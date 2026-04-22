@@ -30,9 +30,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Phase 4 install: just the runtime deps actually used. KB-heavy deps
-# (sentence-transformers, lxml, watchdog, qdrant-client, pypdf, python-docx,
-# beautifulsoup4) are added in Phase 8 when they're actually imported.
+# Runtime deps actually used so far. KB-heavy deps (sentence-transformers,
+# lxml, watchdog, qdrant-client, pypdf, python-docx, beautifulsoup4) are
+# added in Phase 8 when they're actually imported.
 RUN uv pip install --system \
       "fastapi>=0.115" \
       "uvicorn[standard]>=0.32" \
@@ -42,16 +42,14 @@ RUN uv pip install --system \
       "pyyaml>=6.0.2" \
       "tenacity>=9.0" \
       "tiktoken>=0.8" \
+      "langgraph>=0.2.60" \
+      "langchain-core>=0.3.28" \
       "python-dotenv>=1.0"
 
 # Copy the package + config
 COPY pyproject.toml /app/pyproject.toml
 COPY config.yaml    /app/config.yaml
 COPY src/audrey     /app/audrey
-
-# Data dir (bind-mounted in production)
-RUN mkdir -p /data
-ENV AUDREY_DATA_DIR=/data
 
 EXPOSE 8000
 

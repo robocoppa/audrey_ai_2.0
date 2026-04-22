@@ -1,13 +1,11 @@
 """OpenAI-compatible routes.
 
-Phase 4: minimal pass-through. Exposes three virtual models
-(`audrey_deep`, `audrey_cloud`, `audrey_local`), plus `/v1/chat/completions`
-that picks the highest-priority "general" model from the registry and
-forwards the request to Ollama. No classification, no panels, no tools —
-those land in Phase 5+.
+Exposes three virtual models (`audrey_deep`, `audrey_cloud`, `audrey_local`)
+plus `/v1/chat/completions`. Requests go through the pipeline:
+  classify → complexity gate → fast path (Phase 5) | deep stub (Phase 6+).
 
-The response shape is the OpenAI chat-completion contract so Open WebUI
-and other clients can consume it unchanged.
+Response shape is the OpenAI chat-completion contract so Open WebUI and
+any other client can consume it unchanged.
 """
 
 from __future__ import annotations
@@ -23,8 +21,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from audrey import __version__
+from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
+from audrey.pipeline.classify import classify as classify_fn
+from audrey.pipeline.complexity import is_complex
 
 log = logging.getLogger(__name__)
 
@@ -75,11 +76,8 @@ async def list_models() -> dict[str, Any]:
 
 @router.post("/chat/completions")
 async def chat_completions(payload: ChatCompletionRequest, request: Request):
-    ollama: OllamaClient = request.app.state.ollama
-    registry: ModelRegistry = request.app.state.registry
-
-    concrete = _pick_concrete_model(payload.model, registry)
-    if concrete is None:
+    app = request.app
+    if payload.model not in VIRTUAL_MODELS:
         raise HTTPException(
             status_code=400,
             detail=(
@@ -91,37 +89,110 @@ async def chat_completions(payload: ChatCompletionRequest, request: Request):
     messages = [m.model_dump(exclude_none=True) for m in payload.messages]
     options = _options_from_request(payload)
 
-    log.info("chat.completions model=%s -> %s stream=%s", payload.model, concrete, payload.stream)
-
     if payload.stream:
         return StreamingResponse(
-            _stream_openai(ollama, payload.model, concrete, messages, options),
+            _stream_via_pipeline(app, payload, messages, options),
             media_type="text/event-stream",
         )
 
+    return await _generate_via_pipeline(app, payload, messages, options)
+
+
+async def _generate_via_pipeline(app, payload: ChatCompletionRequest, messages, options):
+    """Non-streaming path: invoke the compiled LangGraph and format the result."""
+    graph = app.state.graph
+    state = {
+        "virtual_model": payload.model,
+        "messages": messages,
+        "temperature": payload.temperature,
+        "top_p": payload.top_p,
+        "max_tokens": payload.max_tokens,
+    }
     try:
-        result = await ollama.chat(model=concrete, messages=messages, options=options)
+        final = await graph.ainvoke(state)
     except OllamaError as e:
         raise HTTPException(status_code=502, detail=f"Ollama error: {e}") from e
 
-    return _to_openai_response(payload.model, concrete, result)
+    log.info(
+        "chat.completions model=%s task=%s(%s, conf=%.2f) mode=%s -> %s",
+        payload.model,
+        final.get("task_type"),
+        final.get("classify_reason"),
+        final.get("classify_confidence", 0.0),
+        final.get("mode"),
+        final.get("concrete_model"),
+    )
+    return _to_openai_response(
+        virtual=payload.model,
+        concrete=final.get("concrete_model", "?"),
+        content=final.get("content", "") or "",
+        prompt_tokens=int(final.get("prompt_eval_count", 0)),
+        completion_tokens=int(final.get("eval_count", 0)),
+    )
+
+
+async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, options):
+    """Streaming path: classify + complexity in-line, stream the chosen model.
+
+    Deep-panel streaming is richer (status banners, synth drafts) and lands
+    in Phase 6. For now a 'complex' prompt streams the deep_stub message.
+    """
+    cfg = app.state.cfg
+    ollama: OllamaClient = app.state.ollama
+    registry: ModelRegistry = app.state.registry
+    health: HealthTracker = app.state.health
+    router_cfg = cfg.router
+
+    user_text = _last_user_text(messages)
+    task, reason, conf = await classify_fn(
+        ollama,
+        router_model=router_cfg.get("model", "qwen3:4b"),
+        router_timeout_s=float(router_cfg.get("timeout_s", 20)),
+        max_router_strikes=int(router_cfg.get("max_failures_before_fallback", 2)),
+        user_text=user_text,
+    )
+    complex_, n = is_complex(messages, threshold=int(cfg.raw.get("complexity", {}).get("token_threshold", 500)))
+    log.info(
+        "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=%s",
+        payload.model, task, reason, conf, n, "deep" if complex_ else "fast",
+    )
+
+    if complex_:
+        msg = (
+            f"[deep-panel not yet implemented — Phase 6]. "
+            f"Classified as {task} with {n} tokens."
+        )
+        async for frame in _emit_single_message(payload.model, "deep_stub", msg):
+            yield frame
+        return
+
+    spec = registry.first_healthy(task, health.is_healthy)
+    if spec is None:
+        async for frame in _emit_single_message(
+            payload.model, "none", f"[no healthy model for task={task}]"
+        ):
+            yield frame
+        return
+
+    timeout = float(cfg.timeouts.get("fast_path", 180))
+    async for frame in _stream_openai(
+        ollama, payload.model, spec.name, messages, options, timeout_s=timeout, health=health,
+    ):
+        yield frame
+
+
+def _last_user_text(messages):
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            c = m.get("content", "")
+            if isinstance(c, str):
+                return c
+            if isinstance(c, list):
+                return "\n".join(p.get("text", "") for p in c if isinstance(p, dict))
+    return ""
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────
-
-def _pick_concrete_model(virtual: str, registry: ModelRegistry) -> str | None:
-    """Phase 4 routing: always pick highest-priority 'general' candidate.
-
-    Cloud vs local filtering is a Phase 6 concern — for now all three
-    virtual models map to the same concrete model so we can prove streaming
-    and the OpenAI envelope work end-to-end.
-    """
-    if virtual not in VIRTUAL_MODELS:
-        return None
-    # `lambda _: True` → no health filtering yet; Phase 5 wires HealthTracker in.
-    spec = registry.first_healthy("general", lambda _: True)
-    return spec.name if spec else None
-
 
 def _options_from_request(req: ChatCompletionRequest) -> dict[str, Any]:
     opts: dict[str, Any] = {}
@@ -134,11 +205,14 @@ def _options_from_request(req: ChatCompletionRequest) -> dict[str, Any]:
     return opts
 
 
-def _to_openai_response(virtual: str, concrete: str, ollama_resp: dict[str, Any]) -> dict[str, Any]:
-    msg = ollama_resp.get("message", {}) or {}
-    content = msg.get("content", "") or ""
-    prompt_tokens = int(ollama_resp.get("prompt_eval_count", 0) or 0)
-    completion_tokens = int(ollama_resp.get("eval_count", 0) or 0)
+def _to_openai_response(
+    *,
+    virtual: str,
+    concrete: str,
+    content: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+) -> dict[str, Any]:
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
         "object": "chat.completion",
@@ -149,7 +223,7 @@ def _to_openai_response(virtual: str, concrete: str, ollama_resp: dict[str, Any]
             {
                 "index": 0,
                 "message": {"role": "assistant", "content": content},
-                "finish_reason": "stop" if ollama_resp.get("done") else "length",
+                "finish_reason": "stop",
             }
         ],
         "usage": {
@@ -166,13 +240,15 @@ async def _stream_openai(
     concrete: str,
     messages: list[dict[str, Any]],
     options: dict[str, Any],
+    *,
+    timeout_s: float | None = None,
+    health: HealthTracker | None = None,
 ):
     """Convert Ollama's streaming chunks into OpenAI SSE frames."""
     created = int(time.time())
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     fingerprint = f"audrey-{__version__}/{concrete}"
 
-    # First frame: opening role delta
     first = {
         "id": cid, "object": "chat.completion.chunk", "created": created,
         "model": virtual, "system_fingerprint": fingerprint,
@@ -181,7 +257,9 @@ async def _stream_openai(
     yield f"data: {json.dumps(first)}\n\n"
 
     try:
-        async for chunk in ollama.chat_stream(model=concrete, messages=messages, options=options):
+        async for chunk in ollama.chat_stream(
+            model=concrete, messages=messages, options=options, timeout_s=timeout_s,
+        ):
             msg = chunk.get("message", {}) or {}
             content = msg.get("content", "") or ""
             done = bool(chunk.get("done"))
@@ -199,8 +277,12 @@ async def _stream_openai(
                     "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
                 }
                 yield f"data: {json.dumps(final)}\n\n"
+                if health is not None:
+                    health.record_success(concrete)
                 break
     except OllamaError as e:
+        if health is not None:
+            health.record_failure(concrete, str(e))
         err = {
             "id": cid, "object": "chat.completion.chunk", "created": created,
             "model": virtual, "system_fingerprint": fingerprint,
@@ -208,6 +290,17 @@ async def _stream_openai(
         }
         yield f"data: {json.dumps(err)}\n\n"
 
+    yield "data: [DONE]\n\n"
+
+
+async def _emit_single_message(virtual: str, concrete: str, text: str):
+    """One-shot SSE emission: role delta, single content delta, stop."""
+    created = int(time.time())
+    cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+    fingerprint = f"audrey-{__version__}/{concrete}"
+    yield f"data: {json.dumps({'id': cid, 'object': 'chat.completion.chunk', 'created': created, 'model': virtual, 'system_fingerprint': fingerprint, 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
+    yield f"data: {json.dumps({'id': cid, 'object': 'chat.completion.chunk', 'created': created, 'model': virtual, 'system_fingerprint': fingerprint, 'choices': [{'index': 0, 'delta': {'content': text}, 'finish_reason': None}]})}\n\n"
+    yield f"data: {json.dumps({'id': cid, 'object': 'chat.completion.chunk', 'created': created, 'model': virtual, 'system_fingerprint': fingerprint, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
     yield "data: [DONE]\n\n"
 
 

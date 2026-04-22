@@ -17,6 +17,7 @@ from audrey.config import get_config
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
+from audrey.pipeline.graph import build_graph
 from audrey.routes.openai import router as openai_router
 
 logging.basicConfig(
@@ -37,12 +38,16 @@ async def lifespan(app: FastAPI):
     registry = ModelRegistry(cfg)
     health = HealthTracker()
 
+    graph = build_graph(cfg, ollama, registry, health)
+
     app.state.cfg = cfg
     app.state.ollama = ollama
     app.state.registry = registry
     app.state.health = health
+    app.state.graph = graph
 
-    log.info("ready: ollama=%s; task types=%s", cfg.env.ollama_host, registry.all_task_types())
+    log.info("ready: ollama=%s; task types=%s; pipeline=compiled",
+             cfg.env.ollama_host, registry.all_task_types())
     try:
         yield
     finally:

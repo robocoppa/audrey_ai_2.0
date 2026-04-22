@@ -29,19 +29,7 @@ libraries yet — those come in Phase 8 when the KB lands.
 
 ---
 
-## Step 2 — Create the appdata directory
-
-```bash
-mkdir -p /mnt/user/appdata/audrey
-```
-
-Audrey itself keeps very little local state in Phase 4 (just logs), but
-this directory is the future home for any SQLite / cache files the
-orchestrator owns.
-
----
-
-## Step 3 — Replace the legacy `audrey-ai` container
+## Step 2 — Replace the legacy `audrey-ai` container
 
 Your old `audrey-ai` from `audrey_ai/` is on port 8000. We need the name +
 port, so stop and remove it before starting v2.
@@ -51,7 +39,7 @@ Unraid Docker tab → legacy `audrey-ai` → **Stop** → wait → click icon �
 
 ---
 
-## Step 4 — Create the new `audrey-ai` container in Unraid UI
+## Step 3 — Create the new `audrey-ai` container in Unraid UI
 
 Docker tab → **Add Container**.
 
@@ -66,8 +54,6 @@ Docker tab → **Add Container**.
 **Paths:**
 - Container Path `/app/config.yaml` → Host Path
   `/mnt/user/appdata/audrey_ai_2.0/config.yaml` (access mode `Read Only`)
-- Container Path `/data` → Host Path `/mnt/user/appdata/audrey`
-  (access mode `Read/Write`)
 
 **Variables** (at minimum):
 - `OLLAMA_HOST` → `http://ollama:11434`
@@ -75,7 +61,11 @@ Docker tab → **Add Container**.
 - `QDRANT_HOST` → `qdrant`
 - `QDRANT_PORT` → `6333`
 - `AUDREY_CONFIG` → `/app/config.yaml`
-- `AUDREY_DATA_DIR` → `/data`
+
+> Phase 4 has **no persistent state** — the container is stateless, so no
+> `/data` bind mount yet. We'll add `/mnt/user/appdata/audrey → /data` in
+> Phase 5+ when the health cache / classifier state first needs to survive
+> restarts.
 
 (Or `--env-file /mnt/user/appdata/audrey_ai_2.0/.env` via Post Arguments.)
 
@@ -86,7 +76,7 @@ Click **Apply**.
 
 ---
 
-## Step 5 — Smoke tests
+## Step 4 — Smoke tests
 
 From Unraid terminal (or any LAN host):
 
@@ -124,8 +114,10 @@ curl -s -N -XPOST http://localhost:8000/v1/chat/completions \
 # → sequence of `data: {...}` lines, ending with `data: [DONE]`
 
 # 5. Confirm Ollama received the request
-docker logs ollama --tail 10 | grep -iE "chat|qwen|kimi" | tail -3
-# → shows a recent /api/chat call from the audrey-ai container
+#    The `system_fingerprint` in test 3's response (e.g. "audrey-7.0.0/qwen3.6:35b")
+#    already proves Ollama served it, but if you want to see the HTTP line:
+docker logs ollama --since 5m 2>&1 | grep -iE "POST .*api/(chat|generate)" | tail -3
+# → one or more POST /api/chat lines, each tagged with a 200 status
 
 # 6. Unknown model is rejected with 400
 curl -s -o /dev/null -w '%{http_code}\n' -XPOST http://localhost:8000/v1/chat/completions \
@@ -138,7 +130,7 @@ If all six pass, Phase 4 is complete.
 
 ---
 
-## Step 6 — Point Open WebUI at v2 (optional, quick)
+## Step 5 — Point Open WebUI at v2 (optional, quick)
 
 Your `open-webui` container is already running but configured for the legacy
 Audrey. To swap it over:
@@ -156,7 +148,7 @@ feature-complete, skip this step and point back to v2 at Phase 9.)
 
 ---
 
-## Step 7 — Report back
+## Step 6 — Report back
 
 Reply with "phase 4 smoke tests passed" (and any WebUI observations) and
 we'll move to Phase 5 (classification + complexity gate + fast path).
