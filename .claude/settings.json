@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv --version)",
+      "Bash(chmod +x /home/bart/Documents/github/audrey_ai_2.0/scripts/pull-models.sh)",
+      "Bash(uv lock *)",
+      "Bash(awk '{print $5, $9}')",
+      "Bash(git init *)",
+      "Bash(git config *)",
+      "Bash(git add *)"
+    ]
+  }
+}
