@@ -7,10 +7,19 @@ LangGraph's default reducer (replace-on-write) is fine.
 
 from __future__ import annotations
 
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 TaskType = Literal["code", "reasoning", "general", "vl"]
 PipelineMode = Literal["fast", "deep"]
+
+
+class WorkerDraft(TypedDict, total=False):
+    model: str
+    content: str
+    error: str
+    elapsed_s: float
+    prompt_eval_count: int
+    eval_count: int
 
 
 class PipelineState(TypedDict, total=False):
@@ -28,14 +37,35 @@ class PipelineState(TypedDict, total=False):
 
     # Complexity gate
     prompt_tokens: int
-    complex: bool                    # True → force deep panel (once deep panel exists)
+    complex: bool                    # True → force deep panel
 
     # Routing decision
     mode: PipelineMode               # "fast" or "deep"
-    concrete_model: str              # the Ollama model that was actually hit
+    concrete_model: str              # the Ollama model that was actually hit (or synthesizer for deep)
+
+    # Planner (deep path)
+    subtasks: list[str]              # may be empty; full prompt is run as-is when so
+
+    # Deep-panel results
+    panel_pool: str                  # "deep_panel" | "deep_panel_cloud" | "deep_panel_local"
+    workers_attempted: list[str]     # model names dispatched
+    drafts: list[WorkerDraft]        # one per worker (success or error)
+    synthesizer_model: str           # which synth was used
+    synth_error: str                 # non-empty if synthesis failed (then fallback synth tried)
+
+    # Reflection
+    reflect_attempts: int            # 0 = not attempted, 1 = ran once, etc.
+    reflect_passed: bool             # final answer cleared the quality gate
+    reflect_reason: str              # "ok" | "too_short" | "low_confidence" | "no_drafts"
+
+    # Escalation flag — fast_path → deep when fast answer was inadequate
+    escalated_from_fast: bool
 
     # Output
     content: str                     # final assistant text
     prompt_eval_count: int
     eval_count: int
     error: str                       # non-empty means a failure; main route turns it into 5xx
+
+    # Free-form metadata for log/debug — not used by reducers
+    meta: dict[str, Any]

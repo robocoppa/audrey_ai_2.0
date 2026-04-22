@@ -12,7 +12,8 @@
       "Bash(.venv/bin/python -c \"import aiosqlite, fastapi, pydantic_settings, httpx, tenacity; print\\('imports ok'\\)\")",
       "Bash(.venv/bin/python -c ' *)",
       "Bash(.venv/bin/python -c \"import sys; print\\(sys.path\\)\")",
-      "Bash(uv sync *)"
+      "Bash(uv sync *)",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

@@ -75,7 +75,8 @@ curl -s -XPOST http://localhost:8000/v1/chat/completions \
 # → contains the top `reasoning` pick (qwen3.6:35b)
 
 # 5. Long prompt (>500 tokens of cl100k_base) → complexity=true → deep_stub
-LONG=$(python3 -c "print(' '.join(['lorem ipsum dolor sit amet']*200))")
+# Unraid host has no python3; run it inside the container.
+LONG=$(docker exec audrey-ai python3 -c "print(' '.join(['lorem ipsum dolor sit amet']*200))")
 curl -s -XPOST http://localhost:8000/v1/chat/completions \
   -H 'content-type: application/json' \
   -d "{\"model\":\"audrey_deep\",\"messages\":[{\"role\":\"user\",\"content\":\"$LONG\"}],\"stream\":false}" \

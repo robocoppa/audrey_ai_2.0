@@ -18,6 +18,7 @@ from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.graph import build_graph
+from audrey.pipeline.semaphore import GpuGate
 from audrey.routes.openai import router as openai_router
 
 logging.basicConfig(
@@ -37,17 +38,20 @@ async def lifespan(app: FastAPI):
     ollama = OllamaClient(cfg.env.ollama_host, default_timeout_s=default_timeout)
     registry = ModelRegistry(cfg)
     health = HealthTracker()
+    gpu_concurrency = int(cfg.raw.get("gpu", {}).get("concurrency", 1))
+    gate = GpuGate(concurrency=gpu_concurrency)
 
-    graph = build_graph(cfg, ollama, registry, health)
+    graph = build_graph(cfg, ollama, registry, health, gate)
 
     app.state.cfg = cfg
     app.state.ollama = ollama
     app.state.registry = registry
     app.state.health = health
+    app.state.gate = gate
     app.state.graph = graph
 
-    log.info("ready: ollama=%s; task types=%s; pipeline=compiled",
-             cfg.env.ollama_host, registry.all_task_types())
+    log.info("ready: ollama=%s; task types=%s; gpu_concurrency=%d; pipeline=compiled",
+             cfg.env.ollama_host, registry.all_task_types(), gpu_concurrency)
     try:
         yield
     finally:

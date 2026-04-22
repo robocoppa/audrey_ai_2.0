@@ -113,14 +113,25 @@ async def _generate_via_pipeline(app, payload: ChatCompletionRequest, messages, 
     except OllamaError as e:
         raise HTTPException(status_code=502, detail=f"Ollama error: {e}") from e
 
+    extra = ""
+    if final.get("mode") == "deep":
+        drafts = final.get("drafts") or []
+        ok = sum(1 for d in drafts if (d.get("content") or "").strip())
+        extra = (
+            f" pool={final.get('panel_pool')} workers={len(drafts)} ok={ok}"
+            f" reflect={final.get('reflect_reason', '?')}"
+            f"/attempts={final.get('reflect_attempts', 0)}"
+            f" escalated={bool(final.get('escalated_from_fast'))}"
+        )
     log.info(
-        "chat.completions model=%s task=%s(%s, conf=%.2f) mode=%s -> %s",
+        "chat.completions model=%s task=%s(%s, conf=%.2f) mode=%s -> %s%s",
         payload.model,
         final.get("task_type"),
         final.get("classify_reason"),
         final.get("classify_confidence", 0.0),
         final.get("mode"),
         final.get("concrete_model"),
+        extra,
     )
     return _to_openai_response(
         virtual=payload.model,
@@ -132,10 +143,13 @@ async def _generate_via_pipeline(app, payload: ChatCompletionRequest, messages, 
 
 
 async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, options):
-    """Streaming path: classify + complexity in-line, stream the chosen model.
+    """Streaming path.
 
-    Deep-panel streaming is richer (status banners, synth drafts) and lands
-    in Phase 6. For now a 'complex' prompt streams the deep_stub message.
+    For non-complex audrey_deep prompts, we stream a single fast-path model
+    directly (token-by-token). For complex prompts, or for audrey_cloud /
+    audrey_local (always deep), we run the full graph non-streamed and emit
+    the synthesized answer as one chunk — multi-worker + synth can't be
+    coherently token-streamed.
     """
     cfg = app.state.cfg
     ollama: OllamaClient = app.state.ollama
@@ -152,17 +166,35 @@ async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, op
         user_text=user_text,
     )
     complex_, n = is_complex(messages, threshold=int(cfg.raw.get("complexity", {}).get("token_threshold", 500)))
+    forced_deep = payload.model in ("audrey_cloud", "audrey_local")
+    use_deep = complex_ or forced_deep
+
     log.info(
         "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=%s",
-        payload.model, task, reason, conf, n, "deep" if complex_ else "fast",
+        payload.model, task, reason, conf, n, "deep" if use_deep else "fast",
     )
 
-    if complex_:
-        msg = (
-            f"[deep-panel not yet implemented — Phase 6]. "
-            f"Classified as {task} with {n} tokens."
-        )
-        async for frame in _emit_single_message(payload.model, "deep_stub", msg):
+    if use_deep:
+        # Run the compiled graph end-to-end, then emit the synthesized answer.
+        graph = app.state.graph
+        state = {
+            "virtual_model": payload.model,
+            "messages": messages,
+            "temperature": payload.temperature,
+            "top_p": payload.top_p,
+            "max_tokens": payload.max_tokens,
+        }
+        try:
+            final = await graph.ainvoke(state)
+        except OllamaError as e:
+            async for frame in _emit_single_message(
+                payload.model, "error", f"[ollama error: {e}]"
+            ):
+                yield frame
+            return
+        concrete = final.get("concrete_model", "deep_panel")
+        content = final.get("content", "") or "[empty]"
+        async for frame in _emit_single_message(payload.model, concrete, content):
             yield frame
         return
 
