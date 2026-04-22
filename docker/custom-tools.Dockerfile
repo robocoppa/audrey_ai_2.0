@@ -1,17 +1,14 @@
 # Audrey custom-tools FastAPI server
 #
 # Build from the repo root:
-#   docker build -f docker/custom-tools.Dockerfile -t audrey-custom-tools .
-#
-# Do NOT tag with :latest — Unraid's Docker UI auto-appends :latest, producing
-# "audrey-custom-tools:latest:latest" which won't resolve.
+#   docker build -f docker/custom-tools.Dockerfile -t audrey-custom-tools:latest .
 #
 # Run locally:
 #   docker run --rm -p 8001:8001 \
 #     -e BRAVE_API_KEY=... \
 #     -e AUDREY_URL=http://host.docker.internal:8000 \
 #     -v $PWD/tools-server/data:/app/data \
-#     audrey-custom-tools
+#     audrey-custom-tools:latest
 
 FROM python:3.12-slim AS base
 

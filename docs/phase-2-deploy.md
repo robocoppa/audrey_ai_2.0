@@ -61,16 +61,12 @@ From the repo root on Unraid:
 
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
-docker build -f docker/custom-tools.Dockerfile -t audrey-custom-tools .
+docker build -f docker/custom-tools.Dockerfile -t audrey-custom-tools:latest .
 ```
 
 First build will take ~1–2 minutes (pip install). Subsequent builds reuse the
 dependency layer and only rebuild if the source files change.
 
-> **Unraid quirk:** don't put `:latest` in the `-t` tag. Unraid's Docker UI
-> auto-appends `:latest` to the repository string when you create a
-> container, so tagging as `foo:latest` produces `foo:latest:latest` and the
-> container won't start. Tag with just the name.
 
 ---
 
@@ -79,7 +75,7 @@ dependency layer and only rebuild if the source files change.
 Docker tab → **Add Container**.
 
 - **Name:** `custom-tools`
-- **Repository:** `audrey-custom-tools`
+- **Repository:** `audrey-custom-tools:latest`
 - **Network Type:** `Custom : ollama-net`
 - **Console shell command:** `bash`
 
@@ -171,7 +167,7 @@ If anything fails, paste:
 ## Ops reference
 
 - **Rebuild after code change:** pull on Unraid, then
-  `docker build -f docker/custom-tools.Dockerfile -t audrey-custom-tools . && docker restart custom-tools`
+  `docker build -f docker/custom-tools.Dockerfile -t audrey-custom-tools:latest . && docker restart custom-tools`
 - **Force dependency rebuild:** add `--no-cache` to the build command
 - **View logs live:** `docker logs -f custom-tools`
 - **Open a shell inside:** `docker exec -it custom-tools bash`
