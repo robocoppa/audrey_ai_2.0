@@ -35,16 +35,21 @@ CLOUD_MODELS=(
   "glm-5.1:cloud"
 )
 
-echo "Pulling local models…"
-for m in "${LOCAL_MODELS[@]}"; do
+pull_model() {
+  local m="$1"
   echo "  → $m"
-  curl -s -X POST "$OLLAMA_HOST/api/pull" -d "{\"model\":\"$m\"}" > /dev/null
-done
+  # Stream progress; print final status or any error line.
+  curl -s -N -X POST "$OLLAMA_HOST/api/pull" -d "{\"model\":\"$m\"}" \
+    | awk '/"status":"success"/{ok=1} /"error"/{print; err=1} END{ exit err?1:(ok?0:2) }' \
+    || { echo "  ✗ pull failed for $m"; exit 1; }
+}
+
+echo "Pulling local models (large ones take a while; be patient on llama4)…"
+for m in "${LOCAL_MODELS[@]}"; do pull_model "$m"; done
 
 echo "Registering cloud models…"
-for m in "${CLOUD_MODELS[@]}"; do
-  echo "  → $m"
-  curl -s -X POST "$OLLAMA_HOST/api/pull" -d "{\"model\":\"$m\"}" > /dev/null
-done
+for m in "${CLOUD_MODELS[@]}"; do pull_model "$m"; done
 
-echo "Done. Verify with: curl $OLLAMA_HOST/api/tags | jq '.models[].name'"
+echo
+echo "Done. Verify with:"
+echo "  curl -s $OLLAMA_HOST/api/tags | jq -r '.models[].name' | sort"

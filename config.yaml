@@ -169,7 +169,7 @@ kb:
   chunk_tokens: 1000
   chunk_overlap: 100
   dataset_paths:                         # overridden by KB_DATASET_PATHS env var
-    - "/mnt/user/datasets/geology"
+    - "/datasets/geology"                # container path; host = /mnt/user/appdata/audrey-datasets/geology
   watcher_debounce_seconds: 2
 
 # ─── Tools (OpenAPI auto-discovery) ────────────────────────────────────
