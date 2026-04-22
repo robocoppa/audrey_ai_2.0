@@ -1,0 +1,196 @@
+# Audrey AI — runtime config
+# Env vars override any value here via ${VAR} interpolation in loader.
+# Reloaded at startup only. For live tool re-discovery see POST /v1/tools/rediscover.
+
+version: "7.0.0"
+
+router:
+  model: "qwen3:4b"
+  timeout_s: 20
+  max_failures_before_fallback: 2
+
+# ─── Model registry ────────────────────────────────────────────────────
+# Per task type, ranked by priority (higher = preferred when healthy).
+# Speed/quality are informational hints used by the planner when building panels.
+model_registry:
+  code:
+    - { name: "qwen3-coder-next:latest",  priority: 100, speed: 60, quality: 95, location: local }
+    - { name: "qwen2.5-coder:32b",        priority:  90, speed: 70, quality: 90, location: local }
+    - { name: "devstral-small-2:latest",  priority:  85, speed: 85, quality: 82, location: local }
+    - { name: "qwen3.6:35b",              priority:  80, speed: 70, quality: 90, location: local }
+    - { name: "kimi-k2.6:cloud",          priority:  78, speed: 90, quality: 92, location: cloud }
+    - { name: "deepseek-v3.2:cloud",      priority:  70, speed: 85, quality: 90, location: cloud }
+    - { name: "cogito-2.1:671b-cloud",    priority:  65, speed: 80, quality: 93, location: cloud }
+
+  reasoning:
+    - { name: "qwen3.6:35b",              priority: 100, speed: 70, quality: 93, location: local }
+    - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 94, location: cloud }
+    - { name: "deepseek-r1:32b",          priority:  85, speed: 65, quality: 90, location: local }
+    - { name: "nemotron-cascade-2:latest",priority:  80, speed: 65, quality: 88, location: local }
+    - { name: "cogito-2.1:671b-cloud",    priority:  75, speed: 80, quality: 93, location: cloud }
+    - { name: "nemotron-3-super:cloud",   priority:  70, speed: 85, quality: 90, location: cloud }
+    - { name: "minimax-m2.7:cloud",       priority:  65, speed: 85, quality: 89, location: cloud }
+
+  general:
+    - { name: "qwen3.6:35b",              priority: 100, speed: 75, quality: 92, location: local }
+    - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 93, location: cloud }
+    - { name: "qwen3.5:397b-cloud",       priority:  90, speed: 80, quality: 94, location: cloud }
+    - { name: "glm-4.7-flash:q8_0",       priority:  80, speed: 85, quality: 87, location: local }
+    - { name: "olmo-3.1:32b",             priority:  70, speed: 75, quality: 85, location: local }
+    - { name: "llama4:latest",            priority:  65, speed: 55, quality: 90, location: local }
+    - { name: "glm-5.1:cloud",            priority:  60, speed: 90, quality: 85, location: cloud }
+
+  vl:
+    - { name: "qwen3-vl:32b",             priority: 100, speed: 70, quality: 90, location: local }
+    - { name: "llava:34b",                priority:  85, speed: 65, quality: 85, location: local }
+    - { name: "kimi-k2.6:cloud",          priority:  75, speed: 90, quality: 88, location: cloud }
+
+# ─── Fast path ─────────────────────────────────────────────────────────
+fast_path:
+  enabled: true
+  confidence_threshold: 0.88
+  tool_capable_models:
+    - "qwen3.6:35b"
+    - "kimi-k2.6:cloud"
+    - "qwen3-coder-next:latest"
+    - "qwen2.5-coder:32b"
+    - "devstral-small-2:latest"
+    - "deepseek-v3.2:cloud"
+    - "qwen3.5:397b-cloud"
+    - "cogito-2.1:671b-cloud"
+    - "nemotron-3-super:cloud"
+    - "minimax-m2.7:cloud"
+    - "glm-5.1:cloud"
+
+# ─── Deep panel: mixed (audrey_deep) ───────────────────────────────────
+deep_panel:
+  code:
+    workers: ["qwen3-coder-next:latest", "qwen2.5-coder:32b", "kimi-k2.6:cloud"]
+    synthesizer: "qwen3.6:35b"
+    fallback_synth: "glm-5.1:cloud"
+  reasoning:
+    workers: ["qwen3.6:35b", "kimi-k2.6:cloud", "deepseek-r1:32b"]
+    synthesizer: "qwen3.6:35b"
+    fallback_synth: "glm-5.1:cloud"
+  general:
+    workers: ["qwen3.6:35b", "kimi-k2.6:cloud", "glm-4.7-flash:q8_0"]
+    synthesizer: "qwen3.6:35b"
+    fallback_synth: "glm-5.1:cloud"
+  vl:
+    workers: ["qwen3-vl:32b", "llava:34b", "kimi-k2.6:cloud"]
+    synthesizer: "qwen3.6:35b"
+    fallback_synth: "glm-5.1:cloud"
+
+# ─── Deep panel: cloud-only (audrey_cloud) ─────────────────────────────
+deep_panel_cloud:
+  code:
+    workers: ["kimi-k2.6:cloud", "deepseek-v3.2:cloud", "cogito-2.1:671b-cloud"]
+    synthesizer: "kimi-k2.6:cloud"
+    fallback_synth: "glm-5.1:cloud"
+  reasoning:
+    workers: ["kimi-k2.6:cloud", "qwen3.5:397b-cloud", "minimax-m2.7:cloud"]
+    synthesizer: "kimi-k2.6:cloud"
+    fallback_synth: "glm-5.1:cloud"
+  general:
+    workers: ["kimi-k2.6:cloud", "qwen3.5:397b-cloud", "deepseek-v3.2:cloud"]
+    synthesizer: "kimi-k2.6:cloud"
+    fallback_synth: "glm-5.1:cloud"
+  vl:
+    workers: ["kimi-k2.6:cloud", "qwen3.5:397b-cloud"]
+    synthesizer: "kimi-k2.6:cloud"
+    fallback_synth: "glm-5.1:cloud"
+
+# ─── Deep panel: local-only (audrey_local) ─────────────────────────────
+deep_panel_local:
+  code:
+    workers: ["qwen3-coder-next:latest", "qwen2.5-coder:32b", "devstral-small-2:latest"]
+    synthesizer: "qwen3.6:35b"
+    fallback_synth: "qwen3.5:35b-a3b"
+  reasoning:
+    workers: ["qwen3.6:35b", "deepseek-r1:32b", "nemotron-cascade-2:latest"]
+    synthesizer: "qwen3.6:35b"
+    fallback_synth: "qwen3.5:35b-a3b"
+  general:
+    workers: ["qwen3.6:35b", "glm-4.7-flash:q8_0", "olmo-3.1:32b"]
+    synthesizer: "qwen3.6:35b"
+    fallback_synth: "gemma4:31b"
+  vl:
+    workers: ["qwen3-vl:32b", "llava:34b"]
+    synthesizer: "qwen3.6:35b"
+    fallback_synth: "qwen3.5:35b-a3b"
+
+# ─── Agentic behavior ──────────────────────────────────────────────────
+agentic:
+  react:
+    max_rounds: 3
+    compress_after_round: 2
+    max_tool_result_chars: 2000
+  planning:
+    enabled: true
+    min_prompt_tokens: 40
+    max_subtasks: 3
+  reflection:
+    enabled: true
+    max_retries: 1
+    min_answer_chars: 80
+  escalation:
+    enabled: true
+    min_chars: 100
+    confidence_ceiling: 0.95
+
+# ─── Timeouts (seconds) ────────────────────────────────────────────────
+timeouts:
+  router: 20
+  small: 60
+  medium: 180
+  large: 360
+  cloud: 120
+  deep_worker: 240
+  fast_path: 180
+
+# ─── Cache ─────────────────────────────────────────────────────────────
+cache:
+  enabled: true
+  max_entries: 256
+  ttl_seconds: 600
+
+# ─── Search ────────────────────────────────────────────────────────────
+search:
+  backend: brave             # brave | searxng (future)
+  max_results: 5
+  cache_ttl_hours: 24
+
+# ─── Knowledge base ────────────────────────────────────────────────────
+kb:
+  text_collection: "kb_text"
+  image_collection: "kb_images"
+  text_embedder: "nomic-embed-text"      # via Ollama /api/embeddings, 768-d
+  image_model: "clip-ViT-B-32"           # via sentence-transformers, 512-d
+  chunk_tokens: 1000
+  chunk_overlap: 100
+  dataset_paths:                         # overridden by KB_DATASET_PATHS env var
+    - "/mnt/user/datasets/geology"
+  watcher_debounce_seconds: 2
+
+# ─── Tools (OpenAPI auto-discovery) ────────────────────────────────────
+tools:
+  enabled: true
+  servers:                               # overridden by TOOL_SERVERS env var
+    - "http://custom-tools:8001"
+  max_rounds: 5
+
+# ─── Complexity gate ───────────────────────────────────────────────────
+complexity:
+  token_threshold: 500                   # pasted content this large forces deep panel
+
+# ─── GPU concurrency ───────────────────────────────────────────────────
+gpu:
+  concurrency: 1                         # local-model semaphore; cloud bypasses
+
+# ─── Classification pre-filter ─────────────────────────────────────────
+classification:
+  keyword_prefilter:
+    enabled: true
+  review_override:
+    enabled: true                        # "review this code" → reasoning, not code
+  web_search_regex_set: "default"        # matches time-sensitive / factual / current-info
