@@ -7,7 +7,10 @@
       "Bash(awk '{print $5, $9}')",
       "Bash(git init *)",
       "Bash(git config *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(uv pip *)",
+      "Bash(.venv/bin/python -c \"import aiosqlite, fastapi, pydantic_settings, httpx, tenacity; print\\('imports ok'\\)\")",
+      "Bash(.venv/bin/python -c ' *)"
     ]
   }
 }
