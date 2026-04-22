@@ -107,21 +107,28 @@ cloud-bridge keypair + runtime state.
 > parallel-load a second model on top would thrash VRAM against the 48 GB cap.
 
 ### GPU / device passthrough
-Click **Add another Path, Port, Variable, Label or Device** → **Device**:
-- Name: `nvidia-runtime`
-- Value: leave blank (handled via extra args below)
 
-Scroll to **Extra Parameters** (in "Show more settings…") and set:
+**⚠️ Do not add any `Device` entries for Nvidia.** Leaving the "Device" field
+empty or adding a placeholder device with a blank value causes the container
+to fail to start. GPU access is handled entirely by Extra Parameters and
+environment variables below.
+
+Scroll to **Extra Parameters** (click "Show more settings…" if you don't see
+it) and set:
 ```
 --gpus all --runtime=nvidia
 ```
 
-Scroll to **Nvidia driver** / **NVIDIA_VISIBLE_DEVICES** fields if the
-Unraid Nvidia plugin added them:
-- `NVIDIA_VISIBLE_DEVICES` = `all`
-- `NVIDIA_DRIVER_CAPABILITIES` = `compute,utility`
+Add these environment variables (same form as the three above):
 
-(If those fields don't appear, the `--gpus all` in Extra Parameters covers it.)
+| Name | Value |
+|---|---|
+| `NVIDIA_VISIBLE_DEVICES` | `all` |
+| `NVIDIA_DRIVER_CAPABILITIES` | `compute,utility` |
+
+That's it for GPU setup. No Device entries. If the Unraid Nvidia-Driver plugin
+auto-populates a Device field when you edit later, **delete it** — it'll
+silently break the container.
 
 ### Apply
 Click **Apply** at the bottom. Unraid will pull the image if needed, then start

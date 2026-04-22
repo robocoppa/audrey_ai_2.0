@@ -14,6 +14,7 @@ For the step-by-step first-time setup, see `phase-1-deploy.md`.
 | Network | `Custom: ollama-net` (resolvable as hostname `ollama`) |
 | Port | `11434:11434/tcp` |
 | Extra Parameters | `--gpus all --runtime=nvidia` |
+| Device entries | **none** (adding any — even with a blank value — breaks startup) |
 
 ## Volumes
 
