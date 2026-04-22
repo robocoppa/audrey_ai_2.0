@@ -7,8 +7,15 @@ phases) will auto-discover them from `/openapi.json`.
 
 **Prereqs confirmed:**
 - `ollama-net` Docker network exists (Phase 1 done).
-- Repo pulled to Unraid at `/mnt/user/appdata/projects/audrey_ai_2.0` (or
-  wherever you cloned it). Adjust paths in commands below to match.
+- Repo pulled to Unraid at `/mnt/user/appdata/audrey_ai_2.0` (your actual
+  layout). Adjust paths in commands below if yours differs.
+- **Name collision check:** you already have a `custom-tools` container from
+  the old `audrey_ai/` codebase running on port `8001`. Stop and remove it
+  (Docker tab → `custom-tools` → Stop → Remove) **before** building the new
+  one, or rename the new one (e.g. `custom-tools-v2`). The appdata directory
+  `/mnt/user/appdata/custom-tools/` is reusable — the `memory.db` schema is
+  identical to whatever v1 used, or empty if that container never wrote to
+  it.
 - You have a Brave Search API key (free tier is fine to start).
 
 ---
@@ -18,7 +25,7 @@ phases) will auto-discover them from `/openapi.json`.
 The `.env` is **not** committed. Copy the example and fill it in:
 
 ```bash
-cd /mnt/user/appdata/projects/audrey_ai_2.0
+cd /mnt/user/appdata/audrey_ai_2.0
 cp .env.example .env
 nano .env
 ```
@@ -53,7 +60,7 @@ This is where `memory.db` (SQLite) will live. Survives container rebuilds.
 From the repo root on Unraid:
 
 ```bash
-cd /mnt/user/appdata/projects/audrey_ai_2.0
+cd /mnt/user/appdata/audrey_ai_2.0
 docker build -f docker/custom-tools.Dockerfile -t audrey-custom-tools:latest .
 ```
 
@@ -85,7 +92,7 @@ Click **+ Add another Path, Port, Variable, Label or Device** as needed.
 - `AUDREY_URL` → `http://audrey-ai:8000`
 - `TOOLS_DATA_DIR` → `/app/data`
 
-(Alternatively, set **Post Arguments** → `--env-file /mnt/user/appdata/projects/audrey_ai_2.0/.env`
+(Alternatively, set **Post Arguments** → `--env-file /mnt/user/appdata/audrey_ai_2.0/.env`
 so the container reads the single `.env` file. Either works; env vars in the
 UI override the file.)
 

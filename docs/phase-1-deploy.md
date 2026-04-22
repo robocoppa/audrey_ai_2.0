@@ -154,7 +154,7 @@ docker exec ollama nvidia-smi | head -20
 Expected:
 - The first command prints a JSON object whose key is `ollama-net`.
 - The second prints a number ≥ 1 (your existing models are discovered from
-  `/mnt/user/models`).
+  `/mnt/user/appdata/ollama/models/`).
 - The third prints the nvidia-smi table showing **both** 3090 Ti cards.
 
 If any of those fail, **stop and paste the output** — don't proceed.
@@ -184,7 +184,7 @@ If anything is missing after the container recreation, re-register with the
 bundled script — it's a no-op on already-present models:
 
 ```bash
-cd /mnt/user/projects/audrey_ai_2.0
+cd /mnt/user/appdata/audrey_ai_2.0
 ./scripts/pull-models.sh
 ```
 
