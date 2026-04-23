@@ -88,9 +88,17 @@ def build_graph(
 
     async def node_complexity(state: PipelineState) -> dict[str, Any]:
         complex_, n = is_complex(state["messages"], threshold=complexity_threshold)
-        log.info("complexity: %d tokens (threshold=%d) -> %s", n, complexity_threshold,
-                 "deep" if complex_ else "fast")
-        mode = "deep" if complex_ else "fast"
+        forced_deep = state.get("virtual_model") in ("audrey_cloud", "audrey_local")
+        if forced_deep:
+            mode = "deep"
+            reason = "forced_by_virtual_model"
+        elif complex_:
+            mode = "deep"
+            reason = f"tokens>={complexity_threshold}"
+        else:
+            mode = "fast"
+            reason = f"tokens<{complexity_threshold}"
+        log.info("complexity: %d tokens -> %s (%s)", n, mode, reason)
         return {"prompt_tokens": n, "complex": complex_, "mode": mode}
 
     async def node_fast_path(state: PipelineState) -> dict[str, Any]:
