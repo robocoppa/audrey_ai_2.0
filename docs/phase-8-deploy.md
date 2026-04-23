@@ -229,14 +229,23 @@ docker logs audrey-ai --tail 80 | grep "dispatch: kb_image_search"
 
 ### 2.8 — Watcher picks up new files (env-gated)
 
-Enable the watcher via `.env`:
+Enable the watcher via `.env`. **Also confirm `KB_DATASET_PATHS` is set
+to container-side paths under `/datasets/` (not host paths under
+`/mnt/user/...`) — the watcher filters by `Path.exists()` inside the
+container, so host paths get silently dropped as `no valid roots`:**
 
 ```bash
+# Verify .env has container-side paths
+grep KB_DATASET_PATHS .env
+# Expected: KB_DATASET_PATHS=/datasets/bjj,/datasets/botany,...,/datasets/wilderness-first-aid
+
 echo 'KB_WATCHER_ENABLED=1' >> .env
 docker compose up -d --build audrey-ai
 
 docker logs audrey-ai 2>&1 | grep "kb.watcher" | tail -3
-# Expected: kb.watcher: watching N root(s): ['/datasets/geology', '/datasets/bjj', ...]
+# Expected: kb.watcher: watching N root(s): ['/datasets/bjj', '/datasets/botany', ...]
+# If you see "no valid roots, not starting" — KB_DATASET_PATHS is wrong; fix
+# the env, then `docker compose up -d audrey-ai` (no rebuild needed).
 ```
 
 Drop a new markdown file into the BJJ dir and wait past the 2 s debounce:
@@ -271,17 +280,17 @@ curl -s -XPOST http://localhost:8000/v1/kb/query \
 
 ---
 
-## Step 3 — Report back
+## Step 3 — Verified
 
-If 2.1–2.9 all pass, Phase 8 is done. Reply with
-**"phase 8 smoke tests passed"** and we'll move to Phase 9.
+✅ **Phase 8 verified on Unraid (2026-04-23).** Tests 2.1–2.9 all green:
+- KB endpoints + ingest CLI (`python3 -m audrey.kb.cli`) working.
+- `kb_search` ReAct dispatch returns grounded answers with real `/datasets/...` sources.
+- `kb_image_search` accepts both reference images **and** text queries (CLIP text→image, scores typically 0.20–0.35 — that's normal, not a bug).
+- Tool-mention classifier override (`keyword:tool_mention:<name>`) prevents `vl_strong` traps when prompts explicitly name a tool.
+- Watcher debounces multi-event bursts and re-ingests on file changes.
+- `--purge SOURCE` cleanly removes points from both collections.
 
-If anything fails, paste:
-
-- `docker logs audrey-ai --tail 120`
-- `docker logs qdrant --tail 40`
-- The failing curl output
-- Which test number failed
+Move on to Phase 9 (deep-panel workers + tools).
 
 ---
 
