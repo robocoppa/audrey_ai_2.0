@@ -224,6 +224,10 @@ def build_graph(
             return "end"
         if state.get("escalated_from_fast"):
             return "end"  # already came from an escalation; don't loop
+        if int(state.get("tool_rounds", 0)) > 0:
+            # Fast path used tools — the answer is grounded in real data.
+            # Re-running through tool-blind deep workers can only degrade it.
+            return "end"
         content = (state.get("content") or "").strip()
         conf = float(state.get("classify_confidence", 0.0))
         too_short = len(content) < escalation_min_chars
