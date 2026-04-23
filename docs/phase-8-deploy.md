@@ -45,8 +45,10 @@ What's new vs Phase 7:
   host `/mnt/user/knowledge` → container `/datasets`. Subdirs under
   `/mnt/user/knowledge/` (geology, botany, bushcraft, fishing, first-aid,
   wilderness-first-aid, herbal-medicine, hunting, survival, bjj, mma,
-  powerapps, servicenow) map to `/datasets/<topic>`. Drop at least one
-  `.md`/`.pdf` and one `.jpg` into `geology/` for the smoke tests.
+  powerapps, servicenow) map to `/datasets/<topic>`. The smoke tests
+  below use `/datasets/bjj` as the anchor — make sure that dir has at
+  least one text file (`.md` / `.pdf` / `.docx` / `.html`) and, for
+  2.6/2.7, at least one image (`.jpg` / `.png`).
 - CLIP model cache mount exists:
   host `/mnt/user/appdata/clip-cache` → container `/root/.cache/clip`.
   First image ingest downloads ~380 MB; subsequent starts reuse the cache.
@@ -102,10 +104,10 @@ container: `docker exec audrey-ai curl -fsS http://qdrant:6333/collections`.
 ```bash
 curl -s -XPOST http://localhost:8000/v1/kb/ingest \
   -H 'content-type: application/json' \
-  -d '{"paths":["/datasets/geology"]}' | jq
+  -d '{"paths":["/datasets/bjj"]}' | jq
 # Expected (shape):
 # {
-#   "roots": ["/datasets/geology"],
+#   "roots": ["/datasets/bjj"],
 #   "files_seen": N,
 #   "files_text": T,
 #   "files_image": I,
@@ -119,7 +121,7 @@ Log:
 ```bash
 docker logs audrey-ai --tail 60 | grep -E "kb\.ingest|kb\.chunk"
 # Expected:
-#   kb.ingest: root=/datasets/geology seen=... text=...(... chunks) images=...
+#   kb.ingest: root=/datasets/bjj seen=... text=...(... chunks) images=...
 #   kb.ingest (http): {...}
 ```
 
@@ -128,13 +130,17 @@ That's the deterministic-UUID idempotence at work.
 
 ### 2.3 — `audrey-ingest` CLI works
 
+The `audrey-ingest` console script is declared in `pyproject.toml` but
+the image doesn't `pip install` the package, so the entry point isn't
+on `$PATH`. Invoke as a Python module instead — same code, same args:
+
 ```bash
-docker exec audrey-ai audrey-ingest --stats
+docker exec audrey-ai python3 -m audrey.kb.cli --stats
 # Expected:
 #   kb_text: <N>
 #   kb_images: <M>
 
-docker exec audrey-ai audrey-ingest /datasets/geology
+docker exec audrey-ai python3 -m audrey.kb.cli /datasets/bjj
 # Expected: "ingest complete: seen=... text=...(chunks) images=... skipped=... errors=0"
 ```
 
@@ -143,9 +149,10 @@ docker exec audrey-ai audrey-ingest /datasets/geology
 ```bash
 curl -s -XPOST http://localhost:8000/v1/kb/query \
   -H 'content-type: application/json' \
-  -d '{"query":"what rocks form under high pressure","top_k":3}' | jq '.results[] | {score, source, chunk_idx, text: .text[0:120]}'
+  -d '{"query":"what moves are good under high pressure","top_k":3}' | jq '.results[] | {score, source, chunk_idx, text: .text[0:120]}'
 # Expected: up to 3 hits, scores in (0,1], `source` is an absolute path
-# under /datasets/geology, `text` is a real excerpt.
+# under /datasets/bjj, `text` is a real excerpt (e.g. side-mount escapes,
+# guard fundamentals, etc).
 ```
 
 If `results: []`, either the ingest didn't run or the query is
@@ -161,7 +168,7 @@ curl -s -XPOST http://localhost:8000/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{
     "model":"audrey_deep",
-    "messages":[{"role":"user","content":"use your kb_search tool to look up what the dataset says about metamorphic rocks, then summarize in 2 sentences"}],
+    "messages":[{"role":"user","content":"use your kb_search tool to look up what the BJJ knowledge base says about escapes from side mount, then summarize in 2 sentences"}],
     "stream": false
   }' | jq -r '.choices[0].message.content[0:240]'
 
@@ -175,14 +182,16 @@ docker logs audrey-ai --tail 80 | grep -E "react:|dispatch:|chat\.completions"
 
 ### 2.6 — Image query (URL)
 
-Pick an image in `/datasets/geology`, or use any public image URL that
-resembles what you ingested.
+Use any public image URL that resembles what you ingested. A photo of
+two people grappling on a BJJ mat works well:
 
 ```bash
 curl -s -XPOST http://localhost:8000/v1/kb/query/image \
   -H 'content-type: application/json' \
-  -d '{"image_url":"https://upload.wikimedia.org/wikipedia/commons/9/91/Granite_Yosemite_P1160483.jpg","top_k":3}' | jq '.results[] | {score, source}'
+  -d '{"image_url":"https://upload.wikimedia.org/wikipedia/commons/4/41/Brazilian_Jiu-Jitsu_match_in_Pan_American_2008.jpg","top_k":3}' | jq '.results[] | {score, source}'
 # Expected: up to 3 image hits from kb_images, highest-scoring first.
+# Sources should be paths under /datasets/bjj (or whichever topic dirs
+# contain images you ingested).
 ```
 
 First call is slow (~30–60 s) — CLIP weights download from
@@ -196,7 +205,7 @@ curl -s -XPOST http://localhost:8000/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{
     "model":"audrey_deep",
-    "messages":[{"role":"user","content":"use kb_image_search to find an image of granite in the knowledge base and describe what source matched"}],
+    "messages":[{"role":"user","content":"use kb_image_search to find an image of someone in a guard position in the knowledge base and describe what source matched"}],
     "stream": false
   }' | jq -r '.choices[0].message.content[0:240]'
 
@@ -213,18 +222,18 @@ echo 'KB_WATCHER_ENABLED=1' >> .env
 docker compose up -d --build audrey-ai
 
 docker logs audrey-ai 2>&1 | grep "kb.watcher" | tail -3
-# Expected: kb.watcher: watching 1 root(s): ['/datasets/geology']
+# Expected: kb.watcher: watching N root(s): ['/datasets/geology', '/datasets/bjj', ...]
 ```
 
-Drop a new markdown file and wait past the 2 s debounce:
+Drop a new markdown file into the BJJ dir and wait past the 2 s debounce:
 
 ```bash
-echo "Obsidian is a dark volcanic glass." > \
-  /mnt/user/knowledge/geology/obsidian.md
+echo "The kimura is a shoulder lock that attacks the rotator cuff." > \
+  /mnt/user/knowledge/bjj/kimura-note.md
 sleep 4
 
 docker logs audrey-ai --tail 20 | grep "kb.watcher"
-# Expected: kb.watcher: reingested text /datasets/geology/obsidian.md -> 1 chunks
+# Expected: kb.watcher: reingested text /datasets/bjj/kimura-note.md -> 1 chunks
 ```
 
 Then query it:
@@ -232,18 +241,18 @@ Then query it:
 ```bash
 curl -s -XPOST http://localhost:8000/v1/kb/query \
   -H 'content-type: application/json' \
-  -d '{"query":"volcanic glass","top_k":1}' | jq '.results[0] | {score, source, text}'
-# Expected: obsidian.md as the top hit.
+  -d '{"query":"shoulder lock rotator cuff","top_k":1}' | jq '.results[0] | {score, source, text}'
+# Expected: kimura-note.md as the top hit.
 ```
 
 ### 2.9 — Purge removes a source
 
 ```bash
-docker exec audrey-ai audrey-ingest --purge /datasets/geology/obsidian.md
+docker exec audrey-ai python3 -m audrey.kb.cli --purge /datasets/bjj/kimura-note.md
 curl -s -XPOST http://localhost:8000/v1/kb/query \
   -H 'content-type: application/json' \
-  -d '{"query":"volcanic glass","top_k":1}' | jq '.results'
-# Expected: either [] or a non-obsidian hit — the obsidian.md point is gone.
+  -d '{"query":"shoulder lock rotator cuff","top_k":1}' | jq '.results'
+# Expected: either [] or a non-kimura-note hit — the kimura-note.md point is gone.
 ```
 
 ---
