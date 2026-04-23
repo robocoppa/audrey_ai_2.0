@@ -140,7 +140,7 @@ agentic:
   planning:
     enabled: true
     min_prompt_tokens: 40
-    max_subtasks: 3
+    max_subtasks: 2        # matches deep-panel pool size; prevents dropped subtasks
   reflection:
     enabled: true
     max_retries: 1
