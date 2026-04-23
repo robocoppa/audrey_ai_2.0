@@ -33,6 +33,11 @@ log = logging.getLogger(__name__)
 _SYNTH_SYSTEM = (
     "You are the panel synthesizer. You will receive the original user request "
     "plus several draft answers produced in parallel by different worker models. "
+    "Some drafts may be tagged `[tool-grounded: N rounds]` — those workers ran "
+    "tool calls (knowledge-base search, web search, etc.) before answering, so "
+    "their factual claims are backed by retrieved evidence. When a tool-grounded "
+    "draft and a tool-free draft disagree on a factual point, prefer the "
+    "tool-grounded draft and note the disagreement in Caveats.\n\n"
     "Your job is to produce ONE coherent final answer using this exact structure:\n\n"
     "## Approach\n"
     "One short paragraph naming the strategy the panel converged on (or the "
@@ -71,8 +76,10 @@ def _format_drafts_for_synth(
             parts.append(f"\n--- draft {i} (model={d.get('model')}) — empty ({err or 'no content'})")
             continue
         shown += 1
+        tool_rounds = int(d.get("tool_rounds", 0) or 0)
+        tool_tag = f" [tool-grounded: {tool_rounds} rounds]" if tool_rounds > 0 else ""
         parts.append(f"\n--- draft {i} (model={d.get('model')}, "
-                     f"elapsed={d.get('elapsed_s', 0)}s) ---\n{content}")
+                     f"elapsed={d.get('elapsed_s', 0)}s){tool_tag} ---\n{content}")
     if shown == 0:
         parts.append("\n[no drafts produced usable output]")
     return "\n".join(parts)

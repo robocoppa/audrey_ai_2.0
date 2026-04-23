@@ -1,6 +1,6 @@
 """LangGraph pipeline assembly.
 
-Phase 6 build:
+Phase 9 build:
 
     classify ─► complexity ─► fast_path ─► escalate? ─► END
                           ╲                          ╲
@@ -13,8 +13,11 @@ Phase 6 build:
 short or low-confidence, the graph re-enters in deep mode. `retry?` is the
 reflection loop — at most one extra deep-panel pass.
 
-Tools (ReAct), KB lookup, and run_python land in Phase 7+; the deep-panel
-worker prompt is just the user message for now.
+Phase 9: both `fast_path` and `deep_panel` workers run ReAct when the chosen
+model is in `fast_path.tool_capable_models` and the tool registry is non-empty.
+Deep workers use `agentic.react.deep_worker.*` (tighter per-worker budget).
+The fast-path → deep escalation guard still skips when `tool_rounds > 0`
+(re-running through deep workers rarely improves an already-grounded answer).
 """
 
 from __future__ import annotations
@@ -65,6 +68,15 @@ def build_graph(
     react_compress_after = int(react_cfg.get("compress_after_round", 2))
     react_max_tool_chars = int(react_cfg.get("max_tool_result_chars", 2000))
     react_dispatch_timeout = float(react_cfg.get("dispatch_timeout_s", 30))
+
+    # Deep-panel workers get a separate ReAct budget — tighter by default
+    # because N workers × M rounds multiplies, and local workers hold the
+    # GPU gate for the whole loop.
+    deep_react_cfg = react_cfg.get("deep_worker", {}) or {}
+    deep_react_max_rounds = int(deep_react_cfg.get("max_rounds", 2))
+    deep_react_compress_after = int(deep_react_cfg.get("compress_after_round", react_compress_after))
+    deep_react_max_tool_chars = int(deep_react_cfg.get("max_tool_result_chars", react_max_tool_chars))
+    deep_react_dispatch_timeout = float(deep_react_cfg.get("dispatch_timeout_s", react_dispatch_timeout))
 
     agentic = cfg.raw.get("agentic", {})
     planning_cfg = agentic.get("planning", {}) or {}
@@ -173,10 +185,17 @@ def build_graph(
             options=options,
             timeout_s=timeout_s,
             max_workers_cloud=max_workers_cloud,
+            tools=tools,
+            tool_capable_models=tool_capable_models,
+            react_max_rounds=deep_react_max_rounds,
+            react_compress_after=deep_react_compress_after,
+            react_max_tool_chars=deep_react_max_tool_chars,
+            react_dispatch_timeout_s=deep_react_dispatch_timeout,
         )
         ok = sum(1 for d in drafts if (d.get("content") or "").strip())
-        log.info("deep_panel: pool=%s task=%s workers=%d ok=%d attempted=%s",
-                 pool_key, state["task_type"], len(drafts), ok, attempted)
+        grounded = sum(1 for d in drafts if int(d.get("tool_rounds", 0) or 0) > 0)
+        log.info("deep_panel: pool=%s task=%s workers=%d ok=%d tool_grounded=%d attempted=%s",
+                 pool_key, state["task_type"], len(drafts), ok, grounded, attempted)
         return {
             "panel_pool": pool_key,
             "workers_attempted": attempted,

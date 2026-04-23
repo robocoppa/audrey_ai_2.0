@@ -20,6 +20,8 @@ class WorkerDraft(TypedDict, total=False):
     elapsed_s: float
     prompt_eval_count: int
     eval_count: int
+    tool_rounds: int                 # ReAct rounds that invoked tools (0 if tool-free)
+    tool_calls: list[dict]           # per-call summary: name, elapsed_s, is_error
 
 
 class PipelineState(TypedDict, total=False):
