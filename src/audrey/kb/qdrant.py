@@ -130,13 +130,16 @@ class QdrantKB:
         return await self._search(vector, self.image_collection, top_k=top_k)
 
     async def _search(self, vector: list[float], collection: str, *, top_k: int) -> list[KBHit]:
-        hits = await asyncio.to_thread(
-            self._client.search,
+        # qdrant-client 1.12 deprecated `.search()` in favor of `.query_points()`,
+        # which returns a `QueryResponse` wrapping the same `ScoredPoint` list.
+        result = await asyncio.to_thread(
+            self._client.query_points,
             collection_name=collection,
-            query_vector=vector,
+            query=vector,
             limit=top_k,
             with_payload=True,
         )
+        hits = getattr(result, "points", result)
         out: list[KBHit] = []
         for h in hits:
             p = h.payload or {}
