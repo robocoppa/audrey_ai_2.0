@@ -1,0 +1,70 @@
+# Audrey 2.0 — compose for the two services we rebuild often.
+#
+# Scope: only `audrey-ai` and `custom-tools`. `ollama`, `qdrant`, and
+# `open-webui` stay under the Unraid UI so the GPU passthrough +
+# persistence config stays where you've been managing it.
+#
+# Usage (on Unraid, from /mnt/user/appdata/audrey_ai_2.0):
+#   docker compose up -d --build audrey-ai      # rebuild + restart audrey
+#   docker compose up -d --build custom-tools   # rebuild + restart tools
+#   docker compose up -d --build                # both
+#   docker compose logs -f audrey-ai            # tail logs
+#   docker compose down audrey-ai               # stop + remove
+#
+# The `ollama-net` network is declared `external: true` because it was
+# created out-of-band by the Unraid-managed `ollama` container. Don't let
+# compose try to recreate it.
+
+services:
+  audrey-ai:
+    build:
+      context: .
+      dockerfile: docker/audrey.Dockerfile
+    image: audrey-ai:latest
+    container_name: audrey-ai
+    restart: unless-stopped
+    networks:
+      - ollama-net
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
+      QDRANT_HOST: ${QDRANT_HOST:-qdrant}
+      QDRANT_PORT: ${QDRANT_PORT:-6333}
+      TOOL_SERVERS: ${TOOL_SERVERS:-http://custom-tools:8001}
+      KB_DATASET_PATHS: ${KB_DATASET_PATHS:-/datasets/geology}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - /mnt/user/appdata/audrey:/data
+      - /mnt/user/appdata/clip-cache:/root/.cache/clip
+      - /mnt/user/appdata/audrey-datasets:/datasets
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  custom-tools:
+    build:
+      context: .
+      dockerfile: docker/custom-tools.Dockerfile
+    image: audrey-custom-tools
+    container_name: custom-tools
+    restart: unless-stopped
+    networks:
+      - ollama-net
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    environment:
+      AUDREY_URL: ${AUDREY_URL:-http://audrey-ai:8000}
+    volumes:
+      - /mnt/user/appdata/custom-tools:/app/data
+
+networks:
+  ollama-net:
+    external: true

@@ -44,9 +44,11 @@ What's new vs Phase 5:
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
 git pull
-docker build -f docker/audrey.Dockerfile -t audrey-ai:latest .
-docker restart audrey-ai
+docker compose up -d --build audrey-ai
 ```
+
+(Or the long form if you prefer:
+`docker build -f docker/audrey.Dockerfile -t audrey-ai:latest . && docker restart audrey-ai`.)
 
 No new Python deps in this phase — `langgraph`, `langchain-core`, `tiktoken`
 were all installed in Phase 5.
