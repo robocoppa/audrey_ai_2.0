@@ -103,10 +103,10 @@ curl -s -XPOST http://localhost:8000/v1/chat/completions \
 Then check the log:
 
 ```bash
-docker logs audrey-ai --tail 40 | grep -E "react:|tool_dispatch:|chat\.completions"
+docker logs audrey-ai --tail 40 | grep -E "react:|dispatch:|chat\.completions"
 # Expected:
 #   react: round 1: model produced 1 tool_call(s): ['web_search']
-#   tool_dispatch: web_search ok in 0.8s (1740 chars)
+#   dispatch: web_search ok in 0.8s (1740 chars)
 #   react: round 2: no tool_calls → returning answer
 #   chat.completions model=audrey_deep task=general(...) mode=fast -> qwen3.6:35b tool_rounds=1 tool_calls=[web_search]
 ```
@@ -139,10 +139,10 @@ curl -s -XPOST http://localhost:8000/v1/chat/completions \
 Log check:
 
 ```bash
-docker logs audrey-ai --tail 60 | grep -E "tool_dispatch:|tool_calls"
+docker logs audrey-ai --tail 60 | grep -E "dispatch:|tool_calls"
 # Expected at least:
-#   tool_dispatch: memory_store ok in 0.0s
-#   tool_dispatch: memory_recall ok in 0.0s
+#   dispatch: memory_store ok in 0.0s
+#   dispatch: memory_recall ok in 0.0s
 ```
 
 Also verify the SQLite row landed (the slim image has no `sqlite3` CLI,
@@ -172,8 +172,9 @@ curl -s -XPOST http://localhost:8000/v1/chat/completions \
     "stream": false
   }' > /dev/null
 
-docker logs audrey-ai --tail 20 | grep "tool_dispatch: web_search"
-# Expected: "(... chars)" value is ≤ agentic.react.max_tool_result_chars (2000 by default)
+docker logs audrey-ai --tail 80 | grep "dispatch: web_search"
+# Expected: trailing "(2000 chars, truncated)" — the ", truncated" suffix
+# only appears when the result was clamped to max_tool_result_chars.
 ```
 
 ### 2.6 — ReAct round cap forces a final answer
@@ -215,22 +216,30 @@ curl -s -N -XPOST http://localhost:8000/v1/chat/completions \
 
 ### 2.8 — Non-tool prompt skips the loop entirely
 
-Short factual prompt to a tool-capable model — should *not* trigger a tool
-call (model decides), and `tool_rounds=0` in the log line.
+Prompt to a tool-capable model that's trivial enough the model shouldn't
+call any tool, but long enough the fast-path answer clears the
+`agentic.escalation.min_chars` (100) gate so we don't escalate and end up
+in deep mode. `tool_rounds=0` → log line has no `tool_rounds=` suffix.
 
 ```bash
 curl -s -XPOST http://localhost:8000/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{
     "model":"audrey_deep",
-    "messages":[{"role":"user","content":"what is 2+2?"}],
+    "messages":[{"role":"user","content":"explain in 3 sentences what the pythagorean theorem says and give one example"}],
     "stream": false
-  }' | jq -r '.choices[0].message.content[0:80]'
+  }' | jq -r '.choices[0].message.content[0:160]'
 
-docker logs audrey-ai --tail 5 | grep "chat.completions"
-# Expected: no `tool_rounds=` suffix on the chat.completions line
-# (the suffix only appears when rounds > 0)
+docker logs audrey-ai --tail 40 | grep "chat.completions" | tail -1
+# Expected:
+# - mode=fast (not deep)
+# - no `tool_rounds=` suffix (the suffix only appears when rounds > 0)
+# - no `escalated=True` — pure fast path, no tools
 ```
+
+Note: the escalation gate (`agentic.escalation.min_chars=100`) will force
+short fast-path answers into deep mode. A one-word answer to "what is 2+2?"
+will escalate — that's by design, not a bug.
 
 ### 2.9 — `POST /v1/tools/rediscover` picks up changes live
 
@@ -238,7 +247,7 @@ docker logs audrey-ai --tail 5 | grep "chat.completions"
 curl -s -XPOST http://localhost:8000/v1/tools/rediscover | jq
 # Expected: {"tools":[...5 names...],"count":5}
 
-docker logs audrey-ai --tail 5 | grep "rediscover"
+docker logs audrey-ai --tail 20 | grep "rediscover"
 # Expected: tools: rediscover -> 5 tool(s): [...]
 ```
 
@@ -286,7 +295,7 @@ If anything fails, paste:
   Some smaller local models also don't reliably emit `tool_calls`; try
   forcing one of the cloud models for that query.
 
-- **`tool_dispatch: web_search error: 401` (or 502):** Brave key missing
+- **`dispatch: web_search error: 401` (or 502):** Brave key missing
   or wrong. Verify with
   `docker exec custom-tools env | grep BRAVE_API_KEY` and
   `docker logs custom-tools | grep -i brave`.
