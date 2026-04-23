@@ -169,7 +169,19 @@ kb:
   chunk_tokens: 1000
   chunk_overlap: 100
   dataset_paths:                         # overridden by KB_DATASET_PATHS env var
-    - "/datasets/geology"                # container path; host = /mnt/user/appdata/audrey-datasets/geology
+    - "/datasets/geology"                # container path; host = /mnt/user/knowledge/<topic>
+    - "/datasets/botany"
+    - "/datasets/bushcraft"
+    - "/datasets/fishing"
+    - "/datasets/first-aid"
+    - "/datasets/wilderness-first-aid"
+    - "/datasets/herbal-medicine"
+    - "/datasets/hunting"
+    - "/datasets/survival"
+    - "/datasets/bjj"
+    - "/datasets/mma"
+    - "/datasets/powerapps"
+    - "/datasets/servicenow"
   watcher_debounce_seconds: 2
 
 # ─── Tools (OpenAPI auto-discovery) ────────────────────────────────────

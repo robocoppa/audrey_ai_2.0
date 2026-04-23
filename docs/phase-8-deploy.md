@@ -42,9 +42,11 @@ What's new vs Phase 7:
 - `nomic-embed-text` pulled in Ollama (`docker exec ollama ollama list |
   grep nomic`). If missing: `docker exec ollama ollama pull nomic-embed-text`.
 - Dataset mount exists:
-  host `/mnt/user/appdata/audrey-datasets/geology` →
-  container `/datasets/geology`. Drop at least one `.md`/`.pdf` and one
-  `.jpg` in there for the smoke tests.
+  host `/mnt/user/knowledge` → container `/datasets`. Subdirs under
+  `/mnt/user/knowledge/` (geology, botany, bushcraft, fishing, first-aid,
+  wilderness-first-aid, herbal-medicine, hunting, survival, bjj, mma,
+  powerapps, servicenow) map to `/datasets/<topic>`. Drop at least one
+  `.md`/`.pdf` and one `.jpg` into `geology/` for the smoke tests.
 - CLIP model cache mount exists:
   host `/mnt/user/appdata/clip-cache` → container `/root/.cache/clip`.
   First image ingest downloads ~380 MB; subsequent starts reuse the cache.
@@ -218,7 +220,7 @@ Drop a new markdown file and wait past the 2 s debounce:
 
 ```bash
 echo "Obsidian is a dark volcanic glass." > \
-  /mnt/user/appdata/audrey-datasets/geology/obsidian.md
+  /mnt/user/knowledge/geology/obsidian.md
 sleep 4
 
 docker logs audrey-ai --tail 20 | grep "kb.watcher"

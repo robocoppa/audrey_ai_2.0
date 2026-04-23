@@ -39,7 +39,7 @@ services:
       - ./config.yaml:/app/config.yaml:ro
       - /mnt/user/appdata/audrey:/data
       - /mnt/user/appdata/clip-cache:/root/.cache/clip
-      - /mnt/user/appdata/audrey-datasets:/datasets
+      - /mnt/user/knowledge:/datasets
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
       interval: 30s
