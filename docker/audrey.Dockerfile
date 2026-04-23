@@ -30,9 +30,10 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Runtime deps actually used so far. KB-heavy deps (sentence-transformers,
-# lxml, watchdog, qdrant-client, pypdf, python-docx, beautifulsoup4) are
-# added in Phase 8 when they're actually imported.
+# Runtime deps. Phase 8 adds the KB stack: qdrant-client for the vector
+# store, sentence-transformers+torch for CLIP image embeddings (text
+# embeddings go through ollama), pypdf/python-docx/beautifulsoup4 for
+# document loaders, watchdog for the dataset auto-ingest watcher.
 RUN uv pip install --system \
       "fastapi>=0.115" \
       "uvicorn[standard]>=0.32" \
@@ -44,7 +45,15 @@ RUN uv pip install --system \
       "tiktoken>=0.8" \
       "langgraph>=0.2.60" \
       "langchain-core>=0.3.28" \
-      "python-dotenv>=1.0"
+      "python-dotenv>=1.0" \
+      "qdrant-client>=1.12" \
+      "sentence-transformers>=3.2" \
+      "pypdf>=5.1" \
+      "python-docx>=1.1" \
+      "beautifulsoup4>=4.12" \
+      "lxml>=5.3" \
+      "watchdog>=6.0" \
+      "pillow>=11.0"
 
 # Copy the package + config
 COPY pyproject.toml /app/pyproject.toml

@@ -110,6 +110,38 @@ class OllamaClient:
                 except json.JSONDecodeError:
                     log.warning("Ollama returned non-JSON line: %r", line[:120])
 
+    # ─── Embeddings ─────────────────────────────────────────────────────
+
+    async def embed(
+        self,
+        *,
+        model: str,
+        texts: list[str],
+        timeout_s: float | None = None,
+    ) -> list[list[float]]:
+        """Return one embedding vector per input text.
+
+        Uses `/api/embed` (batch form — `/api/embeddings` is the older
+        single-input variant; `/api/embed` accepts `input: [str]` and
+        returns `embeddings: [[float, ...]]`).
+        """
+        if not texts:
+            return []
+        payload = {"model": model, "input": texts}
+        r = await self._client.post(
+            "/api/embed",
+            json=payload,
+            timeout=httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT,
+        )
+        self._raise_for_status(r, "/api/embed")
+        body = r.json()
+        out = body.get("embeddings") or []
+        if len(out) != len(texts):
+            raise OllamaError(
+                f"/api/embed: expected {len(texts)} vectors, got {len(out)}"
+            )
+        return out
+
     # ─── Internals ──────────────────────────────────────────────────────
 
     @staticmethod

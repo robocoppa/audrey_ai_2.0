@@ -1,24 +1,31 @@
 """Audrey FastAPI entrypoint.
 
-Phase 4: app skeleton wired to the Ollama client + model registry. Exposes
-`/health`, `/v1/models`, `/v1/chat/completions` (pass-through). Classifier,
-pipeline, tools, and KB endpoints attach in later phases.
+Wires the orchestrator, tool registry, and KB stack into a single
+FastAPI app. The KB pieces (Qdrant client, text/image embedders, and
+the optional filesystem watcher) are instantiated in the lifespan and
+attached to `app.state` so routes and the ReAct loop can read them.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 
 from audrey import __version__
 from audrey.config import get_config
+from audrey.kb.embed import ImageEmbedder, TextEmbedder
+from audrey.kb.qdrant import QdrantKB
+from audrey.kb.watcher import KBWatcher
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.graph import build_graph
 from audrey.pipeline.semaphore import GpuGate
+from audrey.routes.kb import router as kb_router
 from audrey.routes.openai import router as openai_router
 from audrey.tools.discovery import discover_all
 
@@ -53,6 +60,42 @@ async def lifespan(app: FastAPI):
 
     graph = build_graph(cfg, ollama, registry, health, gate, tool_registry)
 
+    # ─── KB stack ────────────────────────────────────────────────────
+    kb_cfg = cfg.raw.get("kb", {}) or {}
+    qdrant = QdrantKB(
+        host=cfg.env.qdrant_host,
+        port=cfg.env.qdrant_port,
+        text_collection=kb_cfg.get("text_collection", "kb_text"),
+        image_collection=kb_cfg.get("image_collection", "kb_images"),
+    )
+    try:
+        await qdrant.ensure_collections()
+    except Exception as e:  # noqa: BLE001 — Qdrant outage shouldn't kill boot
+        log.warning("qdrant: ensure_collections failed: %s (KB endpoints will 503)", e)
+
+    text_embedder = TextEmbedder(
+        ollama=ollama,
+        model=kb_cfg.get("text_embedder", "nomic-embed-text"),
+    )
+    image_embedder = ImageEmbedder(
+        model_name=kb_cfg.get("image_model", "clip-ViT-B-32"),
+        cache_folder="/root/.cache/clip",
+    )
+
+    watcher: KBWatcher | None = None
+    if os.environ.get("KB_WATCHER_ENABLED", "").strip() in ("1", "true", "yes"):
+        roots = [Path(p) for p in (kb_cfg.get("dataset_paths") or [])]
+        watcher = KBWatcher(
+            roots=roots,
+            qdrant=qdrant,
+            text_embedder=text_embedder,
+            image_embedder=image_embedder,
+            debounce_s=float(kb_cfg.get("watcher_debounce_seconds", 2)),
+            chunk_tokens=int(kb_cfg.get("chunk_tokens", 1000)),
+            overlap_tokens=int(kb_cfg.get("chunk_overlap", 100)),
+        )
+        await watcher.start()
+
     app.state.cfg = cfg
     app.state.ollama = ollama
     app.state.registry = registry
@@ -60,13 +103,25 @@ async def lifespan(app: FastAPI):
     app.state.gate = gate
     app.state.tools = tool_registry
     app.state.graph = graph
+    app.state.qdrant = qdrant
+    app.state.text_embedder = text_embedder
+    app.state.image_embedder = image_embedder
+    app.state.kb_watcher = watcher
 
-    log.info("ready: ollama=%s; task types=%s; gpu_concurrency=%d; tools=%d (%s); pipeline=compiled",
-             cfg.env.ollama_host, registry.all_task_types(), gpu_concurrency,
-             len(tool_registry.by_name), tool_registry.names())
+    log.info(
+        "ready: ollama=%s; task types=%s; gpu_concurrency=%d; tools=%d (%s); "
+        "qdrant=%s:%d; kb_watcher=%s; pipeline=compiled",
+        cfg.env.ollama_host, registry.all_task_types(), gpu_concurrency,
+        len(tool_registry.by_name), tool_registry.names(),
+        cfg.env.qdrant_host, cfg.env.qdrant_port,
+        "on" if watcher is not None else "off",
+    )
     try:
         yield
     finally:
+        if watcher is not None:
+            await watcher.stop()
+        qdrant.close()
         await ollama.aclose()
 
 
@@ -83,6 +138,7 @@ app = FastAPI(
 )
 
 app.include_router(openai_router)
+app.include_router(kb_router)
 
 
 @app.get("/health", tags=["system"])
