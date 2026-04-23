@@ -95,13 +95,22 @@ class KBSearchRequest(BaseModel):
 
 
 class KBImageSearchRequest(BaseModel):
+    query: str | None = Field(
+        default=None,
+        description=(
+            "Text description of the image you want to find (e.g. 'someone in "
+            "guard position', 'sedimentary rock with visible layers'). Encoded "
+            "via CLIP's text tower and matched against image embeddings."
+        ),
+        max_length=2000,
+    )
     image_url: str | None = Field(
         default=None,
-        description="HTTP(S) URL of an image to search for. Either this or image_b64 must be set.",
+        description="HTTP(S) URL of a reference image to find visually-similar matches.",
     )
     image_b64: str | None = Field(
         default=None,
-        description="Base64-encoded image bytes. Either this or image_url must be set.",
+        description="Base64-encoded reference image bytes.",
     )
     top_k: Annotated[int, Field(ge=1, le=20)] = 5
 
@@ -209,21 +218,24 @@ async def kb_search(req: KBSearchRequest) -> KBSearchResponse:
     operation_id="kb_image_search",
     response_model=KBSearchResponse,
     tags=["tools"],
-    summary="Search the local knowledge base by image",
+    summary="Search the local knowledge base for images",
     description=(
-        "Find visually-similar images in the KB. Use this for identification "
-        "tasks like 'what type of rock is this?' — provide either an image "
-        "URL or base64-encoded bytes."
+        "Find images in the KB by either a text description (e.g. 'someone "
+        "in guard position') OR a reference image (URL / base64). Provide "
+        "exactly one of: query, image_url, image_b64. Use this for image "
+        "lookup; use kb_search for text/document lookup."
     ),
 )
 async def kb_image_search(req: KBImageSearchRequest) -> KBSearchResponse:
-    if not req.image_url and not req.image_b64:
+    if not req.query and not req.image_url and not req.image_b64:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Either image_url or image_b64 is required.",
+            detail="One of query, image_url, or image_b64 is required.",
         )
     client: httpx.AsyncClient = app.state.audrey
     payload: dict[str, Any] = {"top_k": req.top_k}
+    if req.query:
+        payload["query"] = req.query
     if req.image_url:
         payload["image_url"] = req.image_url
     if req.image_b64:
@@ -238,7 +250,7 @@ async def kb_image_search(req: KBImageSearchRequest) -> KBSearchResponse:
     if r.status_code >= 400:
         raise HTTPException(status_code=r.status_code, detail=r.text)
     body = r.json()
-    return KBSearchResponse(results=body.get("results", []))
+    return KBSearchResponse(query=req.query, results=body.get("results", []))
 
 
 @app.post(

@@ -85,6 +85,13 @@ class ImageEmbedder:
         vec = await asyncio.to_thread(_clip_encode, model, image)
         return _normalize(vec)
 
+    async def embed_text(self, text: str) -> list[float]:
+        # CLIP's text and image encoders share the same 512-d embedding space,
+        # so a text vector can be cosine-searched against `kb_images` directly.
+        model = _load_clip(self.model_name, self.cache_folder)
+        vec = await asyncio.to_thread(_clip_encode_text, model, text)
+        return _normalize(vec)
+
 
 # ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -139,6 +146,11 @@ def _clip_encode(model, image: "PILImage") -> list[float]:
     # sentence-transformers returns a numpy array; convert to plain list so
     # qdrant-client's JSON serializer is happy.
     out = model.encode([image], convert_to_numpy=True, normalize_embeddings=False)
+    return [float(x) for x in out[0].tolist()]
+
+
+def _clip_encode_text(model, text: str) -> list[float]:
+    out = model.encode([text], convert_to_numpy=True, normalize_embeddings=False)
     return [float(x) for x in out[0].tolist()]
 
 

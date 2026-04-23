@@ -35,6 +35,11 @@ class TextQuery(BaseModel):
 
 
 class ImageQuery(BaseModel):
+    query: str | None = Field(
+        default=None,
+        description="Text query — encoded via CLIP's text tower and searched against kb_images.",
+        max_length=2000,
+    )
     image_url: str | None = Field(default=None, description="HTTP(S) URL of the image.")
     image_b64: str | None = Field(default=None, description="Base64-encoded image bytes.")
     top_k: int = Field(default=5, ge=1, le=20)
@@ -83,17 +88,23 @@ async def kb_query_image(req: ImageQuery, request: Request) -> QueryResponse:
     embedder: ImageEmbedder | None = getattr(request.app.state, "image_embedder", None)
     if qdrant is None or embedder is None:
         raise HTTPException(status_code=503, detail="KB image search is not initialized")
-    if not req.image_url and not req.image_b64:
-        raise HTTPException(status_code=422, detail="Either image_url or image_b64 is required.")
-    try:
-        vec = await (
-            embedder.embed_url(req.image_url) if req.image_url
-            else embedder.embed_b64(req.image_b64 or "")
+    if not req.image_url and not req.image_b64 and not req.query:
+        raise HTTPException(
+            status_code=422,
+            detail="One of query, image_url, or image_b64 is required.",
         )
-    except Exception as e:  # noqa: BLE001 — surface image errors as 4xx
+    try:
+        if req.image_url:
+            vec = await embedder.embed_url(req.image_url)
+        elif req.image_b64:
+            vec = await embedder.embed_b64(req.image_b64)
+        else:
+            vec = await embedder.embed_text(req.query or "")
+    except Exception as e:  # noqa: BLE001 — surface embed errors as 4xx
         raise HTTPException(status_code=422, detail=f"image embed failed: {e}") from e
     hits = await qdrant.search_images(vec, top_k=req.top_k)
     return QueryResponse(
+        query=req.query,
         results=[
             Hit(score=h.score, source=h.source, kind=h.kind, chunk_idx=h.chunk_idx, text=h.text)
             for h in hits
