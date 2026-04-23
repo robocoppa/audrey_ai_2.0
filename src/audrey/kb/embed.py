@@ -96,7 +96,16 @@ def _normalize(vec: list[float]) -> list[float]:
 
 
 async def _fetch_image(url: str) -> "PILImage":
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+    # Wikimedia (and a handful of other CDNs) reject the default
+    # `python-httpx/x.y.z` UA with 403. A normal browser UA gets through.
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+        ),
+        "Accept": "image/avif,image/webp,image/png,image/jpeg,*/*;q=0.8",
+    }
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, headers=headers) as client:
         r = await client.get(url)
         r.raise_for_status()
         return await asyncio.to_thread(_pil_from_bytes, r.content)
