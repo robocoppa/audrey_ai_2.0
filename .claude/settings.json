@@ -19,7 +19,8 @@
       "Bash(python3 -m py_compile src/audrey/kb/qdrant.py src/audrey/kb/embed.py src/audrey/kb/chunk.py src/audrey/kb/ingest.py src/audrey/kb/watcher.py src/audrey/kb/cli.py src/audrey/routes/kb.py src/audrey/main.py)",
       "Bash(python3 -c \"from watchdog.observers import Observer; print\\(type\\(Observer\\)\\)\")",
       "Bash(python3 -m py_compile /home/bart/Documents/github/audrey_ai_2.0/src/audrey/kb/qdrant.py)",
-      "Bash(python3 -m py_compile /home/bart/Documents/github/audrey_ai_2.0/src/audrey/kb/embed.py)"
+      "Bash(python3 -m py_compile /home/bart/Documents/github/audrey_ai_2.0/src/audrey/kb/embed.py)",
+      "Bash(python3 -m py_compile /home/bart/Documents/github/audrey_ai_2.0/src/audrey/pipeline/classify.py /home/bart/Documents/github/audrey_ai_2.0/src/audrey/pipeline/graph.py)"
     ]
   }
 }

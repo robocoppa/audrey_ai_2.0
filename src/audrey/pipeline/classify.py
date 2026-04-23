@@ -68,8 +68,33 @@ class KeywordSignal:
     reason: str
 
 
-def keyword_classify(text: str) -> KeywordSignal | None:
+def _tool_mention_signal(text: str, tool_names: set[str]) -> KeywordSignal | None:
+    """If the prompt explicitly names a registered tool, classify as `general`.
+
+    A prompt like "use kb_image_search to find …" would otherwise trip
+    `_VL_STRONG` on the word "image" and route to a tool-blind vl model.
+    Naming a tool is a stronger signal than the surrounding nouns: the
+    user wants tool dispatch, so route through the tool-capable fast path.
+    """
+    if not tool_names:
+        return None
+    lowered = text.lower()
+    for name in tool_names:
+        # Word boundary so "memory" alone doesn't trigger "memory_store".
+        if re.search(rf"\b{re.escape(name.lower())}\b", lowered):
+            return KeywordSignal("general", "strong", f"tool_mention:{name}")
+    return None
+
+
+def keyword_classify(text: str, *, tool_names: set[str] | None = None) -> KeywordSignal | None:
     """Return the strongest keyword signal, or None if nothing matches."""
+    # Tool-mention wins over everything else — the user is asking for
+    # tool dispatch, which the deep / vl pools can't do in this phase.
+    if tool_names:
+        sig = _tool_mention_signal(text, tool_names)
+        if sig is not None:
+            return sig
+
     # Review-override wins unconditionally — reviewing code is reasoning.
     if _REVIEW_OVERRIDE.search(text):
         return KeywordSignal("reasoning", "strong", "review_override")
@@ -162,6 +187,7 @@ async def classify(
     router_timeout_s: float,
     max_router_strikes: int,
     user_text: str,
+    tool_names: set[str] | None = None,
 ) -> tuple[TaskType, str, float]:
     """Classify with keyword short-circuit + router fallback.
 
@@ -172,8 +198,12 @@ async def classify(
       2. Run router up to `max_router_strikes` times.
       3. If router still failed, use weak-keyword signal if any.
       4. Default: "general", confidence 0.25.
+
+    `tool_names`: the set of registered tool names (e.g. {"kb_search",
+    "web_search", ...}). When the user prompt explicitly names one,
+    we classify as `general` so the tool-capable fast path runs.
     """
-    signal = keyword_classify(user_text)
+    signal = keyword_classify(user_text, tool_names=tool_names)
     if signal is not None and signal.strength == "strong":
         return signal.task, f"keyword:{signal.reason}", 0.95
 

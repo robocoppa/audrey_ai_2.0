@@ -86,12 +86,17 @@ def build_graph(
 
     async def node_classify(state: PipelineState) -> dict[str, Any]:
         user_text = _last_user_text(state["messages"])
+        # Pass current tool names so prompts that explicitly name a tool
+        # (e.g. "use kb_image_search …") route through the tool-capable
+        # fast path instead of getting trapped by `vl_strong`/code keywords.
+        tool_names = set(tools.names()) if tools is not None else set()
         task, reason, conf = await classify_fn(
             ollama,
             router_model=router_cfg.get("model", "qwen3:4b"),
             router_timeout_s=router_timeout,
             max_router_strikes=int(router_cfg.get("max_failures_before_fallback", 2)),
             user_text=user_text,
+            tool_names=tool_names,
         )
         log.info("classify: %s (%s, conf=%.2f)", task, reason, conf)
         return {"task_type": task, "classify_reason": reason, "classify_confidence": conf}

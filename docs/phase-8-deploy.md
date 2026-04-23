@@ -182,16 +182,30 @@ docker logs audrey-ai --tail 80 | grep -E "react:|dispatch:|chat\.completions"
 
 ### 2.6 — Image query (URL)
 
-Use any public image URL that resembles what you ingested. A photo of
-two people grappling on a BJJ mat works well:
+Use any public image URL that resembles what you ingested. Or —
+faster and guaranteed to match — re-embed a file already in the KB by
+passing its bytes as base64:
+
+```bash
+# base64-encode an already-ingested image, send it back as the query.
+# This should return that same image as the top hit with score ≈ 1.0.
+B64=$(docker exec audrey-ai python3 -c "import base64,sys; sys.stdout.write(base64.b64encode(open('/datasets/bjj/audrey.png','rb').read()).decode())")
+curl -s -XPOST http://localhost:8000/v1/kb/query/image \
+  -H 'content-type: application/json' \
+  -d "{\"image_b64\":\"$B64\",\"top_k\":3}" | jq '.results[] | {score, source}'
+# Expected: top hit is audrey.png (or whichever file you picked) with
+# score ≈ 1.0, followed by visually similar images from the KB.
+```
+
+Or with a public URL (works now that we send a browser UA):
 
 ```bash
 curl -s -XPOST http://localhost:8000/v1/kb/query/image \
   -H 'content-type: application/json' \
-  -d '{"image_url":"https://upload.wikimedia.org/wikipedia/commons/4/41/Brazilian_Jiu-Jitsu_match_in_Pan_American_2008.jpg","top_k":3}' | jq '.results[] | {score, source}'
+  -d '{"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/5/5d/Jiu_jitsu_brasileiro.jpg/640px-Jiu_jitsu_brasileiro.jpg","top_k":3}' | jq '.results[] | {score, source}'
 # Expected: up to 3 image hits from kb_images, highest-scoring first.
-# Sources should be paths under /datasets/bjj (or whichever topic dirs
-# contain images you ingested).
+# Sources should be paths under /datasets/<topic> for topic dirs
+# containing images (e.g. botany, herbal-medicine, hunting).
 ```
 
 First call is slow (~30–60 s) — CLIP weights download from
