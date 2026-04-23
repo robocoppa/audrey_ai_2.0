@@ -123,6 +123,12 @@ async def _generate_via_pipeline(app, payload: ChatCompletionRequest, messages, 
             f"/attempts={final.get('reflect_attempts', 0)}"
             f" escalated={bool(final.get('escalated_from_fast'))}"
         )
+    else:
+        rounds = int(final.get("tool_rounds", 0))
+        if rounds:
+            calls = final.get("tool_calls_log") or []
+            names = ",".join(c.get("name", "?") for c in calls) or "-"
+            extra = f" tool_rounds={rounds} tool_calls=[{names}]"
     log.info(
         "chat.completions model=%s task=%s(%s, conf=%.2f) mode=%s -> %s%s",
         payload.model,
@@ -203,6 +209,34 @@ async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, op
         async for frame in _emit_single_message(
             payload.model, "none", f"[no healthy model for task={task}]"
         ):
+            yield frame
+        return
+
+    # If the chosen model is tool-capable and tools are registered, route
+    # the streaming request through the graph so the ReAct loop can fire.
+    # Mid-stream tool dispatch isn't supported in Phase 7 — we emit one chunk.
+    tool_capable = set(cfg.raw.get("fast_path", {}).get("tool_capable_models", []) or [])
+    tools_active = bool(app.state.tools.by_name) and spec.name in tool_capable
+    if tools_active:
+        graph = app.state.graph
+        state = {
+            "virtual_model": payload.model,
+            "messages": messages,
+            "temperature": payload.temperature,
+            "top_p": payload.top_p,
+            "max_tokens": payload.max_tokens,
+        }
+        try:
+            final = await graph.ainvoke(state)
+        except OllamaError as e:
+            async for frame in _emit_single_message(
+                payload.model, "error", f"[ollama error: {e}]"
+            ):
+                yield frame
+            return
+        concrete = final.get("concrete_model", spec.name)
+        content = final.get("content", "") or "[empty]"
+        async for frame in _emit_single_message(payload.model, concrete, content):
             yield frame
         return
 

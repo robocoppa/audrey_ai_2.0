@@ -13,7 +13,8 @@
       "Bash(.venv/bin/python -c ' *)",
       "Bash(.venv/bin/python -c \"import sys; print\\(sys.path\\)\")",
       "Bash(uv sync *)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -m compileall -q src/audrey)"
     ]
   }
 }

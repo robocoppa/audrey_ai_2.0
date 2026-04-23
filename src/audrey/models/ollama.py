@@ -58,12 +58,21 @@ class OllamaClient:
         model: str,
         messages: list[dict[str, Any]],
         options: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
         timeout_s: float | None = None,
     ) -> dict[str, Any]:
-        """Non-streaming chat completion. Returns the full Ollama response dict."""
-        payload = {"model": model, "messages": messages, "stream": False}
+        """Non-streaming chat completion. Returns the full Ollama response dict.
+
+        When `tools` is provided and the model is tool-capable, the response's
+        `message.tool_calls` will list any tool invocations the model wants to
+        make. Caller (the ReAct loop) is responsible for executing them and
+        feeding results back as `role=tool` messages.
+        """
+        payload: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
         if options:
             payload["options"] = options
+        if tools:
+            payload["tools"] = tools
         r = await self._client.post(
             "/api/chat",
             json=payload,

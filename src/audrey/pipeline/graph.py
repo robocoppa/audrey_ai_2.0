@@ -37,6 +37,7 @@ from audrey.pipeline.reflect import reflect as reflect_fn
 from audrey.pipeline.semaphore import GpuGate
 from audrey.pipeline.state import PipelineState
 from audrey.pipeline.synthesize import synthesize as synthesize_fn
+from audrey.tools.discovery import ToolRegistry
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ def build_graph(
     registry: ModelRegistry,
     health: HealthTracker,
     gate: GpuGate,
+    tools: ToolRegistry,
 ):
     """Compile the LangGraph StateGraph for this process."""
     router_cfg = cfg.router
@@ -55,6 +57,14 @@ def build_graph(
     deep_worker_timeout = float(cfg.timeouts.get("deep_worker", 240))
     cloud_timeout = float(cfg.timeouts.get("cloud", 120))
     router_timeout = float(router_cfg.get("timeout_s", 20))
+
+    fast_path_cfg = cfg.raw.get("fast_path", {}) or {}
+    tool_capable_models = set(fast_path_cfg.get("tool_capable_models", []) or [])
+    react_cfg = cfg.raw.get("agentic", {}).get("react", {}) or {}
+    react_max_rounds = int(react_cfg.get("max_rounds", 3))
+    react_compress_after = int(react_cfg.get("compress_after_round", 2))
+    react_max_tool_chars = int(react_cfg.get("max_tool_result_chars", 2000))
+    react_dispatch_timeout = float(react_cfg.get("dispatch_timeout_s", 30))
 
     agentic = cfg.raw.get("agentic", {})
     planning_cfg = agentic.get("planning", {}) or {}
@@ -109,13 +119,22 @@ def build_graph(
             messages=state["messages"],
             options=options,
             timeout_s=fast_timeout,
+            tools=tools,
+            tool_capable_models=tool_capable_models,
+            react_max_rounds=react_max_rounds,
+            react_compress_after=react_compress_after,
+            react_max_tool_chars=react_max_tool_chars,
+            react_dispatch_timeout_s=react_dispatch_timeout,
         )
         msg = resp.get("message", {}) or {}
+        react_meta = resp.get("_react") or {}
         return {
             "concrete_model": concrete,
             "content": msg.get("content", "") or "",
             "prompt_eval_count": int(resp.get("prompt_eval_count", 0) or 0),
             "eval_count": int(resp.get("eval_count", 0) or 0),
+            "tool_rounds": int(react_meta.get("tool_rounds", 0)),
+            "tool_calls_log": list(react_meta.get("tool_calls", []) or []),
         }
 
     async def node_planner(state: PipelineState) -> dict[str, Any]:

@@ -20,6 +20,7 @@ from audrey.models.registry import ModelRegistry
 from audrey.pipeline.graph import build_graph
 from audrey.pipeline.semaphore import GpuGate
 from audrey.routes.openai import router as openai_router
+from audrey.tools.discovery import discover_all
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,17 +42,28 @@ async def lifespan(app: FastAPI):
     gpu_concurrency = int(cfg.raw.get("gpu", {}).get("concurrency", 1))
     gate = GpuGate(concurrency=gpu_concurrency)
 
-    graph = build_graph(cfg, ollama, registry, health, gate)
+    tool_servers: list[str] = list(cfg.tools.get("servers", []) or [])
+    tools_enabled = bool(cfg.tools.get("enabled", True))
+    if tools_enabled and tool_servers:
+        tool_registry = await discover_all(tool_servers)
+    else:
+        from audrey.tools.discovery import ToolRegistry
+        tool_registry = ToolRegistry()
+        log.info("tools: disabled or no servers configured")
+
+    graph = build_graph(cfg, ollama, registry, health, gate, tool_registry)
 
     app.state.cfg = cfg
     app.state.ollama = ollama
     app.state.registry = registry
     app.state.health = health
     app.state.gate = gate
+    app.state.tools = tool_registry
     app.state.graph = graph
 
-    log.info("ready: ollama=%s; task types=%s; gpu_concurrency=%d; pipeline=compiled",
-             cfg.env.ollama_host, registry.all_task_types(), gpu_concurrency)
+    log.info("ready: ollama=%s; task types=%s; gpu_concurrency=%d; tools=%d (%s); pipeline=compiled",
+             cfg.env.ollama_host, registry.all_task_types(), gpu_concurrency,
+             len(tool_registry.by_name), tool_registry.names())
     try:
         yield
     finally:
@@ -76,6 +88,42 @@ app.include_router(openai_router)
 @app.get("/health", tags=["system"])
 async def health() -> dict[str, str]:
     return {"status": "ok", "version": __version__}
+
+
+@app.get("/v1/tools", tags=["tools"])
+async def list_tools() -> dict[str, list[dict]]:
+    """Inspect what tools are currently registered for the ReAct loop."""
+    reg = app.state.tools
+    return {
+        "tools": [
+            {
+                "name": s.name,
+                "description": s.description,
+                "server_url": s.server_url,
+                "path": s.path,
+                "parameters": s.parameters,
+            }
+            for s in reg.specs()
+        ],
+    }
+
+
+@app.post("/v1/tools/rediscover", tags=["tools"])
+async def rediscover_tools() -> dict[str, list[str] | int]:
+    """Re-fetch /openapi.json from every configured tool server.
+
+    Mutates the live ToolRegistry in place — the graph keeps its closure
+    over the same registry instance, so changes take effect on the next
+    request without a graph rebuild.
+    """
+    cfg = app.state.cfg
+    reg = app.state.tools
+    tool_servers = list(cfg.tools.get("servers", []) or [])
+    fresh = await discover_all(tool_servers)
+    reg.by_name.clear()
+    reg.by_name.update(fresh.by_name)
+    log.info("tools: rediscover -> %d tool(s): %s", len(reg.by_name), reg.names())
+    return {"tools": reg.names(), "count": len(reg.by_name)}
 
 
 def run() -> None:

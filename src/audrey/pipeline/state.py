@@ -61,6 +61,10 @@ class PipelineState(TypedDict, total=False):
     # Escalation flag — fast_path → deep when fast answer was inadequate
     escalated_from_fast: bool
 
+    # ReAct (tool use on the fast path)
+    tool_rounds: int                 # number of rounds that invoked a tool
+    tool_calls_log: list[dict]       # per-call summary: name, elapsed_s, is_error
+
     # Output
     content: str                     # final assistant text
     prompt_eval_count: int
