@@ -145,12 +145,16 @@ docker logs audrey-ai --tail 60 | grep -E "tool_dispatch:|tool_calls"
 #   tool_dispatch: memory_recall ok in 0.0s
 ```
 
-Also verify the SQLite row landed:
+Also verify the SQLite row landed (the slim image has no `sqlite3` CLI,
+so use Python's stdlib module):
 
 ```bash
-docker exec custom-tools sqlite3 /app/data/memory.db \
-  "select key, substr(value,1,40) from memory where key='shell_pref';"
-# Expected: shell_pref|fish
+docker exec custom-tools python3 -c "
+import sqlite3
+c = sqlite3.connect('/app/data/memory.db')
+print(c.execute(\"select key, substr(value,1,40) from memory where key='shell_pref'\").fetchall())
+"
+# Expected: [('shell_pref', 'fish')]
 ```
 
 ### 2.5 — Result truncation kicks in for long tool output
