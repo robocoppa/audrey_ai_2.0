@@ -103,16 +103,29 @@ def _strip_unsupported_keywords(schema: dict[str, Any]) -> dict[str, Any]:
     required, enum, description, items, default, minLength, maxLength,
     minimum, maximum. Drop the rest — they cause silent tool-call failures
     on the smaller routers.
+
+    `properties` and `$defs` map *user-chosen names* → schema bodies, so
+    we walk them as a name-keyed map (preserve keys, recurse into values)
+    rather than filtering their keys against the keyword allow-list.
     """
     allowed = {
         "type", "properties", "required", "enum", "description",
         "items", "default", "minLength", "maxLength", "minimum", "maximum",
         "title",
     }
+    name_keyed = {"properties", "$defs"}
 
     def clean(node: Any) -> Any:
         if isinstance(node, dict):
-            return {k: clean(v) for k, v in node.items() if k in allowed or k == "$defs"}
+            out: dict[str, Any] = {}
+            for k, v in node.items():
+                if k not in allowed:
+                    continue
+                if k in name_keyed and isinstance(v, dict):
+                    out[k] = {prop_name: clean(prop_schema) for prop_name, prop_schema in v.items()}
+                else:
+                    out[k] = clean(v)
+            return out
         if isinstance(node, list):
             return [clean(v) for v in node]
         return node
