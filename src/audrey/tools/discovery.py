@@ -134,18 +134,21 @@ def _build_tool_from_operation(
     json_schema_wrapper = content.get("application/json") or {}
     raw_schema = json_schema_wrapper.get("schema")
     if not raw_schema:
-        log.debug("discovery: %s %s has no JSON request body, skipping", operation_id, path)
+        log.info("discovery: skip %s (%s): no application/json request body", operation_id, path)
         return None
 
     try:
         resolved = _resolve_refs(raw_schema, components)
     except ValueError as e:
-        log.warning("discovery: ref resolution failed for %s: %s", operation_id, e)
+        log.warning("discovery: skip %s: ref resolution failed: %s", operation_id, e)
         return None
 
     parameters = _strip_unsupported_keywords(resolved)
     if parameters.get("type") != "object" or not parameters.get("properties"):
-        log.debug("discovery: %s schema is not an object with properties, skipping", operation_id)
+        log.info(
+            "discovery: skip %s: schema not an object-with-properties (type=%r, keys=%s)",
+            operation_id, parameters.get("type"), sorted(parameters.keys()),
+        )
         return None
 
     description = (op.get("description") or op.get("summary") or operation_id).strip()
