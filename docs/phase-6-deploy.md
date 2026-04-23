@@ -170,8 +170,11 @@ curl -s -N -XPOST http://localhost:8000/v1/chat/completions \
     "model":"audrey_deep",
     "messages":[{"role":"user","content":"count 1 to 5"}],
     "stream": true
-  }' | grep -c '"delta"'
+  }' | grep -c '"delta": {"content"'
 # → > 5 (multiple token-level chunks)
+# Note the space after the colon — Python's json.dumps default formats
+# `{"delta": {"content"...}` with a space; a tight regex like
+# '"delta":{"content"' will return 0.
 ```
 
 ### 2.9 — Inspect pipeline decisions in logs
