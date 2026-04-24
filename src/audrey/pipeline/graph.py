@@ -299,6 +299,13 @@ def build_graph(
             # Fast path used tools — the answer is grounded in real data.
             # Re-running through tool-blind deep workers can only degrade it.
             return "end"
+        if state.get("memory_hits"):
+            # Same reasoning as tool_rounds: the answer is grounded in recalled
+            # memory. Deep workers wash out short-but-correct memory answers
+            # ("You're running a Threadripper 7970X" → 93 chars → would escalate
+            # on length alone → deep workers don't know the user and give
+            # generic "I can't see your computer" responses).
+            return "end"
         content = (state.get("content") or "").strip()
         conf = float(state.get("classify_confidence", 0.0))
         too_short = len(content) < escalation_min_chars

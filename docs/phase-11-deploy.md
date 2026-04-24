@@ -37,6 +37,12 @@ what tag convention to use.
 - `custom-tools` and `audrey-ai` rebuilt from this commit (compose).
 - `curl` + `jq` on Unraid. `docker exec audrey-ai` for Python one-liners.
 
+> **Note on URLs below.** All `curl` examples use `http://localhost:<port>`
+> from the Unraid host shell (both services publish their ports to the
+> host). If you run these *inside* a container on `ollama-net` instead,
+> substitute `custom-tools:8001` / `audrey-ai:8000` — those container-DNS
+> names don't resolve from the host.
+
 Rebuild + restart:
 
 ```bash
@@ -53,16 +59,16 @@ docker compose logs -f audrey-ai   # in one pane
 Confirm `memory_search` is advertised alongside the existing tools:
 
 ```bash
-curl -s http://custom-tools:8001/openapi.json \
+curl -s http://localhost:8001/openapi.json \
   | jq '.paths | keys'
 ```
 
 Expected: `["/health", "/kb_image_search", "/kb_search", "/memory_recall", "/memory_search", "/memory_store", "/web_search"]` (order varies).
 
-Confirm Audrey picked it up:
+Confirm Audrey picked it up (note: rediscover is POST):
 
 ```bash
-curl -s http://audrey-ai:8000/v1/tools/rediscover | jq '.tools'
+curl -s -X POST http://localhost:8000/v1/tools/rediscover | jq '.tools'
 ```
 
 Expected: array containing `"memory_search"` and `"memory_store"`.
@@ -74,7 +80,7 @@ Expected: array containing `"memory_search"` and `"memory_store"`.
 ### 2.1 Empty user → memory step is a no-op
 
 ```bash
-curl -s http://audrey-ai:8000/v1/chat/completions \
+curl -s http://localhost:8000/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{"model":"audrey_deep","messages":[{"role":"user","content":"hello"}]}' \
   > /dev/null
@@ -94,7 +100,7 @@ skip-when-unidentified path.
 Seed a memory for a test user so 2.3 has something to find:
 
 ```bash
-curl -s http://custom-tools:8001/memory_store \
+curl -s http://localhost:8001/memory_store \
   -H 'content-type: application/json' \
   -d '{"key":"prefers_rust","value":"Bart prefers Rust over Go for systems work, cites better type inference","tags":"user:bart@proton.me,topic:languages"}' \
   | jq
@@ -108,7 +114,7 @@ Send a request whose `user` matches the tag and whose text overlaps
 ("rust", "languages"):
 
 ```bash
-curl -s http://audrey-ai:8000/v1/chat/completions \
+curl -s http://localhost:8000/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{"model":"audrey_deep","user":"bart@proton.me","messages":[{"role":"user","content":"what language should I pick for a new systems project?"}]}' \
   | jq -r '.choices[0].message.content' | head -40
@@ -129,15 +135,20 @@ the model may have deemed it irrelevant.
 ### 2.4 Non-matching query → zero hits (hint still attached)
 
 ```bash
-curl -s http://audrey-ai:8000/v1/chat/completions \
+curl -s http://localhost:8000/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{"model":"audrey_deep","user":"bart@proton.me","messages":[{"role":"user","content":"what is the boiling point of water?"}]}' \
   > /dev/null
-docker compose logs --tail 10 audrey-ai | grep "memory:"
+docker compose logs --tail 80 audrey-ai | grep "memory:" | tail -5
 ```
 
 Expected: `memory: user=bart@proton.me hits=0 keys=[] store_hint=on`. The
 store hint alone is enough to prepend a system message.
+
+> `--tail 10` is too narrow if the request runs for more than a few
+> seconds — `audrey_deep` on a cold prompt can take 15–30s and the
+> `memory:` line scrolls out of a 10-line window before the response
+> lands. Use `--tail 80` (or `--since 1m` for time-scoped filtering).
 
 ### 2.5 Cross-user isolation
 
@@ -145,19 +156,19 @@ Store a memory for a *different* user and verify the first user can't see
 it:
 
 ```bash
-curl -s http://custom-tools:8001/memory_store \
+curl -s http://localhost:8001/memory_store \
   -H 'content-type: application/json' \
   -d '{"key":"hates_rust","value":"Alice thinks Rust is overhyped","tags":"user:alice@example.com,topic:languages"}' \
   > /dev/null
 
-curl -s http://custom-tools:8001/memory_search \
+curl -s http://localhost:8001/memory_search \
   -H 'content-type: application/json' \
   -d '{"user":"bart@proton.me","query":"rust languages","top_k":5}' \
-  | jq '.results | length, .results[].key'
+  | jq '{count: (.results | length), keys: [.results[].key]}'
 ```
 
-Expected: `1` + `"prefers_rust"`. `"hates_rust"` must NOT appear — it's
-tagged `user:alice@example.com`.
+Expected: `{"count": 1, "keys": ["prefers_rust"]}`. `"hates_rust"` must
+NOT appear — it's tagged `user:alice@example.com`.
 
 ### 2.6 Auto-write via model tool call
 
@@ -166,7 +177,7 @@ tool-capable model explicitly by picking `audrey_deep` with a short prompt
 (stays on fast path):
 
 ```bash
-curl -s http://audrey-ai:8000/v1/chat/completions \
+curl -s http://localhost:8000/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{"model":"audrey_deep","user":"bart@proton.me","messages":[{"role":"user","content":"Please remember that my daily driver is an AMD Threadripper 7970X workstation."}]}' \
   | jq -r '.choices[0].message.content' | head -10
@@ -175,7 +186,7 @@ curl -s http://audrey-ai:8000/v1/chat/completions \
 Then confirm the model actually wrote a memory:
 
 ```bash
-curl -s http://custom-tools:8001/memory_search \
+curl -s http://localhost:8001/memory_search \
   -H 'content-type: application/json' \
   -d '{"user":"bart@proton.me","query":"threadripper workstation","top_k":5}' \
   | jq '.results[] | {key, value, tags}'
@@ -196,7 +207,7 @@ is the smoke test most sensitive to model compliance.
 Same `user`, new request. The memory written in 2.6 should now surface:
 
 ```bash
-curl -s http://audrey-ai:8000/v1/chat/completions \
+curl -s http://localhost:8000/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{"model":"audrey_deep","user":"bart@proton.me","messages":[{"role":"user","content":"what hardware am I running?"}]}' \
   | jq -r '.choices[0].message.content' | head -10
@@ -211,7 +222,7 @@ Simulate an outage:
 
 ```bash
 docker stop custom-tools
-curl -s -w "\nhttp=%{http_code}\n" http://audrey-ai:8000/v1/chat/completions \
+curl -s -w "\nhttp=%{http_code}\n" http://localhost:8000/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{"model":"audrey_deep","user":"bart@proton.me","messages":[{"role":"user","content":"say hi"}]}' \
   | tail -5
