@@ -1,4 +1,4 @@
-"""Per-user file uploads (Phase 13).
+"""Per-user file uploads (Phase 13 + Phase 14 auth).
 
     POST   /v1/files           — multipart upload; stream to disk, validate,
                                  ingest into the user's kb_user_text_* /
@@ -6,24 +6,25 @@
     GET    /v1/files           — list the caller's files (one row per file_id).
     DELETE /v1/files/{file_id} — purge all points for a file + delete bytes.
 
+Identity (Phase 14): every endpoint depends on `require_user`, which
+proxies the browser's `Authorization: Bearer <jwt>` to OWUI and returns
+an `AuthedUser`. The caller's email *is* the user id — no `?user=` query
+param, no `X-User` header, no form field. Attempting to spoof an
+identity requires forging a token OWUI would accept.
+
 Safety layers (all mandatory):
 
+  - Token validation: `require_user` → 401 on missing/invalid token.
   - Size cap: `kb.max_upload_mb` enforced while streaming (stop + 413 at limit).
   - Mime sniff: libmagic reads the saved bytes — extension is a hint, sniff
     is the gate. Whitelist in `kb.extract.ALLOWED_MIMES`.
   - Per-user byte quota: sum of already-stored `bytes` payload field must be
-    under `kb.max_user_bytes` *before* ingest (checked after save, before
-    chunking — cheap bail-out).
-  - User isolation: every read/write is scoped by both `file_id` AND `user`
-    in Qdrant payload filters. See `QdrantKB.delete_by_file_id`.
+    under `kb.max_user_bytes` *before* ingest.
+  - User isolation: every Qdrant read/write is scoped by both `file_id`
+    AND `user` in payload filters. See `QdrantKB.delete_by_file_id`.
   - Filename sanitization: we keep the original filename for display, but
     the bytes land at `<upload_root>/<sanitized_user>/<file_id><ext>` —
     the client-supplied name is never used as a path segment.
-
-The route treats authentication as upstream's job. `user_id` comes from
-the request in Path-B style: either a header (`X-User`) or a query
-parameter. Callers behind a tunnel/reverse proxy should populate it; the
-OWUI link lands the user here already identified.
 """
 
 from __future__ import annotations
@@ -34,9 +35,10 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
+from audrey.auth import AuthedUser, require_user
 from audrey.kb.extract import (
     ALLOWED_IMAGE_MIMES,
     ALLOWED_TEXT_MIMES,
@@ -88,13 +90,6 @@ class ListResponse(BaseModel):
 class DeleteResponse(BaseModel):
     file_id: str
     deleted: bool
-
-
-def _require_user(header_user: str | None, query_user: str | None) -> str:
-    user = (header_user or query_user or "").strip()
-    if not user:
-        raise HTTPException(status_code=401, detail="Missing X-User header or ?user= param.")
-    return user
 
 
 def _upload_root(request: Request) -> Path:
@@ -154,13 +149,11 @@ async def _user_stored_bytes(qdrant: QdrantKB, *, user: str) -> int:
 @router.post("", response_model=UploadResponse)
 async def upload_file(
     request: Request,
+    me: AuthedUser = Depends(require_user),
     file: UploadFile = File(...),
-    x_user: str | None = Form(default=None, alias="user"),
-    user_q: str | None = Query(default=None, alias="user"),
 ) -> UploadResponse:
     """Accept one file, validate, extract, ingest into the caller's user collections."""
-    header_user = request.headers.get("x-user") or x_user
-    user = _require_user(header_user, user_q)
+    user = me.email
 
     qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
     text_embedder = getattr(request.app.state, "text_embedder", None)
@@ -260,9 +253,10 @@ async def upload_file(
 
 
 @router.get("", response_model=ListResponse)
-async def list_files(request: Request, user_q: str | None = Query(default=None, alias="user")) -> ListResponse:
-    header_user = request.headers.get("x-user")
-    user = _require_user(header_user, user_q)
+async def list_files(
+    request: Request, me: AuthedUser = Depends(require_user),
+) -> ListResponse:
+    user = me.email
     qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
     if qdrant is None:
         raise HTTPException(status_code=503, detail="KB is not initialized.")
@@ -284,10 +278,9 @@ async def list_files(request: Request, user_q: str | None = Query(default=None, 
 
 @router.delete("/{file_id}", response_model=DeleteResponse)
 async def delete_file(
-    file_id: str, request: Request, user_q: str | None = Query(default=None, alias="user"),
+    file_id: str, request: Request, me: AuthedUser = Depends(require_user),
 ) -> DeleteResponse:
-    header_user = request.headers.get("x-user")
-    user = _require_user(header_user, user_q)
+    user = me.email
     qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
     if qdrant is None:
         raise HTTPException(status_code=503, detail="KB is not initialized.")

@@ -27,7 +27,21 @@
       "Bash(python3 -m compileall -q src/audrey/pipeline/react.py)",
       "Read(//mnt/user/**)",
       "WebSearch",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(curl -s \"https://api.github.com/repos/open-webui/open-webui/releases\")",
+      "Bash(curl -s \"https://api.github.com/repos/open-webui/open-webui/tags?per_page=20\")",
+      "WebFetch(domain:docs.openwebui.com)",
+      "Bash(mkdir -p /tmp/owui)",
+      "Read(//tmp/**)",
+      "Bash(curl -sL \"https://github.com/open-webui/open-webui/archive/refs/tags/v0.9.2.tar.gz\" -o v092.tar.gz)",
+      "Bash(tar -xzf v092.tar.gz)",
+      "Bash(curl -sL https://github.com/open-webui/open-webui/archive/refs/tags/v0.9.2.tar.gz -o owui.tar.gz)",
+      "Bash(tar xzf *)",
+      "Bash(ls backend/open_webui/apps/webui/routers/)",
+      "Bash(ls backend/open_webui/routers/)",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('/home/bart/Documents/github/audrey_ai_2.0/src/audrey/routes/files.py'\\).read\\(\\)\\)\")",
+      "Bash(python -c \"import ast; [ast.parse\\(open\\(p\\).read\\(\\)\\) for p in \\('src/audrey/auth.py', 'src/audrey/routes/files.py', 'src/audrey/config.py'\\)]\")",
+      "Bash(python3 -c \"import ast; [ast.parse\\(open\\(p\\).read\\(\\)\\) for p in \\('src/audrey/auth.py', 'src/audrey/routes/files.py', 'src/audrey/config.py'\\)]\")"
     ]
   }
 }

@@ -42,6 +42,11 @@ class EnvOverrides(BaseSettings):
     # KB
     kb_dataset_paths: str = Field(default="/datasets/geology", alias="KB_DATASET_PATHS")
 
+    # Open WebUI — used by Phase 14 auth middleware to validate JWT tokens
+    # issued to browsers logged into OWUI. Same-origin via cloudflared, so
+    # this is an internal ollama-net URL.
+    owui_url: str = Field(default="http://open-webui:8080", alias="OWUI_URL")
+
     # Search
     brave_api_key: str = Field(default="", alias="BRAVE_API_KEY")
 

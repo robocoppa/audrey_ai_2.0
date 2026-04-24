@@ -74,23 +74,33 @@ Drag-drop a short `.txt` or `.md`. The status line should read
 `Uploaded <name> → N chunks.` within a second or two. The files table
 refreshes and shows the row.
 
-Then on Unraid:
+Then on the Unraid host (Qdrant is mapped to `:6333` by the Unraid UI).
+Unraid's root shell doesn't have `python3`, so use raw grep — no
+dependencies, works everywhere:
 
 ```bash
-docker exec -it audrey-ai curl -s http://qdrant:6333/collections \
-  | python3 -m json.tool | grep kb_user_text_
-# expected: a line like "name": "kb_user_text_bart_proton_me"
+curl -s http://localhost:6333/collections | grep -o 'kb_user_text_[a-z0-9_]*'
+# expected: kb_user_text_bart_proton_me
 
-docker exec -it audrey-ai curl -s \
-  "http://qdrant:6333/collections/kb_user_text_bart_proton_me" \
-  | python3 -m json.tool | grep -E "points_count|status"
-# expected: points_count >= 1, status "green"
+curl -s http://localhost:6333/collections/kb_user_text_bart_proton_me \
+  | grep -oE '"(points_count|status)":[^,}]*'
+# expected:
+#   "status":"green"
+#   "points_count":N   (N >= 1)
+```
+
+If you have `jq` available, nicer:
+
+```bash
+curl -s http://localhost:6333/collections | jq -r '.result.collections[].name' | grep kb_user_
+curl -s http://localhost:6333/collections/kb_user_text_bart_proton_me \
+  | jq '{status: .result.status, points_count: .result.points_count}'
 ```
 
 ## 3. Upload via `curl` (no UI)
 
 ```bash
-USER=bart@proton.me
+USER=your-owui-email@example.com    # whatever you entered on the upload page
 curl -sX POST "http://localhost:8000/v1/files?user=$USER" \
      -H "X-User: $USER" \
      -F "file=@/mnt/user/knowledge/first-aid/snakebite.pdf"
@@ -103,8 +113,9 @@ Expected JSON: `{"file_id": "...", "filename": "snakebite.pdf",
 ## 4. List shows both uploads
 
 ```bash
-curl -s "http://localhost:8000/v1/files?user=$USER" -H "X-User: $USER" \
-  | python3 -m json.tool
+curl -s "http://localhost:8000/v1/files?user=$USER" -H "X-User: $USER" | jq
+# or without jq:
+# curl -s "http://localhost:8000/v1/files?user=$USER" -H "X-User: $USER"
 ```
 
 Expected: two `files[]` entries, `total_bytes` sums them.
@@ -137,8 +148,8 @@ search proxy only included the current user's collection.
 curl -sX POST http://localhost:8000/v1/kb/query \
   -H "content-type: application/json" \
   -d '{"query": "snakebite treatment", "top_k": 5, "user": "user_b@test"}' \
-  | python3 -m json.tool | head -30
-# expected: hits only from kb_text (global), none from user_a's collection
+  | jq '.results[] | {score, source}'
+# expected: sources only from /datasets/... (global), none from /data/uploads/user_a_test/...
 ```
 
 ## 7. Delete scrubs both Qdrant and bytes
@@ -153,8 +164,8 @@ curl -sX DELETE "http://localhost:8000/v1/files/$FID?user=$USER" -H "X-User: $US
 ls /mnt/user/appdata/audrey/uploads/bart_proton_me/ | grep $FID
 # expected: empty (bytes gone)
 
-curl -s "http://qdrant:6333/collections/kb_user_text_bart_proton_me" \
-  | python3 -m json.tool | grep points_count
+curl -s http://localhost:6333/collections/kb_user_text_bart_proton_me \
+  | grep -oE '"points_count":[0-9]+'
 # expected: one less than before
 ```
 
@@ -201,8 +212,8 @@ curl -sX DELETE "http://localhost:8000/v1/files/$FID?user=user_b@test" \
 # returns {"deleted": true} but…
 # verify nothing actually went away — the Qdrant filter is (file_id AND user)
 # so the delete scoped to the wrong user is a no-op, not an error
-curl -s "http://qdrant:6333/collections/kb_user_text_user_a_test" \
-  | python3 -m json.tool | grep points_count
+curl -s http://localhost:6333/collections/kb_user_text_user_a_test \
+  | grep -oE '"points_count":[0-9]+'
 # expected: unchanged
 ```
 
@@ -220,29 +231,75 @@ curl -sI https://<your-tunnel-host>/v1/files
 If you accidentally exposed `:8000` via Cloudflare, revoke it now. Only
 `open-webui:8080` should be published.
 
-## 13. Post-deploy: add a link from OWUI to `/upload`
+## 13. Post-deploy: point OWUI users at `/upload` + disable native attach
 
-OWUI's admin has a **Sidebar Links** field (path varies by version:
-Settings → Interface → `WEBUI_EXTRA_LINKS`, or `custom_links` in older
-builds). Add one:
+**Verified on OWUI v0.9.2.** Older/newer builds may differ — check the
+v0.9.2 source paths cited below if a setting has moved.
 
+### 13a. Surface the upload URL inside OWUI
+
+OWUI v0.9.2 has **no "Sidebar Links" / `WEBUI_EXTRA_LINKS` / `custom_links`
+feature** — earlier versions of this doc were wrong. The only built-in
+way to show every user a custom URL is the **Banners** feature, which
+renders a dismissible strip at the top of the chat view.
+
+**Admin Panel → Settings → Interface → Banners**, or set the
+`WEBUI_BANNERS` env var on the `open-webui` container:
+
+```json
+[{"id":"upload","type":"info","title":"Upload files",
+  "content":"Upload docs to your private KB: http://<unraid-ip>:8000/upload",
+  "dismissible":true,"timestamp":1761350000}]
 ```
-Label: Upload documents
-URL:   http://<unraid-ip>:8000/upload
-```
 
-And disable the chat composer's attach button in the same panel so
-users aren't split between two upload paths:
+Fallbacks if you want an actual sidebar entry:
 
-- **Settings → Interface → Disable file upload** (or equivalent
-  `ENABLE_FILE_UPLOAD=false`).
+- **Custom CSS/JS injection** — Admin Panel → Settings → General has a
+  custom-CSS field. You can inject a sidebar link via JS that appends
+  to OWUI's nav.
+- **Reverse-proxy HTML rewrite** — inject a `<a>` tag into OWUI's
+  `index.html` before it reaches the browser. Brittle across OWUI
+  upgrades; skip unless you already run a reverse proxy.
 
-If neither toggle exists in your OWUI build, fall back to CSS in the
-admin **Custom CSS** field:
+### 13b. Hide the chat composer's file-attach (paperclip) button
+
+OWUI v0.9.2 has **no `ENABLE_FILE_UPLOAD` env var and no
+"Disable file upload" toggle** under Interface. File attach is gated
+by a group permission:
+
+**Admin Panel → Users → Groups → (your default user group) → Chat
+Permissions → Allow File Upload** (toggle off).
+
+Adjacent toggle "Allow Web Upload" controls webpage attach; turn that
+off too if you don't want that path either.
+
+Important caveats:
+
+- **Admins always see the paperclip** regardless of this setting
+  (v0.9.2 InputMenu.svelte line 56). Test with a non-admin account to
+  verify the button disappears.
+- The server-side block is at `MessageInput.svelte:590` — even if a
+  stale client still shows the button, the upload POST is rejected.
+- If you don't use Groups yet, create one (e.g. "users"), set the
+  permission, and assign existing accounts to it.
+
+**CSS fallback** (admins only, Admin Panel → Settings → General →
+Custom CSS) if you need the paperclip hidden in admin accounts too.
+Selectors drift across OWUI releases — verify in browser devtools for
+your build:
 
 ```css
+/* v0.9.2 — verify aria-label matches your locale */
 button[aria-label="Attach file"] { display: none !important; }
 ```
+
+Source references (inside the OWUI v0.9.2 repo):
+
+- `src/lib/components/admin/Users/Groups/Permissions.svelte` L421-454
+- `src/lib/components/chat/MessageInput/InputMenu.svelte` L56
+- `src/lib/components/chat/MessageInput.svelte` L590
+- `src/lib/components/admin/Settings/Interface/Banners.svelte`
+- `backend/open_webui/config.py` (`WEBUI_BANNERS`)
 
 ---
 
@@ -254,9 +311,9 @@ All new routes are additive. To fully disable:
    `src/audrey/main.py` (or set `max_upload_mb: 0` in `config.yaml`).
 2. Drop the user collections (irreversible):
    ```bash
-   for c in $(curl -s http://qdrant:6333/collections \
-       | python3 -c 'import sys, json; [print(x["name"]) for x in json.load(sys.stdin)["result"]["collections"] if x["name"].startswith("kb_user_")]'); do
-     curl -sX DELETE "http://qdrant:6333/collections/$c"
+   for c in $(curl -s http://localhost:6333/collections \
+       | grep -oE 'kb_user_[a-z0-9_]+'); do
+     curl -sX DELETE "http://localhost:6333/collections/$c"
    done
    ```
 3. `rm -rf /mnt/user/appdata/audrey/uploads/` to reclaim disk.
