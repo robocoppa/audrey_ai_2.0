@@ -156,30 +156,33 @@ ran tools. Verify the synth received the tag by temporarily raising log
 verbosity or by calling the panel directly from inside the container:
 
 ```bash
-docker exec -it audrey-ai python3 - <<'PY'
+docker exec -i audrey-ai python3 <<'PY'
 import asyncio
-from audrey.config import load_config
+from audrey.config import get_config
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.deep_panel import run_panel
 from audrey.pipeline.semaphore import GpuGate
 from audrey.pipeline.synthesize import _format_drafts_for_synth
-from audrey.tools.discovery import discover_tools
+from audrey.tools.discovery import discover_all, ToolRegistry
 
 async def main():
-    cfg = load_config('/app/config.yaml')
-    ollama = OllamaClient(base_url=cfg.ollama_url)
+    cfg = get_config()
+    ollama = OllamaClient(cfg.env.ollama_host)
     health = HealthTracker()
     gate = GpuGate(concurrency=1)
-    registry = ModelRegistry.from_config(cfg)
-    tools = await discover_tools(cfg.tool_servers)
+    registry = ModelRegistry(cfg)
+    tool_servers = list(cfg.tools.get("servers", []) or [])
+    tools = await discover_all(tool_servers) if tool_servers else ToolRegistry()
     capable = set(cfg.raw['fast_path']['tool_capable_models'])
+    prompt = ('Use kb_search to find anything about resetting a stuck '
+              'ServiceNow incident workflow. Quote passages with filenames.')
     drafts, attempted = await run_panel(
         cfg, ollama, registry, health, gate,
-        pool_key='deep_panel', task='general',
-        messages=[{'role':'user','content':'What does our KB say about resetting a stuck ServiceNow incident workflow?'}],
-        subtasks=[], options={}, timeout_s=120, max_workers_cloud=3,
+        pool_key='deep_panel_local', task='general',
+        messages=[{'role':'user','content':prompt}],
+        subtasks=[], options={}, timeout_s=240, max_workers_cloud=3,
         tools=tools, tool_capable_models=capable,
         react_max_rounds=2, react_compress_after=2,
         react_max_tool_chars=2000, react_dispatch_timeout_s=30,
@@ -188,13 +191,15 @@ async def main():
         print(f"model={d.get('model')} tool_rounds={d.get('tool_rounds',0)} "
               f"content_chars={len(d.get('content','') or '')} err={d.get('error','')}")
     print('---')
-    print(_format_drafts_for_synth(
-        'What does our KB say about resetting a stuck ServiceNow incident workflow?',
-        drafts, [])[:2000])
+    print(_format_drafts_for_synth(prompt, drafts, [])[:2000])
 
 asyncio.run(main())
 PY
 ```
+
+> **`-it` vs `-i`:** use `docker exec -i` (no `-t`) when piping a heredoc or
+> redirected input — `-t` allocates a pseudo-TTY and fails with
+> `the input device is not a TTY` when stdin isn't attached to a terminal.
 
 **Expected:**
 
@@ -225,24 +230,31 @@ print(json.dumps({
     -H 'Content-Type: application/json' --data-binary @- >/dev/null
 ```
 
-Then inspect the gate-acquire ordering in the logs:
+Then inspect worker ordering in the logs:
 
 ```bash
 docker logs audrey-ai --tail 200 2>&1 | \
-  grep -E "gate\.acquire|gate\.release|react: round=|deep_panel:" | \
+  grep -E "react: round=|deep_panel:" | \
   tail -40
 ```
 
+`GpuGate.acquire` / `.release` don't emit log lines — the evidence for
+serialization is the *ordering and timing* of `react:` lines plus the
+total panel wall-clock.
+
 **Expected:**
 
-- Gate acquires are **strictly interleaved with releases** — never two
-  consecutive `gate.acquire` without a `gate.release` between them for
-  local workers.
-- All `react: round=…` lines for worker A come before any for worker B
-  (or vice versa). If you see rounds interleave across local workers,
-  the gate is not holding the full loop — stop and investigate.
-- Wall-clock time is roughly `worker1_time + worker2_time + synth_time`.
-  If it's much less, parallelism leaked somewhere.
+- All `react: round=…` lines for worker A (a tool-capable local model)
+  appear before any for worker B. If rounds from two local workers
+  interleave in time, the gate isn't holding the full loop — stop and
+  investigate `pipeline/deep_panel.py:_run_one_worker`.
+- A non-tool-capable worker in the pool (e.g. `glm-4.7-flash:q8_0` for
+  `general`, `deepseek-r1:32b` for `reasoning`) won't emit any
+  `react:` line — it runs one-shot. Its serialization is implicit in
+  the gate + the fact that the panel doesn't return until both
+  workers finish.
+- Total panel wall-clock ≈ `sum(worker_times) + synth_time`. If it's
+  much less, parallelism leaked somewhere.
 
 ### 2.5 — Cloud workers run in parallel (`audrey_cloud`)
 

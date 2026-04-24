@@ -148,8 +148,16 @@ async def run_react(
 
         # Hit max_rounds and the model is still asking for tools. Force a final
         # pass without tools so it has to commit to an answer.
+        #
+        # Compress aggressively first: the convo may now contain max_rounds
+        # worth of tool calls × their full result bodies (up to max_tool_result_chars
+        # each). Feeding that uncompressed to a tool-less chat causes timeouts
+        # and confused "let me call a tool" replies even though tools=None.
+        # Keep only the *last* tool message verbatim; everything else gets the
+        # one-line summary treatment.
         log.warning("react: max_rounds=%d reached for %s; forcing final answer without tools",
                     max_rounds, model)
+        convo = _compress_history(convo, keep_last_round=1)
         try:
             final = await ollama.chat(
                 model=model, messages=convo, options=options or None,

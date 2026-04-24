@@ -23,7 +23,8 @@
       "Bash(python3 -m py_compile /home/bart/Documents/github/audrey_ai_2.0/src/audrey/pipeline/classify.py /home/bart/Documents/github/audrey_ai_2.0/src/audrey/pipeline/graph.py)",
       "Bash(python3 -m compileall -q src/audrey/pipeline/deep_panel.py src/audrey/pipeline/graph.py src/audrey/pipeline/synthesize.py src/audrey/pipeline/state.py)",
       "Bash(python3 -c \"import yaml; yaml.safe_load\\(open\\('config.yaml'\\)\\)\")",
-      "Bash(python3 -m compileall -q src/audrey/models/ollama.py)"
+      "Bash(python3 -m compileall -q src/audrey/models/ollama.py)",
+      "Bash(python3 -m compileall -q src/audrey/pipeline/react.py)"
     ]
   }
 }
