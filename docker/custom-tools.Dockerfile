@@ -33,7 +33,8 @@ RUN uv pip install --system \
       "pydantic-settings>=2.6" \
       "aiosqlite>=0.20" \
       "tenacity>=9.0" \
-      "python-dotenv>=1.0"
+      "python-dotenv>=1.0" \
+      "qdrant-client>=1.12"
 
 # Copy application code
 COPY tools-server/app.py      /app/app.py
