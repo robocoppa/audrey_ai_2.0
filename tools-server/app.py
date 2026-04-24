@@ -1,11 +1,12 @@
 """custom-tools FastAPI server.
 
-Five endpoints, OpenAPI auto-discovered by the Audrey orchestrator:
+Six endpoints, OpenAPI auto-discovered by the Audrey orchestrator:
   POST /web_search         — Brave Search API
   POST /kb_search          — text query proxied to Audrey /v1/kb/query
   POST /kb_image_search    — image query proxied to Audrey /v1/kb/query/image
   POST /memory_store       — save (key, value, tags) to local SQLite
-  POST /memory_recall      — fetch by key
+  POST /memory_recall      — fetch by exact key
+  POST /memory_search      — keyword-search a user's memories (auto-recall)
 
 Each endpoint has a clear operation_id so the orchestrator's OpenAPI →
 Ollama-tool converter produces sensible tool names.
@@ -130,6 +131,12 @@ class MemoryRecallRequest(BaseModel):
     key: Annotated[str, Field(min_length=1, max_length=200)]
 
 
+class MemorySearchRequest(BaseModel):
+    user: Annotated[str, Field(min_length=1, max_length=200, description="User id to scope the search to. Required — memories are per-user.")]
+    query: Annotated[str, Field(min_length=1, max_length=1000, description="Text to keyword-match against memory keys, values, and tags.")]
+    top_k: Annotated[int, Field(ge=1, le=20)] = 5
+
+
 class MemoryEntryResponse(BaseModel):
     key: str
     value: str
@@ -143,6 +150,12 @@ class MemoryEntryResponse(BaseModel):
             key=e.key, value=e.value, tags=e.tags,
             created_at=e.created_at, updated_at=e.updated_at,
         )
+
+
+class MemorySearchResponse(BaseModel):
+    user: str
+    query: str
+    results: list[MemoryEntryResponse]
 
 
 # ─── Health ───────────────────────────────────────────────────────────
@@ -285,3 +298,27 @@ async def memory_recall(req: MemoryRecallRequest) -> MemoryEntryResponse:
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No memory for key: {req.key!r}")
     return MemoryEntryResponse.from_entry(entry)
+
+
+@app.post(
+    "/memory_search",
+    operation_id="memory_search",
+    response_model=MemorySearchResponse,
+    tags=["tools"],
+    summary="Keyword-search memories scoped to a user",
+    description=(
+        "Find a user's memories by matching a query against keys, values, "
+        "and tags (case-insensitive substring match on each whitespace-"
+        "separated token; any token hit counts). Results are ordered by "
+        "most-recently-updated. Used by the orchestrator for auto-recall "
+        "at the top of every request, but also callable as a tool."
+    ),
+)
+async def memory_search(req: MemorySearchRequest) -> MemorySearchResponse:
+    memory: MemoryStore = app.state.memory
+    hits = await memory.search(user=req.user, query=req.query, top_k=req.top_k)
+    return MemorySearchResponse(
+        user=req.user,
+        query=req.query,
+        results=[MemoryEntryResponse.from_entry(h) for h in hits],
+    )

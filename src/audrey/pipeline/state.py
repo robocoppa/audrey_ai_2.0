@@ -31,6 +31,10 @@ class PipelineState(TypedDict, total=False):
     temperature: float | None
     top_p: float | None
     max_tokens: int | None
+    user_id: str                     # OpenAI-spec `user` field; "" if unset. Required to enable memory.
+
+    # Memory (per-user, keyword-match via custom-tools /memory_search)
+    memory_hits: list[dict]          # recalled entries shown to the model as a system hint
 
     # Classification
     task_type: TaskType              # chosen task family

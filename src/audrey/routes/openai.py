@@ -51,6 +51,14 @@ class ChatCompletionRequest(BaseModel):
     temperature: float | None = None
     top_p: float | None = None
     max_tokens: int | None = None
+    user: str | None = Field(
+        default=None,
+        description=(
+            "OpenAI-spec stable identifier. Forwarded by Open WebUI as the "
+            "signed-in user's id. Required to enable per-user memory recall "
+            "and writes — when unset, the memory step is skipped."
+        ),
+    )
 
 
 # ─── /v1/models ───────────────────────────────────────────────────────
@@ -107,6 +115,7 @@ async def _generate_via_pipeline(app, payload: ChatCompletionRequest, messages, 
         "temperature": payload.temperature,
         "top_p": payload.top_p,
         "max_tokens": payload.max_tokens,
+        "user_id": payload.user or "",
     }
     try:
         final = await graph.ainvoke(state)
@@ -189,6 +198,7 @@ async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, op
             "temperature": payload.temperature,
             "top_p": payload.top_p,
             "max_tokens": payload.max_tokens,
+            "user_id": payload.user or "",
         }
         try:
             final = await graph.ainvoke(state)
@@ -225,6 +235,7 @@ async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, op
             "temperature": payload.temperature,
             "top_p": payload.top_p,
             "max_tokens": payload.max_tokens,
+            "user_id": payload.user or "",
         }
         try:
             final = await graph.ainvoke(state)

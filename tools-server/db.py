@@ -76,3 +76,35 @@ class MemoryStore:
             return None
         (k, v, t, c, u) = rows[0]
         return MemoryEntry(key=k, value=v, tags=t, created_at=c, updated_at=u)
+
+    async def search(
+        self, *, user: str, query: str, top_k: int = 5,
+    ) -> list[MemoryEntry]:
+        """Keyword-match search scoped to a user.
+
+        Matches rows whose tags contain `user:<user>` AND whose key, value,
+        or tags contain any whitespace-separated token from `query`. Ordered
+        by `updated_at DESC` so recent notes win ties.
+        """
+        tokens = [t for t in query.split() if t]
+        if not tokens:
+            return []
+        user_tag = f"user:{user}"
+        like_clauses = []
+        params: list[str] = [f"%{user_tag}%"]
+        for tok in tokens:
+            like_clauses.append("(key LIKE ? OR value LIKE ? OR tags LIKE ?)")
+            like = f"%{tok}%"
+            params.extend([like, like, like])
+        sql = (
+            "SELECT key, value, tags, created_at, updated_at FROM memory "
+            "WHERE tags LIKE ? AND (" + " OR ".join(like_clauses) + ") "
+            "ORDER BY updated_at DESC LIMIT ?"
+        )
+        params.append(str(top_k))
+        async with aiosqlite.connect(self._db_path) as db:
+            rows = await db.execute_fetchall(sql, tuple(params))
+        return [
+            MemoryEntry(key=k, value=v, tags=t, created_at=c, updated_at=u)
+            for (k, v, t, c, u) in rows
+        ]

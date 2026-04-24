@@ -280,12 +280,26 @@ docker logs audrey-ai --tail 120 2>&1 | grep -E "react: round=0 model=|deep_pane
 
 **Expected:**
 
-- Both `react: round=0 model=<cloud_model>` log lines appear within ~1 s
-  of each other (true parallel start).
+- Both `react: round=0 model=<cloud_model>` log lines appear within
+  ~1-3 s of each other (true parallel start). This is the primary
+  pass signal.
 - `deep_panel: pool=deep_panel_cloud task=<t> workers=2 ok=2
-  tool_grounded=<n>` — ideally `=2`.
-- End-to-end wall time on `time` is dominated by `max(worker_time) +
+  tool_grounded=<n>` — ideally `=2`. Cloud models are more aggressive
+  tool-callers than locals.
+- End-to-end wall time is dominated by `max(worker_time) +
   synth_time`, not `sum(worker_times)`.
+- Workers routinely hit `max_rounds=2` and trigger the forced-final
+  path (logged as `react: max_rounds=2 reached for <model>; forcing
+  final answer without tools`). This is expected and the panel still
+  completes cleanly — see the "forced-final" note below.
+
+> **On hitting max_rounds:** at `deep_worker.max_rounds=2`, both cloud
+> and local tool-capable models frequently exhaust the budget. The
+> forced-final path (compress history + append a directive user turn +
+> chat without tools) consistently produces a real answer in ~30-60s
+> on cloud. If you observe deep-panel answers that feel consistently
+> underresearched, consider bumping `agentic.react.deep_worker.max_rounds`
+> to 3; the latency cost is ~+20-30s per worker × N workers.
 
 ### 2.6 — Non-tool-capable model → one-shot chat, no ReAct (regression)
 
@@ -317,13 +331,16 @@ docker logs audrey-ai --tail 80 2>&1 | grep -E "react: round=|deep_panel:"
 ### 2.7 — Escalation guard still holds (fast-path tool answer → no deep re-run)
 
 A fast-path answer that used tools should **not** escalate to deep, even
-if the answer looks short.
+if the answer looks short. Use `audrey_deep` — it's the only virtual
+model that respects the complexity gate, so a short prompt goes fast
+path. (`audrey_local` and `audrey_cloud` both force deep regardless of
+length.)
 
 ```bash
 docker exec audrey-ai python3 -c "
 import json
 print(json.dumps({
-  'model': 'audrey',
+  'model': 'audrey_deep',
   'messages': [{'role': 'user', 'content': 'use kb_search to check our servicenow kb for anything about 500 errors on the incident form'}]
 }))
 " | curl -sS -X POST http://localhost:8000/v1/chat/completions \

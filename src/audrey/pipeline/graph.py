@@ -1,22 +1,26 @@
 """LangGraph pipeline assembly.
 
-Phase 9 build:
+Phase 11 build:
 
-    classify ─► complexity ─► fast_path ─► escalate? ─► END
-                          ╲                          ╲
-                           ╲                          └► planner ─► deep_panel ─► synthesize ─► reflect ─► retry?
-                            ╲                                                                            ↺ deep_panel
-                             ╲                                                                          → END
-                              └► planner (when complex=True) ─► deep_panel ─► …
+    memory_recall ─► classify ─► complexity ─► fast_path ─► escalate? ─► END
+                                           ╲                          ╲
+                                            ╲                          └► planner ─► deep_panel ─► synthesize ─► reflect ─► retry?
+                                             ╲                                                                            ↺ deep_panel
+                                              ╲                                                                          → END
+                                               └► planner (when complex=True) ─► deep_panel ─► …
+
+`memory_recall` (Phase 11) runs first: when `state["user_id"]` is set and
+the `memory_search` tool is registered, it keyword-searches the user's
+memories and prepends any hits as a system message. No-op otherwise.
 
 `escalate?` is the adaptive hook from `fast_path`: if the fast answer is too
 short or low-confidence, the graph re-enters in deep mode. `retry?` is the
 reflection loop — at most one extra deep-panel pass.
 
-Phase 9: both `fast_path` and `deep_panel` workers run ReAct when the chosen
-model is in `fast_path.tool_capable_models` and the tool registry is non-empty.
-Deep workers use `agentic.react.deep_worker.*` (tighter per-worker budget).
-The fast-path → deep escalation guard still skips when `tool_rounds > 0`
+Both `fast_path` and `deep_panel` workers run ReAct when the chosen model is
+in `fast_path.tool_capable_models` and the tool registry is non-empty. Deep
+workers use `agentic.react.deep_worker.*` (tighter per-worker budget). The
+fast-path → deep escalation guard still skips when `tool_rounds > 0`
 (re-running through deep workers rarely improves an already-grounded answer).
 """
 
@@ -35,6 +39,11 @@ from audrey.pipeline.classify import classify as classify_fn
 from audrey.pipeline.complexity import is_complex
 from audrey.pipeline.deep_panel import pool_key_for, run_panel
 from audrey.pipeline.fast_path import run_fast_path
+from audrey.pipeline.memory import (
+    MEMORY_STORE_TOOL,
+    memory_system_message,
+    recall_for_request,
+)
 from audrey.pipeline.planner import plan as planner_plan
 from audrey.pipeline.reflect import reflect as reflect_fn
 from audrey.pipeline.semaphore import GpuGate
@@ -92,9 +101,47 @@ def build_graph(
     escalation_min_chars = int(escalation_cfg.get("min_chars", 100))
     escalation_conf_ceiling = float(escalation_cfg.get("confidence_ceiling", 0.95))
 
+    memory_cfg = agentic.get("memory", {}) or {}
+    memory_enabled = bool(memory_cfg.get("enabled", True))
+    memory_top_k = int(memory_cfg.get("top_k", 3))
+    memory_timeout_s = float(memory_cfg.get("timeout_s", 5))
+
     max_workers_cloud = int(agentic.get("max_deep_workers_cloud", 3))
 
     # ── Nodes ─────────────────────────────────────────────────────────
+
+    async def node_memory_recall(state: PipelineState) -> dict[str, Any]:
+        """Keyword-search the user's memories, inject hits + store-hint as system message.
+
+        No-op when memory is disabled or the user isn't identified. When the
+        user *is* identified and `memory_store` is available as a tool, we
+        always prepend the "write durable facts via memory_store" hint so
+        tool-capable models learn to save things — even on requests that
+        returned zero recall hits.
+        """
+        if not memory_enabled:
+            return {}
+        user_id = (state.get("user_id") or "").strip()
+        if not user_id:
+            return {}
+        hits = await recall_for_request(
+            tools, user_id=user_id, messages=state["messages"],
+            top_k=memory_top_k, timeout_s=memory_timeout_s,
+        )
+        include_store_hint = tools is not None and MEMORY_STORE_TOOL in tools.by_name
+        sys_msg = memory_system_message(
+            hits, user_id=user_id, include_store_hint=include_store_hint,
+        )
+        if sys_msg is None:
+            log.info("memory: no hits / no store hint for user=%s", user_id)
+            return {"memory_hits": hits}
+        new_messages = [sys_msg, *state["messages"]]
+        log.info(
+            "memory: user=%s hits=%d keys=%s store_hint=%s",
+            user_id, len(hits), [h.get("key", "?") for h in hits],
+            "on" if include_store_hint else "off",
+        )
+        return {"memory_hits": hits, "messages": new_messages}
 
     async def node_classify(state: PipelineState) -> dict[str, Any]:
         user_text = _last_user_text(state["messages"])
@@ -281,6 +328,7 @@ def build_graph(
     # ── Graph wiring ──────────────────────────────────────────────────
 
     g: StateGraph = StateGraph(PipelineState)
+    g.add_node("memory_recall", node_memory_recall)
     g.add_node("classify", node_classify)
     g.add_node("complexity", node_complexity)
     g.add_node("fast_path", node_fast_path)
@@ -290,7 +338,8 @@ def build_graph(
     g.add_node("synthesize", node_synthesize)
     g.add_node("reflect", node_reflect)
 
-    g.set_entry_point("classify")
+    g.set_entry_point("memory_recall")
+    g.add_edge("memory_recall", "classify")
     g.add_edge("classify", "complexity")
     g.add_conditional_edges(
         "complexity", route_after_complexity,

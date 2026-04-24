@@ -149,6 +149,10 @@ agentic:
     enabled: true
     min_chars: 100
     confidence_ceiling: 0.95
+  memory:
+    enabled: true
+    top_k: 3                       # recall hits to inject into the prompt
+    timeout_s: 5                   # short — the LIKE query against SQLite is cheap
 
 # ─── Timeouts (seconds) ────────────────────────────────────────────────
 timeouts:
