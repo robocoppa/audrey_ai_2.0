@@ -19,6 +19,7 @@ model_registry:
     - { name: "devstral-small-2:latest",  priority:  85, speed: 85, quality: 82, location: local }
     - { name: "qwen3.6:35b",              priority:  80, speed: 70, quality: 90, location: local }
     - { name: "kimi-k2.6:cloud",          priority:  78, speed: 90, quality: 92, location: cloud }
+    - { name: "deepseek-v4-flash:cloud",  priority:  72, speed: 92, quality: 90, location: cloud }
     - { name: "deepseek-v3.2:cloud",      priority:  70, speed: 85, quality: 90, location: cloud }
     - { name: "cogito-2.1:671b-cloud",    priority:  65, speed: 80, quality: 93, location: cloud }
 
@@ -35,6 +36,7 @@ model_registry:
     - { name: "qwen3.6:35b",              priority: 100, speed: 75, quality: 92, location: local }
     - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 93, location: cloud }
     - { name: "qwen3.5:397b-cloud",       priority:  90, speed: 80, quality: 94, location: cloud }
+    - { name: "deepseek-v4-flash:cloud",  priority:  82, speed: 92, quality: 89, location: cloud }
     - { name: "glm-4.7-flash:q8_0",       priority:  80, speed: 85, quality: 87, location: local }
     - { name: "olmo-3.1:32b",             priority:  70, speed: 75, quality: 85, location: local }
     - { name: "llama4:latest",            priority:  65, speed: 55, quality: 90, location: local }
@@ -55,6 +57,7 @@ fast_path:
     - "qwen3-coder-next:latest"
     - "qwen2.5-coder:32b"
     - "devstral-small-2:latest"
+    - "deepseek-v4-flash:cloud"
     - "deepseek-v3.2:cloud"
     - "qwen3.5:397b-cloud"
     - "cogito-2.1:671b-cloud"

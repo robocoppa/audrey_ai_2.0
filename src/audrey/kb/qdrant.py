@@ -184,7 +184,13 @@ class QdrantKB:
         file_id alone. (The file_id UUIDs are unguessable, but belt-and-
         suspenders: two users can't collide on a UUID, but if the API ever
         leaks an id to the wrong user, this filter prevents cross-scope delete.)
+
+        Missing collection = no-op. The /v1/files delete route hits both the
+        text and image collections without knowing which holds the file, and
+        a user who has only uploaded one kind won't have the other collection.
         """
+        if not await self.collection_exists(collection):
+            return
         flt = qmodels.Filter(must=[
             qmodels.FieldCondition(key="file_id", match=qmodels.MatchValue(value=file_id)),
             qmodels.FieldCondition(key="user", match=qmodels.MatchValue(value=user)),

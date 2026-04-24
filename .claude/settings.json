@@ -41,7 +41,8 @@
       "Bash(ls backend/open_webui/routers/)",
       "Bash(python3 -c \"import ast; ast.parse\\(open\\('/home/bart/Documents/github/audrey_ai_2.0/src/audrey/routes/files.py'\\).read\\(\\)\\)\")",
       "Bash(python -c \"import ast; [ast.parse\\(open\\(p\\).read\\(\\)\\) for p in \\('src/audrey/auth.py', 'src/audrey/routes/files.py', 'src/audrey/config.py'\\)]\")",
-      "Bash(python3 -c \"import ast; [ast.parse\\(open\\(p\\).read\\(\\)\\) for p in \\('src/audrey/auth.py', 'src/audrey/routes/files.py', 'src/audrey/config.py'\\)]\")"
+      "Bash(python3 -c \"import ast; [ast.parse\\(open\\(p\\).read\\(\\)\\) for p in \\('src/audrey/auth.py', 'src/audrey/routes/files.py', 'src/audrey/config.py'\\)]\")",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('src/audrey/kb/qdrant.py'\\).read\\(\\)\\)\")"
     ]
   }
 }

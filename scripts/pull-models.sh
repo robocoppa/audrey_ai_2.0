@@ -29,6 +29,7 @@ CLOUD_MODELS=(
   "kimi-k2.6:cloud"
   "qwen3.5:397b-cloud"
   "deepseek-v3.2:cloud"
+  "deepseek-v4-flash:cloud"
   "cogito-2.1:671b-cloud"
   "nemotron-3-super:cloud"
   "minimax-m2.7:cloud"
