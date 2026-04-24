@@ -115,6 +115,7 @@ async def _run_one_worker(
     react_compress_after: int,
     react_max_tool_chars: int,
     react_dispatch_timeout_s: float,
+    user_id: str | None = None,
 ) -> WorkerDraft:
     """Execute one worker. Always returns a WorkerDraft — never raises.
 
@@ -138,6 +139,7 @@ async def _run_one_worker(
                     compress_after_round=react_compress_after,
                     max_tool_result_chars=react_max_tool_chars,
                     tool_dispatch_timeout_s=react_dispatch_timeout_s,
+                    user_id=user_id,
                 )
                 elapsed = round(time.monotonic() - start, 2)
                 # run_react already records success/failure per chat call.
@@ -223,6 +225,7 @@ async def run_panel(
     react_compress_after: int = 2,
     react_max_tool_chars: int = 2000,
     react_dispatch_timeout_s: float = 30.0,
+    user_id: str | None = None,
 ) -> tuple[list[WorkerDraft], list[str]]:
     """Run the panel and return (drafts, attempted_models).
 
@@ -271,6 +274,7 @@ async def run_panel(
             react_compress_after=react_compress_after,
             react_max_tool_chars=react_max_tool_chars,
             react_dispatch_timeout_s=react_dispatch_timeout_s,
+            user_id=user_id,
         )
         for i, (name, loc) in enumerate(workers)
     ]

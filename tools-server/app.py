@@ -110,6 +110,15 @@ class WebSearchResponse(BaseModel):
 class KBSearchRequest(BaseModel):
     query: Annotated[str, Field(min_length=1, max_length=1000)]
     top_k: Annotated[int, Field(ge=1, le=20)] = 5
+    user: str | None = Field(
+        default=None,
+        description=(
+            "Optional user id. If the user has uploaded files via Audrey's "
+            "/v1/files endpoint, their private collection is searched alongside "
+            "the global KB and results are merged by score."
+        ),
+        max_length=200,
+    )
 
 
 class KBImageSearchRequest(BaseModel):
@@ -131,6 +140,11 @@ class KBImageSearchRequest(BaseModel):
         description="Base64-encoded reference image bytes.",
     )
     top_k: Annotated[int, Field(ge=1, le=20)] = 5
+    user: str | None = Field(
+        default=None,
+        description="Optional user id; merges user's private image collection with the global one.",
+        max_length=200,
+    )
 
 
 class KBSearchResponse(BaseModel):
@@ -230,8 +244,11 @@ async def web_search(req: WebSearchRequest) -> WebSearchResponse:
 )
 async def kb_search(req: KBSearchRequest) -> KBSearchResponse:
     client: httpx.AsyncClient = app.state.audrey
+    payload: dict[str, Any] = {"query": req.query, "top_k": req.top_k}
+    if req.user:
+        payload["user"] = req.user
     try:
-        r = await client.post("/v1/kb/query", json={"query": req.query, "top_k": req.top_k})
+        r = await client.post("/v1/kb/query", json=payload)
     except httpx.RequestError as e:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -270,6 +287,8 @@ async def kb_image_search(req: KBImageSearchRequest) -> KBSearchResponse:
         payload["image_url"] = req.image_url
     if req.image_b64:
         payload["image_b64"] = req.image_b64
+    if req.user:
+        payload["user"] = req.user
     try:
         r = await client.post("/v1/kb/query/image", json=payload)
     except httpx.RequestError as e:

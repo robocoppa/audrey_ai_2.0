@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         libxml2 \
         libxslt1.1 \
+        libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
 # uv for fast, reproducible installs
@@ -37,6 +38,7 @@ WORKDIR /app
 RUN uv pip install --system \
       "fastapi>=0.115" \
       "uvicorn[standard]>=0.32" \
+      "python-multipart>=0.0.12" \
       "httpx>=0.28" \
       "pydantic>=2.9" \
       "pydantic-settings>=2.6" \
@@ -53,7 +55,8 @@ RUN uv pip install --system \
       "beautifulsoup4>=4.12" \
       "lxml>=5.3" \
       "watchdog>=6.0" \
-      "pillow>=11.0"
+      "pillow>=11.0" \
+      "python-magic>=0.4.27"
 
 # Copy the package + config
 COPY pyproject.toml /app/pyproject.toml

@@ -14,10 +14,12 @@ What's new vs Phase 11:
   the Ollama `/api/embed` endpoint using `nomic-embed-text` (same model
   the KB uses). `memory_search` embeds the query, does a cosine search
   with `user == <id>` payload filter, drops hits below threshold.
-- **Similarity threshold (0.4 default, env `MEMORY_SIMILARITY_THRESHOLD`)**
+- **Similarity threshold (0.5 default, env `MEMORY_SIMILARITY_THRESHOLD`)**
   keeps false positives out. Tighter than KB's (no threshold) because
   memory false-positives poison the prompt as "facts about the user" —
-  more damaging than an irrelevant KB snippet.
+  more damaging than an irrelevant KB snippet. nomic-embed-text runs
+  warm — its unrelated baseline sits around ~0.4 — so 0.5 is the first
+  value that cleanly separates on-topic from noise.
 - **Refuses untagged writes.** `memory_store` now returns 422 when `tags`
   has no `user:<id>` token. Prevents memories that can't be recalled
   (search requires a user filter) and prevents leakage across scopes.

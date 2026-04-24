@@ -47,6 +47,7 @@ async def run_fast_path(
     react_compress_after: int = 2,
     react_max_tool_chars: int = 2000,
     react_dispatch_timeout_s: float = 30.0,
+    user_id: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Return (concrete_model, response_like_dict).
 
@@ -85,6 +86,7 @@ async def run_fast_path(
         compress_after_round=react_compress_after,
         max_tool_result_chars=react_max_tool_chars,
         tool_dispatch_timeout_s=react_dispatch_timeout_s,
+        user_id=user_id,
     )
     return spec.name, {
         "message": {"role": "assistant", "content": react.content},

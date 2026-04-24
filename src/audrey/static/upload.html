@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Audrey — Knowledge Upload</title>
+  <style>
+    :root {
+      color-scheme: dark light;
+      --bg: #0f1115;
+      --panel: #181b22;
+      --panel2: #1f232c;
+      --text: #e6e8ec;
+      --muted: #8b95a6;
+      --accent: #7aa7ff;
+      --danger: #ff6b6b;
+      --ok: #6fd18d;
+      --border: #2a2f3a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg); color: var(--text); padding: 32px;
+      max-width: 960px; margin-inline: auto;
+    }
+    h1 { font-size: 1.5rem; margin: 0 0 4px; }
+    p.sub { color: var(--muted); margin: 0 0 24px; }
+    .row { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; }
+    label { font-size: 0.85rem; color: var(--muted); }
+    input[type="text"] {
+      flex: 1; padding: 10px 12px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--panel); color: var(--text);
+      font-size: 0.95rem;
+    }
+    #drop {
+      border: 2px dashed var(--border); border-radius: 12px;
+      padding: 48px; text-align: center; background: var(--panel);
+      cursor: pointer; transition: border-color .15s, background .15s;
+    }
+    #drop.hover { border-color: var(--accent); background: var(--panel2); }
+    #drop p { margin: 0; color: var(--muted); }
+    #drop strong { color: var(--text); }
+    #picker { display: none; }
+    .hint { font-size: 0.8rem; color: var(--muted); margin-top: 8px; }
+
+    table { width: 100%; border-collapse: collapse; margin-top: 24px; }
+    th, td {
+      text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border);
+      font-size: 0.9rem;
+    }
+    th { color: var(--muted); font-weight: 500; }
+    tr.pending td { color: var(--muted); }
+    tr.err td { color: var(--danger); }
+    td.right { text-align: right; }
+
+    button {
+      background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+      border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 0.85rem;
+    }
+    button.danger { border-color: var(--danger); color: var(--danger); }
+    button:hover { background: var(--panel); }
+
+    #status { margin-top: 12px; font-size: 0.85rem; }
+    #status.ok { color: var(--ok); }
+    #status.err { color: var(--danger); }
+
+    .quota { font-size: 0.85rem; color: var(--muted); margin-top: 4px; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <h1>Audrey · Knowledge Upload</h1>
+  <p class="sub">
+    Upload files into your private knowledge collection.
+    Supported: PDF, TXT, MD, CSV, HTML, DOCX, PNG, JPEG, WEBP, GIF.
+  </p>
+
+  <div class="row">
+    <label for="user">User</label>
+    <input id="user" type="text" placeholder="you@example.com" />
+  </div>
+
+  <div id="drop">
+    <p><strong>Drop files here</strong> or click to select.</p>
+    <p class="hint">Max 50 MB per file. Quota per user applies.</p>
+    <input id="picker" type="file" multiple />
+  </div>
+
+  <div id="status"></div>
+
+  <h2 style="margin-top: 32px; font-size: 1.1rem;">Your files</h2>
+  <div class="quota" id="quota"></div>
+  <table>
+    <thead>
+      <tr>
+        <th>Filename</th><th>Mime</th><th class="right">Size</th>
+        <th class="right">Chunks</th><th>Uploaded</th><th></th>
+      </tr>
+    </thead>
+    <tbody id="rows"><tr><td colspan="6" style="color: var(--muted);">—</td></tr></tbody>
+  </table>
+
+<script>
+(() => {
+  const USER_KEY = "audrey_upload_user";
+  const userInput = document.getElementById("user");
+  const drop = document.getElementById("drop");
+  const picker = document.getElementById("picker");
+  const status = document.getElementById("status");
+  const rows = document.getElementById("rows");
+  const quota = document.getElementById("quota");
+
+  userInput.value = localStorage.getItem(USER_KEY) || "";
+  userInput.addEventListener("change", () => {
+    localStorage.setItem(USER_KEY, userInput.value.trim());
+    refreshList();
+  });
+
+  function fmtBytes(n) {
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + " MB";
+    return (n / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+  }
+
+  function currentUser() {
+    const u = userInput.value.trim();
+    if (!u) {
+      status.textContent = "Enter a user id first.";
+      status.className = "err";
+      return null;
+    }
+    return u;
+  }
+
+  drop.addEventListener("click", () => picker.click());
+  picker.addEventListener("change", (e) => handleFiles(e.target.files));
+  drop.addEventListener("dragover", (e) => {
+    e.preventDefault(); drop.classList.add("hover");
+  });
+  drop.addEventListener("dragleave", () => drop.classList.remove("hover"));
+  drop.addEventListener("drop", (e) => {
+    e.preventDefault(); drop.classList.remove("hover");
+    handleFiles(e.dataTransfer.files);
+  });
+
+  async function handleFiles(files) {
+    const user = currentUser();
+    if (!user) return;
+    for (const f of files) {
+      await uploadOne(user, f);
+    }
+    await refreshList();
+  }
+
+  async function uploadOne(user, file) {
+    status.textContent = `Uploading ${file.name} (${fmtBytes(file.size)})…`;
+    status.className = "";
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const r = await fetch(`/v1/files?user=${encodeURIComponent(user)}`, {
+        method: "POST",
+        headers: { "X-User": user },
+        body: fd,
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        status.textContent = `Upload failed (${r.status}): ${body.detail || "unknown error"}`;
+        status.className = "err";
+      } else {
+        status.textContent = `Uploaded ${body.filename} → ${body.chunks} chunk${body.chunks === 1 ? "" : "s"}.`;
+        status.className = "ok";
+      }
+    } catch (e) {
+      status.textContent = `Upload failed: ${e}`;
+      status.className = "err";
+    }
+  }
+
+  async function deleteOne(fileId) {
+    const user = currentUser();
+    if (!user) return;
+    if (!confirm(`Delete ${fileId}? This removes all chunks.`)) return;
+    const r = await fetch(`/v1/files/${encodeURIComponent(fileId)}?user=${encodeURIComponent(user)}`, {
+      method: "DELETE",
+      headers: { "X-User": user },
+    });
+    if (!r.ok) {
+      status.textContent = `Delete failed (${r.status}).`;
+      status.className = "err";
+    } else {
+      status.textContent = `Deleted.`;
+      status.className = "ok";
+    }
+    await refreshList();
+  }
+
+  async function refreshList() {
+    const user = currentUser();
+    if (!user) { rows.innerHTML = ""; quota.textContent = ""; return; }
+    try {
+      const r = await fetch(`/v1/files?user=${encodeURIComponent(user)}`, {
+        headers: { "X-User": user },
+      });
+      if (!r.ok) {
+        rows.innerHTML = `<tr><td colspan="6">Error: ${r.status}</td></tr>`;
+        return;
+      }
+      const body = await r.json();
+      quota.textContent = `Stored: ${fmtBytes(body.total_bytes)} across ${body.files.length} file${body.files.length === 1 ? "" : "s"}.`;
+      if (body.files.length === 0) {
+        rows.innerHTML = `<tr><td colspan="6" style="color: var(--muted);">No files yet.</td></tr>`;
+        return;
+      }
+      rows.innerHTML = body.files.map(f => `
+        <tr>
+          <td>${escapeHtml(f.filename)}</td>
+          <td>${escapeHtml(f.mime)}</td>
+          <td class="right">${fmtBytes(f.bytes)}</td>
+          <td class="right">${f.chunks}</td>
+          <td>${escapeHtml(f.uploaded_at)}</td>
+          <td><button class="danger" data-id="${escapeAttr(f.file_id)}">delete</button></td>
+        </tr>
+      `).join("");
+      rows.querySelectorAll("button.danger").forEach(btn =>
+        btn.addEventListener("click", () => deleteOne(btn.dataset.id)),
+      );
+    } catch (e) {
+      rows.innerHTML = `<tr><td colspan="6">Error: ${e}</td></tr>`;
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
+  }
+  function escapeAttr(s) { return escapeHtml(s); }
+
+  refreshList();
+})();
+</script>
+</body>
+</html>

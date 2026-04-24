@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # Cosine similarity floor. `memory_search` drops anything below this.
     # Tighter than KB because memory false-positives poison the prompt as
     # "facts about the user" — a false hit actively misleads the model.
-    memory_similarity_threshold: float = Field(default=0.4, alias="MEMORY_SIMILARITY_THRESHOLD")
+    memory_similarity_threshold: float = Field(default=0.5, alias="MEMORY_SIMILARITY_THRESHOLD")
 
     # Ollama URL for nomic-embed-text calls
     ollama_url: str = Field(default="http://ollama:11434", alias="OLLAMA_URL")

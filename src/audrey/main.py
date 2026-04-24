@@ -25,8 +25,10 @@ from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.graph import build_graph
 from audrey.pipeline.semaphore import GpuGate
+from audrey.routes.files import router as files_router
 from audrey.routes.kb import router as kb_router
 from audrey.routes.openai import router as openai_router
+from audrey.routes.upload_ui import router as upload_ui_router
 from audrey.tools.discovery import discover_all
 
 logging.basicConfig(
@@ -139,6 +141,8 @@ app = FastAPI(
 
 app.include_router(openai_router)
 app.include_router(kb_router)
+app.include_router(files_router)
+app.include_router(upload_ui_router)
 
 
 @app.get("/health", tags=["system"])

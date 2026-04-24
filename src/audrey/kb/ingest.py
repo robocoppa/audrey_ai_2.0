@@ -18,6 +18,7 @@ vector for the whole image); no chunking.
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,6 +27,7 @@ from qdrant_client.http import models as qmodels
 
 from audrey.kb.chunk import IMAGE_SUFFIXES, TEXT_SUFFIXES, Chunk, chunk_text, load_text
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
+from audrey.kb.extract import extract_text
 from audrey.kb.qdrant import QdrantKB, build_image_point, build_text_point, normalize_source
 
 log = logging.getLogger(__name__)
@@ -187,4 +189,100 @@ async def ingest_many(
     return merged
 
 
-__all__ = ["IngestStats", "ingest_path", "ingest_many", "ingest_text_file", "ingest_image_file"]
+async def ingest_user_text_file(
+    path: Path,
+    *,
+    qdrant: QdrantKB,
+    embedder: TextEmbedder,
+    collection: str,
+    user: str,
+    file_id: str,
+    filename: str,
+    mime: str,
+    uploaded_at: str | None = None,
+    chunk_tokens: int = 1000,
+    overlap_tokens: int = 100,
+) -> int:
+    """Ingest a single uploaded file into a user-scoped text collection.
+
+    Mirrors `ingest_text_file` but writes to `collection` (e.g.
+    `kb_user_text_bart_proton_me`) with user/file metadata in the payload.
+    Delete-before-upsert clears any prior points for the same file_id.
+    """
+    raw = extract_text(path)  # raises EmptyExtractionError on scanned PDFs etc.
+    chunks: list[Chunk] = chunk_text(raw, chunk_tokens=chunk_tokens, overlap_tokens=overlap_tokens)
+    if not chunks:
+        return 0
+
+    source = normalize_source(path)
+    mtime = path.stat().st_mtime
+    size_bytes = path.stat().st_size
+    stamp = uploaded_at or _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+    vectors = await embedder.embed_many([c.text for c in chunks])
+
+    await qdrant.delete_by_file_id(file_id, user=user, collection=collection)
+
+    extras = {
+        "user": user,
+        "file_id": file_id,
+        "filename": filename,
+        "mime": mime,
+        "bytes": int(size_bytes),
+        "uploaded_at": stamp,
+    }
+    points: list[qmodels.PointStruct] = [
+        build_text_point(
+            source=source, chunk_idx=c.idx, text=c.text,
+            vector=v, mtime=mtime, extra=extras,
+        )
+        for c, v in zip(chunks, vectors, strict=True)
+    ]
+    await qdrant.upsert_text(points, collection=collection)
+    return len(points)
+
+
+async def ingest_user_image_file(
+    path: Path,
+    *,
+    qdrant: QdrantKB,
+    embedder: ImageEmbedder,
+    collection: str,
+    user: str,
+    file_id: str,
+    filename: str,
+    mime: str,
+    uploaded_at: str | None = None,
+) -> bool:
+    source = normalize_source(path)
+    mtime = path.stat().st_mtime
+    size_bytes = path.stat().st_size
+    stamp = uploaded_at or _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+    try:
+        vec = await embedder.embed_path(path)
+    except Exception as e:  # noqa: BLE001
+        log.warning("kb.ingest: user image %s failed: %s", path, e)
+        return False
+
+    await qdrant.delete_by_file_id(file_id, user=user, collection=collection)
+
+    extras = {
+        "user": user,
+        "file_id": file_id,
+        "filename": filename,
+        "mime": mime,
+        "bytes": int(size_bytes),
+        "uploaded_at": stamp,
+    }
+    point = build_image_point(
+        source=source, chunk_idx=0, caption=filename,
+        vector=vec, mtime=mtime, extra=extras,
+    )
+    await qdrant.upsert_images([point], collection=collection)
+    return True
+
+
+__all__ = [
+    "IngestStats", "ingest_path", "ingest_many",
+    "ingest_text_file", "ingest_image_file",
+    "ingest_user_text_file", "ingest_user_image_file",
+]

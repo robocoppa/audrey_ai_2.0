@@ -189,6 +189,7 @@ def build_graph(
             react_compress_after=react_compress_after,
             react_max_tool_chars=react_max_tool_chars,
             react_dispatch_timeout_s=react_dispatch_timeout,
+            user_id=(state.get("user_id") or None),
         )
         msg = resp.get("message", {}) or {}
         react_meta = resp.get("_react") or {}
@@ -238,6 +239,7 @@ def build_graph(
             react_compress_after=deep_react_compress_after,
             react_max_tool_chars=deep_react_max_tool_chars,
             react_dispatch_timeout_s=deep_react_dispatch_timeout,
+            user_id=(state.get("user_id") or None),
         )
         ok = sum(1 for d in drafts if (d.get("content") or "").strip())
         grounded = sum(1 for d in drafts if int(d.get("tool_rounds", 0) or 0) > 0)

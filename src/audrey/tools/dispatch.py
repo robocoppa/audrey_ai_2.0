@@ -37,10 +37,29 @@ class ToolResult:
     is_error: bool
 
 
+# Tools that are scoped by the caller's user id. When dispatching these,
+# we overwrite any `user` argument the model supplied with the real
+# pipeline user_id — prevents the model from querying another user's
+# data, and spares it from having to guess its own id.
+_USER_SCOPED_TOOLS: frozenset[str] = frozenset({
+    "kb_search",
+    "kb_image_search",
+    "memory_search",
+    "memory_store",
+})
+
+
 def _truncate(s: str, limit: int) -> str:
     if len(s) <= limit:
         return s
     return s[: limit - len("\n…[truncated]")] + "\n…[truncated]"
+
+
+def _force_user_tag(tags: str, user_id: str) -> str:
+    """Strip any existing `user:<anything>` token and append `user:<user_id>`."""
+    parts = [t for t in tags.replace(",", " ").split() if not t.startswith("user:")]
+    parts.append(f"user:{user_id}")
+    return ",".join(parts)
 
 
 async def dispatch_one(
@@ -50,6 +69,7 @@ async def dispatch_one(
     *,
     max_result_chars: int,
     timeout_s: float,
+    user_id: str | None = None,
 ) -> ToolResult:
     """Execute one tool_call. Always returns a ToolResult — never raises."""
     fn = (tool_call.get("function") or {})
@@ -76,6 +96,16 @@ async def dispatch_one(
             content=json.dumps({"error": "arguments_not_object", "got": str(type(args).__name__)}),
             elapsed_s=0.0, is_error=True,
         )
+
+    # Overwrite `user` for user-scoped tools with the real pipeline user_id.
+    # Prevents the model from querying or writing to another user's scope,
+    # and spares it from having to guess its own id. For `memory_store`, the
+    # user lives inside the free-form `tags` string — we enforce it there too.
+    if user_id and name in _USER_SCOPED_TOOLS:
+        if name == "memory_store":
+            args["tags"] = _force_user_tag(str(args.get("tags") or ""), user_id)
+        else:
+            args["user"] = user_id
 
     spec = registry.get(name)
     if spec is None:

@@ -200,6 +200,11 @@ kb:
     - "/datasets/servicenow"
   watcher_debounce_seconds: 2
 
+  # Per-user uploads (Phase 13). Landing dir is bind-mounted from the host.
+  upload_root: "/data/uploads"
+  max_upload_mb: 50                      # per-file cap
+  max_user_bytes: 1073741824             # 1 GiB per-user quota
+
 # ─── Tools (OpenAPI auto-discovery) ────────────────────────────────────
 tools:
   enabled: true

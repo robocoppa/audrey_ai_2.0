@@ -45,6 +45,9 @@ dependencies = [
     "lxml>=5.3",
     "markdown>=3.7",
 
+    # Mime sniffing for per-user uploads (requires libmagic1 in the image)
+    "python-magic>=0.4.27",
+
     # Filesystem watcher for KB auto-ingest
     "watchdog>=6.0",
 

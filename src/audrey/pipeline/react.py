@@ -82,6 +82,7 @@ async def run_react(
     compress_after_round: int,
     max_tool_result_chars: int,
     tool_dispatch_timeout_s: float,
+    user_id: str | None = None,
 ) -> ReactResult:
     """Drive the model through up to `max_rounds` of tool use, then return the answer.
 
@@ -138,6 +139,7 @@ async def run_react(
                     http, registry, tc,
                     max_result_chars=max_tool_result_chars,
                     timeout_s=tool_dispatch_timeout_s,
+                    user_id=user_id,
                 )
                 for tc in tool_calls
             ])

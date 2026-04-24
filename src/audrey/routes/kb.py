@@ -22,7 +22,8 @@ from pydantic import BaseModel, Field
 
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
 from audrey.kb.ingest import ingest_many
-from audrey.kb.qdrant import QdrantKB
+from audrey.kb.qdrant import KBHit, QdrantKB
+from audrey.kb.user_store import user_image_collection, user_text_collection
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +33,15 @@ router = APIRouter(prefix="/v1/kb", tags=["kb"])
 class TextQuery(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
     top_k: int = Field(default=5, ge=1, le=20)
+    user: str | None = Field(
+        default=None,
+        description=(
+            "Optional user id. If set and the user has a kb_user_text_<sanitized> "
+            "collection, it is searched alongside the global kb_text and results "
+            "are merged by score."
+        ),
+        max_length=200,
+    )
 
 
 class ImageQuery(BaseModel):
@@ -43,6 +53,11 @@ class ImageQuery(BaseModel):
     image_url: str | None = Field(default=None, description="HTTP(S) URL of the image.")
     image_b64: str | None = Field(default=None, description="Base64-encoded image bytes.")
     top_k: int = Field(default=5, ge=1, le=20)
+    user: str | None = Field(
+        default=None,
+        description="Optional user id. Merges user's private image collection with the global one.",
+        max_length=200,
+    )
 
 
 class IngestRequest(BaseModel):
@@ -72,7 +87,7 @@ async def kb_query(req: TextQuery, request: Request) -> QueryResponse:
     if qdrant is None or embedder is None:
         raise HTTPException(status_code=503, detail="KB is not initialized")
     vec = await embedder.embed_one(req.query)
-    hits = await qdrant.search_text(vec, top_k=req.top_k)
+    hits = await _search_text_merged(qdrant, vec, top_k=req.top_k, user=req.user)
     return QueryResponse(
         query=req.query,
         results=[
@@ -80,6 +95,35 @@ async def kb_query(req: TextQuery, request: Request) -> QueryResponse:
             for h in hits
         ],
     )
+
+
+async def _search_text_merged(
+    qdrant: QdrantKB, vec: list[float], *, top_k: int, user: str | None,
+) -> list[KBHit]:
+    """Search global kb_text and, if the user has one, their kb_user_text_* too. Merge by score."""
+    tasks = [qdrant.search_text(vec, top_k=top_k)]
+    if user:
+        user_col = user_text_collection(user)
+        if await qdrant.collection_exists(user_col):
+            tasks.append(qdrant.search_text(vec, top_k=top_k, collection=user_col))
+    results = await asyncio.gather(*tasks)
+    merged: list[KBHit] = [h for batch in results for h in batch]
+    merged.sort(key=lambda h: h.score, reverse=True)
+    return merged[:top_k]
+
+
+async def _search_images_merged(
+    qdrant: QdrantKB, vec: list[float], *, top_k: int, user: str | None,
+) -> list[KBHit]:
+    tasks = [qdrant.search_images(vec, top_k=top_k)]
+    if user:
+        user_col = user_image_collection(user)
+        if await qdrant.collection_exists(user_col):
+            tasks.append(qdrant.search_images(vec, top_k=top_k, collection=user_col))
+    results = await asyncio.gather(*tasks)
+    merged: list[KBHit] = [h for batch in results for h in batch]
+    merged.sort(key=lambda h: h.score, reverse=True)
+    return merged[:top_k]
 
 
 @router.post("/query/image", response_model=QueryResponse)
@@ -102,7 +146,7 @@ async def kb_query_image(req: ImageQuery, request: Request) -> QueryResponse:
             vec = await embedder.embed_text(req.query or "")
     except Exception as e:  # noqa: BLE001 — surface embed errors as 4xx
         raise HTTPException(status_code=422, detail=f"image embed failed: {e}") from e
-    hits = await qdrant.search_images(vec, top_k=req.top_k)
+    hits = await _search_images_merged(qdrant, vec, top_k=req.top_k, user=req.user)
     return QueryResponse(
         query=req.query,
         results=[
