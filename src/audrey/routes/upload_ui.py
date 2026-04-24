@@ -19,7 +19,7 @@ router = APIRouter(tags=["ui"])
 _HTML_PATH = Path(__file__).resolve().parent.parent / "static" / "upload.html"
 
 
-@router.get("/upload", response_class=HTMLResponse, include_in_schema=False)
+@router.api_route("/upload", methods=["GET", "HEAD"], response_class=HTMLResponse, include_in_schema=False)
 async def upload_page() -> HTMLResponse:
     try:
         html = _HTML_PATH.read_text(encoding="utf-8")

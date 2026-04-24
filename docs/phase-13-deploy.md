@@ -60,6 +60,8 @@ From a machine on the LAN:
 ```bash
 curl -sI http://localhost:8000/upload | head -1
 # expected: HTTP/1.1 200 OK
+# (if you see 405 Method Not Allowed, the running image predates the
+#  HEAD/GET change in routes/upload_ui.py — rebuild audrey-ai)
 ```
 
 Open `http://<unraid-ip>:8000/upload` in a browser — you should see the
