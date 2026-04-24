@@ -149,15 +149,25 @@ async def run_react(
         # Hit max_rounds and the model is still asking for tools. Force a final
         # pass without tools so it has to commit to an answer.
         #
-        # Compress aggressively first: the convo may now contain max_rounds
-        # worth of tool calls × their full result bodies (up to max_tool_result_chars
-        # each). Feeding that uncompressed to a tool-less chat causes timeouts
-        # and confused "let me call a tool" replies even though tools=None.
-        # Keep only the *last* tool message verbatim; everything else gets the
-        # one-line summary treatment.
+        # Two things matter here:
+        #   1. Compress older tool messages so the convo stays small.
+        #   2. Explicitly prompt the model to write prose. Just setting
+        #      tools=None is too weak a signal after N rounds of tool-calling:
+        #      models can stall (no bytes for 4+ minutes) or try to emit a
+        #      pseudo-tool-call in plain text. A direct user turn saying
+        #      "write the final answer now" flips the mode cleanly.
         log.warning("react: max_rounds=%d reached for %s; forcing final answer without tools",
                     max_rounds, model)
         convo = _compress_history(convo, keep_last_round=1)
+        convo.append({
+            "role": "user",
+            "content": (
+                "You have reached the tool-call budget. Do not call any more tools. "
+                "Using only the information already gathered above, write the final "
+                "answer to the original request now as plain prose. If the gathered "
+                "information is insufficient, say so explicitly — do not fabricate."
+            ),
+        })
         try:
             final = await ollama.chat(
                 model=model, messages=convo, options=options or None,
