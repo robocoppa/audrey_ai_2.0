@@ -13,7 +13,8 @@ dependencies = [
     "httpx>=0.28",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
-    "aiosqlite>=0.20",
+    "aiosqlite>=0.20",                 # kept for the one-shot SQLite→Qdrant migration
+    "qdrant-client>=1.12",
     "tenacity>=9.0",
     "python-dotenv>=1.0",
 ]

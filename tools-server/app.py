@@ -4,9 +4,14 @@ Six endpoints, OpenAPI auto-discovered by the Audrey orchestrator:
   POST /web_search         — Brave Search API
   POST /kb_search          — text query proxied to Audrey /v1/kb/query
   POST /kb_image_search    — image query proxied to Audrey /v1/kb/query/image
-  POST /memory_store       — save (key, value, tags) to local SQLite
+  POST /memory_store       — save (key, value, user:<id>-tagged) to Qdrant
   POST /memory_recall      — fetch by exact key
-  POST /memory_search      — keyword-search a user's memories (auto-recall)
+  POST /memory_search      — semantic search over a user's memories
+
+Memory is Qdrant-backed (Phase 12): each entry is a point in the
+`kb_memory` collection, embedded with nomic-embed-text. On first startup,
+a legacy `memory.db` SQLite file (Phase 11) is migrated automatically and
+renamed to `memory.db.migrated`.
 
 Each endpoint has a clear operation_id so the orchestrator's OpenAPI →
 Ollama-tool converter produces sensible tool names.
@@ -38,7 +43,16 @@ async def lifespan(app: FastAPI):
         api_key=settings.brave_api_key,
         cache_ttl_seconds=settings.brave_cache_ttl_hours * 3600,
     )
-    memory = MemoryStore(settings.memory_db_path)
+    memory = MemoryStore(
+        qdrant_url=settings.qdrant_url,
+        ollama_url=settings.ollama_url,
+        collection=settings.memory_collection,
+        embed_model=settings.memory_embed_model,
+        embed_dim=settings.memory_embed_dim,
+        similarity_threshold=settings.memory_similarity_threshold,
+        embed_timeout_s=settings.ollama_embed_timeout_s,
+        legacy_sqlite_path=settings.memory_db_path,
+    )
     await memory.init()
     audrey = httpx.AsyncClient(
         base_url=settings.audrey_url,
@@ -49,16 +63,19 @@ async def lifespan(app: FastAPI):
     app.state.memory = memory
     app.state.audrey = audrey
     log.info(
-        "custom-tools ready. brave=%s audrey=%s memory_db=%s",
+        "custom-tools ready. brave=%s audrey=%s qdrant=%s collection=%s threshold=%.2f",
         "configured" if settings.brave_api_key else "UNSET",
         settings.audrey_url,
-        settings.memory_db_path,
+        settings.qdrant_url,
+        settings.memory_collection,
+        settings.memory_similarity_threshold,
     )
     try:
         yield
     finally:
         await brave.aclose()
         await audrey.aclose()
+        await memory.aclose()
 
 
 app = FastAPI(
@@ -271,16 +288,27 @@ async def kb_image_search(req: KBImageSearchRequest) -> KBSearchResponse:
     operation_id="memory_store",
     response_model=MemoryEntryResponse,
     tags=["tools"],
-    summary="Save a persistent memory",
+    summary="Save a persistent memory for a specific user",
     description=(
-        "Persist a key-value note (plus optional comma-separated tags) to "
-        "long-term memory. Survives restarts. Overwrites any existing value "
-        "for the same key."
+        "Persist a key-value note to long-term memory, scoped to one user. "
+        "`tags` MUST contain `user:<id>` (e.g. `user:bart@proton.me`) — "
+        "memories without a user tag are rejected. Add further comma-"
+        "separated topic tags to improve recall (e.g. "
+        "`user:bart@proton.me,topic:hardware`). Overwrites any existing "
+        "value for the same (user, key) pair."
     ),
 )
 async def memory_store(req: MemoryStoreRequest) -> MemoryEntryResponse:
     memory: MemoryStore = app.state.memory
-    entry = await memory.store(key=req.key, value=req.value, tags=req.tags)
+    try:
+        entry = await memory.store(key=req.key, value=req.value, tags=req.tags)
+    except ValueError as e:
+        # Missing `user:<id>` tag — memories without a user tag can't be
+        # recalled and leak across scopes, so we refuse to write them.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e),
+        ) from e
     return MemoryEntryResponse.from_entry(entry)
 
 
@@ -305,12 +333,12 @@ async def memory_recall(req: MemoryRecallRequest) -> MemoryEntryResponse:
     operation_id="memory_search",
     response_model=MemorySearchResponse,
     tags=["tools"],
-    summary="Keyword-search memories scoped to a user",
+    summary="Semantic search over a user's memories",
     description=(
-        "Find a user's memories by matching a query against keys, values, "
-        "and tags (case-insensitive substring match on each whitespace-"
-        "separated token; any token hit counts). Results are ordered by "
-        "most-recently-updated. Used by the orchestrator for auto-recall "
+        "Find a user's memories by embedding the query and cosine-matching "
+        "against each stored memory's embedding (via nomic-embed-text). "
+        "Scoped by the `user:<id>` tag. Results below the similarity "
+        "threshold are dropped. Used by the orchestrator for auto-recall "
         "at the top of every request, but also callable as a tool."
     ),
 )
