@@ -45,7 +45,10 @@ class OllamaClient:
 
     async def tags(self) -> list[dict[str, Any]]:
         """Return the list of locally-available models (from /api/tags)."""
-        r = await self._client.get("/api/tags")
+        try:
+            r = await self._client.get("/api/tags")
+        except httpx.HTTPError as e:
+            raise OllamaError(f"GET /api/tags transport error: {type(e).__name__}: {e}") from e
         self._raise_for_status(r, "/api/tags")
         body = r.json()
         return body.get("models", []) or []
@@ -73,11 +76,17 @@ class OllamaClient:
             payload["options"] = options
         if tools:
             payload["tools"] = tools
-        r = await self._client.post(
-            "/api/chat",
-            json=payload,
-            timeout=httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT,
-        )
+        try:
+            r = await self._client.post(
+                "/api/chat",
+                json=payload,
+                timeout=httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT,
+            )
+        except httpx.HTTPError as e:
+            # Timeouts, connection errors, etc. Callers catch OllamaError —
+            # if we let httpx.* escape, failures bubble up as 500s instead
+            # of being retried/skipped by router fallbacks.
+            raise OllamaError(f"POST /api/chat transport error: {type(e).__name__}: {e}") from e
         self._raise_for_status(r, "/api/chat")
         return r.json()
 
@@ -98,17 +107,20 @@ class OllamaClient:
         if options:
             payload["options"] = options
         timeout = httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT
-        async with self._client.stream("POST", "/api/chat", json=payload, timeout=timeout) as r:
-            if r.status_code >= 400:
-                body = await r.aread()
-                raise OllamaError(f"POST /api/chat -> {r.status_code}: {body.decode('utf-8', 'replace')}")
-            async for line in r.aiter_lines():
-                if not line:
-                    continue
-                try:
-                    yield json.loads(line)
-                except json.JSONDecodeError:
-                    log.warning("Ollama returned non-JSON line: %r", line[:120])
+        try:
+            async with self._client.stream("POST", "/api/chat", json=payload, timeout=timeout) as r:
+                if r.status_code >= 400:
+                    body = await r.aread()
+                    raise OllamaError(f"POST /api/chat -> {r.status_code}: {body.decode('utf-8', 'replace')}")
+                async for line in r.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        yield json.loads(line)
+                    except json.JSONDecodeError:
+                        log.warning("Ollama returned non-JSON line: %r", line[:120])
+        except httpx.HTTPError as e:
+            raise OllamaError(f"POST /api/chat (stream) transport error: {type(e).__name__}: {e}") from e
 
     # ─── Embeddings ─────────────────────────────────────────────────────
 
@@ -128,11 +140,14 @@ class OllamaClient:
         if not texts:
             return []
         payload = {"model": model, "input": texts}
-        r = await self._client.post(
-            "/api/embed",
-            json=payload,
-            timeout=httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT,
-        )
+        try:
+            r = await self._client.post(
+                "/api/embed",
+                json=payload,
+                timeout=httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT,
+            )
+        except httpx.HTTPError as e:
+            raise OllamaError(f"POST /api/embed transport error: {type(e).__name__}: {e}") from e
         self._raise_for_status(r, "/api/embed")
         body = r.json()
         out = body.get("embeddings") or []
