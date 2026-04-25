@@ -30,10 +30,10 @@ Safety layers (all mandatory):
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 import logging
 import uuid
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
@@ -50,6 +50,7 @@ from audrey.kb.extract import (
 )
 from audrey.kb.ingest import ingest_user_image_file, ingest_user_text_file
 from audrey.kb.qdrant import QdrantKB
+from audrey.kb.uploads_db import UploadsDB
 from audrey.kb.user_store import (
     ensure_user_collections,
     sanitize_user,
@@ -131,19 +132,11 @@ async def _stream_to_disk(upload: UploadFile, dest: Path, *, limit_bytes: int) -
     return written
 
 
-async def _user_stored_bytes(qdrant: QdrantKB, *, user: str) -> int:
-    """Sum payload.bytes across the user's text + image collections, deduped by file_id."""
-    seen: dict[str, int] = {}
-    for col_fn in (user_text_collection, user_image_collection):
-        col = col_fn(user)
-        if not await qdrant.collection_exists(col):
-            continue
-        rows = await qdrant.list_user_files(user=user, collection=col)
-        for r in rows:
-            fid = r["file_id"]
-            if fid not in seen:
-                seen[fid] = int(r.get("bytes") or 0)
-    return sum(seen.values())
+def _get_uploads_db(request: Request) -> UploadsDB:
+    db: UploadsDB | None = getattr(request.app.state, "uploads_db", None)
+    if db is None:
+        raise HTTPException(status_code=503, detail="Uploads index is not initialized.")
+    return db
 
 
 @router.post("", response_model=UploadResponse)
@@ -160,6 +153,7 @@ async def upload_file(
     image_embedder = getattr(request.app.state, "image_embedder", None)
     if qdrant is None or text_embedder is None:
         raise HTTPException(status_code=503, detail="KB is not initialized.")
+    db = _get_uploads_db(request)
 
     # Ensure user collections + indexes exist before we write.
     text_col, image_col = await ensure_user_collections(qdrant, user)
@@ -192,8 +186,8 @@ async def upload_file(
             detail=f"Unsupported mime: {mime!r}. Allowed: {sorted(ALLOWED_TEXT_MIMES | ALLOWED_IMAGE_MIMES)}",
         )
 
-    # Quota gate. Fresh sum after write — allow the upload if it fits the ceiling.
-    already = await _user_stored_bytes(qdrant, user=user)
+    # Quota gate, served from the sqlite index (was a Qdrant scroll pre-Phase 15).
+    already = await db.user_total_bytes(user)
     if already + written > max_total:
         _safe_unlink(dest)
         raise HTTPException(
@@ -206,6 +200,8 @@ async def upload_file(
 
     filename = Path(file.filename or file_id).name  # strip any directory component
     kind = "image" if is_image_mime(mime) else "text"
+    # Stamp once here so the qdrant payload + sqlite row agree to the second.
+    stamp = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
     try:
         if kind == "text":
             if not is_text_mime(mime):
@@ -213,7 +209,7 @@ async def upload_file(
             n_chunks = await ingest_user_text_file(
                 dest, qdrant=qdrant, embedder=text_embedder,
                 collection=text_col, user=user, file_id=file_id,
-                filename=filename, mime=mime,
+                filename=filename, mime=mime, uploaded_at=stamp,
             )
             collection = text_col
         else:
@@ -222,7 +218,7 @@ async def upload_file(
             ok = await ingest_user_image_file(
                 dest, qdrant=qdrant, embedder=image_embedder,
                 collection=image_col, user=user, file_id=file_id,
-                filename=filename, mime=mime,
+                filename=filename, mime=mime, uploaded_at=stamp,
             )
             if not ok:
                 raise HTTPException(status_code=422, detail="Image embedding failed.")
@@ -242,6 +238,21 @@ async def upload_file(
         log.exception("files: ingest failed for %s (%s): %s", filename, user, e)
         raise HTTPException(status_code=500, detail=f"Ingest failed: {e}") from e
 
+    # Index the upload AFTER qdrant succeeded. If sqlite fails, roll back
+    # qdrant so list/quota stay coherent — better to drop the upload than
+    # ship a phantom file the user can't see or delete.
+    try:
+        await db.record_upload(
+            file_id=file_id, user=user, filename=filename, mime=mime,
+            bytes_=written, kind=kind, collection=collection,
+            chunks=n_chunks, uploaded_at=stamp,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.exception("files: uploads_db.record failed for %s (%s): %s", filename, user, e)
+        await qdrant.delete_by_file_id(file_id, user=user, collection=collection)
+        _safe_unlink(dest)
+        raise HTTPException(status_code=500, detail=f"Index write failed: {e}") from e
+
     log.info(
         "files: user=%s file_id=%s filename=%r mime=%s bytes=%d kind=%s chunks=%d",
         user, file_id, filename, mime, written, kind, n_chunks,
@@ -257,21 +268,12 @@ async def list_files(
     request: Request, me: AuthedUser = Depends(require_user),
 ) -> ListResponse:
     user = me.email
-    qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
-    if qdrant is None:
-        raise HTTPException(status_code=503, detail="KB is not initialized.")
+    db = _get_uploads_db(request)
 
-    text_col = user_text_collection(user)
-    image_col = user_image_collection(user)
-    text_rows, image_rows = await asyncio.gather(
-        qdrant.list_user_files(user=user, collection=text_col),
-        qdrant.list_user_files(user=user, collection=image_col),
-    )
-    merged: dict[str, dict[str, Any]] = {}
-    for row in text_rows + image_rows:
-        merged[row["file_id"]] = row
-    files = [FileRow(**row) for row in merged.values()]
-    files.sort(key=lambda r: r.uploaded_at, reverse=True)
+    rows = await db.list_user(user)
+    files = [FileRow(**{k: row[k] for k in (
+        "file_id", "filename", "mime", "bytes", "uploaded_at", "chunks",
+    )}) for row in rows]
     total = sum(r.bytes for r in files)
     return ListResponse(user=user, files=files, total_bytes=total)
 
@@ -284,12 +286,16 @@ async def delete_file(
     qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
     if qdrant is None:
         raise HTTPException(status_code=503, detail="KB is not initialized.")
+    db = _get_uploads_db(request)
 
-    text_col = user_text_collection(user)
-    image_col = user_image_collection(user)
+    # sqlite first — once the index row is gone, list/quota immediately
+    # reflect the delete even if the qdrant calls below take a beat.
+    deleted_row = await db.delete_upload(file_id, user=user)
 
     # Delete from both collections; a given file_id only lives in one, but
     # scoped double-filter on (file_id, user) makes unscoped calls safe.
+    text_col = user_text_collection(user)
+    image_col = user_image_collection(user)
     await asyncio.gather(
         qdrant.delete_by_file_id(file_id, user=user, collection=text_col),
         qdrant.delete_by_file_id(file_id, user=user, collection=image_col),
@@ -302,7 +308,7 @@ async def delete_file(
     bare = root / file_id
     _safe_unlink(bare)
 
-    log.info("files: delete user=%s file_id=%s", user, file_id)
+    log.info("files: delete user=%s file_id=%s indexed=%s", user, file_id, deleted_row)
     return DeleteResponse(file_id=file_id, deleted=True)
 
 

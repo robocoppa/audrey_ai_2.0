@@ -19,6 +19,7 @@ from audrey import __version__
 from audrey.config import get_config
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
 from audrey.kb.qdrant import QdrantKB
+from audrey.kb.uploads_db import UploadsDB, reconcile_with_qdrant
 from audrey.kb.watcher import KBWatcher
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
@@ -75,6 +76,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # noqa: BLE001 — Qdrant outage shouldn't kill boot
         log.warning("qdrant: ensure_collections failed: %s (KB endpoints will 503)", e)
 
+    # Phase 15: sqlite index over per-user upload metadata. Reconciled
+    # against qdrant on every boot — ghost rows pruned, missing rows
+    # backfilled from the user collections.
+    uploads_db = UploadsDB(kb_cfg.get("uploads_db_path", "/data/uploads.sqlite"))
+    try:
+        await reconcile_with_qdrant(uploads_db, qdrant)
+    except Exception as e:  # noqa: BLE001 — reconciliation is a tune-up, not load-bearing
+        log.warning("uploads_db: reconcile failed: %s (sqlite still usable)", e)
+
     text_embedder = TextEmbedder(
         ollama=ollama,
         model=kb_cfg.get("text_embedder", "nomic-embed-text"),
@@ -106,6 +116,7 @@ async def lifespan(app: FastAPI):
     app.state.tools = tool_registry
     app.state.graph = graph
     app.state.qdrant = qdrant
+    app.state.uploads_db = uploads_db
     app.state.text_embedder = text_embedder
     app.state.image_embedder = image_embedder
     app.state.kb_watcher = watcher
@@ -123,6 +134,7 @@ async def lifespan(app: FastAPI):
     finally:
         if watcher is not None:
             await watcher.stop()
+        uploads_db.close()
         qdrant.close()
         await ollama.aclose()
 

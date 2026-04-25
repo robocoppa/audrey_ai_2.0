@@ -208,6 +208,12 @@ kb:
   max_upload_mb: 50                      # per-file cap
   max_user_bytes: 1073741824             # 1 GiB per-user quota
 
+  # Phase 15: sqlite index over the per-user upload metadata. Qdrant is
+  # still authoritative for the file's content; this is a fast index for
+  # list + quota that doesn't require scrolling the whole collection.
+  # Reconciled against Qdrant at startup.
+  uploads_db_path: "/data/uploads.sqlite"
+
 # ─── Tools (OpenAPI auto-discovery) ────────────────────────────────────
 tools:
   enabled: true
