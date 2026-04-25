@@ -43,7 +43,7 @@ import time
 from dataclasses import dataclass
 
 import httpx
-from fastapi import Header, HTTPException, Request
+from fastapi import Depends, Header, HTTPException, Request
 
 log = logging.getLogger(__name__)
 
@@ -138,9 +138,36 @@ async def require_user(
     return user
 
 
-def clear_auth_cache() -> None:
-    """Expose for tests + admin rotate. Not wired to a route yet."""
+async def require_admin(me: AuthedUser = Depends(require_user)) -> AuthedUser:
+    """Like `require_user`, but additionally enforces `role == "admin"`.
+
+    OWUI v0.9.2 emits role strings as lowercase (`"admin"`, `"user"`,
+    `"pending"`). 403 — not 401 — because the caller is authenticated;
+    they just don't have permission.
+    """
+    if me.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required.")
+    return me
+
+
+def clear_auth_cache() -> int:
+    """Drop every cached AuthedUser. Returns the number of entries evicted.
+
+    Used by `POST /v1/admin/auth/clear` and tests. Self-evicts the caller's
+    own cache row too — that's intentional. Their next request re-probes
+    OWUI, which is exactly the point.
+    """
+    n = len(_cache)
     _cache.clear()
+    return n
 
 
-__all__ = ["AuthedUser", "require_user", "clear_auth_cache"]
+def cache_size() -> int:
+    """Current count of cached AuthedUser entries. For admin observability."""
+    return len(_cache)
+
+
+__all__ = [
+    "AuthedUser", "require_user", "require_admin",
+    "clear_auth_cache", "cache_size",
+]
