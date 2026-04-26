@@ -51,6 +51,12 @@ _TTL_S: float = 30.0
 _SWEEP_AT: int = 1024
 _PROBE_TIMEOUT_S: float = 5.0
 
+# Roles allowed past the gate. OWUI emits these as lowercase. `pending` —
+# a user the admin hasn't activated — has a valid JWT but no chat access
+# in OWUI, so we reject them too. Anything outside this set (a future
+# `disabled` state, garbled response) also fails closed.
+_ALLOWED_ROLES: frozenset[str] = frozenset({"user", "admin"})
+
 
 @dataclass(slots=True)
 class AuthedUser:
@@ -101,9 +107,16 @@ async def _probe_owui(owui_url: str, token: str) -> AuthedUser:
     email = body.get("email")
     if not email:
         raise HTTPException(status_code=502, detail="OWUI response missing email.")
+    role = str(body.get("role") or "").lower()
+    if role not in _ALLOWED_ROLES:
+        # OWUI returns 200 for `pending` users — the JWT is valid; the user
+        # just isn't activated. Reject here so they can't sneak past the
+        # gate via Audrey while OWUI itself blocks them.
+        log.info("auth: rejecting %s with role=%r (not in %s)", email, role, sorted(_ALLOWED_ROLES))
+        raise HTTPException(status_code=401, detail=f"Account not activated (role={role!r}).")
     return AuthedUser(
         email=str(email),
-        role=str(body.get("role") or "user"),
+        role=role,
         owui_id=str(body.get("id") or ""),
     )
 

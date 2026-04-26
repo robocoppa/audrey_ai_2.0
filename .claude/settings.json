@@ -44,7 +44,8 @@
       "Bash(python3 -c \"import ast; [ast.parse\\(open\\(p\\).read\\(\\)\\) for p in \\('src/audrey/auth.py', 'src/audrey/routes/files.py', 'src/audrey/config.py'\\)]\")",
       "Bash(python3 -c \"import ast; ast.parse\\(open\\('src/audrey/kb/qdrant.py'\\).read\\(\\)\\)\")",
       "Bash(python3 -c \"import ast; [ast.parse\\(open\\(p\\).read\\(\\)\\) for p in \\('src/audrey/kb/uploads_db.py', 'src/audrey/routes/files.py', 'src/audrey/main.py'\\)]\")",
-      "Bash(python3 -c \"import ast; [ast.parse\\(open\\(p\\).read\\(\\)\\) for p in \\('src/audrey/auth.py', 'src/audrey/routes/admin.py', 'src/audrey/main.py'\\)]\")"
+      "Bash(python3 -c \"import ast; [ast.parse\\(open\\(p\\).read\\(\\)\\) for p in \\('src/audrey/auth.py', 'src/audrey/routes/admin.py', 'src/audrey/main.py'\\)]\")",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('src/audrey/auth.py'\\).read\\(\\)\\)\")"
     ]
   }
 }
