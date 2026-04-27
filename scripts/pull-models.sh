@@ -26,6 +26,7 @@ LOCAL_MODELS=(
 )
 
 CLOUD_MODELS=(
+  "deepseek-v4-pro:cloud"
   "kimi-k2.6:cloud"
   "qwen3.5:397b-cloud"
   "deepseek-v3.2:cloud"

@@ -524,6 +524,13 @@ async def _stream_deep_with_banners(
         yield _stop_frame()
         yield "data: [DONE]\n\n"
 
+    except asyncio.CancelledError:
+        # Client disconnected mid-stream. We can't yield more frames (the
+        # response transport is gone), but we still want the metric/log to
+        # reflect "cancelled" rather than the misleading "ok" the finally
+        # block would otherwise record.
+        pipeline_outcome = "cancelled"
+        raise
     except OllamaError as e:
         pipeline_outcome = "error"
         log.warning("stream deep: ollama error: %s", e)

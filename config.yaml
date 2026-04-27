@@ -17,6 +17,7 @@ model_registry:
     - { name: "qwen3-coder-next:latest",  priority: 100, speed: 60, quality: 95, location: local }
     - { name: "qwen2.5-coder:32b",        priority:  90, speed: 70, quality: 90, location: local }
     - { name: "devstral-small-2:latest",  priority:  85, speed: 85, quality: 82, location: local }
+    - { name: "deepseek-v4-pro:cloud",    priority:  82, speed: 80, quality: 95, location: cloud }
     - { name: "qwen3.6:35b",              priority:  80, speed: 70, quality: 90, location: local }
     - { name: "kimi-k2.6:cloud",          priority:  78, speed: 90, quality: 92, location: cloud }
     - { name: "deepseek-v4-flash:cloud",  priority:  72, speed: 92, quality: 90, location: cloud }
@@ -25,6 +26,7 @@ model_registry:
 
   reasoning:
     - { name: "qwen3.6:35b",              priority: 100, speed: 70, quality: 93, location: local }
+    - { name: "deepseek-v4-pro:cloud",    priority:  97, speed: 80, quality: 95, location: cloud }
     - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 94, location: cloud }
     - { name: "deepseek-r1:32b",          priority:  85, speed: 65, quality: 90, location: local }
     - { name: "nemotron-cascade-2:latest",priority:  80, speed: 65, quality: 88, location: local }
@@ -34,6 +36,7 @@ model_registry:
 
   general:
     - { name: "qwen3.6:35b",              priority: 100, speed: 75, quality: 92, location: local }
+    - { name: "deepseek-v4-pro:cloud",    priority:  97, speed: 80, quality: 95, location: cloud }
     - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 93, location: cloud }
     - { name: "qwen3.5:397b-cloud",       priority:  90, speed: 80, quality: 94, location: cloud }
     - { name: "deepseek-v4-flash:cloud",  priority:  82, speed: 92, quality: 89, location: cloud }
@@ -57,6 +60,7 @@ fast_path:
     - "qwen3-coder-next:latest"
     - "qwen2.5-coder:32b"
     - "devstral-small-2:latest"
+    - "deepseek-v4-pro:cloud"
     - "deepseek-v4-flash:cloud"
     - "deepseek-v3.2:cloud"
     - "qwen3.5:397b-cloud"
@@ -91,20 +95,20 @@ deep_panel:
 # Both workers run in parallel (Ollama Pro caps at 3 concurrent cloud).
 deep_panel_cloud:
   code:
-    workers: ["kimi-k2.6:cloud", "deepseek-v3.2:cloud"]
-    synthesizer: "kimi-k2.6:cloud"
+    workers: ["deepseek-v4-pro:cloud", "kimi-k2.6:cloud"]
+    synthesizer: "deepseek-v4-pro:cloud"
     fallback_synth: "glm-5.1:cloud"
   reasoning:
-    workers: ["kimi-k2.6:cloud", "qwen3.5:397b-cloud"]
-    synthesizer: "kimi-k2.6:cloud"
+    workers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud"]
+    synthesizer: "deepseek-v4-pro:cloud"
     fallback_synth: "glm-5.1:cloud"
   general:
-    workers: ["kimi-k2.6:cloud", "qwen3.5:397b-cloud"]
-    synthesizer: "kimi-k2.6:cloud"
+    workers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud"]
+    synthesizer: "deepseek-v4-pro:cloud"
     fallback_synth: "glm-5.1:cloud"
   vl:
-    workers: ["kimi-k2.6:cloud", "qwen3.5:397b-cloud"]
-    synthesizer: "kimi-k2.6:cloud"
+    workers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud"]
+    synthesizer: "deepseek-v4-pro:cloud"
     fallback_synth: "glm-5.1:cloud"
 
 # ─── Deep panel: local-only (audrey_local) ─────────────────────────────

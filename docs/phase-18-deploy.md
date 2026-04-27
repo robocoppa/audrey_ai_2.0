@@ -116,7 +116,7 @@ required this time — the new code only uses stdlib `asyncio`).
 as they're sent, instead of all at once at the end.
 
 ```bash
-curl -N -sS -X POST -H "Authorization: Bearer $TOKEN" \
+curl -N -sS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"model":"audrey_cloud","stream":true,"messages":[{"role":"user","content":"compare React and Vue in detail, with a focus on state management"}]}' \
   https://chat.builtryte.xyz/v1/chat/completions
@@ -255,30 +255,54 @@ Expected: `"audrey_deep"`, `"audrey_cloud"`, `"audrey_local"`, `"audrey_auto"`,
 
 The whole point of this phase was to add visibility *without* slowing
 anything down. Compare a non-streamed and a streamed run of the same
-prompt and watch the metrics:
+prompt and watch the metrics. Five steps, alternating between **Unraid**
+(metrics snapshots — `/metrics` is LAN-only) and **laptop** (curls go
+through cloudflared, the same path real users take, so any added
+latency surfaces here).
+
+**Step 1 — snapshot metrics. Run on Unraid:**
 
 ```bash
-PROMPT='{"model":"audrey_cloud","stream":false,"messages":[{"role":"user","content":"compare React and Vue, focus on state management"}]}'
-
-# Snapshot metrics before
 docker exec audrey-ai curl -sS http://127.0.0.1:8000/metrics \
   | grep -E '^audrey_(pipeline_seconds_sum|model_seconds_sum)' \
   | grep -E 'mode="deep"|model="' > /tmp/m-before.txt
+```
 
-# Non-streaming run
-curl -sS -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d "$PROMPT" https://chat.builtryte.xyz/v1/chat/completions > /dev/null
+**Step 2 — non-streaming run. Run on laptop:**
 
-# Streaming run (note stream:true)
-PROMPT_STREAM='{"model":"audrey_cloud","stream":true,"messages":[{"role":"user","content":"compare React and Vue, focus on state management"}]}'
-curl -N -sS -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d "$PROMPT_STREAM" https://chat.builtryte.xyz/v1/chat/completions > /dev/null
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"audrey_cloud","stream":false,"messages":[{"role":"user","content":"compare React and Vue, focus on state management"}]}' \
+  https://chat.builtryte.xyz/v1/chat/completions > /dev/null
+```
 
-# Snapshot after
+This will block until the deep panel + synth complete (~30–90s).
+
+**Step 3 — streaming run. Run on laptop:**
+
+```bash
+curl -N -sS -X POST \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"audrey_cloud","stream":true,"messages":[{"role":"user","content":"compare React and Vue, focus on state management"}]}' \
+  https://chat.builtryte.xyz/v1/chat/completions > /dev/null
+```
+
+Same prompt, `stream:true`, `-N` to disable curl buffering.
+
+**Step 4 — snapshot metrics again. Run on Unraid:**
+
+```bash
 docker exec audrey-ai curl -sS http://127.0.0.1:8000/metrics \
   | grep -E '^audrey_(pipeline_seconds_sum|model_seconds_sum)' \
   | grep -E 'mode="deep"|model="' > /tmp/m-after.txt
+```
 
+**Step 5 — diff. Run on Unraid (where the snapshots live):**
+
+```bash
 diff /tmp/m-before.txt /tmp/m-after.txt
 ```
 
@@ -294,7 +318,7 @@ Verify cleanup. From a separate terminal start a long run, then ^C it
 during the dispatch phase:
 
 ```bash
-curl -N -sS -X POST -H "Authorization: Bearer $TOKEN" \
+curl -N -sS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"model":"audrey_cloud","stream":true,"messages":[{"role":"user","content":"write a 1500-word essay about cycle racing"}]}' \
   https://chat.builtryte.xyz/v1/chat/completions
