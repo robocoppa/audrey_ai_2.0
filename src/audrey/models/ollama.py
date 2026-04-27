@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
+
+from audrey.metrics import model_seconds
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +79,7 @@ class OllamaClient:
             payload["options"] = options
         if tools:
             payload["tools"] = tools
+        t0 = time.perf_counter()
         try:
             r = await self._client.post(
                 "/api/chat",
@@ -83,11 +87,17 @@ class OllamaClient:
                 timeout=httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT,
             )
         except httpx.HTTPError as e:
+            model_seconds.labels(model=model, outcome="error").observe(time.perf_counter() - t0)
             # Timeouts, connection errors, etc. Callers catch OllamaError —
             # if we let httpx.* escape, failures bubble up as 500s instead
             # of being retried/skipped by router fallbacks.
             raise OllamaError(f"POST /api/chat transport error: {type(e).__name__}: {e}") from e
-        self._raise_for_status(r, "/api/chat")
+        try:
+            self._raise_for_status(r, "/api/chat")
+        except OllamaError:
+            model_seconds.labels(model=model, outcome="error").observe(time.perf_counter() - t0)
+            raise
+        model_seconds.labels(model=model, outcome="ok").observe(time.perf_counter() - t0)
         return r.json()
 
     async def chat_stream(
@@ -107,10 +117,13 @@ class OllamaClient:
         if options:
             payload["options"] = options
         timeout = httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT
+        t0 = time.perf_counter()
+        outcome = "ok"
         try:
             async with self._client.stream("POST", "/api/chat", json=payload, timeout=timeout) as r:
                 if r.status_code >= 400:
                     body = await r.aread()
+                    outcome = "error"
                     raise OllamaError(f"POST /api/chat -> {r.status_code}: {body.decode('utf-8', 'replace')}")
                 async for line in r.aiter_lines():
                     if not line:
@@ -120,7 +133,10 @@ class OllamaClient:
                     except json.JSONDecodeError:
                         log.warning("Ollama returned non-JSON line: %r", line[:120])
         except httpx.HTTPError as e:
+            outcome = "error"
             raise OllamaError(f"POST /api/chat (stream) transport error: {type(e).__name__}: {e}") from e
+        finally:
+            model_seconds.labels(model=model, outcome=outcome).observe(time.perf_counter() - t0)
 
     # ─── Embeddings ─────────────────────────────────────────────────────
 

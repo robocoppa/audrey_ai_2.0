@@ -14,9 +14,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import Response
 
 from audrey import __version__
 from audrey.config import get_config
+from audrey.metrics import render as render_metrics
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
 from audrey.kb.qdrant import QdrantKB
 from audrey.kb.uploads_db import UploadsDB, reconcile_with_qdrant
@@ -162,6 +164,18 @@ app.include_router(admin_router)
 @app.get("/health", tags=["system"])
 async def health() -> dict[str, str]:
     return {"status": "ok", "version": __version__}
+
+
+@app.get("/metrics", tags=["system"], include_in_schema=False)
+async def metrics() -> Response:
+    """Prometheus text-format exposition.
+
+    Unauthenticated by design — Prometheus convention, and we don't
+    publish the route via cloudflared, so it's effectively LAN-only
+    (Unraid scrapes from the same docker network as audrey-ai).
+    """
+    body, content_type = render_metrics()
+    return Response(content=body, media_type=content_type)
 
 
 @app.get("/v1/tools", tags=["tools"])

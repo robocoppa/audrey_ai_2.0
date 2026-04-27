@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from audrey.metrics import dispatch_total
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry, ModelSpec, TaskType
@@ -63,6 +64,11 @@ async def run_fast_path(
         and spec.name in tool_capable_models
     )
     log.info("fast_path task=%s -> %s (tools=%s)", task, spec.name, "on" if use_tools else "off")
+    dispatch_total.labels(
+        model=spec.name,
+        task_type=str(task),
+        path="fast_react" if use_tools else "fast",
+    ).inc()
 
     if not use_tools:
         try:

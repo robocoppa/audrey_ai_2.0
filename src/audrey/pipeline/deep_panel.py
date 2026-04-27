@@ -35,6 +35,7 @@ import time
 from typing import Any
 
 from audrey.config import Config
+from audrey.metrics import dispatch_total
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
@@ -261,6 +262,12 @@ async def run_panel(
         per_worker_messages = [messages] * len(workers)
 
     capable = tool_capable_models or set()
+    for name, _loc in workers:
+        dispatch_total.labels(
+            model=name,
+            task_type=str(task),
+            path="deep_react" if name in capable else "deep",
+        ).inc()
     coros = [
         _run_one_worker(
             ollama, health, gate,

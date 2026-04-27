@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ from audrey.kb.embed import ImageEmbedder, TextEmbedder
 from audrey.kb.ingest import ingest_many
 from audrey.kb.qdrant import KBHit, QdrantKB
 from audrey.kb.user_store import user_image_collection, user_text_collection
+from audrey.metrics import kb_search_hits, kb_search_seconds
 
 log = logging.getLogger(__name__)
 
@@ -86,8 +88,12 @@ async def kb_query(req: TextQuery, request: Request) -> QueryResponse:
     embedder: TextEmbedder | None = getattr(request.app.state, "text_embedder", None)
     if qdrant is None or embedder is None:
         raise HTTPException(status_code=503, detail="KB is not initialized")
+    t0 = time.perf_counter()
     vec = await embedder.embed_one(req.query)
-    hits = await _search_text_merged(qdrant, vec, top_k=req.top_k, user=req.user)
+    hits, had_user = await _search_text_merged(qdrant, vec, top_k=req.top_k, user=req.user)
+    elapsed = time.perf_counter() - t0
+    kb_search_seconds.labels(kind="text", had_user_collection=str(had_user).lower()).observe(elapsed)
+    kb_search_hits.labels(kind="text").observe(len(hits))
     return QueryResponse(
         query=req.query,
         results=[
@@ -99,31 +105,39 @@ async def kb_query(req: TextQuery, request: Request) -> QueryResponse:
 
 async def _search_text_merged(
     qdrant: QdrantKB, vec: list[float], *, top_k: int, user: str | None,
-) -> list[KBHit]:
-    """Search global kb_text and, if the user has one, their kb_user_text_* too. Merge by score."""
+) -> tuple[list[KBHit], bool]:
+    """Search global kb_text and, if the user has one, their kb_user_text_* too. Merge by score.
+
+    Second return value is True iff the user's private collection was actually
+    merged in (user supplied + collection exists). The metrics label uses it.
+    """
     tasks = [qdrant.search_text(vec, top_k=top_k)]
+    had_user = False
     if user:
         user_col = user_text_collection(user)
         if await qdrant.collection_exists(user_col):
             tasks.append(qdrant.search_text(vec, top_k=top_k, collection=user_col))
+            had_user = True
     results = await asyncio.gather(*tasks)
     merged: list[KBHit] = [h for batch in results for h in batch]
     merged.sort(key=lambda h: h.score, reverse=True)
-    return merged[:top_k]
+    return merged[:top_k], had_user
 
 
 async def _search_images_merged(
     qdrant: QdrantKB, vec: list[float], *, top_k: int, user: str | None,
-) -> list[KBHit]:
+) -> tuple[list[KBHit], bool]:
     tasks = [qdrant.search_images(vec, top_k=top_k)]
+    had_user = False
     if user:
         user_col = user_image_collection(user)
         if await qdrant.collection_exists(user_col):
             tasks.append(qdrant.search_images(vec, top_k=top_k, collection=user_col))
+            had_user = True
     results = await asyncio.gather(*tasks)
     merged: list[KBHit] = [h for batch in results for h in batch]
     merged.sort(key=lambda h: h.score, reverse=True)
-    return merged[:top_k]
+    return merged[:top_k], had_user
 
 
 @router.post("/query/image", response_model=QueryResponse)
@@ -137,6 +151,7 @@ async def kb_query_image(req: ImageQuery, request: Request) -> QueryResponse:
             status_code=422,
             detail="One of query, image_url, or image_b64 is required.",
         )
+    t0 = time.perf_counter()
     try:
         if req.image_url:
             vec = await embedder.embed_url(req.image_url)
@@ -146,7 +161,10 @@ async def kb_query_image(req: ImageQuery, request: Request) -> QueryResponse:
             vec = await embedder.embed_text(req.query or "")
     except Exception as e:  # noqa: BLE001 — surface embed errors as 4xx
         raise HTTPException(status_code=422, detail=f"image embed failed: {e}") from e
-    hits = await _search_images_merged(qdrant, vec, top_k=req.top_k, user=req.user)
+    hits, had_user = await _search_images_merged(qdrant, vec, top_k=req.top_k, user=req.user)
+    elapsed = time.perf_counter() - t0
+    kb_search_seconds.labels(kind="image", had_user_collection=str(had_user).lower()).observe(elapsed)
+    kb_search_hits.labels(kind="image").observe(len(hits))
     return QueryResponse(
         query=req.query,
         results=[

@@ -20,6 +20,7 @@ import time
 from typing import Any
 
 from audrey.config import Config
+from audrey.metrics import dispatch_total
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
@@ -180,6 +181,11 @@ async def synthesize(
             log.warning("synth: %s unhealthy, skipping (attempt %d)", model, attempt)
             continue
         loc = _location_of(model, registry)
+        dispatch_total.labels(
+            model=model,
+            task_type=str(task),
+            path="synth_primary" if attempt == 1 else "synth_fallback",
+        ).inc()
         start = time.monotonic()
         try:
             content, ptok, etok = await _try_synth(

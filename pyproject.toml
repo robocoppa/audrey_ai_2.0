@@ -56,6 +56,9 @@ dependencies = [
 
     # Misc
     "python-dotenv>=1.0",
+
+    # Telemetry (Phase 17 — /metrics endpoint, Prometheus text format)
+    "prometheus-client>=0.21",
 ]
 
 [project.optional-dependencies]

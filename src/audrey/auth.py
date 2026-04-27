@@ -45,6 +45,8 @@ from dataclasses import dataclass
 import httpx
 from fastapi import Depends, Header, HTTPException, Request
 
+from audrey.metrics import auth_cache_size as _auth_cache_size_gauge
+
 log = logging.getLogger(__name__)
 
 _TTL_S: float = 30.0
@@ -81,6 +83,7 @@ def _sweep_cache(now: float) -> None:
     for k, (t, _) in list(_cache.items()):
         if t < cutoff:
             _cache.pop(k, None)
+    _auth_cache_size_gauge.set(len(_cache))
 
 
 async def _probe_owui(owui_url: str, token: str) -> AuthedUser:
@@ -146,6 +149,7 @@ async def require_user(
     user = await _probe_owui(owui_url, token)
 
     _cache[token] = (now, user)
+    _auth_cache_size_gauge.set(len(_cache))
     if len(_cache) > _SWEEP_AT:
         _sweep_cache(now)
     return user
@@ -172,6 +176,7 @@ def clear_auth_cache() -> int:
     """
     n = len(_cache)
     _cache.clear()
+    _auth_cache_size_gauge.set(0)
     return n
 
 

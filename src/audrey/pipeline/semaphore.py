@@ -16,7 +16,10 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import time
 from contextlib import asynccontextmanager
+
+from audrey.metrics import gpu_gate_wait_seconds
 
 
 class GpuGate:
@@ -34,9 +37,15 @@ class GpuGate:
 
     @asynccontextmanager
     async def acquire(self, model: str, *, location: str):
-        """Acquire the gate iff `location == 'local'`. Cloud is a no-op."""
+        """Acquire the gate iff `location == 'local'`. Cloud is a no-op.
+
+        Cloud calls don't pay any gate cost so we don't observe — only local
+        contention belongs in the histogram.
+        """
         if location == "local":
+            t0 = time.perf_counter()
             async with self._sem:
+                gpu_gate_wait_seconds.observe(time.perf_counter() - t0)
                 yield
         else:
             yield

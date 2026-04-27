@@ -21,6 +21,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from audrey import __version__
+from audrey.metrics import pipeline_seconds, pipeline_total
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
@@ -106,6 +107,30 @@ async def chat_completions(payload: ChatCompletionRequest, request: Request):
     return await _generate_via_pipeline(app, payload, messages, options)
 
 
+async def _run_graph_with_metrics(graph, state: dict[str, Any]) -> dict[str, Any]:
+    """Invoke the graph and emit pipeline_seconds + pipeline_total.
+
+    Labels read from the final state (mode/task_type) so the histogram bucket
+    matches the path actually taken. On OllamaError we still observe latency
+    against the requested virtual model with mode=unknown — the error happened
+    before classify could pin a real mode.
+    """
+    t0 = time.perf_counter()
+    try:
+        final = await graph.ainvoke(state)
+    except OllamaError:
+        elapsed = time.perf_counter() - t0
+        pipeline_seconds.labels(mode="unknown", task_type="unknown").observe(elapsed)
+        pipeline_total.labels(mode="unknown", task_type="unknown", outcome="error").inc()
+        raise
+    elapsed = time.perf_counter() - t0
+    mode = str(final.get("mode") or "unknown")
+    task_type = str(final.get("task_type") or "unknown")
+    pipeline_seconds.labels(mode=mode, task_type=task_type).observe(elapsed)
+    pipeline_total.labels(mode=mode, task_type=task_type, outcome="ok").inc()
+    return final
+
+
 async def _generate_via_pipeline(app, payload: ChatCompletionRequest, messages, options):
     """Non-streaming path: invoke the compiled LangGraph and format the result."""
     graph = app.state.graph
@@ -118,7 +143,7 @@ async def _generate_via_pipeline(app, payload: ChatCompletionRequest, messages, 
         "user_id": payload.user or "",
     }
     try:
-        final = await graph.ainvoke(state)
+        final = await _run_graph_with_metrics(graph, state)
     except OllamaError as e:
         raise HTTPException(status_code=502, detail=f"Ollama error: {e}") from e
 
@@ -201,7 +226,7 @@ async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, op
             "user_id": payload.user or "",
         }
         try:
-            final = await graph.ainvoke(state)
+            final = await _run_graph_with_metrics(graph, state)
         except OllamaError as e:
             async for frame in _emit_single_message(
                 payload.model, "error", f"[ollama error: {e}]"
@@ -238,7 +263,7 @@ async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, op
             "user_id": payload.user or "",
         }
         try:
-            final = await graph.ainvoke(state)
+            final = await _run_graph_with_metrics(graph, state)
         except OllamaError as e:
             async for frame in _emit_single_message(
                 payload.model, "error", f"[ollama error: {e}]"
