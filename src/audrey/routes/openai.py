@@ -10,10 +10,12 @@ any other client can consume it unchanged.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -25,8 +27,25 @@ from audrey.metrics import pipeline_seconds, pipeline_total
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
+from audrey.pipeline.banners import (
+    BANNER_DISPATCHING,
+    BANNER_SEPARATOR,
+    BANNER_SYNTHESIZING,
+    BANNER_THINKING,
+    PhaseTicker,
+    worker_fail,
+    worker_ok,
+)
 from audrey.pipeline.classify import classify as classify_fn
 from audrey.pipeline.complexity import is_complex
+from audrey.pipeline.deep_panel import pool_key_for, run_panel_streaming
+from audrey.pipeline.memory import (
+    MEMORY_STORE_TOOL,
+    memory_system_message,
+    recall_for_request,
+)
+from audrey.pipeline.planner import plan as planner_plan
+from audrey.pipeline.synthesize import synthesize as synthesize_fn
 
 log = logging.getLogger(__name__)
 
@@ -215,27 +234,9 @@ async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, op
     )
 
     if use_deep:
-        # Run the compiled graph end-to-end, then emit the synthesized answer.
-        graph = app.state.graph
-        state = {
-            "virtual_model": payload.model,
-            "messages": messages,
-            "temperature": payload.temperature,
-            "top_p": payload.top_p,
-            "max_tokens": payload.max_tokens,
-            "user_id": payload.user or "",
-        }
-        try:
-            final = await _run_graph_with_metrics(graph, state)
-        except OllamaError as e:
-            async for frame in _emit_single_message(
-                payload.model, "error", f"[ollama error: {e}]"
-            ):
-                yield frame
-            return
-        concrete = final.get("concrete_model", "deep_panel")
-        content = final.get("content", "") or "[empty]"
-        async for frame in _emit_single_message(payload.model, concrete, content):
+        async for frame in _stream_deep_with_banners(
+            app, payload, messages, options, task=task, conf=conf,
+        ):
             yield frame
         return
 
@@ -334,6 +335,295 @@ def _to_openai_response(
             "total_tokens": prompt_tokens + completion_tokens,
         },
     }
+
+
+async def _stream_deep_with_banners(
+    app, payload: ChatCompletionRequest, messages, options,
+    *, task: str, conf: float,
+):
+    """Streaming deep path with progress banners (Phase 18).
+
+    Bypasses the compiled graph for streaming so we can emit progress banners
+    between pipeline phases. Workers run with the same scheduling as the
+    non-streaming graph (parallel, gate-bounded for local) — `as_completed`
+    just changes reception order so we can banner per-completion.
+
+    Flow:
+      Thinking phase   → memory recall + planner (already classified upstream)
+      Dispatching      → run_panel_streaming, banner per worker
+      Synthesizing     → synth (non-streamed in phase 18; streams in phase 19)
+      separator + answer
+
+    The `is_complex` / classify decisions happened in the caller; we receive
+    the task type as an arg.
+    """
+    cfg = app.state.cfg
+    ollama: OllamaClient = app.state.ollama
+    registry: ModelRegistry = app.state.registry
+    health: HealthTracker = app.state.health
+    gate = app.state.gate
+    tools = app.state.tools
+    router_cfg = cfg.router
+    agentic = cfg.raw.get("agentic", {}) or {}
+
+    created = int(time.time())
+    cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+    concrete = "deep_panel"
+    fingerprint = f"audrey-{__version__}/{concrete}"
+
+    def _delta_frame(text: str) -> str:
+        frame = {
+            "id": cid, "object": "chat.completion.chunk", "created": created,
+            "model": payload.model, "system_fingerprint": fingerprint,
+            "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
+        }
+        return f"data: {json.dumps(frame)}\n\n"
+
+    def _stop_frame() -> str:
+        frame = {
+            "id": cid, "object": "chat.completion.chunk", "created": created,
+            "model": payload.model, "system_fingerprint": fingerprint,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        }
+        return f"data: {json.dumps(frame)}\n\n"
+
+    # Role delta — required first frame per OpenAI streaming spec.
+    role = {
+        "id": cid, "object": "chat.completion.chunk", "created": created,
+        "model": payload.model, "system_fingerprint": fingerprint,
+        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+    }
+    yield f"data: {json.dumps(role)}\n\n"
+
+    # The banner emitter routes string fragments through a queue so the
+    # ticker's background task is decoupled from the route generator's
+    # frame emission. Bounded queue: slow consumer backpressures the ticker,
+    # never the model.
+    banner_q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=128)
+
+    async def emit(text: str) -> None:
+        await banner_q.put(text)
+
+    t0 = time.perf_counter()
+    pipeline_outcome = "ok"
+    drafts: list[dict[str, Any]] = []
+    final_content = ""
+    synth_model = "deep_panel"
+
+    try:
+        # ── Phase 1: Thinking (memory recall + planner) ─────────────────
+        memory_cfg = agentic.get("memory", {}) or {}
+        memory_enabled = bool(memory_cfg.get("enabled", True))
+        memory_top_k = int(memory_cfg.get("top_k", 3))
+        memory_timeout_s = float(memory_cfg.get("timeout_s", 5))
+        planning_cfg = agentic.get("planning", {}) or {}
+        planning_enabled = bool(planning_cfg.get("enabled", True))
+        planning_min_tokens = int(planning_cfg.get("min_prompt_tokens", 40))
+        planning_max_subtasks = int(planning_cfg.get("max_subtasks", 3))
+        complexity_threshold = int(cfg.raw.get("complexity", {}).get("token_threshold", 500))
+        _, prompt_tokens = is_complex(messages, threshold=complexity_threshold)
+
+        async with PhaseTicker(BANNER_THINKING, emit):
+            think_task = asyncio.create_task(_phase_thinking(
+                ollama=ollama, tools=tools, payload=payload, messages=messages,
+                memory_enabled=memory_enabled, memory_top_k=memory_top_k,
+                memory_timeout_s=memory_timeout_s,
+                planning_enabled=planning_enabled,
+                planning_min_tokens=planning_min_tokens,
+                planning_max_subtasks=planning_max_subtasks,
+                prompt_tokens=prompt_tokens,
+                router_cfg=router_cfg,
+            ))
+            async for frame in _drain_q_until_task(banner_q, think_task, _delta_frame):
+                yield frame
+            messages_with_memory, subtasks = think_task.result()
+        async for frame in _drain_q_now(banner_q, _delta_frame):
+            yield frame
+
+        # ── Phase 2: Dispatching panel ──────────────────────────────────
+        pool_key = pool_key_for(payload.model)
+        cloud_timeout = float(cfg.timeouts.get("cloud", 120))
+        deep_worker_timeout = float(cfg.timeouts.get("deep_worker", 240))
+        timeout_s = cloud_timeout if pool_key == "deep_panel_cloud" else deep_worker_timeout
+        max_workers_cloud = int(agentic.get("max_deep_workers_cloud", 3))
+        fast_path_cfg = cfg.raw.get("fast_path", {}) or {}
+        tool_capable_models = set(fast_path_cfg.get("tool_capable_models", []) or [])
+        react_cfg = agentic.get("react", {}) or {}
+        deep_react_cfg = react_cfg.get("deep_worker", {}) or {}
+        deep_react_max_rounds = int(deep_react_cfg.get("max_rounds", 2))
+        deep_react_compress_after = int(deep_react_cfg.get("compress_after_round",
+            int(react_cfg.get("compress_after_round", 2))))
+        deep_react_max_tool_chars = int(deep_react_cfg.get("max_tool_result_chars",
+            int(react_cfg.get("max_tool_result_chars", 2000))))
+        deep_react_dispatch_timeout = float(deep_react_cfg.get("dispatch_timeout_s",
+            float(react_cfg.get("dispatch_timeout_s", 30))))
+
+        async with PhaseTicker(BANNER_DISPATCHING, emit) as ticker:
+            panel_task = asyncio.create_task(_phase_dispatch(
+                cfg=cfg, ollama=ollama, registry=registry, health=health, gate=gate,
+                pool_key=pool_key, task=task, messages=messages_with_memory,
+                subtasks=subtasks, options=options,
+                timeout_s=timeout_s, max_workers_cloud=max_workers_cloud,
+                tools=tools, tool_capable_models=tool_capable_models,
+                react_max_rounds=deep_react_max_rounds,
+                react_compress_after=deep_react_compress_after,
+                react_max_tool_chars=deep_react_max_tool_chars,
+                react_dispatch_timeout_s=deep_react_dispatch_timeout,
+                user_id=(payload.user or None),
+                ticker=ticker,
+            ))
+            async for frame in _drain_q_until_task(banner_q, panel_task, _delta_frame):
+                yield frame
+            drafts = panel_task.result()
+        async for frame in _drain_q_now(banner_q, _delta_frame):
+            yield frame
+
+        # ── Phase 3: Synthesizing ───────────────────────────────────────
+        async with PhaseTicker(BANNER_SYNTHESIZING, emit):
+            synth_task = asyncio.create_task(synthesize_fn(
+                cfg, ollama, registry, health, gate,
+                pool_key=pool_key, task=task,
+                messages=messages_with_memory, drafts=drafts,
+                subtasks=subtasks, timeout_s=deep_worker_timeout,
+            ))
+            async for frame in _drain_q_until_task(banner_q, synth_task, _delta_frame):
+                yield frame
+            synth_result = synth_task.result()
+            final_content = synth_result.get("content", "") or "[empty]"
+            synth_model = synth_result.get("synthesizer_model", "deep_panel")
+            if synth_result.get("synth_error"):
+                pipeline_outcome = "error"
+        async for frame in _drain_q_now(banner_q, _delta_frame):
+            yield frame
+
+        # ── Separator + answer ──────────────────────────────────────────
+        yield _delta_frame(BANNER_SEPARATOR)
+        yield _delta_frame(final_content)
+        yield _stop_frame()
+        yield "data: [DONE]\n\n"
+
+    except OllamaError as e:
+        pipeline_outcome = "error"
+        log.warning("stream deep: ollama error: %s", e)
+        yield _delta_frame(f"\n\n[ollama error: {e}]")
+        yield _stop_frame()
+        yield "data: [DONE]\n\n"
+    except Exception:  # noqa: BLE001 — surface any other failure cleanly
+        pipeline_outcome = "error"
+        log.exception("stream deep: unexpected error")
+        yield _delta_frame("\n\n[internal error]")
+        yield _stop_frame()
+        yield "data: [DONE]\n\n"
+    finally:
+        elapsed = time.perf_counter() - t0
+        pipeline_seconds.labels(mode="deep", task_type=task).observe(elapsed)
+        pipeline_total.labels(mode="deep", task_type=task, outcome=pipeline_outcome).inc()
+        log.info(
+            "stream deep done model=%s task=%s synth=%s outcome=%s elapsed=%.2fs",
+            payload.model, task, synth_model, pipeline_outcome, elapsed,
+        )
+
+
+async def _drain_q_until_task(
+    q: asyncio.Queue[str | None],
+    task: asyncio.Task[Any],
+    delta_frame: Callable[[str], str],
+):
+    """Yield SSE frames built from queued strings while `task` runs.
+
+    Stops yielding when the task is done AND the queue is empty. Callers
+    should run this *inside* the `async with PhaseTicker(...)` block, then
+    drain once more *after* the block exits — the ticker's __aexit__ pushes
+    the closing fragment (✓/✗ + newline) onto the queue, which lands after
+    this generator returns.
+    """
+    while not task.done() or not q.empty():
+        try:
+            item = await asyncio.wait_for(q.get(), timeout=0.05)
+        except TimeoutError:
+            continue
+        if item is None:
+            continue
+        yield delta_frame(item)
+
+
+async def _drain_q_now(
+    q: asyncio.Queue[str | None],
+    delta_frame: Callable[[str], str],
+):
+    """Yield any remaining frames currently in the queue, then return.
+
+    Used right after a PhaseTicker exits to surface the closing ✓/✗ + newline
+    that __aexit__ pushed onto the queue.
+    """
+    while not q.empty():
+        item = q.get_nowait()
+        if item is None:
+            continue
+        yield delta_frame(item)
+
+
+async def _phase_thinking(
+    *, ollama, tools, payload, messages,
+    memory_enabled, memory_top_k, memory_timeout_s,
+    planning_enabled, planning_min_tokens, planning_max_subtasks,
+    prompt_tokens, router_cfg,
+):
+    """Run memory recall + planner. Returns (messages_with_memory, subtasks)."""
+    msgs = messages
+    if memory_enabled and (payload.user or "").strip():
+        hits = await recall_for_request(
+            tools, user_id=payload.user or "", messages=messages,
+            top_k=memory_top_k, timeout_s=memory_timeout_s,
+        )
+        include_store_hint = tools is not None and MEMORY_STORE_TOOL in tools.by_name
+        sys_msg = memory_system_message(
+            hits, user_id=payload.user or "", include_store_hint=include_store_hint,
+        )
+        if sys_msg is not None:
+            msgs = [sys_msg, *messages]
+
+    subtasks: list[str] = []
+    if planning_enabled and prompt_tokens >= planning_min_tokens:
+        user_text = _last_user_text(messages)
+        subtasks = await planner_plan(
+            ollama,
+            planner_model=router_cfg.get("model", "qwen3:4b"),
+            user_text=user_text,
+            timeout_s=float(router_cfg.get("timeout_s", 20)),
+            max_subtasks=planning_max_subtasks,
+        )
+    return msgs, subtasks
+
+
+async def _phase_dispatch(
+    *, cfg, ollama, registry, health, gate,
+    pool_key, task, messages, subtasks, options,
+    timeout_s, max_workers_cloud,
+    tools, tool_capable_models,
+    react_max_rounds, react_compress_after,
+    react_max_tool_chars, react_dispatch_timeout_s,
+    user_id, ticker: PhaseTicker,
+):
+    """Run the panel and feed per-worker results to the ticker. Returns drafts."""
+    drafts: list[dict[str, Any]] = []
+    async for evt in run_panel_streaming(
+        cfg, ollama, registry, health, gate,
+        pool_key=pool_key, task=task, messages=messages,
+        subtasks=subtasks, options=options,
+        timeout_s=timeout_s, max_workers_cloud=max_workers_cloud,
+        tools=tools, tool_capable_models=tool_capable_models,
+        react_max_rounds=react_max_rounds,
+        react_compress_after=react_compress_after,
+        react_max_tool_chars=react_max_tool_chars,
+        react_dispatch_timeout_s=react_dispatch_timeout_s,
+        user_id=user_id,
+    ):
+        if evt["type"] == "worker_done":
+            ticker.append_tail(worker_ok(evt["model"]) if evt["ok"] else worker_fail(evt["model"]))
+        elif evt["type"] == "final":
+            drafts = list(evt["drafts"])
+    return drafts
 
 
 async def _stream_openai(

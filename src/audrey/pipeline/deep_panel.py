@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import AsyncIterator
 from typing import Any
 
 from audrey.config import Config
@@ -290,4 +291,110 @@ async def run_panel(
     return list(drafts), attempted
 
 
-__all__ = ["pool_key_for", "select_workers", "run_panel"]
+async def run_panel_streaming(
+    cfg: Config,
+    ollama: OllamaClient,
+    registry: ModelRegistry,
+    health: HealthTracker,
+    gate: GpuGate,
+    *,
+    pool_key: str,
+    task: TaskType,
+    messages: list[dict[str, Any]],
+    subtasks: list[str],
+    options: dict[str, Any],
+    timeout_s: float,
+    max_workers_cloud: int,
+    tools: ToolRegistry | None = None,
+    tool_capable_models: set[str] | None = None,
+    react_max_rounds: int = 2,
+    react_compress_after: int = 2,
+    react_max_tool_chars: int = 2000,
+    react_dispatch_timeout_s: float = 30.0,
+    user_id: str | None = None,
+) -> AsyncIterator[dict[str, Any]]:
+    """Streaming variant of `run_panel`.
+
+    Yields one event per worker as it completes (in completion order, not
+    submission order), then a final event carrying the full draft list.
+
+    Workers run with the same scheduling as `run_panel` — `asyncio.as_completed`
+    only changes *reception* order, not *execution* order. Local workers still
+    serialize through the GPU gate; cloud workers still run concurrently up to
+    `max_workers_cloud`. Total wall-clock time is identical to `run_panel`.
+
+    Event shapes:
+      {"type": "worker_done", "model": str, "ok": bool, "elapsed_s": float}
+      {"type": "final", "drafts": list[WorkerDraft], "attempted": list[str]}
+
+    The final event always fires last, even if zero workers were available
+    (drafts=[], attempted=[]). Callers can rely on it as the end-of-stream
+    sentinel.
+    """
+    workers = select_workers(
+        cfg, registry, health,
+        pool_key=pool_key, task=task, max_workers_cloud=max_workers_cloud,
+    )
+    if not workers:
+        log.warning("deep_panel: no healthy pool workers for %s/%s; falling back to registry", pool_key, task)
+        for spec in registry.candidates(task):
+            if not health.is_healthy(spec.name):
+                continue
+            workers.append((spec.name, spec.location))
+            if len(workers) >= 2:
+                break
+    if not workers:
+        yield {"type": "final", "drafts": [], "attempted": []}
+        return
+
+    if subtasks:
+        per_worker_messages = [
+            _messages_for_subtask(messages, subtasks[i % len(subtasks)])
+            for i in range(len(workers))
+        ]
+    else:
+        per_worker_messages = [messages] * len(workers)
+
+    capable = tool_capable_models or set()
+    for name, _loc in workers:
+        dispatch_total.labels(
+            model=name,
+            task_type=str(task),
+            path="deep_react" if name in capable else "deep",
+        ).inc()
+
+    coros = [
+        _run_one_worker(
+            ollama, health, gate,
+            model=name, location=loc,
+            messages=per_worker_messages[i],
+            options=options,
+            timeout_s=timeout_s,
+            tools=tools,
+            tool_capable=(name in capable),
+            react_max_rounds=react_max_rounds,
+            react_compress_after=react_compress_after,
+            react_max_tool_chars=react_max_tool_chars,
+            react_dispatch_timeout_s=react_dispatch_timeout_s,
+            user_id=user_id,
+        )
+        for i, (name, loc) in enumerate(workers)
+    ]
+
+    drafts: list[WorkerDraft] = []
+    for coro in asyncio.as_completed(coros):
+        draft = await coro
+        ok = bool((draft.get("content") or "").strip())
+        drafts.append(draft)
+        yield {
+            "type": "worker_done",
+            "model": draft.get("model", "?"),
+            "ok": ok,
+            "elapsed_s": float(draft.get("elapsed_s", 0.0) or 0.0),
+        }
+
+    attempted = [name for name, _ in workers]
+    yield {"type": "final", "drafts": drafts, "attempted": attempted}
+
+
+__all__ = ["pool_key_for", "select_workers", "run_panel", "run_panel_streaming"]

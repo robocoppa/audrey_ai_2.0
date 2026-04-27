@@ -229,25 +229,214 @@ admin status call re-probes.
 
 ## 4. Wire to Prometheus
 
-This is the part that depends on which Prometheus you run on Unraid.
-The minimum scrape config snippet:
+The Audrey side is done — `/metrics` is up at `http://audrey-ai:8000/metrics`
+on the `ollama-net` bridge. What's missing is a Prometheus *server* to scrape
+it. Below is a from-scratch setup using a separate compose file under
+`/mnt/user/appdata/prometheus/`. If you already have Prometheus running on
+Unraid, skip to §4.4 for the scrape stanza.
+
+### 4.1 Prep the appdata directories
+
+```bash
+mkdir -p /mnt/user/appdata/prometheus/{config,data}
+chown -R nobody:users /mnt/user/appdata/prometheus
+```
+
+`data` is where time-series get persisted (default ~15-day retention; tunable
+later). `config` holds `prometheus.yml`.
+
+### 4.2 Drop the scrape config
+
+Create `/mnt/user/appdata/prometheus/config/prometheus.yml`:
 
 ```yaml
+global:
+  scrape_interval: 15s        # how often each target gets polled
+  evaluation_interval: 15s    # how often alert/recording rules fire
+
 scrape_configs:
   - job_name: audrey
     metrics_path: /metrics
     static_configs:
       - targets: ['audrey-ai:8000']
+        labels:
+          service: audrey-ai
+
+  # Prometheus scraping itself — useful as a "is the scraper alive" canary.
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
 ```
 
-Prereq: the Prometheus container shares the `ollama-net` Docker
-network (or whatever bridge audrey-ai sits on). If they're on
-different bridges, either join them or expose audrey-ai's port to the
-Unraid host and scrape via `host.docker.internal:8000`.
+`audrey-ai:8000` resolves only when Prometheus is on the same docker network
+as the audrey-ai container (next step). 15s is a reasonable default — every
+audrey histogram has buckets that make sense at that resolution.
 
-Verify in Prometheus' targets page (`/targets`) that audrey shows
-`UP` within ~30s. If it's `DOWN` with a `connection refused`, the
-network isn't shared.
+### 4.3 Add Prometheus to compose
+
+Prometheus lives in its own compose file at
+`/mnt/user/appdata/prometheus/compose.yaml`, separate from the audrey repo.
+Keeps observability infra out of the application repo and lets the two
+restart independently.
+
+```yaml
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    networks:
+      - ollama-net
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+
+networks:
+  ollama-net:
+    external: true
+```
+
+Bring it up:
+
+```bash
+cd /mnt/user/appdata/prometheus
+docker compose up -d
+docker compose logs --tail 20
+```
+
+The `external: true` on the network is the same trick `compose.yaml` uses for
+audrey — it joins the existing bridge instead of creating a new one. If you
+forget this, Prometheus will sit on its own bridge and `audrey-ai:8000` won't
+resolve.
+
+### 4.4 Verify Prometheus reaches Audrey
+
+Open `http://<unraid-ip>:9090/targets` in a browser. The `audrey` job should
+show `UP` within ~30s, with `Last Scrape` ticking forward.
+
+If it's `DOWN`:
+
+- `dial tcp: lookup audrey-ai on 127.0.0.11:53: no such host` → Prometheus
+  isn't on `ollama-net`. Fix: re-check the `networks:` block above and that
+  `ollama-net` already exists (`docker network ls | grep ollama-net`).
+- `connection refused` → audrey-ai is restarting or `/metrics` 500'd. Re-run
+  §2 to confirm it's still serving.
+- `403`/`401` → unlikely for /metrics, but if you see it, double-check you
+  didn't accidentally route /metrics through the auth dependency.
+
+Test a query in the Prometheus WebUI (`http://<unraid-ip>:9090/graph`):
+
+```promql
+audrey_pipeline_total
+```
+
+You should see one row per `(mode, task_type, outcome)` combination from
+your earlier smoke tests. If the result is empty, the scrape is failing
+silently — check `/targets` again.
+
+### 4.5 Useful starter queries
+
+These are the six queries the Audrey dashboard in Grafana (§4.7) is built
+from. The Prometheus WebUI itself doesn't save queries — bookmark the URL
+or use Grafana panels for persistence.
+
+```promql
+# Fast vs deep mix over the last 5 minutes
+sum by (mode) (rate(audrey_pipeline_total[5m]))
+
+# p95 pipeline latency by mode
+histogram_quantile(0.95, sum by (mode, le) (rate(audrey_pipeline_seconds_bucket[5m])))
+
+# Top 5 dispatched models in the last hour
+topk(5, sum by (model) (increase(audrey_dispatch_total[1h])))
+
+# KB miss rate (fraction of queries returning 0 hits)
+sum(rate(audrey_kb_search_hits_bucket{le="0"}[5m]))
+  / sum(rate(audrey_kb_search_hits_count[5m]))
+
+# GPU gate p50/p95 wait (only meaningful if you run multiple local prompts)
+histogram_quantile(0.5,  rate(audrey_gpu_gate_wait_seconds_bucket[5m]))
+histogram_quantile(0.95, rate(audrey_gpu_gate_wait_seconds_bucket[5m]))
+
+# Auth cache size right now (gauge — point-in-time, not rate)
+audrey_auth_cache_size
+```
+
+### 4.6 Hot-reloading config
+
+Once Prometheus is up, you don't need to restart the container to add new
+scrape jobs. Edit `prometheus.yml`, then:
+
+```bash
+curl -sS -X POST http://<unraid-ip>:9090/-/reload
+```
+
+If reload returns non-empty body, the new config has a parse error — old
+config stays in effect. Restart only if reload itself fails.
+
+### 4.7 Grafana
+
+Grafana runs alongside Prometheus in the same compose stack at
+`/mnt/user/appdata/prometheus/compose.yaml`. Add the service:
+
+```yaml
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    networks:
+      - ollama-net
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana-data:/var/lib/grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: changeme
+```
+
+Prep the data directory and start it:
+
+```bash
+mkdir -p /mnt/user/appdata/prometheus/grafana-data
+chown -R nobody:users /mnt/user/appdata/prometheus/grafana-data
+cd /mnt/user/appdata/prometheus
+docker compose up -d grafana
+```
+
+Open `http://<unraid-ip>:3000`, log in as `admin` / `changeme`, then walk
+through the first-time setup:
+
+1. **Add the Prometheus data source.** Connections → Data sources → Add new
+   data source → Prometheus. URL: `http://prometheus:9090` (the docker DNS
+   name — works because Grafana and Prometheus share `ollama-net`). Save & test.
+2. **Create the Audrey dashboard.** Dashboards → New → New dashboard.
+3. **Add one panel per query from §4.5.** For each: paste the PromQL into the
+   query field, set the title, choose a viz type:
+   - "Time series" for the rate / quantile queries (fast vs deep, p95
+     latency, GPU gate p50/p95).
+   - "Stat" for the gauge query (auth cache size).
+   - "Bar gauge" or "Stat" for the topk query (top dispatched models).
+4. **Save the dashboard** with a memorable name like "Audrey".
+
+Network gotcha: Grafana resolves `prometheus:9090` only because both
+containers share `ollama-net`. If you ever move Grafana to a different
+bridge, swap the URL to `http://<unraid-ip>:9090`.
+
+Storage gotcha: dashboards live in `./grafana-data`, not in `prometheus.yml`.
+Back up `/mnt/user/appdata/prometheus/grafana-data/grafana.db` if the
+dashboards become important. Or export each dashboard's JSON via the WebUI
+(Dashboard settings → JSON Model → Copy) and check it into a repo.
+
+Password gotcha: change `GF_SECURITY_ADMIN_PASSWORD` from `changeme` to
+something real before exposing port 3000 anywhere outside the LAN. Grafana
+on `:3000` is unauthenticated apart from this.
 
 ---
 
