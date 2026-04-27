@@ -5,12 +5,12 @@ progresses:
 
     > _Thinking_
     > _Thinking._
-    > _Thinking ✓_
+    > _Thinking ✅_
     > _Dispatching panel_
-    > _Dispatching panel..  ✓ kimi-k2.6:cloud_
-    > _Dispatching panel...  ✓ kimi-k2.6:cloud  ✗ qwen3.6:35b_
+    > _Dispatching panel..  ✅ kimi-k2.6:cloud_
+    > _Dispatching panel...  ✅ kimi-k2.6:cloud  ❌ qwen3.6:35b_
     > _Synthesizing_
-    > _Synthesizing ✓_
+    > _Synthesizing ✅_
 
 The `PhaseTicker` is the only public surface. Used as an async context
 manager from the route handler:
@@ -60,13 +60,13 @@ BANNER_SEPARATOR = "\n\n---\n\n"
 # ─── Inline tail fragments (no leading newline; appended in place) ────
 
 def worker_ok(model: str) -> str:
-    """Successful worker → '  ✓ qwen3.6:35b'."""
-    return f"  ✓ {model}"
+    """Successful worker → '  ✅ qwen3.6:35b'."""
+    return f"  ✅ {model}"
 
 
 def worker_fail(model: str) -> str:
-    """Failed worker → '  ✗ qwen3.6:35b'."""
-    return f"  ✗ {model}"
+    """Failed worker → '  ❌ qwen3.6:35b'."""
+    return f"  ❌ {model}"
 
 
 # Type alias — async function that takes a string and yields it as an
@@ -87,7 +87,7 @@ class PhaseTicker:
       __aenter__:  emit header                ('> _Thinking_')
       tick task:   emit '.' every TICK_INTERVAL_S
       append_tail: emit a fragment NOW (interleaves with dots)
-      __aexit__:   cancel ticker, emit ' ✓\\n' (or ' ✗\\n' on error)
+      __aexit__:   cancel ticker, emit ' ✅\\n' (or ' ❌\\n' on error)
     """
 
     def __init__(
@@ -130,8 +130,8 @@ class PhaseTicker:
                 await self._tail_drainer
             except asyncio.CancelledError:
                 pass
-        # Closing mark. ✗ on exception so the user sees the phase failed.
-        closing = " ✗\n" if exc_type is not None else " ✓\n"
+        # Closing mark. ❌ on exception so the user sees the phase failed.
+        closing = " ❌\n" if exc_type is not None else " ✅\n"
         await self._emit(closing)
         # Don't suppress the exception — let it propagate.
         return None

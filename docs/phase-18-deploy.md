@@ -4,7 +4,7 @@
 `audrey_cloud` request stops looking like a frozen tab. Each pipeline phase
 emits a one-line blockquote that grows in place — header on entry, a `.`
 appended every 5s, worker checkmarks/crosses interleaved during dispatch,
-closing ✓ or ✗ on phase exit.
+closing ✅ or ❌ on phase exit.
 
 Why now: phase 17 made deep latency *visible* in metrics. Users still saw
 nothing during the wait. This is the smallest UX improvement that pays back
@@ -15,16 +15,16 @@ What the user sees:
 
 ```
 > _Thinking..._
-> _Thinking ✓_
+> _Thinking ✅_
 > _Dispatching panel_
 > _Dispatching panel.._
-> _Dispatching panel...  ✓ kimi-k2.6:cloud_
-> _Dispatching panel....  ✓ kimi-k2.6:cloud  ✓ glm-4.5:cloud_
-> _Dispatching panel.....  ✓ kimi-k2.6:cloud  ✓ glm-4.5:cloud  ✓ qwen3.6:35b_
-> _Dispatching panel ✓_
+> _Dispatching panel...  ✅ kimi-k2.6:cloud_
+> _Dispatching panel....  ✅ kimi-k2.6:cloud  ✅ glm-4.5:cloud_
+> _Dispatching panel.....  ✅ kimi-k2.6:cloud  ✅ glm-4.5:cloud  ✅ qwen3.6:35b_
+> _Dispatching panel ✅_
 > _Synthesizing_
 > _Synthesizing._
-> _Synthesizing ✓_
+> _Synthesizing ✅_
 
 ---
 
@@ -50,6 +50,14 @@ What changed:
   drives memory_recall → planner → run_panel_streaming → synthesize, with
   a banner per phase. Non-streaming requests still use the compiled graph
   unchanged.
+- **Virtual-model lineup expanded** to five names with strict semantics:
+  `audrey_deep` (always deep, mixed pool), `audrey_cloud` (always deep,
+  cloud pool), `audrey_local` (always deep, local pool), `audrey_auto`
+  (adaptive — fast for short prompts, deep for long), and `audrey_fast`
+  (always fast, no escalation). Previously `audrey_deep` was adaptive;
+  it's now strict so the name matches the behavior. Migration: any OWUI
+  alias that pointed at `audrey_deep` and expected fast short responses
+  should switch to `audrey_auto` or `audrey_fast`.
 
 What stays the same:
 
@@ -119,13 +127,13 @@ spell out, in order:
 
 1. `> _Thinking_` immediately
 2. Possibly one or two `.` after 5s / 10s
-3. ` ✓\n` when memory recall + planner finish
+3. ` ✅\n` when memory recall + planner finish
 4. `> _Dispatching panel_`
-5. Periodic `.` plus `  ✓ {model}` (or `  ✗ {model}` on a failure) as
+5. Periodic `.` plus `  ✅ {model}` (or `  ❌ {model}` on a failure) as
    each worker completes
-6. ` ✓\n` when the panel completes
+6. ` ✅\n` when the panel completes
 7. `> _Synthesizing_` plus `.` ticks
-8. ` ✓\n` when synth finishes
+8. ` ✅\n` when synth finishes
 9. `\n\n---\n\n` separator
 10. The full synthesized answer as one chunk (phase 18 — streamed
     chunk-by-chunk in phase 19)
@@ -157,9 +165,93 @@ classifies as `ok=False` → `worker_fail()`. Confirm by code-reading
 
 To force one in production for verification, take one cloud model offline
 in `config.yaml` (mark `enabled: false`) for the deep-panel pool, redeploy,
-and watch for ✗ in the dispatching banner.
+and watch for ❌ in the dispatching banner.
 
-### 2.4 Performance regression check (most important)
+### 2.4 Virtual-model routing matrix
+
+Verify each virtual model picks the expected mode. The four cases below
+exercise both forced-mode bypasses and the adaptive complexity gate.
+
+The **complexity gate fires at 500 tokens** (`config.yaml:complexity.token_threshold`).
+A prompt that *asks for* an 800-word essay is only ~70 tokens itself — not
+long. To trigger `mode=deep` on `audrey_auto` you need to actually paste
+~500+ tokens of content. The drill below uses
+`tr -dc '[:print:]' </dev/urandom | head -c 3000` to fabricate that.
+
+Run the four curls one at a time on Unraid (or any laptop with
+`$ADMIN_TOKEN` exported):
+
+```bash
+# 1. audrey_deep with a trivial prompt — should be deep (forced)
+curl -sS -X POST \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"audrey_deep","stream":true,"messages":[{"role":"user","content":"hi"}]}' \
+  https://chat.builtryte.xyz/v1/chat/completions > /dev/null
+
+# 2. audrey_fast with a long pasted prompt — should be fast (forced, no escalation)
+LONG=$(tr -dc '[:print:]' </dev/urandom | head -c 3000)
+curl -sS -X POST \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "$(jq -nc --arg c "summarize this: $LONG" '{model:"audrey_fast",stream:true,messages:[{role:"user",content:$c}]}')" \
+  https://chat.builtryte.xyz/v1/chat/completions > /dev/null
+
+# 3. audrey_auto with a trivial prompt — should be fast (under 500 tokens)
+curl -sS -X POST \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"audrey_auto","stream":true,"messages":[{"role":"user","content":"hi"}]}' \
+  https://chat.builtryte.xyz/v1/chat/completions > /dev/null
+
+# 4. audrey_auto with the same long pasted prompt — should be deep (over 500 tokens)
+curl -sS -X POST \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "$(jq -nc --arg c "summarize this: $LONG" '{model:"audrey_auto",stream:true,messages:[{role:"user",content:$c}]}')" \
+  https://chat.builtryte.xyz/v1/chat/completions > /dev/null
+```
+
+Then check the audrey log:
+
+```bash
+docker compose logs --tail 200 audrey-ai 2>&1 | grep 'chat.completions (stream)'
+```
+
+Expected (in order — one line per curl):
+
+```
+chat.completions (stream) model=audrey_deep ... tokens=1   ... mode=deep
+chat.completions (stream) model=audrey_fast ... tokens=900 ... mode=fast
+chat.completions (stream) model=audrey_auto ... tokens=1   ... mode=fast
+chat.completions (stream) model=audrey_auto ... tokens=900 ... mode=deep
+```
+
+(Token counts will vary based on the random content — `tokens=` for the
+two long prompts should be well above 500.)
+
+Failure-mode interpretation:
+
+- `audrey_deep` shows `mode=fast` → `node_complexity` didn't update;
+  the forced-deep set in [graph.py](src/audrey/pipeline/graph.py) is
+  missing `audrey_deep`.
+- `audrey_fast` long-prompt shows `mode=deep` or you see an
+  `escalate: fast→deep` line right after it → escalation-suppression
+  in `route_after_fast_path` didn't land.
+- `audrey_auto` long-prompt shows `mode=fast` despite high token count
+  → check `tokens=` in the log; if it's under 500 the prompt didn't
+  paste through. Re-run with a longer `head -c` value.
+
+Also confirm `/v1/models` lists all five:
+
+```bash
+docker exec audrey-ai curl -sS http://127.0.0.1:8000/v1/models | jq '.data[].id'
+```
+
+Expected: `"audrey_deep"`, `"audrey_cloud"`, `"audrey_local"`, `"audrey_auto"`,
+`"audrey_fast"` (in some order).
+
+### 2.5 Performance regression check (most important)
 
 The whole point of this phase was to add visibility *without* slowing
 anything down. Compare a non-streamed and a streamed run of the same
@@ -196,7 +288,7 @@ streaming adds significantly to `model_seconds_sum` (more than a few
 percent over non-streaming), that's the canary that the queue / ticker
 is somehow blocking model work — investigate.
 
-### 2.5 Disconnect mid-stream
+### 2.6 Disconnect mid-stream
 
 Verify cleanup. From a separate terminal start a long run, then ^C it
 during the dispatch phase:
