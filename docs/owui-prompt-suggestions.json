@@ -1,0 +1,50 @@
+[
+  {
+    "title": ["Search the web", "for current news"],
+    "content": "Use web_search to find the most important AI and machine-learning news from the last 7 days. Return the top 5 stories with a one-sentence summary, the source name, and the date for each."
+  },
+  {
+    "title": ["Look up your knowledge base", "geology question"],
+    "content": "Use kb_search to find references about sedimentary rock layering and depositional environments. Cite each source by filename and quote the most relevant sentence."
+  },
+  {
+    "title": ["Find an image in the KB", "by description"],
+    "content": "Use kb_image_search with the query 'sedimentary rock with visible bedding planes'. Show the top 3 matches with their source filenames and similarity scores."
+  },
+  {
+    "title": ["Search your uploaded files", "with private context"],
+    "content": "Use kb_search to find anything I've uploaded that relates to my current project. Include my user id when searching so my private uploads are included alongside the global KB. List the top 5 hits with filenames and a short excerpt for each."
+  },
+  {
+    "title": ["Save a fact to memory", "for later recall"],
+    "content": "Use memory_store to save the following note. key: 'preferred_editor' value: 'I use Neovim with the LazyVim distribution as my primary editor.' tags: include the user tag for me. Confirm what was stored."
+  },
+  {
+    "title": ["Recall what you remember", "about me"],
+    "content": "Use memory_search to recall everything you've stored about me. Return each memory's key, value, and tags."
+  },
+  {
+    "title": ["Compare two things", "in detail"],
+    "content": "Compare PostgreSQL and SQLite for a self-hosted application that needs to scale from 1 user to 100. Cover schema flexibility, concurrent writes, backup workflow, and operational complexity. Use a table for the side-by-side, then a recommendation paragraph."
+  },
+  {
+    "title": ["Plan a multi-step task", "with subtasks"],
+    "content": "I want to set up Prometheus and Grafana on Unraid to monitor a small home lab with 5 services. Break this into ordered subtasks with rough time estimates, flag the risky steps, and tell me what to verify after each step."
+  },
+  {
+    "title": ["Debug a problem", "step by step"],
+    "content": "My Docker container keeps restarting with exit code 1 right after start. Walk me through a structured debugging plan: what to check first, what each finding would mean, and what command to run for each check. Don't guess at the cause — give me the diagnostic tree."
+  },
+  {
+    "title": ["Write production code", "with constraints"],
+    "content": "Write a FastAPI endpoint POST /v1/health/check that takes a JSON body {service: str, timeout_s: float}, calls GET http://{service}/health with httpx, returns {ok: bool, latency_ms: float, status_code: int}. Use async, handle httpx.HTTPError as a 502, validate timeout_s is between 0.1 and 30. Include the imports and a one-line docstring on the route."
+  },
+  {
+    "title": ["Explain code", "I paste in"],
+    "content": "Explain what this code does, line by line, calling out any non-obvious behavior or possible bugs. Then suggest one concrete improvement and show the diff. Code: [paste your code here]"
+  },
+  {
+    "title": ["Today's news + memory", "personalized digest"],
+    "content": "Use memory_search to find what topics I care about, then use web_search to fetch today's news in those areas. Return a digest of 3-5 stories with one-sentence summaries grouped by topic."
+  }
+]

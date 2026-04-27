@@ -1,8 +1,14 @@
 """OpenAI-compatible routes.
 
-Exposes three virtual models (`audrey_deep`, `audrey_cloud`, `audrey_local`)
-plus `/v1/chat/completions`. Requests go through the pipeline:
-  classify → complexity gate → fast path (Phase 5) | deep stub (Phase 6+).
+Exposes five virtual models plus `/v1/chat/completions`:
+  audrey_deep   — always deep (mixed pool)
+  audrey_cloud  — always deep (cloud-only pool)
+  audrey_local  — always deep (local-only pool)
+  audrey_auto   — adaptive: fast for short prompts, deep for long ones
+  audrey_fast   — always fast (no escalation, even on long prompts)
+
+Requests go through the pipeline:
+  classify → complexity gate → fast path | deep panel + synth.
 
 Response shape is the OpenAI chat-completion contract so Open WebUI and
 any other client can consume it unchanged.
@@ -53,7 +59,13 @@ router = APIRouter(prefix="/v1", tags=["openai"])
 
 # The three virtual models Audrey exposes. Each is a *pipeline mode*, not a
 # real Ollama model. Mapping to concrete models happens inside the pipeline.
-VIRTUAL_MODELS = ("audrey_deep", "audrey_cloud", "audrey_local")
+VIRTUAL_MODELS = (
+    "audrey_deep",   # always deep (mixed pool)
+    "audrey_cloud",  # always deep (cloud-only pool)
+    "audrey_local",  # always deep (local-only pool)
+    "audrey_auto",   # adaptive: fast for short prompts, deep for long ones
+    "audrey_fast",   # always fast (no escalation, even on long prompts)
+)
 
 
 # ─── Schemas (OpenAI-compatible subset) ───────────────────────────────
@@ -204,11 +216,15 @@ async def _generate_via_pipeline(app, payload: ChatCompletionRequest, messages, 
 async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, options):
     """Streaming path.
 
-    For non-complex audrey_deep prompts, we stream a single fast-path model
-    directly (token-by-token). For complex prompts, or for audrey_cloud /
-    audrey_local (always deep), we run the full graph non-streamed and emit
-    the synthesized answer as one chunk — multi-worker + synth can't be
-    coherently token-streamed.
+    Routing is fixed by the virtual model:
+      audrey_deep / audrey_cloud / audrey_local — always deep (banner stream)
+      audrey_fast — always fast (token stream from the picked model)
+      audrey_auto — adaptive: deep when prompt is complex, fast otherwise
+
+    Deep requests run through `_stream_deep_with_banners` (phase 18). Fast
+    requests stream a single model token-by-token; if the chosen model is
+    tool-capable, the request goes through the graph for a ReAct loop and
+    is emitted as one chunk on completion.
     """
     cfg = app.state.cfg
     ollama: OllamaClient = app.state.ollama
@@ -225,8 +241,14 @@ async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, op
         user_text=user_text,
     )
     complex_, n = is_complex(messages, threshold=int(cfg.raw.get("complexity", {}).get("token_threshold", 500)))
-    forced_deep = payload.model in ("audrey_cloud", "audrey_local")
-    use_deep = complex_ or forced_deep
+    forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local")
+    forced_fast = payload.model == "audrey_fast"
+    if forced_deep:
+        use_deep = True
+    elif forced_fast:
+        use_deep = False
+    else:
+        use_deep = complex_  # audrey_auto
 
     log.info(
         "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=%s",

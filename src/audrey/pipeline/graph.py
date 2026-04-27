@@ -17,6 +17,11 @@ memories and prepends any hits as a system message. No-op otherwise.
 short or low-confidence, the graph re-enters in deep mode. `retry?` is the
 reflection loop — at most one extra deep-panel pass.
 
+Virtual-model routing (decided by `node_complexity`):
+  audrey_deep / audrey_cloud / audrey_local — always deep
+  audrey_fast — always fast, escalation suppressed in `route_after_fast_path`
+  audrey_auto — adaptive: deep when prompt ≥ token_threshold, fast otherwise
+
 Both `fast_path` and `deep_panel` workers run ReAct when the chosen model is
 in `fast_path.tool_capable_models` and the tool registry is non-empty. Deep
 workers use `agentic.react.deep_worker.*` (tighter per-worker budget). The
@@ -162,9 +167,14 @@ def build_graph(
 
     async def node_complexity(state: PipelineState) -> dict[str, Any]:
         complex_, n = is_complex(state["messages"], threshold=complexity_threshold)
-        forced_deep = state.get("virtual_model") in ("audrey_cloud", "audrey_local")
+        vm = state.get("virtual_model")
+        forced_deep = vm in ("audrey_deep", "audrey_cloud", "audrey_local")
+        forced_fast = vm == "audrey_fast"
         if forced_deep:
             mode = "deep"
+            reason = "forced_by_virtual_model"
+        elif forced_fast:
+            mode = "fast"
             reason = "forced_by_virtual_model"
         elif complex_:
             mode = "deep"
@@ -294,6 +304,12 @@ def build_graph(
 
     def route_after_fast_path(state: PipelineState) -> str:
         if not escalation_enabled:
+            return "end"
+        if state.get("virtual_model") == "audrey_fast":
+            # audrey_fast is the always-fast virtual model — never escalates,
+            # even on long prompts. Users who want adaptive routing should
+            # use audrey_auto; users who want forced deep should use
+            # audrey_deep / audrey_cloud / audrey_local.
             return "end"
         if state.get("escalated_from_fast"):
             return "end"  # already came from an escalation; don't loop
