@@ -56,7 +56,10 @@ RUN uv pip install --system \
       "lxml>=5.3" \
       "watchdog>=6.0" \
       "pillow>=11.0" \
-      "python-magic>=0.4.27"
+      "python-magic>=0.4.27" \
+      "aiosqlite>=0.20" \
+      "markdown>=3.7" \
+      "prometheus-client>=0.21"
 
 # Copy the package + config
 COPY pyproject.toml /app/pyproject.toml
