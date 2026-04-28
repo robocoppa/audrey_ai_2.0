@@ -52,7 +52,7 @@ from audrey.pipeline.memory import (
     recall_for_request,
 )
 from audrey.pipeline.planner import plan as planner_plan
-from audrey.pipeline.synthesize import synthesize as synthesize_fn
+from audrey.pipeline.synthesize import synthesize_stream
 
 log = logging.getLogger(__name__)
 
@@ -501,29 +501,129 @@ async def _stream_deep_with_banners(
         async for frame in _drain_q_now(banner_q, _delta_frame):
             yield frame
 
-        # ── Phase 3: Synthesizing ───────────────────────────────────────
-        async with PhaseTicker(BANNER_SYNTHESIZING, emit):
-            synth_task = asyncio.create_task(synthesize_fn(
-                cfg, ollama, registry, health, gate,
-                pool_key=pool_key, task=task,
-                messages=messages_with_memory, drafts=drafts,
-                subtasks=subtasks, timeout_s=deep_worker_timeout,
-            ))
-            async for frame in _drain_q_until_task(banner_q, synth_task, _delta_frame):
-                yield frame
-            synth_result = synth_task.result()
-            final_content = synth_result.get("content", "") or "[empty]"
-            synth_model = synth_result.get("synthesizer_model", "deep_panel")
-            if synth_result.get("synth_error"):
-                pipeline_outcome = "error"
-        async for frame in _drain_q_now(banner_q, _delta_frame):
-            yield frame
+        # ── Phase 3: Synthesizing (streaming) ───────────────────────────
+        # Phase 19: synth tokens stream live. The Synthesizing banner runs
+        # while we wait for the first token; on first_token we close the
+        # banner with ✅, emit the separator, and then forward each delta
+        # straight to the client. Mid-stream errors are surfaced inline.
+        synth_done: dict[str, Any] = {}
+        events_q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(maxsize=128)
 
-        # ── Separator + answer ──────────────────────────────────────────
-        yield _delta_frame(BANNER_SEPARATOR)
-        yield _delta_frame(final_content)
-        yield _stop_frame()
-        yield "data: [DONE]\n\n"
+        async def _run_synth_stream() -> None:
+            try:
+                async for evt in synthesize_stream(
+                    cfg, ollama, registry, health, gate,
+                    pool_key=pool_key, task=task,
+                    messages=messages_with_memory, drafts=drafts,
+                    subtasks=subtasks, timeout_s=deep_worker_timeout,
+                ):
+                    await events_q.put(evt)
+            finally:
+                await events_q.put(None)
+
+        synth_task = asyncio.create_task(_run_synth_stream())
+        first_token_seen = False
+        try:
+            async with PhaseTicker(BANNER_SYNTHESIZING, emit):
+                # Pre-first-token: drain banner dots; consume events; on
+                # first_token we exit this `async with` so the ticker emits
+                # its closing ✅, then we move to raw delta forwarding.
+                while not first_token_seen:
+                    drained = False
+                    while not banner_q.empty():
+                        item = banner_q.get_nowait()
+                        if item is not None:
+                            yield _delta_frame(item)
+                            drained = True
+                    try:
+                        evt = await asyncio.wait_for(events_q.get(), timeout=0.05)
+                    except TimeoutError:
+                        if not drained and synth_task.done():
+                            # Generator finished without ever yielding
+                            # first_token (shouldn't happen — generator
+                            # always emits one — but guard anyway).
+                            break
+                        continue
+                    if evt is None:
+                        # Generator finished pre-first-token.
+                        break
+                    etype = evt.get("type")
+                    if etype == "first_token":
+                        first_token_seen = True
+                        synth_model = str(evt.get("model") or synth_model)
+                        break
+                    if etype == "fallback_attempt":
+                        log.info("synth: falling back to %s after %s",
+                                 evt.get("model"), evt.get("error"))
+                        continue
+                    if etype == "delta":
+                        # Should not arrive before first_token — synth_stream
+                        # always emits first_token first. Surface defensively
+                        # without losing the text: stash it for emission once
+                        # the banner closes.
+                        first_token_seen = True
+                        text = evt.get("text", "") or ""
+                        if text:
+                            final_content += text
+                        break
+                    if etype == "done":
+                        synth_done = evt
+                        break
+            # Banner exited with ✅. Drain the closing fragment.
+            async for frame in _drain_q_now(banner_q, _delta_frame):
+                yield frame
+
+            # Separator goes between banner and answer body.
+            yield _delta_frame(BANNER_SEPARATOR)
+
+            # If a delta was consumed pre-first-token (defensive path),
+            # emit it now so we don't drop content.
+            if first_token_seen and final_content and not synth_done:
+                yield _delta_frame(final_content)
+
+            # If first_token actually arrived, the event we consumed above
+            # was just the marker — the next events on the queue are the
+            # deltas. Stream them through.
+            if first_token_seen and not synth_done:
+                while True:
+                    evt = await events_q.get()
+                    if evt is None:
+                        break
+                    etype = evt.get("type")
+                    if etype == "delta":
+                        text = evt.get("text", "") or ""
+                        if text:
+                            final_content += text
+                            yield _delta_frame(text)
+                    elif etype == "done":
+                        synth_done = evt
+                    elif etype == "fallback_attempt":
+                        # Can't happen post-first-token (synth_stream only
+                        # falls back before any tokens), but log defensively.
+                        log.warning("synth: unexpected fallback_attempt mid-stream: %r", evt)
+
+            # Make sure the producer task is finished.
+            await synth_task
+
+            if synth_done:
+                synth_model = str(synth_done.get("synthesizer_model") or synth_model)
+                if not final_content:
+                    final_content = synth_done.get("content", "") or "[empty]"
+                if synth_done.get("synth_error"):
+                    pipeline_outcome = "error"
+            elif not final_content:
+                final_content = "[empty]"
+                pipeline_outcome = "error"
+
+            yield _stop_frame()
+            yield "data: [DONE]\n\n"
+        finally:
+            if not synth_task.done():
+                synth_task.cancel()
+                try:
+                    await synth_task
+                except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                    pass
 
     except asyncio.CancelledError:
         # Client disconnected mid-stream. We can't yield more frames (the

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import AsyncIterator
 from typing import Any
 
 from audrey.config import Config
@@ -109,6 +110,16 @@ def pick_synthesizer(cfg: Config, *, pool_key: str, task: TaskType) -> tuple[str
     return primary, fallback
 
 
+def _build_synth_messages(drafts_block: str) -> list[dict[str, Any]]:
+    return [
+        {"role": "system", "content": _SYNTH_SYSTEM},
+        {"role": "user", "content": (
+            f"Original user request and {drafts_block.count('--- draft ')} drafts follow."
+            f" Produce the final answer now.\n\n{drafts_block}"
+        )},
+    ]
+
+
 async def _try_synth(
     ollama: OllamaClient,
     health: HealthTracker,
@@ -121,13 +132,7 @@ async def _try_synth(
     timeout_s: float,
 ) -> tuple[str, int, int]:
     """Run one synthesizer attempt. Returns (content, prompt_tokens, completion_tokens)."""
-    messages = [
-        {"role": "system", "content": _SYNTH_SYSTEM},
-        {"role": "user", "content": (
-            f"Original user request and {drafts_block.count('--- draft ')} drafts follow."
-            f" Produce the final answer now.\n\n{drafts_block}"
-        )},
-    ]
+    messages = _build_synth_messages(drafts_block)
     async with gate.acquire(model, location=location):
         resp = await ollama.chat(
             model=model,
@@ -221,4 +226,167 @@ async def synthesize(
     }
 
 
-__all__ = ["synthesize", "pick_synthesizer"]
+async def synthesize_stream(
+    cfg: Config,
+    ollama: OllamaClient,
+    registry: ModelRegistry,
+    health: HealthTracker,
+    gate: GpuGate,
+    *,
+    pool_key: str,
+    task: TaskType,
+    messages: list[dict[str, Any]],
+    drafts: list[WorkerDraft],
+    subtasks: list[str],
+    timeout_s: float,
+) -> AsyncIterator[dict[str, Any]]:
+    """Streaming variant of `synthesize` (Phase 19).
+
+    Yields a sequence of events. The route handler interleaves these with
+    progress banners and SSE frames; the non-streaming graph keeps using
+    `synthesize` unchanged.
+
+    Event shapes:
+      {"type": "delta", "text": "..."}
+          A content chunk from the active synthesizer.
+      {"type": "first_token", "model": str}
+          Emitted exactly once, immediately before the first non-empty
+          delta. The route uses this to close the Synthesizing banner
+          and emit the separator before answer text starts streaming.
+      {"type": "fallback_attempt", "model": str, "error": str}
+          Primary synth failed before any tokens; fallback is starting.
+          Purely informational — the route logs it but doesn't surface
+          to the user.
+      {"type": "done", "content": str, "synthesizer_model": str,
+       "synth_error": str, "prompt_eval_count": int, "eval_count": int}
+          Final event. Always emitted exactly once at the end. `content`
+          is the concatenation of all deltas (or the degraded fallback
+          text). `synth_error` is "" on success, or one of:
+            "no_drafts"            — panel produced nothing usable
+            "all_synth_failed"     — both synths errored; longest draft
+                                     emitted as a single delta first
+            "stream_truncated"     — primary synth started streaming then
+                                     errored mid-flight; partial content
+                                     was emitted, error appended
+    """
+    # Edge case: no drafts at all → emit a single delta + done, mirroring
+    # the non-streaming `synthesize` so the route's separator handling is
+    # uniform.
+    if not drafts or all(not (d.get("content") or "").strip() for d in drafts):
+        msg = "[deep panel produced no usable drafts — all workers failed]"
+        yield {"type": "first_token", "model": "none"}
+        yield {"type": "delta", "text": msg}
+        yield {
+            "type": "done",
+            "content": msg,
+            "synthesizer_model": "none",
+            "synth_error": "no_drafts",
+            "prompt_eval_count": 0,
+            "eval_count": 0,
+        }
+        return
+
+    primary, fallback = pick_synthesizer(cfg, pool_key=pool_key, task=task)
+    user_text = _last_user_text(messages)
+    drafts_block = _format_drafts_for_synth(user_text, drafts, subtasks)
+    synth_messages = _build_synth_messages(drafts_block)
+
+    candidates = [primary] if primary == fallback else [primary, fallback]
+
+    accumulated = ""
+    last_chunk: dict[str, Any] = {}
+    chosen_model = ""
+    any_tokens = False
+
+    for attempt, model in enumerate(candidates, start=1):
+        if not health.is_healthy(model):
+            log.warning("synth: %s unhealthy, skipping (attempt %d)", model, attempt)
+            continue
+        loc = _location_of(model, registry)
+        dispatch_total.labels(
+            model=model,
+            task_type=str(task),
+            path="synth_primary" if attempt == 1 else "synth_fallback",
+        ).inc()
+        start = time.monotonic()
+        attempt_started_tokens = False
+        try:
+            async with gate.acquire(model, location=loc):
+                async for chunk in ollama.chat_stream(
+                    model=model,
+                    messages=synth_messages,
+                    options={"temperature": 0.2},
+                    timeout_s=timeout_s,
+                ):
+                    msg_part = chunk.get("message", {}) or {}
+                    text = msg_part.get("content", "") or ""
+                    if text:
+                        if not attempt_started_tokens:
+                            attempt_started_tokens = True
+                            any_tokens = True
+                            chosen_model = model
+                            yield {"type": "first_token", "model": model}
+                        accumulated += text
+                        yield {"type": "delta", "text": text}
+                    if chunk.get("done"):
+                        last_chunk = chunk
+                        break
+            health.record_success(model)
+            log.info("synth: %s ok in %.2fs (attempt %d, streamed=%s)",
+                     model, time.monotonic() - start, attempt, attempt_started_tokens)
+            if accumulated.strip():
+                yield {
+                    "type": "done",
+                    "content": accumulated,
+                    "synthesizer_model": model,
+                    "synth_error": "",
+                    "prompt_eval_count": int(last_chunk.get("prompt_eval_count", 0) or 0),
+                    "eval_count": int(last_chunk.get("eval_count", 0) or 0),
+                }
+                return
+            log.warning("synth: %s returned empty content (attempt %d)", model, attempt)
+        except OllamaError as e:
+            health.record_failure(model, str(e))
+            log.warning("synth: %s failed in %.2fs (attempt %d, streamed=%s): %s",
+                        model, time.monotonic() - start, attempt, attempt_started_tokens, e)
+            if attempt_started_tokens:
+                # Mid-stream failure: partial content already on the wire,
+                # can't fall back. Surface the truncation to the user.
+                trailing = f"\n\n[synth error mid-stream: {e}]"
+                accumulated += trailing
+                yield {"type": "delta", "text": trailing}
+                yield {
+                    "type": "done",
+                    "content": accumulated,
+                    "synthesizer_model": model,
+                    "synth_error": "stream_truncated",
+                    "prompt_eval_count": 0,
+                    "eval_count": 0,
+                }
+                return
+            # No tokens emitted — safe to try the fallback.
+            if attempt < len(candidates):
+                yield {"type": "fallback_attempt",
+                       "model": candidates[attempt], "error": str(e)}
+
+    # Both candidates failed without producing any output. Degrade to the
+    # longest non-empty draft, emitted as a single delta so the route's
+    # downstream rendering is uniform.
+    best = max(drafts, key=lambda d: len(d.get("content") or ""))
+    fallback_text = best.get("content", "") or "[no content]"
+    log.warning("synth: all synthesizers failed; returning longest draft from %s",
+                best.get("model"))
+    if not any_tokens:
+        yield {"type": "first_token", "model": "fallback:longest_draft"}
+    yield {"type": "delta", "text": fallback_text}
+    yield {
+        "type": "done",
+        "content": fallback_text,
+        "synthesizer_model": "fallback:longest_draft",
+        "synth_error": "all_synth_failed",
+        "prompt_eval_count": int(best.get("prompt_eval_count", 0)),
+        "eval_count": int(best.get("eval_count", 0)),
+    }
+
+
+__all__ = ["synthesize", "synthesize_stream", "pick_synthesizer"]
