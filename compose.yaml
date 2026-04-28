@@ -22,6 +22,8 @@ services:
       dockerfile: docker/audrey.Dockerfile
     image: audrey-ai:latest
     container_name: audrey-ai
+    labels:
+      net.unraid.docker.icon: "${AUDREY_REPO_DIR:-/mnt/user/appdata/audrey_ai_2.0}/images/audrey.png"
     restart: unless-stopped
     networks:
       - ollama-net
@@ -54,6 +56,8 @@ services:
       dockerfile: docker/custom-tools.Dockerfile
     image: audrey-custom-tools
     container_name: custom-tools
+    labels:
+      net.unraid.docker.icon: "${AUDREY_REPO_DIR:-/mnt/user/appdata/audrey_ai_2.0}/images/toolbox.png"
     restart: unless-stopped
     networks:
       - ollama-net
