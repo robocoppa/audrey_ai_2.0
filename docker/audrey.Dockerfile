@@ -31,40 +31,28 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Runtime deps. Phase 8 adds the KB stack: qdrant-client for the vector
-# store, sentence-transformers+torch for CLIP image embeddings (text
-# embeddings go through ollama), pypdf/python-docx/beautifulsoup4 for
-# document loaders, watchdog for the dataset auto-ingest watcher.
-RUN uv pip install --system \
-      "fastapi>=0.115" \
-      "uvicorn[standard]>=0.32" \
-      "python-multipart>=0.0.12" \
-      "httpx>=0.28" \
-      "pydantic>=2.9" \
-      "pydantic-settings>=2.6" \
-      "pyyaml>=6.0.2" \
-      "tenacity>=9.0" \
-      "tiktoken>=0.8" \
-      "langgraph>=0.2.60" \
-      "langchain-core>=0.3.28" \
-      "python-dotenv>=1.0" \
-      "qdrant-client>=1.12" \
-      "sentence-transformers>=3.2" \
-      "pypdf>=5.1" \
-      "python-docx>=1.1" \
-      "beautifulsoup4>=4.12" \
-      "lxml>=5.3" \
-      "watchdog>=6.0" \
-      "pillow>=11.0" \
-      "python-magic>=0.4.27" \
-      "aiosqlite>=0.20" \
-      "markdown>=3.7" \
-      "prometheus-client>=0.21"
-
-# Copy the package + config
+# Phase 21: install from pyproject.toml so deps live in one place. Adding
+# a new runtime dep is now a single edit to pyproject.toml — no Dockerfile
+# change needed. Tradeoff: the install layer invalidates on any source
+# change because hatchling needs the package source to build the wheel,
+# so `docker build` runs install on every code change rather than only
+# when deps change. Acceptable to never re-trip over the pre-Phase-21
+# footgun: adding a dep to pyproject alone (forgetting the Dockerfile's
+# hardcoded list) crashed the container at import time. Bit us with
+# aiosqlite (Phase 15) and prometheus-client (Phase 17).
+#
+# Layout note: the wheel is built with `[tool.hatch.build] packages = ["src/audrey"]`,
+# which expects the source at /app/src/audrey at build time. We copy it
+# there for the build, then expose it at /app/audrey via symlink so the
+# historical PYTHONPATH=/app + `import audrey` still resolves the live
+# source. (PYTHONPATH wins over site-packages — runtime edits to
+# /app/audrey/* are reflected without rebuilding the wheel.)
 COPY pyproject.toml /app/pyproject.toml
-COPY config.yaml    /app/config.yaml
-COPY src/audrey     /app/audrey
+COPY README.md      /app/README.md
+COPY src/audrey     /app/src/audrey
+RUN uv pip install --system . && ln -s /app/src/audrey /app/audrey
+
+COPY config.yaml /app/config.yaml
 
 EXPOSE 8000
 

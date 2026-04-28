@@ -23,7 +23,7 @@ services:
     image: audrey-ai:latest
     container_name: audrey-ai
     labels:
-      net.unraid.docker.icon: "${AUDREY_REPO_DIR:-/mnt/user/appdata/audrey_ai_2.0}/images/audrey.png"
+      net.unraid.docker.icon: "${AUDREY_REPO_DIR:-/mnt/user/appdata/audrey_ai_2.0}/images/audrey2.png"
     restart: unless-stopped
     networks:
       - ollama-net

@@ -23,7 +23,14 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Install dependencies first so they cache independently of source changes
+# Install dependencies first so they cache independently of source changes.
+#
+# Phase 21 note: the audrey-ai Dockerfile installs from `pyproject.toml` via
+# `uv pip install --system .`, but tools-server has a flat-script layout
+# (no `src/<pkg>/` wrapper, just `app.py` / `brave.py` / `db.py` / `settings.py`)
+# which hatchling can't cleanly wheel-build. So this list stays manual.
+# **If you add a dep to tools-server/pyproject.toml, also add it here** —
+# Phase 12 hit this with qdrant-client when only pyproject was edited.
 COPY tools-server/pyproject.toml /app/pyproject.toml
 RUN uv pip install --system \
       "fastapi>=0.115" \
