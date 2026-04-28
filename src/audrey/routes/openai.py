@@ -44,6 +44,7 @@ from audrey.pipeline.banners import (
 )
 from audrey.pipeline.classify import classify as classify_fn
 from audrey.pipeline.complexity import is_complex
+from audrey.pipeline.context import datetime_system_message
 from audrey.pipeline.deep_panel import pool_key_for, run_panel_streaming
 from audrey.pipeline.memory import (
     MEMORY_STORE_TOOL,
@@ -598,8 +599,10 @@ async def _phase_thinking(
     planning_enabled, planning_min_tokens, planning_max_subtasks,
     prompt_tokens, router_cfg,
 ):
-    """Run memory recall + planner. Returns (messages_with_memory, subtasks)."""
-    msgs = messages
+    """Run datetime injection + memory recall + planner. Returns (messages_with_context, subtasks)."""
+    # Datetime first so it sits at the top of the system-message stack.
+    # Mirrors what node_datetime does for the non-streaming graph.
+    msgs = [datetime_system_message(), *messages]
     if memory_enabled and (payload.user or "").strip():
         hits = await recall_for_request(
             tools, user_id=payload.user or "", messages=messages,
@@ -610,7 +613,7 @@ async def _phase_thinking(
             hits, user_id=payload.user or "", include_store_hint=include_store_hint,
         )
         if sys_msg is not None:
-            msgs = [sys_msg, *messages]
+            msgs = [msgs[0], sys_msg, *messages]
 
     subtasks: list[str] = []
     if planning_enabled and prompt_tokens >= planning_min_tokens:

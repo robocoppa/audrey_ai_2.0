@@ -2,14 +2,18 @@
 
 Phase 11 build:
 
-    memory_recall ─► classify ─► complexity ─► fast_path ─► escalate? ─► END
-                                           ╲                          ╲
-                                            ╲                          └► planner ─► deep_panel ─► synthesize ─► reflect ─► retry?
-                                             ╲                                                                            ↺ deep_panel
-                                              ╲                                                                          → END
-                                               └► planner (when complex=True) ─► deep_panel ─► …
+    datetime ─► memory_recall ─► classify ─► complexity ─► fast_path ─► escalate? ─► END
+                                                       ╲                          ╲
+                                                        ╲                          └► planner ─► deep_panel ─► synthesize ─► reflect ─► retry?
+                                                         ╲                                                                            ↺ deep_panel
+                                                          ╲                                                                          → END
+                                                           └► planner (when complex=True) ─► deep_panel ─► …
 
-`memory_recall` (Phase 11) runs first: when `state["user_id"]` is set and
+`datetime` (Phase 18 follow-up) prepends a system message with the
+current ISO-8601 server time so every downstream node sees the same
+timestamp. See `pipeline/context.py`.
+
+`memory_recall` (Phase 11) runs next: when `state["user_id"]` is set and
 the `memory_search` tool is registered, it keyword-searches the user's
 memories and prepends any hits as a system message. No-op otherwise.
 
@@ -42,6 +46,7 @@ from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.classify import classify as classify_fn
 from audrey.pipeline.complexity import is_complex
+from audrey.pipeline.context import datetime_system_message
 from audrey.pipeline.deep_panel import pool_key_for, run_panel
 from audrey.pipeline.fast_path import run_fast_path
 from audrey.pipeline.memory import (
@@ -114,6 +119,16 @@ def build_graph(
     max_workers_cloud = int(agentic.get("max_deep_workers_cloud", 3))
 
     # ── Nodes ─────────────────────────────────────────────────────────
+
+    async def node_datetime(state: PipelineState) -> dict[str, Any]:
+        """Prepend a system message with the current date/time.
+
+        Runs first so every downstream node — memory_recall, classify,
+        fast_path, deep_panel workers, synth — sees the same timestamp.
+        Cheap, no network calls; just a string + a list prepend.
+        """
+        sys_msg = datetime_system_message()
+        return {"messages": [sys_msg, *state["messages"]]}
 
     async def node_memory_recall(state: PipelineState) -> dict[str, Any]:
         """Keyword-search the user's memories, inject hits + store-hint as system message.
@@ -353,6 +368,7 @@ def build_graph(
     # ── Graph wiring ──────────────────────────────────────────────────
 
     g: StateGraph = StateGraph(PipelineState)
+    g.add_node("datetime", node_datetime)
     g.add_node("memory_recall", node_memory_recall)
     g.add_node("classify", node_classify)
     g.add_node("complexity", node_complexity)
@@ -363,7 +379,8 @@ def build_graph(
     g.add_node("synthesize", node_synthesize)
     g.add_node("reflect", node_reflect)
 
-    g.set_entry_point("memory_recall")
+    g.set_entry_point("datetime")
+    g.add_edge("datetime", "memory_recall")
     g.add_edge("memory_recall", "classify")
     g.add_edge("classify", "complexity")
     g.add_conditional_edges(
