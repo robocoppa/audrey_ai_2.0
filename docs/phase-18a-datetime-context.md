@@ -62,28 +62,49 @@ No env vars. No image-level changes (stdlib `datetime` only).
 
 ## 2. OWUI side — user local timezone (recommended)
 
-OWUI supports template variables in system prompts. Set a global
-system prompt that injects the *user's browser-local* time alongside
-audrey's server-side injection. Both pieces matter — server time
-covers programmatic clients, user-local covers timezone-sensitive
-questions.
+OWUI v0.9.x has no single "default system prompt" admin field —
+system prompts are configured **per model**. So this is a
+once-per-audrey-alias setup, not a global flip.
 
-In OWUI: **Admin Panel → Settings → General → Default System Prompt**:
+OWUI supports template variables in system prompts; it substitutes
+them client-side (from the browser's clock) before sending the
+request to audrey. Adding the user's local time and timezone to
+each audrey model alias means the model sees both the server-side
+injection (always) and the user-local injection (when the request
+came through OWUI).
+
+**For each audrey model alias** (DeepThink, Cloud-only, whatever
+names point at `audrey_*`):
+
+1. **Admin Panel → Models** (or Workspace → Models depending on
+   v0.9.x layout — Admin Panel → Models is the v0.9.2 path you
+   confirmed earlier)
+2. Click the **pencil/edit** icon on the model row
+3. Scroll to **System Prompt** (under Model Params, near the
+   Advanced Params section)
+4. Add:
 
 ```
 User local date and time: {{CURRENT_DATETIME}}
 User timezone: {{CURRENT_TIMEZONE}}
 ```
 
-OWUI substitutes both values client-side (from the browser's clock)
-before sending the request to audrey. The model sees:
+5. **Save & Update** at the bottom
 
-1. Audrey's `Current server date and time: 2026-04-27T...` (always)
+Repeat for each audrey alias. After this is set, the model sees:
+
+1. Audrey's `Current server date and time: 2026-04-27T...` (always —
+   from `node_datetime` / `_phase_thinking`)
 2. OWUI's `User local date and time: 2026-04-27T... User timezone: ...`
-   (when the user is on OWUI; programmatic clients won't have this)
+   (only when the request came through OWUI; programmatic clients —
+   curl, scripts, the prompt-suggestion JSON — won't see this)
 
 Order doesn't matter — both are system messages, the model can
 reconcile them.
+
+**If you want this for non-audrey models too** (raw ollama models,
+other providers), repeat the same per-model setup. There's no
+shortcut in v0.9.x.
 
 ---
 
