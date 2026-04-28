@@ -41,7 +41,7 @@ from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.react import ReactResult, run_react
-from audrey.pipeline.semaphore import GpuGate
+from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.state import TaskType, WorkerDraft
 from audrey.tools.discovery import ToolRegistry
 
@@ -104,7 +104,7 @@ def select_workers(
 async def _run_one_worker(
     ollama: OllamaClient,
     health: HealthTracker,
-    gate: GpuGate,
+    gate: FairLocalGate,
     *,
     model: str,
     location: str,
@@ -129,7 +129,7 @@ async def _run_one_worker(
     start = time.monotonic()
     use_tools = bool(tool_capable and tools is not None and tools.by_name)
     try:
-        async with gate.acquire(model, location=location):
+        async with gate.acquire(model, location=location, user_id=user_id):
             if use_tools:
                 react: ReactResult = await run_react(
                     ollama, health, tools,  # type: ignore[arg-type]
@@ -212,7 +212,7 @@ async def run_panel(
     ollama: OllamaClient,
     registry: ModelRegistry,
     health: HealthTracker,
-    gate: GpuGate,
+    gate: FairLocalGate,
     *,
     pool_key: str,
     task: TaskType,
@@ -296,7 +296,7 @@ async def run_panel_streaming(
     ollama: OllamaClient,
     registry: ModelRegistry,
     health: HealthTracker,
-    gate: GpuGate,
+    gate: FairLocalGate,
     *,
     pool_key: str,
     task: TaskType,

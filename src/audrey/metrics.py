@@ -117,6 +117,18 @@ auth_cache_size = Gauge(
     "Number of OWUI bearer tokens currently cached.",
 )
 
+# ─── Per-user in-flight cap (Phase 20) ────────────────────────────────
+
+# Most slot acquires are immediate (0 bucket). Long tail catches users
+# parked behind their own concurrent requests.
+_INFLIGHT_BUCKETS = (0.0, 0.05, 0.5, 2.0, 10.0, 30.0, 120.0)
+
+user_inflight_blocked_seconds = Histogram(
+    "audrey_user_inflight_blocked_seconds",
+    "Time waited at the per-user in-flight cap before the request started running.",
+    buckets=_INFLIGHT_BUCKETS,
+)
+
 
 def render() -> tuple[bytes, str]:
     """Serialize the default registry. Returns (body, content_type)."""
@@ -133,4 +145,5 @@ __all__ = [
     "kb_search_seconds",
     "kb_search_hits",
     "auth_cache_size",
+    "user_inflight_blocked_seconds",
 ]

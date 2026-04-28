@@ -26,10 +26,11 @@ from audrey.kb.watcher import KBWatcher
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
+from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.graph import build_graph
-from audrey.pipeline.semaphore import GpuGate
 from audrey.routes.admin import router as admin_router
 from audrey.routes.files import router as files_router
+from audrey.routes.inflight import UserInflightRegistry
 from audrey.routes.kb import router as kb_router
 from audrey.routes.openai import router as openai_router
 from audrey.routes.upload_ui import router as upload_ui_router
@@ -53,7 +54,12 @@ async def lifespan(app: FastAPI):
     registry = ModelRegistry(cfg)
     health = HealthTracker()
     gpu_concurrency = int(cfg.raw.get("gpu", {}).get("concurrency", 1))
-    gate = GpuGate(concurrency=gpu_concurrency)
+    gate = FairLocalGate(concurrency=gpu_concurrency)
+    fairness_cfg = cfg.raw.get("fairness", {}) or {}
+    inflight = UserInflightRegistry(
+        max_inflight_per_user=int(fairness_cfg.get("max_inflight_per_user", 3)),
+        max_tracked_users=int(fairness_cfg.get("max_tracked_users", 1024)),
+    )
 
     tool_servers: list[str] = list(cfg.tools.get("servers", []) or [])
     tools_enabled = bool(cfg.tools.get("enabled", True))
@@ -116,6 +122,7 @@ async def lifespan(app: FastAPI):
     app.state.registry = registry
     app.state.health = health
     app.state.gate = gate
+    app.state.inflight = inflight
     app.state.tools = tool_registry
     app.state.graph = graph
     app.state.qdrant = qdrant
@@ -125,9 +132,11 @@ async def lifespan(app: FastAPI):
     app.state.kb_watcher = watcher
 
     log.info(
-        "ready: ollama=%s; task types=%s; gpu_concurrency=%d; tools=%d (%s); "
+        "ready: ollama=%s; task types=%s; gpu_concurrency=%d; "
+        "max_inflight_per_user=%d; tools=%d (%s); "
         "qdrant=%s:%d; kb_watcher=%s; pipeline=compiled",
         cfg.env.ollama_host, registry.all_task_types(), gpu_concurrency,
+        inflight.max_per_user,
         len(tool_registry.by_name), tool_registry.names(),
         cfg.env.qdrant_host, cfg.env.qdrant_port,
         "on" if watcher is not None else "off",

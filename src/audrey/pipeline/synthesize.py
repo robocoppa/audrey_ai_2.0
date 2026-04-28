@@ -26,7 +26,7 @@ from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.deep_panel import _location_of
-from audrey.pipeline.semaphore import GpuGate
+from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.state import TaskType, WorkerDraft
 
 log = logging.getLogger(__name__)
@@ -123,17 +123,18 @@ def _build_synth_messages(drafts_block: str) -> list[dict[str, Any]]:
 async def _try_synth(
     ollama: OllamaClient,
     health: HealthTracker,
-    gate: GpuGate,
+    gate: FairLocalGate,
     *,
     model: str,
     location: str,
     user_text: str,
     drafts_block: str,
     timeout_s: float,
+    user_id: str | None = None,
 ) -> tuple[str, int, int]:
     """Run one synthesizer attempt. Returns (content, prompt_tokens, completion_tokens)."""
     messages = _build_synth_messages(drafts_block)
-    async with gate.acquire(model, location=location):
+    async with gate.acquire(model, location=location, user_id=user_id):
         resp = await ollama.chat(
             model=model,
             messages=messages,
@@ -154,7 +155,7 @@ async def synthesize(
     ollama: OllamaClient,
     registry: ModelRegistry,
     health: HealthTracker,
-    gate: GpuGate,
+    gate: FairLocalGate,
     *,
     pool_key: str,
     task: TaskType,
@@ -162,6 +163,7 @@ async def synthesize(
     drafts: list[WorkerDraft],
     subtasks: list[str],
     timeout_s: float,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     """Return a dict to merge into PipelineState.
 
@@ -198,6 +200,7 @@ async def synthesize(
                 model=model, location=loc,
                 user_text=user_text, drafts_block=drafts_block,
                 timeout_s=timeout_s,
+                user_id=user_id,
             )
             log.info("synth: %s ok in %.2fs (attempt %d)", model, time.monotonic() - start, attempt)
             if content.strip():
@@ -231,7 +234,7 @@ async def synthesize_stream(
     ollama: OllamaClient,
     registry: ModelRegistry,
     health: HealthTracker,
-    gate: GpuGate,
+    gate: FairLocalGate,
     *,
     pool_key: str,
     task: TaskType,
@@ -239,6 +242,7 @@ async def synthesize_stream(
     drafts: list[WorkerDraft],
     subtasks: list[str],
     timeout_s: float,
+    user_id: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Streaming variant of `synthesize` (Phase 19).
 
@@ -311,7 +315,7 @@ async def synthesize_stream(
         start = time.monotonic()
         attempt_started_tokens = False
         try:
-            async with gate.acquire(model, location=loc):
+            async with gate.acquire(model, location=loc, user_id=user_id):
                 async for chunk in ollama.chat_stream(
                     model=model,
                     messages=synth_messages,

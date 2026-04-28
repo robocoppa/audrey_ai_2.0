@@ -166,6 +166,7 @@ async def _run_graph_with_metrics(graph, state: dict[str, Any]) -> dict[str, Any
 async def _generate_via_pipeline(app, payload: ChatCompletionRequest, messages, options):
     """Non-streaming path: invoke the compiled LangGraph and format the result."""
     graph = app.state.graph
+    inflight = app.state.inflight
     state = {
         "virtual_model": payload.model,
         "messages": messages,
@@ -174,10 +175,11 @@ async def _generate_via_pipeline(app, payload: ChatCompletionRequest, messages, 
         "max_tokens": payload.max_tokens,
         "user_id": payload.user or "",
     }
-    try:
-        final = await _run_graph_with_metrics(graph, state)
-    except OllamaError as e:
-        raise HTTPException(status_code=502, detail=f"Ollama error: {e}") from e
+    async with inflight.slot(payload.user):
+        try:
+            final = await _run_graph_with_metrics(graph, state)
+        except OllamaError as e:
+            raise HTTPException(status_code=502, detail=f"Ollama error: {e}") from e
 
     extra = ""
     if final.get("mode") == "deep":
@@ -231,80 +233,82 @@ async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, op
     ollama: OllamaClient = app.state.ollama
     registry: ModelRegistry = app.state.registry
     health: HealthTracker = app.state.health
+    inflight = app.state.inflight
     router_cfg = cfg.router
 
-    user_text = _last_user_text(messages)
-    task, reason, conf = await classify_fn(
-        ollama,
-        router_model=router_cfg.get("model", "qwen3:4b"),
-        router_timeout_s=float(router_cfg.get("timeout_s", 20)),
-        max_router_strikes=int(router_cfg.get("max_failures_before_fallback", 2)),
-        user_text=user_text,
-    )
-    complex_, n = is_complex(messages, threshold=int(cfg.raw.get("complexity", {}).get("token_threshold", 500)))
-    forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local")
-    forced_fast = payload.model == "audrey_fast"
-    if forced_deep:
-        use_deep = True
-    elif forced_fast:
-        use_deep = False
-    else:
-        use_deep = complex_  # audrey_auto
+    async with inflight.slot(payload.user):
+        user_text = _last_user_text(messages)
+        task, reason, conf = await classify_fn(
+            ollama,
+            router_model=router_cfg.get("model", "qwen3:4b"),
+            router_timeout_s=float(router_cfg.get("timeout_s", 20)),
+            max_router_strikes=int(router_cfg.get("max_failures_before_fallback", 2)),
+            user_text=user_text,
+        )
+        complex_, n = is_complex(messages, threshold=int(cfg.raw.get("complexity", {}).get("token_threshold", 500)))
+        forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local")
+        forced_fast = payload.model == "audrey_fast"
+        if forced_deep:
+            use_deep = True
+        elif forced_fast:
+            use_deep = False
+        else:
+            use_deep = complex_  # audrey_auto
 
-    log.info(
-        "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=%s",
-        payload.model, task, reason, conf, n, "deep" if use_deep else "fast",
-    )
+        log.info(
+            "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=%s",
+            payload.model, task, reason, conf, n, "deep" if use_deep else "fast",
+        )
 
-    if use_deep:
-        async for frame in _stream_deep_with_banners(
-            app, payload, messages, options, task=task, conf=conf,
-        ):
-            yield frame
-        return
-
-    spec = registry.first_healthy(task, health.is_healthy)
-    if spec is None:
-        async for frame in _emit_single_message(
-            payload.model, "none", f"[no healthy model for task={task}]"
-        ):
-            yield frame
-        return
-
-    # If the chosen model is tool-capable and tools are registered, route
-    # the streaming request through the graph so the ReAct loop can fire.
-    # Mid-stream tool dispatch isn't supported in Phase 7 — we emit one chunk.
-    tool_capable = set(cfg.raw.get("fast_path", {}).get("tool_capable_models", []) or [])
-    tools_active = bool(app.state.tools.by_name) and spec.name in tool_capable
-    if tools_active:
-        graph = app.state.graph
-        state = {
-            "virtual_model": payload.model,
-            "messages": messages,
-            "temperature": payload.temperature,
-            "top_p": payload.top_p,
-            "max_tokens": payload.max_tokens,
-            "user_id": payload.user or "",
-        }
-        try:
-            final = await _run_graph_with_metrics(graph, state)
-        except OllamaError as e:
-            async for frame in _emit_single_message(
-                payload.model, "error", f"[ollama error: {e}]"
+        if use_deep:
+            async for frame in _stream_deep_with_banners(
+                app, payload, messages, options, task=task, conf=conf,
             ):
                 yield frame
             return
-        concrete = final.get("concrete_model", spec.name)
-        content = final.get("content", "") or "[empty]"
-        async for frame in _emit_single_message(payload.model, concrete, content):
-            yield frame
-        return
 
-    timeout = float(cfg.timeouts.get("fast_path", 180))
-    async for frame in _stream_openai(
-        ollama, payload.model, spec.name, messages, options, timeout_s=timeout, health=health,
-    ):
-        yield frame
+        spec = registry.first_healthy(task, health.is_healthy)
+        if spec is None:
+            async for frame in _emit_single_message(
+                payload.model, "none", f"[no healthy model for task={task}]"
+            ):
+                yield frame
+            return
+
+        # If the chosen model is tool-capable and tools are registered, route
+        # the streaming request through the graph so the ReAct loop can fire.
+        # Mid-stream tool dispatch isn't supported in Phase 7 — we emit one chunk.
+        tool_capable = set(cfg.raw.get("fast_path", {}).get("tool_capable_models", []) or [])
+        tools_active = bool(app.state.tools.by_name) and spec.name in tool_capable
+        if tools_active:
+            graph = app.state.graph
+            state = {
+                "virtual_model": payload.model,
+                "messages": messages,
+                "temperature": payload.temperature,
+                "top_p": payload.top_p,
+                "max_tokens": payload.max_tokens,
+                "user_id": payload.user or "",
+            }
+            try:
+                final = await _run_graph_with_metrics(graph, state)
+            except OllamaError as e:
+                async for frame in _emit_single_message(
+                    payload.model, "error", f"[ollama error: {e}]"
+                ):
+                    yield frame
+                return
+            concrete = final.get("concrete_model", spec.name)
+            content = final.get("content", "") or "[empty]"
+            async for frame in _emit_single_message(payload.model, concrete, content):
+                yield frame
+            return
+
+        timeout = float(cfg.timeouts.get("fast_path", 180))
+        async for frame in _stream_openai(
+            ollama, payload.model, spec.name, messages, options, timeout_s=timeout, health=health,
+        ):
+            yield frame
 
 
 def _last_user_text(messages):
@@ -516,6 +520,7 @@ async def _stream_deep_with_banners(
                     pool_key=pool_key, task=task,
                     messages=messages_with_memory, drafts=drafts,
                     subtasks=subtasks, timeout_s=deep_worker_timeout,
+                    user_id=(payload.user or None),
                 ):
                     await events_q.put(evt)
             finally:

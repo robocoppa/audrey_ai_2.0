@@ -56,6 +56,7 @@ class EnvOverrides(BaseSettings):
     tool_max_rounds: int | None = Field(default=None, alias="TOOL_MAX_ROUNDS")
     planning_min_tokens: int | None = Field(default=None, alias="PLANNING_MIN_TOKENS")
     max_deep_workers_cloud: int | None = Field(default=None, alias="MAX_DEEP_WORKERS_CLOUD")
+    max_inflight_per_user: int | None = Field(default=None, alias="MAX_INFLIGHT_PER_USER")
 
     # Data dir (for any local sqlite/caches Audrey itself owns)
     data_dir: Path = Field(default=Path("/data"), alias="AUDREY_DATA_DIR")
@@ -80,6 +81,8 @@ class Config:
             self._yaml.setdefault("agentic", {}).setdefault("planning", {})["min_prompt_tokens"] = v
         if (v := self.env.max_deep_workers_cloud) is not None:
             self._yaml.setdefault("agentic", {})["max_deep_workers_cloud"] = v
+        if (v := self.env.max_inflight_per_user) is not None:
+            self._yaml.setdefault("fairness", {})["max_inflight_per_user"] = v
         self._yaml.setdefault("tools", {})["servers"] = [
             s.strip() for s in self.env.tool_servers.split(",") if s.strip()
         ]

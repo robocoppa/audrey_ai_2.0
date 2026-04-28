@@ -233,6 +233,16 @@ complexity:
 gpu:
   concurrency: 1                         # local-model semaphore; cloud bypasses
 
+# ─── Per-user fairness (Phase 20) ──────────────────────────────────────
+# Layer 1 (FairLocalGate): round-robin across users at the local-GPU
+# acquire point. Cloud calls bypass. No knob — replaces the old GpuGate.
+# Layer 2 (in-flight cap): bounds how many concurrent pipeline requests
+# one user can hold across the whole pipeline. Soft — extra requests
+# wait, never error.
+fairness:
+  max_inflight_per_user: 3               # concurrent requests per user
+  max_tracked_users: 1024                # LRU cap on the in-flight registry
+
 # ─── Classification pre-filter ─────────────────────────────────────────
 classification:
   keyword_prefilter:

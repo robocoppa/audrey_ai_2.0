@@ -1,5 +1,6 @@
 # Session memory — local only, pre-populated with real setup state
 CONTINUITY.md
+CLAUDE.md
 
 # Python
 __pycache__/

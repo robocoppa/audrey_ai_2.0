@@ -56,7 +56,7 @@ from audrey.pipeline.memory import (
 )
 from audrey.pipeline.planner import plan as planner_plan
 from audrey.pipeline.reflect import reflect as reflect_fn
-from audrey.pipeline.semaphore import GpuGate
+from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.state import PipelineState
 from audrey.pipeline.synthesize import synthesize as synthesize_fn
 from audrey.tools.discovery import ToolRegistry
@@ -69,7 +69,7 @@ def build_graph(
     ollama: OllamaClient,
     registry: ModelRegistry,
     health: HealthTracker,
-    gate: GpuGate,
+    gate: FairLocalGate,
     tools: ToolRegistry,
 ):
     """Compile the LangGraph StateGraph for this process."""
@@ -286,6 +286,7 @@ def build_graph(
             drafts=list(state.get("drafts") or []),
             subtasks=list(state.get("subtasks") or []),
             timeout_s=deep_worker_timeout,
+            user_id=(state.get("user_id") or None),
         )
         # Concrete_model exposed to the caller is the synthesizer (or the
         # fallback tag, e.g. "fallback:longest_draft").
