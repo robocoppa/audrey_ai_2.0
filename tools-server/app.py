@@ -159,6 +159,7 @@ class MemoryStoreRequest(BaseModel):
 
 
 class MemoryRecallRequest(BaseModel):
+    user: Annotated[str, Field(min_length=1, max_length=200, description="User id to scope the recall to. Required — memories are per-user (Phase 26 fix; pre-fix this leaked the most-recent matching key across all users).")]
     key: Annotated[str, Field(min_length=1, max_length=200)]
 
 
@@ -341,7 +342,7 @@ async def memory_store(req: MemoryStoreRequest) -> MemoryEntryResponse:
 )
 async def memory_recall(req: MemoryRecallRequest) -> MemoryEntryResponse:
     memory: MemoryStore = app.state.memory
-    entry = await memory.recall(req.key)
+    entry = await memory.recall(req.key, user=req.user)
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No memory for key: {req.key!r}")
     return MemoryEntryResponse.from_entry(entry)

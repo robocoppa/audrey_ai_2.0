@@ -18,9 +18,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from audrey.auth import AuthedUser, require_admin
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
 from audrey.kb.ingest import ingest_many
 from audrey.kb.qdrant import KBHit, QdrantKB
@@ -175,7 +176,11 @@ async def kb_query_image(req: ImageQuery, request: Request) -> QueryResponse:
 
 
 @router.post("/ingest")
-async def kb_ingest(req: IngestRequest, request: Request) -> dict[str, Any]:
+async def kb_ingest(
+    req: IngestRequest,
+    request: Request,
+    _admin: AuthedUser = Depends(require_admin),
+) -> dict[str, Any]:
     app = request.app
     qdrant: QdrantKB | None = getattr(app.state, "qdrant", None)
     text_embedder: TextEmbedder | None = getattr(app.state, "text_embedder", None)

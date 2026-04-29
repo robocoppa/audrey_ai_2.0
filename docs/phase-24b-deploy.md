@@ -183,7 +183,9 @@ RUN [audrey-ai stage-0 9/9] COPY src/audrey ...     ← rerunning
 RUN [audrey-ai stage-0 10/9] RUN uv pip install --no-deps ...  ← rerunning
 ```
 
-`time` output should be ~10-15s (vs pre-Phase-24b's ~30-60s).
+`time` output should be **~5-10s** (vs pre-Phase-24b's ~30-60s).
+Verified 2026-04-29 at 6.4s wall-clock on Unraid — most of which was
+Docker layer-export overhead, not the install itself.
 
 Revert the edit and rebuild once more to leave things clean:
 
@@ -198,24 +200,38 @@ to checked-in state) match prior cache.
 
 ### 2.7 Pyproject change correctly invalidates layer 1
 
-To prove the cache invalidation triggers when it should, add a
-no-op comment to pyproject.toml:
+To prove the cache invalidation triggers when it should, append a
+no-op comment to the END of `pyproject.toml`. End-of-file is the
+safest place — TOML parsers ignore trailing comments and you can't
+accidentally land inside a `[section]` block and break parsing:
 
 ```bash
-# (Be careful: pyproject.toml IS used by the runtime, so don't break it.)
-# Pick a line in [tool.hatch] or [build-system] that doesn't affect installs:
+echo "" >> /mnt/user/appdata/audrey_ai_2.0/pyproject.toml
 echo "# 24b cache test" >> /mnt/user/appdata/audrey_ai_2.0/pyproject.toml
 
-time docker compose build audrey-ai 2>&1 | tail -10
+time docker compose build audrey-ai 2>&1 | grep -E 'CACHED|RUN.*uv pip'
 ```
 
-Expect: layer 1 reruns (no `CACHED` for the `uv pip compile` line),
-~30-60s wall-clock. This is the path where Phase 24b matches today's
-behavior — no regression, just no improvement either.
+Expect:
+- The `RUN uv pip compile` line shows **no** `CACHED` marker — it
+  reruns because pyproject.toml's content hash changed.
+- The `RUN uv pip install --no-deps` (layer 2) ALSO reruns, because
+  Docker invalidates downstream layers when an upstream COPY's input
+  changes.
+- `time` output: **~30-60s wall-clock** — same as pre-Phase-24b on
+  this rare path. No regression, no improvement either; pyproject
+  edits trigger full dep re-resolve regardless of layer split.
 
-Revert:
+Revert immediately so the trailing comment doesn't land in git:
 ```bash
-git checkout /mnt/user/appdata/audrey_ai_2.0/pyproject.toml
+cd /mnt/user/appdata/audrey_ai_2.0
+git checkout pyproject.toml
+```
+
+Confirm the revert was clean:
+```bash
+git diff pyproject.toml  # should be empty
+tail -3 pyproject.toml    # should match the original (no test comment)
 ```
 
 ---

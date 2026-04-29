@@ -226,18 +226,21 @@ class MemoryStore:
             created_at=created_at, updated_at=now,
         )
 
-    async def recall(self, key: str) -> MemoryEntry | None:
-        """Exact-key lookup, not scoped to user.
+    async def recall(self, key: str, *, user: str) -> MemoryEntry | None:
+        """Exact-key lookup, scoped to a single user (Phase 26).
 
-        This is the legacy `memory_recall` path. Returns the most-recent
-        point whose payload `key` equals the argument; if multiple users
-        share a key we return the newest. Kept simple — the primary path
-        is `search()`.
+        Pre-Phase-26 this method dropped the `user` filter and returned the
+        newest point matching `key` across all users — a cross-user leak.
+        Now both `key` AND `user` must match; if multiple points still
+        match (one user with two writes to the same key, since UUIDv5
+        point-id collapses re-stores into one point this should be rare)
+        we return the newest by `updated_at`.
         """
         result = await self._qdrant.scroll(
             collection_name=self._collection,
             scroll_filter=qm.Filter(must=[
                 qm.FieldCondition(key="key", match=qm.MatchValue(value=key)),
+                qm.FieldCondition(key="user", match=qm.MatchValue(value=user)),
             ]),
             limit=10, with_payload=True, with_vectors=False,
         )

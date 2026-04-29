@@ -49,7 +49,15 @@ services:
       - /mnt/user/appdata/prometheus/grafana-data:/var/lib/grafana
     environment:
       TZ: America/Denver
-      GF_SECURITY_ADMIN_PASSWORD: changeme
+      # Phase 26: must be set in the environment when running `compose up`
+      # (e.g. via /mnt/user/appdata/audrey_ai_2.0/monitoring/.env). Compose's
+      # `:?` syntax fails the up command if the var is unset, preventing the
+      # default-`changeme` footgun. Note: this only takes effect on Grafana's
+      # *initial* admin user creation; once the admin password is hashed into
+      # /var/lib/grafana/grafana.db, changing this env var alone won't update
+      # the live password — use `grafana-cli admin reset-admin-password` from
+      # inside the container.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set in the environment}
 
 networks:
   ollama-net:

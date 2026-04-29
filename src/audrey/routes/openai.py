@@ -25,7 +25,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -46,6 +46,7 @@ from audrey.pipeline.banners import (
 from audrey.pipeline.classify import classify as classify_fn
 from audrey.pipeline.complexity import is_complex
 from audrey.pipeline.context import datetime_system_message
+from audrey.auth import AuthedUser, require_user
 from audrey.pipeline.deep_panel import pool_key_for, run_panel_streaming
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.memory import (
@@ -89,9 +90,11 @@ class ChatCompletionRequest(BaseModel):
     user: str | None = Field(
         default=None,
         description=(
-            "OpenAI-spec stable identifier. Forwarded by Open WebUI as the "
-            "signed-in user's id. Required to enable per-user memory recall "
-            "and writes — when unset, the memory step is skipped."
+            "OpenAI-spec passthrough field. Phase 26: Audrey **ignores** this "
+            "for identity purposes — the canonical user id comes from the "
+            "Authorization header (require_user → AuthedUser.id). Kept in the "
+            "schema for OpenAI client compatibility; logged for debugging "
+            "client-vs-resolved identity drift but never trusted."
         ),
     )
 
@@ -118,7 +121,11 @@ async def list_models() -> dict[str, Any]:
 # ─── /v1/chat/completions ─────────────────────────────────────────────
 
 @router.post("/chat/completions")
-async def chat_completions(payload: ChatCompletionRequest, request: Request):
+async def chat_completions(
+    payload: ChatCompletionRequest,
+    request: Request,
+    me: AuthedUser = Depends(require_user),
+):
     app = request.app
     if payload.model not in VIRTUAL_MODELS:
         raise HTTPException(
@@ -129,16 +136,26 @@ async def chat_completions(payload: ChatCompletionRequest, request: Request):
             ),
         )
 
+    # Phase 26: identity comes from the Authorization header via require_user,
+    # NOT from payload.user (which is OpenAI-spec passthrough and trusted for
+    # nothing). If a client sent a different `user` field, log it once for
+    # drift-debugging but otherwise ignore.
+    if payload.user and payload.user != me.id:
+        log.debug(
+            "chat.completions: payload.user=%r ignored (auth user=%r)",
+            payload.user, me.id,
+        )
+
     messages = [m.model_dump(exclude_none=True) for m in payload.messages]
     options = _options_from_request(payload)
 
     if payload.stream:
         return StreamingResponse(
-            _stream_via_pipeline(app, payload, messages, options),
+            _stream_via_pipeline(app, payload, messages, options, user_id=me.id),
             media_type="text/event-stream",
         )
 
-    return await _generate_via_pipeline(app, payload, messages, options)
+    return await _generate_via_pipeline(app, payload, messages, options, user_id=me.id)
 
 
 async def _run_graph_with_metrics(graph, state: dict[str, Any]) -> dict[str, Any]:
@@ -165,7 +182,9 @@ async def _run_graph_with_metrics(graph, state: dict[str, Any]) -> dict[str, Any
     return final
 
 
-async def _generate_via_pipeline(app, payload: ChatCompletionRequest, messages, options):
+async def _generate_via_pipeline(
+    app, payload: ChatCompletionRequest, messages, options, *, user_id: str
+):
     """Non-streaming path: invoke the compiled LangGraph and format the result."""
     graph = app.state.graph
     inflight = app.state.inflight
@@ -175,9 +194,9 @@ async def _generate_via_pipeline(app, payload: ChatCompletionRequest, messages, 
         "temperature": payload.temperature,
         "top_p": payload.top_p,
         "max_tokens": payload.max_tokens,
-        "user_id": payload.user or "",
+        "user_id": user_id,
     }
-    async with inflight.slot(payload.user):
+    async with inflight.slot(user_id):
         try:
             final = await _run_graph_with_metrics(graph, state)
         except OllamaError as e:
@@ -218,7 +237,9 @@ async def _generate_via_pipeline(app, payload: ChatCompletionRequest, messages, 
     )
 
 
-async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, options):
+async def _stream_via_pipeline(
+    app, payload: ChatCompletionRequest, messages, options, *, user_id: str
+):
     """Streaming path.
 
     Routing is fixed by the virtual model:
@@ -238,7 +259,7 @@ async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, op
     inflight = app.state.inflight
     router_cfg = cfg.router
 
-    async with inflight.slot(payload.user):
+    async with inflight.slot(user_id):
         user_text = _last_user_text(messages)
         task, reason, conf = await classify_fn(
             ollama,
@@ -264,7 +285,7 @@ async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, op
 
         if use_deep:
             async for frame in _stream_deep_with_banners(
-                app, payload, messages, options, task=task, conf=conf,
+                app, payload, messages, options, task=task, conf=conf, user_id=user_id,
             ):
                 yield frame
             return
@@ -290,7 +311,7 @@ async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, op
                 "temperature": payload.temperature,
                 "top_p": payload.top_p,
                 "max_tokens": payload.max_tokens,
-                "user_id": payload.user or "",
+                "user_id": user_id,
             }
             try:
                 final = await _run_graph_with_metrics(graph, state)
@@ -310,7 +331,7 @@ async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, op
         async for frame in _stream_openai(
             ollama, payload.model, spec.name, messages, options,
             timeout_s=timeout, health=health,
-            gate=app.state.gate, location=spec.location, user_id=payload.user,
+            gate=app.state.gate, location=spec.location, user_id=user_id,
         ):
             yield frame
 
@@ -370,7 +391,7 @@ def _to_openai_response(
 
 async def _stream_deep_with_banners(
     app, payload: ChatCompletionRequest, messages, options,
-    *, task: str, conf: float,
+    *, task: str, conf: float, user_id: str,
 ):
     """Streaming deep path with progress banners (Phase 18).
 
@@ -456,7 +477,7 @@ async def _stream_deep_with_banners(
 
         async with PhaseTicker(BANNER_THINKING, emit):
             think_task = asyncio.create_task(_phase_thinking(
-                ollama=ollama, tools=tools, payload=payload, messages=messages,
+                ollama=ollama, tools=tools, user_id=user_id, messages=messages,
                 memory_enabled=memory_enabled, memory_top_k=memory_top_k,
                 memory_timeout_s=memory_timeout_s,
                 planning_enabled=planning_enabled,
@@ -500,7 +521,7 @@ async def _stream_deep_with_banners(
                 react_compress_after=deep_react_compress_after,
                 react_max_tool_chars=deep_react_max_tool_chars,
                 react_dispatch_timeout_s=deep_react_dispatch_timeout,
-                user_id=(payload.user or None),
+                user_id=user_id or None,
                 ticker=ticker,
             ))
             async for frame in _drain_q_until_task(banner_q, panel_task, _delta_frame):
@@ -524,7 +545,7 @@ async def _stream_deep_with_banners(
                     pool_key=pool_key, task=task,
                     messages=messages_with_memory, drafts=drafts,
                     subtasks=subtasks, timeout_s=deep_worker_timeout,
-                    user_id=(payload.user or None),
+                    user_id=user_id or None,
                 ):
                     await events_q.put(evt)
             finally:
@@ -703,7 +724,7 @@ async def _drain_q_now(
 
 
 async def _phase_thinking(
-    *, ollama, tools, payload, messages,
+    *, ollama, tools, user_id: str, messages,
     memory_enabled, memory_top_k, memory_timeout_s,
     planning_enabled, planning_min_tokens, planning_max_subtasks,
     prompt_tokens, router_cfg,
@@ -712,14 +733,14 @@ async def _phase_thinking(
     # Datetime first so it sits at the top of the system-message stack.
     # Mirrors what node_datetime does for the non-streaming graph.
     msgs = [datetime_system_message(), *messages]
-    if memory_enabled and (payload.user or "").strip():
+    if memory_enabled and user_id.strip():
         hits = await recall_for_request(
-            tools, user_id=payload.user or "", messages=messages,
+            tools, user_id=user_id, messages=messages,
             top_k=memory_top_k, timeout_s=memory_timeout_s,
         )
         include_store_hint = tools is not None and MEMORY_STORE_TOOL in tools.by_name
         sys_msg = memory_system_message(
-            hits, user_id=payload.user or "", include_store_hint=include_store_hint,
+            hits, user_id=user_id, include_store_hint=include_store_hint,
         )
         if sys_msg is not None:
             msgs = [msgs[0], sys_msg, *messages]

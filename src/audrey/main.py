@@ -13,8 +13,10 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import Response
+
+from audrey.auth import AuthedUser, require_admin
 
 from audrey import __version__
 from audrey.config import get_config
@@ -206,7 +208,9 @@ async def list_tools() -> dict[str, list[dict]]:
 
 
 @app.post("/v1/tools/rediscover", tags=["tools"])
-async def rediscover_tools() -> dict[str, list[str] | int]:
+async def rediscover_tools(
+    _admin: AuthedUser = Depends(require_admin),
+) -> dict[str, list[str] | int]:
     """Re-fetch /openapi.json from every configured tool server.
 
     Mutates the live ToolRegistry in place — the graph keeps its closure

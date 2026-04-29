@@ -45,6 +45,7 @@ class ToolResult:
 _USER_SCOPED_TOOLS: frozenset[str] = frozenset({
     "kb_search",
     "kb_image_search",
+    "memory_recall",  # Phase 26: was leaking cross-user; now required user scope.
     "memory_search",
     "memory_store",
 })
