@@ -23,6 +23,26 @@ whole worker" pattern is correct for deep panel because all N workers
 will run regardless of gate granularity — releasing between rounds
 would only shuffle order, not save GPU time.
 
+**Fairness-bias fix (bundled into Phase 23):** while validating Phase
+23 we caught a pre-existing bug in `FairLocalGate._release` from
+Phase 20 — a user with multiple queued waiters stayed at the head of
+the round-robin OrderedDict because `move_to_end()` is a no-op when
+they're the only entry. New buckets joining the queue got appended
+*behind* the head, so they only got served after the head's queue
+fully drained. That's FIFO-by-bucket, not round-robin.
+
+The fix tracks `_last_granted` explicitly. On release, the picker
+walks the dict and skips the last-granted bucket whenever another
+bucket has waiters, falling back to re-granting only when the
+last-granted is the *only* bucket queued. Verified locally with a
+multi-user test: alice fires 3 staggered requests, bob fires a 4th
+mid-flight, charlie fires a 5th later → grant order is now
+`a1, b1, a2, c1, a3, a4, a5` (alternation), not `a1, a2, a3, b1, c1`
+(starvation). Phase 20's deep-panel smoke test 2.4 happened to mask
+this in deep mode because each request makes ~10 acquires (one per
+worker × multiple rounds), amortizing the bias. Fast path with 1-3
+acquires per request makes it stark.
+
 What stays the same:
 
 - All existing metrics — no new metric in Phase 23. The existing
@@ -55,6 +75,10 @@ What changed:
   explaining why (worker-level gate hold is correct for deep panel).
 - `src/audrey/pipeline/graph.py` — `node_fast_path` passes `gate` into
   `run_fast_path`.
+- `src/audrey/pipeline/fair_gate.py` — round-robin `_release` fix:
+  added `_last_granted` field; picker skips the last-granted bucket
+  when another bucket has waiters. Pre-existing bias from Phase 20
+  surfaced by Phase 23's fast-path traffic.
 
 Out of scope (deliberately):
 
@@ -132,8 +156,12 @@ AFTER=$(curl -s http://localhost:8000/metrics \
   | grep '^audrey_gpu_gate_wait_seconds_count ' \
   | awk '{print $2}')
 
-echo "gate_wait observations: before=$BEFORE after=$AFTER (delta=$((AFTER-BEFORE)))"
+DELTA=$(awk "BEGIN {print $AFTER - $BEFORE}")
+echo "gate_wait observations: before=$BEFORE after=$AFTER (delta=$DELTA)"
 ```
+
+Note: prometheus exposes histogram `_count` as a float (`46.0`), so
+we use `awk` for the subtraction — bash's `$(())` rejects decimals.
 
 Expect: delta ≥ 5 (one observation per `ollama.chat` call;
 non-tool-capable models do exactly 1). If delta is 0, the gate isn't
@@ -148,20 +176,24 @@ call). That's expected.
 Goal: prove round-robin works for fast path the same way it does for
 deep.
 
-In two terminals, simultaneously:
+**Important:** background alice's three requests so they're truly
+concurrent. The naïve `for ...; do curl; done` (no `&`) runs them
+*serially*, which means bob never competes for the gate and the test
+proves nothing.
 
-Terminal A:
+Terminal A — fire all three of alice's requests in the background:
 ```bash
 for i in 1 2 3; do
-  time curl -sS -X POST -H "Authorization: Bearer $ALICE_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "{\"model\":\"audrey_fast\",\"stream\":false,\"user\":\"alice\",\"messages\":[{\"role\":\"user\",\"content\":\"alice request $i — write 200 words on the history of typewriters\"}]}" \
-    http://localhost:8000/v1/chat/completions \
-    -o /tmp/alice_$i.json
+  ( time curl -sS -X POST -H "Authorization: Bearer $ALICE_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "{\"model\":\"audrey_fast\",\"stream\":false,\"user\":\"alice\",\"messages\":[{\"role\":\"user\",\"content\":\"alice request $i — write 200 words on the history of typewriters\"}]}" \
+      http://localhost:8000/v1/chat/completions \
+      -o /tmp/alice_$i.json ) 2> /tmp/alice_${i}.time &
 done
 ```
 
-Terminal B (start ~5s after A's first request fires):
+Terminal B — fire bob ~5s later, while alice's three are all still
+in flight:
 ```bash
 sleep 5
 time curl -sS -X POST -H "Authorization: Bearer $BOB_TOKEN" \
@@ -171,18 +203,41 @@ time curl -sS -X POST -H "Authorization: Bearer $BOB_TOKEN" \
   -o /tmp/bob.json
 ```
 
-Expect: bob's request finishes after alice's *first* request, not
-after all three of alice's. Fairness round-robin in `FairLocalGate`
-does this. Without this fix bob would have to wait for all 3 of
-alice's to finish back-to-back.
-
-Look at:
+Back in terminal A:
 ```bash
-docker compose logs --since 5m audrey-ai | grep -E 'fast_path task=|inflight: user='
+wait
+cat /tmp/alice_1.time /tmp/alice_2.time /tmp/alice_3.time
 ```
 
-Expect: alice and bob's `fast_path task=...` lines interleaved (not
-3 alices in a row, then bob).
+**Expect:** bob's request finishes *second* — after alice_1 (which
+held the gate when bob arrived) but *before* alice_2 and alice_3
+(which were queued behind alice_1). The fairness round-robin in
+`FairLocalGate` skips back-to-back grants to the same user when
+another bucket has waiters. So the grant order should be:
+
+```
+alice_1 (was running) → bob → alice_2 → alice_3
+```
+
+To verify the order from logs:
+```bash
+docker compose logs --since 5m audrey-ai | grep -E 'react: round=|fast_path task='
+```
+
+The `react: round=0` lines carry elapsed seconds — match each one
+back to the request that started that long ago. You should see bob's
+chat call complete *before* alice_2 and alice_3's first chat calls.
+
+Common mistakes:
+
+- **Loop without `&`** runs serially → bob never competes → test
+  proves nothing.
+- **Same user-id for all four requests** (e.g. forgetting to change
+  `"user":"alice"` to `"user":"bob"`) → all four go into one bucket,
+  no round-robin to test.
+- **Anonymous bob** (omitting `"user"` field) → bob falls into the
+  `__anon__` bucket, which is its own bucket and *should* still
+  round-robin against alice; just be aware.
 
 ### 2.4 Tool-dispatch releases the GPU (the headline benefit)
 
@@ -249,7 +304,7 @@ AFTER=$(curl -s http://localhost:8000/metrics \
   | grep '^audrey_gpu_gate_wait_seconds_count ' \
   | awk '{print $2}')
 
-echo "cloud delta: $((AFTER-BEFORE))"
+echo "cloud delta: $(awk "BEGIN {print $AFTER - $BEFORE}")"
 ```
 
 Expect: delta = 0. Cloud workers don't hit the local gate. (If the
@@ -294,7 +349,7 @@ AFTER=$(curl -s http://localhost:8000/metrics \
   | grep '^audrey_gpu_gate_wait_seconds_count ' \
   | awk '{print $2}')
 
-echo "stream delta: $((AFTER-BEFORE))"
+echo "stream delta: $(awk "BEGIN {print $AFTER - $BEFORE}")"
 head -c 400 /tmp/stream.txt
 ```
 

@@ -14,13 +14,26 @@ Design:
 - Anonymous / no-user-id requests share a synthetic `__anon__` bucket.
   They round-robin against authed users like everyone else.
 
-Round-robin pointer logic uses an `OrderedDict[str, deque[Future]]`:
-- A user joining the queue is appended (move-to-end via `move_to_end` on
-  re-entry isn't strictly needed; we pop the head user's first waiter
-  and demote them to the tail when they still have remaining waiters).
+Round-robin pointer logic uses an `OrderedDict[str, deque[Future]]` plus
+a `_last_granted` bucket name:
+- A user joining the queue is appended.
+- On release, we walk the OrderedDict from the head looking for the next
+  bucket to grant. We *skip* the most-recently-granted bucket if any
+  other bucket has waiters — this is the "round-robin to a different
+  user" behavior. If the last-granted bucket is the only one with
+  waiters (or no other has waiters), we grant to it again.
 - After each grant, the granted user is moved to the back of the order
   if they still have queued waiters; if their deque is empty, the user
   entry is removed entirely.
+
+Why the explicit `_last_granted` is needed: with only OrderedDict
+ordering, a single user with many queued waiters stays at the head
+indefinitely (their deque never goes empty so we never `pop` them and
+never reinsert them at the tail in a way that lets a new arrival
+overtake). A new bucket arriving mid-queue gets appended to the tail
+and would only be granted after the head user's queue drained — that's
+FIFO-by-bucket, not round-robin. Tracking the last granted bucket and
+skipping it on the next pick gives true alternation.
 
 Cancellation safety: when a waiter's coroutine is cancelled (e.g. client
 disconnected), their Future is marked cancelled. The release path checks
@@ -65,6 +78,10 @@ class FairLocalGate:
         # head waiter and either remove the user (deque empty) or move
         # them to the tail.
         self._waiters: OrderedDict[str, deque[asyncio.Future[None]]] = OrderedDict()
+        # Bucket name of the most recently granted slot. Used in `_release`
+        # to skip back-to-back grants to the same user when another user
+        # has waiters queued.
+        self._last_granted: str | None = None
         self._lock = asyncio.Lock()
 
     @property
@@ -87,6 +104,7 @@ class FairLocalGate:
         async with self._lock:
             if self._available > 0 and not self._waiters:
                 self._available -= 1
+                self._last_granted = bucket
                 granted_directly = True
 
         if not granted_directly:
@@ -122,29 +140,50 @@ class FairLocalGate:
             await self._release(bucket)
 
     async def _release(self, _released_bucket: str) -> None:
-        """Free one slot and grant it to the next round-robin waiter."""
+        """Free one slot and grant it to the next round-robin waiter.
+
+        Skips the bucket that just released (`self._last_granted`) when
+        any other bucket has waiters, so the slot alternates across users
+        instead of letting one user's backlog hog the head of the dict.
+        Falls back to re-granting the last bucket only when it's the
+        sole queued user.
+        """
         async with self._lock:
-            # Find the next non-empty user bucket. Pop dead/cancelled
-            # futures along the way so they don't keep their user "first
-            # in line" forever.
-            granted = False
-            while self._waiters and not granted:
-                bucket, dq = next(iter(self._waiters.items()))
+            # First sweep: garbage-collect cancelled/dead futures and
+            # empty buckets. Keeps the picker logic below clean.
+            for bucket in list(self._waiters.keys()):
+                dq = self._waiters[bucket]
                 while dq and dq[0].done():
                     dq.popleft()
                 if not dq:
                     self._waiters.pop(bucket, None)
-                    continue
-                fut = dq.popleft()
-                if dq:
-                    # User has more queued — demote to tail of round-robin.
-                    self._waiters.move_to_end(bucket)
-                else:
-                    self._waiters.pop(bucket, None)
-                fut.set_result(None)
-                granted = True
-            if not granted:
+
+            if not self._waiters:
                 self._available += 1
+                return
+
+            # Pick: prefer any bucket *other* than the one we just granted.
+            # Fall back to the last-granted bucket only if it's the only
+            # one with waiters.
+            pick: str | None = None
+            for bucket in self._waiters:
+                if bucket != self._last_granted:
+                    pick = bucket
+                    break
+            if pick is None:
+                # All remaining waiters are from the last-granted bucket.
+                pick = next(iter(self._waiters))
+
+            dq = self._waiters[pick]
+            fut = dq.popleft()
+            if dq:
+                # User still has queued waiters — demote them so the next
+                # release prefers a different bucket if one exists.
+                self._waiters.move_to_end(pick)
+            else:
+                self._waiters.pop(pick, None)
+            self._last_granted = pick
+            fut.set_result(None)
 
     # ── Introspection (used by metrics endpoint, smoke tests) ─────────
 
