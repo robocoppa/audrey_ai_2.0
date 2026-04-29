@@ -23,6 +23,7 @@ from typing import Any
 
 import httpx
 
+from audrey.metrics import tool_call_seconds, tool_calls_total
 from audrey.tools.discovery import ToolRegistry
 
 log = logging.getLogger(__name__)
@@ -71,7 +72,13 @@ async def dispatch_one(
     timeout_s: float,
     user_id: str | None = None,
 ) -> ToolResult:
-    """Execute one tool_call. Always returns a ToolResult — never raises."""
+    """Execute one tool_call. Always returns a ToolResult — never raises.
+
+    Phase 22: emits `audrey_tool_calls_total{tool,outcome}` for every return
+    path and `audrey_tool_call_seconds{tool}` for paths that actually made a
+    network call. Outcomes: `ok` (2xx + parsed), `error` (bad args, unknown
+    tool, 4xx, 5xx, non-timeout transport), `timeout` (httpx.TimeoutException).
+    """
     fn = (tool_call.get("function") or {})
     name = str(fn.get("name") or "?")
     call_id = tool_call.get("id")
@@ -83,6 +90,7 @@ async def dispatch_one(
             args = json.loads(args)
         except json.JSONDecodeError:
             log.warning("dispatch: %s arguments not JSON: %r", name, args[:200])
+            tool_calls_total.labels(tool=name, outcome="error").inc()
             return ToolResult(
                 name=name, call_id=call_id,
                 content=json.dumps({"error": "arguments_not_json", "raw": args[:500]}),
@@ -91,6 +99,7 @@ async def dispatch_one(
     if args is None:
         args = {}
     if not isinstance(args, dict):
+        tool_calls_total.labels(tool=name, outcome="error").inc()
         return ToolResult(
             name=name, call_id=call_id,
             content=json.dumps({"error": "arguments_not_object", "got": str(type(args).__name__)}),
@@ -110,6 +119,7 @@ async def dispatch_one(
     spec = registry.get(name)
     if spec is None:
         log.warning("dispatch: unknown tool %r (registered: %s)", name, registry.names())
+        tool_calls_total.labels(tool=name, outcome="error").inc()
         return ToolResult(
             name=name, call_id=call_id,
             content=json.dumps({"error": "unknown_tool", "tool": name, "available": registry.names()}),
@@ -120,9 +130,21 @@ async def dispatch_one(
     start = time.monotonic()
     try:
         r = await client.post(url, json=args, timeout=timeout_s)
+    except httpx.TimeoutException as e:
+        elapsed = round(time.monotonic() - start, 2)
+        log.warning("dispatch: %s timeout in %.2fs: %s", name, elapsed, e)
+        tool_calls_total.labels(tool=name, outcome="timeout").inc()
+        tool_call_seconds.labels(tool=name).observe(elapsed)
+        return ToolResult(
+            name=name, call_id=call_id,
+            content=json.dumps({"error": "timeout", "detail": str(e)[:300]}),
+            elapsed_s=elapsed, is_error=True,
+        )
     except httpx.HTTPError as e:
         elapsed = round(time.monotonic() - start, 2)
         log.warning("dispatch: %s network error in %.2fs: %s", name, elapsed, e)
+        tool_calls_total.labels(tool=name, outcome="error").inc()
+        tool_call_seconds.labels(tool=name).observe(elapsed)
         return ToolResult(
             name=name, call_id=call_id,
             content=json.dumps({"error": "network_error", "detail": str(e)[:300]}),
@@ -130,9 +152,11 @@ async def dispatch_one(
         )
 
     elapsed = round(time.monotonic() - start, 2)
+    tool_call_seconds.labels(tool=name).observe(elapsed)
     if r.status_code >= 400:
         log.warning("dispatch: %s -> %d in %.2fs: %s", name, r.status_code, elapsed, r.text[:200])
         body = {"error": f"http_{r.status_code}", "detail": r.text[:500]}
+        tool_calls_total.labels(tool=name, outcome="error").inc()
         return ToolResult(
             name=name, call_id=call_id,
             content=_truncate(json.dumps(body), max_result_chars),
@@ -149,6 +173,7 @@ async def dispatch_one(
     log.info("dispatch: %s ok in %.2fs (%d chars%s)",
              name, elapsed, len(truncated),
              ", truncated" if len(truncated) != len(content) else "")
+    tool_calls_total.labels(tool=name, outcome="ok").inc()
     return ToolResult(
         name=name, call_id=call_id,
         content=truncated, elapsed_s=elapsed, is_error=False,

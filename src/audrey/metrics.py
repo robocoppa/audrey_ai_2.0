@@ -129,6 +129,28 @@ user_inflight_blocked_seconds = Histogram(
     buckets=_INFLIGHT_BUCKETS,
 )
 
+# ─── Per-tool dispatch (Phase 22) ─────────────────────────────────────
+
+# Tool cardinality is bounded (currently 6: kb_search, kb_image_search,
+# memory_recall, memory_search, memory_store, web_search). Adding tool
+# as a label is safe — no per-user labels here, no risk of explosion.
+# Outcome bucketed three ways so timeouts are distinguishable from
+# other errors: matters for "is the tool slow?" vs "is the tool broken?"
+_TOOL_BUCKETS = (0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0)
+
+tool_calls_total = Counter(
+    "audrey_tool_calls_total",
+    "Tool dispatches inside the ReAct loop.",
+    labelnames=("tool", "outcome"),  # outcome ∈ {ok, error, timeout}
+)
+
+tool_call_seconds = Histogram(
+    "audrey_tool_call_seconds",
+    "Per-tool dispatch latency (success and failure).",
+    labelnames=("tool",),
+    buckets=_TOOL_BUCKETS,
+)
+
 
 def render() -> tuple[bytes, str]:
     """Serialize the default registry. Returns (body, content_type)."""
@@ -146,4 +168,6 @@ __all__ = [
     "kb_search_hits",
     "auth_cache_size",
     "user_inflight_blocked_seconds",
+    "tool_calls_total",
+    "tool_call_seconds",
 ]

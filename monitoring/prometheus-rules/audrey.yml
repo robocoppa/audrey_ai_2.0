@@ -1,0 +1,108 @@
+###
+# Audrey Prometheus alert rules (Phase 22).
+#
+# Canonical version of rules; deploy to Unraid by copying to
+# /mnt/user/appdata/prometheus/rules/audrey.yml and reloading prometheus
+# (POST /-/reload or restart). The sibling compose at
+# /mnt/user/appdata/prometheus/compose.yaml needs `--config.file=...` and
+# `rule_files: ["rules/*.yml"]` already wired (this rules dir is mounted
+# read-only into the prometheus container at /etc/prometheus/rules).
+#
+# Tuning: thresholds here are starting guesses. Watch for ~1 week of
+# real traffic, then tighten if you're getting false-positive pages.
+###
+
+groups:
+  - name: audrey
+    interval: 30s
+    rules:
+
+      # ─── Pipeline error rate (Phase 19+ relevance) ─────────────────
+      # Phase 19 changed mid-stream synth errors from "silently degrade
+      # to longest draft" to flagging outcome=error. This alert catches
+      # a sustained nonzero error rate that the user wouldn't otherwise
+      # see until they read a bad answer.
+      - alert: AudreyPipelineErrorRate
+        expr: |
+          (
+            sum(rate(audrey_pipeline_total{outcome="error"}[10m]))
+            /
+            clamp_min(sum(rate(audrey_pipeline_total[10m])), 1e-9)
+          ) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+          service: audrey
+        annotations:
+          summary: "Audrey pipeline error rate > 10% for 5m"
+          description: |
+            {{ $value | humanizePercentage }} of audrey pipeline requests
+            are erroring over the last 10 minutes. Check
+            `docker logs audrey-ai` for recent OllamaError or stream_truncated
+            entries.
+
+      # ─── Tool call error rate (Phase 22 instrumentation) ───────────
+      # New audrey_tool_calls_total{tool,outcome} surfaces per-tool
+      # health. Most tools are remote services (Brave, custom-tools);
+      # a sustained tool-side outage would otherwise only show up as
+      # poor answers.
+      - alert: AudreyToolCallErrorRate
+        expr: |
+          (
+            sum by (tool) (rate(audrey_tool_calls_total{outcome=~"error|timeout"}[10m]))
+            /
+            clamp_min(sum by (tool) (rate(audrey_tool_calls_total[10m])), 1e-9)
+          ) > 0.25
+        for: 10m
+        labels:
+          severity: warning
+          service: audrey
+        annotations:
+          summary: "Audrey tool {{ $labels.tool }} failing > 25% over 10m"
+          description: |
+            Tool {{ $labels.tool }} has a {{ $value | humanizePercentage }}
+            failure rate. Check the upstream service (custom-tools container
+            for memory_*/kb_*; Brave API for web_search).
+
+      # ─── Slow tool dispatches (Phase 22) ───────────────────────────
+      # 95th percentile per tool > 10s for 10m. Catches a tool that's
+      # working but degraded — often the case before an outright outage.
+      - alert: AudreyToolCallLatencyP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (tool, le) (rate(audrey_tool_call_seconds_bucket[10m]))
+          ) > 10
+        for: 10m
+        labels:
+          severity: info
+          service: audrey
+        annotations:
+          summary: "Audrey tool {{ $labels.tool }} p95 latency > 10s"
+          description: |
+            Tool {{ $labels.tool }} 95th-percentile dispatch latency is
+            {{ $value | humanizeDuration }} over 10m. Probably degraded
+            but not yet failing.
+
+      # ─── Cloud worker error rate (kimi watch reinforcement) ────────
+      # The kimi-k2.6:cloud reliability story (Phase 18a/Phase 23 watch)
+      # benefits from automation. If error count > 30% over 30m, that's
+      # the threshold the followup memory says should drop kimi from the
+      # pool — alert lets you act on it without manually grepping metrics.
+      - alert: AudreyCloudModelErrorRate
+        expr: |
+          (
+            sum by (model) (rate(audrey_model_seconds_count{outcome="error",model=~".*:cloud"}[30m]))
+            /
+            clamp_min(sum by (model) (rate(audrey_model_seconds_count{model=~".*:cloud"}[30m])), 1e-9)
+          ) > 0.30
+        for: 15m
+        labels:
+          severity: warning
+          service: audrey
+        annotations:
+          summary: "Audrey cloud model {{ $labels.model }} > 30% errors over 30m"
+          description: |
+            Cloud model {{ $labels.model }} error rate is
+            {{ $value | humanizePercentage }} over the last 30 minutes.
+            Consider dropping it from the relevant pool in config.yaml.

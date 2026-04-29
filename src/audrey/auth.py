@@ -180,6 +180,30 @@ def clear_auth_cache() -> int:
     return n
 
 
+def clear_auth_cache_for_email(email: str) -> int:
+    """Drop every cached entry whose `AuthedUser.email == email`.
+
+    Targeted variant of `clear_auth_cache`. A user can have multiple cached
+    tokens (multi-device, multi-session) — this clears all of theirs at once
+    without disturbing other users' entries. Returns the number evicted.
+
+    Phase 22 use case: OWUI v0.9.x doesn't emit user-deletion webhooks, so
+    after an admin deletes/bans a user in OWUI we need a way to evict that
+    one user immediately rather than wait for TTL or wipe the whole cache.
+    """
+    if not email:
+        return 0
+    target = email.strip().lower()
+    if not target:
+        return 0
+    to_evict = [k for k, (_, u) in _cache.items() if u.email.lower() == target]
+    for k in to_evict:
+        _cache.pop(k, None)
+    if to_evict:
+        _auth_cache_size_gauge.set(len(_cache))
+    return len(to_evict)
+
+
 def cache_size() -> int:
     """Current count of cached AuthedUser entries. For admin observability."""
     return len(_cache)
@@ -187,5 +211,5 @@ def cache_size() -> int:
 
 __all__ = [
     "AuthedUser", "require_user", "require_admin",
-    "clear_auth_cache", "cache_size",
+    "clear_auth_cache", "clear_auth_cache_for_email", "cache_size",
 ]
