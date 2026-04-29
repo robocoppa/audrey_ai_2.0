@@ -174,7 +174,7 @@ If something goes wrong:
 
 ```bash
 docker compose stop audrey-ai
-mv /mnt/user/appdata/audrey/uploads.sqlite{,.bak}
+mv /mnt/user/appdata/runtime/uploads.sqlite{,.bak}
 git checkout <previous-sha> -- src/audrey/routes/files.py src/audrey/main.py
 docker compose up -d --build audrey-ai
 ```

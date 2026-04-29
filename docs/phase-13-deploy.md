@@ -35,8 +35,8 @@ What's new vs Phase 12:
   `docker/audrey.Dockerfile` as of this commit).
 - `python-magic`, `python-multipart` in the Python deps (already in
   `pyproject.toml` and the Dockerfile pin list).
-- `/mnt/user/appdata/audrey` bind-mount existing (already — reused from
-  Phase 8 as `/data` in-container).
+- `/mnt/user/appdata/runtime` bind-mount existing (already — reused from
+  Phase 8 as `/data` in-container; renamed from `audrey/` in Phase 24a).
 
 Rebuild + restart:
 
@@ -161,7 +161,7 @@ FID=<file_id from step 4>
 curl -sX DELETE "http://localhost:8000/v1/files/$FID?user=$USER" -H "X-User: $USER"
 # expected: {"file_id": "...", "deleted": true}
 
-ls /mnt/user/appdata/audrey/uploads/bart_proton_me/ | grep $FID
+ls /mnt/user/appdata/runtime/uploads/bart_proton_me/ | grep $FID
 # expected: empty (bytes gone)
 
 curl -s http://localhost:6333/collections/kb_user_text_bart_proton_me \
@@ -179,7 +179,7 @@ curl -sX POST "http://localhost:8000/v1/files?user=$USER" \
      -F "file=@/tmp/big.bin" -w '\nHTTP %{http_code}\n'
 # expected: HTTP 413, "Upload exceeds 50 MB limit."
 # verify nothing landed:
-ls /mnt/user/appdata/audrey/uploads/bart_proton_me/ | grep -c '^' # should not include big.bin
+ls /mnt/user/appdata/runtime/uploads/bart_proton_me/ | grep -c '^' # should not include big.bin
 ```
 
 ## 9. Mime reject (415)
@@ -316,7 +316,7 @@ All new routes are additive. To fully disable:
      curl -sX DELETE "http://localhost:6333/collections/$c"
    done
    ```
-3. `rm -rf /mnt/user/appdata/audrey/uploads/` to reclaim disk.
+3. `rm -rf /mnt/user/appdata/runtime/uploads/` to reclaim disk.
 
 `kb_search` without a `user` arg still works identically to Phase 12
 (searches only global `kb_text`), so the orchestrator behaves correctly

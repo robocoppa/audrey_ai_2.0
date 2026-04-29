@@ -40,7 +40,7 @@ services:
       KB_DATASET_PATHS: ${KB_DATASET_PATHS:-/datasets/geology}
     volumes:
       - ./config.yaml:/app/config.yaml:ro
-      - /mnt/user/appdata/audrey:/data
+      - /mnt/user/appdata/runtime:/data
       - /mnt/user/appdata/clip-cache:/root/.cache/clip
       - /mnt/user/knowledge:/datasets
     healthcheck:

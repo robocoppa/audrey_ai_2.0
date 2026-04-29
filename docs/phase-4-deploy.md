@@ -63,9 +63,10 @@ Docker tab → **Add Container**.
 - `AUDREY_CONFIG` → `/app/config.yaml`
 
 > Phase 4 has **no persistent state** — the container is stateless, so no
-> `/data` bind mount yet. We'll add `/mnt/user/appdata/audrey → /data` in
+> `/data` bind mount yet. We'll add `/mnt/user/appdata/runtime → /data` in
 > Phase 5+ when the health cache / classifier state first needs to survive
-> restarts.
+> restarts. (The directory was originally named `audrey/`; renamed to
+> `runtime/` in Phase 24a.)
 
 (Or `--env-file /mnt/user/appdata/audrey_ai_2.0/.env` via Post Arguments.)
 
