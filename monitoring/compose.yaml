@@ -1,0 +1,56 @@
+###
+# Prometheus + Grafana stack for Audrey (Phase 24, moved into the repo).
+#
+# Run from this directory:
+#   cd /mnt/user/appdata/audrey_ai_2.0/monitoring
+#   docker compose up -d
+#
+# Persistent state (TSDB, Grafana SQLite + dashboards) lives OUTSIDE the
+# repo at the existing Unraid paths — see absolute bind-mount paths
+# below. The repo only owns the configuration (compose, scrape config,
+# alert rules).
+#
+# Joins the existing `ollama-net` network so prometheus can resolve
+# `audrey-ai:8000` for scrapes.
+###
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    networks:
+      - ollama-net
+    ports:
+      - "9090:9090"
+    volumes:
+      # Configuration — repo-relative, read-only.
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus-rules:/etc/prometheus/rules:ro
+      # Persistent TSDB — absolute Unraid path, read-write.
+      - /mnt/user/appdata/prometheus/data:/prometheus
+    environment:
+      TZ: America/Denver
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    networks:
+      - ollama-net
+    ports:
+      - "3000:3000"
+    volumes:
+      - /mnt/user/appdata/prometheus/grafana-data:/var/lib/grafana
+    environment:
+      TZ: America/Denver
+      GF_SECURITY_ADMIN_PASSWORD: changeme
+
+networks:
+  ollama-net:
+    external: true

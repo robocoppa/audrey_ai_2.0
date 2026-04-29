@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 15s        # how often each target gets polled
+  evaluation_interval: 15s    # how often alert/recording rules fire
+
+rule_files:
+  - "rules/*.yml"
+
+scrape_configs:
+  - job_name: audrey
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['audrey-ai:8000']
+        labels:
+          service: audrey-ai
+
+  # Prometheus scraping itself — useful as a "is the scraper alive" canary.
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']

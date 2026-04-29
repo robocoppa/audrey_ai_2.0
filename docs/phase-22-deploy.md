@@ -56,6 +56,14 @@ docker compose logs --tail 5 audrey-ai | grep ready
 
 ### Prometheus rules (Phase 22B)
 
+> **Phase 24 update:** the Prometheus stack now lives in the audrey
+> repo at `monitoring/`, and the rules dir is bind-mounted directly
+> from `monitoring/prometheus-rules/` — **no `cp` step required**.
+> The instructions below describe the pre-Phase-24 layout where
+> rules had to be copied into `/mnt/user/appdata/prometheus/rules/`.
+> Post-Phase-24, just `git pull` on Unraid and reload Prometheus.
+> See `docs/phase-24-deploy.md`.
+
 The canonical rule file lives at
 `monitoring/prometheus-rules/audrey.yml` in the audrey repo. Copy it
 into the prometheus container's rules directory and reload:
