@@ -1,12 +1,20 @@
 """Synthesizer — merges worker drafts into the final assistant answer.
 
-Output structure (Markdown):
-    ## Approach
-    one paragraph naming the strategy the panel converged on
-    ## Answer
-    the actual response to the user's request
-    ## Caveats
-    bullets covering disagreements between workers, gaps, things to verify
+The synthesizer writes the user's answer directly. Phase 25 dropped the
+mandatory `## Approach` / `## Answer` / `## Caveats` three-section
+structure (the meta `Approach` preamble was useful for debugging but
+useless for end users; required `Caveats` blocks read awkwardly when
+there was nothing genuinely to caveat). The new prompt instructs the
+synth to write the answer in its own voice, adding a short `## Caveats`
+section ONLY when drafts genuinely disagreed on facts or a tool-grounded
+draft explicitly noted incomplete evidence.
+
+Phase 25 also forwards the original conversation's system messages
+(datetime, memory recall, OWUI template variables) into the synth call.
+Pre-Phase-25, the synth ran on a fresh 2-message stack
+`[synth_system, user_with_drafts]` and never saw the datetime context
+the workers had — so synth answers reasoned about "today" from training
+cutoff alone. Now synth gets the same system-message floor as workers.
 
 If the primary synthesizer fails, we retry once with the configured
 `fallback_synth`. If both fail, we degrade to the longest non-empty draft
@@ -33,29 +41,24 @@ log = logging.getLogger(__name__)
 
 
 _SYNTH_SYSTEM = (
-    "You are the panel synthesizer. You will receive the original user request "
+    "You are the panel synthesizer. You receive the original user request "
     "plus several draft answers produced in parallel by different worker models. "
     "Some drafts may be tagged `[tool-grounded: N rounds]` — those workers ran "
     "tool calls (knowledge-base search, web search, etc.) before answering, so "
-    "their factual claims are backed by retrieved evidence. When a tool-grounded "
-    "draft and a tool-free draft disagree on a factual point, prefer the "
-    "tool-grounded draft and note the disagreement in Caveats.\n\n"
-    "Your job is to produce ONE coherent final answer using this exact structure:\n\n"
-    "## Approach\n"
-    "One short paragraph naming the strategy the panel converged on (or the "
-    "strongest single approach if drafts disagreed).\n\n"
-    "## Answer\n"
-    "The actual response to the user's request — substantive, complete, and "
-    "directly usable. Pull the strongest passages from the drafts; don't just "
-    "average them. If the request was for code, include working code here.\n\n"
-    "## Caveats\n"
-    "Bullet list. Note where workers disagreed, what's uncertain, what the user "
-    "should verify, or what was outside the panel's reach. If there are no real "
-    "caveats, write `- none`.\n\n"
-    "Rules:\n"
-    "- Do NOT mention the worker model names in your answer.\n"
-    "- Do NOT label drafts ('Draft 1 said...'). Speak in your own voice.\n"
-    "- Preserve any code blocks verbatim from the strongest draft.\n"
+    "their factual claims are backed by retrieved evidence.\n\n"
+    "Your job is to produce ONE coherent final answer for the user:\n"
+    "- Speak directly to the user. Do NOT explain your synthesis process, "
+    "do NOT reference 'drafts' or 'workers,' do NOT include an 'Approach' "
+    "preamble. Just write the answer.\n"
+    "- Pull the strongest passages from the drafts; don't average them.\n"
+    "- Preserve code blocks verbatim from the strongest draft.\n"
+    "- Do NOT mention worker model names.\n"
+    "- When a tool-grounded draft and a tool-free draft disagree on a "
+    "factual point, prefer the tool-grounded one.\n"
+    "- Add a short `## Caveats` section at the END only if the drafts "
+    "genuinely disagreed on facts, or if a tool-grounded draft explicitly "
+    "noted incomplete evidence. Otherwise omit Caveats entirely — do NOT "
+    "write '## Caveats\\n- none' or any placeholder.\n"
 )
 
 
@@ -110,8 +113,26 @@ def pick_synthesizer(cfg: Config, *, pool_key: str, task: TaskType) -> tuple[str
     return primary, fallback
 
 
-def _build_synth_messages(drafts_block: str) -> list[dict[str, Any]]:
+def _build_synth_messages(
+    prior_messages: list[dict[str, Any]],
+    drafts_block: str,
+) -> list[dict[str, Any]]:
+    """Forward original system messages, then append synth-system + user.
+
+    Workers see all the system messages from the request (datetime from
+    `node_datetime`, memory recall hits, OWUI template variables, any
+    user-supplied system prompts). Phase 25 pulls those same system
+    messages into the synth call so the synthesizer reasons with the
+    same context — most importantly the datetime (otherwise synth
+    hedges about "today" from training cutoff).
+
+    Only `role=system` messages are forwarded. The user/assistant turns
+    from the original conversation are already represented in
+    `drafts_block` so we don't replay them.
+    """
+    system_msgs = [m for m in prior_messages if m.get("role") == "system"]
     return [
+        *system_msgs,
         {"role": "system", "content": _SYNTH_SYSTEM},
         {"role": "user", "content": (
             f"Original user request and {drafts_block.count('--- draft ')} drafts follow."
@@ -129,11 +150,12 @@ async def _try_synth(
     location: str,
     user_text: str,
     drafts_block: str,
+    prior_messages: list[dict[str, Any]],
     timeout_s: float,
     user_id: str | None = None,
 ) -> tuple[str, int, int]:
     """Run one synthesizer attempt. Returns (content, prompt_tokens, completion_tokens)."""
-    messages = _build_synth_messages(drafts_block)
+    messages = _build_synth_messages(prior_messages, drafts_block)
     async with gate.acquire(model, location=location, user_id=user_id):
         resp = await ollama.chat(
             model=model,
@@ -199,6 +221,7 @@ async def synthesize(
                 ollama, health, gate,
                 model=model, location=loc,
                 user_text=user_text, drafts_block=drafts_block,
+                prior_messages=messages,
                 timeout_s=timeout_s,
                 user_id=user_id,
             )
@@ -293,7 +316,7 @@ async def synthesize_stream(
     primary, fallback = pick_synthesizer(cfg, pool_key=pool_key, task=task)
     user_text = _last_user_text(messages)
     drafts_block = _format_drafts_for_synth(user_text, drafts, subtasks)
-    synth_messages = _build_synth_messages(drafts_block)
+    synth_messages = _build_synth_messages(messages, drafts_block)
 
     candidates = [primary] if primary == fallback else [primary, fallback]
 

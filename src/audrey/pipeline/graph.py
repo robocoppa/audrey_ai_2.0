@@ -304,7 +304,6 @@ def build_graph(
             content=state.get("content", "") or "",
             synth_error=state.get("synth_error", "") or "",
             min_chars=reflection_min_chars,
-            require_sections=True,
         )
         log.info("reflect: attempt=%d passed=%s reason=%s", attempts + 1, result.passed, result.reason)
         return {

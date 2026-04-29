@@ -63,9 +63,10 @@ docker exec audrey-ai ls -la /data | head -10
 #   uploads/        (Phase 13)
 #   any caches that have accumulated
 
-# Confirm uploads.sqlite is intact
-docker exec audrey-ai sqlite3 /data/uploads.sqlite \
-  'SELECT COUNT(*) FROM uploads;'
+# Confirm uploads.sqlite is intact (audrey-ai image has no sqlite3 CLI;
+# use the python stdlib module instead).
+docker exec audrey-ai python -c \
+  "import sqlite3; print(sqlite3.connect('/data/uploads.sqlite').execute('SELECT COUNT(*) FROM uploads').fetchone()[0])"
 # Expect: same row count as before the rename.
 
 # Confirm a real chat completion still works (smoke)
