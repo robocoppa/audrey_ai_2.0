@@ -15,6 +15,14 @@ small changes to the synthesizer:
   training-cutoff answer even when workers (which DO see the datetime
   system message) answered correctly. Now synth sees the same
   system-message floor as workers.
+- **Respect user-requested brevity in reflect.** The new synth prompt
+  is permissive about length, which exposed a bad interaction with
+  reflect's `min_answer_chars=80` floor: questions like "what year is
+  it? answer in one sentence" produced legitimate ~10-char responses
+  ("It is 2026.") that reflect punished by retrying the whole panel.
+  Reflect now (a) drops the floor to 40 chars and (b) skips the
+  `too_short` check entirely when the user's prompt contains brevity
+  cues like "in one sentence", "tldr", "briefly", etc.
 
 What stays the same:
 
@@ -35,10 +43,17 @@ What changed:
   represented in the drafts block already).
 - `src/audrey/pipeline/reflect.py` — dropped `_REQUIRED_HEADERS`
   (Approach/Answer/Caveats triplet) and the `require_sections` param.
-  The synth no longer outputs that fixed structure, so reflecting
-  against it would falsely fail.
+  Added `_BREVITY_CUES` tuple and `_user_wants_brevity()` helper. New
+  `user_text` kwarg on `reflect()`; when the user requested brevity,
+  a too-short answer is treated as `passed=True reason=ok_brevity_requested`
+  instead of triggering a retry.
 - `src/audrey/pipeline/graph.py` — drops the `require_sections=True`
-  arg from the `reflect_fn` call.
+  arg from the `reflect_fn` call; passes `user_text` from the most
+  recent user message via the existing `_last_user_text` helper.
+- `config.yaml` — `agentic.reflection.min_answer_chars` lowered from
+  80 → 40 (the new synth prompt produces tighter answers; 40 is a
+  one-sentence floor that catches genuinely-broken empty responses
+  without false-flagging legitimate brevity).
 
 Out of scope (deliberately):
 
@@ -161,12 +176,59 @@ caveats for a given query. The strict requirement is just that it
 docker compose logs --since 5m audrey-ai | grep "reflect:"
 ```
 
-Expect: `reflect: attempt=1 passed=True reason=ok` for the test
-queries above. **No** `reason=missing_sections` lines (that path
-doesn't exist anymore).
+Expect: `reflect: attempt=1 passed=True reason=ok` for substantive
+test queries. **No** `reason=missing_sections` lines (that path
+doesn't exist anymore). For brevity-cued queries (test 2.5b below),
+expect `reason=ok_brevity_requested`. Length-based `too_short` should
+only fire on substantive-prompt queries that produced suspiciously
+short synth output.
 
-If you see `reason=too_short`, check that the synth model produced
-real content — that path still exists for genuinely-short answers.
+### 2.5b Brevity cue bypasses too_short
+
+The pre-fix regression: "what year is it? answer in one sentence."
+produced a legitimate ~10-char synth response that reflect's
+`min_answer_chars=80` floor punished by retrying the whole panel.
+
+```bash
+curl -sS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"audrey_cloud","stream":false,"messages":[{"role":"user","content":"what year is it right now? answer in one sentence."}]}' \
+  http://localhost:8000/v1/chat/completions \
+  | jq -r '.choices[0].message.content'
+
+docker compose logs --since 1m audrey-ai | grep "reflect:"
+```
+
+Expect:
+- The answer is one sentence naming the current year (e.g.
+  "It is 2026."). No retry, no degraded shipping.
+- The reflect log shows
+  `reflect: attempt=1 passed=True reason=ok_brevity_requested`.
+- The pipeline_total log shows `reflect=ok_brevity_requested/attempts=1`
+  (single attempt, no second deep-panel run).
+
+Compare against pre-fix behavior: would have shown two
+`reason=too_short` lines (~10s + ~10s of unnecessary cloud time burned)
+before "shipping degraded answer."
+
+### 2.5c too_short still triggers when brevity is NOT requested
+
+To prove the brevity check is keyed on the user's prompt and not
+just answer length, fire a substantive prompt that the synth might
+under-answer:
+
+```bash
+curl -sS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"audrey_local","stream":false,"messages":[{"role":"user","content":"explain in detail how btrfs handles copy-on-write and how that interacts with zfs-style snapshots, with examples."}]}' \
+  http://localhost:8000/v1/chat/completions \
+  | jq -r '.choices[0].message.content' | wc -c
+```
+
+Expect: a long answer (> 1000 chars typically). If by some quirk the
+synth produced <40 chars on a query like this, reflect WOULD retry
+(no brevity cue in the prompt). That's the intended safety net for
+legitimately-broken short responses.
 
 ### 2.6 Streaming path also drops Approach
 

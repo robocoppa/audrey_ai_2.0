@@ -151,7 +151,11 @@ agentic:
   reflection:
     enabled: true
     max_retries: 1
-    min_answer_chars: 80
+    # 40 chars = roughly one short sentence floor. Phase 25 dropped from
+    # 80 because the new synth prompt produces tighter answers and 80
+    # was triggering false-positive retries on legitimately-brief
+    # responses (e.g. "what year is it" → "It is 2026.").
+    min_answer_chars: 40
   escalation:
     enabled: true
     min_chars: 100
