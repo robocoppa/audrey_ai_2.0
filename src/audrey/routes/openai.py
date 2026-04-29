@@ -22,6 +22,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -46,6 +47,7 @@ from audrey.pipeline.classify import classify as classify_fn
 from audrey.pipeline.complexity import is_complex
 from audrey.pipeline.context import datetime_system_message
 from audrey.pipeline.deep_panel import pool_key_for, run_panel_streaming
+from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.memory import (
     MEMORY_STORE_TOOL,
     memory_system_message,
@@ -306,7 +308,9 @@ async def _stream_via_pipeline(app, payload: ChatCompletionRequest, messages, op
 
         timeout = float(cfg.timeouts.get("fast_path", 180))
         async for frame in _stream_openai(
-            ollama, payload.model, spec.name, messages, options, timeout_s=timeout, health=health,
+            ollama, payload.model, spec.name, messages, options,
+            timeout_s=timeout, health=health,
+            gate=app.state.gate, location=spec.location, user_id=payload.user,
         ):
             yield frame
 
@@ -772,8 +776,17 @@ async def _stream_openai(
     *,
     timeout_s: float | None = None,
     health: HealthTracker | None = None,
+    gate: FairLocalGate | None = None,
+    location: str = "local",
+    user_id: str | None = None,
 ):
-    """Convert Ollama's streaming chunks into OpenAI SSE frames."""
+    """Convert Ollama's streaming chunks into OpenAI SSE frames.
+
+    Phase 23: when `gate` is supplied and `location == "local"`, the entire
+    token stream is held under the gate. Tokens are GPU-bound the whole way
+    through (no tool dispatch in this branch), so a single acquire for the
+    full duration is the right granularity here.
+    """
     created = int(time.time())
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     fingerprint = f"audrey-{__version__}/{concrete}"
@@ -785,30 +798,37 @@ async def _stream_openai(
     }
     yield f"data: {json.dumps(first)}\n\n"
 
+    gate_ctx = (
+        gate.acquire(concrete, location=location, user_id=user_id)
+        if gate is not None
+        else _noop_async_ctx()
+    )
+
     try:
-        async for chunk in ollama.chat_stream(
-            model=concrete, messages=messages, options=options, timeout_s=timeout_s,
-        ):
-            msg = chunk.get("message", {}) or {}
-            content = msg.get("content", "") or ""
-            done = bool(chunk.get("done"))
-            if content:
-                frame = {
-                    "id": cid, "object": "chat.completion.chunk", "created": created,
-                    "model": virtual, "system_fingerprint": fingerprint,
-                    "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
-                }
-                yield f"data: {json.dumps(frame)}\n\n"
-            if done:
-                final = {
-                    "id": cid, "object": "chat.completion.chunk", "created": created,
-                    "model": virtual, "system_fingerprint": fingerprint,
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                }
-                yield f"data: {json.dumps(final)}\n\n"
-                if health is not None:
-                    health.record_success(concrete)
-                break
+        async with gate_ctx:
+            async for chunk in ollama.chat_stream(
+                model=concrete, messages=messages, options=options, timeout_s=timeout_s,
+            ):
+                msg = chunk.get("message", {}) or {}
+                content = msg.get("content", "") or ""
+                done = bool(chunk.get("done"))
+                if content:
+                    frame = {
+                        "id": cid, "object": "chat.completion.chunk", "created": created,
+                        "model": virtual, "system_fingerprint": fingerprint,
+                        "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
+                    }
+                    yield f"data: {json.dumps(frame)}\n\n"
+                if done:
+                    final = {
+                        "id": cid, "object": "chat.completion.chunk", "created": created,
+                        "model": virtual, "system_fingerprint": fingerprint,
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                    }
+                    yield f"data: {json.dumps(final)}\n\n"
+                    if health is not None:
+                        health.record_success(concrete)
+                    break
     except OllamaError as e:
         if health is not None:
             health.record_failure(concrete, str(e))
@@ -820,6 +840,11 @@ async def _stream_openai(
         yield f"data: {json.dumps(err)}\n\n"
 
     yield "data: [DONE]\n\n"
+
+
+@asynccontextmanager
+async def _noop_async_ctx():
+    yield
 
 
 async def _emit_single_message(virtual: str, concrete: str, text: str):

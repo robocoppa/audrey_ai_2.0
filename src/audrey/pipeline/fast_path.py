@@ -4,6 +4,12 @@ Phase 7 update: when the chosen model is in `fast_path.tool_capable_models`
 *and* a tool registry is non-empty, we run a ReAct loop (`pipeline/react.py`)
 that lets the model call tools before answering. Otherwise it's a one-shot
 `ollama.chat`. Streaming still bypasses both (route-layer concern).
+
+Phase 23: local fast-path calls now go through `FairLocalGate`. The
+non-tools branch holds the gate around the single `ollama.chat`. The tools
+branch passes the gate down into `run_react`, which acquires per-chat so
+the gate is released during tool dispatch. Cloud calls bypass the gate
+entirely (`gate.acquire` is a no-op when `location != "local"`).
 """
 
 from __future__ import annotations
@@ -15,6 +21,7 @@ from audrey.metrics import dispatch_total
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry, ModelSpec, TaskType
+from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.react import ReactResult, run_react
 from audrey.tools.discovery import ToolRegistry
 
@@ -37,6 +44,7 @@ async def run_fast_path(
     ollama: OllamaClient,
     registry: ModelRegistry,
     health: HealthTracker,
+    gate: FairLocalGate,
     *,
     task: TaskType,
     messages: list[dict[str, Any]],
@@ -72,10 +80,11 @@ async def run_fast_path(
 
     if not use_tools:
         try:
-            resp = await ollama.chat(
-                model=spec.name, messages=messages,
-                options=options or None, timeout_s=timeout_s,
-            )
+            async with gate.acquire(spec.name, location=spec.location, user_id=user_id):
+                resp = await ollama.chat(
+                    model=spec.name, messages=messages,
+                    options=options or None, timeout_s=timeout_s,
+                )
             health.record_success(spec.name)
             return spec.name, resp
         except OllamaError as e:
@@ -93,6 +102,8 @@ async def run_fast_path(
         max_tool_result_chars=react_max_tool_chars,
         tool_dispatch_timeout_s=react_dispatch_timeout_s,
         user_id=user_id,
+        gate=gate,
+        location=spec.location,
     )
     return spec.name, {
         "message": {"role": "assistant", "content": react.content},

@@ -203,7 +203,7 @@ def build_graph(
     async def node_fast_path(state: PipelineState) -> dict[str, Any]:
         options = _options_from_state(state)
         concrete, resp = await run_fast_path(
-            ollama, registry, health,
+            ollama, registry, health, gate,
             task=state["task_type"],
             messages=state["messages"],
             options=options,

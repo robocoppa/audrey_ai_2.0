@@ -19,6 +19,15 @@ verbatim — only older rounds are summarized.
 Tool dispatch is fully concurrent within a round (Ollama may emit multiple
 tool_calls in one assistant turn). Errors come back as tool messages so the
 model can decide how to recover.
+
+Phase 23: when a `FairLocalGate` is supplied, each `ollama.chat` is wrapped
+with `gate.acquire(...)`. Tool dispatch sits *outside* the gate hold, so a
+slow tool call doesn't head-of-line-block other users' GPU work. The gate is
+re-acquired for the next round; if another user slipped in between, the
+model may be reloaded — that's the trade we accept to keep tool-wait time
+non-blocking. Deep panel passes `gate=None` because it holds the gate at the
+whole-worker level (one acquire across all rounds, by design — see
+`deep_panel._run_one_worker`).
 """
 
 from __future__ import annotations
@@ -26,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -33,6 +43,7 @@ import httpx
 
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
+from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.tools.discovery import ToolRegistry
 from audrey.tools.dispatch import ToolResult, dispatch_one, to_tool_message
 
@@ -69,6 +80,23 @@ def _compress_history(messages: list[dict[str, Any]], *, keep_last_round: int) -
     return out
 
 
+@asynccontextmanager
+async def _noop_gate():
+    yield
+
+
+def _gate_ctx(gate: FairLocalGate | None, model: str, location: str, user_id: str | None):
+    """Acquire the gate per-chat-call when supplied; no-op when None or cloud.
+
+    Deep panel passes `gate=None` because it holds the gate across the whole
+    worker (rounds + tool dispatch). Fast path passes a real gate so the
+    tool-dispatch window between rounds releases the GPU for other users.
+    """
+    if gate is None or location != "local":
+        return _noop_gate()
+    return gate.acquire(model, location=location, user_id=user_id)
+
+
 async def run_react(
     ollama: OllamaClient,
     health: HealthTracker,
@@ -83,6 +111,8 @@ async def run_react(
     max_tool_result_chars: int,
     tool_dispatch_timeout_s: float,
     user_id: str | None = None,
+    gate: FairLocalGate | None = None,
+    location: str = "local",
 ) -> ReactResult:
     """Drive the model through up to `max_rounds` of tool use, then return the answer.
 
@@ -103,10 +133,11 @@ async def run_react(
 
             start = time.monotonic()
             try:
-                last_resp = await ollama.chat(
-                    model=model, messages=convo, options=options or None,
-                    tools=tools, timeout_s=timeout_s,
-                )
+                async with _gate_ctx(gate, model, location, user_id):
+                    last_resp = await ollama.chat(
+                        model=model, messages=convo, options=options or None,
+                        tools=tools, timeout_s=timeout_s,
+                    )
                 health.record_success(model)
             except OllamaError as e:
                 health.record_failure(model, str(e))
@@ -171,10 +202,11 @@ async def run_react(
             ),
         })
         try:
-            final = await ollama.chat(
-                model=model, messages=convo, options=options or None,
-                tools=None, timeout_s=timeout_s,
-            )
+            async with _gate_ctx(gate, model, location, user_id):
+                final = await ollama.chat(
+                    model=model, messages=convo, options=options or None,
+                    tools=None, timeout_s=timeout_s,
+                )
             health.record_success(model)
         except OllamaError as e:
             health.record_failure(model, str(e))

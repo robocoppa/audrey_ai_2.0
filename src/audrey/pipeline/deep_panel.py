@@ -131,6 +131,10 @@ async def _run_one_worker(
     try:
         async with gate.acquire(model, location=location, user_id=user_id):
             if use_tools:
+                # Phase 23: deep panel holds the gate for the *whole* worker
+                # (this `async with`), so pass `gate=None` to keep ReAct from
+                # double-acquiring. Fast path is the opposite: it passes a
+                # real gate so tool-dispatch windows release the GPU.
                 react: ReactResult = await run_react(
                     ollama, health, tools,  # type: ignore[arg-type]
                     model=model,
@@ -142,6 +146,8 @@ async def _run_one_worker(
                     max_tool_result_chars=react_max_tool_chars,
                     tool_dispatch_timeout_s=react_dispatch_timeout_s,
                     user_id=user_id,
+                    gate=None,
+                    location=location,
                 )
                 elapsed = round(time.monotonic() - start, 2)
                 # run_react already records success/failure per chat call.
