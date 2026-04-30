@@ -25,6 +25,13 @@ services:
     labels:
       net.unraid.docker.icon: "${AUDREY_REPO_DIR:-/mnt/user/appdata/audrey_ai_2.0}/images/audrey2.png"
     restart: unless-stopped
+    # Audrey discovers tools at startup by GETting custom-tools'
+    # /openapi.json. If audrey starts before custom-tools is ready,
+    # discovery returns 0 tools and never re-tries (until manual
+    # `POST /v1/tools/rediscover`). Wait for custom-tools to be healthy.
+    depends_on:
+      custom-tools:
+        condition: service_healthy
     networks:
       - ollama-net
     ports:
@@ -75,6 +82,15 @@ services:
       MEMORY_SIMILARITY_THRESHOLD: ${MEMORY_SIMILARITY_THRESHOLD:-0.5}
     volumes:
       - /mnt/user/appdata/custom-tools:/app/data
+    # Healthcheck so audrey-ai's depends_on(condition=service_healthy)
+    # actually has something to wait on. The image has no `curl` binary,
+    # so use python (which is the entrypoint and guaranteed present).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=2).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
 networks:
   ollama-net:

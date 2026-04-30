@@ -120,17 +120,24 @@ Expect: 422 with detail mentioning the https-only requirement.
 
 ### 2.5 Real public image works
 
-A real Wikimedia URL — image of the Audrey Hepburn photo from her
-Wikipedia page (or any other small public image you trust). The point
-is to confirm we didn't break legitimate fetches.
+A small public image — the point is to confirm we didn't break
+legitimate fetches. Use a Brave Search image-CDN URL (these are
+served behind Brave's CDN and are reliably reachable from Unraid's
+network; the older Wikimedia thumbnail-URL form 403'd or DNS-failed
+during testing).
 
 ```bash
-curl -sS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"image_url":"https://upload.wikimedia.org/wikipedia/commons/thumb/2/22/Audrey_Hepburn_screentest_in_Roman_Holiday_trailer.jpg/200px-Audrey_Hepburn_screentest_in_Roman_Holiday_trailer.jpg","top_k":3}' http://localhost:8000/v1/kb/query/image | head -c 400
+curl -sS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"image_url":"https://imgs.search.brave.com/5sa_7ONUZiCVUdjeQO7WkvaSy3RWsIdrDfcJmZ44gWA/rs:fit:500:0:1:0/g:ce/aHR0cHM6Ly9tZWRp/YS5nZXR0eWltYWdl/cy5jb20vaWQvMjE3/NzE3NDQ5Ny9waG90/by9sZXR0ZXItcy1w/YWludGVkLWluLWdv/bGQtYW5kLXdoaXRl/LW9uLWEtYmxhY2st/YmFja2dyb3VuZC1h/bmQtcGhvdG9ncmFw/aGVkLW9uLXRoZS1m/YWNhZGUtb2YtYS5q/cGc_cz02MTJ4NjEy/Jnc9MCZrPTIwJmM9/ZVRkd25uN1phNFJz/QXliSzBUcVV4bUpW/LUZUQ21ZMHBnNHVF/ZU9wV1hzVT0","top_k":3}' http://localhost:8000/v1/kb/query/image | head -c 400
 ```
 
 Expect: HTTP 200 with a JSON response containing `"results": [...]`
 (may be empty if no images in `kb_images` match). The presence of a
 JSON body — not 422 — proves the fetch succeeded and embedding ran.
+
+If you want to swap to a different image source, any small `https://`
+URL serving an `image/*` content-type from a non-private IP works.
+Brave's CDN happens to be convenient because every Brave Search
+image hit produces a stable proxy URL.
 
 ### 2.6 Redirect rejected
 
@@ -149,6 +156,31 @@ chose.
 ---
 
 ## 3. Smoke tests — Piece B (watcher on_deleted)
+
+> **Run these from the repo directory.** `docker compose logs ...`
+> reads the local `compose.yaml`, so if you're not in
+> `/mnt/user/appdata/audrey_ai_2.0/` you'll get
+> `no configuration file provided: not found`. Either `cd` there
+> first or use `docker compose -f
+> /mnt/user/appdata/audrey_ai_2.0/compose.yaml logs ...`.
+
+> **Watcher must be enabled.** Check the audrey-ai readiness log:
+> ```bash
+> cd /mnt/user/appdata/audrey_ai_2.0
+> docker compose logs --tail 30 audrey-ai | grep "kb_watcher="
+> ```
+> If you see `kb_watcher=off`, the watcher isn't running and the
+> on_deleted handler can't fire (the code is loaded; it's just not
+> observing). To turn it on, add `KB_WATCHER_ENABLED=1` to the
+> `audrey-ai` service environment in `compose.yaml`, then
+> `docker compose up -d audrey-ai`. After restart, the readiness log
+> should show `kb_watcher=on` plus a `kb.watcher: watching N root(s)`
+> line shortly after.
+>
+> If you don't want auto-reingest at all (some operators prefer
+> running `audrey-ingest` manually), Phase 27 piece B's runtime
+> verification is N/A — the code is shipped + AST-clean but won't
+> exercise. SSRF (Piece A) verifies independently.
 
 Picking a real test file is the trickiest part. Use a throwaway under
 one of the existing `KB_DATASET_PATHS` — `/datasets/geology/` is a

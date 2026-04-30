@@ -182,6 +182,40 @@ HTML shell).
 
 ---
 
+## 4b. Configure OWUI to forward user JWTs to Audrey
+
+Phase 26 makes `/v1/chat/completions` reject requests without a valid
+bearer token. OWUI's default Connection auth mode is `bearer` with a
+fixed per-Connection API key — Audrey would receive *that* key and
+401 it (Audrey only validates OWUI-issued JWTs, not arbitrary keys).
+
+The fix is to switch the Audrey Connection's auth mode to **Session**,
+which makes OWUI forward the requesting user's JWT to Audrey on every
+chat-completions call. v0.9.x supports this via `auth_type: "session"`
+on the Connection record (see OWUI source
+`backend/open_webui/routers/openai.py:184-215`).
+
+**Steps in OWUI:**
+
+1. Sign in as admin.
+2. **Admin Panel** → **Settings** → **Connections**.
+3. Click the Audrey Connection (URL `http://audrey-ai:8000/v1`).
+4. Change **Auth** from `Bearer` to **`Session`**. The API key field
+   becomes irrelevant.
+5. Save.
+
+After that, every chat from any signed-in OWUI user carries that user's
+JWT in the `Authorization: Bearer <jwt>` header sent to Audrey, and
+Audrey resolves it via `require_user`. Per-user fairness, memory recall,
+KB user-collections all key off the real user's email — exactly the
+identity boundary Phase 26 is trying to enforce.
+
+**Symptom of skipping this step:** OWUI chat replies show
+`Missing bearer token.` (or `Token rejected by OWUI.` if you set a
+random key).
+
+---
+
 ## 5. Smoke tests
 
 ### 5.1 Container starts cleanly
