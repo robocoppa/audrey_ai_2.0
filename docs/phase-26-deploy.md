@@ -310,29 +310,36 @@ Without two real users it's hard to test directly. The mechanical
 check: tools-server's `memory_recall` route now requires a `user`
 field in the JSON payload.
 
+The custom-tools image doesn't ship `curl` or `sqlite3` in its apt
+list (minimal image), so we hit it from the Unraid host directly via
+the bind on port 8001.
+
+Without a `user` field (expect `422` — pydantic rejects the missing
+required field):
 ```bash
-# Direct call to custom-tools (use docker exec since localhost:8001
-# is a bind from the host that may or may not be exposed):
-docker exec custom-tools curl -sS -o /dev/null -w "%{http_code}\n" \
-  -X POST -H "Content-Type: application/json" \
-  -d '{"key":"anything"}' \
-  http://localhost:8001/memory_recall
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST -H "Content-Type: application/json" -d '{"key":"anything"}' http://localhost:8001/memory_recall
 ```
 
-Expect: `422` (Unprocessable Entity — pydantic rejects the missing
-`user` field). Pre-fix this would have returned 200 with whatever
-memory matched the key.
+Pre-Phase-26 this returned `200` with whatever memory matched the
+key across any user — the cross-user leak.
 
+With a `user` field but a key that doesn't exist for that user
+(expect `404`):
 ```bash
-# With a valid user:
-docker exec custom-tools curl -sS -o /dev/null -w "%{http_code}\n" \
-  -X POST -H "Content-Type: application/json" \
-  -d '{"user":"some-user-id","key":"nonexistent"}' \
-  http://localhost:8001/memory_recall
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST -H "Content-Type: application/json" -d '{"user":"some-user-id","key":"nonexistent"}' http://localhost:8001/memory_recall
 ```
 
-Expect: `404` (no memory for that user+key combination — or 200 if
-that user really has a memory at that key, which is fine too).
+If the host can't reach `localhost:8001` (port mapping was removed
+in some setups for defense-in-depth), call from inside audrey-ai's
+container instead:
+```bash
+docker exec audrey-ai python -c "import httpx; r = httpx.post('http://custom-tools:8001/memory_recall', json={'key':'anything'}); print(r.status_code)"
+```
+Expect: `422`. Then with a valid user:
+```bash
+docker exec audrey-ai python -c "import httpx; r = httpx.post('http://custom-tools:8001/memory_recall', json={'user':'some-user-id','key':'nonexistent'}); print(r.status_code)"
+```
+Expect: `404`.
 
 ### 5.9 Grafana login still works
 

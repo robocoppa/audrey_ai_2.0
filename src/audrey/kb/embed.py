@@ -19,8 +19,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import ipaddress
 import logging
 import math
+import socket
+import urllib.parse
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -32,6 +35,69 @@ from audrey.models.ollama import OllamaClient
 
 if TYPE_CHECKING:
     from PIL.Image import Image as PILImage
+
+
+# ── SSRF guards (Phase 27) ────────────────────────────────────────────
+#
+# `_fetch_image` is called by the public `/v1/kb/query/image` route with
+# whatever URL an authenticated user supplied. Without these guards a
+# user could:
+#   - Probe internal services via redirects ("does qdrant:6333 respond?")
+#   - Hit Audrey's own loopback metrics/admin endpoints
+#   - OOM the container with a multi-GB response (no streaming cap)
+#
+# Phase 26 already requires auth on the chat completions route that
+# eventually triggers tool calls; Phase 27 adds defense-in-depth at the
+# fetch layer itself. Trade-offs documented inline.
+
+_IMAGE_FETCH_BYTE_CAP = 25 * 1024 * 1024  # 25 MB; huge for an image
+_ALLOWED_IMAGE_SCHEMES = frozenset({"https"})
+_ALLOWED_CONTENT_TYPE_PREFIX = "image/"
+
+
+def _is_unsafe_address(host: str) -> bool:
+    """True if any DNS-resolved IP for `host` is private / loopback / etc.
+
+    Resolves via `socket.getaddrinfo` (IPv4 + IPv6). Any single resolved
+    address falling into a non-public range fails the host. Unresolvable
+    hosts also fail (better to reject than try and possibly hit something
+    weird via dns search domains).
+
+    Doesn't defend against DNS rebinding — the actual httpx connection
+    re-resolves and could land on a different IP. Real mitigation would
+    require connecting to the resolved IP and passing the hostname via
+    SNI. Out of scope for Phase 27; bounded by Phase 26 requiring auth.
+    """
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return True
+    for _, _, _, _, sockaddr in infos:
+        addr = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            return True
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_multicast or ip.is_reserved or ip.is_unspecified):
+            return True
+    return False
+
+
+def _validate_image_url(url: str) -> None:
+    """Raise ValueError if the URL is unsafe to fetch as an image."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in _ALLOWED_IMAGE_SCHEMES:
+        raise ValueError(
+            f"image_url scheme must be one of {sorted(_ALLOWED_IMAGE_SCHEMES)}; got {parsed.scheme!r}"
+        )
+    if not parsed.hostname:
+        raise ValueError("image_url has no host")
+    if _is_unsafe_address(parsed.hostname):
+        raise ValueError(
+            f"image_url host {parsed.hostname!r} resolves to a private, loopback, "
+            "link-local, or otherwise non-public address"
+        )
 
 log = logging.getLogger(__name__)
 
@@ -103,6 +169,11 @@ def _normalize(vec: list[float]) -> list[float]:
 
 
 async def _fetch_image(url: str) -> "PILImage":
+    # Phase 27: validate URL before any I/O. Raises ValueError on bad
+    # scheme, missing host, or host resolving to a private/loopback IP.
+    # Run in a thread because socket.getaddrinfo can block.
+    await asyncio.to_thread(_validate_image_url, url)
+
     # Wikimedia (and a handful of other CDNs) reject the default
     # `python-httpx/x.y.z` UA with 403. A normal browser UA gets through.
     headers = {
@@ -112,10 +183,27 @@ async def _fetch_image(url: str) -> "PILImage":
         ),
         "Accept": "image/avif,image/webp,image/png,image/jpeg,*/*;q=0.8",
     }
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, headers=headers) as client:
-        r = await client.get(url)
-        r.raise_for_status()
-        return await asyncio.to_thread(_pil_from_bytes, r.content)
+    # Phase 27: follow_redirects=False — a permitted public host could
+    # 302 to an internal address otherwise. Stream the response with a
+    # byte cap so a malicious server can't OOM us with a giant payload.
+    async with httpx.AsyncClient(
+        timeout=20.0, follow_redirects=False, headers=headers,
+    ) as client:
+        async with client.stream("GET", url) as r:
+            r.raise_for_status()
+            ctype = r.headers.get("content-type", "").lower()
+            if not ctype.startswith(_ALLOWED_CONTENT_TYPE_PREFIX):
+                raise ValueError(
+                    f"image_url returned content-type {ctype!r}; expected image/*"
+                )
+            buf = bytearray()
+            async for chunk in r.aiter_bytes():
+                buf.extend(chunk)
+                if len(buf) > _IMAGE_FETCH_BYTE_CAP:
+                    raise ValueError(
+                        f"image_url response exceeds {_IMAGE_FETCH_BYTE_CAP}-byte cap"
+                    )
+            return await asyncio.to_thread(_pil_from_bytes, bytes(buf))
 
 
 def _pil_from_bytes(data: bytes) -> "PILImage":
