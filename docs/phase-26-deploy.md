@@ -5,7 +5,8 @@ small pieces, all touching the route-level identity story:
 
 1. **`/v1/chat/completions` requires auth.** Was unauthenticated and
    trusted `payload.user`. Now `Depends(require_user)`; identity comes
-   from `AuthedUser.id`. `payload.user` is logged-but-ignored.
+   from `AuthedUser.email` (the canonical user-identity field shared
+   with files/admin/memory routes). `payload.user` is logged-but-ignored.
 2. **`/v1/kb/ingest` requires admin.** Was unauthenticated. Now
    `Depends(require_admin)`. Query routes (`/v1/kb/query`, `/query/image`,
    `/stats`) stay internal-only — they're called by custom-tools' ReAct
@@ -46,19 +47,31 @@ source changes).
 ## 1. Set the Grafana password env var FIRST
 
 Before any rebuild, set `GRAFANA_ADMIN_PASSWORD` somewhere compose
-will pick it up. Two options:
+will pick it up. Two options.
 
-**A. `.env` file alongside compose (cleanest):**
+**A. `.env` file alongside compose (cleanest).**
+
+Run each of these three commands on its own line. Don't paste them
+as a block — terminal paste behavior is inconsistent on multi-line
+shell snippets and you can end up with commands smashed together.
+
+Generate a random password and write it to the `.env`:
 ```bash
-echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 24)" \
-  >> /mnt/user/appdata/audrey_ai_2.0/monitoring/.env
-chmod 600 /mnt/user/appdata/audrey_ai_2.0/monitoring/.env
-cat /mnt/user/appdata/audrey_ai_2.0/monitoring/.env
-# Save the password somewhere — Grafana stores it hashed; you can't
-# read it back from the running container.
+echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> /mnt/user/appdata/audrey_ai_2.0/monitoring/.env
 ```
 
-**B. Shell export (one-shot):**
+Tighten the file's permissions:
+```bash
+chmod 600 /mnt/user/appdata/audrey_ai_2.0/monitoring/.env
+```
+
+Print it once so you can copy it somewhere safe (Grafana stores the
+password hashed; you can't read it back from the running container):
+```bash
+cat /mnt/user/appdata/audrey_ai_2.0/monitoring/.env
+```
+
+**B. Shell export (one-shot, lost on shell exit).**
 ```bash
 export GRAFANA_ADMIN_PASSWORD="<your-password>"
 ```
@@ -146,11 +159,26 @@ capital C.)
 
 Verify from outside Unraid:
 ```bash
-# From a non-LAN box (laptop on cellular, phone, etc.):
-curl -sS https://<your-tunnel-host>/v1/kb/stats
-# Expect: 404 (OWUI catch-all returns 404 for unknown paths) — NOT
-# a real KB stats response.
+curl -sS https://<your-tunnel-host>/v1/kb/stats | head -5
 ```
+
+Expect: HTML output starting with `<!doctype html>` — that's OWUI's
+SPA index.html being served by the catch-all `*` rule. OWUI is a
+single-page app, so cloudflared's catch-all returns 200 + index.html
+for any unmatched path; the SPA router would then show its own 404
+page client-side.
+
+What you want to **NOT** see: a JSON response like
+`{"collections": [...], "global": {...}}` — that would mean the
+`^/v1/kb` rule is still routing to audrey.
+
+To make the test less noisy, you can also check for an audrey
+fingerprint specifically:
+```bash
+curl -sS https://<your-tunnel-host>/v1/kb/stats | grep -c '"collections"'
+```
+Expect: `0` (the substring `"collections"` won't appear in OWUI's
+HTML shell).
 
 ---
 
@@ -168,11 +196,12 @@ custom-tools, no errors.
 
 ### 5.2 Chat completions REJECTS unauthenticated requests
 
+Each command below is a single line — copy-paste each one as a unit,
+not as a block. Mixing multiple commands per paste tends to smash
+them together if your terminal eats the trailing newline.
+
 ```bash
-curl -sS -o /dev/null -w "%{http_code}\n" \
-  -X POST -H "Content-Type: application/json" \
-  -d '{"model":"audrey_fast","messages":[{"role":"user","content":"hi"}]}' \
-  http://localhost:8000/v1/chat/completions
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST -H "Content-Type: application/json" -d '{"model":"audrey_fast","messages":[{"role":"user","content":"hi"}]}' http://localhost:8000/v1/chat/completions
 ```
 
 Expect: `401`. Pre-Phase-26 this returned `200` and a real chat
@@ -181,11 +210,7 @@ response — that's the gap that's now closed.
 ### 5.3 Chat completions WORKS with auth
 
 ```bash
-curl -sS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"audrey_fast","messages":[{"role":"user","content":"two-sentence intro to rsync"}]}' \
-  http://localhost:8000/v1/chat/completions \
-  | jq -r '.choices[0].message.content'
+curl -sS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"model":"audrey_fast","messages":[{"role":"user","content":"two-sentence intro to rsync"}]}' http://localhost:8000/v1/chat/completions | jq -r '.choices[0].message.content'
 ```
 
 Expect: a real answer.
@@ -193,18 +218,17 @@ Expect: a real answer.
 ### 5.4 Spoofed `payload.user` is ignored
 
 This is the headline behavior change. Send a request with a *valid*
-auth token but a *spoofed* `user` field; the spoofed value should
-be logged-as-ignored, and the real authenticated id should be what
-shows up in fairness/inflight buckets.
+auth token but a *spoofed* `user` field; the spoofed value should be
+logged-as-ignored, and the real authenticated id should be what shows
+up in fairness/inflight buckets.
 
+Run this curl on its own:
 ```bash
-curl -sS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"audrey_fast","user":"evil-spoof@nope.com","messages":[{"role":"user","content":"hi"}]}' \
-  http://localhost:8000/v1/chat/completions \
-  | jq -r '.choices[0].message.content' > /dev/null
+curl -sS -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"model":"audrey_fast","user":"evil-spoof@nope.com","messages":[{"role":"user","content":"hi"}]}' http://localhost:8000/v1/chat/completions -o /dev/null
+```
 
-# The chat works (real user is admin), but check the logs
+Then on its own line, check the logs:
+```bash
 docker compose logs --since 1m audrey-ai | grep -E 'fast_path task=|payload.user'
 ```
 
@@ -219,31 +243,23 @@ Expect:
 
 ### 5.5 KB ingest requires admin
 
+Three separate commands, each on its own line. Run one at a time.
+
+Without auth (expect `401`):
 ```bash
-# Without auth → 401
-curl -sS -o /dev/null -w "%{http_code}\n" \
-  -X POST -H "Content-Type: application/json" \
-  -d '{"paths":["/datasets/geology"]}' \
-  http://localhost:8000/v1/kb/ingest
-
-# With non-admin auth → 403 (need a non-admin user token; if you
-# only have admin tokens locally, skip this case)
-# curl -sS -o /dev/null -w "%{http_code}\n" \
-#   -X POST -H "Authorization: Bearer $REGULAR_USER_TOKEN" \
-#   -H "Content-Type: application/json" \
-#   -d '{"paths":["/datasets/geology"]}' \
-#   http://localhost:8000/v1/kb/ingest
-
-# With admin auth → 200 (or 503 if KB isn't initialized; either way
-# means auth passed)
-curl -sS -o /dev/null -w "%{http_code}\n" \
-  -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"paths":["/datasets/geology"]}' \
-  http://localhost:8000/v1/kb/ingest
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST -H "Content-Type: application/json" -d '{"paths":["/datasets/geology"]}' http://localhost:8000/v1/kb/ingest
 ```
 
-Expect: 401, 403, 200/503.
+With non-admin auth (expect `403`; skip if you only have admin tokens):
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST -H "Authorization: Bearer $REGULAR_USER_TOKEN" -H "Content-Type: application/json" -d '{"paths":["/datasets/geology"]}' http://localhost:8000/v1/kb/ingest
+```
+
+With admin auth (expect `200`, or `503` if KB isn't initialized —
+either means auth passed):
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"paths":["/datasets/geology"]}' http://localhost:8000/v1/kb/ingest
+```
 
 ### 5.6 Tools rediscover requires admin
 
@@ -331,15 +347,30 @@ in with the new password.
 
 From a non-LAN box:
 ```bash
-curl -sS -o /dev/null -w "%{http_code}\n" \
-  https://<your-tunnel-host>/v1/kb/stats
+curl -sS https://<your-tunnel-host>/v1/kb/stats | grep -c '"collections"'
 ```
 
-Expect: `404` (OWUI catch-all returns 404 for unknown paths). Pre-fix
-this would have hit audrey's KB stats endpoint.
+Expect: `0`. The `"collections"` substring appears in audrey's real KB
+stats response but not in OWUI's HTML index. Pre-fix this would have
+returned a positive number (one match per JSON-key occurrence). For
+visual confirmation that you're getting OWUI's frontend instead:
 
-If you still get a real KB response, the cloudflared rule wasn't
-removed correctly — recheck step 4.
+```bash
+curl -sS https://<your-tunnel-host>/v1/kb/stats | head -3
+```
+
+Expect: lines starting with `<!doctype html>` and `<html lang="en">`
+— that's OWUI's SPA shell being served by cloudflared's catch-all
+`*` rule. Audrey's `/v1/kb/stats` endpoint is unreachable from the
+public tunnel.
+
+If you DO see `"collections"` in the response, the cloudflared rule
+wasn't removed correctly — recheck step 4.
+
+Also script-friendly: the HTTP code is `200` (catch-all serves the
+HTML shell with a 200), NOT `404`. Don't write monitoring on `200 ==
+healthy` for this path; check the body for the `"collections"`
+substring or for an audrey-specific marker instead.
 
 ---
 
@@ -385,7 +416,7 @@ existing Phase 17 `audrey_auth_cache_size` metric for unusual churn.
 
 ### `payload.user` drift logging
 
-The new code logs at DEBUG when `payload.user` differs from `me.id`
+The new code logs at DEBUG when `payload.user` differs from `me.email`
 (e.g. an OpenAI client that hardcodes a different user id). If you
 ever bump audrey-ai to log level DEBUG, watch for that line — recurring
 appearances might indicate a misconfigured client or a probe attempt.

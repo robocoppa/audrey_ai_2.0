@@ -92,7 +92,7 @@ class ChatCompletionRequest(BaseModel):
         description=(
             "OpenAI-spec passthrough field. Phase 26: Audrey **ignores** this "
             "for identity purposes — the canonical user id comes from the "
-            "Authorization header (require_user → AuthedUser.id). Kept in the "
+            "Authorization header (require_user → AuthedUser.email). Kept in the "
             "schema for OpenAI client compatibility; logged for debugging "
             "client-vs-resolved identity drift but never trusted."
         ),
@@ -140,10 +140,10 @@ async def chat_completions(
     # NOT from payload.user (which is OpenAI-spec passthrough and trusted for
     # nothing). If a client sent a different `user` field, log it once for
     # drift-debugging but otherwise ignore.
-    if payload.user and payload.user != me.id:
+    if payload.user and payload.user != me.email:
         log.debug(
             "chat.completions: payload.user=%r ignored (auth user=%r)",
-            payload.user, me.id,
+            payload.user, me.email,
         )
 
     messages = [m.model_dump(exclude_none=True) for m in payload.messages]
@@ -151,11 +151,11 @@ async def chat_completions(
 
     if payload.stream:
         return StreamingResponse(
-            _stream_via_pipeline(app, payload, messages, options, user_id=me.id),
+            _stream_via_pipeline(app, payload, messages, options, user_id=me.email),
             media_type="text/event-stream",
         )
 
-    return await _generate_via_pipeline(app, payload, messages, options, user_id=me.id)
+    return await _generate_via_pipeline(app, payload, messages, options, user_id=me.email)
 
 
 async def _run_graph_with_metrics(graph, state: dict[str, Any]) -> dict[str, Any]:
