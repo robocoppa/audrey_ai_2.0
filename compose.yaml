@@ -45,6 +45,11 @@ services:
       QDRANT_PORT: ${QDRANT_PORT:-6333}
       TOOL_SERVERS: ${TOOL_SERVERS:-http://custom-tools:8001}
       KB_DATASET_PATHS: ${KB_DATASET_PATHS:-/datasets/geology}
+      # Auto-reingest dataset files when they change. The watcher
+      # observes KB_DATASET_PATHS and pushes through ingest on
+      # create/modify/move/delete. Off by default historically; turned
+      # on in Phase 27 once the on_deleted handler landed.
+      KB_WATCHER_ENABLED: ${KB_WATCHER_ENABLED:-1}
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - /mnt/user/appdata/runtime:/data
