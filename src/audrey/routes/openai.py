@@ -40,6 +40,7 @@ from audrey.pipeline.banners import (
     BANNER_SYNTHESIZING,
     BANNER_THINKING,
     PhaseTicker,
+    tool_summary_block,
     worker_fail,
     worker_ok,
 )
@@ -323,6 +324,14 @@ async def _stream_via_pipeline(
                 return
             concrete = final.get("concrete_model", spec.name)
             content = final.get("content", "") or "[empty]"
+            # Per-worker tool-usage footer (Phase 28). Fast path is one
+            # worker — `tool_calls_log` is its full call list. Skipped when
+            # the ReAct loop ran zero tool calls.
+            footer = tool_summary_block([
+                (concrete, list(final.get("tool_calls_log") or []))
+            ])
+            if footer:
+                content = content + footer
             async for frame in _emit_single_message(payload.model, concrete, content):
                 yield frame
             return
@@ -644,6 +653,15 @@ async def _stream_deep_with_banners(
             elif not final_content:
                 final_content = "[empty]"
                 pipeline_outcome = "error"
+
+            # Per-worker tool-usage footer (Phase 28). Only renders rows for
+            # workers that actually called tools; empty when no tools fired.
+            footer = tool_summary_block([
+                (str(d.get("model") or "?"), list(d.get("tool_calls") or []))
+                for d in drafts
+            ])
+            if footer:
+                yield _delta_frame(footer)
 
             yield _stop_frame()
             yield "data: [DONE]\n\n"

@@ -69,6 +69,66 @@ def worker_fail(model: str) -> str:
     return f"  ❌ {model}"
 
 
+# ─── Tool-usage footer ────────────────────────────────────────────────
+
+def _format_calls(calls: list[dict]) -> str:
+    """`[{name, is_error}, ...]` → `kb_search ×2, web_search ×1 ❌`.
+
+    Counts duplicate names; appends ❌ to a tool that had any error in this
+    worker's run. Order is first-seen so the footer stays stable across runs.
+    """
+    seen: list[str] = []
+    counts: dict[str, int] = {}
+    errors: dict[str, bool] = {}
+    for c in calls:
+        name = str(c.get("name") or "?")
+        if name not in counts:
+            seen.append(name)
+            counts[name] = 0
+            errors[name] = False
+        counts[name] += 1
+        if c.get("is_error"):
+            errors[name] = True
+    parts = []
+    for name in seen:
+        n = counts[name]
+        suffix = " ❌" if errors[name] else ""
+        if n == 1:
+            parts.append(f"`{name}`{suffix}")
+        else:
+            parts.append(f"`{name}` ×{n}{suffix}")
+    return ", ".join(parts)
+
+
+def tool_summary_block(
+    per_worker: list[tuple[str, list[dict]]],
+) -> str:
+    """Render a per-worker tools-used footer, or empty string if no tools fired.
+
+    Input: list of `(model_name, tool_calls)` pairs — same shape across deep
+    panel (one entry per WorkerDraft) and fast path (one entry total).
+
+    Output (when at least one worker called at least one tool):
+
+        \\n\\n---\\n> _Tools used:_\\n> - **qwen3.6:35b** — `kb_search` ×2\\n> - …
+
+    The two leading newlines + horizontal rule give the markdown renderer a
+    clean break from the answer body. Skipped silently when nothing to show.
+    """
+    rows = [
+        (model, calls)
+        for model, calls in per_worker
+        if calls
+    ]
+    if not rows:
+        return ""
+    lines = ["", "", "---", "> _Tools used:_"]
+    for model, calls in rows:
+        formatted = _format_calls(calls)
+        lines.append(f"> - **{model}** — {formatted}")
+    return "\n".join(lines) + "\n"
+
+
 # Type alias — async function that takes a string and yields it as an
 # SSE frame. The route handler supplies this; the ticker doesn't know
 # (or care) what the frame format is.
@@ -174,6 +234,7 @@ __all__ = [
     "Emitter",
     "PhaseTicker",
     "TICK_INTERVAL_S",
+    "tool_summary_block",
     "worker_fail",
     "worker_ok",
 ]
