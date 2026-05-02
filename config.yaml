@@ -211,6 +211,14 @@ kb:
     - "/datasets/servicenow"
   watcher_debounce_seconds: 2
 
+  # Phase 30: periodic reconcile pass for the global kb_text + kb_images
+  # collections. Catches drift the watcher misses (container restarts,
+  # KB_WATCHER_ENABLED=0 stretches, bulk deletes outside audrey).
+  # Excludes per-user collections — Phase 15's sqlite handles those.
+  reconcile:
+    enabled: true
+    interval_s: 1800                     # 30 min default; lower = more aggressive
+
   # Per-user uploads (Phase 13). Landing dir is bind-mounted from the host.
   upload_root: "/data/uploads"
   max_upload_mb: 50                      # per-file cap

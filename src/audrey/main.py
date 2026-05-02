@@ -21,6 +21,7 @@ from audrey.auth import AuthedUser, require_admin
 from audrey.config import get_config
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
 from audrey.kb.qdrant import QdrantKB
+from audrey.kb.reconcile import KBReconciler
 from audrey.kb.uploads_db import UploadsDB, reconcile_with_qdrant
 from audrey.kb.watcher import KBWatcher
 from audrey.metrics import render as render_metrics
@@ -118,6 +119,17 @@ async def lifespan(app: FastAPI):
         )
         await watcher.start()
 
+    reconciler: KBReconciler | None = None
+    reconcile_cfg = kb_cfg.get("reconcile", {}) or {}
+    if reconcile_cfg.get("enabled", True):
+        reconciler = KBReconciler(
+            qdrant=qdrant,
+            interval_s=float(reconcile_cfg.get("interval_s", 1800)),
+            text_collection=kb_cfg.get("text_collection", "kb_text"),
+            image_collection=kb_cfg.get("image_collection", "kb_images"),
+        )
+        await reconciler.start()
+
     app.state.cfg = cfg
     app.state.ollama = ollama
     app.state.registry = registry
@@ -131,20 +143,24 @@ async def lifespan(app: FastAPI):
     app.state.text_embedder = text_embedder
     app.state.image_embedder = image_embedder
     app.state.kb_watcher = watcher
+    app.state.kb_reconciler = reconciler
 
     log.info(
         "ready: ollama=%s; task types=%s; gpu_concurrency=%d; "
         "max_inflight_per_user=%d; tools=%d (%s); "
-        "qdrant=%s:%d; kb_watcher=%s; pipeline=compiled",
+        "qdrant=%s:%d; kb_watcher=%s; kb_reconcile=%s; pipeline=compiled",
         cfg.env.ollama_host, registry.all_task_types(), gpu_concurrency,
         inflight.max_per_user,
         len(tool_registry.by_name), tool_registry.names(),
         cfg.env.qdrant_host, cfg.env.qdrant_port,
         "on" if watcher is not None else "off",
+        "on" if reconciler is not None else "off",
     )
     try:
         yield
     finally:
+        if reconciler is not None:
+            await reconciler.stop()
         if watcher is not None:
             await watcher.stop()
         uploads_db.close()

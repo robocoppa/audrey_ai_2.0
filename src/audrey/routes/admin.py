@@ -15,6 +15,11 @@ Endpoints:
                                       shipped this because OWUI v0.9.x
                                       doesn't emit user-deletion webhooks.
   GET  /v1/admin/auth/status        — cache size visibility.
+  POST /v1/admin/kb/reconcile       — trigger one KB reconcile pass on
+                                      demand (Phase 30). Useful right
+                                      after a bulk delete on disk, or
+                                      to verify the periodic loop is
+                                      doing what it should.
 
 Eviction is intentionally manual — OWUI doesn't notify Audrey of user
 lifecycle events, so the admin operator (you) signals via these
@@ -26,7 +31,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from audrey.auth import (
@@ -36,6 +41,7 @@ from audrey.auth import (
     clear_auth_cache_for_email,
     require_admin,
 )
+from audrey.kb.reconcile import reconcile_once
 
 log = logging.getLogger(__name__)
 
@@ -90,6 +96,32 @@ async def auth_clear_for_user(
 async def auth_status(_: AuthedUser = Depends(require_admin)) -> AuthStatusResponse:
     """Quick visibility: how many entries the auth cache currently holds."""
     return AuthStatusResponse(cached_entries=cache_size())
+
+
+@router.post("/kb/reconcile")
+async def kb_reconcile(
+    request: Request,
+    me: AuthedUser = Depends(require_admin),
+) -> dict:
+    """Trigger one KB reconcile sweep on demand (Phase 30).
+
+    Scrolls `kb_text` + `kb_images`, deletes vectors for any source path
+    that no longer exists on disk. Returns the structured summary
+    (per-collection: checked/orphans_deleted/points_in_orphans/elapsed_s).
+
+    Per-user collections are NOT touched — Phase 15's sqlite handles
+    those at startup.
+
+    Synchronous: call returns when the sweep completes. On a 10k-point
+    KB this is sub-second; on a much larger one it can take longer.
+    The periodic loop (configured via `kb.reconcile.interval_s`) runs
+    independently — calling this endpoint doesn't reset its timer.
+    """
+    qdrant = request.app.state.qdrant
+    result = await reconcile_once(qdrant)
+    log.warning("admin: kb reconcile triggered by %s; orphans_deleted=%d",
+                me.email, result.total_orphans_deleted)
+    return result.to_dict()
 
 
 __all__ = ["router"]
