@@ -110,13 +110,39 @@ curl -sN -X POST http://localhost:8000/v1/chat/completions \
     "messages": [
       {"role":"user","content":"Use kb_search and web_search to find recent news about geology in Iceland."}
     ]
-  }' | tee /tmp/phase28-deep.sse | grep -oE '"content":"[^"]{0,80}"' | head -40
+  }' > /tmp/phase28-deep.sse
+
+# Footer presence + last bit of assembled body (so you can eyeball it):
+grep -c "Tools used" /tmp/phase28-deep.sse
+
+# Reassemble all SSE deltas into the rendered answer body. Pipes the
+# raw SSE into the audrey-ai container's python (Unraid host has
+# neither python3 nor jq's --slurp newline handling that we'd need).
+cat /tmp/phase28-deep.sse | docker exec -i audrey-ai python -c '
+import json, sys
+body = []
+for line in sys.stdin:
+    if not line.startswith("data: "): continue
+    payload = line[6:].strip()
+    if payload == "[DONE]": continue
+    try: evt = json.loads(payload)
+    except Exception: continue
+    delta = (evt.get("choices") or [{}])[0].get("delta", {})
+    text = delta.get("content")
+    if text: body.append(text)
+print("".join(body)[-800:])
+'
 ```
 
-Expected: stream ends with a delta containing `> _Tools used:_` and
-one `> - **<model>** — \`tool_name\`...` row per worker that fired a
-tool. Open `/tmp/phase28-deep.sse` in a viewer to see the rendered
-shape; OWUI will render it as a blockquote with bullets.
+Expected: `grep -c "Tools used"` returns `1` or higher, and the
+printed tail ends with the footer:
+
+```
+---
+> _Tools used:_
+> - **deepseek-v4-pro:cloud** — `kb_search` ×2, `web_search`
+> - **kimi-k2.6:cloud** — `web_search`
+```
 
 ### 2.2 Tool-free deep request omits the footer
 
@@ -151,11 +177,27 @@ curl -sN -X POST http://localhost:8000/v1/chat/completions \
     "messages": [
       {"role":"user","content":"Use kb_search to find a survival shelter knot."}
     ]
-  }' | tee /tmp/phase28-fast.sse | grep -oE '"content":"[^"]{0,200}"' | tail -5
+  }' > /tmp/phase28-fast.sse
+
+grep -c "Tools used" /tmp/phase28-fast.sse
+cat /tmp/phase28-fast.sse | docker exec -i audrey-ai python -c '
+import json, sys
+body = []
+for line in sys.stdin:
+    if not line.startswith("data: "): continue
+    payload = line[6:].strip()
+    if payload == "[DONE]": continue
+    try: evt = json.loads(payload)
+    except Exception: continue
+    delta = (evt.get("choices") or [{}])[0].get("delta", {})
+    text = delta.get("content")
+    if text: body.append(text)
+print("".join(body)[-800:])
+'
 ```
 
-Expected: the (single) content delta contains both the answer body
-and the appended footer with one row for the picked fast-path model.
+Expected: `grep -c "Tools used"` returns `1`, and the printed tail
+ends with one footer row for the picked fast-path model.
 
 ### 2.4 Footer never breaks the answer
 

@@ -26,7 +26,6 @@ for a short answer; reflect was punishing the synth for complying.
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 
 log = logging.getLogger(__name__)

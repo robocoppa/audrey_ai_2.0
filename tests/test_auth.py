@@ -1,0 +1,294 @@
+"""Tests for require_user + _probe_owui (Phase 14, 22, 26).
+
+Stubs `httpx.AsyncClient` so tests run offline. Avoids `respx` to keep
+the dev-dep surface tight — the auth module only ever calls
+`AsyncClient().get(...)` once, so a hand-rolled fake is fewer LOC than
+the mock library would be.
+
+Critical regression guards:
+  - **Phase 26 `me.id` slip:** `AuthedUser.id` does not exist; only
+    `email`, `role`, `owui_id`. Tested below — accessing `.id` must
+    raise `AttributeError`.
+  - **OWUI `pending` role:** OWUI v0.9.2 returns 200 for pending users.
+    The `_ALLOWED_ROLES` allowlist must reject them at audrey's gate
+    even though OWUI itself returned 2xx.
+"""
+
+from types import SimpleNamespace
+
+import httpx
+import pytest
+from fastapi import HTTPException
+
+from audrey import auth as auth_module
+from audrey.auth import (
+    AuthedUser,
+    _probe_owui,
+    clear_auth_cache,
+    clear_auth_cache_for_email,
+    require_admin,
+    require_user,
+)
+
+# ─── Test helpers ──────────────────────────────────────────────────────
+
+class _FakeResponse:
+    """Minimal stand-in for `httpx.Response` — only what `_probe_owui` reads."""
+
+    def __init__(self, status_code: int, body: dict | None = None, raw: str | None = None):
+        self.status_code = status_code
+        self._body = body
+        self._raw = raw if raw is not None else ""
+        self.text = raw if raw is not None else (str(body) if body else "")
+
+    def json(self):
+        if self._body is None:
+            raise ValueError("no json")
+        return self._body
+
+
+class _FakeAsyncClient:
+    """Stand-in for `httpx.AsyncClient`. Returns a pre-canned response."""
+
+    def __init__(self, response: _FakeResponse | Exception):
+        self._response = response
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return None
+
+    async def get(self, url: str, headers=None):
+        if isinstance(self._response, Exception):
+            raise self._response
+        return self._response
+
+
+def _patch_async_client(monkeypatch, response):
+    """Make `httpx.AsyncClient(...)` inside `auth.py` return our fake."""
+    def _factory(*args, **kwargs):
+        return _FakeAsyncClient(response)
+    monkeypatch.setattr(auth_module.httpx, "AsyncClient", _factory)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_cache():
+    # Auth uses a module-level dict cache; clear it before AND after each
+    # test so cross-test contamination can't sneak in.
+    clear_auth_cache()
+    yield
+    clear_auth_cache()
+
+
+def _fake_request(owui_url: str = "http://open-webui:8080"):
+    # FastAPI passes a `Request` whose `.app.state.cfg.env.owui_url`
+    # is the OWUI base URL. Build the smallest object graph that exposes
+    # that attribute path.
+    return SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                cfg=SimpleNamespace(
+                    env=SimpleNamespace(owui_url=owui_url)
+                )
+            )
+        )
+    )
+
+
+# ─── AuthedUser shape (Phase 26 regression) ────────────────────────────
+
+def test_authed_user_exposes_email_role_owui_id():
+    me = AuthedUser(email="bart@proton.me", role="admin", owui_id="uuid-x")
+    assert me.email == "bart@proton.me"
+    assert me.role == "admin"
+    assert me.owui_id == "uuid-x"
+
+
+def test_authed_user_has_no_id_field():
+    # The Phase 26 deploy hit `AttributeError: 'AuthedUser' object has
+    # no attribute 'id'` in production. This test exists so any future
+    # refactor that re-introduces an `.id` field is a deliberate, visible
+    # change rather than a silent one.
+    me = AuthedUser(email="x@y.z", role="user", owui_id="uuid")
+    with pytest.raises(AttributeError):
+        _ = me.id  # type: ignore[attr-defined]
+
+
+# ─── _probe_owui happy path ────────────────────────────────────────────
+
+async def test_probe_owui_returns_authed_user_on_200(monkeypatch):
+    _patch_async_client(monkeypatch, _FakeResponse(200, body={
+        "id": "uuid-bart", "email": "bart@proton.me", "role": "admin",
+    }))
+    me = await _probe_owui("http://open-webui:8080", "tok123")
+    assert me == AuthedUser(email="bart@proton.me", role="admin", owui_id="uuid-bart")
+
+
+async def test_probe_owui_lowercases_role(monkeypatch):
+    _patch_async_client(monkeypatch, _FakeResponse(200, body={
+        "id": "uuid", "email": "x@y.z", "role": "ADMIN",
+    }))
+    me = await _probe_owui("http://owui", "t")
+    assert me.role == "admin"
+
+
+# ─── _probe_owui rejection paths ───────────────────────────────────────
+
+async def test_probe_owui_401_raises_401(monkeypatch):
+    _patch_async_client(monkeypatch, _FakeResponse(401, raw="invalid token"))
+    with pytest.raises(HTTPException) as exc:
+        await _probe_owui("http://owui", "bad")
+    assert exc.value.status_code == 401
+
+
+async def test_probe_owui_5xx_raises_502(monkeypatch):
+    # Distinguish "you're not logged in" (401) from "auth backend broken"
+    # (502) — clients react differently.
+    _patch_async_client(monkeypatch, _FakeResponse(500, raw="oops"))
+    with pytest.raises(HTTPException) as exc:
+        await _probe_owui("http://owui", "t")
+    assert exc.value.status_code == 502
+
+
+async def test_probe_owui_network_error_raises_502(monkeypatch):
+    _patch_async_client(monkeypatch, httpx.ConnectError("connection refused"))
+    with pytest.raises(HTTPException) as exc:
+        await _probe_owui("http://owui", "t")
+    assert exc.value.status_code == 502
+
+
+async def test_probe_owui_pending_role_rejected_with_401(monkeypatch):
+    # OWUI returns 200 with role=pending for unactivated users — JWT is
+    # technically valid but they shouldn't have chat access. Audrey must
+    # fail closed at the role allowlist.
+    _patch_async_client(monkeypatch, _FakeResponse(200, body={
+        "id": "uuid", "email": "newuser@example.com", "role": "pending",
+    }))
+    with pytest.raises(HTTPException) as exc:
+        await _probe_owui("http://owui", "t")
+    assert exc.value.status_code == 401
+
+
+async def test_probe_owui_unknown_role_rejected(monkeypatch):
+    # Future-proofing: a future OWUI version might add `disabled` or
+    # similar. Anything not in `_ALLOWED_ROLES` must fail closed.
+    _patch_async_client(monkeypatch, _FakeResponse(200, body={
+        "id": "uuid", "email": "x@y.z", "role": "disabled",
+    }))
+    with pytest.raises(HTTPException) as exc:
+        await _probe_owui("http://owui", "t")
+    assert exc.value.status_code == 401
+
+
+async def test_probe_owui_missing_email_raises_502(monkeypatch):
+    _patch_async_client(monkeypatch, _FakeResponse(200, body={
+        "id": "uuid", "role": "user",
+    }))
+    with pytest.raises(HTTPException) as exc:
+        await _probe_owui("http://owui", "t")
+    assert exc.value.status_code == 502
+
+
+# ─── require_user header parsing ───────────────────────────────────────
+
+async def test_require_user_missing_header_raises_401(monkeypatch):
+    with pytest.raises(HTTPException) as exc:
+        await require_user(_fake_request(), authorization=None)
+    assert exc.value.status_code == 401
+
+
+async def test_require_user_non_bearer_scheme_raises_401(monkeypatch):
+    with pytest.raises(HTTPException) as exc:
+        await require_user(_fake_request(), authorization="Basic dXNlcjpwYXNz")
+    assert exc.value.status_code == 401
+
+
+async def test_require_user_empty_bearer_raises_401(monkeypatch):
+    with pytest.raises(HTTPException) as exc:
+        await require_user(_fake_request(), authorization="Bearer ")
+    assert exc.value.status_code == 401
+
+
+# ─── require_user happy path + cache ───────────────────────────────────
+
+async def test_require_user_happy_path_returns_authed_user(monkeypatch):
+    _patch_async_client(monkeypatch, _FakeResponse(200, body={
+        "id": "uuid-x", "email": "ok@user.com", "role": "user",
+    }))
+    me = await require_user(_fake_request(), authorization="Bearer goodtoken")
+    assert me.email == "ok@user.com"
+    assert me.role == "user"
+
+
+async def test_require_user_caches_subsequent_calls(monkeypatch):
+    # First call hits OWUI; second call with the same token must hit the
+    # cache (verified by counting calls to the fake client factory).
+    call_count = 0
+    response = _FakeResponse(200, body={
+        "id": "uuid", "email": "x@y.z", "role": "user",
+    })
+
+    def _factory(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return _FakeAsyncClient(response)
+
+    monkeypatch.setattr(auth_module.httpx, "AsyncClient", _factory)
+
+    req = _fake_request()
+    await require_user(req, authorization="Bearer same-token")
+    await require_user(req, authorization="Bearer same-token")
+    assert call_count == 1, "second call should be served from cache"
+
+
+# ─── require_admin ─────────────────────────────────────────────────────
+
+async def test_require_admin_passes_admin_role():
+    me = AuthedUser(email="a@b.c", role="admin", owui_id="u")
+    out = await require_admin(me=me)
+    assert out is me
+
+
+async def test_require_admin_rejects_user_role_with_403():
+    me = AuthedUser(email="a@b.c", role="user", owui_id="u")
+    with pytest.raises(HTTPException) as exc:
+        await require_admin(me=me)
+    assert exc.value.status_code == 403
+
+
+# ─── clear_auth_cache_for_email (Phase 22) ─────────────────────────────
+
+async def test_targeted_eviction_removes_only_matching_email(monkeypatch):
+    # Seed two users into the cache via real require_user calls.
+    user1 = _FakeResponse(200, body={"id": "u1", "email": "alice@x.y", "role": "user"})
+    user2 = _FakeResponse(200, body={"id": "u2", "email": "bob@x.y", "role": "user"})
+
+    seq = iter([user1, user2])
+
+    def _factory(*args, **kwargs):
+        return _FakeAsyncClient(next(seq))
+
+    monkeypatch.setattr(auth_module.httpx, "AsyncClient", _factory)
+    req = _fake_request()
+    await require_user(req, authorization="Bearer token-alice")
+    await require_user(req, authorization="Bearer token-bob")
+    assert auth_module.cache_size() == 2
+
+    n = clear_auth_cache_for_email("alice@x.y")
+    assert n == 1
+    assert auth_module.cache_size() == 1
+
+
+async def test_targeted_eviction_is_case_insensitive(monkeypatch):
+    _patch_async_client(monkeypatch, _FakeResponse(200, body={
+        "id": "u", "email": "Bart@Proton.ME", "role": "admin",
+    }))
+    await require_user(_fake_request(), authorization="Bearer t")
+    n = clear_auth_cache_for_email("bart@proton.me")
+    assert n == 1
+
+
+def test_targeted_eviction_empty_email_returns_zero():
+    assert clear_auth_cache_for_email("") == 0
+    assert clear_auth_cache_for_email("   ") == 0
