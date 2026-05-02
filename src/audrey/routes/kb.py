@@ -160,7 +160,7 @@ async def kb_query_image(req: ImageQuery, request: Request) -> QueryResponse:
             vec = await embedder.embed_b64(req.image_b64)
         else:
             vec = await embedder.embed_text(req.query or "")
-    except Exception as e:  # noqa: BLE001 — surface embed errors as 4xx
+    except Exception as e:
         raise HTTPException(status_code=422, detail=f"image embed failed: {e}") from e
     hits, had_user = await _search_images_merged(qdrant, vec, top_k=req.top_k, user=req.user)
     elapsed = time.perf_counter() - t0

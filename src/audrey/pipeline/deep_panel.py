@@ -40,8 +40,8 @@ from audrey.metrics import dispatch_total
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
-from audrey.pipeline.react import ReactResult, run_react
 from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.pipeline.react import ReactResult, run_react
 from audrey.pipeline.state import TaskType, WorkerDraft
 from audrey.tools.discovery import ToolRegistry
 

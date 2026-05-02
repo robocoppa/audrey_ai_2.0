@@ -48,6 +48,7 @@ from audrey.pipeline.classify import classify as classify_fn
 from audrey.pipeline.complexity import is_complex
 from audrey.pipeline.context import datetime_system_message
 from audrey.pipeline.deep_panel import pool_key_for, run_panel
+from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.fast_path import run_fast_path
 from audrey.pipeline.memory import (
     MEMORY_STORE_TOOL,
@@ -56,7 +57,6 @@ from audrey.pipeline.memory import (
 )
 from audrey.pipeline.planner import plan as planner_plan
 from audrey.pipeline.reflect import reflect as reflect_fn
-from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.state import PipelineState
 from audrey.pipeline.synthesize import synthesize as synthesize_fn
 from audrey.tools.discovery import ToolRegistry

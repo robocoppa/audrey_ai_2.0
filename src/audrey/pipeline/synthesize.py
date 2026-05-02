@@ -322,7 +322,6 @@ async def synthesize_stream(
 
     accumulated = ""
     last_chunk: dict[str, Any] = {}
-    chosen_model = ""
     any_tokens = False
 
     for attempt, model in enumerate(candidates, start=1):
@@ -351,7 +350,6 @@ async def synthesize_stream(
                         if not attempt_started_tokens:
                             attempt_started_tokens = True
                             any_tokens = True
-                            chosen_model = model
                             yield {"type": "first_token", "model": model}
                         accumulated += text
                         yield {"type": "delta", "text": text}

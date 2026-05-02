@@ -168,7 +168,7 @@ class UploadsDB:
             return {r["file_id"] for r in cur.fetchall()}
 
 
-async def reconcile_with_qdrant(db: "UploadsDB", qdrant) -> dict[str, int]:
+async def reconcile_with_qdrant(db: UploadsDB, qdrant) -> dict[str, int]:
     """Make sqlite agree with Qdrant.
 
     Strategy:

@@ -30,6 +30,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from audrey import __version__
+from audrey.auth import AuthedUser, require_user
 from audrey.metrics import pipeline_seconds, pipeline_total
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
@@ -47,7 +48,6 @@ from audrey.pipeline.banners import (
 from audrey.pipeline.classify import classify as classify_fn
 from audrey.pipeline.complexity import is_complex
 from audrey.pipeline.context import datetime_system_message
-from audrey.auth import AuthedUser, require_user
 from audrey.pipeline.deep_panel import pool_key_for, run_panel_streaming
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.memory import (
@@ -670,7 +670,7 @@ async def _stream_deep_with_banners(
                 synth_task.cancel()
                 try:
                     await synth_task
-                except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                except (asyncio.CancelledError, Exception):  # noqa: BLE001, S110 — cleanup path; we just cancelled the task
                     pass
 
     except asyncio.CancelledError:
@@ -686,7 +686,7 @@ async def _stream_deep_with_banners(
         yield _delta_frame(f"\n\n[ollama error: {e}]")
         yield _stop_frame()
         yield "data: [DONE]\n\n"
-    except Exception:  # noqa: BLE001 — surface any other failure cleanly
+    except Exception:
         pipeline_outcome = "error"
         log.exception("stream deep: unexpected error")
         yield _delta_frame("\n\n[internal error]")

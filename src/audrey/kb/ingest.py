@@ -17,7 +17,6 @@ vector for the whole image); no chunking.
 
 from __future__ import annotations
 
-import asyncio
 import datetime as _dt
 import logging
 from dataclasses import dataclass, field

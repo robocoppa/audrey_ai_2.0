@@ -159,7 +159,7 @@ class KBWatcher:
                 timeout = self._debounce_s if pending else None
                 kind, path = await asyncio.wait_for(self._queue.get(), timeout=timeout)
                 pending[(kind, path)] = time.monotonic()
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             except asyncio.CancelledError:
                 return

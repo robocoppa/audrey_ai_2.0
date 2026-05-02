@@ -16,15 +16,14 @@ from pathlib import Path
 from fastapi import Depends, FastAPI
 from fastapi.responses import Response
 
-from audrey.auth import AuthedUser, require_admin
-
 from audrey import __version__
+from audrey.auth import AuthedUser, require_admin
 from audrey.config import get_config
-from audrey.metrics import render as render_metrics
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
 from audrey.kb.qdrant import QdrantKB
 from audrey.kb.uploads_db import UploadsDB, reconcile_with_qdrant
 from audrey.kb.watcher import KBWatcher
+from audrey.metrics import render as render_metrics
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
@@ -233,7 +232,7 @@ def run() -> None:
 
     uvicorn.run(
         "audrey.main:app",
-        host="0.0.0.0",
+        host="0.0.0.0",  # noqa: S104 — server bind, all-interfaces is the point
         port=8000,
         log_level="info",
     )

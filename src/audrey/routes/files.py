@@ -233,7 +233,7 @@ async def upload_file(
     except HTTPException:
         _safe_unlink(dest)
         raise
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         _safe_unlink(dest)
         log.exception("files: ingest failed for %s (%s): %s", filename, user, e)
         raise HTTPException(status_code=500, detail=f"Ingest failed: {e}") from e
@@ -247,7 +247,7 @@ async def upload_file(
             bytes_=written, kind=kind, collection=collection,
             chunks=n_chunks, uploaded_at=stamp,
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.exception("files: uploads_db.record failed for %s (%s): %s", filename, user, e)
         await qdrant.delete_by_file_id(file_id, user=user, collection=collection)
         _safe_unlink(dest)

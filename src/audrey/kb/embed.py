@@ -146,7 +146,7 @@ class ImageEmbedder:
         img = await asyncio.to_thread(_pil_from_path, Path(path))
         return await self.embed_pil(img)
 
-    async def embed_pil(self, image: "PILImage") -> list[float]:
+    async def embed_pil(self, image: PILImage) -> list[float]:
         model = _load_clip(self.model_name, self.cache_folder)
         vec = await asyncio.to_thread(_clip_encode, model, image)
         return _normalize(vec)
@@ -168,7 +168,7 @@ def _normalize(vec: list[float]) -> list[float]:
     return [x / norm for x in vec]
 
 
-async def _fetch_image(url: str) -> "PILImage":
+async def _fetch_image(url: str) -> PILImage:
     # Phase 27: validate URL before any I/O. Raises ValueError on bad
     # scheme, missing host, or host resolving to a private/loopback IP.
     # Run in a thread because socket.getaddrinfo can block.
@@ -206,7 +206,7 @@ async def _fetch_image(url: str) -> "PILImage":
             return await asyncio.to_thread(_pil_from_bytes, bytes(buf))
 
 
-def _pil_from_bytes(data: bytes) -> "PILImage":
+def _pil_from_bytes(data: bytes) -> PILImage:
     from PIL import Image
 
     img = Image.open(io.BytesIO(data))
@@ -214,7 +214,7 @@ def _pil_from_bytes(data: bytes) -> "PILImage":
     return img.convert("RGB")
 
 
-def _pil_from_path(path: Path) -> "PILImage":
+def _pil_from_path(path: Path) -> PILImage:
     from PIL import Image
 
     img = Image.open(path)
@@ -230,7 +230,7 @@ def _load_clip(model_name: str, cache_folder: str | None):
     return SentenceTransformer(model_name, cache_folder=cache_folder)
 
 
-def _clip_encode(model, image: "PILImage") -> list[float]:
+def _clip_encode(model, image: PILImage) -> list[float]:
     # sentence-transformers returns a numpy array; convert to plain list so
     # qdrant-client's JSON serializer is happy.
     out = model.encode([image], convert_to_numpy=True, normalize_embeddings=False)

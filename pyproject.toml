@@ -88,8 +88,18 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "UP", "B", "ASYNC", "S", "PTH", "RUF"]
-ignore = ["S101", "S603", "S607"]
+select = ["E", "F", "I", "N", "UP", "B", "BLE", "ASYNC", "S", "PTH", "RUF"]
+ignore = [
+    "S101",   # use of assert — fine in tests + defensive code
+    "S603",   # subprocess call — only used in audited contexts
+    "S607",   # partial executable path — fine for known-binary subprocess
+    "E501",   # line too long — we have many intentional long URLs/docstrings
+    "B008",   # function call in default arg — REQUIRED by FastAPI Depends idiom
+    "RUF001", # ambiguous unicode in string  — intentional UX copy (×, –, etc.)
+    "RUF002", # ambiguous unicode in docstring — same
+    "RUF003", # ambiguous unicode in comment  — same
+    "RUF022", # __all__ not sorted — codebase convention is human-meaningful order
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

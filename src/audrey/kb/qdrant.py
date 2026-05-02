@@ -281,7 +281,7 @@ class QdrantKB:
     def close(self) -> None:
         try:
             self._client.close()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001, S110 — shutdown path; logging would be noise
             pass
 
 
