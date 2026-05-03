@@ -16,7 +16,11 @@
 
 services:
   prometheus:
-    image: prom/prometheus:latest
+    # Phase 31: pinned to digest. Tag (`prom/prometheus:latest`) is what
+    # this digest pointed to on 2026-05-02. To bump:
+    #   docker pull prom/prometheus:latest
+    #   docker inspect --format='{{index .RepoDigests 0}}' prom/prometheus:latest
+    image: prom/prometheus@sha256:e4254400b85610324913f0dc4acf92603d9984e7519414c5a12811aa6146acc3
     container_name: prometheus
     restart: unless-stopped
     networks:
@@ -38,7 +42,8 @@ services:
       - '--web.enable-lifecycle'
 
   grafana:
-    image: grafana/grafana:latest
+    # Phase 31: pinned to digest (see prometheus block above for bump procedure).
+    image: grafana/grafana@sha256:0f86bada30d65ef9d0183b90c1e2682ac92d53d95da8bed322b984ea78a4a73a
     container_name: grafana
     restart: unless-stopped
     networks:

@@ -172,10 +172,16 @@ app = FastAPI(
     title="Audrey AI",
     version=__version__,
     description=(
-        "OpenAI-compatible orchestrator. Exposes three virtual models — "
-        "`audrey_deep`, `audrey_cloud`, `audrey_local` — each a different "
-        "pipeline mode over the same model registry. Phase 4 build is a "
-        "pass-through; routing/panels/tools land in later phases."
+        "OpenAI-compatible orchestrator over Ollama (local + cloud-bridge "
+        "models) with a shared LangGraph pipeline: classify → complexity "
+        "gate → fast path or deep panel → synth → reflect. Five virtual "
+        "models — `audrey_deep`/`audrey_cloud`/`audrey_local` (always deep, "
+        "different pools), `audrey_auto` (adaptive), `audrey_fast` (always "
+        "fast, no escalation). Tool dispatch via custom-tools (Brave web "
+        "search, Qdrant text + CLIP-image KB, per-user memory). Per-user "
+        "fair scheduling at the local-GPU gate, OWUI-backed auth, "
+        "Prometheus metrics at `/metrics`, streaming progress banners + "
+        "per-worker tools-used footer on streamed responses."
     ),
     lifespan=lifespan,
 )

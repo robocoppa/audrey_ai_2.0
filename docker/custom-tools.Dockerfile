@@ -10,7 +10,10 @@
 #     -v $PWD/tools-server/data:/app/data \
 #     audrey-custom-tools:latest
 
-FROM python:3.12-slim AS base
+# Phase 31: pinned to digest for reproducibility. Tag (`python:3.12-slim`)
+# is what this digest pointed to on 2026-05-02. Same digest as audrey's
+# Dockerfile — keep them in sync when bumping.
+FROM python:3.12-slim@sha256:46cb7cc2877e60fbd5e21a9ae6115c30ace7a077b9f8772da879e4590c18c2e3 AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -18,8 +21,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_SYSTEM_PYTHON=1 \
     UV_LINK_MODE=copy
 
-# uv for fast, reproducible installs
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# uv for fast, reproducible installs. Pinned to digest (Phase 31).
+COPY --from=ghcr.io/astral-sh/uv@sha256:3b7b60a81d3c57ef471703e5c83fd4aaa33abcd403596fb22ab07db85ae91347 /uv /usr/local/bin/uv
 
 WORKDIR /app
 

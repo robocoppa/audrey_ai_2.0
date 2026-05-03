@@ -136,42 +136,84 @@ Expected JSON shape:
 This is the load-bearing smoke check — proves the watcher-can't-see
 case actually heals.
 
+**Key constraints learned from the first verification attempt:**
+- The host path `/mnt/user/knowledge/geology/` IS the watched directory
+  (bind-mounted to `/datasets/geology` in audrey-ai). Write/delete on
+  the host side; the container sees it via the bind.
+- `echo 'one short line' > file.md` may not produce any chunks (chunker
+  min-tokens). Use a **multi-paragraph** file so ingestion produces
+  visible chunks you can verify.
+- After staging, **wait for the watcher log line BEFORE stopping the
+  container.** Don't move on until ingestion is confirmed.
+
 ```bash
-# 1. Stage a real file in a watched directory.
-docker exec audrey-ai bash -c "echo 'phase 30 reconcile smoke test' > /datasets/geology/_phase30_orphan.md"
+# 1. Stage a real multi-paragraph file in a watched directory. Use the
+#    host path; the watcher inside the container sees it via the bind.
+cat > /mnt/user/knowledge/geology/_phase30_orphan.md <<'EOF'
+# Phase 30 reconcile smoke test
 
-# 2. Wait ~3s for watcher to ingest (debounce_s=2 + ingest time).
-sleep 3
-docker compose logs --since 30s audrey-ai | grep "_phase30_orphan"
-# Expected: "kb.watcher: reingested text /datasets/geology/_phase30_orphan.md -> N chunks"
+This is the first paragraph. It needs to be substantial enough that the
+chunker produces at least one chunk (default min_tokens around 100).
 
-# 3. Stop the watcher (turn it off via env override + restart audrey-ai).
-#    Or — easier — delete the file directly via docker exec without
-#    going through a watched bind mount path. Trick: write to /tmp first,
-#    then mv via docker exec. We use the simpler approach: just rm and
-#    rely on a small race window — most filesystems propagate the
-#    delete, but to truly bypass the watcher you'd disable it.
-#    For this smoke, stop the audrey container, delete, restart, then
-#    use the admin endpoint:
-docker compose stop audrey-ai
-docker exec -it $(docker ps -aqf "name=audrey-ai") bash -c "rm /datasets/geology/_phase30_orphan.md" 2>/dev/null \
-  || rm /mnt/user/knowledge/geology/_phase30_orphan.md
-docker compose start audrey-ai
-sleep 5
+This is the second paragraph, just to be sure we cross the chunk
+threshold without depending on tokenizer specifics. Geology, basalt,
+quartzite, schist — filler text that's domain-relevant in case the
+chunker filters by topic, which it doesn't, but defensively anyway.
+EOF
 
-# 4. Verify the orphan is still in qdrant (watcher didn't catch the delete).
+# 2. Tail the watcher log until it ingests. Don't proceed until you
+#    see the "reingested text" line. Up to ~10s on a cold embedder.
+docker compose logs -f --since 5s audrey-ai &
+LOG_PID=$!
+sleep 12   # generous; watcher debounce_s=2 + embed time
+kill $LOG_PID 2>/dev/null
+# You must see: "kb.watcher: reingested text /datasets/geology/_phase30_orphan.md -> N chunks"
+# If you don't, STOP and investigate before continuing — there's no orphan to clean.
+
+# 2b. Confirm via qdrant count delta (kb_text grew by N chunks):
 curl -s http://localhost:8000/v1/kb/stats | jq
-#   counts will still show the chunk; could also scroll qdrant to confirm.
+
+# 3. Stop audrey, delete the file from disk, restart audrey.
+#    With audrey down, the watcher can't see the delete — exactly the
+#    drift case Phase 30 fixes.
+docker compose stop audrey-ai
+rm /mnt/user/knowledge/geology/_phase30_orphan.md
+docker compose start audrey-ai
+sleep 8   # let ready log emit
+
+# 4. Verify the orphan vectors are still in qdrant (watcher missed it).
+curl -s http://localhost:8000/v1/kb/stats | jq
+#    kb_text count should be unchanged from step 2b (the points are
+#    still there even though the file is gone).
 
 # 5. Trigger reconcile.
 curl -s -X POST http://localhost:8000/v1/admin/kb/reconcile \
   -H "Authorization: Bearer $ADMIN_TOKEN" | jq
 
-# 6. Look for the delete log line and the response orphans_deleted count.
+# 6. Look for the delete log line.
 docker compose logs --since 30s audrey-ai | grep "_phase30_orphan"
 # Expected: "kb.reconcile: deleted orphan /datasets/geology/_phase30_orphan.md (N points) from kb_text"
-# Expected response: total_orphans_deleted >= 1
+# Expected response: total_orphans_deleted >= 1, points_in_orphans = N
+
+# 7. Confirm cleanup via qdrant count.
+curl -s http://localhost:8000/v1/kb/stats | jq
+#    kb_text count should be back to the pre-step-1 baseline.
 ```
+
+**Troubleshooting:**
+- **No "reingested text" line in step 2:** the watcher didn't ingest.
+  Check `KB_WATCHER_ENABLED=1` is set (readiness log shows
+  `kb_watcher=on`). Check the file path is under `/datasets/...`
+  inside the container, not under `/mnt/user/...` (host path → no
+  ingest). Look for `kb.watcher: no valid roots, not starting`.
+- **Reconcile reports 0 orphans in step 5 even though the file is gone:**
+  the orphan was never ingested in step 1. The reconcile is working;
+  there's nothing to clean. Re-run from step 1 with a longer file or
+  longer wait.
+- **`kb_text` count didn't drop after reconcile:** `delete_by_source`
+  in qdrant is async-style; the `wait=True` flag in `delete_by_source`
+  should make it visible immediately, but if you scroll fast on a busy
+  qdrant you might see stale counts. Wait 1-2s and re-check.
 
 ### 2.4 Per-user uploads NOT touched
 

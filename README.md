@@ -5,62 +5,100 @@ Self-hosted multi-model LangGraph orchestrator that exposes an OpenAI-compatible
 routes requests across local Ollama models + cloud-bridge models through a
 classify → route → tool-call → reflect pipeline.
 
-**Status:** early build. See `CONTINUITY.md` (gitignored) for the current phase,
-verified stack state, and "what a new session should do first".
-
 ## High-level architecture
 
 ```
-Open WebUI (Cloudflare Tunnel)
-        ↓ OpenAI API
-    audrey-ai (FastAPI + LangGraph)
-        ├── classify → route → fast path | deep panel
-        ├── web search (Brave API)
-        ├── KB query (Qdrant: text + CLIP images)
-        └── custom-tools (5 OpenAPI endpoints, auto-discovered)
-            ↓
-        Ollama (local + cloud-bridge models, both GPUs)
+Open WebUI ──[Cloudflare Tunnel]──> audrey-ai ─────> Ollama (local + cloud)
+                                       │             │
+                                       │             └─ both 3090 Ti GPUs
+                                       │
+                                       ├─> custom-tools (6 OpenAPI endpoints)
+                                       │     web_search, kb_search,
+                                       │     kb_image_search, memory_store,
+                                       │     memory_recall, memory_search
+                                       │
+                                       ├─> Qdrant (text vectors + CLIP images,
+                                       │   per-user collections + global KB)
+                                       │
+                                       └─> KB watcher (event-driven re-ingest)
+                                           + reconcile (periodic orphan sweep)
+
+                                  + Prometheus + Grafana (metrics + alerts)
+                                  + OWUI-backed auth on all routes
 ```
 
 All containers sit on Docker network `ollama-net`. Only Open WebUI is exposed
-publicly via the existing Cloudflare Tunnel.
+publicly via the Cloudflare Tunnel; every other service is internal.
 
 ## Virtual models
 
-| Model            | Behavior                                                          |
-|------------------|-------------------------------------------------------------------|
-| `audrey_deep`    | Auto-routes: fast path when confident + input is simple; deep panel otherwise. Mixed cloud + local. |
-| `audrey_cloud`   | Always deep panel, cloud-only workers + synthesizer. Up to 3 parallel workers. |
-| `audrey_local`   | Always deep panel, local-only workers + synthesizer. |
+Five virtual models, each a different routing mode over the same registry:
+
+| Model            | Routing                                                                  |
+|------------------|--------------------------------------------------------------------------|
+| `audrey_auto`    | Adaptive: fast path on short prompts, deep panel on long ones.           |
+| `audrey_fast`    | Always fast path; never escalates, even on long prompts.                 |
+| `audrey_deep`    | Always deep panel, mixed cloud + local pool.                             |
+| `audrey_cloud`   | Always deep panel, cloud-only pool (up to 3 parallel workers).           |
+| `audrey_local`   | Always deep panel, local-only pool (serialized through GPU gate).        |
+
+Streaming responses (when the client sends `stream: true`) emit progress
+banners during each phase (Thinking / Dispatching / Synthesizing) and a
+per-worker tools-used footer after the answer.
+
+## Pipeline shape
+
+```
+datetime injection
+  → memory recall (per-user, semantic via custom-tools)
+  → classify (keyword pre-filter + qwen3:4b router)
+  → complexity gate (token threshold)
+  → fast path (single model + ReAct if tool-capable)  | deep panel (N parallel workers, all tool-capable)
+  → synth (cloud or local, streamed)
+  → reflect (length + brevity-cue check)
+  → retry on failure
+```
+
+Per-user fair scheduling (`FairLocalGate`) round-robins across users at the
+local-GPU bottleneck. Per-user in-flight cap (default 3) prevents one user
+from saturating the queue. Cloud calls bypass the gate.
 
 ## Documentation
 
+- `docs/phase-N-deploy.md` — one per phase, with smoke-test verification steps
 - `docs/unraid-ollama.md` — clean Ollama container recreation on Unraid
-- `docs/unraid-audrey.md` — Audrey + tools + Qdrant + WebUI deployment
-- `docs/cloudflared-routing.md` — existing tunnel → Open WebUI wiring
-- `docs/kb-geology.md` — KB ingest workflow + rock ID query examples
-- `docs/future-tools.md` — how to add run_python, read_document, sql_query, etc. later
-
-Each phase gets a `docs/phase-N-deploy.md` with click-by-click Unraid steps and
-the exact smoke-test command to verify.
+- `docs/README.md` — categorized index of phase docs by feature area
 
 ## Dev workflow
 
 ```bash
 # On the laptop
-uv sync                    # install deps into .venv
-uv run audrey              # start the FastAPI app
-uv run audrey-ingest --source ./sample-datasets/geology  # test KB ingest
+uv sync --extra dev          # install deps + pytest
+.venv/bin/pytest tests/ -q   # run the test suite (110 tests, ~1s)
+
+# Manual run (rare — Unraid is the deploy target)
+uv run audrey                # start FastAPI on :8000
+uv run audrey-ingest --source /path/to/docs --topic geology
 ```
 
 ## Repo layout
 
 ```
-src/audrey/         # orchestrator package
+src/audrey/         # orchestrator package (FastAPI + LangGraph)
 tools-server/       # custom-tools FastAPI service (separate package)
-docker/             # Dockerfiles
+tests/              # pytest suite — hermetic, no Ollama/Qdrant needed
+docker/             # Dockerfiles (audrey-ai + custom-tools)
+monitoring/         # prometheus + grafana compose + scrape config + rules
 docs/               # deploy guides, per-phase instructions
-scripts/            # model-pull script, smoke tests
-config.yaml         # model_registry, fast_path, deep_panel*, timeouts, cache, tools
-.env.example        # BRAVE_API_KEY and other required env vars
+scripts/            # model-pull, smoke tests
+config.yaml         # model registry, fast_path, deep_panel*, fairness, KB
+.env.example        # BRAVE_API_KEY, GRAFANA_ADMIN_PASSWORD, etc.
+compose.yaml        # audrey-ai + custom-tools (ollama/qdrant/owui stay on Unraid UI)
 ```
+
+## Status
+
+Active development. See `CONTINUITY.md` (gitignored, dev-machine only) for
+the current phase, verified stack state, and per-phase behavioral facts.
+
+Phases 1 → 31 verified.
