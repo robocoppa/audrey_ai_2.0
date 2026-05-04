@@ -1,8 +1,8 @@
-"""Qdrant-backed memory store (Phase 12).
+"""Qdrant-backed memory store.
 
-Supersedes the Phase 11 SQLite backend. Stores each memory as a single Qdrant
-point whose payload holds `key`, `value`, `tags`, `user`, `created_at`,
-`updated_at`. The vector is a `nomic-embed-text` embedding of
+Stores each memory as a single Qdrant point whose payload holds `key`,
+`value`, `tags`, `user`, `created_at`, `updated_at`. The vector is a
+`nomic-embed-text` embedding of
 `f"{key}: {value} [tags: {tags}]"` — concatenating tags into the embedded
 text gives tag keywords some semantic weight even though we primarily filter
 by the `user` payload field.
@@ -227,14 +227,12 @@ class MemoryStore:
         )
 
     async def recall(self, key: str, *, user: str) -> MemoryEntry | None:
-        """Exact-key lookup, scoped to a single user (Phase 26).
+        """Exact-key lookup, scoped to a single user.
 
-        Pre-Phase-26 this method dropped the `user` filter and returned the
-        newest point matching `key` across all users — a cross-user leak.
-        Now both `key` AND `user` must match; if multiple points still
-        match (one user with two writes to the same key, since UUIDv5
-        point-id collapses re-stores into one point this should be rare)
-        we return the newest by `updated_at`.
+        Both `key` AND `user` must match — never relax the `user` filter,
+        or memories leak across accounts. If multiple points match (rare,
+        since UUIDv5 point-id collapses re-stores into one point) we return
+        the newest by `updated_at`.
         """
         result = await self._qdrant.scroll(
             collection_name=self._collection,

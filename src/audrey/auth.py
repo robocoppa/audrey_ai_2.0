@@ -1,4 +1,4 @@
-"""OWUI-backed authentication (Phase 14).
+"""OWUI-backed authentication.
 
 Validates `Authorization: Bearer <jwt>` tokens by proxying them to
 Open WebUI's session endpoint (`GET /api/v1/auths/`, trailing slash
@@ -64,9 +64,8 @@ _ALLOWED_ROLES: frozenset[str] = frozenset({"user", "admin"})
 class AuthedUser:
     """Identity returned from OWUI. `email` is the canonical user id.
 
-    Matches what Phase 11 memory + Phase 13 uploads have been keying on
-    since those phases shipped, so threading this through `user_id`
-    everywhere requires zero downstream changes.
+    Per-user memory and per-user uploads both key on this email; never
+    introduce an `id` field on this dataclass — `email` is load-bearing.
     """
 
     email: str
@@ -187,9 +186,9 @@ def clear_auth_cache_for_email(email: str) -> int:
     tokens (multi-device, multi-session) — this clears all of theirs at once
     without disturbing other users' entries. Returns the number evicted.
 
-    Phase 22 use case: OWUI v0.9.x doesn't emit user-deletion webhooks, so
-    after an admin deletes/bans a user in OWUI we need a way to evict that
-    one user immediately rather than wait for TTL or wipe the whole cache.
+    OWUI v0.9.x doesn't emit user-deletion webhooks, so when an admin deletes
+    or bans a user in OWUI, this endpoint is the supported way to evict
+    immediately rather than waiting for TTL or wiping the whole cache.
     """
     if not email:
         return 0

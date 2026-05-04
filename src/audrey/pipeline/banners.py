@@ -1,4 +1,4 @@
-"""Streaming progress banners (Phase 18).
+"""Streaming progress banners.
 
 Renders one blockquote line per pipeline phase, growing in place as work
 progresses:

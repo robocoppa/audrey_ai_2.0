@@ -1,9 +1,8 @@
 """Config loader.
 
-Merges three sources (last wins):
+Merges two sources (env wins):
   1. `config.yaml` at the repo root (or `AUDREY_CONFIG` env var)
   2. Environment variables listed in `EnvOverrides` (12-factor friendly)
-  3. Runtime patches (not used in Phase 4)
 
 `config.yaml` is the source of truth for the model registry and pipeline
 knobs — see the top of that file for the authoritative schema. Env vars
@@ -41,9 +40,9 @@ class EnvOverrides(BaseSettings):
     # KB
     kb_dataset_paths: str = Field(default="/datasets/geology", alias="KB_DATASET_PATHS")
 
-    # Open WebUI — used by Phase 14 auth middleware to validate JWT tokens
-    # issued to browsers logged into OWUI. Same-origin via cloudflared, so
-    # this is an internal ollama-net URL.
+    # Open WebUI — `require_user` proxies the browser's bearer token here
+    # to validate identity. Same-origin via cloudflared, so this is an
+    # internal ollama-net URL.
     owui_url: str = Field(default="http://open-webui:8080", alias="OWUI_URL")
 
     # Search

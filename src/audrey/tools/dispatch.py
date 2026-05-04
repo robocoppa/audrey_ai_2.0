@@ -45,7 +45,7 @@ class ToolResult:
 _USER_SCOPED_TOOLS: frozenset[str] = frozenset({
     "kb_search",
     "kb_image_search",
-    "memory_recall",  # Phase 26: was leaking cross-user; now required user scope.
+    "memory_recall",
     "memory_search",
     "memory_store",
 })
@@ -75,10 +75,10 @@ async def dispatch_one(
 ) -> ToolResult:
     """Execute one tool_call. Always returns a ToolResult — never raises.
 
-    Phase 22: emits `audrey_tool_calls_total{tool,outcome}` for every return
-    path and `audrey_tool_call_seconds{tool}` for paths that actually made a
-    network call. Outcomes: `ok` (2xx + parsed), `error` (bad args, unknown
-    tool, 4xx, 5xx, non-timeout transport), `timeout` (httpx.TimeoutException).
+    Emits `audrey_tool_calls_total{tool,outcome}` for every return path and
+    `audrey_tool_call_seconds{tool}` for paths that actually made a network
+    call. Outcomes: `ok` (2xx + parsed), `error` (bad args, unknown tool,
+    4xx, 5xx, non-timeout transport), `timeout` (httpx.TimeoutException).
     """
     fn = (tool_call.get("function") or {})
     name = str(fn.get("name") or "?")

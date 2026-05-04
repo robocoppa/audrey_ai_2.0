@@ -1,8 +1,8 @@
 """Tool discovery — fetch each tool server's /openapi.json and convert to Ollama-callable tools.
 
-Each tool server (started Phase 2) exposes a FastAPI app with one or more
-POST endpoints under the `tools` tag. We hit `/openapi.json` at startup,
-then again on demand via `POST /v1/tools/rediscover` if a server changes.
+Each tool server exposes a FastAPI app with one or more POST endpoints
+under the `tools` tag. We hit `/openapi.json` at startup, then again on
+demand via `POST /v1/tools/rediscover` if a server changes.
 
 Output shape per discovered tool — matches Ollama's `/api/chat` tool schema:
     {

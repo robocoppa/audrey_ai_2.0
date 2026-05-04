@@ -4,8 +4,8 @@ When a model returns an error or times out, we cool it down so the registry
 doesn't immediately re-pick it. Each failure doubles the cooldown (capped).
 A successful call clears the record.
 
-Phase 4 scope: the tracker itself + `is_healthy()`. It's not yet wired into
-request dispatch — that happens in Phase 5 where we actually fail over.
+Used by the registry's `first_healthy` / `candidates` helpers as the
+`predicate` argument: unhealthy models are skipped during selection.
 """
 
 from __future__ import annotations

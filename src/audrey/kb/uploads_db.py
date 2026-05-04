@@ -1,4 +1,4 @@
-"""SQLite index over per-user upload metadata (Phase 15).
+"""SQLite index over per-user upload metadata.
 
 Qdrant remains authoritative for *file content* (text chunks, image
 embeddings). This module is a fast index over the per-file metadata so

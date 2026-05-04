@@ -91,11 +91,11 @@ class ChatCompletionRequest(BaseModel):
     user: str | None = Field(
         default=None,
         description=(
-            "OpenAI-spec passthrough field. Phase 26: Audrey **ignores** this "
-            "for identity purposes — the canonical user id comes from the "
-            "Authorization header (require_user → AuthedUser.email). Kept in the "
-            "schema for OpenAI client compatibility; logged for debugging "
-            "client-vs-resolved identity drift but never trusted."
+            "OpenAI-spec passthrough field. Audrey **ignores** this for "
+            "identity purposes — the canonical user id comes from the "
+            "Authorization header (require_user → AuthedUser.email). Kept "
+            "in the schema for OpenAI client compatibility; logged for "
+            "debugging client-vs-resolved identity drift but never trusted."
         ),
     )
 
@@ -137,10 +137,9 @@ async def chat_completions(
             ),
         )
 
-    # Phase 26: identity comes from the Authorization header via require_user,
-    # NOT from payload.user (which is OpenAI-spec passthrough and trusted for
-    # nothing). If a client sent a different `user` field, log it once for
-    # drift-debugging but otherwise ignore.
+    # Identity comes from the Authorization header via require_user, NOT from
+    # payload.user (OpenAI-spec passthrough, trusted for nothing). If a client
+    # sent a different `user` field, log once for drift-debugging then ignore.
     if payload.user and payload.user != me.email:
         log.debug(
             "chat.completions: payload.user=%r ignored (auth user=%r)",
@@ -301,7 +300,8 @@ async def _stream_via_pipeline(
 
         # If the chosen model is tool-capable and tools are registered, route
         # the streaming request through the graph so the ReAct loop can fire.
-        # Mid-stream tool dispatch isn't supported in Phase 7 — we emit one chunk.
+        # Mid-stream tool dispatch isn't supported — we emit one chunk after
+        # the loop completes, rather than streaming tokens during ReAct rounds.
         tool_capable = set(cfg.raw.get("fast_path", {}).get("tool_capable_models", []) or [])
         tools_active = bool(app.state.tools.by_name) and spec.name in tool_capable
         if tools_active:
@@ -324,9 +324,9 @@ async def _stream_via_pipeline(
                 return
             concrete = final.get("concrete_model", spec.name)
             content = final.get("content", "") or "[empty]"
-            # Per-worker tool-usage footer (Phase 28). Fast path is one
-            # worker — `tool_calls_log` is its full call list. Skipped when
-            # the ReAct loop ran zero tool calls.
+            # Per-worker tool-usage footer. Fast path is one worker —
+            # `tool_calls_log` is its full call list. Skipped when the ReAct
+            # loop ran zero tool calls.
             footer = tool_summary_block([
                 (concrete, list(final.get("tool_calls_log") or []))
             ])
@@ -402,7 +402,7 @@ async def _stream_deep_with_banners(
     app, payload: ChatCompletionRequest, messages, options,
     *, task: str, conf: float, user_id: str,
 ):
-    """Streaming deep path with progress banners (Phase 18).
+    """Streaming deep path with progress banners.
 
     Bypasses the compiled graph for streaming so we can emit progress banners
     between pipeline phases. Workers run with the same scheduling as the
@@ -472,7 +472,7 @@ async def _stream_deep_with_banners(
     synth_model = "deep_panel"
 
     try:
-        # ── Phase 1: Thinking (memory recall + planner) ─────────────────
+        # ── Stage 1: Thinking (memory recall + planner) ─────────────────
         memory_cfg = agentic.get("memory", {}) or {}
         memory_enabled = bool(memory_cfg.get("enabled", True))
         memory_top_k = int(memory_cfg.get("top_k", 3))
@@ -501,7 +501,7 @@ async def _stream_deep_with_banners(
         async for frame in _drain_q_now(banner_q, _delta_frame):
             yield frame
 
-        # ── Phase 2: Dispatching panel ──────────────────────────────────
+        # ── Stage 2: Dispatching panel ──────────────────────────────────
         pool_key = pool_key_for(payload.model)
         cloud_timeout = float(cfg.timeouts.get("cloud", 120))
         deep_worker_timeout = float(cfg.timeouts.get("deep_worker", 240))
@@ -539,11 +539,11 @@ async def _stream_deep_with_banners(
         async for frame in _drain_q_now(banner_q, _delta_frame):
             yield frame
 
-        # ── Phase 3: Synthesizing (streaming) ───────────────────────────
-        # Phase 19: synth tokens stream live. The Synthesizing banner runs
-        # while we wait for the first token; on first_token we close the
-        # banner with ✅, emit the separator, and then forward each delta
-        # straight to the client. Mid-stream errors are surfaced inline.
+        # ── Stage 3: Synthesizing (streaming) ───────────────────────────
+        # Synth tokens stream live. The Synthesizing banner runs while we
+        # wait for the first token; on first_token we close the banner with
+        # ✅, emit the separator, and then forward each delta straight to
+        # the client. Mid-stream errors are surfaced inline.
         synth_done: dict[str, Any] = {}
         events_q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(maxsize=128)
 
@@ -654,8 +654,8 @@ async def _stream_deep_with_banners(
                 final_content = "[empty]"
                 pipeline_outcome = "error"
 
-            # Per-worker tool-usage footer (Phase 28). Only renders rows for
-            # workers that actually called tools; empty when no tools fired.
+            # Per-worker tool-usage footer. Only renders rows for workers
+            # that actually called tools; empty when no tools fired.
             footer = tool_summary_block([
                 (str(d.get("model") or "?"), list(d.get("tool_calls") or []))
                 for d in drafts
@@ -821,10 +821,10 @@ async def _stream_openai(
 ):
     """Convert Ollama's streaming chunks into OpenAI SSE frames.
 
-    Phase 23: when `gate` is supplied and `location == "local"`, the entire
-    token stream is held under the gate. Tokens are GPU-bound the whole way
-    through (no tool dispatch in this branch), so a single acquire for the
-    full duration is the right granularity here.
+    When `gate` is supplied and `location == "local"`, the entire token
+    stream is held under the gate. Tokens are GPU-bound the whole way
+    through (no tool dispatch in this branch), so a single acquire for
+    the full duration is the right granularity here.
     """
     created = int(time.time())
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"

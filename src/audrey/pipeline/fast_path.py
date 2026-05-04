@@ -1,15 +1,15 @@
 """Fast path — single-model generation, optionally with ReAct tool use.
 
-Phase 7 update: when the chosen model is in `fast_path.tool_capable_models`
-*and* a tool registry is non-empty, we run a ReAct loop (`pipeline/react.py`)
-that lets the model call tools before answering. Otherwise it's a one-shot
-`ollama.chat`. Streaming still bypasses both (route-layer concern).
+When the chosen model is in `fast_path.tool_capable_models` *and* the tool
+registry is non-empty, we run a ReAct loop (`pipeline/react.py`) that lets
+the model call tools before answering. Otherwise it's a one-shot
+`ollama.chat`. Streaming bypasses both (route-layer concern).
 
-Phase 23: local fast-path calls now go through `FairLocalGate`. The
-non-tools branch holds the gate around the single `ollama.chat`. The tools
-branch passes the gate down into `run_react`, which acquires per-chat so
-the gate is released during tool dispatch. Cloud calls bypass the gate
-entirely (`gate.acquire` is a no-op when `location != "local"`).
+Local calls go through `FairLocalGate`. The non-tools branch holds the
+gate around the single `ollama.chat`. The tools branch passes the gate
+down into `run_react`, which acquires per-chat so the gate is released
+during tool dispatch. Cloud calls bypass the gate entirely
+(`gate.acquire` is a no-op when `location != "local"`).
 """
 
 from __future__ import annotations

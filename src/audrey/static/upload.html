@@ -94,9 +94,9 @@
 
 <script>
 (() => {
-  // OWUI stores its JWT here after login. Same-origin via cloudflared is what
-  // lets this page read it — the whole Phase 14 routing trick exists to keep
-  // this code path legal.
+  // OWUI stores its JWT here after login. Same-origin via cloudflared is
+  // what lets this page read localStorage — that's why /upload is served
+  // from the audrey domain rather than as a separate origin.
   const token = localStorage.getItem("token");
   if (!token) {
     window.location.href = "/";

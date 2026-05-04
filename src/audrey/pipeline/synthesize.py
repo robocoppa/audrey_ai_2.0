@@ -1,20 +1,14 @@
 """Synthesizer — merges worker drafts into the final assistant answer.
 
-The synthesizer writes the user's answer directly. Phase 25 dropped the
-mandatory `## Approach` / `## Answer` / `## Caveats` three-section
-structure (the meta `Approach` preamble was useful for debugging but
-useless for end users; required `Caveats` blocks read awkwardly when
-there was nothing genuinely to caveat). The new prompt instructs the
-synth to write the answer in its own voice, adding a short `## Caveats`
-section ONLY when drafts genuinely disagreed on facts or a tool-grounded
-draft explicitly noted incomplete evidence.
+The synthesizer writes the user's answer directly in its own voice. A
+short `## Caveats` section is appended ONLY when drafts genuinely disagreed
+on facts or a tool-grounded draft explicitly noted incomplete evidence —
+it's not a required section.
 
-Phase 25 also forwards the original conversation's system messages
-(datetime, memory recall, OWUI template variables) into the synth call.
-Pre-Phase-25, the synth ran on a fresh 2-message stack
-`[synth_system, user_with_drafts]` and never saw the datetime context
-the workers had — so synth answers reasoned about "today" from training
-cutoff alone. Now synth gets the same system-message floor as workers.
+The original conversation's system messages (datetime, memory recall,
+OWUI template variables) are forwarded into the synth call so the
+synthesizer reasons about "today" from the same temporal floor as the
+workers, not from its training cutoff.
 
 If the primary synthesizer fails, we retry once with the configured
 `fallback_synth`. If both fail, we degrade to the longest non-empty draft
@@ -121,10 +115,10 @@ def _build_synth_messages(
 
     Workers see all the system messages from the request (datetime from
     `node_datetime`, memory recall hits, OWUI template variables, any
-    user-supplied system prompts). Phase 25 pulls those same system
-    messages into the synth call so the synthesizer reasons with the
-    same context — most importantly the datetime (otherwise synth
-    hedges about "today" from training cutoff).
+    user-supplied system prompts). The same system messages are forwarded
+    into the synth call so the synthesizer reasons with the same context
+    — most importantly the datetime (otherwise synth hedges about "today"
+    from training cutoff).
 
     Only `role=system` messages are forwarded. The user/assistant turns
     from the original conversation are already represented in
@@ -267,7 +261,7 @@ async def synthesize_stream(
     timeout_s: float,
     user_id: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
-    """Streaming variant of `synthesize` (Phase 19).
+    """Streaming variant of `synthesize`.
 
     Yields a sequence of events. The route handler interleaves these with
     progress banners and SSE frames; the non-streaming graph keeps using

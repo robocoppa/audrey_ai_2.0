@@ -7,20 +7,17 @@ Checks:
     etc.) — see `_BREVITY_CUES` below.
 
 If the gate fails, the graph runs the deep panel + synth one more time
-(max_retries=1). On the retry we add a system note nudging the synthesizer
+(max_retries=1). On retry we add a system note nudging the synthesizer
 to be more substantive. If the second pass still fails, we ship what we
 have rather than 502 — the answer is tagged with `reflect_passed=False`
 in state for log inspection.
 
-Phase 25 dropped the "must contain all three of `## Approach` / `## Answer`
-/ `## Caveats`" requirement because the synth prompt no longer asks for
-that fixed structure. Length-and-presence is the sole structural check now.
+Length-and-brevity is the sole structural check; we don't require any
+fixed section structure in the answer.
 
-Phase 25 also added the brevity-cue skip after observing that the new
-synth prompt (which is permissive about length) plus an
-`min_answer_chars=80` floor caused false retries on questions like
-"what year is it? answer in one sentence." The user explicitly asked
-for a short answer; reflect was punishing the synth for complying.
+The brevity-cue skip exists because the synth prompt is permissive about
+length — without the cue check, a correct one-line answer to "what year
+is it? answer in one sentence" would trigger a wasteful retry.
 """
 
 from __future__ import annotations

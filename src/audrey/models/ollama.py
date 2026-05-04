@@ -1,9 +1,9 @@
 """Async Ollama client.
 
-Phase 4 scope: non-streaming + streaming `chat` + `tags`. Tool-calls,
-embeddings, and multi-round ReAct loops come in Phase 5+ and Phase 8.
+Wraps Ollama's HTTP API: non-streaming + streaming `chat`, `tags`, and
+`embed`. Supports tool-call payloads in chat requests. The client is
+constructed once at app startup and shared across requests.
 
-The client is constructed once at app startup and shared across requests.
 All public methods are async — do NOT call them from sync code.
 """
 

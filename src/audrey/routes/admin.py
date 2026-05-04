@@ -8,18 +8,15 @@ Endpoints:
   POST /v1/admin/auth/clear         — evict every cached AuthedUser.
                                       Used after revoking a token in OWUI,
                                       or as an incident-response lever.
-  POST /v1/admin/auth/clear/{email} — evict only entries for one user
-                                      (Phase 22). Used after deleting a
-                                      user in OWUI — eviction without
-                                      disturbing other sessions. Phase 22
-                                      shipped this because OWUI v0.9.x
-                                      doesn't emit user-deletion webhooks.
+  POST /v1/admin/auth/clear/{email} — evict cache entries for one user.
+                                      Used after deleting/banning a user in
+                                      OWUI; surgically clears their sessions
+                                      without disturbing other users.
   GET  /v1/admin/auth/status        — cache size visibility.
-  POST /v1/admin/kb/reconcile       — trigger one KB reconcile pass on
-                                      demand (Phase 30). Useful right
-                                      after a bulk delete on disk, or
-                                      to verify the periodic loop is
-                                      doing what it should.
+  POST /v1/admin/kb/reconcile       — trigger one KB reconcile sweep on
+                                      demand. Useful after a bulk delete on
+                                      disk, or to confirm the periodic loop
+                                      is functioning.
 
 Eviction is intentionally manual — OWUI doesn't notify Audrey of user
 lifecycle events, so the admin operator (you) signals via these
@@ -82,9 +79,9 @@ async def auth_clear_for_user(
 ) -> AuthClearForUserResponse:
     """Evict cache entries for one user by email. Other users untouched.
 
-    Phase 22: surgical replacement for blanket-clearing the cache after
-    deleting a user in OWUI. Idempotent — calling twice for the same
-    email returns 0 the second time. Case-insensitive match.
+    Surgical replacement for blanket-clearing the cache after deleting a
+    user in OWUI. Idempotent — calling twice for the same email returns 0
+    the second time. Case-insensitive match.
     """
     n = clear_auth_cache_for_email(email)
     log.warning("admin: auth cache cleared for %s by %s (%d entries evicted)",
@@ -103,14 +100,14 @@ async def kb_reconcile(
     request: Request,
     me: AuthedUser = Depends(require_admin),
 ) -> dict:
-    """Trigger one KB reconcile sweep on demand (Phase 30).
+    """Trigger one KB reconcile sweep on demand.
 
     Scrolls `kb_text` + `kb_images`, deletes vectors for any source path
     that no longer exists on disk. Returns the structured summary
     (per-collection: checked/orphans_deleted/points_in_orphans/elapsed_s).
 
-    Per-user collections are NOT touched — Phase 15's sqlite handles
-    those at startup.
+    Per-user collections are NOT touched — those are reconciled by the
+    sqlite uploads index at startup.
 
     Synchronous: call returns when the sweep completes. On a 10k-point
     KB this is sub-second; on a much larger one it can take longer.

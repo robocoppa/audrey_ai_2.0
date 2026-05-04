@@ -1,24 +1,22 @@
 """KB reconcile pass — drift catch-up for the global text/image collections.
 
-The Phase 27 watcher fixes the *steady-state* leak: while running, a
-deleted file's vectors get cleaned up via `on_deleted` / `on_moved`.
-But anything that happens while the watcher isn't running — container
-restart, `KB_WATCHER_ENABLED=0` for a stretch, bulk `rm` on
-`/mnt/user/knowledge/...`, an atomic-rename pattern watchdog struggles
-with on certain filesystems — leaves stale vectors in `kb_text` and
-`kb_images` forever.
+The watcher fixes the *steady-state* leak: while running, a deleted file's
+vectors get cleaned up via `on_deleted` / `on_moved`. But anything that
+happens while the watcher isn't running — container restart,
+`KB_WATCHER_ENABLED=0` for a stretch, bulk `rm` on `/mnt/user/knowledge/...`,
+an atomic-rename pattern watchdog struggles with on certain filesystems —
+leaves stale vectors in `kb_text` and `kb_images` forever.
 
-Phase 30 adds a periodic reconciler that scrolls every point in the
-two global collections, groups by `payload.source`, checks each unique
-source against `Path.exists()`, and calls `delete_by_source` for any
-orphan. Returns a summary dict suitable for logging or admin response.
+This reconciler runs periodically: scroll every point in the two global
+collections, group by `payload.source`, check each unique source against
+`Path.exists()`, and call `delete_by_source` for any orphan. Returns a
+summary dict suitable for logging or admin response.
 
-Excludes per-user collections (`kb_user_text_*` / `kb_user_images_*`)
-on purpose — Phase 15's sqlite uploads index already does its own
-reconcile against qdrant at startup. Mixing the two paths would let
-this reconciler delete legitimately-uploaded files just because the
-host can't see the user's filename (which it can't — uploads live in
-qdrant only, no on-disk source).
+Excludes per-user collections (`kb_user_text_*` / `kb_user_images_*`) on
+purpose — the sqlite uploads index already reconciles those against qdrant
+at startup. Mixing the two paths would let this reconciler delete
+legitimately-uploaded files just because the host can't see the user's
+filename (which it can't — uploads live in qdrant only, no on-disk source).
 
 Lifecycle wrapper `KBReconciler` mirrors `KBWatcher`'s shape: `start()`
 spawns a long-lived asyncio task, `stop()` cancels it. The task sleeps
@@ -167,7 +165,7 @@ async def reconcile_once(
     """Run one full reconcile pass over both global collections.
 
     Returns a structured summary. Per-user collections are NOT touched —
-    they're managed by Phase 15's sqlite + startup reconcile.
+    they're managed by the sqlite uploads index + startup reconcile.
     """
     result = ReconcileResult()
     start = time.monotonic()

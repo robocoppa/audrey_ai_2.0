@@ -1,8 +1,9 @@
 """Model registry — ranked lists of candidate models per task type.
 
-Phase 4 scope: data shape + simple "pick highest-priority healthy model"
-selector. Multi-model panels, deep-panel dispatch, and escalation are layered
-on in later phases (5+).
+Loaded once at startup from `config.yaml` under `model_registry`. Provides
+`first_healthy(task, predicate)` for the fast path's "pick highest-priority
+healthy model" selection, and `candidates(task)` for the deep panel's
+multi-worker dispatch.
 """
 
 from __future__ import annotations

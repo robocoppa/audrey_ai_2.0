@@ -1,9 +1,9 @@
-"""Per-user fair local-GPU gate (Phase 20).
+"""Per-user fair local-GPU gate.
 
-Replaces the global-FIFO `GpuGate`. Same purpose — serialize local Ollama
-generations against the PSU/VRAM budget — but instead of strict FIFO, we
-round-robin across users so U2's first request slips ahead of U1's
-queries 2–10.
+Serializes local Ollama generations against the PSU/VRAM budget. Instead
+of strict FIFO across all callers, this round-robins across users so a
+new arrival's first request slips ahead of an existing user's backlog —
+fairness rather than first-come-first-served.
 
 Design:
 

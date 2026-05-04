@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # Local storage
     data_dir: Path = Field(default=Path("/app/data"), alias="TOOLS_DATA_DIR")
 
-    # Memory (Qdrant-backed, semantic; Phase 12)
+    # Memory (Qdrant-backed, semantic search via nomic-embed-text)
     qdrant_url: str = Field(default="http://qdrant:6333", alias="QDRANT_URL")
     memory_collection: str = Field(default="kb_memory", alias="MEMORY_COLLECTION")
     memory_embed_model: str = Field(default="nomic-embed-text", alias="MEMORY_EMBED_MODEL")

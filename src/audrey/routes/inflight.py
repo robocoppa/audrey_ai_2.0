@@ -1,4 +1,4 @@
-"""Per-user in-flight cap (Phase 20, layer 2).
+"""Per-user in-flight cap.
 
 Bounds the number of concurrent pipeline requests one user can have
 running at once. When a user is at the cap, request N+1 *waits* — no

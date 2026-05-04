@@ -1,4 +1,4 @@
-"""Per-user KB collections (Phase 13).
+"""Per-user KB collections.
 
 Each user who uploads files gets two lazily-created Qdrant collections:
   - `kb_user_text_<sanitized>`   — 768-d cosine, nomic-embed

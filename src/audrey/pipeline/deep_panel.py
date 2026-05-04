@@ -12,15 +12,15 @@ least one draft comes back.
 
 Concurrency:
   - Cloud workers run via `asyncio.gather` (Ollama Pro caps at 3, configurable).
-  - Local workers are submitted concurrently but serialize through the GPU
-    semaphore in `semaphore.py` (default `GPU_CONCURRENCY=1`).
+  - Local workers are submitted concurrently but serialize through
+    `FairLocalGate` (default `GPU_CONCURRENCY=1`).
 
-Phase 9: workers are tool-capable. When a `ToolRegistry` is supplied and the
-worker model is in `fast_path.tool_capable_models`, the worker runs a ReAct
-loop (`pipeline/react.py`) with a tighter per-worker budget from
-`agentic.react.deep_worker`. The GPU gate is held for the *entire* loop — not
-just a single chat call — so local workers never overlap across tool rounds.
-Tool-grounded drafts carry `tool_rounds` > 0 in their `WorkerDraft`.
+Workers are tool-capable: when a `ToolRegistry` is supplied and the worker
+model is in `fast_path.tool_capable_models`, the worker runs a ReAct loop
+(`pipeline/react.py`) with a tighter per-worker budget from
+`agentic.react.deep_worker`. The GPU gate is held for the *entire* loop —
+not just a single chat call — so local workers never overlap across tool
+rounds. Tool-grounded drafts carry `tool_rounds` > 0 in their `WorkerDraft`.
 
 If `state["subtasks"]` is non-empty, workers are assigned to subtasks
 round-robin so each draft answers a different slice. Otherwise every worker
@@ -131,10 +131,10 @@ async def _run_one_worker(
     try:
         async with gate.acquire(model, location=location, user_id=user_id):
             if use_tools:
-                # Phase 23: deep panel holds the gate for the *whole* worker
-                # (this `async with`), so pass `gate=None` to keep ReAct from
-                # double-acquiring. Fast path is the opposite: it passes a
-                # real gate so tool-dispatch windows release the GPU.
+                # Deep panel holds the gate for the *whole* worker (this
+                # `async with`), so pass `gate=None` to keep ReAct from
+                # double-acquiring. Fast path does the opposite — it passes
+                # a real gate so tool-dispatch windows release the GPU.
                 react: ReactResult = await run_react(
                     ollama, health, tools,  # type: ignore[arg-type]
                     model=model,

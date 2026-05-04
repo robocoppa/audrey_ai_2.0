@@ -1,15 +1,18 @@
-"""Prometheus metrics for Audrey (Phase 17).
+"""Prometheus metrics for Audrey.
 
-Eight metrics, each tied to an actual question:
+Each metric is tied to a specific operational question:
 
-  audrey_pipeline_seconds        — fast-path vs deep latency by task type
-  audrey_pipeline_total          — fast/deep ratio + outcome counts
-  audrey_dispatch_total          — which model is actually being picked
-  audrey_model_seconds           — per-model latency (ollama call timing)
-  audrey_gpu_gate_wait_seconds   — local-model queue wait time
-  audrey_kb_search_seconds       — KB query latency (text/image; merged or not)
-  audrey_kb_search_hits          — hits returned per query (zero = retrieval miss)
-  audrey_auth_cache_size         — current Phase 14 token cache size
+  audrey_pipeline_seconds          — fast-path vs deep latency by task type
+  audrey_pipeline_total            — fast/deep ratio + outcome counts
+  audrey_dispatch_total            — which model is actually being picked
+  audrey_model_seconds             — per-model latency (ollama call timing)
+  audrey_gpu_gate_wait_seconds     — local-model queue wait time
+  audrey_kb_search_seconds         — KB query latency (text/image; merged or not)
+  audrey_kb_search_hits            — hits returned per query (zero = retrieval miss)
+  audrey_auth_cache_size           — OWUI token cache occupancy
+  audrey_user_inflight_blocked_seconds — wait at the per-user concurrency cap
+  audrey_tool_calls_total          — tool dispatches inside ReAct, by outcome
+  audrey_tool_call_seconds         — per-tool dispatch latency
 
 Cardinality is bounded by design:
   - `model` labels come from the registry (a few dozen at most)
@@ -117,7 +120,7 @@ auth_cache_size = Gauge(
     "Number of OWUI bearer tokens currently cached.",
 )
 
-# ─── Per-user in-flight cap (Phase 20) ────────────────────────────────
+# ─── Per-user in-flight cap ───────────────────────────────────────────
 
 # Most slot acquires are immediate (0 bucket). Long tail catches users
 # parked behind their own concurrent requests.
@@ -129,7 +132,7 @@ user_inflight_blocked_seconds = Histogram(
     buckets=_INFLIGHT_BUCKETS,
 )
 
-# ─── Per-tool dispatch (Phase 22) ─────────────────────────────────────
+# ─── Per-tool dispatch ────────────────────────────────────────────────
 
 # Tool cardinality is bounded (currently 6: kb_search, kb_image_search,
 # memory_recall, memory_search, memory_store, web_search). Adding tool

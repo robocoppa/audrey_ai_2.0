@@ -7,15 +7,16 @@ if a file changes N times within `debounce_s` seconds, we only act
 once after the last change settles. Bulk operations (e.g. `cp -r`)
 thus become O(files) ingests, not O(events).
 
-Phase 27: handles deletes and renames properly. Pre-Phase-27 the
-watcher only knew about `on_created` / `on_modified` / `on_moved` and
-treated `on_moved` as "ingest the new path" — leaving stale vectors
-behind for both deleted files and the source side of renames. Now:
+Event handling:
 
 - `on_deleted`         → enqueue ("delete", path) → `delete_by_source`
 - `on_moved` (rename)  → enqueue ("delete", src), then ("ingest", dest)
-- `on_created`         → enqueue ("ingest", path) → ingest as before
-- `on_modified`        → enqueue ("ingest", path) → re-ingest
+- `on_created`         → enqueue ("ingest", path)
+- `on_modified`        → enqueue ("ingest", path) — re-ingest from scratch
+
+Within a debounce flush, deletes are processed before ingests for the
+same path so a `mv old.md new.md` can't race the delete-of-old against
+the ingest-of-new.
 
 The watcher is gated behind `KB_WATCHER_ENABLED=1` so tests and the
 smoke-test container don't start it.

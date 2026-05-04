@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from PIL.Image import Image as PILImage
 
 
-# ── SSRF guards (Phase 27) ────────────────────────────────────────────
+# ── SSRF guards ───────────────────────────────────────────────────────
 #
 # `_fetch_image` is called by the public `/v1/kb/query/image` route with
 # whatever URL an authenticated user supplied. Without these guards a
@@ -46,9 +46,8 @@ if TYPE_CHECKING:
 #   - Hit Audrey's own loopback metrics/admin endpoints
 #   - OOM the container with a multi-GB response (no streaming cap)
 #
-# Phase 26 already requires auth on the chat completions route that
-# eventually triggers tool calls; Phase 27 adds defense-in-depth at the
-# fetch layer itself. Trade-offs documented inline.
+# The chat-completions route already requires auth; these guards add
+# defense-in-depth at the fetch layer itself. Trade-offs documented inline.
 
 _IMAGE_FETCH_BYTE_CAP = 25 * 1024 * 1024  # 25 MB; huge for an image
 _ALLOWED_IMAGE_SCHEMES = frozenset({"https"})
@@ -66,7 +65,7 @@ def _is_unsafe_address(host: str) -> bool:
     Doesn't defend against DNS rebinding — the actual httpx connection
     re-resolves and could land on a different IP. Real mitigation would
     require connecting to the resolved IP and passing the hostname via
-    SNI. Out of scope for Phase 27; bounded by Phase 26 requiring auth.
+    SNI; out of scope, bounded by chat-completions requiring auth.
     """
     try:
         infos = socket.getaddrinfo(host, None)
@@ -169,8 +168,8 @@ def _normalize(vec: list[float]) -> list[float]:
 
 
 async def _fetch_image(url: str) -> PILImage:
-    # Phase 27: validate URL before any I/O. Raises ValueError on bad
-    # scheme, missing host, or host resolving to a private/loopback IP.
+    # Validate URL before any I/O. Raises ValueError on bad scheme,
+    # missing host, or host resolving to a private/loopback IP.
     # Run in a thread because socket.getaddrinfo can block.
     await asyncio.to_thread(_validate_image_url, url)
 
@@ -183,9 +182,9 @@ async def _fetch_image(url: str) -> PILImage:
         ),
         "Accept": "image/avif,image/webp,image/png,image/jpeg,*/*;q=0.8",
     }
-    # Phase 27: follow_redirects=False — a permitted public host could
-    # 302 to an internal address otherwise. Stream the response with a
-    # byte cap so a malicious server can't OOM us with a giant payload.
+    # follow_redirects=False — a permitted public host could 302 to an
+    # internal address otherwise. Stream the response with a byte cap so
+    # a malicious server can't OOM us with a giant payload.
     async with httpx.AsyncClient(
         timeout=20.0, follow_redirects=False, headers=headers,
     ) as client:

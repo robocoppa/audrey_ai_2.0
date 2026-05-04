@@ -8,10 +8,10 @@ Six endpoints, OpenAPI auto-discovered by the Audrey orchestrator:
   POST /memory_recall      — fetch by exact key
   POST /memory_search      — semantic search over a user's memories
 
-Memory is Qdrant-backed (Phase 12): each entry is a point in the
-`kb_memory` collection, embedded with nomic-embed-text. On first startup,
-a legacy `memory.db` SQLite file (Phase 11) is migrated automatically and
-renamed to `memory.db.migrated`.
+Memory is Qdrant-backed: each entry is a point in the `kb_memory`
+collection, embedded with nomic-embed-text. On first startup, a legacy
+`memory.db` SQLite file (from an earlier backend) is migrated
+automatically and renamed to `memory.db.migrated`.
 
 Each endpoint has a clear operation_id so the orchestrator's OpenAPI →
 Ollama-tool converter produces sensible tool names.
@@ -159,7 +159,7 @@ class MemoryStoreRequest(BaseModel):
 
 
 class MemoryRecallRequest(BaseModel):
-    user: Annotated[str, Field(min_length=1, max_length=200, description="User id to scope the recall to. Required — memories are per-user (Phase 26 fix; pre-fix this leaked the most-recent matching key across all users).")]
+    user: Annotated[str, Field(min_length=1, max_length=200, description="User id to scope the recall to. Required — memories are per-user; relaxing this would leak across accounts.")]
     key: Annotated[str, Field(min_length=1, max_length=200)]
 
 

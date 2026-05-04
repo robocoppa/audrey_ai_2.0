@@ -20,13 +20,13 @@ Tool dispatch is fully concurrent within a round (Ollama may emit multiple
 tool_calls in one assistant turn). Errors come back as tool messages so the
 model can decide how to recover.
 
-Phase 23: when a `FairLocalGate` is supplied, each `ollama.chat` is wrapped
-with `gate.acquire(...)`. Tool dispatch sits *outside* the gate hold, so a
-slow tool call doesn't head-of-line-block other users' GPU work. The gate is
+When a `FairLocalGate` is supplied, each `ollama.chat` is wrapped with
+`gate.acquire(...)`. Tool dispatch sits *outside* the gate hold, so a slow
+tool call doesn't head-of-line-block other users' GPU work. The gate is
 re-acquired for the next round; if another user slipped in between, the
 model may be reloaded — that's the trade we accept to keep tool-wait time
-non-blocking. Deep panel passes `gate=None` because it holds the gate at the
-whole-worker level (one acquire across all rounds, by design — see
+non-blocking. Deep panel passes `gate=None` because it holds the gate at
+the whole-worker level (one acquire across all rounds, by design — see
 `deep_panel._run_one_worker`).
 """
 

@@ -39,6 +39,7 @@ def count_tokens(messages: list[dict]) -> int:
 
 
 def is_complex(messages: list[dict], *, threshold: int) -> tuple[bool, int]:
+    """Returns `(complex?, token_count)`. Complex prompts route to deep panel."""
     n = count_tokens(messages)
     return n >= threshold, n
 

@@ -1,25 +1,30 @@
 """LangGraph pipeline assembly.
 
-Phase 11 build:
+Topology:
 
-    datetime ─► memory_recall ─► classify ─► complexity ─► fast_path ─► escalate? ─► END
-                                                       ╲                          ╲
-                                                        ╲                          └► planner ─► deep_panel ─► synthesize ─► reflect ─► retry?
-                                                         ╲                                                                            ↺ deep_panel
-                                                          ╲                                                                          → END
-                                                           └► planner (when complex=True) ─► deep_panel ─► …
+    datetime ─► memory_recall ─► classify ─► complexity ─┬─► fast_path ─┬─► END
+                                                         │              └─► escalate ─┐
+                                                         │                            ▼
+                                                         └────────────────────► planner ─► deep_panel ─► synthesize ─► reflect ─┬─► END
+                                                                                                                                └─► deep_panel (retry)
 
-`datetime` (Phase 18 follow-up) prepends a system message with the
-current ISO-8601 server time so every downstream node sees the same
-timestamp. See `pipeline/context.py`.
+Node responsibilities (one paragraph each):
 
-`memory_recall` (Phase 11) runs next: when `state["user_id"]` is set and
-the `memory_search` tool is registered, it keyword-searches the user's
+`datetime` prepends a system message with the current ISO-8601 server time
+so every downstream node and the model itself reasons from the same "today"
+rather than from training cutoff. See `pipeline/context.py`.
+
+`memory_recall` runs next: when `state["user_id"]` is set and the
+`memory_search` tool is registered, it semantic-searches the user's stored
 memories and prepends any hits as a system message. No-op otherwise.
 
-`escalate?` is the adaptive hook from `fast_path`: if the fast answer is too
-short or low-confidence, the graph re-enters in deep mode. `retry?` is the
-reflection loop — at most one extra deep-panel pass.
+`classify` decides the task family (code / reasoning / general / vl) via
+keyword pre-filter then a router model. `complexity` decides fast vs deep
+based on prompt token count and the virtual-model preference.
+
+`escalate?` is the adaptive hook from `fast_path`: if the fast answer is
+too short or low-confidence, the graph re-enters in deep mode. `retry?` is
+the reflection loop — at most one extra deep-panel pass.
 
 Virtual-model routing (decided by `node_complexity`):
   audrey_deep / audrey_cloud / audrey_local — always deep
@@ -29,8 +34,8 @@ Virtual-model routing (decided by `node_complexity`):
 Both `fast_path` and `deep_panel` workers run ReAct when the chosen model is
 in `fast_path.tool_capable_models` and the tool registry is non-empty. Deep
 workers use `agentic.react.deep_worker.*` (tighter per-worker budget). The
-fast-path → deep escalation guard still skips when `tool_rounds > 0`
-(re-running through deep workers rarely improves an already-grounded answer).
+fast-path → deep escalation guard skips when `tool_rounds > 0` —
+re-running through deep workers rarely improves an already-grounded answer.
 """
 
 from __future__ import annotations

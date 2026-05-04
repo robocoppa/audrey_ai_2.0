@@ -87,9 +87,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # noqa: BLE001 — Qdrant outage shouldn't kill boot
         log.warning("qdrant: ensure_collections failed: %s (KB endpoints will 503)", e)
 
-    # Phase 15: sqlite index over per-user upload metadata. Reconciled
-    # against qdrant on every boot — ghost rows pruned, missing rows
-    # backfilled from the user collections.
+    # SQLite index over per-user upload metadata. Reconciled against qdrant
+    # on every boot — ghost rows pruned, missing rows backfilled from the
+    # user collections.
     uploads_db = UploadsDB(kb_cfg.get("uploads_db_path", "/data/uploads.sqlite"))
     try:
         await reconcile_with_qdrant(uploads_db, qdrant)

@@ -3,7 +3,7 @@
 Minimal FastAPI service that Audrey auto-discovers via `/openapi.json`. Any
 endpoint defined here becomes a tool the models can call.
 
-## v1 endpoints (built in Phase 2)
+## Endpoints
 
 - `POST /web_search` — Brave Search API proxy
 - `POST /kb_search` — text query → Audrey `/v1/kb/query`

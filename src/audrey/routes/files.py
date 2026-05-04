@@ -1,4 +1,4 @@
-"""Per-user file uploads (Phase 13 + Phase 14 auth).
+"""Per-user file uploads.
 
     POST   /v1/files           — multipart upload; stream to disk, validate,
                                  ingest into the user's kb_user_text_* /
@@ -6,11 +6,10 @@
     GET    /v1/files           — list the caller's files (one row per file_id).
     DELETE /v1/files/{file_id} — purge all points for a file + delete bytes.
 
-Identity (Phase 14): every endpoint depends on `require_user`, which
-proxies the browser's `Authorization: Bearer <jwt>` to OWUI and returns
-an `AuthedUser`. The caller's email *is* the user id — no `?user=` query
-param, no `X-User` header, no form field. Attempting to spoof an
-identity requires forging a token OWUI would accept.
+Identity: every endpoint depends on `require_user`, which proxies the
+browser's `Authorization: Bearer <jwt>` to OWUI and returns an `AuthedUser`.
+The caller's email *is* the user id — no `?user=` query param, no `X-User`
+header, no form field. Spoofing requires forging a token OWUI would accept.
 
 Safety layers (all mandatory):
 
@@ -186,7 +185,7 @@ async def upload_file(
             detail=f"Unsupported mime: {mime!r}. Allowed: {sorted(ALLOWED_TEXT_MIMES | ALLOWED_IMAGE_MIMES)}",
         )
 
-    # Quota gate, served from the sqlite index (was a Qdrant scroll pre-Phase 15).
+    # Quota gate served from the sqlite index — O(1) lookup vs scrolling Qdrant.
     already = await db.user_total_bytes(user)
     if already + written > max_total:
         _safe_unlink(dest)

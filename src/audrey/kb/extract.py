@@ -1,4 +1,4 @@
-"""Upload-side extraction (Phase 13).
+"""Upload-side extraction.
 
 Given a file on disk (already saved by the upload route to
 `/data/uploads/<sanitized_user>/<uuid><ext>`), return the extracted text
