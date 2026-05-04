@@ -1,5 +1,6 @@
 # Session memory — local only, pre-populated with real setup state
-CONTINUITY.md
+# HISTORY (formerly CONTINUITY) stays laptop-local; lesson docs ship to GitHub.
+docs/campaign-1/HISTORY.md
 CLAUDE.md
 
 # Python

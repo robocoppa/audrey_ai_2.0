@@ -97,50 +97,59 @@ monitoring stack.
 
 ## 2. Smoke tests
 
-### 2.1 Verify pinned digests in built images
+### 2.1 Verify pinned digests appear in the build trace
 
 ```bash
-# audrey-ai's base layer:
-docker history audrey-ai:latest | grep -i python
-# Expected: a layer line referencing the pinned digest somewhere in the chain.
-# (docker history doesn't show FROM digests directly; the cleaner check is below.)
-
-# Inspect the resolved digest of the audrey-ai image's Python layer:
-docker inspect audrey-ai:latest | jq -r '.[0].RootFS.Layers[]' | head -3
-# Compare against the digest you pulled — Python's filesystem layer should
-# match across builds that pin the same FROM digest.
+docker compose build --no-cache audrey-ai 2>&1 | grep -iE "FROM python|Pulling.*python"
 ```
 
-A simpler ground-truth check: rebuild from scratch and confirm no error.
+Expected: a line like
+`FROM docker.io/library/python:3.12-slim@sha256:46cb7cc2877e60fb...`
+in the trace. If you see `Using default tag: latest` or any line
+referencing `python:3.12-slim` *without* a `@sha256:` suffix, an
+unpinned reference slipped in — search the Dockerfile for the bare
+tag.
+
+Same check for the uv pin:
 
 ```bash
-docker compose build --no-cache audrey-ai 2>&1 | grep -E "FROM|Pulling"
-# Expected: "FROM python:3.12-slim@sha256:46cb..." in the build trace.
-# No "Using default tag: latest" warning — that means an unpinned
-# reference slipped in.
+docker compose build --no-cache audrey-ai 2>&1 | grep -iE "ghcr.io/astral-sh/uv|Pulling.*uv"
 ```
 
-### 2.2 Build is reproducible
+Expected: a line referencing
+`ghcr.io/astral-sh/uv@sha256:3b7b60a81d3c57ef...`. The `COPY --from=`
+pattern doesn't print as cleanly as `FROM`, so you may need to
+search for `astral-sh` instead.
 
-Two builds from the same source tree should produce the same image
-digest (modulo timestamps in metadata):
+### 2.2 What pinning does NOT guarantee
+
+Pinning gives you **same base layer**, not **byte-identical builds**.
+Even with pinned `FROM` digests, two `docker build --no-cache` runs
+will produce different final image IDs because:
+
+- `apt-get update` pulls the package index *at build time*.
+- pip writes install timestamps into wheel metadata.
+- BuildKit records `RUN` step timestamps in layer metadata.
+
+That's fine. The point of pinning isn't byte-identical builds — it's
+defense against a registry tag silently advancing under us. A CVE
+patched in `python:3.12-slim` between yesterday and tomorrow stays out
+of our build until we explicitly bump the digest.
+
+If you want to verify the *base layer* is stable across builds (the
+useful part), compare the first few entries of `RootFS.Layers`:
 
 ```bash
 docker compose build --no-cache audrey-ai
-DIGEST_1=$(docker inspect audrey-ai:latest --format='{{.Id}}')
-
+docker inspect audrey-ai:latest --format='{{range .RootFS.Layers}}{{println .}}{{end}}' > /tmp/layers-1
 docker compose build --no-cache audrey-ai
-DIGEST_2=$(docker inspect audrey-ai:latest --format='{{.Id}}')
-
-echo "Build 1: $DIGEST_1"
-echo "Build 2: $DIGEST_2"
-[ "$DIGEST_1" = "$DIGEST_2" ] && echo "✅ reproducible" || echo "⚠️  digests differ"
+docker inspect audrey-ai:latest --format='{{range .RootFS.Layers}}{{println .}}{{end}}' > /tmp/layers-2
+diff /tmp/layers-1 /tmp/layers-2 | head
 ```
 
-A digest mismatch here doesn't necessarily mean a regression — pip's
-metadata bakes in install timestamps, and `apt-get update` can pull
-slightly different package indexes. The point is to *see* the
-divergence rather than have it hidden behind floating tags.
+Expected: the first ~5 layer SHAs (Python base + apt install) match
+between builds. Layers further down (uv install, package install,
+config copy) may differ for the timestamp reasons above.
 
 ### 2.3 Monitoring stack still scrapes
 

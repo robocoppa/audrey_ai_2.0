@@ -2,36 +2,47 @@
 
 ## On every new session, before answering the user's first prompt
 
-Read `CONTINUITY.md` at the repo root. It is the source of truth for current
-project state — phase status, behavioral facts, queued followups, container
-layout, model registry, and decisions already locked. The codebase alone does
-not tell you which phases are shipped vs. queued, why certain choices were
-made, or which gotchas not to re-discover.
+Read **`docs/campaign-1/HISTORY.md`** for the full Phase 1→31 build history
+(behavioral facts, phase decisions, container/model layout) AND **`docs/lessons/CONTINUITY.md`**
+for the current lesson-plan state. Together these are the source of truth
+for what's been built and what we're working on right now.
 
-`CONTINUITY.md` is **gitignored** and laptop-only — it lives at this path on
-the development laptop and is not synced to Unraid or anywhere else. Treat it
-as the durable working memory for this project.
+Both files are **gitignored** and laptop-only — they live at these paths on
+the development laptop and aren't synced to Unraid or anywhere else. Treat
+them as the durable working memory for this project.
 
-After reading it, skip ahead to its **Next session should** section. That is
-where current priority lives.
+Path note: `HISTORY.md` was renamed from `CONTINUITY.md` (was at repo root)
+on 2026-05-03 when the project transitioned from "build phases" to "lesson
+plan." The build phases are complete and now live in `docs/campaign-1/`
+alongside their phase-N-deploy.md docs.
 
-## At the end of every phase
+After reading both, skip ahead to the **Next session should** section in
+the lessons CONTINUITY (or HISTORY's section if there's no lesson-side
+priority yet). That is where current priority lives.
 
-When a phase ships (deploy doc verified, smoke tests passing, work
-acknowledged by the user as done), update `CONTINUITY.md` before moving on.
+## At the end of every phase or lesson
+
+When a phase ships or a lesson concludes (deploy doc verified, smoke tests
+passing, work acknowledged by the user as done), update the relevant
+continuity-style doc before moving on:
+
+- For **build phases** (historical now, but the convention persists for
+  any future phase work): update `docs/campaign-1/HISTORY.md`.
+- For **lessons**: update `docs/lessons/CONTINUITY.md`.
+
 Specifically:
 
 - Bump the `_Last updated:` line at the top with the current date and a
   one-line summary of what shipped.
-- Update the **Status** section: current phase, last completed step, new
-  behavioral facts worth remembering. Preserve older phase notes — they have
+- Update the **Status** section: current phase/lesson, last completed step,
+  new behavioral facts worth remembering. Preserve older notes — they have
   load-bearing context that future sessions need.
 - Rewrite the **Next session should** list: remove items now done, promote
-  the next priority, capture any new followups discovered during the phase.
+  the next priority, capture any new followups.
 - Update **Stack state**, **Containers table**, **Model registry**, etc. if
   the phase changed any of them.
 
-The goal: a new Claude session that reads `CONTINUITY.md` cold should be able
+The goal: a new Claude session that reads the file cold should be able
 to pick up right where the last one left off, without re-deriving state from
 git log or codebase scans. If after a phase you realize a fact would have
 saved you 30 minutes of re-discovery, that's exactly the kind of thing that
