@@ -1,7 +1,12 @@
-# Lesson 1 — The request lifecycle, end-to-end
+# Lesson 2 — The request lifecycle, end-to-end
 
 **Estimated time:** 45-60 minutes (read 25, walk through code 20, audit
 + questions 15).
+
+**Prerequisite:** [Lesson 1](lesson-01-foundations.md). This lesson
+assumes you've already met `async`/`await`, FastAPI, Pydantic, and
+LangGraph in the abstract. If `async def foo(): await bar()` doesn't
+look meaningful to you, go back to Lesson 1 first.
 
 **Goal:** by the end of this lesson, you can answer the question
 *"what happens between the user clicking 'send' in Open WebUI and the
@@ -29,44 +34,13 @@ it sends an HTTP request to Audrey, and Audrey decides:
   progress banners, so the user sees something happening?
 
 That decision-making is the **pipeline**. The thing that *runs* the
-pipeline is a library called **LangGraph**. The thing that *exposes
-the pipeline to the network* is a library called **FastAPI**. The
-thing that *makes everything async* (so we can wait for the model to
-think without blocking other requests) is Python's built-in `asyncio`.
+pipeline is **LangGraph**. The thing that *exposes the pipeline to the
+network* is **FastAPI**. The thing that *makes everything concurrent*
+(so we can wait for the model to think without blocking other requests)
+is Python's built-in `asyncio`.
 
-If those three terms — async, FastAPI, LangGraph — are unfamiliar,
-that's fine. We'll meet each one in this lesson, just enough to know
-it exists. Lessons 2 and 3 explain them properly.
-
-> **Concept: async/await (first encounter).** Python normally runs
-> code one line at a time, top to bottom. When a line says "wait for
-> the network" or "wait for a file," Python sits there blocked until
-> the wait is done. `async`/`await` is a way to tell Python: "while
-> you're waiting for *this* network call, you're allowed to start
-> running *that* unrelated request in the meantime." A function
-> declared `async def foo()` can be paused at `await some_other_thing()`
-> — Python yields control to the event loop, which finds something
-> else to do, and resumes `foo` when `some_other_thing()` finishes.
-> Concretely: every function you'll see in Audrey's request path is
-> `async`, because the request spends most of its time waiting for
-> Ollama to generate tokens, and we want to handle other users' requests
-> during that wait.
-
-> **Concept: FastAPI (first encounter).** A framework for building HTTP
-> APIs in Python. You write functions decorated with `@router.get(...)`
-> or `@router.post(...)`, and FastAPI turns them into HTTP endpoints.
-> It also validates incoming JSON against a schema (using Pydantic),
-> handles streaming responses, and integrates with `async` natively.
-> All Audrey routes live in `src/audrey/routes/` and use FastAPI.
-
-> **Concept: LangGraph (first encounter).** A framework for defining
-> a pipeline as a directed graph of "nodes" (functions) connected by
-> "edges" (which node runs after which). Each node reads from and
-> writes to a shared `state` dictionary. LangGraph's job is to walk
-> the graph: run the entry node, look at the state to decide which
-> node is next, run that, repeat. Audrey's whole pipeline (classify
-> → fast_path or deep_panel → synthesize → reflect) is one LangGraph
-> graph. We'll see it built in `pipeline/graph.py`.
+If you read Lesson 1 those names should be familiar in the abstract —
+this lesson is where you see them touch each other in real code.
 
 ---
 
@@ -227,12 +201,12 @@ LangGraph merges the returned dict into the state and runs the next
 node. This is the whole pattern. Every node — even the most complex
 ones like `node_deep_panel` — is structurally just this.
 
-> **Concept: TypedDict.** `PipelineState` is defined in
-> [`pipeline/state.py`](../../src/audrey/pipeline/state.py). It's a
-> `TypedDict` — a dict where the keys are declared in advance with
-> their types. So `state["messages"]` is typed as `list[dict]` even
-> though it's really just a dict lookup. Useful for editor
-> autocomplete + type checking; doesn't change runtime behavior.
+`PipelineState` is defined in
+[`pipeline/state.py`](../../src/audrey/pipeline/state.py) as a `TypedDict`
+— see [Lesson 1 §6](lesson-01-foundations.md#6-typed-dictionaries-typeddict)
+if that's unfamiliar. The short version: it's a regular dict where the
+allowed keys and their types are declared up front, so the type checker
+can catch typos and editors can autocomplete.
 
 ### 2.4 The request flow, end to end
 
@@ -297,12 +271,12 @@ follow along in the files.
 
 That's it. Every Audrey request is some variation of those nine steps.
 
-> **Concept: SSE (Server-Sent Events).** A protocol where the server
-> keeps an HTTP connection open and pushes text-formatted "frames" to
-> the client. Each frame starts with `data: ` and ends with a blank
-> line. OpenAI's chat-completion streaming uses SSE; FastAPI's
-> `StreamingResponse` is how Audrey produces it. We'll see the actual
-> frame format in Lesson 12.
+The streaming protocol Audrey speaks is **SSE (Server-Sent Events)** —
+the server keeps the HTTP connection open and pushes text-formatted
+"frames" (each starts with `data: ` and ends with a blank line) until
+done. OpenAI's chat-completion streaming is SSE; FastAPI's
+`StreamingResponse` is how Audrey produces it. Lesson 12 walks the
+exact frame format.
 
 ### 2.5 Where the heavy lifting lives
 
@@ -395,12 +369,12 @@ Don't grade yourself; just notice the gaps.
 
 ---
 
-## When you're ready for Lesson 2
+## When you're ready for Lesson 3
 
 Reply with anything from "ready" to "I'm stuck on question N" to
 "actually back up, what does X mean?" — all are useful signals.
 
-Lesson 2 covers `main.py` + `config.py` + `compose.yaml`. We'll learn
+Lesson 3 covers `main.py` + `config.py` + `compose.yaml`. We'll learn
 how the app boots, what `app.state.*` is, how config flows from a YAML
 file into running code, and what the lifespan context manager does.
 That lesson is where we properly meet FastAPI dependency injection +

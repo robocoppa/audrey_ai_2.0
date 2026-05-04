@@ -1,8 +1,8 @@
 # Audrey AI 2.0 — Codebase Lessons
 
-A 12-lesson course that walks the entire Audrey codebase end-to-end,
-starting from "what's a request lifecycle" and ending at "I could
-extend this myself."
+A 13-lesson course that walks the entire Audrey codebase end-to-end,
+starting from "what tools is this codebase built with" and ending at
+"I could extend this myself."
 
 This is a **personal learning track** — written for the codebase
 author (Bart) to consolidate knowledge after shipping Phases 1-31.
@@ -11,7 +11,13 @@ to understand a similar multi-model orchestration pattern.
 
 ## How the course is structured
 
-Each lesson is one focused topic with four parts:
+Lesson 1 is a **foundations primer** — what async, FastAPI, Pydantic,
+LangGraph, and the other core libraries are, in the abstract. Read it
+first so the rest of the course can refer back rather than
+re-explain.
+
+From Lesson 2 onward, each lesson is one focused area of the codebase
+with four parts:
 
 1. **Context** — why this piece exists, what problem it solves, where it
    sits in the system.
@@ -24,8 +30,9 @@ Each lesson is one focused topic with four parts:
 4. **Comprehension questions** — 3-5 per lesson. Some are warm-ups; some
    surface gaps.
 
-Lessons assume Python familiarity at "I can read it but I don't know
-async or FastAPI deeply." Concepts get explained as they appear.
+Python proficiency assumed: "I can read def, classes, and control
+flow." Anything more advanced (async, type hints, decorators, context
+managers) gets introduced in Lesson 1.
 
 ## Prerequisites
 
@@ -37,31 +44,35 @@ async or FastAPI deeply." Concepts get explained as they appear.
 
 ### Part I — Foundations
 
-1. [The request lifecycle, end-to-end](lesson-01-request-lifecycle.md) —
+1. [Foundations: the tools you'll meet in this codebase](lesson-01-foundations.md) —
+   `async`/`await`, FastAPI, Pydantic, LangGraph, type hints,
+   context managers, httpx, vector search, Prometheus, pytest. The
+   shape of each, why it exists, where you'll see it in Audrey.
+2. [The request lifecycle, end-to-end](lesson-02-request-lifecycle.md) —
    one request from OWUI to the user, all the way through. Touches
    every major component without going deep on any.
-2. **Configuration + startup** *(coming next)* — `main.py`, `config.py`,
+3. **Configuration + startup** *(coming next)* — `main.py`, `config.py`,
    `compose.yaml`. How the app boots and what gets read where.
-3. **The model layer** *(coming)* — `models/`. The Ollama client, the
+4. **The model layer** *(coming)* — `models/`. The Ollama client, the
    model registry, the health tracker.
 
 ### Part II — The pipeline
 
-4. **Classify + complexity** *(coming)*
-5. **Memory recall + datetime injection** *(coming)*
-6. **Fast path + ReAct** *(coming)*
-7. **Deep panel + synthesis** *(coming)*
-8. **Reflection + retry** *(coming)*
-9. **Fair scheduling + in-flight cap** *(coming)*
+5. **Classify + complexity** *(coming)*
+6. **Memory recall + datetime injection** *(coming)*
+7. **Fast path + ReAct** *(coming)*
+8. **Deep panel + synthesis** *(coming)*
+9. **Reflection + retry** *(coming)*
+10. **Fair scheduling + in-flight cap** *(coming)*
 
 ### Part III — Knowledge base + tools
 
-10. **KB ingest + storage** *(coming)*
-11. **Tools dispatch + custom-tools server** *(coming)*
+11. **KB ingest + storage** *(coming)*
+12. **Tools dispatch + custom-tools server** *(coming)*
 
 ### Part IV — Routes, observability, ops
 
-12. **Routes + auth + metrics** *(coming)*
+13. **Routes + auth + metrics** *(coming)*
 
 ## What you'll know at the end
 
