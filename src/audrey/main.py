@@ -9,7 +9,6 @@ attached to `app.state` so routes and the ReAct loop can read them.
 from __future__ import annotations
 
 import logging
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -36,7 +35,7 @@ from audrey.routes.inflight import UserInflightRegistry
 from audrey.routes.kb import router as kb_router
 from audrey.routes.openai import router as openai_router
 from audrey.routes.upload_ui import router as upload_ui_router
-from audrey.tools.discovery import discover_all
+from audrey.tools.discovery import ToolRegistry, discover_all
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,7 +67,6 @@ async def lifespan(app: FastAPI):
     if tools_enabled and tool_servers:
         tool_registry = await discover_all(tool_servers)
     else:
-        from audrey.tools.discovery import ToolRegistry
         tool_registry = ToolRegistry()
         log.info("tools: disabled or no servers configured")
 
@@ -106,7 +104,7 @@ async def lifespan(app: FastAPI):
     )
 
     watcher: KBWatcher | None = None
-    if os.environ.get("KB_WATCHER_ENABLED", "").strip() in ("1", "true", "yes"):
+    if cfg.env.kb_watcher_enabled:
         roots = [Path(p) for p in (kb_cfg.get("dataset_paths") or [])]
         watcher = KBWatcher(
             roots=roots,

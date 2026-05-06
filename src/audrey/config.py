@@ -34,11 +34,13 @@ class EnvOverrides(BaseSettings):
     qdrant_host: str = Field(default="qdrant", alias="QDRANT_HOST")
     qdrant_port: int = Field(default=6333, alias="QDRANT_PORT")
 
-    # Tools (comma-separated URLs)
-    tool_servers: str = Field(default="http://custom-tools:8001", alias="TOOL_SERVERS")
+    # Tools (comma-separated URLs). Default None so YAML's `tools.servers`
+    # wins when the env var is unset; setting TOOL_SERVERS overrides YAML.
+    tool_servers: str | None = Field(default=None, alias="TOOL_SERVERS")
 
-    # KB
-    kb_dataset_paths: str = Field(default="/datasets/geology", alias="KB_DATASET_PATHS")
+    # KB dataset paths (comma-separated). Default None so YAML's
+    # `kb.dataset_paths` wins when KB_DATASET_PATHS is unset.
+    kb_dataset_paths: str | None = Field(default=None, alias="KB_DATASET_PATHS")
 
     # Open WebUI — `require_user` proxies the browser's bearer token here
     # to validate identity. Same-origin via cloudflared, so this is an
@@ -56,65 +58,70 @@ class EnvOverrides(BaseSettings):
     max_deep_workers_cloud: int | None = Field(default=None, alias="MAX_DEEP_WORKERS_CLOUD")
     max_inflight_per_user: int | None = Field(default=None, alias="MAX_INFLIGHT_PER_USER")
 
-    # Data dir (for any local sqlite/caches Audrey itself owns)
-    data_dir: Path = Field(default=Path("/data"), alias="AUDREY_DATA_DIR")
+    # KB watcher toggle (Pydantic Settings parses 1/true/yes as True)
+    kb_watcher_enabled: bool = Field(default=False, alias="KB_WATCHER_ENABLED")
 
 
 class Config:
     """Merged YAML + env view. Access via `get_config()`."""
 
     def __init__(self, yaml_cfg: dict[str, Any], env: EnvOverrides) -> None:
-        self._yaml = yaml_cfg
+        self._merged = yaml_cfg
         self.env = env
         self._apply_env_overrides()
 
     def _apply_env_overrides(self) -> None:
         if (v := self.env.complexity_token_threshold) is not None:
-            self._yaml.setdefault("complexity", {})["token_threshold"] = v
+            self._merged.setdefault("complexity", {})["token_threshold"] = v
         if (v := self.env.gpu_concurrency) is not None:
-            self._yaml.setdefault("gpu", {})["concurrency"] = v
+            self._merged.setdefault("gpu", {})["concurrency"] = v
         if (v := self.env.tool_max_rounds) is not None:
-            self._yaml.setdefault("tools", {})["max_rounds"] = v
+            self._merged.setdefault("tools", {})["max_rounds"] = v
         if (v := self.env.planning_min_tokens) is not None:
-            self._yaml.setdefault("agentic", {}).setdefault("planning", {})["min_prompt_tokens"] = v
+            self._merged.setdefault("agentic", {}).setdefault("planning", {})["min_prompt_tokens"] = v
         if (v := self.env.max_deep_workers_cloud) is not None:
-            self._yaml.setdefault("agentic", {})["max_deep_workers_cloud"] = v
+            self._merged.setdefault("agentic", {})["max_deep_workers_cloud"] = v
         if (v := self.env.max_inflight_per_user) is not None:
-            self._yaml.setdefault("fairness", {})["max_inflight_per_user"] = v
-        self._yaml.setdefault("tools", {})["servers"] = [
-            s.strip() for s in self.env.tool_servers.split(",") if s.strip()
-        ]
-        self._yaml.setdefault("kb", {})["dataset_paths"] = [
-            p.strip() for p in self.env.kb_dataset_paths.split(",") if p.strip()
-        ]
+            self._merged.setdefault("fairness", {})["max_inflight_per_user"] = v
+        if (v := self.env.tool_servers) is not None:
+            self._merged.setdefault("tools", {})["servers"] = [
+                s.strip() for s in v.split(",") if s.strip()
+            ]
+        if (v := self.env.kb_dataset_paths) is not None:
+            self._merged.setdefault("kb", {})["dataset_paths"] = [
+                p.strip() for p in v.split(",") if p.strip()
+            ]
 
     # Convenient typed accessors — add more as needed in later phases.
     @property
     def version(self) -> str:
-        return self._yaml.get("version", "0.0.0")
+        return self._merged.get("version", "0.0.0")
 
     @property
     def router(self) -> dict[str, Any]:
-        return self._yaml.get("router", {})
+        return self._merged.get("router", {})
 
     @property
     def model_registry(self) -> dict[str, list[dict[str, Any]]]:
-        return self._yaml.get("model_registry", {})
+        return self._merged.get("model_registry", {})
 
     @property
     def timeouts(self) -> dict[str, int]:
-        return self._yaml.get("timeouts", {})
+        return self._merged.get("timeouts", {})
 
     @property
     def tools(self) -> dict[str, Any]:
-        return self._yaml.get("tools", {})
+        return self._merged.get("tools", {})
 
     @property
     def raw(self) -> dict[str, Any]:
-        return self._yaml
+        return self._merged
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
+    # Intentional fast-fail: a missing or malformed config has no sensible
+    # default, so we let the exception bubble out of lifespan and crash the
+    # process. Asymmetric with the qdrant boot path, which degrades.
     if not path.exists():
         raise FileNotFoundError(
             f"config.yaml not found at {path}. Set AUDREY_CONFIG or run from repo root."
@@ -142,9 +149,4 @@ def reload_config() -> Config:
     return get_config()
 
 
-def get_env() -> EnvOverrides:
-    """Access the raw env object (e.g. for constructing clients before config is parsed)."""
-    return EnvOverrides()
-
-
-__all__ = ["Config", "EnvOverrides", "get_config", "get_env", "reload_config"]
+__all__ = ["Config", "EnvOverrides", "get_config", "reload_config"]

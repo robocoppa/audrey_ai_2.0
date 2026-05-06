@@ -43,8 +43,10 @@ services:
       OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
       QDRANT_HOST: ${QDRANT_HOST:-qdrant}
       QDRANT_PORT: ${QDRANT_PORT:-6333}
-      TOOL_SERVERS: ${TOOL_SERVERS:-http://custom-tools:8001}
-      KB_DATASET_PATHS: ${KB_DATASET_PATHS:-/datasets/geology}
+      # TOOL_SERVERS and KB_DATASET_PATHS deliberately omitted — the
+      # YAML (`config.yaml`'s `tools.servers` and `kb.dataset_paths`) is
+      # the source of truth. Set those env vars in `.env` only if you
+      # need to override the YAML for a specific deployment.
       # Auto-reingest dataset files when they change. The watcher
       # observes KB_DATASET_PATHS and pushes through ingest on
       # create/modify/move/delete. Off by default historically; turned
