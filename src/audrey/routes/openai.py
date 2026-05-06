@@ -247,7 +247,7 @@ async def _stream_via_pipeline(
       audrey_fast — always fast (token stream from the picked model)
       audrey_auto — adaptive: deep when prompt is complex, fast otherwise
 
-    Deep requests run through `_stream_deep_with_banners` (phase 18). Fast
+    Deep requests run through `_stream_deep_with_banners`. Fast
     requests stream a single model token-by-token; if the chosen model is
     tool-capable, the request goes through the graph for a ReAct loop and
     is emitted as one chunk on completion.

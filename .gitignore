@@ -3,6 +3,11 @@
 docs/campaign-1/HISTORY.md
 CLAUDE.md
 
+# Lesson-side working docs that should NOT ship to GitHub.
+# AUDIT.md collects code-review findings raised during lesson writing —
+# it's an internal queue, not teaching material.
+docs/lessons/AUDIT.md
+
 # Python
 __pycache__/
 *.py[cod]
