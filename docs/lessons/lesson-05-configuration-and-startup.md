@@ -275,8 +275,7 @@ the Ollama httpx client. **Order matters here.** We stop the
 background tasks first so they're not mid-flight when their backing
 clients close.
 
-#### Why a context manager and not separate `startup` / `shutdown`
-hooks?
+#### Why a context manager and not separate `startup` / `shutdown` hooks?
 
 FastAPI used to expose `@app.on_event("startup")` and
 `@app.on_event("shutdown")` decorators. They're now deprecated in

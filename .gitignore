@@ -1,9 +1,11 @@
-# Session memory — local only, pre-populated with real setup state
-# HISTORY (formerly CONTINUITY) stays laptop-local; lesson docs ship to GitHub.
+# Agent/session memory — local only, pre-populated with real setup state.
+# AGENTS.md is the tracked entrypoint; these files are local continuity,
+# compatibility, archive, or audit state.
+docs/PROJECT_STATE.md
 docs/campaign-1/HISTORY.md
 CLAUDE.md
 
-# Lesson-side working docs that should NOT ship to GitHub.
+# Lesson-side working docs that should not ship to GitHub.
 # AUDIT.md collects code-review findings raised during lesson writing —
 # it's an internal queue, not teaching material.
 # CONTINUITY.md is the lesson-plan tracker; same posture as HISTORY.md.
