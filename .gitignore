@@ -1,6 +1,7 @@
 # Agent/session memory — local only, pre-populated with real setup state.
 # AGENTS.md is the tracked entrypoint; these files are local continuity,
 # compatibility, archive, or audit state.
+.claude/
 docs/PROJECT_STATE.md
 docs/campaign-1/HISTORY.md
 CLAUDE.md
