@@ -9,12 +9,13 @@ multi-worker dispatch.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 from audrey.config import Config
 
 TaskType = Literal["code", "reasoning", "general", "vl"]
 Location = Literal["local", "cloud"]
+_VALID_LOCATIONS = {"local", "cloud"}
 
 
 @dataclass(slots=True, frozen=True)
@@ -41,7 +42,11 @@ class ModelRegistry:
                     priority=int(e.get("priority", 0)),
                     speed=int(e.get("speed", 50)),
                     quality=int(e.get("quality", 50)),
-                    location=e.get("location", "local"),
+                    location=_parse_location(
+                        e.get("location", "local"),
+                        task=task,
+                        model=e["name"],
+                    ),
                 )
                 for e in entries
             ]
@@ -60,6 +65,16 @@ class ModelRegistry:
 
     def all_task_types(self) -> list[str]:
         return list(self._by_task.keys())
+
+
+def _parse_location(raw: object, *, task: str, model: str) -> Location:
+    if isinstance(raw, str) and raw in _VALID_LOCATIONS:
+        return cast(Location, raw)
+    allowed = ", ".join(sorted(_VALID_LOCATIONS))
+    raise ValueError(
+        f"Invalid model location for {task}/{model}: {raw!r}. "
+        f"Expected one of: {allowed}"
+    )
 
 
 __all__ = ["ModelRegistry", "ModelSpec", "TaskType"]

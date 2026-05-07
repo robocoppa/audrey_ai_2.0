@@ -503,8 +503,9 @@ code that cleans them up live in one function.
 
 ## When you're ready for the next lesson
 
-The next lesson covers the model layer: `OllamaClient`, `ModelRegistry`, and
-`HealthTracker`. We will trace what happens when a pipeline node says "I need a
-general-purpose model": how the registry ranks candidates, how the health
-tracker filters failing ones, how the request becomes an HTTP call to Ollama,
-and how local and `:cloud`-suffixed model names travel through the same client.
+The next lesson covers the model layer:
+[Lesson 6 - The model layer](lesson-06-the-model-layer.md). We will trace what
+happens when a pipeline node says "I need a general-purpose model": how the
+registry ranks candidates, how the health tracker filters failing ones, how the
+request becomes an HTTP call to Ollama, and how local and `:cloud`-suffixed
+model names travel through the same client.

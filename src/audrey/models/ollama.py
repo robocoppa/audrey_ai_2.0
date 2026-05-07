@@ -23,22 +23,29 @@ log = logging.getLogger(__name__)
 
 
 class OllamaError(Exception):
-    """Raised for any non-2xx response from Ollama."""
+    """Raised for Ollama HTTP, transport, or response parsing failures."""
 
 
 class OllamaClient:
     """Thin async wrapper over the Ollama HTTP API.
 
-    Uses httpx.AsyncClient with no default timeout — per-call timeouts are
-    set via the `timeout` kwarg, driven by `config.timeouts`.
+    Uses httpx.AsyncClient with a default timeout from startup config. Per-call
+    timeouts may override that default via the `timeout_s` kwarg.
     """
 
-    def __init__(self, base_url: str, *, default_timeout_s: float = 120.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        default_timeout_s: float = 120.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
             timeout=httpx.Timeout(default_timeout_s),
             headers={"Accept": "application/json"},
+            transport=transport,
         )
 
     async def aclose(self) -> None:
@@ -53,8 +60,11 @@ class OllamaClient:
         except httpx.HTTPError as e:
             raise OllamaError(f"GET /api/tags transport error: {type(e).__name__}: {e}") from e
         self._raise_for_status(r, "/api/tags")
-        body = r.json()
-        return body.get("models", []) or []
+        body = self._json_object(r, "/api/tags")
+        models = body.get("models", []) or []
+        if not isinstance(models, list):
+            raise OllamaError(f"/api/tags: expected 'models' list, got {type(models).__name__}")
+        return models
 
     # ─── Chat ───────────────────────────────────────────────────────────
 
@@ -94,11 +104,12 @@ class OllamaClient:
             raise OllamaError(f"POST /api/chat transport error: {type(e).__name__}: {e}") from e
         try:
             self._raise_for_status(r, "/api/chat")
+            body = self._json_object(r, "/api/chat")
         except OllamaError:
             model_seconds.labels(model=model, outcome="error").observe(time.perf_counter() - t0)
             raise
         model_seconds.labels(model=model, outcome="ok").observe(time.perf_counter() - t0)
-        return r.json()
+        return body
 
     async def chat_stream(
         self,
@@ -165,12 +176,18 @@ class OllamaClient:
         except httpx.HTTPError as e:
             raise OllamaError(f"POST /api/embed transport error: {type(e).__name__}: {e}") from e
         self._raise_for_status(r, "/api/embed")
-        body = r.json()
+        body = self._json_object(r, "/api/embed")
         out = body.get("embeddings") or []
+        if not isinstance(out, list):
+            raise OllamaError(
+                f"/api/embed: expected 'embeddings' list, got {type(out).__name__}"
+            )
         if len(out) != len(texts):
             raise OllamaError(
                 f"/api/embed: expected {len(texts)} vectors, got {len(out)}"
             )
+        if not all(isinstance(vector, list) for vector in out):
+            raise OllamaError("/api/embed: expected each embedding vector to be a list")
         return out
 
     # ─── Internals ──────────────────────────────────────────────────────
@@ -179,6 +196,16 @@ class OllamaClient:
     def _raise_for_status(r: httpx.Response, op: str) -> None:
         if r.status_code >= 400:
             raise OllamaError(f"{op} -> {r.status_code}: {r.text}")
+
+    @staticmethod
+    def _json_object(r: httpx.Response, op: str) -> dict[str, Any]:
+        try:
+            body = r.json()
+        except ValueError as e:
+            raise OllamaError(f"{op}: invalid JSON response: {e}") from e
+        if not isinstance(body, dict):
+            raise OllamaError(f"{op}: expected JSON object, got {type(body).__name__}")
+        return body
 
 
 __all__ = ["OllamaClient", "OllamaError"]

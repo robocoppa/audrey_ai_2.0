@@ -143,11 +143,14 @@ Before editing, check the worktree and preserve user changes. At the time this
 guide was added, `docs/lessons/lesson-05-configuration-and-startup.md` had
 local modifications; treat unrelated dirty files as user work.
 
-After a meaningful edit, suggest a conventional-commit style message in a
-fenced block:
+Whenever you ship repo changes (code, docs, config, deployment notes, tests, or
+agent instructions), always include a suggested git commit message in the final
+response, even if Bart did not ask for one in that turn. Use a
+conventional-commit style message in a fenced block:
 
 ```text
 docs: add repository agent guide
 ```
 
 Use one short message per concern. No `Commit:` prefix and no trailing period.
+For pure Q&A or investigation with no file changes, no commit message is needed.
