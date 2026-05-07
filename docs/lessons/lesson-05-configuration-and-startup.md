@@ -1,123 +1,180 @@
 # Lesson 5 — Configuration and startup
 
-**Estimated time:** 45-60 minutes (read 25, walk through code 20)
+**Estimated time:** 50-70 minutes if you read slowly and keep the files open.
 
 **Goal:** by the end of this lesson, you can answer
-*"what happens between the Python process starting and the first
-request being served?"* — including where settings come from, in
-what order things get wired together, and what `app.state.*` is for.
+*"what happens between starting the container and Audrey serving its first
+request?"* You should understand where settings come from, why startup lives in
+FastAPI's `lifespan`, what gets stored on `app.state`, and why some boot
+failures crash Audrey while others only degrade part of the system.
 
-In Lesson 4 we traced one request through the running app. This lesson
-zooms out to the moment *before* any request: How the process boots,
-how config flows from a YAML file through env vars into Python objects,
-and how the long-lived dependencies (Ollama client, model registry, KB
-stack, tool registry, compiled pipeline graph) get attached to the app
-so every route can reach them.
+Lesson 4 traced a request through a running Audrey process. This lesson walks
+the moment before that: the container starts, config gets loaded, long-lived
+clients and registries are built, the LangGraph pipeline is compiled, and only
+then does FastAPI begin accepting traffic.
 
 
 ## 1. Context
 
-A FastAPI app is, in principle, just a Python process running uvicorn
-— uvicorn being the **ASGI server** that actually opens the TCP
-socket, accepts HTTP connections, and hands each one to FastAPI as a
-request. ("ASGI" is the asynchronous successor to WSGI: A Python
-calling-convention for web frameworks. FastAPI defines the routes;
-uvicorn does the network plumbing.) The two are separate programs by
-design — FastAPI is the application framework, uvicorn is the server
-running it, and you'd swap uvicorn for hypercorn or daphne without
-touching FastAPI code. In Audrey we launch uvicorn explicitly via the
-`CMD` line at the bottom of `docker/audrey.Dockerfile`:
+Audrey has two different kinds of code:
 
+- **Request-time code** runs every time a user sends a prompt. That was Lesson
+  4: route handler, auth, pipeline nodes, model call, streaming response.
+- **Boot-time code** runs once when the process starts. That is this lesson:
+  config loading, client construction, tool discovery, graph compilation,
+  background task startup, and cleanup on shutdown.
+
+If request-time code is "what happens when someone asks Audrey a question,"
+boot-time code is "what Audrey has to prepare before any question can be
+answered."
+
+Here is the whole startup story in one pass:
+
+```text
+docker compose starts audrey-ai
+  -> compose supplies env vars and mounts config.yaml
+  -> Docker CMD runs uvicorn
+  -> uvicorn imports audrey.main:app
+  -> FastAPI creates the app object
+  -> uvicorn starts FastAPI's lifespan
+  -> lifespan loads config
+  -> lifespan builds long-lived services
+  -> lifespan compiles the LangGraph pipeline
+  -> lifespan stores shared objects on app.state
+  -> lifespan reaches yield
+  -> Audrey is ready for requests
 ```
-CMD ["uvicorn", "audrey.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
 
-That command imports `audrey.main`, finds the `app` object, and
-starts serving it on port 8000.
-
-But Audrey isn't *just* a FastAPI app — by the time it serves its
-first request it has:
-
-- Read a YAML config file and merged env-var overrides on top.
-- Opened an httpx client to Ollama (kept open for the process lifetime).
-- Built a model registry and a per-task health tracker.
-- Built two queueing layers — a global GPU semaphore (`FairLocalGate`)
-  and a per-user in-flight cap (`UserInflightRegistry`).
-- Walked every configured tool server's `/openapi.json` and registered
-  the tools it found.
-- Compiled a LangGraph pipeline that closes over all of the above.
-- Connected to Qdrant, ensured collections exist, and reconciled an
-  on-disk SQLite index against them.
-- Started two background tasks (a filesystem watcher for the dataset
-  directories, and a periodic reconciler).
-
-All of that is **boot work** — it happens once, before the first
-request lands, and most of it gets **stashed on `app.state`** so route
-handlers can pull it back out. Once you unpack `main.py`, you will understand that it is essentially a large and complex checklist.
-
-The same goes for config: There is one source of truth (`config.yaml`),
-one override layer (env vars from `.env` and the shell), and one access
-function (`get_config()`). Every other module in Audrey ultimately gets
-its tunables from there. Knowing how that pipeline works is what lets
-you change a setting and predict where it'll show up.
+That `yield` is the hinge of the whole file. Everything before it is startup.
+Everything after it is shutdown.
 
 
 ## 2. Read-along
 
 Open these files in your editor as we go:
 
-- [`src/audrey/main.py`](../../src/audrey/main.py) — the FastAPI
-  entrypoint and lifespan.
+- [`compose.yaml`](../../compose.yaml) — how the audrey-ai container gets its
+  environment, volumes, healthcheck, and tool-server startup ordering.
+- [`docker/audrey.Dockerfile`](../../docker/audrey.Dockerfile) — the command
+  that starts uvicorn inside the container.
+- [`config.yaml`](../../config.yaml) — Audrey's checked-in runtime settings.
 - [`src/audrey/config.py`](../../src/audrey/config.py) — the YAML +
   env-var loader.
-- [`config.yaml`](../../config.yaml) — the actual settings, at the
-  repo root.
+- [`src/audrey/main.py`](../../src/audrey/main.py) — the FastAPI
+  entrypoint and lifespan.
 
-### 2.1 The config stack: yaml → env → Python
+### 2.1 From compose to Python
 
-Config has three layers, from "most static" to "most overridable":
+Start in [`compose.yaml`](../../compose.yaml). The `audrey-ai` service does
+four startup-relevant things before Audrey's Python code runs.
 
-1. **`config.yaml`** at the repo root — the source of truth for the
-   model registry, deep-panel pools, timeouts, KB knobs, fairness
-   limits, complexity threshold, etc.
-2. **`.env` file + shell environment** — overrides for things that
-   change per deployment (URLs, ports, secrets). The `.env` file is
-   gitignored; whatever launches the Python process is responsible
-   for getting these into `os.environ`.
-3. **`EnvOverrides`** in [`config.py:23`](../../src/audrey/config.py#L23)
-   — a `pydantic_settings.BaseSettings` subclass that reads those env
-   vars (with optional fallback defaults) into typed Python fields.
+**It builds the right image.** The service points at
+[`docker/audrey.Dockerfile`](../../docker/audrey.Dockerfile), which installs
+Audrey and ends with:
+
+```dockerfile
+CMD ["uvicorn", "audrey.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+That command says: "Run uvicorn, import the object named `app` from the Python
+module `audrey.main`, listen on all interfaces inside the container, and serve
+HTTP on port 8000."
+
+`uvicorn` is the ASGI server. ASGI is the async Python calling convention that
+lets a web server talk to a Python web app. FastAPI defines the application;
+uvicorn opens the socket, accepts HTTP connections, and hands each request to
+FastAPI. You can think of FastAPI as the route table and uvicorn as the process
+that puts that route table on the network.
+
+**It supplies environment variables.** The service has both `env_file: .env`
+and an explicit `environment:` block. Those values become process environment
+variables inside the container. When Python later instantiates `EnvOverrides`,
+Pydantic Settings reads from exactly that environment.
+
+**It mounts config.** Compose binds the repo's `./config.yaml` into the
+container at `/app/config.yaml` read-only. The image also contains a copy from
+build time, but the runtime bind mount is the important one during deploy.
+The Dockerfile sets `AUDREY_CONFIG=/app/config.yaml`, so `get_config()` reads
+that mounted file. When the repo is pulled on Unraid and the container is
+restarted, the current repo `config.yaml` is what Audrey sees.
+
+**It waits for custom-tools.** Audrey discovers tools once during startup by
+asking custom-tools for `/openapi.json`. Compose's healthcheck and
+`depends_on` ordering keep Audrey from starting until custom-tools is healthy.
+Without that, Audrey can boot with an empty tool registry and stay that way
+until the admin rediscover endpoint is called.
+
+Now open [`src/audrey/main.py`](../../src/audrey/main.py). When uvicorn imports
+`audrey.main:app`, Python executes the module top to bottom and creates the
+FastAPI app object near the middle of the file. Importing the module does not
+mean Audrey is ready yet. The app exists, but the expensive shared objects are
+built later by `lifespan`.
+
+### 2.2 The config stack: YAML → env → Python
+
+Config has three layers:
+
+1. **`config.yaml`** describes the application's shape: model registry,
+   routing pools, timeouts, tool settings, knowledge-base settings, fairness
+   limits, and agentic behavior.
+2. **Environment variables** describe the deployment: where Ollama is, where
+   Qdrant is, whether the KB watcher is enabled, secrets, and site-specific
+   overrides.
+3. **`Config`** is the Python object Audrey passes around after YAML and env
+   have been merged.
+
+The rule of thumb:
+
+```text
+YAML says what Audrey is.
+Env says where this copy of Audrey is running.
+```
+
+Open [`src/audrey/config.py`](../../src/audrey/config.py). The first important
+class is [`EnvOverrides`](../../src/audrey/config.py#L23), which inherits from
+`pydantic_settings.BaseSettings`.
 
 The merge happens in `Config._apply_env_overrides` at
-[`config.py:71`](../../src/audrey/config.py#L71). Read it top to bottom
+[`config.py:73`](../../src/audrey/config.py#L73). Read it top to bottom
 — it's just a list of "if env var X was set, write its value into the
 right slot of the YAML dict." The YAML dict is the merged result;
 `Config.raw` exposes it.
 
-#### A concrete walk-through
+#### A concrete value trace
 
 You set `GPU_CONCURRENCY=2` in the environment Python sees at boot.
 Here's what happens:
 
-1. **Python boots.** uvicorn imports `audrey.main:app`, which
-   triggers FastAPI's startup, which calls `lifespan()`, which on its
-   first line calls [`get_config()`](../../src/audrey/config.py#L130).
-2. **`get_config()` instantiates `EnvOverrides()`.** Pydantic
-   Settings reads the process environment, sees
-   `GPU_CONCURRENCY=2`, matches the `gpu_concurrency` field's `alias`
-   on [`config.py:53`](../../src/audrey/config.py#L53), and stores
-   `2` on the object.
-3. **`Config.__init__` calls `_apply_env_overrides`,** which on
-   [`config.py:74-75`](../../src/audrey/config.py#L74) does
-   `self._yaml.setdefault("gpu", {})["concurrency"] = 2`. The YAML
-   originally said `gpu.concurrency: 1`; now the merged dict says `2`.
-4. **`lifespan()` reads it back** at [`main.py:58`](../../src/audrey/main.py#L58):
-   `int(cfg.raw.get("gpu", {}).get("concurrency", 1))`. The result is
-   `2`, which it passes to `FairLocalGate(concurrency=2)`.
+1. `lifespan()` calls [`get_config()`](../../src/audrey/config.py#L136).
+2. `get_config()` creates `EnvOverrides()`.
+3. Pydantic Settings sees `GPU_CONCURRENCY=2`, matches it to
+   `gpu_concurrency`, and converts it to an integer.
+4. `Config.__init__` stores the YAML dict on `self._merged`, then calls
+   `_apply_env_overrides()`.
+5. `_apply_env_overrides()` runs:
 
-That's the whole pipeline. Memorize the shape: **process env →
-Pydantic Settings reads env → merge into YAML dict → lifespan reads
-merged dict.**
+   ```python
+   if (v := self.env.gpu_concurrency) is not None:
+       self._merged.setdefault("gpu", {})["concurrency"] = v
+   ```
+
+   `setdefault("gpu", {})` means "if the merged config does not already have a
+   `gpu` section, create an empty one." Then it writes `concurrency = 2` into
+   that section.
+
+6. `lifespan()` later reads `cfg.raw["gpu"]["concurrency"]` and passes the
+   value into `FairLocalGate`.
+
+So the path is:
+
+```text
+process env
+  -> EnvOverrides.gpu_concurrency
+  -> Config._merged["gpu"]["concurrency"]
+  -> FairLocalGate(concurrency=...)
+```
+
+That is the mental model for every env override in this file.
 
 #### What's a `BaseSettings`?
 
@@ -144,11 +201,12 @@ SHOUTY_CASE.
 
 Two reasons.
 
-**(1) The model registry is too big to live in env vars.** It's
-roughly thirty entries, each with a name, priority, speed score,
-quality score, and location. That kind of structured data wants to be
-YAML. Same for the deep-panel pools, the tool-capable model list,
-the dataset paths.
+**(1) The model registry is too structured to live in env vars.** A
+model registry entry has a model name, task type, priority, speed hint,
+quality hint, and local/cloud location. A deep-panel pool is a list of
+worker models plus a synthesizer and fallback. A KB config has
+collections, dataset paths, chunking knobs, watcher settings, and
+reconcile settings. YAML is good at this kind of shape.
 
 **(2) The YAML is checked into git; the env vars aren't.** A new
 deployment can `git clone` and immediately have a sensible default
@@ -156,12 +214,27 @@ config. The deployment-specific bits (URLs of Ollama / Qdrant / OWUI,
 the Brave API key) go in `.env`, which is gitignored — they're
 deployment secrets and shouldn't follow the repo around.
 
-So: YAML for shape (rarely changes), env for site-specific (often
-changes, often secret).
+This is also why `TOOL_SERVERS` and `KB_DATASET_PATHS` default to
+`None` in `EnvOverrides`. If those env vars are unset, the YAML lists
+should win. If an operator explicitly sets the env var, the env var
+wins. Silent env defaults that replace YAML lists are dangerous because
+Audrey can boot with a config that looks correct in git but is not the
+config actually running.
 
-### 2.2 `lifespan` — the boot script
+#### Why config changes require restart
 
-Open [`main.py:48`](../../src/audrey/main.py#L48):
+`get_config()` is decorated with `@lru_cache(maxsize=1)`. In plain
+English: "run this function once per process, remember the result, and
+return the same object on future calls."
+
+That is intentional. Config is a boot-time concern, not something every
+route reloads from disk. If you change `config.yaml`, restart the
+process. Restarting runs the whole boot sequence again and builds fresh
+long-lived objects from the new merged config.
+
+### 2.3 `lifespan`: the startup and shutdown owner
+
+Open [`main.py:47`](../../src/audrey/main.py#L47):
 
 ```python
 @asynccontextmanager
@@ -169,283 +242,269 @@ async def lifespan(app: FastAPI):
     cfg = get_config()
     log.info("audrey starting; version=%s", __version__)
     ...
+    try:
+        yield
+    finally:
+        ...
 ```
 
-That `@asynccontextmanager` decorator is the same one we covered in
-[Lesson 1 §2](lesson-01-foundations.md#async-context-managers). The
-function uses `yield` exactly once; everything *before* the yield
-runs on startup, everything *after* runs on shutdown.
+This is an async context manager, the same pattern from Lesson 1's context
+manager section. FastAPI runs the code before `yield` during startup. It keeps
+the function suspended at `yield` while the app serves requests. On shutdown,
+control resumes after `yield`, inside the `finally` block, so cleanup runs even
+when the process is stopping because of a signal or an exception.
 
-FastAPI calls this when uvicorn starts the app. The `lifespan=lifespan`
-keyword on [`main.py:186`](../../src/audrey/main.py#L186) is what
-hooks it in. Here's the script the function executes, top to bottom:
+The important thing is ownership. The same function that creates long-lived
+resources also closes them. That keeps lifecycle code in one place.
 
-**Lines 50-52 — load config.** `get_config()` returns the merged
-`Config` object we built in §2.1. The `log.info(...)` is the first
-sign-of-life line in the logs.
+Here is what `lifespan` builds, grouped by role rather than by exact line
+number:
 
-**Lines 54-55 — open the Ollama client.** `OllamaClient` wraps an
-httpx `AsyncClient` and is reused for the rest of the process —
-exactly the use case we called out in
-[Lesson 3 §1](lesson-03-foundations-satellites.md). One client,
-process-lifetime, closed during shutdown.
+| Boot step | What gets built | Why Audrey needs it | Where it goes |
+|---|---|---|---|
+| Load config | `Config` | One merged view of YAML + env | `app.state.cfg`; also passed into graph |
+| Open model client | `OllamaClient` | Shared async HTTP client for model calls and embeddings | `app.state.ollama`; graph closure |
+| Build model state | `ModelRegistry`, `HealthTracker` | Pick models by task and avoid failing ones | `app.state.registry`, `app.state.health`; graph closure |
+| Build fairness controls | `FairLocalGate`, `UserInflightRegistry` | Protect local GPU and cap per-user concurrency | `app.state.gate`, `app.state.inflight`; gate also in graph closure |
+| Discover tools | `ToolRegistry` | Let ReAct-capable models call custom-tools | `app.state.tools`; graph closure |
+| Compile pipeline | compiled LangGraph | The request pipeline from Lesson 4 | `app.state.graph` |
+| Connect KB | `QdrantKB`, `UploadsDB` | Global KB and per-user upload metadata | `app.state.qdrant`, `app.state.uploads_db` |
+| Build embedders | `TextEmbedder`, `ImageEmbedder` | Convert text/images into vectors | `app.state.text_embedder`, `app.state.image_embedder` |
+| Start background work | `KBWatcher`, `KBReconciler` | Re-ingest changed files and clean stale KB vectors | `app.state.kb_watcher`, `app.state.kb_reconciler` |
 
-**Lines 56-64 — build the model layer.** A `ModelRegistry` (knows
-which models exist for which task type), a `HealthTracker` (knows
-which ones are currently failing), a `FairLocalGate` (the GPU
-semaphore — capacity 1 by default), a `UserInflightRegistry` (the
-per-user request cap). All four are plain Python objects with no I/O
-in their constructors; we'll meet them in detail in later lessons.
+Two concepts in that table need a little extra care: graceful degradation and
+background tasks.
 
-**Lines 66-73 — discover tools.** `discover_all(tool_servers)` walks
-each configured tool-server URL, hits its `/openapi.json`, parses the
-tool definitions, and returns a populated `ToolRegistry`. If
-`tools.enabled` is false or no servers are configured, we build an
-empty registry and log it. We'll cover this in detail later.
+#### Graceful degradation
 
-> **The discovery step is one-shot.** If a tool server isn't ready
-> when this runs, `discover_all` returns whatever it found (possibly
-> zero tools) and never auto-retries. The registry stays in that
-> state until someone calls `POST /v1/tools/rediscover`, exposed at
-> [`main.py:231`](../../src/audrey/main.py#L231). The deploy
-> environment is responsible for not starting Audrey until its tool
-> servers are reachable; the Python side has no retry loop.
+Not every startup failure means the same thing.
 
-**Line 75 — build the LangGraph pipeline.** `build_graph(...)` is
-the function we glanced at in [Lesson 4 §2.2](lesson-04-request-lifecycle.md#22-the-pipeline-graph).
-Crucially, `cfg`, `ollama`, `registry`, `health`, `gate`, and
-`tool_registry` get passed in here, and the resulting compiled graph
-*closes over* those instances. That means the graph nodes don't read
-from `app.state` to find these things — they captured them at
-build time. Live mutations to `app.state.tools` (e.g. via
-`/v1/tools/rediscover`) work only because we keep handing back the
-*same `ToolRegistry` instance* and mutating its insides
-([`main.py:245-246`](../../src/audrey/main.py#L245)).
+If `config.yaml` is missing or malformed, Audrey cannot know which models,
+tools, timeouts, and routing rules to use. There is no honest degraded mode.
+[`_load_yaml()`](../../src/audrey/config.py#L121) lets that exception crash
+startup.
 
-**Lines 78-97 — KB stack.** `QdrantKB` opens a connection;
-`ensure_collections()` is idempotent (creates the `kb_text` /
-`kb_images` collections if they don't exist, no-op otherwise).
-`UploadsDB` is the SQLite index over per-user uploads. The
-`reconcile_with_qdrant` call cross-checks the SQLite rows against
-Qdrant's reality and prunes ghosts / backfills missing rows.
+If Qdrant is unreachable, Audrey loses some KB functionality, but it can still
+serve ordinary chat completions, route prompts, call non-KB tools, and answer
+without uploaded-file search. So the Qdrant boot calls are wrapped in
+`try/except`: log the problem, keep the rest of the service alive, and let KB
+routes fail later if they need Qdrant.
 
-Note the two `try/except`s on [`main.py:85-88`](../../src/audrey/main.py#L85)
-and [`94-97`](../../src/audrey/main.py#L94): If Qdrant is unreachable
-at boot, we log a warning and keep going. **The KB endpoints will
-return 503 later**, but the rest of Audrey (chat, tools, fast path,
-deep panel without KB tool calls) still works. That's a deliberate
-choice — Qdrant being down shouldn't kill the whole orchestrator.
+The pattern is:
 
-**Lines 99-106 — build embedders.** A text embedder (delegates to
-Ollama's `/api/embeddings` endpoint) and an image embedder (uses
-sentence-transformers locally with a CLIP model). Both are reused
-across requests.
+```text
+Fail fast when running would be a lie.
+Degrade when a useful subset of Audrey still works.
+```
 
-**Lines 108-120 — KB watcher (conditional).** If `KB_WATCHER_ENABLED`
-is set, instantiate a watcher that listens for filesystem changes
-under the configured dataset paths and re-ingests files as they
-change. `watcher.start()` spawns a background task. We'll cover the
-watcher in detail when we reach the KB-ingest lesson.
+#### Background tasks
 
-**Lines 122-131 — KB reconciler (conditional).** Periodic background
-sweep that catches drift the watcher misses. Also background-tasked.
+The KB watcher and reconciler keep doing work after startup. They are not
+ordinary "build this object and forget it" services.
 
-**Lines 133-146 — `app.state.*` assignments.** This is the punchline.
-Every long-lived dependency we built above gets stashed on
-`app.state`, which is the per-app key-value store FastAPI provides
-exactly for this purpose. Routes pull these back out via
-`request.app.state.foo`. We'll see consumers in later lessons — every
-route handler is, structurally, "look up some app.state things, do
-work with them, return."
+The watcher reacts to filesystem changes under configured dataset paths and
+queues re-ingest/delete work. The reconciler periodically checks for global KB
+vectors whose source files disappeared. Both need Qdrant and embedding clients
+to stay alive while they run.
 
-**Line 159 — readiness log.** A single multi-line `log.info` that
-prints the boot configuration in one place. When you're tailing the
-running process's logs and want to know *what config it actually
-booted with*, this is the line to grep for.
+That explains the shutdown order in `finally`: stop the background tasks first,
+then close the objects they depend on. Closing Qdrant first would leave the
+watcher or reconciler mid-flight with a dead client.
 
-**Line 160 — `yield`.** Control returns to FastAPI; uvicorn starts
-accepting requests. This line stays "paused" for the entire lifetime
-of the process.
+### 2.4 `app.state`: the app's service shelf
 
-**Lines 162-168 — shutdown.** When uvicorn receives SIGTERM, it
-cancels the lifespan task; control resumes after the `yield`, and
-we tear down in reverse order — stop the reconciler, stop the
-watcher, close the SQLite handle, close the Qdrant client, close
-the Ollama httpx client. **Order matters here.** We stop the
-background tasks first so they're not mid-flight when their backing
-clients close.
-
-#### Why a context manager and not separate `startup` / `shutdown` hooks?
-
-FastAPI used to expose `@app.on_event("startup")` and
-`@app.on_event("shutdown")` decorators. They're now deprecated in
-favour of `lifespan`. The reason is exactly the one
-[Lesson 1 §2](lesson-01-foundations.md#why-audrey-needs-context-managers)
-points at: With a context manager, a single block of code owns *both*
-sides of the resource lifecycle. The local variables you create on
-the way up are still in scope on the way down. With separate startup
-/ shutdown handlers you have to stash everything in a module-level
-global to get it from one to the other, which is exactly the kind of
-state that gets out of sync.
-
-### 2.3 `app.state` as a registry
-
-`app.state` is just a `types.SimpleNamespace`-ish object FastAPI
-attaches to the `FastAPI()` instance. You can write any attribute to
-it; you can read it back from `request.app.state` inside a route, or
-from `app.state` directly if you have the app object in scope.
-
-Audrey uses it as a service registry — the lifespan populates it once
-on boot, routes read from it during requests, and the
-`/v1/tools/rediscover` endpoint mutates one of its entries in place.
-
-A representative reader is [`main.py:241-247`](../../src/audrey/main.py#L241):
+`app.state` is FastAPI's per-application storage object. You can attach
+attributes to it during startup:
 
 ```python
-async def rediscover_tools(...) -> dict[str, list[str] | int]:
-    cfg = app.state.cfg
-    reg = app.state.tools
-    tool_servers = list(cfg.tools.get("servers", []) or [])
-    fresh = await discover_all(tool_servers)
-    reg.by_name.clear()
-    reg.by_name.update(fresh.by_name)
+app.state.cfg = cfg
+app.state.graph = graph
+app.state.tools = tool_registry
 ```
 
-Look at this carefully. The handler doesn't replace
-`app.state.tools` with `fresh`; it mutates the *existing* registry's
-internal dict in place. That's because the compiled LangGraph
-captured a reference to that exact `ToolRegistry` object back in
-`build_graph` — replacing `app.state.tools` would leave the graph
-holding the old empty one. Mutating in place keeps the closure
-pointed at the right thing.
+Then route handlers can retrieve those same objects from `request.app.state`.
 
-That's a deliberate design choice. It's the kind of subtle thing
-you only notice once you've seen the bug it prevents.
+Why not just create clients inside each route? Because these are long-lived
+resources. Reopening an Ollama HTTP client, rebuilding the model registry, or
+rediscovering tools on every request would be slower, noisier, and harder to
+reason about. Startup builds them once; routes reuse them.
+
+Why not create them as module-level globals? Because most of them need runtime
+config, async startup, or cleanup. Module-level code runs during import, before
+FastAPI's lifespan starts. The lifespan is the right place because it has an
+event loop, can `await`, and owns shutdown.
+
+So the pattern is:
+
+```text
+lifespan builds services once
+  -> stores shared services on app.state
+  -> routes read app.state during requests
+```
+
+### 2.5 Graph closures: why rediscover mutates in place
+
+One subtle part of `main.py` is easy to miss if you are new to Python
+closures.
+
+During startup, Audrey does this:
+
+```python
+graph = build_graph(cfg, ollama, registry, health, gate, tool_registry)
+app.state.tools = tool_registry
+app.state.graph = graph
+```
+
+`build_graph(...)` defines node functions that use the objects passed into it.
+Those node functions keep references to those objects. That is a **closure**:
+an inner function remembers values from the environment where it was created.
+
+A tiny example:
+
+```python
+def make_reader(registry):
+    def read_names():
+        return registry.names()
+    return read_names
+```
+
+`read_names()` can still use `registry` even after `make_reader()` has
+returned, because it captured that object.
+
+Audrey's graph does the same thing with `tool_registry`. The snippet below is
+the **correct pattern Audrey uses** in
+[`rediscover_tools`](../../src/audrey/main.py#L229). It refreshes the existing
+registry object in place:
+
+```python
+fresh = await discover_all(tool_servers)
+reg.by_name.clear()
+reg.by_name.update(fresh.by_name)
+```
+
+The thing **not** to do is this:
+
+```python
+app.state.tools = fresh
+```
+
+That would make the FastAPI app point at the new registry, but the
+already-compiled graph would still hold the old registry in its closure.
+Mutating `reg.by_name` keeps the object identity the same while changing its
+contents, so the graph sees the refreshed tools on the next request.
+
+This is one of those details that feels small until it breaks tool use. Once
+you know the closure exists, the in-place mutation is not  just clever; it is the
+correct shape.
+
+### 2.6 The readiness log
+
+Near the end of startup, `lifespan` logs a single "ready" line with the
+important boot facts: Ollama URL, task types, GPU concurrency, per-user
+in-flight limit, discovered tools, Qdrant location, watcher state, reconciler
+state, and whether the pipeline compiled.
+
+When you are operating Audrey and asking "what did this process actually boot
+with?", that readiness line is the first thing to find. It is the runtime truth
+after YAML, env vars, discovery, and startup conditionals have all done their
+work.
 
 ## 3. Comprehension Q&A
 
 Try answering each yourself before reading the answer.
 
-**1. You change `gpu.concurrency` in `config.yaml` from `1` to `3`.
-What do you have to do for the running app to pick up the change?**
+**1. You change `gpu.concurrency` in `config.yaml`. What has to happen before
+the running app uses the new value?**
 
-You have to restart the process. `get_config()` is
-`@lru_cache(maxsize=1)` on
-[`config.py:129`](../../src/audrey/config.py#L129) — config is read
-once per process. The `FairLocalGate` is constructed once during
-`lifespan()` and stashed on `app.state.gate`; nothing re-reads
-`gpu.concurrency` after that. So the change in YAML lives on disk
-but has no effect until uvicorn is restarted, at which point
-lifespan runs again and builds a fresh gate from the new value.
+Restart Audrey. Config is loaded once per process by `get_config()`, and the
+`FairLocalGate` is built once during `lifespan`. Changing YAML on disk does not
+modify the already-created gate. Restarting the container runs the boot path
+again: YAML is loaded, env overrides are merged, and a new gate is built from
+the new value.
 
-If you wanted live reload, you'd have to plumb in a
-`reload_config()` call somewhere and rebuild the gate from the new
-value — and you'd also need to migrate any in-flight requests off
-the old gate. Audrey deliberately doesn't do this; restart is
-simpler and fast enough.
+Live reload would be possible, but it would not be just "read the file again."
+You would need to decide what happens to in-flight requests waiting on the old
+gate, rebuild affected services, and make sure route handlers and graph nodes
+all see the same new objects. Audrey deliberately keeps config reload simple:
+change config, restart process.
 
-**2. Two engineers debate setting `OLLAMA_HOST`. One says "set it in
-`config.yaml`," the other says "set it in `.env`." Who's right and
-why?**
+**2. Why does `OLLAMA_HOST` belong in `.env` or compose environment instead of
+`config.yaml`?**
 
-`.env` is right. `config.yaml` doesn't have an `ollama_host` key at
-all — Ollama's URL is purely an `EnvOverrides` field
-([`config.py:31`](../../src/audrey/config.py#L31)) with no YAML
-counterpart. The reason: It's a deployment-specific URL. Whoever runs
-Audrey on a different network needs a different value, and we don't
-want everyone editing the YAML (which is checked into git) to pin
-their personal host. Same for `QDRANT_HOST`, `OWUI_URL`,
-`BRAVE_API_KEY`, etc. — anything that varies per deployment goes in
-`.env`, anything that describes the *application*'s shape (model
-registry, deep-panel pools, KB topics, fairness limits) goes in
-`config.yaml`.
+Because it describes where this deployment is running, not Audrey's application
+shape. On the Unraid network, Ollama may be reachable as `http://ollama:11434`.
+In a laptop dev run, it may be somewhere else. That should not require editing
+the checked-in application config.
 
-The shape we settled on, restated: YAML for what Audrey *is*, env
-for *where* it's running.
+By contrast, model pools, routing thresholds, timeouts, KB settings, and
+tool-capable model lists describe Audrey itself. Those belong in YAML.
 
-**3. The lifespan does `await qdrant.ensure_collections()` but
-catches the exception. Why is this `try/except` justified, when most
-of the boot is fail-fast?**
+The short version: YAML for Audrey's design, env for deployment location and
+secrets.
 
-Qdrant outage is recoverable in a way config-file corruption isn't.
-If `config.yaml` is malformed, there's no sensible default and Audrey
-can't function as an orchestrator at all — fast-fail is the right
-behaviour and the operator gets a Python traceback in the process
-logs. But if Qdrant is temporarily unreachable, Audrey still does
-useful work — chat completions, tool calls, fast path, deep panel
-without the KB tool — and the user benefit of "service stays up" beats
-the cost of "KB endpoints return 503 for a few minutes."
+**3. What would happen if custom-tools were not healthy when Audrey discovers
+tools?**
 
-The same logic applies to the `reconcile_with_qdrant` call directly
-below ([`main.py:94-97`](../../src/audrey/main.py#L94)): The
-SQLite index is still readable without reconciliation; it might just
-be slightly stale until next boot.
+Tool discovery runs once during startup. Audrey asks each configured tool
+server for `/openapi.json` and builds a `ToolRegistry` from whatever it finds.
+If custom-tools is unreachable at that moment, the registry can be empty.
 
-The pattern is: Catch when degraded operation is meaningful; let it
-bubble when degraded operation is a lie.
+Audrey does not automatically retry discovery in the background. The live fix
+is to call the admin `/v1/tools/rediscover` route after custom-tools is
+healthy. The deployment fix is what compose already does: make `audrey-ai`
+wait for `custom-tools` to pass its healthcheck before Audrey starts.
 
-**4. What's `app.state` actually for, and why does the request
-handler in `_stream_via_pipeline` reach for `request.app.state.graph`
-instead of importing the graph at module load?**
+**4. Why does Audrey crash on a bad config file but keep booting when Qdrant is
+temporarily unavailable?**
 
-`app.state` is FastAPI's per-app key-value bag — the canonical place
-to stash long-lived dependencies that the lifespan builds and routes
-read. The two reasons routes pull from `request.app.state` rather
-than module-level imports:
+A bad config file means Audrey does not know its own model registry, routing
+rules, timeouts, tools config, or KB config. Serving requests from that state
+would be pretending the app is valid when it is not, so startup should fail.
 
-**(1) The objects can't exist at import time.** The `OllamaClient`,
-the `QdrantKB`, the compiled LangGraph all need a running event loop
-or live network connections to instantiate. Module-level code runs at
-import, before the loop starts. They have to be built inside the
-async lifespan and stashed somewhere routes can find them later.
+Qdrant being down is different. Audrey can still authenticate users, route
+requests, call models, and answer prompts that do not need KB search. The KB
+parts degrade, but the whole orchestrator is not useless. That is why Qdrant
+startup checks are caught and logged instead of crashing the process.
 
-**(2) It keeps the dependencies in one place.** Everything the app
-needs at runtime is on `app.state`; reading `main.py` once tells you
-exactly what services exist. If routes individually `import` their
-own clients, you get the same proliferation of half-shared half-not
-state that
-[Lesson 1's resource-leak example](lesson-01-foundations.md#why-audrey-needs-context-managers)
-calls out.
+**5. What is `app.state` for?**
 
-In Lesson 4's request walk, every node-level dependency — Ollama
-client, model registry, fair gate, tool registry — was passed into
-`build_graph(...)` at boot and *captured by closure* in the node
-functions. The route handlers themselves only need `app.state.graph`
-(the compiled pipeline) and `app.state.cfg` (for tunables); the rest
-is reachable through the graph's closure.
+`app.state` is FastAPI's app-level storage for objects that should live for the
+whole process and be reused by routes. Audrey uses it for config, model client,
+model registry, health tracker, fairness controls, tools, compiled graph,
+Qdrant, upload DB, embedders, watcher, and reconciler.
 
-**5. The `ChatCompletionRequest` Pydantic model and the
-`EnvOverrides` Pydantic-Settings model are both Pydantic. Why are
-they separate base classes?**
+The key idea is lifetime. These objects are too expensive or too stateful to
+rebuild on every request, and most need cleanup on shutdown. `lifespan` owns
+their lifecycle; `app.state` makes them reachable during requests.
 
-They solve different shapes of the same problem.
+**6. Why does `/v1/tools/rediscover` mutate `reg.by_name` instead of assigning
+`app.state.tools = fresh`?**
 
-`BaseModel` (what `ChatCompletionRequest` extends) is for
-*request-time* data — JSON bodies that arrive over HTTP, get parsed
-once per request, validated, and discarded after the handler
-returns. The values are different for every request; Pydantic's job
-is "validate this incoming payload."
+Because the compiled graph captured the original `ToolRegistry` object when
+`build_graph(...)` ran. Replacing `app.state.tools` would only change the
+attribute on the FastAPI app; the graph would still have the old object.
 
-`BaseSettings` (what `EnvOverrides` extends) is for *boot-time*
-data — environment variables that get read once at process start, get
-turned into typed Python attributes, and stay constant for the
-process's lifetime. The values are the same for every request;
-Pydantic Settings' job is "validate the environment Audrey was
-launched in."
+Mutating `reg.by_name` changes the contents of the same object. Both
+`app.state.tools` and the graph closure still point at that object, so the next
+request sees the refreshed tools.
 
-They share the same validation engine — type coercion, default
-handling, error messages — but `BaseSettings` adds the
-"read from environment + optional dotenv file + alias support"
-machinery on top. Same family, different role.
+**7. What does the `yield` inside `lifespan` mean?**
+
+It marks the boundary between startup and shutdown.
+
+Everything before `yield` runs before Audrey accepts requests. FastAPI waits
+for that code to finish. When execution reaches `yield`, the app is considered
+started and uvicorn can serve traffic. When the server shuts down, execution
+resumes after `yield`, where Audrey stops background tasks and closes clients.
+
+That is why lifespan is a good fit: the code that creates resources and the
+code that cleans them up live in one function.
 
 
 ## When you're ready for the next lesson
 
-The next lesson covers `models/` — `OllamaClient`, `ModelRegistry`,
-and `HealthTracker`. We'll trace what happens when a node says "I
-want a `general` model": How the registry ranks candidates, how the
-health tracker filters out failing ones, how a request gets shaped
-into an HTTP call, and what happens when the call fails (retries,
-circuit breaker, escalation). It's also where we look at the
-distinction between `:cloud`-suffixed model names and local ones,
-and why the same `OllamaClient` handles both.
+The next lesson covers the model layer: `OllamaClient`, `ModelRegistry`, and
+`HealthTracker`. We will trace what happens when a pipeline node says "I need a
+general-purpose model": how the registry ranks candidates, how the health
+tracker filters failing ones, how the request becomes an HTTP call to Ollama,
+and how local and `:cloud`-suffixed model names travel through the same client.
