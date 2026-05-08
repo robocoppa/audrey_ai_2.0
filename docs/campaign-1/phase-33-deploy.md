@@ -95,12 +95,19 @@ Expected: one readiness line with task types including `code`,
 
 ### 2.2 Confirm a fast request still works
 
-Use any OpenAI-compatible client or curl with a valid OWUI bearer token:
+Use any OpenAI-compatible client or curl with a valid OWUI bearer token.
+If running from the Unraid host, `localhost:8000` is correct. If
+running from your laptop, replace it with `http://<unraid-ip>:8000`.
 
 ```bash
 USER_TOKEN="<valid OWUI bearer token>"
+AUDREY_URL="http://localhost:8000"
 
-curl -s http://localhost:8000/v1/chat/completions \
+curl -sS -o /tmp/audrey-health.json -w "HTTP %{http_code}\n" "$AUDREY_URL/health"
+cat /tmp/audrey-health.json
+
+curl -sS -o /tmp/audrey-fast.json -w "HTTP %{http_code}\n" \
+  "$AUDREY_URL/v1/chat/completions" \
   -H "Authorization: Bearer $USER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -109,16 +116,22 @@ curl -s http://localhost:8000/v1/chat/completions \
     "messages": [
       {"role": "user", "content": "Briefly explain what BTRFS is."}
     ]
-  }' | jq '.model, .choices[0].message.content'
+  }'
+
+cat /tmp/audrey-fast.json | jq .
+cat /tmp/audrey-fast.json | jq '.model, .choices[0].message.content'
 ```
 
-Expected: a normal non-streaming chat response. In logs, the fast path
-should dispatch one concrete model for task `general`.
+Expected: `HTTP 200` and a normal non-streaming chat response. In logs,
+the fast path should dispatch one concrete model for task `general`.
+If the HTTP code is not 200, inspect the full JSON body printed by
+`jq .` before looking at the filtered `.model` / `.choices` fields.
 
 ### 2.3 Confirm a deep request still works
 
 ```bash
-curl -s http://localhost:8000/v1/chat/completions \
+curl -sS -o /tmp/audrey-deep.json -w "HTTP %{http_code}\n" \
+  "$AUDREY_URL/v1/chat/completions" \
   -H "Authorization: Bearer $USER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -127,12 +140,16 @@ curl -s http://localhost:8000/v1/chat/completions \
     "messages": [
       {"role": "user", "content": "Compare BTRFS snapshots and ZFS snapshots in a short table."}
     ]
-  }' | jq '.model, .choices[0].message.content'
+  }'
+
+cat /tmp/audrey-deep.json | jq .
+cat /tmp/audrey-deep.json | jq '.model, .choices[0].message.content'
 ```
 
-Expected: deep-panel logs showing workers and a synthesizer. A single
-worker failure should not kill the whole response; it should become
-draft error data and synthesis should proceed if another draft exists.
+Expected: `HTTP 200`, plus deep-panel logs showing workers and a
+synthesizer. A single worker failure should not kill the whole response;
+it should become draft error data and synthesis should proceed if
+another draft exists.
 
 ### 2.4 Optional negative config check
 

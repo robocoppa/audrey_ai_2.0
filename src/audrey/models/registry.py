@@ -38,17 +38,17 @@ class ModelRegistry:
         for task, entries in cfg.model_registry.items():
             specs = [
                 ModelSpec(
-                    name=e["name"],
-                    priority=int(e.get("priority", 0)),
-                    speed=int(e.get("speed", 50)),
-                    quality=int(e.get("quality", 50)),
+                    name=entry["name"],
+                    priority=int(entry.get("priority", 0)),
+                    speed=int(entry.get("speed", 50)),
+                    quality=int(entry.get("quality", 50)),
                     location=_parse_location(
-                        e.get("location", "local"),
+                        entry.get("location", "local"),
                         task=task,
-                        model=e["name"],
+                        model=entry["name"],
                     ),
                 )
-                for e in entries
+                for entry in entries
             ]
             specs.sort(key=lambda s: s.priority, reverse=True)
             self._by_task[task] = specs
