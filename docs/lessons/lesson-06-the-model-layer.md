@@ -960,8 +960,9 @@ and elapsed-time calculations.
 
 ## When you're ready for the next lesson
 
-The next lesson can move one step earlier in the request path: classification
-and routing. We have now seen what happens once Audrey knows the task type. The
-next useful question is how Audrey decides whether a prompt is `code`,
-`reasoning`, `general`, or `vl`, and how that classification combines with
-`audrey_auto`, `audrey_fast`, and the deep virtual models.
+The next lesson moves one step earlier in the request path:
+[Lesson 7 - Classification and routing](lesson-07-classification-and-routing.md).
+We have now seen what happens once Audrey knows the task type. The next useful
+question is how Audrey decides whether a prompt is `code`, `reasoning`,
+`general`, or `vl`, and how that classification combines with `audrey_auto`,
+`audrey_fast`, and the deep virtual models.

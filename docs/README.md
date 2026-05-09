@@ -8,6 +8,8 @@
   (Phases 1 → 31). Each `phase-N-deploy.md` ends with smoke-test commands
   that verified the phase when it shipped. `campaign-1/HISTORY.md` (gitignored,
   laptop-only) is the authoritative running state of the build campaign.
+- [`campaign-2/`](campaign-2/) — next build campaign. Phase 1 starts with a
+  searchable per-user chat archive integrated with Audrey's memory/tool path.
 - [`unraid-ollama.md`](unraid-ollama.md) — canonical Ollama container config
   (referenced by Phase 1).
 - [`owui-prompt-suggestions.json`](owui-prompt-suggestions.json) — OWUI
@@ -17,6 +19,16 @@
 
 The phase docs in `campaign-1/` are historical — written when the feature
 shipped. Use the groupings below for navigation.
+
+### Campaign 2
+
+- [phase-1-chat-archive-memory.md](campaign-2/phase-1-chat-archive-memory.md)
+  — plan for a per-user searchable chat archive that is stored automatically,
+  searched deliberately by tool call, and kept out of automatic prompt context
+  by default.
+- [phase-2-task-role-prompts.md](campaign-2/phase-2-task-role-prompts.md)
+  — plan to centralize Audrey's prompt defaults and add compact task-role
+  prompts after the chat archive phase.
 
 ### Foundation (Phases 1–10)
 
@@ -88,4 +100,3 @@ shipped. Use the groupings below for navigation.
 
 - [phase-29-deploy.md](campaign-1/phase-29-deploy.md) — starter test suite (110 tests
   hermetic + offline)
-
