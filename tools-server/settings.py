@@ -40,6 +40,24 @@ class Settings(BaseSettings):
     ollama_url: str = Field(default="http://ollama:11434", alias="OLLAMA_URL")
     ollama_embed_timeout_s: float = Field(default=10.0, alias="OLLAMA_EMBED_TIMEOUT_S")
 
+    # Chat archive (per-user searchable conversation history).
+    # SQLite is the source of truth; Qdrant indexes Q+A-pair chunks for
+    # semantic search. Reuses the same embedder as durable memory so a
+    # missing Ollama only breaks one subsystem at a time.
+    chat_archive_collection: str = Field(default="kb_chat_archive", alias="CHAT_ARCHIVE_COLLECTION")
+    chat_archive_chunk_max_chars: int = Field(default=1500, alias="CHAT_ARCHIVE_CHUNK_MAX_CHARS")
+    chat_archive_chunk_overlap_chars: int = Field(default=100, alias="CHAT_ARCHIVE_CHUNK_OVERLAP_CHARS")
+    chat_archive_search_threshold: float = Field(default=0.4, alias="CHAT_ARCHIVE_SEARCH_THRESHOLD")
+    # 0 means "keep forever" / "no cap". Wired in from day one so a later
+    # retention policy doesn't need a schema migration.
+    chat_archive_retention_days: int = Field(default=0, alias="CHAT_ARCHIVE_RETENTION_DAYS")
+    chat_archive_max_bytes: int = Field(default=0, alias="CHAT_ARCHIVE_MAX_BYTES")
+
+    @property
+    def chat_archive_db_path(self) -> Path:
+        """SQLite source-of-truth for the chat archive."""
+        return self.data_dir / "chat_archive.db"
+
     @property
     def memory_db_path(self) -> Path:
         """Legacy SQLite path. Used only for one-shot migration on startup.

@@ -95,6 +95,61 @@ async def auth_status(_: AuthedUser = Depends(require_admin)) -> AuthStatusRespo
     return AuthStatusResponse(cached_entries=cache_size())
 
 
+@router.post("/chat_archive/prune")
+async def chat_archive_prune(
+    request: Request,
+    me: AuthedUser = Depends(require_admin),
+) -> dict:
+    """Apply the chat archive's retention policy on demand.
+
+    Honors `CHAT_ARCHIVE_RETENTION_DAYS` (0 means "keep forever" and
+    returns zero counts). Deletes both SQLite rows and Qdrant points for
+    chunks older than the cutoff. The periodic loop is not yet wired —
+    until then, this is the only way to enforce retention.
+    """
+    archive_client = getattr(request.app.state, "archive_client", None)
+    registry = request.app.state.tools
+    if archive_client is None:
+        return {"error": "archive_client_unavailable"}
+    host = archive_client.host_url(registry)
+    if host is None:
+        return {"error": "chat_history_search_not_registered"}
+    import httpx as _httpx
+    async with _httpx.AsyncClient(timeout=30.0) as http:
+        r = await http.post(f"{host}/chat_history/prune")
+    log.warning("admin: chat_archive prune triggered by %s; result=%s",
+                me.email, r.text[:200])
+    if r.status_code >= 400:
+        return {"error": "prune_failed", "status": r.status_code, "body": r.text[:500]}
+    return r.json()
+
+
+@router.get("/chat_archive/stats")
+async def chat_archive_stats(
+    request: Request,
+    _: AuthedUser = Depends(require_admin),
+) -> dict:
+    """Row counts from the chat archive.
+
+    Returns `messages`, `chunks`, and `chunks_unindexed` (chunks present
+    in SQLite but not yet in Qdrant — non-zero indicates embed/upsert
+    failures during write that need reconcile).
+    """
+    archive_client = getattr(request.app.state, "archive_client", None)
+    registry = request.app.state.tools
+    if archive_client is None:
+        return {"error": "archive_client_unavailable"}
+    host = archive_client.host_url(registry)
+    if host is None:
+        return {"error": "chat_history_search_not_registered"}
+    import httpx as _httpx
+    async with _httpx.AsyncClient(timeout=10.0) as http:
+        r = await http.get(f"{host}/chat_history/stats")
+    if r.status_code >= 400:
+        return {"error": "stats_failed", "status": r.status_code}
+    return r.json()
+
+
 @router.post("/kb/reconcile")
 async def kb_reconcile(
     request: Request,

@@ -12,6 +12,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 from fastapi import Depends, FastAPI
 from fastapi.responses import Response
 
@@ -27,6 +28,7 @@ from audrey.metrics import render as render_metrics
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
+from audrey.pipeline.chat_archive import ChatArchiveClient
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.graph import build_graph
 from audrey.routes.admin import router as admin_router
@@ -143,6 +145,16 @@ async def lifespan(app: FastAPI):
     app.state.kb_watcher = watcher
     app.state.kb_reconciler = reconciler
 
+    # Shared httpx client + chat-archive writer. The client is reused
+    # across requests to avoid the per-call connection setup cost; the
+    # archive writer is a thin wrapper that resolves the host server
+    # from the tool registry on each call so a tools-server reload
+    # doesn't strand the writer on a stale URL.
+    archive_http = httpx.AsyncClient(timeout=10.0)
+    archive_client = ChatArchiveClient(archive_http)
+    app.state.archive_http = archive_http
+    app.state.archive_client = archive_client
+
     log.info(
         "ready: ollama=%s; task types=%s; gpu_concurrency=%d; "
         "max_inflight_per_user=%d; tools=%d (%s); "
@@ -164,6 +176,7 @@ async def lifespan(app: FastAPI):
         uploads_db.close()
         qdrant.close()
         await ollama.aclose()
+        await archive_http.aclose()
 
 
 app = FastAPI(

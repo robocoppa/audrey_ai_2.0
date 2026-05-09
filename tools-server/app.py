@@ -1,20 +1,26 @@
 """custom-tools FastAPI server.
 
-Six endpoints, OpenAPI auto-discovered by the Audrey orchestrator:
-  POST /web_search         — Brave Search API
-  POST /kb_search          — text query proxied to Audrey /v1/kb/query
-  POST /kb_image_search    — image query proxied to Audrey /v1/kb/query/image
-  POST /memory_store       — save (key, value, user:<id>-tagged) to Qdrant
-  POST /memory_recall      — fetch by exact key
-  POST /memory_search      — semantic search over a user's memories
+Endpoints, OpenAPI auto-discovered by the Audrey orchestrator:
+  POST /web_search             — Brave Search API
+  POST /kb_search              — text query proxied to Audrey /v1/kb/query
+  POST /kb_image_search        — image query proxied to Audrey /v1/kb/query/image
+  POST /memory_store           — save (key, value, user:<id>-tagged) to Qdrant
+  POST /memory_recall          — fetch by exact key
+  POST /memory_search          — semantic search over a user's memories
+  POST /chat_history_search    — semantic search over a user's prior conversations
 
-Memory is Qdrant-backed: each entry is a point in the `kb_memory`
-collection, embedded with nomic-embed-text. On first startup, a legacy
-`memory.db` SQLite file (from an earlier backend) is migrated
-automatically and renamed to `memory.db.migrated`.
+Internal-only (hidden from /openapi.json so the model can't call them):
+  POST /chat_history/archive   — write a turn to the chat archive
+  POST /chat_history/prune     — apply retention policy
+  GET  /chat_history/stats     — row counts for admin/debug
 
-Each endpoint has a clear operation_id so the orchestrator's OpenAPI →
-Ollama-tool converter produces sensible tool names.
+Memory and chat archive are both Qdrant-backed and embedded with
+nomic-embed-text. On first startup, a legacy `memory.db` SQLite file
+(from an earlier backend) is migrated automatically and renamed to
+`memory.db.migrated`.
+
+Each tool endpoint has a clear operation_id so the orchestrator's
+OpenAPI → Ollama-tool converter produces sensible tool names.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
 from brave import BraveClient, BraveRateLimitError, SearchResult
+from chat_archive import ChatArchiveStore
 from db import MemoryEntry, MemoryStore
 from settings import settings
 
@@ -58,17 +65,33 @@ async def lifespan(app: FastAPI):
         base_url=settings.audrey_url,
         timeout=settings.audrey_kb_timeout_seconds,
     )
+    chat_archive = ChatArchiveStore(
+        sqlite_path=settings.chat_archive_db_path,
+        qdrant_url=settings.qdrant_url,
+        ollama_url=settings.ollama_url,
+        collection=settings.chat_archive_collection,
+        embed_model=settings.memory_embed_model,
+        embed_dim=settings.memory_embed_dim,
+        embed_timeout_s=settings.ollama_embed_timeout_s,
+        chunk_max_chars=settings.chat_archive_chunk_max_chars,
+        chunk_overlap_chars=settings.chat_archive_chunk_overlap_chars,
+        search_threshold=settings.chat_archive_search_threshold,
+        retention_days=settings.chat_archive_retention_days,
+        max_bytes=settings.chat_archive_max_bytes,
+    )
+    await chat_archive.init()
 
     app.state.brave = brave
     app.state.memory = memory
     app.state.audrey = audrey
+    app.state.chat_archive = chat_archive
     log.info(
-        "custom-tools ready. brave=%s audrey=%s qdrant=%s collection=%s threshold=%.2f",
+        "custom-tools ready. brave=%s audrey=%s qdrant=%s memory=%s archive=%s",
         "configured" if settings.brave_api_key else "UNSET",
         settings.audrey_url,
         settings.qdrant_url,
         settings.memory_collection,
-        settings.memory_similarity_threshold,
+        settings.chat_archive_collection,
     )
     try:
         yield
@@ -76,6 +99,7 @@ async def lifespan(app: FastAPI):
         await brave.aclose()
         await audrey.aclose()
         await memory.aclose()
+        await chat_archive.aclose()
 
 
 app = FastAPI(
@@ -370,3 +394,105 @@ async def memory_search(req: MemorySearchRequest) -> MemorySearchResponse:
         query=req.query,
         results=[MemoryEntryResponse.from_entry(h) for h in hits],
     )
+
+
+# ─── Chat archive ─────────────────────────────────────────────────────
+
+class ChatHistorySearchRequest(BaseModel):
+    user: Annotated[str, Field(min_length=1, max_length=200, description="User id to scope the search to. Required — chat history is per-user.")]
+    query: Annotated[str, Field(min_length=1, max_length=1000, description="Natural-language search over the user's previous conversations.")]
+    limit: Annotated[int, Field(ge=1, le=10)] = 5
+    date_from: str | None = Field(default=None, description="ISO timestamp — only return hits at or after this time.")
+    date_to: str | None = Field(default=None, description="ISO timestamp — only return hits at or before this time.")
+
+
+class ChatHistorySearchHit(BaseModel):
+    conversation_id: str
+    chunk_id: str
+    created_at: str
+    snippet: str
+    score: float
+
+
+class ChatHistorySearchResponse(BaseModel):
+    query: str
+    results: list[ChatHistorySearchHit]
+
+
+@app.post(
+    "/chat_history_search",
+    operation_id="chat_history_search",
+    response_model=ChatHistorySearchResponse,
+    tags=["tools"],
+    summary="Search this user's prior conversations with you",
+    description=(
+        "Search this user's prior conversations with you. Use only when the "
+        "user references something previously discussed, or when answering "
+        "requires a specific prior decision. Do not call to personalize "
+        "ordinary answers or to repeat back recent context. Returns short "
+        "snippets and conversation ids; never returns another user's data."
+    ),
+)
+async def chat_history_search(req: ChatHistorySearchRequest) -> ChatHistorySearchResponse:
+    archive: ChatArchiveStore = app.state.chat_archive
+    hits = await archive.search(
+        user=req.user, query=req.query, limit=req.limit,
+        date_from=req.date_from, date_to=req.date_to,
+    )
+    return ChatHistorySearchResponse(
+        query=req.query,
+        results=[
+            ChatHistorySearchHit(
+                conversation_id=h.conversation_id,
+                chunk_id=h.chunk_id,
+                created_at=h.created_at,
+                snippet=h.snippet,
+                score=h.score,
+            )
+            for h in hits
+        ],
+    )
+
+
+# ─── Chat archive: internal write/admin (not in /openapi.json) ────────
+# `include_in_schema=False` keeps these out of OpenAPI tool discovery.
+# The model never sees them, only Audrey's archive client and ops.
+
+class ArchiveTurnRequest(BaseModel):
+    user: Annotated[str, Field(min_length=1, max_length=200)]
+    conversation_id: Annotated[str, Field(min_length=1, max_length=200)]
+    user_content: str
+    assistant_content: str
+    partial: bool = False
+    virtual_model: str = ""
+    concrete_model: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+
+@app.post("/chat_history/archive", include_in_schema=False, tags=["internal"])
+async def chat_history_archive(req: ArchiveTurnRequest) -> dict[str, Any]:
+    archive: ChatArchiveStore = app.state.chat_archive
+    return await archive.archive_turn(
+        user=req.user,
+        conversation_id=req.conversation_id,
+        user_content=req.user_content,
+        assistant_content=req.assistant_content,
+        partial=req.partial,
+        virtual_model=req.virtual_model,
+        concrete_model=req.concrete_model,
+        prompt_tokens=req.prompt_tokens,
+        completion_tokens=req.completion_tokens,
+    )
+
+
+@app.post("/chat_history/prune", include_in_schema=False, tags=["internal"])
+async def chat_history_prune() -> dict[str, int]:
+    archive: ChatArchiveStore = app.state.chat_archive
+    return await archive.prune()
+
+
+@app.get("/chat_history/stats", include_in_schema=False, tags=["internal"])
+async def chat_history_stats() -> dict[str, int]:
+    archive: ChatArchiveStore = app.state.chat_archive
+    return await archive.stats()

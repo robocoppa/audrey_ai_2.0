@@ -48,6 +48,7 @@ _USER_SCOPED_TOOLS: frozenset[str] = frozenset({
     "memory_recall",
     "memory_search",
     "memory_store",
+    "chat_history_search",
 })
 
 

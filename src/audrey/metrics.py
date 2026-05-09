@@ -154,6 +154,24 @@ tool_call_seconds = Histogram(
     buckets=_TOOL_BUCKETS,
 )
 
+# ─── Chat archive ────────────────────────────────────────────────────
+# Best-effort archive writes must not be silent failures. Outcome
+# enumerates the cases the operator actually cares about: ok, partial
+# (stream cut short but persisted), fail (HTTP/transport failure),
+# skipped (no user / archive disabled).
+
+chat_archive_writes_total = Counter(
+    "audrey_chat_archive_writes_total",
+    "Chat archive write attempts from Audrey to custom-tools.",
+    labelnames=("result",),  # result ∈ {ok, partial, fail, skipped}
+)
+
+chat_archive_write_seconds = Histogram(
+    "audrey_chat_archive_write_seconds",
+    "Latency of the archive-write call from Audrey's side.",
+    buckets=_TOOL_BUCKETS,
+)
+
 
 def render() -> tuple[bytes, str]:
     """Serialize the default registry. Returns (body, content_type)."""
@@ -173,4 +191,6 @@ __all__ = [
     "user_inflight_blocked_seconds",
     "tool_calls_total",
     "tool_call_seconds",
+    "chat_archive_writes_total",
+    "chat_archive_write_seconds",
 ]

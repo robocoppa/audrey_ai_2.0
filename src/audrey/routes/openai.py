@@ -45,6 +45,14 @@ from audrey.pipeline.banners import (
     worker_fail,
     worker_ok,
 )
+from audrey.pipeline.chat_archive import (
+    ChatArchiveClient,
+    StreamCollector,
+    resolve_conversation_id,
+)
+from audrey.pipeline.chat_archive import (
+    last_user_text as _archive_last_user_text,
+)
 from audrey.pipeline.classify import classify as classify_fn
 from audrey.pipeline.complexity import is_complex
 from audrey.pipeline.context import datetime_system_message
@@ -149,13 +157,36 @@ async def chat_completions(
     messages = [m.model_dump(exclude_none=True) for m in payload.messages]
     options = _options_from_request(payload)
 
+    # Resolve conversation id once, before pipeline branches. Reads OWUI
+    # `chat_id` from the raw request body when present so a continued OWUI
+    # thread stitches in the archive; falls back to a deterministic hash
+    # of the message-history prefix otherwise.
+    try:
+        raw_payload = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        raw_payload = None
+    conversation_id = resolve_conversation_id(
+        user_id=me.email, raw_payload=raw_payload, messages=messages,
+    )
+    user_turn_text = _archive_last_user_text(messages)
+
     if payload.stream:
         return StreamingResponse(
-            _stream_via_pipeline(app, payload, messages, options, user_id=me.email),
+            _stream_via_pipeline(
+                app, payload, messages, options,
+                user_id=me.email,
+                conversation_id=conversation_id,
+                user_turn_text=user_turn_text,
+            ),
             media_type="text/event-stream",
         )
 
-    return await _generate_via_pipeline(app, payload, messages, options, user_id=me.email)
+    return await _generate_via_pipeline(
+        app, payload, messages, options,
+        user_id=me.email,
+        conversation_id=conversation_id,
+        user_turn_text=user_turn_text,
+    )
 
 
 async def _run_graph_with_metrics(graph, state: dict[str, Any]) -> dict[str, Any]:
@@ -183,7 +214,8 @@ async def _run_graph_with_metrics(graph, state: dict[str, Any]) -> dict[str, Any
 
 
 async def _generate_via_pipeline(
-    app, payload: ChatCompletionRequest, messages, options, *, user_id: str
+    app, payload: ChatCompletionRequest, messages, options,
+    *, user_id: str, conversation_id: str, user_turn_text: str,
 ):
     """Non-streaming path: invoke the compiled LangGraph and format the result."""
     graph = app.state.graph
@@ -201,6 +233,24 @@ async def _generate_via_pipeline(
             final = await _run_graph_with_metrics(graph, state)
         except OllamaError as e:
             raise HTTPException(status_code=502, detail=f"Ollama error: {e}") from e
+
+    # Archive after the response is produced. Best-effort: never raises,
+    # never delays the response (we await before returning to the client
+    # but the tool-server call is bounded by ChatArchiveClient's timeout).
+    archive_client: ChatArchiveClient | None = getattr(app.state, "archive_client", None)
+    if archive_client is not None:
+        await archive_client.archive_turn(
+            registry=app.state.tools,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_content=user_turn_text,
+            assistant_content=str(final.get("content", "") or ""),
+            partial=False,
+            virtual_model=payload.model,
+            concrete_model=str(final.get("concrete_model", "?")),
+            prompt_tokens=int(final.get("prompt_eval_count", 0)),
+            completion_tokens=int(final.get("eval_count", 0)),
+        )
 
     extra = ""
     if final.get("mode") == "deep":
@@ -238,7 +288,8 @@ async def _generate_via_pipeline(
 
 
 async def _stream_via_pipeline(
-    app, payload: ChatCompletionRequest, messages, options, *, user_id: str
+    app, payload: ChatCompletionRequest, messages, options,
+    *, user_id: str, conversation_id: str, user_turn_text: str,
 ):
     """Streaming path.
 
@@ -251,6 +302,13 @@ async def _stream_via_pipeline(
     requests stream a single model token-by-token; if the chosen model is
     tool-capable, the request goes through the graph for a ReAct loop and
     is emitted as one chunk on completion.
+
+    Capture: every emitted SSE frame is passed through `StreamCollector`
+    so assistant-content deltas accumulate for the post-completion
+    archive write. `_stream_deep_with_banners` does its own narrower
+    capture (only synth deltas) so progress banners stay out of the
+    archive — its return value is ignored here and the archive write
+    happens inside that helper instead.
     """
     cfg = app.state.cfg
     ollama: OllamaClient = app.state.ollama
@@ -259,90 +317,127 @@ async def _stream_via_pipeline(
     inflight = app.state.inflight
     router_cfg = cfg.router
 
-    async with inflight.slot(user_id):
-        user_text = _last_user_text(messages)
-        task, reason, conf = await classify_fn(
-            ollama,
-            router_model=router_cfg.get("model", "qwen3:4b"),
-            router_timeout_s=float(router_cfg.get("timeout_s", 20)),
-            max_router_strikes=int(router_cfg.get("max_failures_before_fallback", 2)),
-            user_text=user_text,
-        )
-        complex_, n = is_complex(messages, threshold=int(cfg.raw.get("complexity", {}).get("token_threshold", 500)))
-        forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local")
-        forced_fast = payload.model == "audrey_fast"
-        if forced_deep:
-            use_deep = True
-        elif forced_fast:
-            use_deep = False
-        else:
-            use_deep = complex_  # audrey_auto
+    archive_client: ChatArchiveClient | None = getattr(app.state, "archive_client", None)
+    collector = StreamCollector()
+    chosen_concrete: str = "?"
+    is_deep_branch = False  # deep handles its own archive write to skip banners
 
-        log.info(
-            "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=%s",
-            payload.model, task, reason, conf, n, "deep" if use_deep else "fast",
-        )
+    try:
+        async with inflight.slot(user_id):
+            user_text = _last_user_text(messages)
+            task, reason, conf = await classify_fn(
+                ollama,
+                router_model=router_cfg.get("model", "qwen3:4b"),
+                router_timeout_s=float(router_cfg.get("timeout_s", 20)),
+                max_router_strikes=int(router_cfg.get("max_failures_before_fallback", 2)),
+                user_text=user_text,
+            )
+            complex_, n = is_complex(messages, threshold=int(cfg.raw.get("complexity", {}).get("token_threshold", 500)))
+            forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local")
+            forced_fast = payload.model == "audrey_fast"
+            if forced_deep:
+                use_deep = True
+            elif forced_fast:
+                use_deep = False
+            else:
+                use_deep = complex_  # audrey_auto
 
-        if use_deep:
-            async for frame in _stream_deep_with_banners(
-                app, payload, messages, options, task=task, conf=conf, user_id=user_id,
-            ):
-                yield frame
-            return
+            log.info(
+                "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=%s",
+                payload.model, task, reason, conf, n, "deep" if use_deep else "fast",
+            )
 
-        spec = registry.first_healthy(task, health.is_healthy)
-        if spec is None:
-            async for frame in _emit_single_message(
-                payload.model, "none", f"[no healthy model for task={task}]"
-            ):
-                yield frame
-            return
-
-        # If the chosen model is tool-capable and tools are registered, route
-        # the streaming request through the graph so the ReAct loop can fire.
-        # Mid-stream tool dispatch isn't supported — we emit one chunk after
-        # the loop completes, rather than streaming tokens during ReAct rounds.
-        tool_capable = set(cfg.raw.get("fast_path", {}).get("tool_capable_models", []) or [])
-        tools_active = bool(app.state.tools.by_name) and spec.name in tool_capable
-        if tools_active:
-            graph = app.state.graph
-            state = {
-                "virtual_model": payload.model,
-                "messages": messages,
-                "temperature": payload.temperature,
-                "top_p": payload.top_p,
-                "max_tokens": payload.max_tokens,
-                "user_id": user_id,
-            }
-            try:
-                final = await _run_graph_with_metrics(graph, state)
-            except OllamaError as e:
-                async for frame in _emit_single_message(
-                    payload.model, "error", f"[ollama error: {e}]"
+            if use_deep:
+                is_deep_branch = True
+                async for frame in _stream_deep_with_banners(
+                    app, payload, messages, options, task=task, conf=conf, user_id=user_id,
+                    conversation_id=conversation_id, user_turn_text=user_turn_text,
                 ):
                     yield frame
                 return
-            concrete = final.get("concrete_model", spec.name)
-            content = final.get("content", "") or "[empty]"
-            # Per-worker tool-usage footer. Fast path is one worker —
-            # `tool_calls_log` is its full call list. Skipped when the ReAct
-            # loop ran zero tool calls.
-            footer = tool_summary_block([
-                (concrete, list(final.get("tool_calls_log") or []))
-            ])
-            if footer:
-                content = content + footer
-            async for frame in _emit_single_message(payload.model, concrete, content):
-                yield frame
-            return
 
-        timeout = float(cfg.timeouts.get("fast_path", 180))
-        async for frame in _stream_openai(
-            ollama, payload.model, spec.name, messages, options,
-            timeout_s=timeout, health=health,
-            gate=app.state.gate, location=spec.location, user_id=user_id,
-        ):
-            yield frame
+            spec = registry.first_healthy(task, health.is_healthy)
+            if spec is None:
+                async for frame in _emit_single_message(
+                    payload.model, "none", f"[no healthy model for task={task}]"
+                ):
+                    yield frame
+                return
+            chosen_concrete = spec.name
+
+            # If the chosen model is tool-capable and tools are registered, route
+            # the streaming request through the graph so the ReAct loop can fire.
+            # Mid-stream tool dispatch isn't supported — we emit one chunk after
+            # the loop completes, rather than streaming tokens during ReAct rounds.
+            tool_capable = set(cfg.raw.get("fast_path", {}).get("tool_capable_models", []) or [])
+            tools_active = bool(app.state.tools.by_name) and spec.name in tool_capable
+            if tools_active:
+                graph = app.state.graph
+                state = {
+                    "virtual_model": payload.model,
+                    "messages": messages,
+                    "temperature": payload.temperature,
+                    "top_p": payload.top_p,
+                    "max_tokens": payload.max_tokens,
+                    "user_id": user_id,
+                }
+                try:
+                    final = await _run_graph_with_metrics(graph, state)
+                except OllamaError as e:
+                    async for frame in _emit_single_message(
+                        payload.model, "error", f"[ollama error: {e}]"
+                    ):
+                        yield frame
+                    return
+                concrete = final.get("concrete_model", spec.name)
+                chosen_concrete = concrete
+                content = final.get("content", "") or "[empty]"
+                # Per-worker tool-usage footer. Fast path is one worker —
+                # `tool_calls_log` is its full call list. Skipped when the ReAct
+                # loop ran zero tool calls.
+                footer = tool_summary_block([
+                    (concrete, list(final.get("tool_calls_log") or []))
+                ])
+                if footer:
+                    content = content + footer
+                # Tool-capable fast path emits the answer in one chunk; feed
+                # the answer text directly into the collector since the
+                # SSE-frame parser would also catch it but feeding text is
+                # cheaper and unambiguous.
+                collector.feed_text(str(final.get("content", "") or ""))
+                async for frame in _emit_single_message(payload.model, concrete, content):
+                    yield frame
+                return
+
+            timeout = float(cfg.timeouts.get("fast_path", 180))
+            async for frame in collector.wrap(_stream_openai(
+                ollama, payload.model, spec.name, messages, options,
+                timeout_s=timeout, health=health,
+                gate=app.state.gate, location=spec.location, user_id=user_id,
+            )):
+                yield frame
+    except asyncio.CancelledError:
+        # Client disconnect mid-stream. Mark partial; archive what we
+        # captured before we re-raise. The deep branch handles its own
+        # cancellation accounting inside _stream_deep_with_banners.
+        if not is_deep_branch:
+            collector.mark_partial()
+        raise
+    finally:
+        # Archive only the fast/tool-capable branches here; deep branch
+        # owns its own archive write because banner frames must not be
+        # included in the captured assistant text.
+        if not is_deep_branch and archive_client is not None:
+            await archive_client.archive_turn(
+                registry=app.state.tools,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                user_content=user_turn_text,
+                assistant_content=collector.text,
+                partial=collector.partial,
+                virtual_model=payload.model,
+                concrete_model=chosen_concrete,
+            )
 
 
 def _last_user_text(messages):
@@ -401,6 +496,8 @@ def _to_openai_response(
 async def _stream_deep_with_banners(
     app, payload: ChatCompletionRequest, messages, options,
     *, task: str, conf: float, user_id: str,
+    conversation_id: str = "",
+    user_turn_text: str = "",
 ):
     """Streaming deep path with progress banners.
 
@@ -700,6 +797,21 @@ async def _stream_deep_with_banners(
             "stream deep done model=%s task=%s synth=%s outcome=%s elapsed=%.2fs",
             payload.model, task, synth_model, pipeline_outcome, elapsed,
         )
+        # Archive whatever synth content actually streamed. `final_content`
+        # is built only from synth deltas (banner text never lands here),
+        # so progress banners stay out of the archive automatically.
+        archive_client: ChatArchiveClient | None = getattr(app.state, "archive_client", None)
+        if archive_client is not None and conversation_id:
+            await archive_client.archive_turn(
+                registry=app.state.tools,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                user_content=user_turn_text,
+                assistant_content=final_content,
+                partial=(pipeline_outcome == "cancelled"),
+                virtual_model=payload.model,
+                concrete_model=synth_model,
+            )
 
 
 async def _drain_q_until_task(
