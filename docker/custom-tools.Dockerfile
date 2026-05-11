@@ -47,12 +47,13 @@ RUN uv pip install --system \
       "qdrant-client>=1.12"
 
 # Copy application code
-COPY tools-server/app.py      /app/app.py
-COPY tools-server/brave.py    /app/brave.py
-COPY tools-server/db.py       /app/db.py
-COPY tools-server/settings.py /app/settings.py
+COPY tools-server/app.py          /app/app.py
+COPY tools-server/brave.py        /app/brave.py
+COPY tools-server/chat_archive.py /app/chat_archive.py
+COPY tools-server/db.py           /app/db.py
+COPY tools-server/settings.py     /app/settings.py
 
-# Data dir for memory.db (bind-mounted in production)
+# Data dir for memory.db and chat_archive.db (bind-mounted in production)
 RUN mkdir -p /app/data
 ENV TOOLS_DATA_DIR=/app/data
 

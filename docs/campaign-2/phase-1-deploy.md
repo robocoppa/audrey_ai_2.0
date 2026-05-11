@@ -35,6 +35,12 @@ What changed:
     overlap 100 chars, search threshold 0.4, retention 0 (forever),
     max bytes 0 (no cap). Reuses the durable-memory embed model and
     dimension so a missing Ollama only breaks one subsystem.
+- **`docker/custom-tools.Dockerfile`** -
+  - Added `COPY tools-server/chat_archive.py /app/chat_archive.py`.
+    The tools-server image uses an explicit per-file `COPY` list, not
+    a directory copy, so any new file under `tools-server/` must be
+    added here too or the import will fail at startup. Comment on
+    the `/app/data` line updated to mention `chat_archive.db`.
 - **`tools-server/chat_archive.py`** (new) -
   - `ChatArchiveStore`: SQLite source of truth + Qdrant search index.
   - Schema: `conversations`, `messages`, `archive_chunks`. Indexed by
