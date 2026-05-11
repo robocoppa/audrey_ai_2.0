@@ -31,10 +31,13 @@ What changed:
     `CHAT_ARCHIVE_CHUNK_MAX_CHARS`, `CHAT_ARCHIVE_CHUNK_OVERLAP_CHARS`,
     `CHAT_ARCHIVE_SEARCH_THRESHOLD`, `CHAT_ARCHIVE_RETENTION_DAYS`,
     `CHAT_ARCHIVE_MAX_BYTES`. All optional with safe defaults.
-  - Defaults: collection `kb_chat_archive`, max chunk 1500 chars,
+  - Defaults: collection `kb_chat_archive`, max chunk 2500 chars,
     overlap 100 chars, search threshold 0.4, retention 0 (forever),
     max bytes 0 (no cap). Reuses the durable-memory embed model and
-    dimension so a missing Ollama only breaks one subsystem.
+    dimension so a missing Ollama only breaks one subsystem. The
+    chunk cap defaults to 2500 (raised from 1500 after observing that
+    short Q+A pairs were splitting more than the search snippet
+    needed).
 - **`docker/custom-tools.Dockerfile`** -
   - Added `COPY tools-server/chat_archive.py /app/chat_archive.py`.
     The tools-server image uses an explicit per-file `COPY` list, not
@@ -78,6 +81,12 @@ What changed:
 - **`src/audrey/main.py`** -
   - Lifespan now constructs a shared httpx client and a
     `ChatArchiveClient`, exposes both on `app.state`.
+  - When initial tool discovery returns an empty registry (custom-tools
+    not healthy yet at boot), a background `_retry_tool_discovery` task
+    retries `discover_all` every 4s for up to 2 minutes. The graph
+    closes over the same `ToolRegistry` instance so the retry mutates
+    in place — no graph rebuild. Manual `/v1/tools/rediscover` remains
+    available for cases that exceed the retry window.
 - **`src/audrey/routes/openai.py`** -
   - `chat_completions` resolves the conversation id and the last user
     text once, before pipeline branches.
@@ -148,109 +157,168 @@ Expected:
 
 ## 2. Smoke tests
 
+Set these once per shell before running anything below:
+
+```bash
+AUDREY_URL="http://localhost:8000"
+USER_TOKEN="<valid OWUI bearer token for a non-admin user>"
+echo "AUDREY_URL=$AUDREY_URL  USER_TOKEN_len=${#USER_TOKEN}"
+```
+
+If `USER_TOKEN_len` is `0` the rest of the tests will all silently
+401 — fix that first before running anything.
+
 ### 2.1 Confirm Audrey discovered the new tool
 
 ```bash
-docker compose logs --since 2m audrey-ai | grep "tools="
+docker compose logs audrey-ai | grep "tools=" | tail -1
 ```
 
-Expected: a tool count one higher than before, including
-`chat_history_search` in the names list.
+Expected: the most recent readiness line shows `tools=N (...)` with
+`chat_history_search` in the names list, and `N` is one higher than
+the pre-Phase-1 count. Drop the `--since` window so the readiness line
+is included even when the container has been up for a while.
+
+**If `tools=0` at boot**, a background retry kicks in and re-runs
+discovery every 4s for up to 2 minutes. Watch for a follow-up log
+line like `tools: retry K/30 succeeded -> N tool(s): ...`. The
+readiness `tools=0` line stays as-is — only the live registry
+updates.
+
+**If retry exhausted (rare) or you want to rehydrate immediately**:
+restart Audrey, or call rediscover (requires an **admin** OWUI
+bearer):
+
+```bash
+ADMIN_TOKEN="<admin OWUI bearer token>"
+curl -sS -X POST "$AUDREY_URL/v1/tools/rediscover" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" | jq
+```
+
+Expected: `{"tools": [..., "chat_history_search", ...], "count": N}`.
+Then confirm the live registry actually has it (this route is
+unauthenticated):
+
+```bash
+curl -sS "$AUDREY_URL/v1/tools" | jq '.tools[].name'
+```
+
+The list must include `chat_history_search` before any of the
+remaining tests will produce archive writes — without it the
+archive client short-circuits with
+`audrey_chat_archive_writes_total{result="skipped"}`.
 
 ### 2.2 Confirm archive writes happen on a normal request
 
-```bash
-USER_TOKEN="<valid OWUI bearer token>"
-AUDREY_URL="http://localhost:8000"
+Precondition: 2.1 passed and `chat_history_search` is in the
+registry.
 
-# Baseline counts (custom-tools host, e.g. via mapped port):
-curl -sS http://localhost:8001/chat_history/stats | jq
+```bash
+echo "before:"; curl -sS http://localhost:8001/chat_history/stats | jq
 
 curl -sS -o /tmp/audrey-fast.json -w "HTTP %{http_code}\n" \
   "$AUDREY_URL/v1/chat/completions" \
   -H "Authorization: Bearer $USER_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "audrey_fast",
-    "stream": false,
-    "messages": [
-      {"role": "user", "content": "Briefly explain what BTRFS is."}
-    ]
-  }'
+  -d '{"model":"audrey_fast","stream":false,
+       "messages":[{"role":"user","content":"Briefly explain what BTRFS is."}]}'
 
-curl -sS http://localhost:8001/chat_history/stats | jq
+echo "after:";  curl -sS http://localhost:8001/chat_history/stats | jq
+jq '.choices[0].message.content' /tmp/audrey-fast.json | head -c 200
 ```
 
-Expected: the second `stats` call shows `messages` up by 2 (one user
-turn, one assistant turn) and `chunks` up by 1. Audrey's
+Expected: `HTTP 200`, the `after:` stats show `messages` up by 2
+(user turn + assistant turn) and `chunks` up by 1, and the assistant
+content is a real answer about BTRFS. Audrey's
 `audrey_chat_archive_writes_total{result="ok"}` Prometheus counter
 should also increment.
 
-### 2.3 Confirm dedup on a re-sent history
-
-Open WebUI re-sends the entire conversation on each turn. Repeat the
-exact same request from 2.2:
+If `HTTP` is not 200, inspect the full body:
 
 ```bash
-curl -sS -o /dev/null "$AUDREY_URL/v1/chat/completions" \
-  -H "Authorization: Bearer $USER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{ "model": "audrey_fast", "stream": false,
-        "messages": [{"role": "user", "content": "Briefly explain what BTRFS is."}] }'
-
-curl -sS http://localhost:8001/chat_history/stats | jq
+jq . /tmp/audrey-fast.json
 ```
 
-Expected: `messages` increases by at most 2 (a fresh assistant response
-generated from the same minute may share a `message_id` with the
-previous one and be ignored). `chunks` may stay flat or increase by 1.
-What must not happen: `messages` doubling on every retry.
+If stats stay at zero, re-check 2.1 — archive writes only fire when
+`chat_history_search` is registered.
+
+### 2.3 Confirm dedup on a re-sent user turn
+
+Open WebUI re-sends the entire conversation on each turn. Only the
+**user** turn dedups deterministically — its `message_id` is
+`sha256(user|conversation_id|"user"|content|minute_bucket)[:32]`, so
+identical user content within the same minute collapses on
+`INSERT OR IGNORE`. The assistant turn typically produces different
+content on each run and gets a new id.
+
+```bash
+echo "before:"; curl -sS http://localhost:8001/chat_history/stats | jq
+
+curl -sS -o /dev/null -w "HTTP %{http_code}\n" \
+  "$AUDREY_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $USER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"audrey_fast","stream":false,
+       "messages":[{"role":"user","content":"Briefly explain what BTRFS is."}]}'
+
+echo "after:";  curl -sS http://localhost:8001/chat_history/stats | jq
+```
+
+Expected: `messages` increases by exactly **1** (the new assistant
+turn) when run within the same minute as 2.2. Across minute
+boundaries the user turn also gets a fresh id and `messages`
+increases by 2. What must not happen: every retry of the same
+conversation history doubling the row count — that would mean dedup
+is off.
 
 ### 2.4 Confirm streaming capture
 
 ```bash
-curl -sS -N -o /tmp/audrey-stream.sse \
+echo "before:"; curl -sS http://localhost:8001/chat_history/stats | jq
+
+curl -sS -N -o /tmp/audrey-stream.sse -w "HTTP %{http_code}\n" \
   "$AUDREY_URL/v1/chat/completions" \
   -H "Authorization: Bearer $USER_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{ "model": "audrey_fast", "stream": true,
-        "messages": [{"role": "user", "content": "Give me three uses for ZFS."}] }'
+  -d '{"model":"audrey_fast","stream":true,
+       "messages":[{"role":"user","content":"Give me three uses for ZFS."}]}'
 
-# Audrey logs should include exactly one archive write for this turn.
-docker compose logs --since 1m audrey-ai | grep -E "chat_archive"
-
-curl -sS http://localhost:8001/chat_history/stats | jq
+echo "after:";  curl -sS http://localhost:8001/chat_history/stats | jq
+tail -c 200 /tmp/audrey-stream.sse
 ```
 
-Expected: `messages` increased by 2, `chunks` by 1. The archive write
-should not have appeared mid-stream, only after the stream completed.
+Expected: `HTTP 200`, the `after:` stats show `messages` up by 2 and
+`chunks` up by 1, and the tail of the SSE file ends with
+`data: [DONE]`. The archive write fires after the stream completes,
+not mid-stream — there's no separate log line per write today; the
+proof is the stats delta.
 
 ### 2.5 Confirm `chat_history_search` is user-scoped
 
-Run the search with one OWUI user, then the same search with a
-different OWUI user. Each user should see only their own conversation
-history.
+Run a request that hints the model to search prior chats, with one
+OWUI user, then the same request with a different OWUI user. Each
+user should see only their own conversation history.
+
+This test only works when the fast-path model is in
+`fast_path.tool_capable_models` (set in `config.yaml`); otherwise the
+model can't actually call `chat_history_search` mid-answer. Use
+`audrey_deep` if your fast model isn't tool-capable — every deep
+worker model can call tools.
 
 ```bash
-curl -sS -o /tmp/search-alice.json -w "HTTP %{http_code}\n" \
+curl -sS -o /tmp/search-userA.json -w "HTTP %{http_code}\n" \
   "$AUDREY_URL/v1/chat/completions" \
   -H "Authorization: Bearer $USER_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "audrey_fast",
-    "stream": false,
-    "messages": [
-      {"role": "user", "content": "Search my prior chats for what I asked about BTRFS."}
-    ]
-  }'
+  -d '{"model":"audrey_deep","stream":false,
+       "messages":[{"role":"user","content":"Search my prior chats for what I asked about BTRFS and quote the question back."}]}'
 
-cat /tmp/search-alice.json | jq '.choices[0].message.content'
+jq '.choices[0].message.content' /tmp/search-userA.json
 ```
 
-Expected: the answer cites prior turns from this user's archive only.
-Switching `USER_TOKEN` to a second OWUI user and running the same
-prompt should return either an empty result or only that user's
-unrelated chat history.
+Expected: the assistant cites the BTRFS turn from this user's archive
+only. Re-running with a second OWUI user's `USER_TOKEN` should return
+either an empty result or only that user's unrelated history.
 
 ### 2.6 Confirm partial-on-disconnect
 

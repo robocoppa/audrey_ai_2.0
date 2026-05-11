@@ -8,6 +8,7 @@ attached to `app.state` so routes and the ReAct loop can read them.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -71,6 +72,19 @@ async def lifespan(app: FastAPI):
     else:
         tool_registry = ToolRegistry()
         log.info("tools: disabled or no servers configured")
+
+    # If the first discovery came up empty despite servers being configured,
+    # custom-tools probably wasn't healthy yet (depends_on race, slow Qdrant
+    # init, etc.). Retry in the background so Audrey doesn't sit at tools=0
+    # for the whole session and silently skip everything that needs a tool.
+    # The graph closes over the same ToolRegistry instance, so in-place
+    # mutation is enough — no rebuild needed.
+    tools_retry_task: asyncio.Task[None] | None = None
+    if tools_enabled and tool_servers and not tool_registry.by_name:
+        tools_retry_task = asyncio.create_task(
+            _retry_tool_discovery(tool_registry, tool_servers),
+            name="audrey.tools.retry_discovery",
+        )
 
     graph = build_graph(cfg, ollama, registry, health, gate, tool_registry)
 
@@ -169,6 +183,12 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if tools_retry_task is not None and not tools_retry_task.done():
+            tools_retry_task.cancel()
+            try:
+                await tools_retry_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001, S110 — shutdown path
+                pass
         if reconciler is not None:
             await reconciler.stop()
         if watcher is not None:
@@ -177,6 +197,49 @@ async def lifespan(app: FastAPI):
         qdrant.close()
         await ollama.aclose()
         await archive_http.aclose()
+
+
+async def _retry_tool_discovery(
+    registry: ToolRegistry,
+    tool_servers: list[str],
+    *,
+    attempts: int = 30,
+    interval_s: float = 4.0,
+) -> None:
+    """Retry `discover_all` in the background when initial discovery was empty.
+
+    Custom-tools may not be healthy yet when Audrey starts (depends_on
+    races, slow Qdrant init). Without this retry the live registry sits
+    at zero tools until somebody hits `/v1/tools/rediscover`, and every
+    request that wanted a tool quietly skips.
+
+    The loop bails out the moment any tool is discovered, so it costs
+    nothing on a healthy startup. Bounded so a permanently-broken
+    custom-tools doesn't generate retries forever — after the window
+    expires, manual rediscover stays available. Default window:
+    30 × 4s = 2 minutes, which covers the worst observed cold-start.
+    """
+    for attempt in range(1, attempts + 1):
+        await asyncio.sleep(interval_s)
+        try:
+            fresh = await discover_all(tool_servers)
+        except Exception as e:  # noqa: BLE001 — discovery is best-effort here
+            log.warning("tools: retry %d/%d failed: %s", attempt, attempts, e)
+            continue
+        if not fresh.by_name:
+            log.info("tools: retry %d/%d still empty", attempt, attempts)
+            continue
+        registry.by_name.clear()
+        registry.by_name.update(fresh.by_name)
+        log.info(
+            "tools: retry %d/%d succeeded -> %d tool(s): %s",
+            attempt, attempts, len(registry.by_name), registry.names(),
+        )
+        return
+    log.warning(
+        "tools: gave up after %d retries (%.0fs); use /v1/tools/rediscover to retry manually",
+        attempts, attempts * interval_s,
+    )
 
 
 app = FastAPI(
