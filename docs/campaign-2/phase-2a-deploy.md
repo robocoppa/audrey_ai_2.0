@@ -217,13 +217,25 @@ Pick one and add it under `agentic.prompts.*` in `config.yaml`. The
 easiest visible test is `planner` because the override lands in every
 deep-panel request that exceeds the planning token threshold:
 
+Add the `prompts:` block as a sibling of the existing `react:` /
+`planning:` / `memory:` entries under `agentic:`:
+
 ```yaml
 agentic:
+  # ... existing react/planning/reflection/memory entries stay as-is ...
   prompts:
     planner: |
-      Decompose into exactly two questions. Return JSON: {"subtasks": ["a", "b"]}.
-      Output ONLY the JSON.
+      Decompose the user request into exactly two independent sub-questions.
+      Return ONLY a JSON object of shape {"subtasks": ["<question 1>", "<question 2>"]}.
+      Each sub-question must be a complete question (≤ 200 chars).
+      No prose, no markdown.
 ```
+
+The `|` is YAML's literal block scalar — the multi-line string is
+passed to the model verbatim (one trailing newline, model ignores it).
+The `<question 1>` / `<question 2>` markers read as placeholders, not
+literal subtask names, which avoids the model producing
+`{"subtasks": ["a", "b"]}` literally.
 
 Restart audrey-ai:
 
