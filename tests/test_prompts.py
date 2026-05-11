@@ -121,6 +121,107 @@ def test_chat_history_search_system_is_non_empty():
     assert "chat_history_search" in CHAT_HISTORY_SEARCH_SYSTEM
 
 
+# ─── Overrides reach the model (loader wired into call sites) ────────
+
+
+def test_planner_uses_override(monkeypatch):
+    """`agentic.prompts.planner` override flows into the messages
+    `plan()` builds. Catches the regression where the loader exists
+    but the call site still references the bare constant."""
+    import asyncio
+
+    from audrey.pipeline import planner as planner_mod
+
+    captured: dict = {}
+
+    class _FakeOllama:
+        async def chat(self, **kwargs):
+            captured["messages"] = kwargs["messages"]
+            return {"message": {"content": '{"subtasks": []}'}}
+
+    cfg = _cfg_with({"planner": "OVERRIDE_PLANNER_SYSTEM"})
+    asyncio.run(planner_mod.plan(
+        _FakeOllama(),
+        planner_model="x", user_text="hello", timeout_s=1.0, max_subtasks=3,
+        cfg=cfg,
+    ))
+    sys_msgs = [m for m in captured["messages"] if m["role"] == "system"]
+    assert sys_msgs[0]["content"] == "OVERRIDE_PLANNER_SYSTEM"
+
+
+def test_planner_falls_back_to_default_without_override():
+    import asyncio
+
+    from audrey.pipeline import planner as planner_mod
+
+    captured: dict = {}
+
+    class _FakeOllama:
+        async def chat(self, **kwargs):
+            captured["messages"] = kwargs["messages"]
+            return {"message": {"content": '{"subtasks": []}'}}
+
+    asyncio.run(planner_mod.plan(
+        _FakeOllama(),
+        planner_model="x", user_text="hello", timeout_s=1.0, max_subtasks=3,
+        cfg=None,
+    ))
+    sys_msgs = [m for m in captured["messages"] if m["role"] == "system"]
+    assert sys_msgs[0]["content"] == PLANNER_SYSTEM
+
+
+def test_router_uses_override():
+    import asyncio
+
+    from audrey.pipeline import classify as classify_mod
+
+    captured: dict = {}
+
+    class _FakeOllama:
+        async def chat(self, **kwargs):
+            captured["messages"] = kwargs["messages"]
+            return {"message": {"content": '{"task": "general", "confidence": 0.9}'}}
+
+    cfg = _cfg_with({"classifier": "OVERRIDE_CLASSIFIER"})
+    asyncio.run(classify_mod.router_classify(
+        _FakeOllama(),
+        router_model="x", user_text="hi", timeout_s=1.0, cfg=cfg,
+    ))
+    sys_msgs = [m for m in captured["messages"] if m["role"] == "system"]
+    assert sys_msgs[0]["content"] == "OVERRIDE_CLASSIFIER"
+
+
+def test_synth_uses_override():
+    from audrey.pipeline.synthesize import _build_synth_messages
+
+    cfg = _cfg_with({"synthesizer": "OVERRIDE_SYNTH"})
+    msgs = _build_synth_messages([], "drafts go here", cfg=cfg)
+    synth_sys = [m for m in msgs if m["role"] == "system"]
+    # _build_synth_messages forwards prior system msgs then appends the
+    # synth-system. With empty prior, the synth-system is index 0.
+    assert synth_sys[0]["content"] == "OVERRIDE_SYNTH"
+
+
+def test_memory_store_hint_uses_override():
+    from audrey.pipeline.memory import memory_system_message
+
+    cfg = _cfg_with({"memory_store_hint": "OVERRIDE_HINT for {user_id}"})
+    msg = memory_system_message(
+        hits=[], user_id="alice@example.com", include_store_hint=True, cfg=cfg,
+    )
+    assert msg is not None
+    assert "OVERRIDE_HINT for alice@example.com" in msg["content"]
+
+
+def test_react_final_answer_uses_override():
+    """The override loader is called at the same call site that appends
+    the final-answer user turn — we test the loader directly here since
+    invoking the full ReAct loop requires a heavy mock."""
+    cfg = _cfg_with({"react_final_answer": "WRAP UP NOW"})
+    out = prompt_from_config(cfg, "react_final_answer", REACT_FINAL_ANSWER_USER)
+    assert out == "WRAP UP NOW"
+
+
 # ─── Call-site aliases match the module constants ─────────────────────
 
 

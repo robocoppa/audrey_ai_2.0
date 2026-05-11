@@ -44,7 +44,7 @@ import httpx
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.pipeline.fair_gate import FairLocalGate
-from audrey.pipeline.prompts import REACT_FINAL_ANSWER_USER
+from audrey.pipeline.prompts import REACT_FINAL_ANSWER_USER, prompt_from_config
 from audrey.tools.discovery import ToolRegistry
 from audrey.tools.dispatch import ToolResult, dispatch_one, to_tool_message
 
@@ -114,6 +114,7 @@ async def run_react(
     user_id: str | None = None,
     gate: FairLocalGate | None = None,
     location: str = "local",
+    cfg: Any = None,
 ) -> ReactResult:
     """Drive the model through up to `max_rounds` of tool use, then return the answer.
 
@@ -196,8 +197,10 @@ async def run_react(
         # Final-answer instruction lives in pipeline/prompts.py; this is
         # the load-bearing flip from tool-using mode to prose mode. Kept
         # as a user turn rather than a system message because it's a
-        # mode-change signal, not background context.
-        convo.append({"role": "user", "content": REACT_FINAL_ANSWER_USER})
+        # mode-change signal, not background context. `agentic.prompts.
+        # react_final_answer` overrides the default when supplied.
+        final_answer_text = prompt_from_config(cfg, "react_final_answer", REACT_FINAL_ANSWER_USER)
+        convo.append({"role": "user", "content": final_answer_text})
         try:
             async with _gate_ctx(gate, model, location, user_id):
                 final = await ollama.chat(

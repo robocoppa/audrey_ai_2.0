@@ -156,7 +156,7 @@ def build_graph(
         )
         include_store_hint = tools is not None and MEMORY_STORE_TOOL in tools.by_name
         sys_msg = memory_system_message(
-            hits, user_id=user_id, include_store_hint=include_store_hint,
+            hits, user_id=user_id, include_store_hint=include_store_hint, cfg=cfg,
         )
         # Chat-history-search guidance lands only when the live registry
         # has the tool — telling a model how to use a tool it can't
@@ -192,6 +192,7 @@ def build_graph(
             max_router_strikes=int(router_cfg.get("max_failures_before_fallback", 2)),
             user_text=user_text,
             tool_names=tool_names,
+            cfg=cfg,
         )
         log.info("classify: %s (%s, conf=%.2f)", task, reason, conf)
         return {"task_type": task, "classify_reason": reason, "classify_confidence": conf}
@@ -231,6 +232,7 @@ def build_graph(
             react_max_tool_chars=react_max_tool_chars,
             react_dispatch_timeout_s=react_dispatch_timeout,
             user_id=(state.get("user_id") or None),
+            cfg=cfg,
         )
         msg = resp.get("message", {}) or {}
         react_meta = resp.get("_react") or {}
@@ -253,6 +255,7 @@ def build_graph(
             user_text=user_text,
             timeout_s=router_timeout,
             max_subtasks=planning_max_subtasks,
+            cfg=cfg,
         )
         if subs:
             log.info("planner: %d subtasks: %s", len(subs), [s[:60] for s in subs])

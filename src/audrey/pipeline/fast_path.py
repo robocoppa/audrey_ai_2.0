@@ -57,6 +57,7 @@ async def run_fast_path(
     react_max_tool_chars: int = 2000,
     react_dispatch_timeout_s: float = 30.0,
     user_id: str | None = None,
+    cfg: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     """Return (concrete_model, response_like_dict).
 
@@ -104,6 +105,7 @@ async def run_fast_path(
         user_id=user_id,
         gate=gate,
         location=spec.location,
+        cfg=cfg,
     )
     return spec.name, {
         "message": {"role": "assistant", "content": react.content},

@@ -118,6 +118,7 @@ async def _run_one_worker(
     react_max_tool_chars: int,
     react_dispatch_timeout_s: float,
     user_id: str | None = None,
+    cfg: Any = None,
 ) -> WorkerDraft:
     """Execute one worker. Always returns a WorkerDraft — never raises.
 
@@ -148,6 +149,7 @@ async def _run_one_worker(
                     user_id=user_id,
                     gate=None,
                     location=location,
+                    cfg=cfg,
                 )
                 elapsed = round(time.monotonic() - start, 2)
                 # run_react already records success/failure per chat call.
@@ -289,6 +291,7 @@ async def run_panel(
             react_max_tool_chars=react_max_tool_chars,
             react_dispatch_timeout_s=react_dispatch_timeout_s,
             user_id=user_id,
+            cfg=cfg,
         )
         for i, (name, loc) in enumerate(workers)
     ]
@@ -383,6 +386,7 @@ async def run_panel_streaming(
             react_max_tool_chars=react_max_tool_chars,
             react_dispatch_timeout_s=react_dispatch_timeout_s,
             user_id=user_id,
+            cfg=cfg,
         )
         for i, (name, loc) in enumerate(workers)
     ]

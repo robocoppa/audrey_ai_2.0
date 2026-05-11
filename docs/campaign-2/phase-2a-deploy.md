@@ -51,21 +51,33 @@ What changed:
     treated as "disabled" so a wiped override never emits a hollow
     system message.
 - **`src/audrey/pipeline/classify.py`** -
-  - Local `_ROUTER_SYSTEM` is now an alias for
-    `prompts.CLASSIFIER_SYSTEM`. Call site unchanged.
+  - Local `_ROUTER_SYSTEM` is an alias for
+    `prompts.CLASSIFIER_SYSTEM`. `router_classify` and `classify`
+    take an optional `cfg` kwarg; when supplied,
+    `agentic.prompts.classifier` overrides the system prompt.
 - **`src/audrey/pipeline/planner.py`** -
-  - Local `_PLANNER_SYSTEM` is now an alias for
-    `prompts.PLANNER_SYSTEM`. Call site unchanged.
+  - Local `_PLANNER_SYSTEM` is an alias for `prompts.PLANNER_SYSTEM`.
+    `plan` takes an optional `cfg` kwarg; `agentic.prompts.planner`
+    overrides the system prompt.
 - **`src/audrey/pipeline/synthesize.py`** -
-  - Local `_SYNTH_SYSTEM` is now an alias for `prompts.SYNTH_SYSTEM`.
-    Call site unchanged.
+  - Local `_SYNTH_SYSTEM` is an alias for `prompts.SYNTH_SYSTEM`.
+    `_build_synth_messages` accepts `cfg=`; both call sites
+    (`_try_synth` and `synthesize_stream`) pass it through.
+    `agentic.prompts.synthesizer` overrides the synth system prompt.
 - **`src/audrey/pipeline/react.py`** -
   - The "tool-budget reached, write the final answer now" user turn
-    now reads from `prompts.REACT_FINAL_ANSWER_USER`.
+    now reads from `prompts.REACT_FINAL_ANSWER_USER`. `run_react`
+    takes an optional `cfg` kwarg; `agentic.prompts.react_final_answer`
+    overrides the final-answer text.
 - **`src/audrey/pipeline/memory.py`** -
-  - Local `_MEMORY_STORE_HINT` is now an alias for
-    `prompts.MEMORY_STORE_HINT`. `{user_id}` substitution still
-    happens at call time.
+  - Local `_MEMORY_STORE_HINT` is an alias for
+    `prompts.MEMORY_STORE_HINT`. `memory_system_message` takes an
+    optional `cfg` kwarg; `agentic.prompts.memory_store_hint`
+    overrides the hint template (the `{user_id}` placeholder is still
+    substituted at call time).
+- **`src/audrey/pipeline/fast_path.py`** / **`deep_panel.py`** -
+  - Both forward `cfg=` into `run_react` so the final-answer override
+    works on the fast and deep paths uniformly.
 - **`src/audrey/pipeline/graph.py`** -
   - `node_memory_recall` now goes through `compose_system_messages`,
     which merges the memory hint with `CHAT_HISTORY_SEARCH_SYSTEM`
@@ -189,20 +201,62 @@ Expected: `HTTP 200` on both; the table layout and tone match what
 you saw pre-2a. Pre-2a answers are not preserved, so this is
 eyeball-only.
 
-### 2.4 (Optional) Try an override
+### 2.4 Try an override
 
-In `config.yaml`:
+The override loader is wired into every call site that uses a
+centralized prompt. Supported keys today:
+
+- `classifier`
+- `planner`
+- `synthesizer`
+- `react_final_answer`
+- `memory_store_hint`
+- `chat_history_search`
+
+Pick one and add it under `agentic.prompts.*` in `config.yaml`. The
+easiest visible test is `planner` because the override lands in every
+deep-panel request that exceeds the planning token threshold:
 
 ```yaml
 agentic:
   prompts:
-    react_final_answer: "Wrap up now in three sentences. No more tool calls."
+    planner: |
+      Decompose into exactly two questions. Return JSON: {"subtasks": ["a", "b"]}.
+      Output ONLY the JSON.
 ```
 
-Restart audrey-ai. The override applies the next time the ReAct loop
-hits its tool budget. Empty string or `null` reverts to the default
-without a code change. An override longer than 4000 chars logs a
-one-line warning at startup; it still applies.
+Restart audrey-ai:
+
+```bash
+docker compose up -d --build audrey-ai
+```
+
+Then issue a deep request whose prompt is long enough to trigger
+planning (the default token threshold is 40):
+
+```bash
+curl -sS -o /tmp/override.json -w "HTTP %{http_code}\n" \
+  "$AUDREY_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $USER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"audrey_deep","stream":false,
+       "messages":[{"role":"user","content":"Compare BTRFS and ZFS in terms of snapshots, send/receive, and compression — be specific about modern Linux distros."}]}'
+
+docker compose logs --since 1m audrey-ai | grep "planner:"
+```
+
+Expected: the planner log line shows exactly two subtasks (the
+override forced 2). Removing the override (or setting it to `null` /
+`""`) reverts to the default 2-or-3-subtasks behavior without a code
+change.
+
+Override rules:
+
+- Empty string or `null` → default applies.
+- Non-string value → default applies, with a startup warning.
+- Override longer than 4000 chars → still applies, with a one-time
+  per-key warning so a runaway persona is visible.
+- An unknown override key (typo) → ignored, with a one-line warning.
 
 ### 2.5 Local verification
 

@@ -17,9 +17,10 @@ from __future__ import annotations
 import json
 import logging
 import re
+from typing import Any
 
 from audrey.models.ollama import OllamaClient, OllamaError
-from audrey.pipeline.prompts import PLANNER_SYSTEM
+from audrey.pipeline.prompts import PLANNER_SYSTEM, prompt_from_config
 
 log = logging.getLogger(__name__)
 
@@ -35,14 +36,19 @@ async def plan(
     user_text: str,
     timeout_s: float,
     max_subtasks: int,
+    cfg: Any = None,
 ) -> list[str]:
     """Return a list of sub-questions, or `[]` to skip planning.
 
     Never raises — all failures degrade to `[]` so the deep panel can run the
     original prompt unchanged.
+
+    `cfg` is optional. When supplied, `agentic.prompts.planner` overrides
+    the default system prompt; missing/empty falls back to the default.
     """
+    system_prompt = prompt_from_config(cfg, "planner", _PLANNER_SYSTEM)
     messages = [
-        {"role": "system", "content": _PLANNER_SYSTEM},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_text[:4000]},
     ]
     try:

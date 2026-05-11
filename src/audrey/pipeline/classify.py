@@ -19,9 +19,10 @@ import json
 import logging
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from audrey.models.ollama import OllamaClient, OllamaError
-from audrey.pipeline.prompts import CLASSIFIER_SYSTEM
+from audrey.pipeline.prompts import CLASSIFIER_SYSTEM, prompt_from_config
 from audrey.pipeline.state import TaskType
 
 log = logging.getLogger(__name__)
@@ -127,10 +128,16 @@ async def router_classify(
     router_model: str,
     user_text: str,
     timeout_s: float,
+    cfg: Any = None,
 ) -> tuple[TaskType | None, float, str]:
-    """Ask the router model. Returns (task | None, confidence, raw_body_or_error)."""
+    """Ask the router model. Returns (task | None, confidence, raw_body_or_error).
+
+    `cfg` is optional. When supplied, `agentic.prompts.classifier` overrides
+    the default system prompt; missing/empty falls back to `_ROUTER_SYSTEM`.
+    """
+    system_prompt = prompt_from_config(cfg, "classifier", _ROUTER_SYSTEM)
     messages = [
-        {"role": "system", "content": _ROUTER_SYSTEM},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_text[:2000]},  # hard cap; routing is cheap
     ]
     try:
@@ -182,6 +189,7 @@ async def classify(
     max_router_strikes: int,
     user_text: str,
     tool_names: set[str] | None = None,
+    cfg: Any = None,
 ) -> tuple[TaskType, str, float]:
     """Classify with keyword short-circuit + router fallback.
 
@@ -205,7 +213,8 @@ async def classify(
     last_err = ""
     while strikes < max_router_strikes:
         task, conf, info = await router_classify(
-            ollama, router_model=router_model, user_text=user_text, timeout_s=router_timeout_s
+            ollama, router_model=router_model, user_text=user_text,
+            timeout_s=router_timeout_s, cfg=cfg,
         )
         if task is not None:
             return task, f"router:{task}", conf

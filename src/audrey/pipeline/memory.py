@@ -23,7 +23,7 @@ from typing import Any
 
 import httpx
 
-from audrey.pipeline.prompts import MEMORY_STORE_HINT
+from audrey.pipeline.prompts import MEMORY_STORE_HINT, prompt_from_config
 from audrey.tools.discovery import ToolRegistry
 from audrey.tools.dispatch import dispatch_one
 
@@ -117,16 +117,20 @@ def memory_system_message(
     *,
     user_id: str = "",
     include_store_hint: bool = False,
+    cfg: Any = None,
 ) -> dict[str, Any] | None:
     """Wrap hits (and optionally the memory_store usage hint) into a system message.
 
     Returns None when there is nothing to inject — no hits and no store hint.
+    When `cfg` is supplied, `agentic.prompts.memory_store_hint` overrides
+    the default hint template; missing/empty falls back to the default.
     """
     parts: list[str] = []
     if hits:
         parts.append(_format_memory_hint(hits))
     if include_store_hint and user_id:
-        parts.append(_MEMORY_STORE_HINT.replace("{user_id}", user_id))
+        hint_template = prompt_from_config(cfg, "memory_store_hint", _MEMORY_STORE_HINT)
+        parts.append(hint_template.replace("{user_id}", user_id))
     if not parts:
         return None
     return {"role": "system", "content": "\n\n".join(parts)}

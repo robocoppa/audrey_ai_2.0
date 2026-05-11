@@ -29,7 +29,7 @@ from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.deep_panel import _location_of
 from audrey.pipeline.fair_gate import FairLocalGate
-from audrey.pipeline.prompts import SYNTH_SYSTEM
+from audrey.pipeline.prompts import SYNTH_SYSTEM, prompt_from_config
 from audrey.pipeline.state import TaskType, WorkerDraft
 
 log = logging.getLogger(__name__)
@@ -93,6 +93,8 @@ def pick_synthesizer(cfg: Config, *, pool_key: str, task: TaskType) -> tuple[str
 def _build_synth_messages(
     prior_messages: list[dict[str, Any]],
     drafts_block: str,
+    *,
+    cfg: Config | None = None,
 ) -> list[dict[str, Any]]:
     """Forward original system messages, then append synth-system + user.
 
@@ -106,11 +108,15 @@ def _build_synth_messages(
     Only `role=system` messages are forwarded. The user/assistant turns
     from the original conversation are already represented in
     `drafts_block` so we don't replay them.
+
+    When `cfg` is supplied, `agentic.prompts.synthesizer` overrides the
+    default synth system prompt; missing/empty falls back to the default.
     """
+    synth_system = prompt_from_config(cfg, "synthesizer", _SYNTH_SYSTEM)
     system_msgs = [m for m in prior_messages if m.get("role") == "system"]
     return [
         *system_msgs,
-        {"role": "system", "content": _SYNTH_SYSTEM},
+        {"role": "system", "content": synth_system},
         {"role": "user", "content": (
             f"Original user request and {drafts_block.count('--- draft ')} drafts follow."
             f" Produce the final answer now.\n\n{drafts_block}"
@@ -130,9 +136,10 @@ async def _try_synth(
     prior_messages: list[dict[str, Any]],
     timeout_s: float,
     user_id: str | None = None,
+    cfg: Config | None = None,
 ) -> tuple[str, int, int]:
     """Run one synthesizer attempt. Returns (content, prompt_tokens, completion_tokens)."""
-    messages = _build_synth_messages(prior_messages, drafts_block)
+    messages = _build_synth_messages(prior_messages, drafts_block, cfg=cfg)
     async with gate.acquire(model, location=location, user_id=user_id):
         resp = await ollama.chat(
             model=model,
@@ -201,6 +208,7 @@ async def synthesize(
                 prior_messages=messages,
                 timeout_s=timeout_s,
                 user_id=user_id,
+                cfg=cfg,
             )
             log.info("synth: %s ok in %.2fs (attempt %d)", model, time.monotonic() - start, attempt)
             if content.strip():
@@ -293,7 +301,7 @@ async def synthesize_stream(
     primary, fallback = pick_synthesizer(cfg, pool_key=pool_key, task=task)
     user_text = _last_user_text(messages)
     drafts_block = _format_drafts_for_synth(user_text, drafts, subtasks)
-    synth_messages = _build_synth_messages(messages, drafts_block)
+    synth_messages = _build_synth_messages(messages, drafts_block, cfg=cfg)
 
     candidates = [primary] if primary == fallback else [primary, fallback]
 

@@ -332,6 +332,7 @@ async def _stream_via_pipeline(
                 router_timeout_s=float(router_cfg.get("timeout_s", 20)),
                 max_router_strikes=int(router_cfg.get("max_failures_before_fallback", 2)),
                 user_text=user_text,
+                cfg=cfg,
             )
             complex_, n = is_complex(messages, threshold=int(cfg.raw.get("complexity", {}).get("token_threshold", 500)))
             forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local")
@@ -592,6 +593,7 @@ async def _stream_deep_with_banners(
                 planning_max_subtasks=planning_max_subtasks,
                 prompt_tokens=prompt_tokens,
                 router_cfg=router_cfg,
+                cfg=cfg,
             ))
             async for frame in _drain_q_until_task(banner_q, think_task, _delta_frame):
                 yield frame
@@ -858,7 +860,7 @@ async def _phase_thinking(
     *, ollama, tools, user_id: str, messages,
     memory_enabled, memory_top_k, memory_timeout_s,
     planning_enabled, planning_min_tokens, planning_max_subtasks,
-    prompt_tokens, router_cfg,
+    prompt_tokens, router_cfg, cfg=None,
 ):
     """Run datetime injection + memory recall + planner. Returns (messages_with_context, subtasks)."""
     # Datetime first so it sits at the top of the system-message stack.
@@ -871,7 +873,7 @@ async def _phase_thinking(
         )
         include_store_hint = tools is not None and MEMORY_STORE_TOOL in tools.by_name
         sys_msg = memory_system_message(
-            hits, user_id=user_id, include_store_hint=include_store_hint,
+            hits, user_id=user_id, include_store_hint=include_store_hint, cfg=cfg,
         )
         chat_history_available = tools is not None and "chat_history_search" in tools.by_name
         composed = compose_system_messages(
@@ -890,6 +892,7 @@ async def _phase_thinking(
             user_text=user_text,
             timeout_s=float(router_cfg.get("timeout_s", 20)),
             max_subtasks=planning_max_subtasks,
+            cfg=cfg,
         )
     return msgs, subtasks
 
