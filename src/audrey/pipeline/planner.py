@@ -19,21 +19,13 @@ import logging
 import re
 
 from audrey.models.ollama import OllamaClient, OllamaError
+from audrey.pipeline.prompts import PLANNER_SYSTEM
 
 log = logging.getLogger(__name__)
 
 
-_PLANNER_SYSTEM = (
-    "You decompose a user request into 2 or 3 focused sub-questions that, if "
-    "answered separately, would together cover the original request. Output a "
-    "JSON object with exactly this shape:\n"
-    '  {"subtasks": ["...", "...", "..."]}\n'
-    "Rules:\n"
-    "- 2 to 3 entries, each a complete question or instruction (≤ 200 chars).\n"
-    "- Sub-questions must be independent — no 'first do X then Y' chaining.\n"
-    "- If the request is already atomic (one clear ask), return {\"subtasks\": []}.\n"
-    "Output ONLY the JSON. No prose, no markdown."
-)
+# Prompt centralized in pipeline/prompts.py.
+_PLANNER_SYSTEM = PLANNER_SYSTEM
 
 
 async def plan(

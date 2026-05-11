@@ -64,6 +64,7 @@ from audrey.pipeline.memory import (
     recall_for_request,
 )
 from audrey.pipeline.planner import plan as planner_plan
+from audrey.pipeline.prompts import compose_system_messages
 from audrey.pipeline.synthesize import synthesize_stream
 
 log = logging.getLogger(__name__)
@@ -872,8 +873,13 @@ async def _phase_thinking(
         sys_msg = memory_system_message(
             hits, user_id=user_id, include_store_hint=include_store_hint,
         )
-        if sys_msg is not None:
-            msgs = [msgs[0], sys_msg, *messages]
+        chat_history_available = tools is not None and "chat_history_search" in tools.by_name
+        composed = compose_system_messages(
+            memory_hint=sys_msg,
+            chat_history_guidance=chat_history_available,
+        )
+        if composed:
+            msgs = [msgs[0], *composed, *messages]
 
     subtasks: list[str] = []
     if planning_enabled and prompt_tokens >= planning_min_tokens:

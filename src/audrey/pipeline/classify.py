@@ -21,6 +21,7 @@ import re
 from dataclasses import dataclass
 
 from audrey.models.ollama import OllamaClient, OllamaError
+from audrey.pipeline.prompts import CLASSIFIER_SYSTEM
 from audrey.pipeline.state import TaskType
 
 log = logging.getLogger(__name__)
@@ -112,17 +113,10 @@ def keyword_classify(text: str, *, tool_names: set[str] | None = None) -> Keywor
 
 # ─── Router model ─────────────────────────────────────────────────────
 
-_ROUTER_SYSTEM = (
-    "You are a task classifier. Read the user's message and output a JSON object "
-    "with exactly these keys:\n"
-    '  {"task": "code|reasoning|general|vl", "confidence": 0.0-1.0}\n'
-    "Rules:\n"
-    "- 'code' = user wants code written, debugged, refactored, explained line-by-line.\n"
-    "- 'reasoning' = analysis, comparison, review, multi-step logic, math proofs, explanations.\n"
-    "- 'vl' = anything referencing an image, photo, screenshot, or visual identification.\n"
-    "- 'general' = chitchat, facts, summaries, everything else.\n"
-    "Output ONLY the JSON object. No prose, no markdown."
-)
+# Prompt centralized in pipeline/prompts.py. `_ROUTER_SYSTEM` is kept as
+# a local alias so the existing call site reads naturally; the source of
+# truth is `prompts.CLASSIFIER_SYSTEM`.
+_ROUTER_SYSTEM = CLASSIFIER_SYSTEM
 
 _VALID_TASKS: set[TaskType] = {"code", "reasoning", "general", "vl"}
 

@@ -44,6 +44,7 @@ import httpx
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.pipeline.prompts import REACT_FINAL_ANSWER_USER
 from audrey.tools.discovery import ToolRegistry
 from audrey.tools.dispatch import ToolResult, dispatch_one, to_tool_message
 
@@ -192,15 +193,11 @@ async def run_react(
         log.warning("react: max_rounds=%d reached for %s; forcing final answer without tools",
                     max_rounds, model)
         convo = _compress_history(convo, keep_last_round=1)
-        convo.append({
-            "role": "user",
-            "content": (
-                "You have reached the tool-call budget. Do not call any more tools. "
-                "Using only the information already gathered above, write the final "
-                "answer to the original request now as plain prose. If the gathered "
-                "information is insufficient, say so explicitly — do not fabricate."
-            ),
-        })
+        # Final-answer instruction lives in pipeline/prompts.py; this is
+        # the load-bearing flip from tool-using mode to prose mode. Kept
+        # as a user turn rather than a system message because it's a
+        # mode-change signal, not background context.
+        convo.append({"role": "user", "content": REACT_FINAL_ANSWER_USER})
         try:
             async with _gate_ctx(gate, model, location, user_id):
                 final = await ollama.chat(

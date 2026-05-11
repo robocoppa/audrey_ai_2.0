@@ -61,6 +61,7 @@ from audrey.pipeline.memory import (
     recall_for_request,
 )
 from audrey.pipeline.planner import plan as planner_plan
+from audrey.pipeline.prompts import compose_system_messages
 from audrey.pipeline.reflect import reflect as reflect_fn
 from audrey.pipeline.state import PipelineState
 from audrey.pipeline.synthesize import synthesize as synthesize_fn
@@ -157,14 +158,24 @@ def build_graph(
         sys_msg = memory_system_message(
             hits, user_id=user_id, include_store_hint=include_store_hint,
         )
-        if sys_msg is None:
+        # Chat-history-search guidance lands only when the live registry
+        # has the tool — telling a model how to use a tool it can't
+        # dispatch is wasted tokens. Composer enforces the canonical
+        # order: memory message first, chat-history guidance after.
+        chat_history_available = tools is not None and "chat_history_search" in tools.by_name
+        composed = compose_system_messages(
+            memory_hint=sys_msg,
+            chat_history_guidance=chat_history_available,
+        )
+        if not composed:
             log.info("memory: no hits / no store hint for user=%s", user_id)
             return {"memory_hits": hits}
-        new_messages = [sys_msg, *state["messages"]]
+        new_messages = [*composed, *state["messages"]]
         log.info(
-            "memory: user=%s hits=%d keys=%s store_hint=%s",
+            "memory: user=%s hits=%d keys=%s store_hint=%s chat_history_hint=%s",
             user_id, len(hits), [h.get("key", "?") for h in hits],
             "on" if include_store_hint else "off",
+            "on" if chat_history_available else "off",
         )
         return {"memory_hits": hits, "messages": new_messages}
 

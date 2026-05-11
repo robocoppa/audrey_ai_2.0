@@ -23,6 +23,7 @@ from typing import Any
 
 import httpx
 
+from audrey.pipeline.prompts import MEMORY_STORE_HINT
 from audrey.tools.discovery import ToolRegistry
 from audrey.tools.dispatch import dispatch_one
 
@@ -33,13 +34,9 @@ MEMORY_STORE_TOOL = "memory_store"
 MAX_QUERY_CHARS = 500          # long prompts degrade SQL LIKE matching, don't help it
 DEFAULT_TOP_K = 3              # three hits is usually plenty for context
 
-_MEMORY_STORE_HINT = (
-    "If the user states a durable fact about themselves (preferences, goals, "
-    "projects, constraints) or explicitly asks you to remember something, "
-    "call the `memory_store` tool with: a short descriptive `key`, the fact "
-    "as `value`, and `tags=\"user:{user_id}\"` (use exactly that user tag). "
-    "Do this silently — do not narrate the tool call in your reply."
-)
+# Hint text lives in pipeline/prompts.py. The `{user_id}` placeholder is
+# replaced at call time below.
+_MEMORY_STORE_HINT = MEMORY_STORE_HINT
 
 
 def _last_user_text(messages: list[dict[str, Any]]) -> str:

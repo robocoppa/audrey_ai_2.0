@@ -29,31 +29,14 @@ from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.deep_panel import _location_of
 from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.pipeline.prompts import SYNTH_SYSTEM
 from audrey.pipeline.state import TaskType, WorkerDraft
 
 log = logging.getLogger(__name__)
 
 
-_SYNTH_SYSTEM = (
-    "You are the panel synthesizer. You receive the original user request "
-    "plus several draft answers produced in parallel by different worker models. "
-    "Some drafts may be tagged `[tool-grounded: N rounds]` — those workers ran "
-    "tool calls (knowledge-base search, web search, etc.) before answering, so "
-    "their factual claims are backed by retrieved evidence.\n\n"
-    "Your job is to produce ONE coherent final answer for the user:\n"
-    "- Speak directly to the user. Do NOT explain your synthesis process, "
-    "do NOT reference 'drafts' or 'workers,' do NOT include an 'Approach' "
-    "preamble. Just write the answer.\n"
-    "- Pull the strongest passages from the drafts; don't average them.\n"
-    "- Preserve code blocks verbatim from the strongest draft.\n"
-    "- Do NOT mention worker model names.\n"
-    "- When a tool-grounded draft and a tool-free draft disagree on a "
-    "factual point, prefer the tool-grounded one.\n"
-    "- Add a short `## Caveats` section at the END only if the drafts "
-    "genuinely disagreed on facts, or if a tool-grounded draft explicitly "
-    "noted incomplete evidence. Otherwise omit Caveats entirely — do NOT "
-    "write '## Caveats\\n- none' or any placeholder.\n"
-)
+# Prompt centralized in pipeline/prompts.py.
+_SYNTH_SYSTEM = SYNTH_SYSTEM
 
 
 def _format_drafts_for_synth(
