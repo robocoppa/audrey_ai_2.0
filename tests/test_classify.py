@@ -159,3 +159,104 @@ def test_code_weak_alternation_has_no_duplicates():
         seen[t] = seen.get(t, 0) + 1
     dupes = {term: count for term, count in seen.items() if count > 1}
     assert not dupes, f"duplicate _CODE_WEAK terms: {dupes}"
+
+
+# ─── classify_with_registry — the streaming/graph shared call site ────
+
+
+class _FakeRegistry:
+    """Minimal stand-in for ToolRegistry — only `.names()` is used."""
+
+    def __init__(self, names: list[str]) -> None:
+        self._names = names
+
+    def names(self) -> list[str]:
+        return list(self._names)
+
+
+class _FakeOllama:
+    """Records router invocations so a test can assert when one happens."""
+
+    def __init__(self) -> None:
+        self.chat_calls: list[dict] = []
+
+    async def chat(self, **kwargs):
+        self.chat_calls.append(kwargs)
+        # Default router response. Tests that exercise the router can
+        # override this by passing their own ollama stub.
+        return {"message": {"content": '{"task": "general", "confidence": 0.7}'}}
+
+
+_ROUTER_CFG = {
+    "model": "qwen3:4b",
+    "timeout_s": 5,
+    "max_failures_before_fallback": 1,
+}
+
+
+async def test_classify_with_registry_passes_tool_names_to_keyword_classify():
+    """A prompt naming a registered tool must short-circuit to `general`
+    via `_tool_mention_signal`, no router call. This is the regression
+    test for the streaming-path bug: the streaming `classify_fn` call
+    forgot `tool_names`, so the word "image" inside "use kb_image_search"
+    would trip `_VL_STRONG` and route to a tool-blind VL model. The
+    shared helper now extracts `tool_names` from the registry for both
+    call sites."""
+    from audrey.pipeline.classify import classify_with_registry
+
+    ollama = _FakeOllama()
+    registry = _FakeRegistry(["kb_search", "kb_image_search", "web_search"])
+    task, reason, conf = await classify_with_registry(
+        ollama,
+        user_text="use kb_image_search to find a rock with banding",
+        router_cfg=_ROUTER_CFG,
+        cfg=None,
+        registry=registry,
+    )
+    assert task == "general"
+    assert reason == "keyword:tool_mention:kb_image_search"
+    assert conf == 0.95
+    # Router must not have been called — keyword short-circuited.
+    assert ollama.chat_calls == []
+
+
+async def test_classify_with_registry_no_registry_means_no_tool_override():
+    """When the registry is None, `tool_names` is empty and the classifier
+    behaves exactly as if there were no registered tools. A bare "image"
+    prompt then trips `_VL_STRONG` and routes to vl — the load-bearing
+    scenario the override exists to prevent, demonstrated by removing the
+    registry."""
+    from audrey.pipeline.classify import classify_with_registry
+
+    ollama = _FakeOllama()
+    task, reason, conf = await classify_with_registry(
+        ollama,
+        user_text="identify the type of image in this attachment",
+        router_cfg=_ROUTER_CFG,
+        cfg=None,
+        registry=None,
+    )
+    # No tool_names → `_VL_STRONG` matches "image" first.
+    assert task == "vl"
+    assert reason == "keyword:vl_strong"
+    assert conf == 0.95
+    assert ollama.chat_calls == []
+
+
+async def test_classify_with_registry_falls_through_to_router_on_plain_prose():
+    """Prompts that don't trip any keyword regex still reach the router.
+    This is the "did I break the non-keyword path?" guard."""
+    from audrey.pipeline.classify import classify_with_registry
+
+    ollama = _FakeOllama()
+    task, reason, _conf = await classify_with_registry(
+        ollama,
+        user_text="could you help me think through whether this plan is sensible?",
+        router_cfg=_ROUTER_CFG,
+        cfg=None,
+        registry=_FakeRegistry(["web_search"]),
+    )
+    # Router stub returns task="general" — assert we got there.
+    assert task == "general"
+    assert reason == "router:general"
+    assert len(ollama.chat_calls) == 1

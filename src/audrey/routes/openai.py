@@ -53,7 +53,7 @@ from audrey.pipeline.chat_archive import (
 from audrey.pipeline.chat_archive import (
     last_user_text as _archive_last_user_text,
 )
-from audrey.pipeline.classify import classify as classify_fn
+from audrey.pipeline.classify import classify_with_registry
 from audrey.pipeline.complexity import is_complex
 from audrey.pipeline.context import datetime_system_message
 from audrey.pipeline.deep_panel import pool_key_for, run_panel_streaming
@@ -326,13 +326,16 @@ async def _stream_via_pipeline(
     try:
         async with inflight.slot(user_id):
             user_text = _last_user_text(messages)
-            task, reason, conf = await classify_fn(
+            # Shared helper threads tool names into the classifier so
+            # prompts that explicitly name a tool (e.g. "use kb_image_search
+            # …") route through the tool-capable fast path. The non-
+            # streaming graph node uses the same helper.
+            task, reason, conf = await classify_with_registry(
                 ollama,
-                router_model=router_cfg.get("model", "qwen3:4b"),
-                router_timeout_s=float(router_cfg.get("timeout_s", 20)),
-                max_router_strikes=int(router_cfg.get("max_failures_before_fallback", 2)),
                 user_text=user_text,
+                router_cfg=router_cfg,
                 cfg=cfg,
+                registry=app.state.tools,
             )
             complex_, n = is_complex(messages, threshold=int(cfg.raw.get("complexity", {}).get("token_threshold", 500)))
             forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local")

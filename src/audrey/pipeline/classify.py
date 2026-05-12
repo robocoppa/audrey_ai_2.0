@@ -3,10 +3,11 @@
 Two-stage:
   1. **Keyword pre-filter** — cheap regex match on the last user message.
      Strong signals (e.g. triple-backtick code block, `def foo(`) pick a
-     task directly. Weak signals just bump priority for stage 2.
+     task directly. Weak signals are held in reserve as a router-failure
+     fallback — they do not influence the router call itself.
   2. **Router model** — `qwen3:4b` produces a JSON verdict. On two strikes
      (timeout, parse error, unknown label) we fall back to the best keyword
-     signal, or "general" if nothing matched.
+     signal (strong or weak), or "general" if nothing matched.
 
 **Review override:** "review this code" / "analyze this snippet" → reasoning,
 even though the message contains code. Reviewing code is an analytical task,
@@ -230,4 +231,36 @@ async def classify(
     return "general", "fallback:general", 0.25
 
 
-__all__ = ["classify", "keyword_classify", "router_classify"]
+async def classify_with_registry(
+    ollama: OllamaClient,
+    *,
+    user_text: str,
+    router_cfg: dict[str, Any],
+    cfg: Any = None,
+    registry: Any = None,
+) -> tuple[TaskType, str, float]:
+    """Run `classify(...)` with the current tool-registry names threaded in.
+
+    Both the non-streaming graph node and the streaming route need the same
+    setup: read `router.*` config, extract `tool_names` from the live tool
+    registry, call `classify(...)`. Inlining this in two places once silently
+    diverged — the streaming path forgot the `tool_names` argument and lost
+    the explicit-tool-mention routing override.
+
+    `registry` is duck-typed against `ToolRegistry`: only `.names()` is
+    used. `None` is fine — that path just produces an empty tool-name set,
+    same as the previous inline code.
+    """
+    tool_names = set(registry.names()) if registry is not None else set()
+    return await classify(
+        ollama,
+        router_model=router_cfg.get("model", "qwen3:4b"),
+        router_timeout_s=float(router_cfg.get("timeout_s", 20)),
+        max_router_strikes=int(router_cfg.get("max_failures_before_fallback", 2)),
+        user_text=user_text,
+        tool_names=tool_names,
+        cfg=cfg,
+    )
+
+
+__all__ = ["classify", "keyword_classify", "router_classify", "classify_with_registry"]

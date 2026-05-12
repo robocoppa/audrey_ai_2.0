@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 
 MEMORY_SEARCH_TOOL = "memory_search"
 MEMORY_STORE_TOOL = "memory_store"
-MAX_QUERY_CHARS = 500          # long prompts degrade SQL LIKE matching, don't help it
+MAX_QUERY_CHARS = 500          # long prompts dilute the embedding's signal; tighter queries match better
 DEFAULT_TOP_K = 3              # three hits is usually plenty for context
 
 # Hint text lives in pipeline/prompts.py. The `{user_id}` placeholder is

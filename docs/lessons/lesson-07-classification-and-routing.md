@@ -212,9 +212,14 @@ The graph node lives at [`graph.py:182`](../../src/audrey/pipeline/graph.py#L182
 
 ```python
 async def node_classify(state: PipelineState) -> dict[str, Any]:
-    user_text = _last_user_text(state["messages"])
-    tool_names = set(tools.names()) if tools is not None else set()
-    task, reason, conf = await classify_fn(...)
+    task, reason, conf = await classify_with_registry(
+        ollama,
+        user_text=_last_user_text(state["messages"]),
+        router_cfg=router_cfg,
+        cfg=cfg,
+        registry=tools,
+    )
+    log.info("classify: %s (%s, conf=%.2f)", task, reason, conf)
     return {"task_type": task, "classify_reason": reason, "classify_confidence": conf}
 ```
 
@@ -224,11 +229,31 @@ The returned keys matter:
 - `classify_reason` is a human-readable breadcrumb for logs/debugging.
 - `classify_confidence` is used later by the fast-path escalation guard.
 
-Notice that the graph passes `tool_names` into the classifier at
-[`graph.py:187`](../../src/audrey/pipeline/graph.py#L187). That is not just
-metadata. If the user explicitly says "use `kb_search`" or "use
-`kb_image_search`," Audrey should route toward tool-capable behavior instead
-of accidentally treating the word "image" as a vision-only request.
+The node does almost no work itself. It delegates to a shared helper,
+`classify_with_registry`, at
+[`classify.py:233`](../../src/audrey/pipeline/classify.py#L233). That
+helper exists because the streaming route in `routes/openai.py` needs to
+do the same thing — read the router config, extract `tool_names` from the
+live tool registry, and call `classify(...)`. When that setup was inlined
+in two places it silently diverged: the streaming path forgot to pass
+`tool_names` and lost the explicit-tool-mention routing override. The
+helper kills the duplication and pins both paths to the same call shape.
+
+The interesting line inside the helper is at
+[`classify.py:253`](../../src/audrey/pipeline/classify.py#L253):
+
+```python
+tool_names = set(registry.names()) if registry is not None else set()
+```
+
+Why this matters: if the user explicitly says "use `kb_search`" or "use
+`kb_image_search`," Audrey should route toward tool-capable behavior
+instead of accidentally treating the word "image" as a vision-only
+request. Without `tool_names`, the keyword classifier's `_VL_STRONG`
+regex matches first and the prompt gets sent to a tool-blind VL model.
+The tool-mention signal lives inside `keyword_classify(...)` (next
+section), but it only fires when the caller hands it the current
+tool-name set.
 
 ### 2.4 The classifier has a cheap first pass
 
@@ -304,7 +329,7 @@ Could you help me think through whether this backup plan is sensible?
 the classifier asks a small router model.
 
 The router prompt is `_ROUTER_SYSTEM` at
-[`classify.py:121`](../../src/audrey/pipeline/classify.py#L121). It tells the
+[`classify.py:122`](../../src/audrey/pipeline/classify.py#L122). It tells the
 model to return only JSON:
 
 ```json

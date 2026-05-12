@@ -26,7 +26,7 @@ class WorkerDraft(TypedDict, total=False):
 
 class PipelineState(TypedDict, total=False):
     # Input — set at request time
-    virtual_model: str               # audrey_deep | audrey_cloud | audrey_local
+    virtual_model: str               # audrey_deep | audrey_cloud | audrey_local | audrey_auto | audrey_fast
     messages: list[dict]             # OpenAI-shaped chat messages
     temperature: float | None
     top_p: float | None
