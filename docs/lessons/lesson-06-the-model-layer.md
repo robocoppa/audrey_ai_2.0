@@ -108,7 +108,7 @@ gate = FairLocalGate(concurrency=gpu_concurrency)
 ```
 
 Then `lifespan` passes those objects into `build_graph(...)` at
-[`main.py:73`](../../src/audrey/main.py#L73):
+[`main.py:89`](../../src/audrey/main.py#L89):
 
 ```python
 graph = build_graph(cfg, ollama, registry, health, gate, tool_registry)
@@ -530,7 +530,7 @@ _POOL_KEYS = {
 ```
 
 Then `select_workers(...)` reads the pool for the current task at
-[`deep_panel.py:72`](../../src/audrey/pipeline/deep_panel.py#L72):
+[`deep_panel.py:86`](../../src/audrey/pipeline/deep_panel.py#L86):
 
 ```python
 pool = cfg.raw.get(pool_key, {}).get(task, {})
@@ -591,7 +591,7 @@ streaming version does the same kind of fallback at
 deep mode from becoming brittle when a pool entry is temporarily unavailable.
 
 Each worker runs through `_run_one_worker(...)` at
-[`deep_panel.py:104`](../../src/audrey/pipeline/deep_panel.py#L104). The most
+[`deep_panel.py:123`](../../src/audrey/pipeline/deep_panel.py#L123). The most
 important behavior is in the docstring:
 
 ```python
@@ -824,11 +824,11 @@ Here is what happens after the request reaches the graph:
 1. The classifier labels the request as `general`.
 2. Complexity routing keeps it in fast mode because the prompt is short and the
    user chose `audrey_fast`; the forced-fast check lives at
-   [`graph.py:192`](../../src/audrey/pipeline/graph.py#L192).
+   [`graph.py:204`](../../src/audrey/pipeline/graph.py#L204).
 3. `node_fast_path` calls `run_fast_path(...)` at
-   [`graph.py:210`](../../src/audrey/pipeline/graph.py#L210).
+   [`graph.py:222`](../../src/audrey/pipeline/graph.py#L222).
 4. `run_fast_path(...)` calls `pick_fast_model(...)` at
-   [`fast_path.py:68`](../../src/audrey/pipeline/fast_path.py#L68).
+   [`fast_path.py:69`](../../src/audrey/pipeline/fast_path.py#L69).
 5. `pick_fast_model(...)` asks the registry for the first healthy `general`
    candidate:
 

@@ -128,11 +128,16 @@ When working on lessons:
   wording unless the count is a file/line citation.
 
 After editing any file under `src/audrey/`, `tools-server/`, or `config.yaml`,
-run `scripts/check-lesson-links.sh <changed file>` for each changed file. The
-checker reports lesson cites whose target file or line has shifted; update
-any flagged lessons so the cites still point at the landmark the prose
-describes. Without that, lesson cites silently drift every time the code
-moves.
+run `scripts/check-lesson-links.py <changed file>` for each changed file. The
+checker compares each lesson cite's line against the displayed code snippet
+beneath it, and when they disagree, proposes the correct line number. Apply
+the proposed fix. For cites without a nearby snippet, the checker falls back
+to a landmark heuristic and emits a soft "DRIFT?" hint — eyeball those.
+
+The script's `DRIFT` findings include a concrete `fix:` line you can apply
+directly; `DRIFT?` findings are advisory and may be deliberate "into the
+body" cites. Run without arguments to audit all lessons, or pass changed
+source paths to scope the check to cites that target those files.
 
 When a session changes current priorities, verified stack state, or active
 followups, update `docs/PROJECT_STATE.md`. When a lesson concludes, also update

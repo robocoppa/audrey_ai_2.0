@@ -120,3 +120,42 @@ def test_keyword_classify_returns_none_for_plain_prose():
         "tell me about Iceland",
         tool_names=_REGISTERED_TOOLS,
     ) is None
+
+
+# ─── _CODE_WEAK signal coverage ────────────────────────────────────────
+
+
+def test_code_weak_matches_each_language_term():
+    """Every language and build-tool keyword in `_CODE_WEAK` should
+    classify a plain mention as `code` (weak strength). Guards against
+    a future regex edit accidentally dropping one."""
+    expected_terms = [
+        "python", "javascript", "typescript", "rust", "golang", "kotlin",
+        "dockerfile", "npm", "pip install", "uv add",
+        "cargo", "gradle", "make", "cmake",
+        "pytest", "unittest", "mypy", "ruff", "eslint",
+    ]
+    for term in expected_terms:
+        sig = keyword_classify(f"can you help me with {term}?")
+        assert sig is not None, f"{term!r} should match _CODE_WEAK"
+        assert sig.task == "code", f"{term!r} matched but task is {sig.task!r}"
+        assert sig.strength == "weak", f"{term!r} matched but strength is {sig.strength!r}"
+
+
+def test_code_weak_alternation_has_no_duplicates():
+    """The `_CODE_WEAK` regex string must not list the same keyword
+    twice. Duplicates are harmless at runtime but cost regex compile
+    time and pollute the pattern."""
+    from audrey.pipeline.classify import _CODE_WEAK
+
+    # Extract bare alternation terms (drop `\b` boundaries and the
+    # outer non-capturing group). The pattern is fixed-shape so a
+    # simple split is fine.
+    pattern = _CODE_WEAK.pattern
+    inner = pattern.removeprefix(r"\b(").removesuffix(r")\b")
+    terms = [t.strip() for t in inner.split("|") if t.strip()]
+    seen: dict[str, int] = {}
+    for t in terms:
+        seen[t] = seen.get(t, 0) + 1
+    dupes = {term: count for term, count in seen.items() if count > 1}
+    assert not dupes, f"duplicate _CODE_WEAK terms: {dupes}"

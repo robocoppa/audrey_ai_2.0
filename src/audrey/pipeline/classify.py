@@ -38,8 +38,9 @@ _CODE_STRONG = re.compile(
     re.MULTILINE,
 )
 _CODE_WEAK = re.compile(
-    r"\b(bug|stack ?trace|traceback|exception|compile|syntax error|typescript|"
+    r"\b(bug|stack ?trace|traceback|exception|compile|syntax error|"
     r"python|javascript|typescript|rust|golang|kotlin|dockerfile|npm|pip install|uv add|"
+    r"cargo|gradle|make|cmake|"
     r"pytest|unittest|mypy|ruff|eslint)\b",
     re.IGNORECASE,
 )

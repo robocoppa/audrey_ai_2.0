@@ -167,7 +167,7 @@ node reads state
 
 ### 2.2 The graph order puts context before classification
 
-Open [`graph.py:391`](../../src/audrey/pipeline/graph.py#L391). The graph adds
+Open [`graph.py:390`](../../src/audrey/pipeline/graph.py#L390). The graph adds
 nodes in one block:
 
 ```python
@@ -177,7 +177,7 @@ g.add_node("classify", node_classify)
 g.add_node("complexity", node_complexity)
 ```
 
-Then the edges at [`graph.py:403`](../../src/audrey/pipeline/graph.py#L403)
+Then the edges at [`graph.py:402`](../../src/audrey/pipeline/graph.py#L402)
 make the order explicit:
 
 ```python
@@ -263,7 +263,7 @@ if _VL_STRONG.search(text):
 Two special cases are worth slowing down for.
 
 First, tool mentions win. `_tool_mention_signal(...)` starts at
-[`classify.py:73`](../../src/audrey/pipeline/classify.py#L73). It returns
+[`classify.py:87`](../../src/audrey/pipeline/classify.py#L87). It returns
 `general` when the user explicitly names a registered tool:
 
 ```python
@@ -312,7 +312,7 @@ model to return only JSON:
 ```
 
 `router_classify(...)` starts at
-[`classify.py:125`](../../src/audrey/pipeline/classify.py#L125). It sends only
+[`classify.py:141`](../../src/audrey/pipeline/classify.py#L141). It sends only
 the first part of the user text:
 
 ```python
@@ -445,7 +445,7 @@ def route_after_complexity(state: PipelineState) -> str:
     return "fast" if state.get("mode") == "fast" else "deep"
 ```
 
-That is at [`graph.py:337`](../../src/audrey/pipeline/graph.py#L337).
+That is at [`graph.py:406`](../../src/audrey/pipeline/graph.py#L406).
 
 The wiring at [`graph.py:406`](../../src/audrey/pipeline/graph.py#L406) tells
 LangGraph what those return strings mean:
