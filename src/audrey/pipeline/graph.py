@@ -93,6 +93,7 @@ def build_graph(
     react_compress_after = int(react_cfg.get("compress_after_round", 2))
     react_max_tool_chars = int(react_cfg.get("max_tool_result_chars", 2000))
     react_dispatch_timeout = float(react_cfg.get("dispatch_timeout_s", 30))
+    react_compress_keep_last = int(react_cfg.get("compress_keep_last", 1))
 
     # Deep-panel workers get a separate ReAct budget — tighter by default
     # because N workers × M rounds multiplies, and local workers hold the
@@ -102,6 +103,7 @@ def build_graph(
     deep_react_compress_after = int(deep_react_cfg.get("compress_after_round", react_compress_after))
     deep_react_max_tool_chars = int(deep_react_cfg.get("max_tool_result_chars", react_max_tool_chars))
     deep_react_dispatch_timeout = float(deep_react_cfg.get("dispatch_timeout_s", react_dispatch_timeout))
+    deep_react_compress_keep_last = int(deep_react_cfg.get("compress_keep_last", react_compress_keep_last))
 
     agentic = cfg.raw.get("agentic", {})
     planning_cfg = agentic.get("planning", {}) or {}
@@ -229,6 +231,7 @@ def build_graph(
             react_compress_after=react_compress_after,
             react_max_tool_chars=react_max_tool_chars,
             react_dispatch_timeout_s=react_dispatch_timeout,
+            react_compress_keep_last=react_compress_keep_last,
             user_id=(state.get("user_id") or None),
             cfg=cfg,
         )
@@ -281,6 +284,7 @@ def build_graph(
             react_compress_after=deep_react_compress_after,
             react_max_tool_chars=deep_react_max_tool_chars,
             react_dispatch_timeout_s=deep_react_dispatch_timeout,
+            react_compress_keep_last=deep_react_compress_keep_last,
             user_id=(state.get("user_id") or None),
         )
         ok = sum(1 for d in drafts if (d.get("content") or "").strip())

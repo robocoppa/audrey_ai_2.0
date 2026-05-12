@@ -828,7 +828,7 @@ Here is what happens after the request reaches the graph:
 3. `node_fast_path` calls `run_fast_path(...)` at
    [`graph.py:222`](../../src/audrey/pipeline/graph.py#L222).
 4. `run_fast_path(...)` calls `pick_fast_model(...)` at
-   [`fast_path.py:69`](../../src/audrey/pipeline/fast_path.py#L69).
+   [`fast_path.py:70`](../../src/audrey/pipeline/fast_path.py#L70).
 5. `pick_fast_model(...)` asks the registry for the first healthy `general`
    candidate:
 

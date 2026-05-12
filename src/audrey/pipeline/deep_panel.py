@@ -117,6 +117,7 @@ async def _run_one_worker(
     react_compress_after: int,
     react_max_tool_chars: int,
     react_dispatch_timeout_s: float,
+    react_compress_keep_last: int = 1,
     user_id: str | None = None,
     cfg: Any = None,
 ) -> WorkerDraft:
@@ -146,6 +147,7 @@ async def _run_one_worker(
                     compress_after_round=react_compress_after,
                     max_tool_result_chars=react_max_tool_chars,
                     tool_dispatch_timeout_s=react_dispatch_timeout_s,
+                    compress_keep_last=react_compress_keep_last,
                     user_id=user_id,
                     gate=None,
                     location=location,
@@ -235,6 +237,7 @@ async def run_panel(
     react_compress_after: int = 2,
     react_max_tool_chars: int = 2000,
     react_dispatch_timeout_s: float = 30.0,
+    react_compress_keep_last: int = 1,
     user_id: str | None = None,
 ) -> tuple[list[WorkerDraft], list[str]]:
     """Run the panel and return (drafts, attempted_models).
@@ -290,6 +293,7 @@ async def run_panel(
             react_compress_after=react_compress_after,
             react_max_tool_chars=react_max_tool_chars,
             react_dispatch_timeout_s=react_dispatch_timeout_s,
+            react_compress_keep_last=react_compress_keep_last,
             user_id=user_id,
             cfg=cfg,
         )
@@ -320,6 +324,7 @@ async def run_panel_streaming(
     react_compress_after: int = 2,
     react_max_tool_chars: int = 2000,
     react_dispatch_timeout_s: float = 30.0,
+    react_compress_keep_last: int = 1,
     user_id: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Streaming variant of `run_panel`.
@@ -385,6 +390,7 @@ async def run_panel_streaming(
             react_compress_after=react_compress_after,
             react_max_tool_chars=react_max_tool_chars,
             react_dispatch_timeout_s=react_dispatch_timeout_s,
+            react_compress_keep_last=react_compress_keep_last,
             user_id=user_id,
             cfg=cfg,
         )

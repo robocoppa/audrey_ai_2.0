@@ -199,11 +199,13 @@ async def discover_one(
         if not post:
             continue
         op_id = post.get("operationId")
-        if not op_id or op_id == "health":
+        if not op_id:
             continue
         tags = post.get("tags") or []
         if tags and "tools" not in tags:
             # Server explicitly tagged this as non-tool (e.g. "system").
+            # /health is tagged "system" in tools-server, so this branch
+            # is also what filters it out — no special-case needed.
             continue
         tool = _build_tool_from_operation(
             operation_id=op_id, op=post, path=path,

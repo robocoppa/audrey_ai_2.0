@@ -115,6 +115,7 @@ async def run_react(
     gate: FairLocalGate | None = None,
     location: str = "local",
     cfg: Any = None,
+    compress_keep_last: int = 1,
 ) -> ReactResult:
     """Drive the model through up to `max_rounds` of tool use, then return the answer.
 
@@ -131,7 +132,7 @@ async def run_react(
     async with httpx.AsyncClient() as http:
         for round_idx in range(max_rounds):
             if round_idx >= compress_after_round:
-                convo = _compress_history(convo, keep_last_round=1)
+                convo = _compress_history(convo, keep_last_round=compress_keep_last)
 
             start = time.monotonic()
             try:
@@ -193,7 +194,7 @@ async def run_react(
         #      "write the final answer now" flips the mode cleanly.
         log.warning("react: max_rounds=%d reached for %s; forcing final answer without tools",
                     max_rounds, model)
-        convo = _compress_history(convo, keep_last_round=1)
+        convo = _compress_history(convo, keep_last_round=compress_keep_last)
         # Final-answer instruction lives in pipeline/prompts.py; this is
         # the load-bearing flip from tool-using mode to prose mode. Kept
         # as a user turn rather than a system message because it's a

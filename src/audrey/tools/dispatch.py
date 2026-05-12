@@ -42,6 +42,17 @@ class ToolResult:
 # we overwrite any `user` argument the model supplied with the real
 # pipeline user_id — prevents the model from querying another user's
 # data, and spares it from having to guess its own id.
+#
+# ADDING A NEW USER-SCOPED TOOL — two places to edit:
+#   1. The tools-server route (`tools-server/app.py`) declares the
+#      operation and its `user` request-body field.
+#   2. This set. Without the name here, the dispatcher will pass the
+#      model-supplied `user` argument straight to the network call,
+#      and the security invariant is broken.
+# If you only edit (1) and forget (2), other users' data is reachable
+# from the model. There is no startup check for this today — if you
+# add one, look for a `user` property in `ToolSpec.parameters` and
+# warn when the name isn't in `_USER_SCOPED_TOOLS`.
 _USER_SCOPED_TOOLS: frozenset[str] = frozenset({
     "kb_search",
     "kb_image_search",
@@ -84,18 +95,22 @@ async def dispatch_one(
     fn = (tool_call.get("function") or {})
     name = str(fn.get("name") or "?")
     call_id = tool_call.get("id")
-    args = fn.get("arguments")
+    # Hold onto the raw arguments value so the JSON-parse error path can
+    # always log/echo the original — even if a future edit changes the
+    # order or rebinds `args` before the except branch fires.
+    raw_args = fn.get("arguments")
+    args = raw_args
 
     # Ollama sometimes passes arguments as a JSON-encoded string instead of a dict.
     if isinstance(args, str):
         try:
             args = json.loads(args)
         except json.JSONDecodeError:
-            log.warning("dispatch: %s arguments not JSON: %r", name, args[:200])
+            log.warning("dispatch: %s arguments not JSON: %r", name, raw_args[:200])
             tool_calls_total.labels(tool=name, outcome="error").inc()
             return ToolResult(
                 name=name, call_id=call_id,
-                content=json.dumps({"error": "arguments_not_json", "raw": args[:500]}),
+                content=json.dumps({"error": "arguments_not_json", "raw": raw_args[:500]}),
                 elapsed_s=0.0, is_error=True,
             )
     if args is None:

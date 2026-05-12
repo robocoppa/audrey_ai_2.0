@@ -289,7 +289,7 @@ results = await asyncio.gather(*[
 
 ### 2.6 The dispatcher: turn one tool_call into a ToolResult
 
-Open [`tools/dispatch.py:68`](../../src/audrey/tools/dispatch.py#L68). The
+Open [`tools/dispatch.py:79`](../../src/audrey/tools/dispatch.py#L79). The
 function signature is small but the body has several explicit failure
 paths:
 
@@ -328,7 +328,7 @@ explaining what happened. The ReAct loop then includes that as a
 ### 2.7 Concept spotlight — the user-overwrite invariant
 
 This is the most important part of the dispatcher, and it's three lines.
-At [`tools/dispatch.py:115`](../../src/audrey/tools/dispatch.py#L115):
+At [`tools/dispatch.py:130`](../../src/audrey/tools/dispatch.py#L130):
 
 ```python
 if user_id and name in _USER_SCOPED_TOOLS:
@@ -375,7 +375,7 @@ busy topic can return paragraphs of snippets.
 [`config.yaml:142`](../../config.yaml#L142)) is the single-shot cap. The
 dispatcher truncates to that length and appends `…[truncated]` so the
 model knows it didn't see everything. The helper lives at
-[`tools/dispatch.py:55`](../../src/audrey/tools/dispatch.py#L55):
+[`tools/dispatch.py:66`](../../src/audrey/tools/dispatch.py#L66):
 
 ```python
 def _truncate(s, limit):

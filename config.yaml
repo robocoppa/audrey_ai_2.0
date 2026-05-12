@@ -140,6 +140,14 @@ agentic:
     max_rounds: 3
     compress_after_round: 2
     max_tool_result_chars: 2000
+    # How many *most-recent* `role=tool` messages to keep verbatim once
+    # compression kicks in. Older tool messages collapse to a one-line
+    # stub. Default 1: the model only ever needs the immediately
+    # preceding tool round to keep reasoning. Sensible values are ≥1;
+    # setting 0 happens to be a no-op under the current helper (no
+    # compression) — to wipe history aggressively, lower
+    # `compress_after_round` instead.
+    compress_keep_last: 1
     # Deep-panel workers run ReAct with a tighter budget than fast path:
     # N workers × M rounds multiplies, and each local worker holds the GPU
     # gate for the whole loop (see pipeline/deep_panel.py).
@@ -147,6 +155,7 @@ agentic:
       max_rounds: 2
       compress_after_round: 2
       max_tool_result_chars: 2000
+      compress_keep_last: 1
   planning:
     enabled: true
     min_prompt_tokens: 40
