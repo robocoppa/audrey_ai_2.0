@@ -83,6 +83,14 @@ packages = ["src/audrey"]
 [tool.uv]
 package = true
 
+# Workspace: tools-server lives in its own subdirectory but shares a
+# single resolution + lockfile with the root project. Phase 5 (2026-05-12)
+# consolidated tools-server/uv.lock into the root uv.lock so deps for both
+# services pin together. To add a new tools-server dep: edit
+# tools-server/pyproject.toml, then run `uv lock` from the repo root.
+[tool.uv.workspace]
+members = ["tools-server"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

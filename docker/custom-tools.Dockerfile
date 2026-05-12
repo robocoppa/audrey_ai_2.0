@@ -26,32 +26,33 @@ COPY --from=ghcr.io/astral-sh/uv@sha256:3b7b60a81d3c57ef471703e5c83fd4aaa33abcd4
 
 WORKDIR /app
 
-# Install dependencies first so they cache independently of source changes.
+# Install from pyproject.toml — deps and source in one place. Matches the
+# audrey-ai Dockerfile pattern (Phase 21). Two-layer split per Phase 24b:
+# dep changes rebuild Layer 1 (~30s), source changes rebuild Layer 2 (~5s).
 #
-# Phase 21 note: the audrey-ai Dockerfile installs from `pyproject.toml` via
-# `uv pip install --system .`, but tools-server has a flat-script layout
-# (no `src/<pkg>/` wrapper, just `app.py` / `brave.py` / `db.py` / `settings.py`)
-# which hatchling can't cleanly wheel-build. So this list stays manual.
-# **If you add a dep to tools-server/pyproject.toml, also add it here** —
-# Phase 12 hit this with qdrant-client when only pyproject was edited.
-COPY tools-server/pyproject.toml /app/pyproject.toml
-RUN uv pip install --system \
-      "fastapi>=0.115" \
-      "uvicorn[standard]>=0.32" \
-      "httpx>=0.28" \
-      "pydantic>=2.9" \
-      "pydantic-settings>=2.6" \
-      "aiosqlite>=0.20" \
-      "tenacity>=9.0" \
-      "python-dotenv>=1.0" \
-      "qdrant-client>=1.12"
+# Layout note: the wheel is built with `[tool.hatch.build.targets.wheel]
+# packages = ["."]` (Phase 5). That packs every `.py` file in tools-server/
+# at the wheel root, so `from brave import …` keeps working. Adding a new
+# .py file to tools-server/ no longer requires a Dockerfile edit.
 
-# Copy application code
-COPY tools-server/app.py          /app/app.py
-COPY tools-server/brave.py        /app/brave.py
-COPY tools-server/chat_archive.py /app/chat_archive.py
-COPY tools-server/db.py           /app/db.py
-COPY tools-server/settings.py     /app/settings.py
+# ── Layer 1: deps only ───────────────────────────────────────────────
+# Compile pyproject.toml's deps to a frozen list, then install them.
+# Cache key is `pyproject.toml`'s contents — re-runs only when deps
+# change.
+COPY tools-server/pyproject.toml /app/pyproject.toml
+RUN uv pip compile --quiet /app/pyproject.toml -o /tmp/requirements.txt \
+    && uv pip install --system --no-cache -r /tmp/requirements.txt \
+    && rm /tmp/requirements.txt
+
+# ── Layer 2: package only ────────────────────────────────────────────
+# Build + install the wheel without re-resolving deps. The wildcard
+# COPY picks up new tools-server *.py files automatically — no
+# Dockerfile edit needed when adding modules. README.md is required
+# because pyproject.toml's `readme = "README.md"` field embeds it in
+# the wheel metadata at build time.
+COPY tools-server/README.md /app/README.md
+COPY tools-server/*.py      /app/
+RUN uv pip install --system --no-deps --no-cache /app
 
 # Data dir for memory.db and chat_archive.db (bind-mounted in production)
 RUN mkdir -p /app/data
