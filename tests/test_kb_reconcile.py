@@ -69,9 +69,8 @@ class _FakeQdrantKB:
     async def collection_exists(self, name: str) -> bool:
         return name in self._existing
 
-    async def delete_by_source(self, source: str, *, collection: str) -> int:
+    async def delete_by_source(self, source: str, *, collection: str) -> None:
         self.deletes.append((collection, source))
-        return -1  # mirrors the real client's "we don't know how many"
 
 
 def _make_points(*sources_with_counts: tuple[str, int]) -> list[dict]:

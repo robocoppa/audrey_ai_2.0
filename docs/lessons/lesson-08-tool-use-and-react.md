@@ -446,7 +446,7 @@ strong enough: small models can stall (no bytes for minutes), or invent a
 "pseudo tool-call" in plain text ("I would search for ...").
 
 Audrey forces the mode change explicitly. From
-[`react.py:194`](../../src/audrey/pipeline/react.py#L194):
+[`react.py:195`](../../src/audrey/pipeline/react.py#L195):
 
 ```python
 log.warning("react: max_rounds=%d reached for %s; forcing final answer without tools", ...)

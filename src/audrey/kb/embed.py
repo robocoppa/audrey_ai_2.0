@@ -189,6 +189,16 @@ async def _fetch_image(url: str) -> PILImage:
         timeout=20.0, follow_redirects=False, headers=headers,
     ) as client:
         async with client.stream("GET", url) as r:
+            if 300 <= r.status_code < 400:
+                # `follow_redirects=False` is load-bearing for SSRF defense,
+                # so we don't follow — but the default httpx error message
+                # ("302 Found") is opaque to the user. Name the redirect
+                # target so the user can resupply the final URL.
+                location = r.headers.get("location", "")
+                raise ValueError(
+                    f"image_url returned redirect ({r.status_code}) to "
+                    f"{location!r}; supply the final URL directly"
+                )
             r.raise_for_status()
             ctype = r.headers.get("content-type", "").lower()
             if not ctype.startswith(_ALLOWED_CONTENT_TYPE_PREFIX):
@@ -197,11 +207,16 @@ async def _fetch_image(url: str) -> PILImage:
                 )
             buf = bytearray()
             async for chunk in r.aiter_bytes():
-                buf.extend(chunk)
-                if len(buf) > _IMAGE_FETCH_BYTE_CAP:
+                # Check before extending so a single oversized chunk can't
+                # blow past the cap. httpx's default chunk size is ~64 KB, so
+                # the practical overshoot was small either way — this is
+                # defense-in-depth against a hostile server sending one huge
+                # chunk.
+                if len(buf) + len(chunk) > _IMAGE_FETCH_BYTE_CAP:
                     raise ValueError(
                         f"image_url response exceeds {_IMAGE_FETCH_BYTE_CAP}-byte cap"
                     )
+                buf.extend(chunk)
             return await asyncio.to_thread(_pil_from_bytes, bytes(buf))
 
 

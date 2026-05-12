@@ -1,7 +1,7 @@
 """Qdrant wrapper for Audrey's knowledge base.
 
 Two collections:
-  - `kb_text`   : 768-d (nomic-embed-text via ollama /api/embeddings)
+  - `kb_text`   : 768-d (nomic-embed-text via ollama /api/embed)
   - `kb_images` : 512-d (CLIP ViT-B-32 via sentence-transformers)
 
 We create collections eagerly at startup with explicit vector dim + cosine
@@ -34,6 +34,7 @@ from typing import Any
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
+from qdrant_client.http.exceptions import UnexpectedResponse
 
 log = logging.getLogger(__name__)
 
@@ -127,19 +128,22 @@ class QdrantKB:
             wait=True,
         )
 
-    async def delete_by_source(self, source: str, *, collection: str) -> int:
-        """Remove every point whose payload.source equals `source`. Returns count deleted (best-effort)."""
+    async def delete_by_source(self, source: str, *, collection: str) -> None:
+        """Remove every point whose payload.source equals `source`.
+
+        qdrant-client's `delete()` returns an `UpdateResult` with no count
+        field, so no count is reported back. A source with zero matching
+        points is a no-op, not an error.
+        """
         flt = qmodels.Filter(
             must=[qmodels.FieldCondition(key="source", match=qmodels.MatchValue(value=source))]
         )
-        result = await asyncio.to_thread(
+        await asyncio.to_thread(
             self._client.delete,
             collection_name=collection,
             points_selector=qmodels.FilterSelector(filter=flt),
             wait=True,
         )
-        # qdrant-client returns an UpdateResult with a status; count isn't exposed here.
-        return 0 if result is None else -1
 
     async def search_text(
         self, vector: list[float], *, top_k: int = 5, collection: str | None = None,
@@ -214,8 +218,17 @@ class QdrantKB:
                     field_name=field,
                     field_schema=qmodels.PayloadSchemaType.KEYWORD,
                 )
-            except Exception as e:  # noqa: BLE001 — index may already exist
-                log.debug("qdrant: payload index %s.%s already present or failed: %s", collection, field, e)
+            except UnexpectedResponse as e:
+                # Qdrant returns a 4xx with "already exists" in the body when
+                # the index is already present. That's the expected idempotent
+                # path; anything else (5xx, schema mismatch, transport) is a
+                # real failure and must surface.
+                body = (e.content or b"").decode("utf-8", errors="replace").lower()
+                status = e.status_code or 0
+                if status < 500 and "exist" in body:
+                    log.debug("qdrant: payload index %s.%s already present", collection, field)
+                    continue
+                raise
 
     async def list_user_files(
         self, *, user: str, collection: str,

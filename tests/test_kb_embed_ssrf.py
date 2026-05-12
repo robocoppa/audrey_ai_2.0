@@ -8,10 +8,15 @@ The guard rejects: non-https schemes, missing hosts, hosts that resolve
 to private/loopback/link-local/multicast/reserved/unspecified IPs, and
 hosts that fail to resolve at all (fail-closed). Accepts plain public
 IPs.
+
+Also covers `_fetch_image`'s byte-cap enforcement: the cap is checked
+*before* each streamed chunk is appended, so a hostile server sending
+one huge chunk can't blow past `_IMAGE_FETCH_BYTE_CAP`.
 """
 
 import socket
 
+import httpx
 import pytest
 
 from audrey.kb import embed
@@ -120,3 +125,82 @@ def test_validate_url_includes_offending_host_in_message(monkeypatch):
     monkeypatch.setattr(embed.socket, "getaddrinfo", _stub_getaddrinfo("10.0.0.5"))
     with pytest.raises(ValueError, match="badhost"):
         embed._validate_image_url("https://badhost.example/x.png")
+
+
+# ─── _fetch_image: byte-cap enforcement ────────────────────────────────
+
+def _patch_async_client_with_transport(monkeypatch, handler):
+    """Replace `embed.httpx.AsyncClient` so it routes through MockTransport.
+
+    `_fetch_image` constructs its own `httpx.AsyncClient(...)` inline, so we
+    can't inject a transport directly. This shim keeps every kwarg
+    `_fetch_image` passes (timeout, headers, follow_redirects=False) and
+    just adds `transport=`.
+    """
+    original = embed.httpx.AsyncClient
+
+    def make(*args, **kwargs):
+        kwargs["transport"] = httpx.MockTransport(handler)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(embed.httpx, "AsyncClient", make)
+
+
+@pytest.mark.asyncio
+async def test_fetch_image_rejects_oversized_response_before_appending(monkeypatch):
+    # Send a single chunk that's larger than the cap. The pre-append check
+    # must raise before `buf` ever holds the oversized data — confirms the
+    # cap can't be overshot by one chunk's worth of bytes.
+    monkeypatch.setattr(embed.socket, "getaddrinfo", _stub_getaddrinfo("8.8.8.8"))
+    huge = b"x" * (embed._IMAGE_FETCH_BYTE_CAP + 1)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=huge,
+            headers={"content-type": "image/jpeg"},
+        )
+
+    _patch_async_client_with_transport(monkeypatch, handler)
+
+    with pytest.raises(ValueError, match="exceeds"):
+        await embed._fetch_image("https://example.com/huge.jpg")
+
+
+@pytest.mark.asyncio
+async def test_fetch_image_reports_redirect_clearly(monkeypatch):
+    # `follow_redirects=False` is kept for SSRF defense, but the user-facing
+    # error should name the redirect target instead of raising an opaque
+    # "302 Found". Wikimedia commonly 302s from /wiki/File:foo.jpg to the
+    # actual CDN URL, so this path matters in practice.
+    monkeypatch.setattr(embed.socket, "getaddrinfo", _stub_getaddrinfo("8.8.8.8"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            302,
+            headers={"location": "https://cdn.example.com/real-image.jpg"},
+        )
+
+    _patch_async_client_with_transport(monkeypatch, handler)
+
+    with pytest.raises(ValueError, match=r"redirect.*cdn\.example\.com"):
+        await embed._fetch_image("https://example.com/redirector")
+
+
+@pytest.mark.asyncio
+async def test_fetch_image_rejects_non_image_content_type(monkeypatch):
+    # Regression check that the existing content-type guard still fires
+    # alongside the byte-cap change.
+    monkeypatch.setattr(embed.socket, "getaddrinfo", _stub_getaddrinfo("8.8.8.8"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=b"<html>not an image</html>",
+            headers={"content-type": "text/html"},
+        )
+
+    _patch_async_client_with_transport(monkeypatch, handler)
+
+    with pytest.raises(ValueError, match="content-type"):
+        await embed._fetch_image("https://example.com/not-an-image")

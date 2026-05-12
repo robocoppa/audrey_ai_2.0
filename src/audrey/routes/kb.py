@@ -111,15 +111,20 @@ async def _search_text_merged(
 
     Second return value is True iff the user's private collection was actually
     merged in (user supplied + collection exists). The metrics label uses it.
+
+    Score-merge precondition: both collections must use the same embedder
+    (currently 768-d nomic-embed-text, cosine) so the raw scores are
+    comparable. If a per-user collection ever ships with a different model,
+    switch to reciprocal-rank-fusion rather than sorting by raw score.
     """
-    tasks = [qdrant.search_text(vec, top_k=top_k)]
+    coros = [qdrant.search_text(vec, top_k=top_k)]
     had_user = False
     if user:
         user_col = user_text_collection(user)
         if await qdrant.collection_exists(user_col):
-            tasks.append(qdrant.search_text(vec, top_k=top_k, collection=user_col))
+            coros.append(qdrant.search_text(vec, top_k=top_k, collection=user_col))
             had_user = True
-    results = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*coros)
     merged: list[KBHit] = [h for batch in results for h in batch]
     merged.sort(key=lambda h: h.score, reverse=True)
     return merged[:top_k], had_user
@@ -128,14 +133,16 @@ async def _search_text_merged(
 async def _search_images_merged(
     qdrant: QdrantKB, vec: list[float], *, top_k: int, user: str | None,
 ) -> tuple[list[KBHit], bool]:
-    tasks = [qdrant.search_images(vec, top_k=top_k)]
+    # Same score-merge precondition as `_search_text_merged`: both image
+    # collections use 512-d CLIP ViT-B-32, cosine.
+    coros = [qdrant.search_images(vec, top_k=top_k)]
     had_user = False
     if user:
         user_col = user_image_collection(user)
         if await qdrant.collection_exists(user_col):
-            tasks.append(qdrant.search_images(vec, top_k=top_k, collection=user_col))
+            coros.append(qdrant.search_images(vec, top_k=top_k, collection=user_col))
             had_user = True
-    results = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*coros)
     merged: list[KBHit] = [h for batch in results for h in batch]
     merged.sort(key=lambda h: h.score, reverse=True)
     return merged[:top_k], had_user
