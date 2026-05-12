@@ -304,7 +304,7 @@ Could you help me think through whether this backup plan is sensible?
 the classifier asks a small router model.
 
 The router prompt is `_ROUTER_SYSTEM` at
-[`classify.py:120`](../../src/audrey/pipeline/classify.py#L120). It tells the
+[`classify.py:121`](../../src/audrey/pipeline/classify.py#L121). It tells the
 model to return only JSON:
 
 ```json
@@ -541,10 +541,7 @@ emit a chunk.
 
 For this lesson, the important point is:
 
-```text
-graph path and streaming path share the same routing concepts
-but streaming has a route-level driver so it can control the event stream
-```
+#### Graph path and streaming path share the same routing concepts, but streaming has a route-level driver so it can control the event stream
 
 ### 2.11 One concrete routing path
 
@@ -675,8 +672,8 @@ control over how the client sees progress.
 
 ## When you're ready for the next lesson
 
-The next lesson can follow the most dynamic part of the request path: tool use.
-We have now seen how Audrey decides a request's task and route. The next useful
-question is what happens when a selected model can call tools: how ReAct loops
-work, how Audrey dispatches custom-tools safely, and how tool results come back
-into the model's conversation.
+Lesson 8 picks up where this lesson leaves off. We have seen how Audrey
+decides a request's task and route; the next question is what happens when
+a selected model can call tools. The ReAct loop, the dispatcher, and the
+user-scope invariant on per-user tools all live in
+[`lesson-08-tool-use-and-react.md`](lesson-08-tool-use-and-react.md).
