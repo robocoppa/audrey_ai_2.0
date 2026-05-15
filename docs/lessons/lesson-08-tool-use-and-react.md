@@ -251,6 +251,12 @@ straight away) or two rounds (one tool call, then the answer).
 
 ### 2.5 What "tool_calls" actually looks like
 
+The protocol-level details of this shape — where it comes from, why it
+looks the way it does, and how it differs between OpenAI, Anthropic,
+and Ollama — are covered in the next lesson
+([`lesson-09-how-function-calling-works.md`](lesson-09-how-function-calling-works.md)).
+Here we focus on what Audrey does with it.
+
 When the model decides to call a tool, the chat response looks like:
 
 ```json
@@ -690,8 +696,11 @@ with function calling?"
 ## When you're ready for the next lesson
 
 We have walked classification, routing, model selection, gate scheduling,
-and now tool dispatch. The remaining big surface that hasn't been a lesson
-yet is the knowledge base — how documents and images get ingested, embedded,
-indexed in Qdrant, and served back through `kb_search` and
-`kb_image_search`. That's the natural next stop: tools point at the KB, and
-the next lesson opens it up.
+and now tool dispatch. This lesson treated the function-calling protocol
+as given — Audrey builds a `tools` array, hands it to a model, receives
+`tool_calls`, runs them, loops. The next lesson opens that black box:
+where the JSON shape comes from, how the model is taught to emit it, and
+what changes between OpenAI, Anthropic, and Ollama dialects. After that,
+we open the knowledge base — how documents and images get ingested,
+embedded, indexed in Qdrant, and served back through the `kb_search` and
+`kb_image_search` tools whose dispatch you just learned to follow.
