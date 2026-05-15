@@ -21,21 +21,35 @@ def _encoder() -> tiktoken.Encoding:
     return tiktoken.get_encoding("cl100k_base")
 
 
+def _count_message_tokens(m: dict, enc: tiktoken.Encoding) -> int:
+    c = m.get("content")
+    if isinstance(c, str):
+        return len(enc.encode(c))
+    # Multimodal content (list of parts) — only text parts contribute;
+    # image bytes don't have meaningful token counts at this layer.
+    if isinstance(c, list):
+        n = 0
+        for part in c:
+            if isinstance(part, dict) and isinstance(part.get("text"), str):
+                n += len(enc.encode(part["text"]))
+        return n
+    return 0
+
+
 def count_tokens(messages: list[dict]) -> int:
     """Sum token counts across every message's `content`. System + tool messages count too."""
     enc = _encoder()
-    total = 0
+    return sum(_count_message_tokens(m, enc) for m in messages)
+
+
+def count_tokens_by_role(messages: list[dict]) -> dict[str, int]:
+    """Per-role token sums; unknown/missing roles bucket under `"other"`."""
+    enc = _encoder()
+    totals: dict[str, int] = {}
     for m in messages:
-        c = m.get("content")
-        if isinstance(c, str):
-            total += len(enc.encode(c))
-        # Multimodal content (list of parts) — we only count the text parts;
-        # image bytes don't have meaningful token counts at this layer.
-        elif isinstance(c, list):
-            for part in c:
-                if isinstance(part, dict) and isinstance(part.get("text"), str):
-                    total += len(enc.encode(part["text"]))
-    return total
+        role = m.get("role") or "other"
+        totals[role] = totals.get(role, 0) + _count_message_tokens(m, enc)
+    return totals
 
 
 def is_complex(messages: list[dict], *, threshold: int) -> tuple[bool, int]:
@@ -44,4 +58,4 @@ def is_complex(messages: list[dict], *, threshold: int) -> tuple[bool, int]:
     return n >= threshold, n
 
 
-__all__ = ["count_tokens", "is_complex"]
+__all__ = ["count_tokens", "count_tokens_by_role", "is_complex"]

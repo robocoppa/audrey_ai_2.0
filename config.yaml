@@ -252,6 +252,7 @@ tools:
 # ─── Complexity gate ───────────────────────────────────────────────────
 complexity:
   token_threshold: 500                   # pasted content this large forces deep panel
+  log_breakdown: false                   # when true, emit per-role token sums alongside each complexity line (Phase 6a investigation)
 
 # ─── GPU concurrency ───────────────────────────────────────────────────
 gpu:

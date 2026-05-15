@@ -392,7 +392,7 @@ The token counter lives in
 [`complexity.py:24`](../../src/audrey/pipeline/complexity.py#L24). It walks all
 message content and counts text tokens. Multimodal messages get special care:
 for list-shaped content, Audrey counts only text parts at
-[`complexity.py:34`](../../src/audrey/pipeline/complexity.py#L34).
+[`complexity.py:55`](../../src/audrey/pipeline/complexity.py#L55).
 
 `is_complex(...)` is tiny:
 
@@ -497,7 +497,7 @@ block.
 
 After `fast_path` returns, Audrey may still decide the answer was not good
 enough. The router for that is
-[`graph.py:340`](../../src/audrey/pipeline/graph.py#L340).
+[`graph.py:351`](../../src/audrey/pipeline/graph.py#L351).
 
 The first guard is simple: if escalation is disabled, stop.
 

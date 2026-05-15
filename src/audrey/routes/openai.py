@@ -55,7 +55,7 @@ from audrey.pipeline.chat_archive import (
     last_user_text as _archive_last_user_text,
 )
 from audrey.pipeline.classify import classify_with_registry
-from audrey.pipeline.complexity import is_complex
+from audrey.pipeline.complexity import count_tokens_by_role, is_complex
 from audrey.pipeline.context import datetime_system_message
 from audrey.pipeline.deep_panel import pool_key_for, run_panel_streaming
 from audrey.pipeline.fair_gate import FairLocalGate
@@ -338,7 +338,8 @@ async def _stream_via_pipeline(
                 cfg=cfg,
                 registry=app.state.tools,
             )
-            complex_, n = is_complex(messages, threshold=int(cfg.raw.get("complexity", {}).get("token_threshold", 500)))
+            complexity_cfg = cfg.raw.get("complexity", {}) or {}
+            complex_, n = is_complex(messages, threshold=int(complexity_cfg.get("token_threshold", 500)))
             forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local")
             forced_fast = payload.model == "audrey_fast"
             if forced_deep:
@@ -352,6 +353,10 @@ async def _stream_via_pipeline(
                 "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=%s",
                 payload.model, task, reason, conf, n, "deep" if use_deep else "fast",
             )
+            if complexity_cfg.get("log_breakdown", False):
+                by_role = count_tokens_by_role(messages)
+                parts = " ".join(f"{r}={by_role[r]}" for r in sorted(by_role))
+                log.info("complexity.breakdown: %s", parts)
 
             if use_deep:
                 is_deep_branch = True
