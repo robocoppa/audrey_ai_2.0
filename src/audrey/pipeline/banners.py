@@ -48,6 +48,7 @@ QUEUE_MAXSIZE: int = 64
 # ─── Headers (one per phase) ──────────────────────────────────────────
 
 BANNER_THINKING = "> _Thinking_"
+BANNER_PLANNING = "> _Planning_"
 BANNER_DISPATCHING = "> _Dispatching panel_"
 BANNER_SYNTHESIZING = "> _Synthesizing_"
 
@@ -228,6 +229,7 @@ class PhaseTicker:
 
 __all__ = [
     "BANNER_THINKING",
+    "BANNER_PLANNING",
     "BANNER_DISPATCHING",
     "BANNER_SYNTHESIZING",
     "BANNER_SEPARATOR",

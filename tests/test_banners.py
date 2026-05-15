@@ -9,9 +9,23 @@ The footer is reachable across the deep streaming path
 (`final["tool_calls_log"]`); both call sites pass the same
 `(model, calls)` tuple shape, so the formatter has one definition
 to defend.
+
+Also pins the banner header constants the streaming routes depend on
+(Phase 7 added a Thinking banner on the fast path that reuses
+`BANNER_THINKING` + `BANNER_SEPARATOR`). The constants are part of
+the SSE protocol contract — a silent rename would not break any
+test, but would change what users see in the chat UI.
 """
 
-from audrey.pipeline.banners import _format_calls, tool_summary_block
+from audrey.pipeline.banners import (
+    BANNER_DISPATCHING,
+    BANNER_PLANNING,
+    BANNER_SEPARATOR,
+    BANNER_SYNTHESIZING,
+    BANNER_THINKING,
+    _format_calls,
+    tool_summary_block,
+)
 
 # ─── _format_calls ─────────────────────────────────────────────────────
 
@@ -145,3 +159,39 @@ def test_tool_summary_block_ends_with_newline():
         ("m", [{"name": "t", "is_error": False}]),
     ])
     assert out.endswith("\n")
+
+
+# ─── Banner header constants ──────────────────────────────────────────
+#
+# Pin the user-visible strings so a silent rename can't ship to prod.
+# The streaming route emits these verbatim into SSE frames; the chat
+# UI renders them as markdown blockquotes. Any change here is a UX
+# change and must be deliberate.
+
+def test_banner_thinking_constant_shape():
+    # Blockquote + italic + bare word. The italic underscores tell the
+    # markdown renderer to style the line as a "system aside" rather
+    # than plain text. Used by the fast streaming branch only.
+    assert BANNER_THINKING == "> _Thinking_"
+
+
+def test_banner_planning_constant_shape():
+    # Deep streaming uses Planning (memory recall + planner) instead
+    # of Thinking so users can tell at a glance which branch ran:
+    # Thinking → fast, Planning → deep.
+    assert BANNER_PLANNING == "> _Planning_"
+
+
+def test_banner_dispatching_constant_shape():
+    assert BANNER_DISPATCHING == "> _Dispatching panel_"
+
+
+def test_banner_synthesizing_constant_shape():
+    assert BANNER_SYNTHESIZING == "> _Synthesizing_"
+
+
+def test_banner_separator_is_horizontal_rule_with_padding():
+    # Two newlines on each side so the markdown renderer treats the
+    # `---` as a horizontal rule, not a continuation of the blockquote
+    # above. Phase 7 fast-path banner relies on this exact shape.
+    assert BANNER_SEPARATOR == "\n\n---\n\n"

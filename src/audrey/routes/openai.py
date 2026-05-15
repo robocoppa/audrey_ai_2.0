@@ -37,6 +37,7 @@ from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.banners import (
     BANNER_DISPATCHING,
+    BANNER_PLANNING,
     BANNER_SEPARATOR,
     BANNER_SYNTHESIZING,
     BANNER_THINKING,
@@ -370,6 +371,31 @@ async def _stream_via_pipeline(
                 return
             chosen_concrete = spec.name
 
+            # Banner-emit machinery for the fast branch's Thinking ticker.
+            # Per-request `cid` / `created` / `fingerprint` mirror what
+            # `_stream_deep_with_banners` builds inline — banner frames must
+            # share the streaming request's identity so the client treats
+            # them as continuation chunks of the same response.
+            fast_created = int(time.time())
+            fast_cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+            fast_fingerprint = f"audrey-{__version__}/{spec.name}"
+
+            def _fast_delta(text: str) -> str:
+                frame = {
+                    "id": fast_cid, "object": "chat.completion.chunk", "created": fast_created,
+                    "model": payload.model, "system_fingerprint": fast_fingerprint,
+                    "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
+                }
+                return f"data: {json.dumps(frame)}\n\n"
+
+            # Role frame first per OpenAI streaming spec, then the banner.
+            role_frame = {
+                "id": fast_cid, "object": "chat.completion.chunk", "created": fast_created,
+                "model": payload.model, "system_fingerprint": fast_fingerprint,
+                "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+            }
+            yield f"data: {json.dumps(role_frame)}\n\n"
+
             # If the chosen model is tool-capable and tools are registered, route
             # the streaming request through the graph so the ReAct loop can fire.
             # Mid-stream tool dispatch isn't supported — we emit one chunk after
@@ -377,6 +403,8 @@ async def _stream_via_pipeline(
             tool_capable = set(cfg.raw.get("fast_path", {}).get("tool_capable_models", []) or [])
             tools_active = bool(app.state.tools.by_name) and spec.name in tool_capable
             if tools_active:
+                # Tool-capable path can take 1-3s on a `kb_search` round, so
+                # use a full PhaseTicker that emits dots while the graph runs.
                 graph = app.state.graph
                 state = {
                     "virtual_model": payload.model,
@@ -386,14 +414,30 @@ async def _stream_via_pipeline(
                     "max_tokens": payload.max_tokens,
                     "user_id": user_id,
                 }
+                banner_q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=128)
+
+                async def _banner_emit(text: str) -> None:
+                    await banner_q.put(text)
+
+                graph_task: asyncio.Task[Any] | None = None
                 try:
-                    final = await _run_graph_with_metrics(graph, state)
+                    async with PhaseTicker(BANNER_THINKING, _banner_emit):
+                        graph_task = asyncio.create_task(
+                            _run_graph_with_metrics(graph, state)
+                        )
+                        async for frame in _drain_q_until_task(banner_q, graph_task, _fast_delta):
+                            yield frame
+                        final = graph_task.result()
                 except OllamaError as e:
                     async for frame in _emit_single_message(
                         payload.model, "error", f"[ollama error: {e}]"
                     ):
                         yield frame
                     return
+                # Drain the closing ✅\n that PhaseTicker pushed on exit.
+                async for frame in _drain_q_now(banner_q, _fast_delta):
+                    yield frame
+
                 concrete = final.get("concrete_model", spec.name)
                 chosen_concrete = concrete
                 content = final.get("content", "") or "[empty]"
@@ -405,6 +449,8 @@ async def _stream_via_pipeline(
                 ])
                 if footer:
                     content = content + footer
+                # Separator between banner and answer body — matches deep.
+                yield _fast_delta(BANNER_SEPARATOR)
                 # Tool-capable fast path emits the answer in one chunk; feed
                 # the answer text directly into the collector since the
                 # SSE-frame parser would also catch it but feeding text is
@@ -413,6 +459,15 @@ async def _stream_via_pipeline(
                 async for frame in _emit_single_message(payload.model, concrete, content):
                     yield frame
                 return
+
+            # Plain-chat fast path: no tools, tokens stream within ~200ms of
+            # first byte. A full PhaseTicker would emit no dots before the
+            # first token closes it; emit a static header + ✅ + separator
+            # so the user sees an immediate "Thinking" ack without the dot
+            # animation machinery overhead.
+            yield _fast_delta(BANNER_THINKING)
+            yield _fast_delta(" ✅\n")
+            yield _fast_delta(BANNER_SEPARATOR)
 
             timeout = float(cfg.timeouts.get("fast_path", 180))
             async for frame in collector.wrap(_stream_openai(
@@ -512,7 +567,7 @@ async def _stream_deep_with_banners(
     just changes reception order so we can banner per-completion.
 
     Flow:
-      Thinking phase   → memory recall + planner (already classified upstream)
+      Planning phase   → memory recall + planner (already classified upstream)
       Dispatching      → run_panel_streaming, banner per worker
       Synthesizing     → synth (non-streamed in phase 18; streams in phase 19)
       separator + answer
@@ -574,7 +629,7 @@ async def _stream_deep_with_banners(
     synth_model = "deep_panel"
 
     try:
-        # ── Stage 1: Thinking (memory recall + planner) ─────────────────
+        # ── Stage 1: Planning (memory recall + planner) ─────────────────
         memory_cfg = agentic.get("memory", {}) or {}
         memory_enabled = bool(memory_cfg.get("enabled", True))
         memory_top_k = int(memory_cfg.get("top_k", 3))
@@ -586,7 +641,7 @@ async def _stream_deep_with_banners(
         complexity_threshold = int(cfg.raw.get("complexity", {}).get("token_threshold", 500))
         _, prompt_tokens = is_complex(messages, threshold=complexity_threshold)
 
-        async with PhaseTicker(BANNER_THINKING, emit):
+        async with PhaseTicker(BANNER_PLANNING, emit):
             think_task = asyncio.create_task(_phase_thinking(
                 ollama=ollama, tools=tools, user_id=user_id, messages=messages,
                 memory_enabled=memory_enabled, memory_top_k=memory_top_k,

@@ -90,20 +90,23 @@ dispatch, complexity log shows 600-1200 tokens. If complexity shows
 
 ### Step 2 — sample the chat archive
 
-The chat archive SQLite lives inside the custom-tools container. The
-image does not ship `sqlite3`, so copy the DB out and inspect from the
-host:
+The chat archive lives at `/app/data/chat_archive.db` inside the
+custom-tools container, bind-mounted from
+`/mnt/user/appdata/custom-tools/chat_archive.db` on the Unraid host
+([`tools-server/settings.py:57`](../../tools-server/settings.py#L57),
+[`compose.yaml:91`](../../compose.yaml#L91)). Read it directly off
+the bind mount — no `docker compose cp` needed:
 
 ```bash
-docker compose cp custom-tools:/data/chat_archive.sqlite /tmp/chat_archive.sqlite
-sqlite3 /tmp/chat_archive.sqlite \
-  "SELECT role, length(content) AS chars, COUNT(*) AS n FROM messages GROUP BY role ORDER BY chars DESC LIMIT 30;"
+sqlite3 /mnt/user/appdata/custom-tools/chat_archive.db \
+  "SELECT role, COUNT(*) AS n, AVG(length(content)) AS avg_chars, MAX(length(content)) AS max_chars
+   FROM messages GROUP BY role ORDER BY role;"
 ```
 
-A grouped view of per-role char totals + counts:
+Per-user breakdown:
 
 ```bash
-sqlite3 /tmp/chat_archive.sqlite \
+sqlite3 /mnt/user/appdata/custom-tools/chat_archive.db \
   "SELECT user, role, COUNT(*) AS n, AVG(length(content)) AS avg_chars, MAX(length(content)) AS max_chars
    FROM messages GROUP BY user, role ORDER BY user, role;"
 ```
@@ -131,20 +134,36 @@ message), and compute the token count both ways:
 Then tabulate: how many turns are `current >= 500 AND proposed_B <
 500`? Those are the turns Option B would flip from deep to fast.
 
-`scripts/probe_complexity_gate.py` does this. It is committed to the
-repo. It runs against the copied SQLite from Step 2; no Audrey
-runtime needed.
+`scripts/probe_complexity_gate.py` does this. It depends on tiktoken,
+so it cannot run from the Unraid host shell (no `python3`, no
+`tiktoken`). Two ways to run it that do work:
+
+**Run on the laptop.** Copy the DB down with `scp`, then run inside
+the audrey checkout's venv. Cleanest path because the venv already
+has tiktoken.
 
 ```bash
-# Aggregate counts + token-count histogram (the answer for Option A vs B):
-python3 scripts/probe_complexity_gate.py /tmp/chat_archive.sqlite
-
-# Add the per-user breakdown — both OWUI users will show up here:
-python3 scripts/probe_complexity_gate.py /tmp/chat_archive.sqlite --per-user
-
-# Dump the flipped turns for the Step 4 eyeball pass. PII-bearing:
-python3 scripts/probe_complexity_gate.py /tmp/chat_archive.sqlite --dump-flipped
+# On the laptop, in the audrey repo:
+scp <unraid-host>:/mnt/user/appdata/custom-tools/chat_archive.db /tmp/chat_archive.db
+.venv/bin/python scripts/probe_complexity_gate.py /tmp/chat_archive.db
+.venv/bin/python scripts/probe_complexity_gate.py /tmp/chat_archive.db --per-user
+.venv/bin/python scripts/probe_complexity_gate.py /tmp/chat_archive.db --dump-flipped
 ```
+
+**Run inside the audrey-ai container.** Useful if SSH-copying the DB
+off Unraid is a hassle. Audrey-ai has both Python and tiktoken.
+
+```bash
+# On Unraid:
+docker cp /mnt/user/appdata/custom-tools/chat_archive.db audrey-ai:/tmp/chat_archive.db
+docker cp scripts/probe_complexity_gate.py audrey-ai:/tmp/probe.py
+docker exec audrey-ai python3 /tmp/probe.py /tmp/chat_archive.db --per-user
+```
+
+The script does not write to the DB and does not network out, but it
+holds the connection open for the duration of the scan, so prefer
+running off a host copy rather than the live mount if the archive is
+actively being written to.
 
 The output has four sections:
 
