@@ -105,6 +105,14 @@ docker compose up -d
 - Container DNS names such as `custom-tools` work inside `ollama-net`, not from
   the Unraid host shell. From the host, use mapped localhost ports or `docker
   exec` into a container on the network.
+- The complexity gate runs OWUI-task detection (`### Task:` prefix on the latest
+  user message) before any virtual-model forced-deep/forced-fast check. Utility
+  tasks like Title Generation route fast regardless of the virtual model picked.
+  Don't reorder.
+- `_count_message_tokens` strips Audrey's own banner markup (lines starting with
+  `>`, bare `---` lines) from `role: "assistant"` content before counting.
+  Stripping is assistant-only — user content is never stripped, even if it
+  starts with a blockquote.
 
 ## Lesson Workflow
 
