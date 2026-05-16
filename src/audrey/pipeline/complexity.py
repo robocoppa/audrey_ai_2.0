@@ -65,6 +65,31 @@ def count_last_user_tokens(messages: list[dict]) -> int:
     return 0
 
 
+# OWUI utility tasks (Title Generation, Tags, Follow Up, Autocomplete, Retrieval
+# Query rewrite, Image Prompt, Web Search Query) all submit a single user
+# message that opens with this exact header. They are issued by OWUI itself,
+# not by a human asking a question, and they ship the entire chat history
+# bundled into the body — which trips Audrey's complexity gate to deep even
+# though the work is a short-output utility task. Detect by prefix and force
+# fast in both the streaming and non-streaming gates.
+_OWUI_TASK_PREFIX = "### Task:"
+
+
+def is_owui_task_request(messages: list[dict]) -> bool:
+    """True when the latest user message is an OWUI-generated utility prompt."""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            content = m.get("content")
+            if isinstance(content, str):
+                return content.lstrip().startswith(_OWUI_TASK_PREFIX)
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        return part["text"].lstrip().startswith(_OWUI_TASK_PREFIX)
+            return False
+    return False
+
+
 def is_complex(messages: list[dict], *, threshold: int) -> tuple[bool, int]:
     """Returns `(complex?, token_count)`. Complex prompts route to deep panel."""
     n = count_tokens(messages)
@@ -76,4 +101,5 @@ __all__ = [
     "count_tokens",
     "count_tokens_by_role",
     "is_complex",
+    "is_owui_task_request",
 ]

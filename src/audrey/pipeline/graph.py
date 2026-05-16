@@ -54,6 +54,7 @@ from audrey.pipeline.complexity import (
     count_last_user_tokens,
     count_tokens_by_role,
     is_complex,
+    is_owui_task_request,
 )
 from audrey.pipeline.context import datetime_system_message
 from audrey.pipeline.deep_panel import pool_key_for, run_panel
@@ -208,7 +209,11 @@ def build_graph(
         vm = state.get("virtual_model")
         forced_deep = vm in ("audrey_deep", "audrey_cloud", "audrey_local")
         forced_fast = vm == "audrey_fast"
-        if forced_deep:
+        owui_task = is_owui_task_request(state["messages"])
+        if owui_task:
+            mode = "fast"
+            reason = "owui_task"
+        elif forced_deep:
             mode = "deep"
             reason = "forced_by_virtual_model"
         elif forced_fast:

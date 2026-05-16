@@ -6,6 +6,7 @@ from audrey.pipeline.complexity import (
     count_tokens,
     count_tokens_by_role,
     is_complex,
+    is_owui_task_request,
 )
 
 
@@ -95,6 +96,76 @@ def test_count_last_user_tokens_handles_multimodal_last_user():
     last = count_last_user_tokens(messages)
     expected = count_tokens([{"role": "user", "content": "describe this image"}])
     assert last == expected
+
+
+def test_is_owui_task_request_detects_title_generation():
+    # Captured payload prefix from a real OWUI Title Generation call.
+    messages = [
+        {"role": "system", "content": "User local date and time: 2026-05-16"},
+        {"role": "user", "content": (
+            "### Task:\nGenerate a concise, 3-5 word title with an emoji "
+            "summarizing the chat history.\n### Guidelines:\n- The title "
+            "should clearly represent the main theme..."
+        )},
+    ]
+    assert is_owui_task_request(messages) is True
+
+
+def test_is_owui_task_request_detects_tags_generation():
+    messages = [
+        {"role": "user", "content": "### Task:\nGenerate 1-3 broad tags categorizing this chat."},
+    ]
+    assert is_owui_task_request(messages) is True
+
+
+def test_is_owui_task_request_tolerates_leading_whitespace():
+    # Defensive: some OWUI templates may emit leading newlines/spaces.
+    messages = [
+        {"role": "user", "content": "\n\n  ### Task:\nGenerate a concise title"},
+    ]
+    assert is_owui_task_request(messages) is True
+
+
+def test_is_owui_task_request_ignores_normal_user_message():
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "what is the current temperature in istanbul"},
+    ]
+    assert is_owui_task_request(messages) is False
+
+
+def test_is_owui_task_request_ignores_task_keyword_inside_message():
+    # The header must be the *prefix* — a user mentioning "task" mid-message
+    # shouldn't trigger a false positive.
+    messages = [
+        {"role": "user", "content": "My next task is to write a report. ### Task:..."},
+    ]
+    assert is_owui_task_request(messages) is False
+
+
+def test_is_owui_task_request_only_checks_latest_user():
+    # An earlier user turn was an OWUI task, but the most recent isn't —
+    # follow-ups in a real conversation must not be misclassified.
+    messages = [
+        {"role": "user", "content": "### Task:\nGenerate a concise title"},
+        {"role": "assistant", "content": "Some Title"},
+        {"role": "user", "content": "how many plane rides to pitcairn island"},
+    ]
+    assert is_owui_task_request(messages) is False
+
+
+def test_is_owui_task_request_handles_multimodal_user_content():
+    messages = [
+        {"role": "user", "content": [
+            {"type": "text", "text": "### Task:\nGenerate tags"},
+        ]},
+    ]
+    assert is_owui_task_request(messages) is True
+
+
+def test_is_owui_task_request_no_user_message_returns_false():
+    messages = [{"role": "system", "content": "sys"}]
+    assert is_owui_task_request(messages) is False
 
 
 def test_is_complex_returns_tuple():

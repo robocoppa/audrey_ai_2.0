@@ -59,6 +59,7 @@ from audrey.pipeline.complexity import (
     count_last_user_tokens,
     count_tokens_by_role,
     is_complex,
+    is_owui_task_request,
 )
 from audrey.pipeline.context import datetime_system_message
 from audrey.pipeline.deep_panel import pool_key_for, run_panel_streaming
@@ -356,7 +357,14 @@ async def _stream_via_pipeline(
             complex_, n = is_complex(messages, threshold=int(complexity_cfg.get("token_threshold", 500)))
             forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local")
             forced_fast = payload.model == "audrey_fast"
-            if forced_deep:
+            owui_task = is_owui_task_request(messages)
+            if owui_task:
+                # OWUI utility tasks (title gen, tags, follow-up suggestions)
+                # bundle the whole conversation as one user message. They
+                # always want a short, cheap answer — force fast regardless
+                # of token count or virtual model.
+                use_deep = False
+            elif forced_deep:
                 use_deep = True
             elif forced_fast:
                 use_deep = False
@@ -364,8 +372,10 @@ async def _stream_via_pipeline(
                 use_deep = complex_  # audrey_auto
 
             log.info(
-                "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=%s",
-                payload.model, task, reason, conf, n, "deep" if use_deep else "fast",
+                "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=%s%s",
+                payload.model, task, reason, conf, n,
+                "deep" if use_deep else "fast",
+                " owui_task=1" if owui_task else "",
             )
             if complexity_cfg.get("log_breakdown", False):
                 by_role = count_tokens_by_role(messages)

@@ -110,7 +110,7 @@ shape is the sequence of decisions.
 
 The non-streaming route handler hands off to a helper that builds a
 plain dictionary named `state`. Open
-[`routes/openai.py:229`](../../src/audrey/routes/openai.py#L229),
+[`routes/openai.py:240`](../../src/audrey/routes/openai.py#L240),
 which is the start of `_generate_via_pipeline`:
 
 ```python
@@ -392,7 +392,7 @@ The token counter lives in
 [`complexity.py:24`](../../src/audrey/pipeline/complexity.py#L24). It walks all
 message content and counts text tokens. Multimodal messages get special care:
 for list-shaped content, Audrey counts only text parts at
-[`complexity.py:68`](../../src/audrey/pipeline/complexity.py#L68).
+[`complexity.py:93`](../../src/audrey/pipeline/complexity.py#L93).
 
 `is_complex(...)` is tiny:
 
