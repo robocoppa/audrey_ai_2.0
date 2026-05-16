@@ -55,7 +55,11 @@ from audrey.pipeline.chat_archive import (
     last_user_text as _archive_last_user_text,
 )
 from audrey.pipeline.classify import classify_with_registry
-from audrey.pipeline.complexity import count_tokens_by_role, is_complex
+from audrey.pipeline.complexity import (
+    count_last_user_tokens,
+    count_tokens_by_role,
+    is_complex,
+)
 from audrey.pipeline.context import datetime_system_message
 from audrey.pipeline.deep_panel import pool_key_for, run_panel_streaming
 from audrey.pipeline.fair_gate import FairLocalGate
@@ -355,8 +359,9 @@ async def _stream_via_pipeline(
             )
             if complexity_cfg.get("log_breakdown", False):
                 by_role = count_tokens_by_role(messages)
+                last_user = count_last_user_tokens(messages)
                 parts = " ".join(f"{r}={by_role[r]}" for r in sorted(by_role))
-                log.info("complexity.breakdown: %s", parts)
+                log.info("complexity.breakdown: %s last_user=%d", parts, last_user)
 
             if use_deep:
                 is_deep_branch = True

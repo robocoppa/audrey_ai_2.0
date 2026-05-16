@@ -52,10 +52,28 @@ def count_tokens_by_role(messages: list[dict]) -> dict[str, int]:
     return totals
 
 
+def count_last_user_tokens(messages: list[dict]) -> int:
+    """Tokens in the most recent `role: "user"` message.
+
+    Phase 6a breakdown signal — distinguishes "what's being asked right now"
+    from accumulated conversation history. Returns 0 if no user message.
+    """
+    enc = _encoder()
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            return _count_message_tokens(m, enc)
+    return 0
+
+
 def is_complex(messages: list[dict], *, threshold: int) -> tuple[bool, int]:
     """Returns `(complex?, token_count)`. Complex prompts route to deep panel."""
     n = count_tokens(messages)
     return n >= threshold, n
 
 
-__all__ = ["count_tokens", "count_tokens_by_role", "is_complex"]
+__all__ = [
+    "count_last_user_tokens",
+    "count_tokens",
+    "count_tokens_by_role",
+    "is_complex",
+]

@@ -50,7 +50,11 @@ from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.classify import classify_with_registry
-from audrey.pipeline.complexity import count_tokens_by_role, is_complex
+from audrey.pipeline.complexity import (
+    count_last_user_tokens,
+    count_tokens_by_role,
+    is_complex,
+)
 from audrey.pipeline.context import datetime_system_message
 from audrey.pipeline.deep_panel import pool_key_for, run_panel
 from audrey.pipeline.fair_gate import FairLocalGate
@@ -219,8 +223,9 @@ def build_graph(
         log.info("complexity: %d tokens -> %s (%s)", n, mode, reason)
         if complexity_log_breakdown:
             by_role = count_tokens_by_role(state["messages"])
+            last_user = count_last_user_tokens(state["messages"])
             parts = " ".join(f"{r}={by_role[r]}" for r in sorted(by_role))
-            log.info("complexity.breakdown: %s", parts)
+            log.info("complexity.breakdown: %s last_user=%d", parts, last_user)
         return {"prompt_tokens": n, "complex": complex_, "mode": mode}
 
     async def node_fast_path(state: PipelineState) -> dict[str, Any]:

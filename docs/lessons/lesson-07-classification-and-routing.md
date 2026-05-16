@@ -110,7 +110,7 @@ shape is the sequence of decisions.
 
 The non-streaming route handler hands off to a helper that builds a
 plain dictionary named `state`. Open
-[`routes/openai.py:217`](../../src/audrey/routes/openai.py#L217),
+[`routes/openai.py:229`](../../src/audrey/routes/openai.py#L229),
 which is the start of `_generate_via_pipeline`:
 
 ```python
@@ -167,7 +167,7 @@ node reads state
 
 ### 2.2 The graph order puts context before classification
 
-Open [`graph.py:390`](../../src/audrey/pipeline/graph.py#L390). The graph adds
+Open [`graph.py:390`](../../src/audrey/pipeline/graph.py#L404). The graph adds
 nodes in one block:
 
 ```python
@@ -177,7 +177,7 @@ g.add_node("classify", node_classify)
 g.add_node("complexity", node_complexity)
 ```
 
-Then the edges at [`graph.py:402`](../../src/audrey/pipeline/graph.py#L402)
+Then the edges at [`graph.py:402`](../../src/audrey/pipeline/graph.py#L415)
 make the order explicit:
 
 ```python
@@ -194,7 +194,7 @@ small context steps:
 - `memory_recall` may prepend relevant durable user memories.
 
 The classifier still looks for the last user message, not the system messages.
-That helper is at [`graph.py:438`](../../src/audrey/pipeline/graph.py#L438):
+That helper is at [`graph.py:438`](../../src/audrey/pipeline/graph.py#L451):
 
 ```python
 def _last_user_text(messages: list[dict[str, Any]]) -> str:
@@ -392,7 +392,7 @@ The token counter lives in
 [`complexity.py:24`](../../src/audrey/pipeline/complexity.py#L24). It walks all
 message content and counts text tokens. Multimodal messages get special care:
 for list-shaped content, Audrey counts only text parts at
-[`complexity.py:55`](../../src/audrey/pipeline/complexity.py#L55).
+[`complexity.py:68`](../../src/audrey/pipeline/complexity.py#L68).
 
 `is_complex(...)` is tiny:
 
@@ -470,9 +470,9 @@ def route_after_complexity(state: PipelineState) -> str:
     return "fast" if state.get("mode") == "fast" else "deep"
 ```
 
-That is at [`graph.py:406`](../../src/audrey/pipeline/graph.py#L406).
+That is at [`graph.py:419`](../../src/audrey/pipeline/graph.py#L419).
 
-The wiring at [`graph.py:406`](../../src/audrey/pipeline/graph.py#L406) tells
+The wiring at [`graph.py:419`](../../src/audrey/pipeline/graph.py#L419) tells
 LangGraph what those return strings mean:
 
 ```python

@@ -1,18 +1,33 @@
 # Campaign 2 Phase 6a - Complexity gate investigation
 
-Not a code-shipping phase. This is a structured probe to characterize a
-suspected bug surfaced during Phase 6 smoke testing: **follow-up turns
-in a tool-using conversation get routed to deep mode because prior
-`role: "tool"` results inflate the message token count past the
-`complexity.token_threshold`** (default 500).
+Not a code-shipping phase. This is a structured probe to characterize
+two related routing bugs that share a root cause: **Audrey's
+complexity gate sums tokens across every message in the conversation,
+so short, simple questions get routed to deep panel once the
+conversation around them has accumulated enough mass.**
 
-The fix candidates are known (Option A: raise threshold, Option B:
-exclude tool tokens, Option C: classifier override). The picking
-question is which one matches actual usage data — not just the single
-"tourniquet" example.
+There are two distinct failure patterns:
 
-This doc lays out the probe sequence, expected shape of the answer, and
-what numbers would push the decision one way or the other.
+- **Pattern 1 — tool-bloat within a conversation.** A fresh
+  conversation, fast on turn 1; turn 1's ReAct loop emits multiple
+  tool results; turn 2's short follow-up sees those tool results in
+  the message list and tips over the gate. Transcript 1 below.
+- **Pattern 2 — history accumulation across a long conversation.**
+  A trivially short user message ("what is your system prompt") on
+  turn N of a long-running chat routes deep because turns 1..N-1
+  carry enough assistant/user content alone to exceed the threshold,
+  with no tool involvement at all.
+
+The fix candidates differ by pattern:
+
+| Pattern | Fix candidates |
+|---|---|
+| 1 (tool bloat) | A (raise threshold), B (skip tool tokens), C (classifier override) |
+| 2 (history accumulation) | A (raise threshold), D (weight last user message) |
+
+The picking question is which combination matches actual usage data.
+This doc lays out the probe sequence, expected shape of the answer,
+and what numbers would push the decision one way or the other.
 
 ## What we already know
 
@@ -24,7 +39,7 @@ weighting.
 
 Two transcripts captured on 2026-05-15 show the bug end-to-end.
 
-### Transcript 1 — casual web research (no PII)
+### Transcript 1 — Pattern 1, casual web research (no PII)
 
 User on `audrey_auto`: short question about BJJ guard variants, one
 turn invoking web_search + kb_search, immediate follow-up.
@@ -48,7 +63,7 @@ Two numbers worth pinning down:
   tool results plus prior assistant synthesis carried in conversation
   history.
 
-### Transcript 2 — chat_history_search follow-up
+### Transcript 2 — Pattern 1, chat_history_search follow-up
 
 Same day, different conversation, `audrey_auto`. The model uses
 `memory_search` and `chat_history_search` on one turn, then the next
@@ -79,16 +94,35 @@ Three things this transcript rules in or out:
 - Wall-clock cost: ~57s for a deep panel that the equivalent fast
   path with one ReAct round would handle in ~10s.
 
+### Pattern 2 — long-conversation history accumulation
+
+Live example reported 2026-05-15: in an ongoing `audrey_auto`
+conversation that had been running for many turns, the user asked
+"what is your system prompt." The complexity gate routed the turn
+deep. The user message itself is trivially short (~6 tokens) and
+clearly doesn't deserve deep panel; the prior conversation history
+alone tipped the total over 500. No tool messages were involved on
+the most recent turns.
+
+This is the same root cause as Pattern 1 (the gate sums every message
+in the list), but with a different mechanism: assistant + user
+content from prior turns accumulates to the threshold even without
+tool roundtrips. Option B (skip tool tokens) does nothing here
+because there are no tool tokens to skip. The candidates that help
+are A (raise threshold globally) and D (weight the latest user
+message more heavily than prior history).
+
 ## The decision we need to make
 
-Three candidate fixes, each with different implications. The probe
-should produce enough data to pick one.
+Four candidate fixes, each with different implications. The probe
+should produce enough data to pick one — or a small combination.
 
 | Option | Change | When it wins | When it doesn't |
 |---|---|---|---|
-| **A. Raise threshold** | `config.yaml`: bump 500 → 1500 (or wherever the data lands). | Tool-using conversations regularly run 600-1200 tokens but rarely exceed 1500. Bug is statistical, not categorical. | Tool conversations routinely cross any reasonable threshold (>2k tokens by turn 3). |
-| **B. Exclude tool tokens** | `count_tokens` skips `role: "tool"` messages. ~4 line change in `complexity.py` + a test. | The bulk of the gate-crossing tokens are tool results. Excluding them brings most follow-ups back below threshold. | User prompts + assistant history also routinely cross 500 even without tool baggage. |
-| **C. Classifier override** | If strong keyword signal (e.g. `tool_mention:*`) AND task is `general`/`factoid`, override complexity gate back to fast. | Conversations where the user keeps invoking tools are usually single-shot lookups, not synthesis-worthy. | Some tool-mention turns genuinely benefit from deep (e.g. "search the KB for X and Y, then compare them"), AND `tool_mention` can fire when the model — not the user — name-drops a tool (see Transcript 2 above). The Step 4 eyeball pass needs to check what fraction of `tool_mention` turns are user-initiated vs. model-initiated. |
+| **A. Raise threshold** | `config.yaml`: bump 500 → 1500 (or wherever the data lands). | Both patterns are statistical, not categorical — conversations regularly run 600-1200 tokens but rarely exceed 1500. | Long conversations or tool-heavy turns routinely cross any reasonable threshold (>2k tokens by turn 3). |
+| **B. Exclude tool tokens** | `count_tokens` skips `role: "tool"` messages. ~4 line change in `complexity.py` + a test. Targets Pattern 1. | The bulk of Pattern 1's gate-crossing tokens are tool results. Excluding them brings most tool follow-ups back below threshold. | Doesn't help Pattern 2 at all. User prompts + assistant history also routinely cross 500 without tool baggage. |
+| **C. Classifier override** | If strong keyword signal (e.g. `tool_mention:*`) AND task is `general`/`factoid`, override complexity gate back to fast. | Tool-mention turns are usually single-shot lookups, not synthesis-worthy. | Some tool-mention turns genuinely benefit from deep ("search the KB for X and Y, then compare them"), AND `tool_mention` can fire when the model — not the user — name-drops a tool (see Transcript 2). The Step 4 eyeball pass needs to check what fraction of `tool_mention` turns are user-initiated. |
+| **D. Weight last user message** | Score the latest user message at full weight and prior history at a fractional weight (e.g. `score = last_user + history × 0.25`), or gate purely on `last_user` tokens. Targets Pattern 2. ~10 line change. | A short follow-up question in a long conversation is a fast-path task regardless of what came before — "what's being asked now" is the routing signal. | Users routinely paste long content into follow-ups; D would miss those and route them fast when they deserve deep. Tool-bloat Pattern 1 turns still have a short last user message, so D also helps them — but it's not the right *explanation* for the fix there. |
 
 The probe has three jobs:
 
@@ -271,11 +305,17 @@ Expected shape (one line per gate decision, paired with the existing
 
 ```text
 audrey-ai | ... complexity: 996 tokens -> deep (tokens>=500)
-audrey-ai | ... complexity.breakdown: assistant=412 system=180 tool=358 user=46
+audrey-ai | ... complexity.breakdown: assistant=412 system=180 tool=358 user=46 last_user=12
 ```
 
-The per-role keys can be `system`, `user`, `assistant`, `tool`, or
-`other` (anything with a missing or non-standard role).
+Two distinct signals on the breakdown line:
+
+- **Per-role keys** (`system`, `user`, `assistant`, `tool`, or `other`).
+  `user=` sums every user message in the conversation. Drives the
+  Option B (skip tool) and Option A (threshold) analyses.
+- **`last_user=`** sums only the most recent user message. Drives the
+  Option D analysis: how often is the last user message tiny while the
+  total is large?
 
 #### Run for ~24h of normal use
 
@@ -307,14 +347,21 @@ paste /tmp/c_total.txt /tmp/c_break.txt | head -20
 
 What to compute by hand or with awk:
 
-- Mean `tool=` contribution across all turns. If it averages 300+
+- **Mean `tool=` contribution across all turns.** If it averages 300+
   tokens per turn, tool tokens are a real bloat source — Option B is
-  in the running.
-- Of currently-deep turns (`-> deep (tokens>=500)`), what fraction
-  drop below 500 with the `tool=` sum subtracted?
-- Of the same currently-deep turns, what's the assistant+user
+  in the running for Pattern 1.
+- **Of currently-deep turns** (`-> deep (tokens>=500)`), what fraction
+  drop below 500 with the `tool=` sum subtracted? (Option B
+  effectiveness against Pattern 1.)
+- **Of the same currently-deep turns**, what's the assistant+user
   contribution alone? If it routinely tops 500 without help from
-  `tool=`, Option B can't save them — Option A is the answer.
+  `tool=`, Option B can't save them — that's the Pattern 2 signature.
+- **Mean `last_user=` on currently-deep turns.** If short last-user
+  messages (say, ≤50 tokens) routinely route deep while the total is
+  large, Option D is in the running.
+- **Of currently-deep turns where `last_user < 50`**, what fraction
+  would route fast under D (e.g. `last_user + (total - last_user) × 0.25
+  < 500`)? This is the Pattern 2 fix sizing.
 
 #### When you're done
 
@@ -349,24 +396,33 @@ checking.
 
 ## Decision criteria
 
-After steps 1-5, the call goes:
+After steps 1-5, the call goes. The patterns are independent — you
+may pick one fix that addresses both, or stack two fixes (e.g. B + D).
 
-- **Option B wins** if: ≥70% of currently-deep turns drop below 500
-  with `tool=` subtracted, AND the flipped turns are mostly one-shot
-  questions, AND step 5 doesn't surface a legitimate-deep case that
-  Option B would break.
-- **Option A wins** if: even with `tool=` subtracted, most follow-up
-  turns still cross 500. The signal in the data is "all conversations
-  grow," not "tool results bloat them." Raise the threshold to where
-  the 75th percentile of (current - tool) lands, leaving the top
-  quartile above the line.
+- **Option B wins for Pattern 1** if: ≥70% of currently-deep turns
+  with non-trivial `tool=` drop below 500 with `tool=` subtracted,
+  AND the flipped turns are mostly one-shot questions, AND step 5
+  doesn't surface a legitimate-deep case that Option B would break.
+- **Option D wins for Pattern 2** if: a meaningful fraction of
+  currently-deep turns have `last_user < 50` (i.e. short follow-ups),
+  AND a weighted-history scoring scheme would route them fast, AND
+  step 5 doesn't surface a long-paste case that D would break.
+- **Option A wins** if: even with `tool=` subtracted AND `last_user`
+  weighted, most follow-up turns still cross 500. The signal in the
+  data is "all conversations grow," and the right answer is to raise
+  the threshold to wherever the 75th percentile sits.
 - **Option C wins** if: Option B over-flips (turns legitimately
   benefiting from deep get pushed to fast), AND the tool-mention
   classifier signal turns out to be a good predictor of "one-shot
-  question." Transcript 2 above is the cautionary case — `tool_mention`
+  question." Transcript 2 is the cautionary case — `tool_mention`
   can fire on synthesis turns where the model name-drops a tool.
-- **Do nothing** if: <30% of currently-deep turns are tool-influenced,
-  AND the wall-clock impact is tolerable. The bug is real but rare.
+- **Combined B + D** wins if: Pattern 1 and Pattern 2 are both
+  prevalent (~30%+ of deep turns each) and the fixes are
+  independent (B targets the tool sum, D targets short-follow-up
+  scoring). They don't conflict mechanically.
+- **Do nothing** if: <30% of currently-deep turns are tool-influenced
+  AND short-follow-up-in-long-history, AND the wall-clock impact is
+  tolerable. Both bugs real but rare.
 
 ## Followups to ship if probe confirms
 
@@ -375,12 +431,14 @@ Phase 6b. (`scripts/probe_complexity_gate.py` and the
 `complexity.log_breakdown` config knob already ship as part of 6a —
 they are the probe itself, not a followup.)
 
-1. **The chosen fix.** One of:
+1. **The chosen fix.** One or two of:
    - `config.yaml` edit (Option A, ~1 line).
-   - `complexity.py` patch + test (Option B, ~10 lines + a test
-     case).
+   - `complexity.py` patch + test (Option B, ~10 lines + a test).
    - `graph.py` `node_complexity` patch + test (Option C, ~15 lines +
-     a test case).
+     a test).
+   - `complexity.py` weighted-history scoring + test (Option D,
+     ~15 lines + a test). Likely also exposes a `history_decay`
+     config knob for tuning.
 2. **Phase 6b deploy doc** with smoke tests that confirm:
    - The BJJ-shaped query now routes fast on its second turn.
    - A long pasted document still routes deep.
