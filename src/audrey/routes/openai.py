@@ -161,6 +161,9 @@ async def chat_completions(
         )
 
     messages = [m.model_dump(exclude_none=True) for m in payload.messages]
+    if app.state.cfg.raw.get("complexity", {}).get("log_breakdown", False):
+        shape = [(m.get("role"), len(str(m.get("content") or ""))) for m in messages]
+        log.info("incoming.payload: n=%d roles=%s", len(messages), shape)
     options = _options_from_request(payload)
 
     # Resolve conversation id once, before pipeline branches. Reads OWUI
