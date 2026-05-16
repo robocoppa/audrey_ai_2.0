@@ -16,6 +16,24 @@ from functools import lru_cache
 import tiktoken
 
 
+# Lines starting with `>` (Audrey banner markup) or a bare `---`
+# (banner-to-body / footer-to-body separator) are UI cruft, not part of
+# the model's actual response. They are emitted by `pipeline/banners.py`
+# into the streamed assistant content; when OWUI sends that assistant
+# text back as conversation history, the cruft inflates the complexity
+# gate's view. Strip both before counting tokens on assistant messages.
+def _strip_audrey_markup(text: str) -> str:
+    out_lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(">"):
+            continue
+        if stripped == "---":
+            continue
+        out_lines.append(line)
+    return "\n".join(out_lines)
+
+
 @lru_cache(maxsize=1)
 def _encoder() -> tiktoken.Encoding:
     return tiktoken.get_encoding("cl100k_base")
@@ -23,15 +41,18 @@ def _encoder() -> tiktoken.Encoding:
 
 def _count_message_tokens(m: dict, enc: tiktoken.Encoding) -> int:
     c = m.get("content")
+    role = m.get("role")
     if isinstance(c, str):
-        return len(enc.encode(c))
+        text = _strip_audrey_markup(c) if role == "assistant" else c
+        return len(enc.encode(text))
     # Multimodal content (list of parts) — only text parts contribute;
     # image bytes don't have meaningful token counts at this layer.
     if isinstance(c, list):
         n = 0
         for part in c:
             if isinstance(part, dict) and isinstance(part.get("text"), str):
-                n += len(enc.encode(part["text"]))
+                text = _strip_audrey_markup(part["text"]) if role == "assistant" else part["text"]
+                n += len(enc.encode(text))
         return n
     return 0
 

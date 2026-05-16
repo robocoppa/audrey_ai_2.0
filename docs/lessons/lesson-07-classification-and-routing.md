@@ -392,7 +392,7 @@ The token counter lives in
 [`complexity.py:24`](../../src/audrey/pipeline/complexity.py#L24). It walks all
 message content and counts text tokens. Multimodal messages get special care:
 for list-shaped content, Audrey counts only text parts at
-[`complexity.py:93`](../../src/audrey/pipeline/complexity.py#L93).
+[`complexity.py:114`](../../src/audrey/pipeline/complexity.py#L114).
 
 `is_complex(...)` is tiny:
 

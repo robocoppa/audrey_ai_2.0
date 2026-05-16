@@ -98,6 +98,74 @@ def test_count_last_user_tokens_handles_multimodal_last_user():
     assert last == expected
 
 
+def test_count_tokens_strips_audrey_banner_from_assistant_history():
+    # Real-world assistant message: banner header, separator, real content,
+    # tools-used footer. Only the real content should be counted.
+    banner_response = (
+        "> _Thinking_....... ✅\n"
+        "\n"
+        "---\n"
+        "\n"
+        "The next FIFA World Cup will take place from June 11 to July 19, 2026, "
+        "and it will be jointly hosted by the United States, Canada, and Mexico.\n"
+        "\n"
+        "---\n"
+        "> _Tools used:_\n"
+        "> - **qwen3.6:35b** — `web_search`\n"
+    )
+    real_content = (
+        "\n"
+        "\n"
+        "\n"
+        "\n"
+        "The next FIFA World Cup will take place from June 11 to July 19, 2026, "
+        "and it will be jointly hosted by the United States, Canada, and Mexico.\n"
+        "\n"
+        "\n"
+    )
+    with_banner = count_tokens([{"role": "assistant", "content": banner_response}])
+    without_banner = count_tokens([{"role": "assistant", "content": real_content}])
+    assert with_banner == without_banner
+
+
+def test_count_tokens_does_not_strip_blockquote_from_user_messages():
+    # Stripping is assistant-only. A user paste with `>` quote characters
+    # should keep its content in the gate input.
+    quoted_user = "> please ignore the banner format below\n> _Thinking_ this is a user paste"
+    n_user = count_tokens([{"role": "user", "content": quoted_user}])
+    # Same content under assistant role would be stripped to empty.
+    n_assistant = count_tokens([{"role": "assistant", "content": quoted_user}])
+    assert n_user > 0
+    assert n_assistant == 0
+    assert n_user > n_assistant
+
+
+def test_count_tokens_strips_audrey_planning_and_dispatch_banners():
+    # Deep-mode response has multiple banners stacked.
+    deep_response = (
+        "> _Planning_..... ✅\n"
+        "> _Dispatching panel_..  ✅ kimi-k2.6:cloud\n"
+        "> _Synthesizing_..... ✅\n"
+        "\n"
+        "---\n"
+        "\n"
+        "Real synthesized answer.\n"
+    )
+    n = count_tokens([{"role": "assistant", "content": deep_response}])
+    real_only = count_tokens([{"role": "assistant", "content": "\n\n\n\nReal synthesized answer.\n"}])
+    assert n == real_only
+
+
+def test_count_tokens_by_role_strips_banner_from_assistant_share():
+    banner_assistant = (
+        "> _Thinking_..... ✅\n\n---\n\nReal model output that should be counted.\n"
+    )
+    plain_assistant = "\n\n\nReal model output that should be counted.\n"
+    by_role_with = count_tokens_by_role([{"role": "assistant", "content": banner_assistant}])
+    by_role_clean = count_tokens_by_role([{"role": "assistant", "content": plain_assistant}])
+    assert by_role_with["assistant"] == by_role_clean["assistant"]
+
+
 def test_is_owui_task_request_detects_title_generation():
     # Captured payload prefix from a real OWUI Title Generation call.
     messages = [
