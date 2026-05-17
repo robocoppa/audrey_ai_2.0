@@ -36,6 +36,28 @@ Both are now fixed:
   are counted. Asymmetric — assistant role only; user pastes that
   happen to start with `>` are unaffected.
 
+## Closure verification — 2026-05-17
+
+After 24 hours of normal mixed-use on Unraid with the diagnostic
+knobs on:
+
+- **Six `owui_task` firings.** Token counts 592–1629, all
+  correctly routed fast. Zero false positives (no legitimate user
+  prompt was misclassified as a utility task).
+- **Zero `tokens>=500 -> deep` events.** Every auto-gated turn
+  routed fast. The complete population of complexity decisions
+  ran 218–333 tokens — comfortably below threshold with margin.
+- **`complexity.breakdown:` lines show clean `assistant=N` counts**
+  on multi-turn conversations (sample: 55, 82, 105, 470, 567,
+  1116, 1403). Short follow-ups after short prior responses count
+  small (Fix 2 stripping working); longer prior responses count
+  proportionally. No evidence of over-stripping or under-stripping.
+
+Diagnostic knobs flipped back to `false` 2026-05-17.
+`complexity.log_breakdown`, `debug.log_incoming_payload`, and
+`debug.log_incoming_payload_content` are now off in the deployed
+config; they remain in tree for future investigations.
+
 The infrastructure built for the probe (the `log_breakdown` and
 `log_incoming_payload*` config knobs and the
 `scripts/probe_complexity_gate.py` script) remains in place for
@@ -284,35 +306,27 @@ investigation ruled them out:
   doc showed `tool_mention:*` firing when the model name-dropped
   a tool rather than when the user requested one. Risky predictor.
 
-## What's still open
+## What's closed
 
-- **The diagnostic config knobs are still on in the deployed
-  config.** Once the new fixes have been observed for a real
-  session of mixed use and the routing looks consistently
-  correct, flip all three back to `false` in `config.yaml`:
-  - `complexity.log_breakdown`
-  - `debug.log_incoming_payload`
-  - `debug.log_incoming_payload_content`
-  Then redeploy.
-- **The empty-assistant + duplicate-user pattern** observed in
-  the first capture (Stage 4 above) was attributed to OWUI's
-  Follow Up auto-task. Verify that disabling Follow Up in OWUI
-  has eliminated it. If it recurs, that's a separate OWUI
-  behavior worth tracking.
-- **Audit OWUI's other auto-tasks.** Memory note already
-  recommends:
-  - Task Model → `audrey_fast` (blocked: requires making the
-    model public; deferred. The `### Task:` detector covers this
-    use case from Audrey's side anyway.)
-  - Title Generation → on (fine; routing now fast).
-  - Tags, Follow Up, Autocomplete, Retrieval Query, Web Search
-    Query, Image Prompt → off.
-  - Tools Function Calling (model "Native" mode) → off; Audrey
-    is the function-calling layer.
+- **Diagnostic config knobs.** Flipped back to `false` on 2026-05-17
+  after 24 hours of clean data. See the Closure verification section
+  at the top of this doc.
+- **OWUI auto-tasks audit.** Applied 2026-05-16: Title Generation
+  on (now routes fast via the `### Task:` detector), Tags / Follow
+  Up / Autocomplete / Retrieval Query / Web Search Query / Image
+  Prompt / Tools Function Calling all off. Task Model setting
+  unchanged (would require making `audrey_fast` public; the
+  detector covers it from Audrey's side anyway).
+- **Empty-assistant + duplicate-user pattern.** Not observed in
+  the 24h post-fix sample. Disabling Follow Up appears to have
+  eliminated it.
+
+## Followups tracked elsewhere
+
 - **`chat_history_search` schema mismatch.** Captured at 22:20:45
   on 2026-05-15: model called the tool with `limit=20` but the
   Pydantic schema caps it at 10 (422 response). Not a Phase 6a
-  issue; tracked as a separate followup.
+  issue; lives in `PROJECT_STATE.md` followups.
 
 ## Followups deferred from this phase
 

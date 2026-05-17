@@ -401,7 +401,13 @@ async def memory_search(req: MemorySearchRequest) -> MemorySearchResponse:
 class ChatHistorySearchRequest(BaseModel):
     user: Annotated[str, Field(min_length=1, max_length=200, description="User id to scope the search to. Required — chat history is per-user.")]
     query: Annotated[str, Field(min_length=1, max_length=1000, description="Natural-language search over the user's previous conversations.")]
-    limit: Annotated[int, Field(ge=1, le=10)] = 5
+    limit: Annotated[int, Field(
+        ge=1, le=20,
+        description=(
+            "Max results to return. Must be 1-20. Default 5 is right for "
+            "most lookups; use a larger limit only when you need broad recall."
+        ),
+    )] = 5
     date_from: str | None = Field(default=None, description="ISO timestamp — only return hits at or after this time.")
     date_to: str | None = Field(default=None, description="ISO timestamp — only return hits at or before this time.")
 

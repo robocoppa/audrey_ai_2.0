@@ -40,6 +40,27 @@ if str(_TOOLS_SERVER) not in sys.path:
 
 # Ensure a fresh import each test session (settings env may differ).
 chat_archive_module = importlib.import_module("chat_archive")
+app_module = importlib.import_module("app")
+
+
+# ─── Request-schema bounds ────────────────────────────────────────────
+
+
+def test_chat_history_search_limit_accepts_20():
+    # Phase 8: cap raised from 10 to 20 to match sibling tools (kb_search,
+    # memory_*) and to stop the model 422'ing on its own broad-recall calls.
+    req = app_module.ChatHistorySearchRequest(
+        user="alice@example.com", query="test", limit=20,
+    )
+    assert req.limit == 20
+
+
+def test_chat_history_search_limit_rejects_21():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        app_module.ChatHistorySearchRequest(
+            user="alice@example.com", query="test", limit=21,
+        )
 
 
 # ─── Pure helpers ─────────────────────────────────────────────────────
