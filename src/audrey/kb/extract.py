@@ -24,6 +24,13 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+# Fail-closed dep contract: python-magic must be present. Sniffing the bytes is
+# the only real defense against `a.png.exe`-style filename tricks; falling back
+# to extension-only sniffing silently would defeat the upload security model.
+# Importing at module level means a missing dep refuses process startup rather
+# than degrading silently at upload time.
+import magic  # type: ignore
+
 from audrey.kb.chunk import load_text
 
 log = logging.getLogger(__name__)
@@ -58,14 +65,9 @@ class EmptyExtractionError(ExtractError):
 
 
 def sniff_mime(path: Path) -> str:
-    """Return the sniffed mime type. Falls back to extension-derived guess if libmagic is unavailable."""
+    """Return the sniffed mime type. Falls back to extension-derived guess if libmagic chokes on the file."""
     try:
-        import magic  # type: ignore
-
         return magic.from_file(str(path), mime=True) or ""
-    except ImportError:
-        log.warning("kb.extract: python-magic not installed; falling back to suffix-based mime guess")
-        return _guess_from_suffix(path)
     except Exception as e:  # noqa: BLE001
         log.warning("kb.extract: libmagic sniff failed for %s: %s — falling back to suffix", path, e)
         return _guess_from_suffix(path)
@@ -103,10 +105,12 @@ def extract_text(path: Path) -> str:
     """
     raw = load_text(path)
     if raw is None or not raw.strip():
-        raise EmptyExtractionError(
-            f"no extractable text from {path.name}; "
-            "scanned PDFs without a text layer are not yet supported"
-        )
+        suffix = path.suffix.lower()
+        if suffix == ".pdf":
+            hint = "scanned PDFs without a text layer are not yet supported"
+        else:
+            hint = "the file is empty or contained no extractable text"
+        raise EmptyExtractionError(f"no extractable text from {path.name}; {hint}")
     return raw
 
 

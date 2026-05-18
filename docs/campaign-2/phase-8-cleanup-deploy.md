@@ -13,6 +13,21 @@ small to warrant its own deploy doc:
 
 Both ship in one session.
 
+## Closure verification — 2026-05-17
+
+Both parts shipped and verified the same day:
+
+- **Part A.** `chat_history_search` dispatch with broad-recall prompt
+  returned `HTTP/1.1 200 OK` from custom-tools with no 422 response.
+  The 4.90s dispatch matched the truncation pattern (`2000 chars,
+  truncated`), confirming the cap raise is live and matches sibling
+  tools.
+- **Part B.** All four smoke tests passed cleanly on Unraid. See
+  Phase 6 deploy doc's verification status section for details.
+
+Both code changes are merged. PROJECT_STATE updated to reflect
+full campaign-2 verification.
+
 ---
 
 ## Part A — `chat_history_search` limit hardening

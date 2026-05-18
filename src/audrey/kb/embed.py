@@ -163,6 +163,11 @@ class ImageEmbedder:
 def _normalize(vec: list[float]) -> list[float]:
     norm = math.sqrt(sum(x * x for x in vec))
     if norm == 0:
+        # Real embedders (nomic-embed-text, CLIP) never emit zero vectors for
+        # non-empty input. If this fires, something upstream is broken — Qdrant
+        # cosine against a zero vector returns degenerate scores that look like
+        # silent failures, so surface it loudly.
+        log.warning("kb.embed: zero-norm vector skipped normalization; check upstream embedder")
         return vec
     return [x / norm for x in vec]
 

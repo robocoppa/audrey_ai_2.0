@@ -87,8 +87,7 @@ class QdrantKB:
         await asyncio.to_thread(self._ensure_named_sync, name, dim)
 
     def _ensure_named_sync(self, name: str, dim: int) -> None:
-        existing = {c.name for c in self._client.get_collections().collections}
-        if name not in existing:
+        if not self._client.collection_exists(name):
             self._create_collection_sync(name, dim=dim)
 
     def _create_collection_sync(self, name: str, *, dim: int) -> None:
@@ -102,7 +101,12 @@ class QdrantKB:
         return await asyncio.to_thread(self._collection_exists_sync, name)
 
     def _collection_exists_sync(self, name: str) -> bool:
-        return name in {c.name for c in self._client.get_collections().collections}
+        # qdrant-client >=1.7 exposes `collection_exists(name)` which hits
+        # `/collections/{name}/exists` — O(1) on the server, vs the previous
+        # `get_collections()` round-trip that returned the full list. Called
+        # on every user-scoped KB search via `_search_text_merged`, so the
+        # difference matters on hot paths.
+        return bool(self._client.collection_exists(name))
 
     async def upsert_text(
         self, points: list[qmodels.PointStruct], *, collection: str | None = None,
@@ -243,7 +247,7 @@ class QdrantKB:
         return await asyncio.to_thread(self._list_user_files_sync, user, collection)
 
     def _list_user_files_sync(self, user: str, collection: str) -> list[dict[str, Any]]:
-        if collection not in {c.name for c in self._client.get_collections().collections}:
+        if not self._client.collection_exists(collection):
             return []
         flt = qmodels.Filter(
             must=[qmodels.FieldCondition(key="user", match=qmodels.MatchValue(value=user))]
@@ -298,6 +302,19 @@ class QdrantKB:
             pass
 
 
+_RESERVED_PAYLOAD_KEYS = frozenset({"source", "kind", "text", "caption", "chunk_idx", "mtime"})
+
+
+def _check_extras(extra: dict[str, Any] | None) -> None:
+    if not extra:
+        return
+    clobber = _RESERVED_PAYLOAD_KEYS & extra.keys()
+    if clobber:
+        raise ValueError(
+            f"build_*_point extras cannot override reserved payload keys: {sorted(clobber)}"
+        )
+
+
 def build_text_point(
     *,
     source: str,
@@ -307,6 +324,7 @@ def build_text_point(
     mtime: float,
     extra: dict[str, Any] | None = None,
 ) -> qmodels.PointStruct:
+    _check_extras(extra)
     payload: dict[str, Any] = {
         "source": source,
         "kind": "text",
@@ -332,6 +350,7 @@ def build_image_point(
     mtime: float,
     extra: dict[str, Any] | None = None,
 ) -> qmodels.PointStruct:
+    _check_extras(extra)
     payload: dict[str, Any] = {
         "source": source,
         "kind": "image",

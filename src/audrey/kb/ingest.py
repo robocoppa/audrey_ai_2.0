@@ -157,8 +157,14 @@ def _iter_files(root: Path):
         yield root
         return
     for p in root.rglob("*"):
-        if p.is_file() and not p.name.startswith("."):
-            yield p
+        if not p.is_file():
+            continue
+        # Skip the file if any path component (relative to root) starts with
+        # a dot — so a stray `.git/` or `.cache/` under a topic dir doesn't
+        # have its non-dot children ingested.
+        if any(part.startswith(".") for part in p.relative_to(root).parts):
+            continue
+        yield p
 
 
 async def ingest_many(

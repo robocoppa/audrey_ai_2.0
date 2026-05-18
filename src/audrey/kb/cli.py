@@ -2,7 +2,15 @@
 
     audrey-ingest [PATH ...]              — ingest one or more paths
     audrey-ingest --stats                 — print per-collection counts
-    audrey-ingest --purge SOURCE          — remove a source from both collections
+    audrey-ingest --purge SOURCE          — remove a source from the GLOBAL
+                                            kb_text and kb_images collections only
+
+`--purge` deliberately does NOT touch per-user `kb_user_text_*` /
+`kb_user_images_*` collections — user uploads are managed via the
+`/v1/files` DELETE route (see [`routes/uploads.py`](uploads.py)) so each
+delete is scoped to the requesting user. Running --purge against a user-
+uploaded file path would no-op on the global collections and leave the
+per-user data alone.
 
 If no paths are given, falls back to `kb.dataset_paths` from config. Run
 inside the audrey-ai container where Qdrant + Ollama are reachable.
@@ -29,7 +37,10 @@ def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="audrey-ingest", description=__doc__)
     p.add_argument("paths", nargs="*", help="Paths to ingest (defaults to config kb.dataset_paths)")
     p.add_argument("--stats", action="store_true", help="Print collection counts and exit")
-    p.add_argument("--purge", metavar="SOURCE", help="Delete all points for a given source path")
+    p.add_argument(
+        "--purge", metavar="SOURCE",
+        help="Delete all points for a source path from the global kb_text and kb_images collections (does not touch per-user collections)",
+    )
     p.add_argument("--no-images", action="store_true", help="Skip image files (text-only ingest)")
     p.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     return p

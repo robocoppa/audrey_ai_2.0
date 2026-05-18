@@ -203,7 +203,7 @@ search:
 kb:
   text_collection: "kb_text"
   image_collection: "kb_images"
-  text_embedder: "nomic-embed-text"      # via Ollama /api/embeddings, 768-d
+  text_embedder: "nomic-embed-text"      # via Ollama /api/embed, 768-d
   image_model: "clip-ViT-B-32"           # via sentence-transformers, 512-d
   chunk_tokens: 1000
   chunk_overlap: 100

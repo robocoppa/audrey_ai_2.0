@@ -83,6 +83,18 @@ class QueryResponse(BaseModel):
     results: list[Hit]
 
 
+class StatsResponse(BaseModel):
+    collections: dict[str, int] = Field(
+        description=(
+            "Per-collection point counts. A value of -1 means the count call "
+            "to Qdrant failed for that collection (transport error, missing "
+            "collection, etc.) — treat -1 as 'unknown', not 'zero'."
+        )
+    )
+    text_collection: str
+    image_collection: str
+
+
 @router.post("/query", response_model=QueryResponse)
 async def kb_query(req: TextQuery, request: Request) -> QueryResponse:
     qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
@@ -211,17 +223,17 @@ async def kb_ingest(
     return {"roots": [str(r) for r in roots], **stats.as_dict()}
 
 
-@router.get("/stats")
-async def kb_stats(request: Request) -> dict[str, Any]:
+@router.get("/stats", response_model=StatsResponse)
+async def kb_stats(request: Request) -> StatsResponse:
     qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
     if qdrant is None:
         raise HTTPException(status_code=503, detail="KB is not initialized")
     counts = await qdrant.counts()
-    return {
-        "collections": counts,
-        "text_collection": qdrant.text_collection,
-        "image_collection": qdrant.image_collection,
-    }
+    return StatsResponse(
+        collections=counts,
+        text_collection=qdrant.text_collection,
+        image_collection=qdrant.image_collection,
+    )
 
 
 __all__ = ["router"]

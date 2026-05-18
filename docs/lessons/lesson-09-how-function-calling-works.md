@@ -27,9 +27,7 @@ the loop       - why function calling is multi-turn, not single-shot
 ```
 
 Lesson 8 was a code tour. This one is more conceptual, but every concept
-lands on a citation in Audrey's source — the protocol is real, not
-abstract, and we have a working implementation right here.
-
+lands on a citation in Audrey's source and that's what we will be diving into in more detail in this lesson.
 
 ## 1. Context
 
@@ -68,8 +66,8 @@ old way   - tools live in prose; you parse the model's output
 new way   - tools live in a structured field; the model emits structured calls
 ```
 
-The big win is not that the new way is more expressive — the old way
-could call any tool you described. It is that the new way is **a
+The big win is not that the new way is more expressive, the old way
+could call any tool you described, it is that the new way is **a
 contract**. The model is trained to emit tool calls in a specific
 JSON shape. The provider's API guarantees the shape on the response
 side. You stop parsing free text and start reading a typed field.

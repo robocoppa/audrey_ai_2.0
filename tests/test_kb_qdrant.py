@@ -86,3 +86,49 @@ def test_ensure_user_indexes_propagates_non_qdrant_exception(monkeypatch):
 
     with pytest.raises(ConnectionError):
         kb._ensure_user_indexes_sync("kb_user_text_alice")
+
+
+# ─── build_*_point extras-clobber guard ──────────────────────────────────────
+
+@pytest.mark.parametrize("reserved_key", ["source", "kind", "text", "chunk_idx", "mtime"])
+def test_build_text_point_rejects_extras_that_clobber_reserved_keys(reserved_key):
+    # The base payload pins the deterministic fields (source, kind, chunk_idx,
+    # mtime). An `extras` dict that includes one of those would silently
+    # override it after the .update() — which would corrupt the search-merge
+    # invariants. The guard turns that into a loud ValueError instead.
+    from audrey.kb.qdrant import build_text_point
+
+    with pytest.raises(ValueError, match="reserved payload keys"):
+        build_text_point(
+            source="/x.md", chunk_idx=0, text="hello",
+            vector=[0.1] * 768, mtime=0.0,
+            extra={reserved_key: "evil"},
+        )
+
+
+def test_build_image_point_rejects_reserved_caption_override():
+    from audrey.kb.qdrant import build_image_point
+
+    with pytest.raises(ValueError, match="reserved payload keys"):
+        build_image_point(
+            source="/x.jpg", chunk_idx=0, caption="ok",
+            vector=[0.1] * 512, mtime=0.0,
+            extra={"caption": "shadow"},
+        )
+
+
+def test_build_text_point_allows_non_reserved_extras():
+    # The user-upload path passes `user`, `file_id`, `filename`, `mime`,
+    # `bytes`, `uploaded_at` in extras — none of which are reserved. They
+    # must still pass through into the final payload.
+    from audrey.kb.qdrant import build_text_point
+
+    pt = build_text_point(
+        source="/x.md", chunk_idx=0, text="hello",
+        vector=[0.1] * 768, mtime=0.0,
+        extra={"user": "alice@example.com", "file_id": "uuid", "filename": "x.md"},
+    )
+    assert pt.payload["user"] == "alice@example.com"
+    assert pt.payload["file_id"] == "uuid"
+    assert pt.payload["filename"] == "x.md"
+    assert pt.payload["source"] == "/x.md"  # untouched

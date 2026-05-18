@@ -235,6 +235,23 @@ docker compose up -d --build audrey-ai
 The previous code paths re-deploy. The Qdrant collections and per-user
 indexes stay as they are — they were correct under both versions.
 
+## Verification status
+
+All Phase 6 smoke tests (2.1-2.7) verified on Unraid 2026-05-17 as
+part of the Phase 8 cleanup deploy. Highlights:
+
+- **2.4 happy path:** `httpbin.org/image/png` returned non-empty
+  `results` array.
+- **2.4 redirect arm:** `picsum.photos/200` returned the new clear
+  redirect-with-target message rather than the old opaque 302.
+- **2.5 per-user collection merge:** `kb_search_seconds` histogram
+  shows non-zero `had_user_collection="true"` count for text
+  searches.
+- **2.6 upload flow:** `PUT .../index` calls all returned 200; no
+  `UnexpectedResponse` propagated through the narrowed handler.
+- **2.7 Phase 4 Cat 4 sweep:** end-to-end `kb_search` dispatch
+  through OWUI confirmed working with model synthesis from hits.
+
 ## 4. Followups
 
 - The deferred chunk-tail finding still wants measurement before any
