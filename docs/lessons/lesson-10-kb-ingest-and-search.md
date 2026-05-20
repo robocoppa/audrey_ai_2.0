@@ -5,8 +5,8 @@
 [`routes/kb.py`](../../src/audrey/routes/kb.py) open.
 
 **Goal:** by the end of this lesson, you can answer
-*"a user asks about something in our geology docs — what happened between
-their question and the snippet the model used?"*
+*"a user asks about something covered in our curated docs — what
+happened between their question and the snippet the model used?"*
 
 Lesson 8 showed `kb_search` getting dispatched as a tool call. Lesson 9
 opened the function-calling protocol that carried the call. This lesson
@@ -26,26 +26,84 @@ merge     - global + per-user hits, ranked together
 
 ### Why a KB at all?
 
-The model is good at general knowledge and bad at three specific things:
+A language model is a frozen snapshot of whatever its training corpus
+contained, compressed into weights. That gives it broad general
+knowledge but means it is blind to three categories of information:
 
-1. **Your private docs.** Anything you wrote, scanned, or uploaded.
-2. **Curated topics with depth.** Audrey's `/datasets` tree holds a
-   dozen subject directories (geology, botany, bushcraft, first-aid…)
-   that go further than the model's training corpus on those topics.
-3. **Anything updated after the model's training cutoff.** New
-   editions of references, new species in a guide, this morning's
-   field notes.
+1. **Anything it wasn't trained on.** Your private notes, scanned
+   manuals, internal documents — none of that was on the public web
+   when the model was built, so the weights have no record of it.
+2. **Anything below its training threshold.** The training corpus
+   covers most topics shallowly; only the most-discussed material
+   gets the dense, repeated examples that translate into reliable
+   recall. A specialist topic with limited public coverage will be
+   thin in the weights even if it was technically present.
+3. **Anything that changed after the training cutoff.** Models ship
+   with a fixed knowledge horizon. Anything updated, published, or
+   discovered since that date does not exist as far as the weights
+   are concerned.
 
-A retrieval-augmented system gives the model a way to look those up
+A retrieval-augmented system (RAG) gives the model a way to look those up
 on demand: when the question is in scope, the model issues a
 `kb_search` tool call (Lesson 8); we hand it the matching snippets
 and let it answer with them in context.
 
 ### Whole-system map
 
-The two halves of the KB share machinery but run on different
-schedules. Ingest is offline (cron-shaped). Search is online
-(per-request, on the chat hot path).
+Before the diagram, two pieces of vocabulary the rest of the lesson
+leans on:
+
+- An **embedding** is a list of numbers — a few hundred or a few
+  thousand floats — that represents a piece of text or an image as
+  a single point in a high-dimensional space. The model that
+  produces embeddings is trained so that pieces with similar
+  meaning land near each other in that space. Two paragraphs about
+  the same topic produce embeddings that are close together;
+  unrelated paragraphs produce embeddings far apart. "Close" and
+  "far" are measured by the angle between the two lists of
+  numbers — small angle, similar meaning.
+- A **vector database** is a piece of software that stores
+  embeddings and answers one specific question really fast: "given
+  this new embedding, find me the K stored embeddings that are
+  closest to it." A regular database stores rows you look up by
+  exact key; a vector database stores points you look up by
+  *nearness*. The point of using one is speed — with millions of
+  stored vectors, naive comparison would be too slow per request;
+  a vector database uses an approximate-nearest-neighbour index
+  that returns reliable top-K results in milliseconds.
+
+The vector database Audrey uses is **Qdrant**, an open-source
+service that runs alongside Audrey in its own container.
+
+With those defined, the KB has two jobs that happen at two
+different moments in time. **Ingest** is the slow, one-time-per-file
+work of turning a document into something searchable: read the
+bytes, cut them into pieces, run each piece through the embedder,
+store the resulting embeddings in Qdrant. **Search** is the fast,
+every-request work of turning a user's question into a query
+against that store: embed the question, ask Qdrant for the closest
+matches, hand the matches back.
+
+The two halves share the *same* embedder and the *same* Qdrant
+collections — that's the only way the math works out, because a
+query vector can only be compared against vectors produced by the
+same model. But they run on completely different schedules:
+
+- **Ingest is offline.** It happens once when a file is added to
+  `/datasets`, again when the file changes, and then never until
+  something changes again. No human is waiting on it. It's fine for
+  ingest to take seconds per file or minutes per directory — it's
+  not on anyone's critical path. Think of it like building an
+  index for a book: slow up front, then you have the index forever.
+- **Search is online.** It happens every time the model dispatches
+  a `kb_search` tool call, which is in the middle of a live chat
+  with a user staring at a streaming response. It must complete in
+  tens or low-hundreds of milliseconds or the user notices the
+  pause. Search reuses everything ingest built — without
+  pre-computed vectors and a Qdrant index, the per-request work
+  would be far too slow.
+
+The diagrams below trace each half top to bottom.
 
 ```text
 INGEST (offline / batch)
@@ -132,21 +190,17 @@ that mean similar things cluster in the text space; pictures that
 look like one another (and, because CLIP shares a text/image space,
 text descriptions of pictures) cluster in the image space.
 
-**Concept spotlight — what an embedding *is*.**
-An embedding is a fixed-length array of floats that locates a piece
-of content in a high-dimensional space. The defining property: if two
-pieces of content mean similar things, their embeddings are close
-together (small angle between them). That's the entire trick. The
-"distance" we measure is cosine similarity — literally the cosine of
-the angle between two vectors. Cosine 1.0 means "same direction"
-(very similar); 0.0 means "perpendicular" (unrelated); -1.0 means
-"opposite" (the embedder thinks they contradict).
-
-Qdrant doesn't know what the vectors *mean*. It only knows how to
-find the K vectors closest to a query vector, fast. Approximate
-nearest-neighbour search (ANN) lets it skip most of the index and
-still return reliable top-K results in milliseconds even at millions
-of points.
+**Concept spotlight — how "close" gets measured.**
+§1 introduced embeddings as points in a high-dimensional space and
+"closeness" as the angle between them. The specific number we ask
+Qdrant for is **cosine similarity** — literally the cosine of that
+angle. Cosine 1.0 means "same direction" (very similar); 0.0 means
+"perpendicular" (unrelated); -1.0 means "opposite" (the embedder
+thinks they contradict). Every score that comes back from a Qdrant
+search is a cosine value in `[-1.0, 1.0]`, and Audrey just sorts
+them descending. Crucially, Qdrant has no idea what the vectors
+*mean* — it only knows how to find the K closest to a query
+vector, fast.
 
 [`kb/qdrant.py:41-42`](../../src/audrey/kb/qdrant.py#L41) pins the
 two dims as module constants:
@@ -172,8 +226,8 @@ ends when we hand it a list of hits.
 
 The unit of storage in Qdrant is a **point** — an `(id, vector,
 payload)` triple. For text, one point per chunk. For images, one
-point per image. The journey from `geology/rocks.md` to a row of
-points is `ingest_text_file` —
+point per image. The journey from a Markdown file on disk to a row
+of points is `ingest_text_file` —
 [`kb/ingest.py:103-131`](../../src/audrey/kb/ingest.py#L103):
 
 ```python
@@ -210,11 +264,12 @@ Five steps. Read top to bottom:
 3. **Embed.** Batched calls to Ollama (default batch size 64). One
    HTTP round-trip per batch, vectors come back in the same order as
    the inputs.
-4. **Delete-before-upsert.** Crucial for shrinking files. If yesterday's
-   ingest produced 12 chunks and today the file shrank to 3, we want
-   chunks 4-12 gone. `delete_by_source` clears every point whose
-   payload `source` matches this file before the upsert writes the
-   current 3.
+4. **Delete-before-upsert.** Crucial for shrinking files (someone
+   trims a stale section, a script regenerates a doc with less
+   output, a user re-uploads a smaller v2). If yesterday's ingest
+   produced 12 chunks and today the file shrank to 3, we want chunks
+   4-12 gone. `delete_by_source` clears every point whose payload
+   `source` matches this file before the upsert writes the current 3.
 5. **Upsert.** Build a `PointStruct` per chunk with a deterministic
    ID and write the batch.
 
@@ -227,7 +282,7 @@ def point_id(*, source: str, kind: str, idx: int) -> str:
 ```
 
 UUIDv5 is a hash-based UUID: the same input string always produces
-the same UUID. So `point_id(source="/datasets/geology/rocks.md",
+the same UUID. So `point_id(source="/datasets/topic/file.md",
 kind="text", idx=3)` is *the same UUID every time we run ingest*.
 Qdrant's upsert is keyed by ID — same ID means "replace this point's
 vector and payload", not "create a new one." That's what makes
@@ -292,6 +347,15 @@ clear top-K.
 `if len(tokens) <= chunk_tokens: return [Chunk(...)]` short-circuit
 exists so a half-page note isn't pointlessly windowed.
 
+**One consequence worth internalizing: paragraphs don't always land
+in exactly one location.** Tokens inside an overlap region (e.g.
+tokens 900-999 with the default settings) appear in *two* chunks,
+so they're embedded twice and stored as two separate Qdrant points.
+A sentence that sits squarely in the middle of a chunk is searchable
+via one point; a sentence near a boundary is searchable via two and
+may show up twice in the top-K results. That's the cost overlap buys
+you for the straddling-sentence fix.
+
 There's a subtle issue with the tail of the loop — when the final
 stride lands close to the end, the last iteration produces a chunk
 that's mostly inside the prior chunk's overlap region. It's logged
@@ -299,9 +363,10 @@ in `docs/lessons/AUDIT.md` as a `consider` finding pending
 measurement; not a correctness bug, just wasted index space. Worth
 knowing the loop has this character.
 
-### 2.4 Concept spotlight — embeddings as the search index
+### 2.4 The embedder, in code
 
-[`kb/embed.py:107-125`](../../src/audrey/kb/embed.py#L107):
+Now the actual class that turns text into vectors —
+[`kb/embed.py:107`](../../src/audrey/kb/embed.py#L107):
 
 ```python
 @dataclass(slots=True)
@@ -316,53 +381,51 @@ class TextEmbedder:
         return out[0]
 
     async def embed_many(self, texts: list[str]) -> list[list[float]]:
-        if not texts:
-            return []
-        vectors: list[list[float]] = []
-        for i in range(0, len(texts), self.batch_size):
-            batch = texts[i : i + self.batch_size]
-            got = await self.ollama.embed(model=self.model, texts=batch, timeout_s=self.timeout_s)
-            vectors.extend(_normalize(v) for v in got)
-        return vectors
+        ...
 ```
 
-`embed_many` is the workhorse for ingest; `embed_one` is the
-single-query shortcut. Both routes go through Ollama's `/api/embed`,
-chunked into batches to avoid one giant request. The vectors come
-back from the model and are immediately **normalized** to unit length
-([`kb/embed.py:163-172`](../../src/audrey/kb/embed.py#L163)):
+`TextEmbedder` is a thin wrapper around the Ollama client. Two public
+methods:
 
-```python
-def _normalize(vec: list[float]) -> list[float]:
-    norm = math.sqrt(sum(x * x for x in vec))
-    if norm == 0:
-        log.warning("kb.embed: zero-norm vector skipped normalization; ...")
-        return vec
-    return [x / norm for x in vec]
-```
+- `embed_many(texts)` — send a batch of strings to Ollama in one
+  HTTP call and get back a list of vectors. This is what ingest
+  uses, because ingest typically has dozens or hundreds of chunks
+  to embed at once.
+- `embed_one(text)` — embed a single string. This is what search
+  uses, because a search has exactly one input: the user's question.
 
-Cosine similarity on unit-length vectors equals their dot product
-([`kb/embed.py:12-15`](../../src/audrey/kb/embed.py#L12) explains
-the rationale). Qdrant uses cosine distance, so the normalization is
-strictly optional — but doing it now means the same stored vectors
-also work if anyone ever flips a collection to `Distance.DOT`. Zero
-vectors are an upstream-embedder canary; real embedders never produce
-them for non-empty input, so the warning surfaces a future regression
-rather than silently returning misleading scores.
+`embed_one` is just a one-line wrapper that calls `embed_many` with
+a single-element list. So all roads lead to `embed_many`, which
+batches its input (default 64 strings per Ollama call) so a 500-chunk
+file produces about 8 HTTP requests instead of 500.
 
-Important constraints to keep in your head:
+**One small post-processing step: normalization.** After Ollama
+returns each vector, Audrey scales it down so its total length is 1.
+This is a math trick that makes cosine-similarity comparisons faster
+and lets the same stored vectors work if we ever switch Qdrant to a
+different distance metric. The details are in `_normalize` at
+[`kb/embed.py:163`](../../src/audrey/kb/embed.py#L163); it's a one-
+time cost at ingest and search, and you can largely treat it as a
+background detail.
 
-- **The collection's `dim` is locked at creation.** If you ever swap
-  the text embedder for one that emits 1024-d vectors, the upsert
-  will fail with a Qdrant dim-mismatch error and ingest stops.
-  There's no in-place migration — you drop and rebuild the
-  collection.
-- **The query embedder must match the index embedder.** If
-  `kb_text` was built with `nomic-embed-text` and a query goes
-  through `mxbai-embed-large`, the vectors live in entirely
-  different spaces and cosine results are meaningless.
-- **Within one collection, all vectors share an embedder.** This is
-  the precondition that makes the global/user merge in §2.5 work.
+The interesting part is the constraints that come out of all this:
+
+- **A collection is locked to a specific vector size.** When we
+  create `kb_text`, we tell Qdrant "every vector here will be 768
+  numbers long." If you swap to an embedder that produces 1024-long
+  vectors, the next ingest will fail with a dim-mismatch error.
+  You can't migrate in place — you drop the collection and
+  rebuild.
+- **The embedder used for search must match the embedder used for
+  ingest.** Two different embedders produce vectors in entirely
+  different mathematical spaces. Comparing a vector from one space
+  against vectors from another gives numbers back, but they don't
+  mean anything — like comparing temperatures in Celsius to
+  temperatures in pounds.
+- **Within one collection, every vector came from the same
+  embedder.** This is what lets §2.5's global+user merge sort hits
+  by raw score: the scores are directly comparable because the
+  vectors they came from live in the same space.
 
 ### 2.5 The query path
 
@@ -437,7 +500,7 @@ If we ever spun up a per-user collection on a different embedder, the
 scores would look comparable on paper (both are floats in the same
 range) but mean different things — the merge would produce arbitrary
 ordering. The docstring at
-[`routes/kb.py:128-131`](../../src/audrey/routes/kb.py#L128) pins
+[`routes/kb.py:129-130`](../../src/audrey/routes/kb.py#L128) pins
 that contract:
 
 > If a per-user collection ever ships with a different model, switch
@@ -476,7 +539,7 @@ else:
     vec = await embedder.embed_text(req.query or "")
 ```
 
-All three return a 512-d vector in the same space; the search after
+All three return a 512-D vector in the same space; the search after
 that is identical to the text path.
 
 **Concept spotlight — shared embedding space.**
@@ -585,7 +648,7 @@ the collection, then re-ingest.
 
 **4. Per-user collection drift.**
 A user uploads a file that gets indexed into
-`kb_user_text_bart_proton_me`, then deletes their account / email
+`kb_user_text_alice_example_com`, then deletes their account / email
 changes / etc. The collection stays in Qdrant; nothing points at it
 from Audrey. Not a bug — the uploads-side reconciliation job covered
 in Lesson 11 is what cleans these up.
@@ -597,7 +660,7 @@ with the reason. From the model's side this looks like any tool
 failure: it gets the rejection message in the `role: "tool"`
 content, and the right thing is to ask the user for a different URL
 rather than retry. Redirect responses get caught specially
-([`kb/embed.py:198-206`](../../src/audrey/kb/embed.py#L198)) and
+([`kb/embed.py:197-206`](../../src/audrey/kb/embed.py#L197)) and
 name the redirect target so the user can resupply the final URL.
 
 There is also a sixth mode worth knowing: **the KB returns hits but
@@ -612,10 +675,10 @@ and decide it's actually about the user's question.
 
 ## 3. Comprehension questions
 
-These are operational scenarios. Try to answer from the pipeline
+These are operational scenarios. Try to answer by yourself
 first, then check against the code.
 
-**1. "I re-ingested `geology/rocks.md` after editing it. The file
+**1. "I re-ingested a Markdown file after editing it down. The file
 used to be 12 chunks; now it's 3. What happens to chunks 4-12 in
 Qdrant?"**
 
@@ -662,9 +725,9 @@ references) but if you wanted a guarantee that each side contributes
 at least one hit, you'd need to switch the merge to round-robin or
 RRF.
 
-**4. "Image search on the text query 'someone in guard position'
-returns hits with cosine scores around 0.2 — much lower than text
-search typically gets. Is the KB broken?"**
+**4. "Image search on a plain English text query returns hits with
+cosine scores around 0.2 — much lower than text search typically
+gets. Is the KB broken?"**
 
 Probably not. CLIP's text-to-image cosine scores live in a narrower
 band than text-to-text scores from `nomic-embed-text` — different

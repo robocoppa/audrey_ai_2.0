@@ -89,35 +89,18 @@ async def _scroll_sources(qdrant: QdrantKB, *, collection: str) -> dict[str, int
     """Scroll a collection and return `{source_path: point_count}`.
 
     Best-effort — if a point has no `payload.source` we skip it (uploaded
-    files don't have one; only ingested-from-disk content does). Pagination
-    via qdrant's scroll offset; runs to completion before returning.
+    files don't have one; only ingested-from-disk content does). Uses
+    `QdrantKB.scroll_collection` so qdrant-client's pagination API stays
+    behind the facade.
     """
     by_source: dict[str, int] = {}
-    next_page: Any = None
-    client = qdrant._client
-
-    if not await qdrant.collection_exists(collection):
-        return by_source
-
-    while True:
-        # qdrant-client's scroll is sync; offload to a thread to keep the
-        # event loop responsive on collections with many pages.
-        points, next_page = await asyncio.to_thread(
-            client.scroll,
-            collection_name=collection,
-            limit=_SCROLL_PAGE_SIZE,
-            offset=next_page,
-            with_payload=True,
-            with_vectors=False,
-        )
-        for p in points:
-            payload = p.payload or {}
-            source = str(payload.get("source") or "")
-            if not source:
-                continue
-            by_source[source] = by_source.get(source, 0) + 1
-        if next_page is None:
-            break
+    for _point_id, payload in await qdrant.scroll_collection(
+        collection, page_size=_SCROLL_PAGE_SIZE,
+    ):
+        source = str(payload.get("source") or "")
+        if not source:
+            continue
+        by_source[source] = by_source.get(source, 0) + 1
     return by_source
 
 

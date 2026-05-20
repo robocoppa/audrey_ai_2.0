@@ -108,6 +108,58 @@ class QdrantKB:
         # difference matters on hot paths.
         return bool(self._client.collection_exists(name))
 
+    async def list_collections(self) -> list[str]:
+        """Return the names of every collection on this Qdrant instance.
+
+        Public surface so callers don't reach into `_client` to enumerate
+        collections — used by the uploads startup reconcile to find every
+        `kb_user_*` collection without round-tripping through every known
+        prefix.
+        """
+        return await asyncio.to_thread(self._list_collections_sync)
+
+    def _list_collections_sync(self) -> list[str]:
+        return [c.name for c in self._client.get_collections().collections]
+
+    async def scroll_collection(
+        self,
+        collection: str,
+        *,
+        page_size: int = 256,
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """Walk every point in `collection` and return `[(point_id, payload), ...]`.
+
+        Loads the whole collection into memory; intended for offline /
+        admin paths (reconcile sweeps, uploads-side startup reconcile,
+        per-user file lists). Don't use this on the chat hot path — use
+        `search_text` / `search_images` instead.
+
+        Returns an empty list if the collection doesn't exist; matches
+        the behavior callers want for "scroll whatever's there."
+        """
+        if not await self.collection_exists(collection):
+            return []
+        return await asyncio.to_thread(self._scroll_collection_sync, collection, page_size)
+
+    def _scroll_collection_sync(
+        self, collection: str, page_size: int,
+    ) -> list[tuple[str, dict[str, Any]]]:
+        out: list[tuple[str, dict[str, Any]]] = []
+        next_page: Any = None
+        while True:
+            points, next_page = self._client.scroll(
+                collection_name=collection,
+                limit=page_size,
+                offset=next_page,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for p in points:
+                out.append((str(p.id), p.payload or {}))
+            if next_page is None:
+                break
+        return out
+
     async def upsert_text(
         self, points: list[qmodels.PointStruct], *, collection: str | None = None,
     ) -> None:

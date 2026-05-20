@@ -91,7 +91,11 @@ class _QueueHandler(FileSystemEventHandler):
         if not raw_path:
             return
         path = Path(raw_path)
-        if path.name.startswith("."):
+        # Skip if any path component starts with a dot — so a stray `.git/`
+        # or `.cache/` somewhere under a watched root doesn't have its
+        # non-dot children ingested via filesystem events. Mirrors the same
+        # rule the offline `_iter_files` crawl applies.
+        if any(part.startswith(".") for part in path.parts):
             return
         if path.suffix.lower() not in _ALL_SUFFIXES:
             return
@@ -213,9 +217,9 @@ class KBWatcher:
         """
         src = str(path)
         try:
-            await self._qdrant.delete_by_source(src, collection="kb_text")
+            await self._qdrant.delete_by_source(src, collection=self._qdrant.text_collection)
             if self._image is not None:
-                await self._qdrant.delete_by_source(src, collection="kb_images")
+                await self._qdrant.delete_by_source(src, collection=self._qdrant.image_collection)
             log.info("kb.watcher: requested delete of vectors for %s", path)
         except Exception as e:  # noqa: BLE001 — watcher must stay alive
             log.warning("kb.watcher: delete %s failed: %s", path, e)

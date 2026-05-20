@@ -165,6 +165,20 @@ async def upload_file(
     ext = Path(file.filename or "").suffix.lower()
     dest = root / slug / f"{file_id}{ext}"
 
+    # Pre-flight quota check before we touch disk: if the user is already at
+    # or over their byte budget, every byte we stream is wasted I/O on what
+    # we'll reject anyway. Post-stream check below still runs (we only know
+    # the actual upload size after streaming) — this is an additional guard.
+    already = await db.user_total_bytes(user)
+    if already >= max_total:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Per-user storage quota already at or over the limit: "
+                f"{already // (1024 * 1024)}MB >= {max_total // (1024 * 1024)}MB."
+            ),
+        )
+
     written = await _stream_to_disk(file, dest, limit_bytes=max_upload)
     if written < 0:
         _safe_unlink(dest)
@@ -185,8 +199,9 @@ async def upload_file(
             detail=f"Unsupported mime: {mime!r}. Allowed: {sorted(ALLOWED_TEXT_MIMES | ALLOWED_IMAGE_MIMES)}",
         )
 
-    # Quota gate served from the sqlite index — O(1) lookup vs scrolling Qdrant.
-    already = await db.user_total_bytes(user)
+    # Post-stream quota check — actual upload size only becomes known after
+    # streaming. The pre-flight above catches the already-over case at the
+    # wire; this catches the case where this upload itself crosses the line.
     if already + written > max_total:
         _safe_unlink(dest)
         raise HTTPException(
@@ -308,7 +323,11 @@ async def delete_file(
     _safe_unlink(bare)
 
     log.info("files: delete user=%s file_id=%s indexed=%s", user, file_id, deleted_row)
-    return DeleteResponse(file_id=file_id, deleted=True)
+    # `deleted` reflects whether sqlite had a row to remove. The Qdrant
+    # delete-by-filter and the disk unlink are best-effort cleanup that
+    # both no-op gracefully on missing data, so the sqlite outcome is
+    # the honest signal to the caller.
+    return DeleteResponse(file_id=file_id, deleted=deleted_row)
 
 
 def _safe_unlink(p: Path) -> None:

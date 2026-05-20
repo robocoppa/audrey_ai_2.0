@@ -191,7 +191,7 @@ async def reconcile_with_qdrant(db: UploadsDB, qdrant) -> dict[str, int]:
     )
 
     # 1. Pull every kb_user_* collection from qdrant and backfill sqlite.
-    all_collections = await asyncio.to_thread(_list_collection_names, qdrant)
+    all_collections = await qdrant.list_collections()
     user_to_collections: dict[str, list[str]] = {}
     for col in all_collections:
         if not (col.startswith(USER_TEXT_PREFIX) or col.startswith(USER_IMAGE_PREFIX)):
@@ -241,49 +241,29 @@ async def reconcile_with_qdrant(db: UploadsDB, qdrant) -> dict[str, int]:
     return {"backfilled_collections": backfilled, "pruned_rows": pruned}
 
 
-def _list_collection_names(qdrant) -> list[str]:
-    return [c.name for c in qdrant._client.get_collections().collections]
-
-
 async def _scroll_user_rows(qdrant, collection: str) -> dict[str, list[dict]]:
     """Scroll a single collection and group `list_user_files`-shaped rows by raw user.
 
     Reuses the same payload-shape contract as QdrantKB._list_user_files_sync,
     but doesn't pre-filter by user — we don't know the user yet.
     """
-    return await asyncio.to_thread(_scroll_user_rows_sync, qdrant, collection)
-
-
-def _scroll_user_rows_sync(qdrant, collection: str) -> dict[str, list[dict]]:
     by_user_file: dict[tuple[str, str], dict] = {}
-    next_page = None
-    while True:
-        points, next_page = qdrant._client.scroll(
-            collection_name=collection,
-            limit=256,
-            offset=next_page,
-            with_payload=True,
-            with_vectors=False,
-        )
-        for p in points:
-            payload = p.payload or {}
-            raw_user = str(payload.get("user") or "")
-            fid = str(payload.get("file_id") or "")
-            if not raw_user or not fid:
-                continue
-            key = (raw_user, fid)
-            row = by_user_file.setdefault(key, {
-                "file_id": fid,
-                "filename": str(payload.get("filename") or ""),
-                "mime": str(payload.get("mime") or ""),
-                "bytes": int(payload.get("bytes") or 0),
-                "kind": str(payload.get("kind") or "text"),
-                "uploaded_at": str(payload.get("uploaded_at") or ""),
-                "chunks": 0,
-            })
-            row["chunks"] += 1
-        if next_page is None:
-            break
+    for _point_id, payload in await qdrant.scroll_collection(collection):
+        raw_user = str(payload.get("user") or "")
+        fid = str(payload.get("file_id") or "")
+        if not raw_user or not fid:
+            continue
+        key = (raw_user, fid)
+        row = by_user_file.setdefault(key, {
+            "file_id": fid,
+            "filename": str(payload.get("filename") or ""),
+            "mime": str(payload.get("mime") or ""),
+            "bytes": int(payload.get("bytes") or 0),
+            "kind": str(payload.get("kind") or "text"),
+            "uploaded_at": str(payload.get("uploaded_at") or ""),
+            "chunks": 0,
+        })
+        row["chunks"] += 1
     grouped: dict[str, list[dict]] = {}
     for (user, _fid), row in by_user_file.items():
         grouped.setdefault(user, []).append(row)

@@ -132,3 +132,77 @@ def test_build_text_point_allows_non_reserved_extras():
     assert pt.payload["file_id"] == "uuid"
     assert pt.payload["filename"] == "x.md"
     assert pt.payload["source"] == "/x.md"  # untouched
+
+
+# ─── list_collections + scroll_collection facade methods ────────────────
+
+class _FakeRecord:
+    def __init__(self, point_id: str, payload: dict):
+        self.id = point_id
+        self.payload = payload
+
+
+class _FakeCollDescriptor:
+    def __init__(self, name: str):
+        self.name = name
+
+
+class _FakeCollectionsResponse:
+    def __init__(self, names: list[str]):
+        self.collections = [_FakeCollDescriptor(n) for n in names]
+
+
+async def test_list_collections_returns_every_collection_name(monkeypatch):
+    kb, client = _make_kb(monkeypatch)
+    client.get_collections.return_value = _FakeCollectionsResponse(
+        ["kb_text", "kb_images", "kb_user_text_alice_example_com"],
+    )
+
+    out = await kb.list_collections()
+
+    assert out == ["kb_text", "kb_images", "kb_user_text_alice_example_com"]
+
+
+async def test_scroll_collection_returns_empty_when_collection_missing(monkeypatch):
+    # The facade's collection-existence check fires before scroll; missing
+    # collections return [] rather than raising.
+    kb, client = _make_kb(monkeypatch)
+    client.collection_exists.return_value = False
+
+    out = await kb.scroll_collection("does_not_exist")
+
+    assert out == []
+    client.scroll.assert_not_called()
+
+
+async def test_scroll_collection_walks_pages_and_returns_id_payload_tuples(monkeypatch):
+    kb, client = _make_kb(monkeypatch)
+    client.collection_exists.return_value = True
+
+    # Two pages: first returns next_page="cursor", second returns None.
+    page_one = ([_FakeRecord("pt-1", {"source": "/a.md"})], "cursor")
+    page_two = ([_FakeRecord("pt-2", {"source": "/b.md"})], None)
+    client.scroll.side_effect = [page_one, page_two]
+
+    out = await kb.scroll_collection("kb_text", page_size=1)
+
+    assert out == [
+        ("pt-1", {"source": "/a.md"}),
+        ("pt-2", {"source": "/b.md"}),
+    ]
+    assert client.scroll.call_count == 2
+
+
+async def test_scroll_collection_normalizes_missing_payload_to_empty_dict(monkeypatch):
+    # Qdrant can return a point with payload=None; we materialize {} so
+    # callers don't have to .get with a default.
+    kb, client = _make_kb(monkeypatch)
+    client.collection_exists.return_value = True
+    record_with_none_payload = MagicMock()
+    record_with_none_payload.id = "pt-3"
+    record_with_none_payload.payload = None
+    client.scroll.return_value = ([record_with_none_payload], None)
+
+    out = await kb.scroll_collection("kb_text")
+
+    assert out == [("pt-3", {})]

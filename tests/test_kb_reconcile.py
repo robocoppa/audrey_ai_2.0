@@ -22,43 +22,20 @@ from audrey.kb.reconcile import (
 
 # ─── Fakes ─────────────────────────────────────────────────────────────
 
-class _FakePoint:
-    """Minimal stand-in for `qdrant_client.models.Record`."""
-    def __init__(self, payload: dict):
-        self.payload = payload
-
-
-class _FakeRawClient:
-    """Stand-in for `QdrantKB._client`. Only the methods reconcile uses."""
-
-    def __init__(self, points_by_collection: dict[str, list[dict]]):
-        self._points = {
-            name: [_FakePoint(p) for p in points]
-            for name, points in points_by_collection.items()
-        }
-        # Track delete calls so tests can assert what got removed.
-        self.deletes: list[tuple[str, str]] = []  # (collection, source)
-
-    def scroll(self, collection_name: str, limit: int, offset, with_payload: bool, with_vectors: bool):
-        # Return everything in one page; reconcile handles pagination but
-        # tests don't need to exercise it (the page-loop logic is just
-        # `while next_page is not None`).
-        if collection_name not in self._points:
-            # qdrant raises on missing collection — the QdrantKB wrapper
-            # turns this into a False from collection_exists.
-            raise RuntimeError(f"collection {collection_name} not found")
-        return self._points[collection_name], None
-
-
 class _FakeQdrantKB:
-    """Stand-in for `QdrantKB`. Only the methods reconcile uses."""
+    """Stand-in for `QdrantKB`. Only the methods reconcile uses.
+
+    Models the public facade: `collection_exists`, `scroll_collection`,
+    `delete_by_source`. Reconcile shouldn't reach into qdrant-client
+    primitives, so the fake doesn't expose any either.
+    """
 
     def __init__(
         self,
         points_by_collection: dict[str, list[dict]],
         existing_collections: set[str] | None = None,
     ):
-        self._client = _FakeRawClient(points_by_collection)
+        self._points = points_by_collection
         self._existing = (
             existing_collections
             if existing_collections is not None
@@ -68,6 +45,15 @@ class _FakeQdrantKB:
 
     async def collection_exists(self, name: str) -> bool:
         return name in self._existing
+
+    async def scroll_collection(
+        self, collection: str, *, page_size: int = 256,
+    ) -> list[tuple[str, dict]]:
+        if collection not in self._existing:
+            return []
+        # Return `(point_id, payload)` tuples — same shape the real method
+        # returns; payloads are the dicts passed in via `_make_points`.
+        return [(f"pt-{i}", p) for i, p in enumerate(self._points.get(collection, []))]
 
     async def delete_by_source(self, source: str, *, collection: str) -> None:
         self.deletes.append((collection, source))
