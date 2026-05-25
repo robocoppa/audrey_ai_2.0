@@ -698,7 +698,8 @@ control over how the client sees progress.
 ## When you're ready for the next lesson
 
 Lesson 8 picks up where this lesson leaves off. We have seen how Audrey
-decides a request's task and route; the next question is what happens when
-a selected model can call tools. The ReAct loop, the dispatcher, and the
-user-scope invariant on per-user tools all live in
-[`lesson-08-tool-use-and-react.md`](lesson-08-tool-use-and-react.md).
+decides a request's task type and routes between fast and deep modes;
+the next lesson opens what *happens* on the deep side. Planner, deep
+panel workers, synthesizer, and reflect — the four-stage pipeline that
+runs when the complexity gate sends a request down the deep path —
+all live in [`lesson-08-deep-mode.md`](lesson-08-deep-mode.md).

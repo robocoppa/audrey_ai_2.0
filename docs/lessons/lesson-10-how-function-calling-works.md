@@ -1,15 +1,15 @@
-# Lesson 9 - How function calling actually works
+# Lesson 10 - How function calling actually works
 
 **Estimated time:** 60-80 minutes if you read with one source file open
 ([`src/audrey/tools/discovery.py`](../../src/audrey/tools/discovery.py)) and the
-Lesson 8 worked example handy.
+Lesson 9 worked example handy.
 
 **Goal:** by the end of this lesson, you can answer
 *"where does that `tool_calls` JSON come from? What is the model actually being
 told, what is it allowed to do, and what changes if I switch from Ollama to
 Anthropic to OpenAI?"*
 
-Lesson 8 used function calling. It showed Audrey building a `tools` list,
+Lesson 9 used function calling. It showed Audrey building a `tools` list,
 handing it to a model, receiving `tool_calls`, dispatching them, feeding
 results back, and looping. The shape was treated as given.
 
@@ -26,7 +26,7 @@ the contract   - what the model is promising when it emits tool_calls
 the loop       - why function calling is multi-turn, not single-shot
 ```
 
-Lesson 8 was a code tour. This one is more conceptual, but every concept
+Lesson 9 was a code tour. This one is more conceptual, but every concept
 lands on a citation in Audrey's source and that's what we will be diving into in more detail in this lesson.
 
 ## 1. Context
@@ -96,7 +96,7 @@ chat completion can produce a tool_calls response that does not end the
 conversation. You have to round-trip: model → tool_calls → you →
 tool result → model → tool_calls or content → ...
 
-Lesson 8 traced this loop through Audrey's `run_react` function. This
+Lesson 9 traced this loop through Audrey's `run_react` function. This
 lesson is about what happens on the wire at each step.
 
 
@@ -187,12 +187,12 @@ emits:
 }
 ```
 
-This is the same JSON Lesson 8 §2.5 used as its illustration. Now you
+This is the same JSON Lesson 9 §2.5 used as its illustration. Now you
 know where it came from: the model emitted it because it was trained
 to, given a request whose `tools` array advertised `web_search` with a
 description matching the user's query.
 
-Audrey runs `dispatch_one` (Lesson 8 §2.6), gets the search results,
+Audrey runs `dispatch_one` (Lesson 9 §2.6), gets the search results,
 and packages them as a new message via `to_tool_message` —
 [`tools/dispatch.py:200`](../../src/audrey/tools/dispatch.py#L200):
 
@@ -218,7 +218,7 @@ answer. That round trip is the protocol's basic unit.
 
 The `parameters` field is JSON Schema. Audrey gets it from the
 tools-server's `/openapi.json` (which FastAPI auto-generates from the
-Pydantic models in the route signatures — Lesson 8 §2.1). That schema
+Pydantic models in the route signatures — Lesson 9 §2.1). That schema
 contains everything FastAPI uses to validate incoming requests:
 required fields, types, descriptions, optional constraints like
 `minimum`, `maximum`, `pattern`, `format`.
@@ -288,7 +288,7 @@ Three consequences worth internalizing:
 
 - **The model can ignore the tools entirely.** Tools are optional. The
   model is allowed to answer from training-time knowledge even when a
-  perfectly applicable tool is in the array. Lesson 8's force-final-
+  perfectly applicable tool is in the array. Lesson 9's force-final-
   answer behavior on the last round (§2.11) leans on this: by
   dropping the `tools` array entirely from the final request, Audrey
   guarantees the model produces prose, not another tool call.
@@ -344,7 +344,7 @@ Response:
 Note the OpenAI quirk: `arguments` is a **string** containing JSON,
 not a JSON object. Audrey's dispatcher handles both shapes — Ollama
 sometimes returns it pre-parsed as a dict, OpenAI returns it as a
-string. Lesson 8 §2.6 lists this as one of `dispatch_one`'s five
+string. Lesson 9 §2.6 lists this as one of `dispatch_one`'s five
 explicit responsibilities ("Ollama sometimes returns `arguments` as a
 JSON-encoded string instead of a dict").
 
@@ -421,7 +421,7 @@ Mirrors OpenAI's tools shape closely, but with quirks:
   `tool_capable_models` allow-list in
   [`config.yaml`](../../config.yaml) is the human-curated answer to
   "which Ollama models actually emit clean tool calls in practice"
-  (Lesson 8 §2.12 covered this in passing). Ollama's own `capabilities`
+  (Lesson 9 §2.12 covered this in passing). Ollama's own `capabilities`
   field on a model is sometimes wrong.
 - Constrained decoding is not applied to tool calls. The model is free
   to emit arguments that violate the schema; you must validate at
@@ -478,7 +478,7 @@ Three things make this work:
    pairing — or sending tool results before the assistant message
    they answer — is a protocol error. Most providers will 400.
 3. **The model can keep calling tools indefinitely.** There is no
-   protocol-level round limit. The caller imposes one. Lesson 8
+   protocol-level round limit. The caller imposes one. Lesson 9
    §2.11 covered Audrey's: `agentic.react.max_rounds` (default 3).
    On the last round, the `tools` array is omitted, forcing prose.
 
@@ -504,7 +504,7 @@ follow-up request. The order of results in the conversation does not
 have to match the order of calls — providers match by id, not by
 position.
 
-Audrey dispatches them concurrently — Lesson 8 §2.9 walked the
+Audrey dispatches them concurrently — Lesson 9 §2.9 walked the
 `asyncio.gather` block in `react.py`. The protocol does not require
 this; you could run them serially and the model would still get the
 right results. Concurrency is an optimization, not a correctness
@@ -532,12 +532,12 @@ values:
 Audrey does not use `tool_choice` explicitly. Instead, it controls
 behavior at a coarser level:
 
-- **Force prose on the last round** (Lesson 8 §2.11): drop the `tools`
+- **Force prose on the last round** (Lesson 9 §2.11): drop the `tools`
   array entirely from the final request. This is equivalent to
   `tool_choice: "none"` but works across providers that don't
   implement that field. The model literally cannot call a tool it
   doesn't know exists.
-- **Per-model gating** (Lesson 8 §2.12): if the configured model is
+- **Per-model gating** (Lesson 9 §2.12): if the configured model is
   not in `tool_capable_models`, Audrey skips ReAct entirely and does
   a plain chat completion. There is no `tools` array on the request,
   no tool-use code path active.
@@ -588,7 +588,7 @@ message content size. A `kb_search` that returns 50 KB of matched
 chunks will all go into the next request — eating context budget,
 slowing the model, and potentially exceeding the model's context
 window. Audrey truncates at `max_tool_result_chars` before building
-the message (Lesson 8 §2.8). Mitigation is always caller-side; the
+the message (Lesson 9 §2.8). Mitigation is always caller-side; the
 protocol won't help.
 
 **5. Model ignores the tool entirely and answers from training data.**

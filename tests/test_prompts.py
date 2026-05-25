@@ -195,7 +195,7 @@ def test_synth_uses_override():
     from audrey.pipeline.synthesize import _build_synth_messages
 
     cfg = _cfg_with({"synthesizer": "OVERRIDE_SYNTH"})
-    msgs = _build_synth_messages([], "drafts go here", cfg=cfg)
+    msgs = _build_synth_messages([], "drafts go here", draft_count=2, cfg=cfg)
     synth_sys = [m for m in msgs if m["role"] == "system"]
     # _build_synth_messages forwards prior system msgs then appends the
     # synth-system. With empty prior, the synth-system is index 0.

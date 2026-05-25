@@ -65,6 +65,39 @@ def test_model_registry_rejects_unknown_location():
         }))
 
 
+def test_model_registry_location_of_returns_declared_location():
+    registry = ModelRegistry(_Cfg({
+        "general": [
+            {"name": "local-model", "priority": 100, "location": "local"},
+            {"name": "cloud-model", "priority": 50, "location": "cloud"},
+        ],
+    }))
+
+    assert registry.location_of("local-model") == "local"
+    assert registry.location_of("cloud-model") == "cloud"
+
+
+def test_model_registry_location_of_defaults_to_local_for_unknown():
+    # The deep panel and synthesizer call this with worker names pulled
+    # from the pool config. An unknown model — typo, or a model removed
+    # from the registry but not from the pool — must default to "local"
+    # so it goes through the GPU gate instead of bypassing it as "cloud".
+    registry = ModelRegistry(_Cfg({"general": []}))
+
+    assert registry.location_of("never-registered") == "local"
+
+
+def test_model_registry_location_of_finds_model_across_task_types():
+    # A worker can appear in multiple task lists; the lookup walks every
+    # task type, so finding the model under any one is enough.
+    registry = ModelRegistry(_Cfg({
+        "code": [{"name": "shared-model", "priority": 50, "location": "cloud"}],
+        "general": [{"name": "other-model", "priority": 50, "location": "local"}],
+    }))
+
+    assert registry.location_of("shared-model") == "cloud"
+
+
 # ─── HealthTracker ─────────────────────────────────────────────────────
 
 def test_health_tracker_cools_down_after_failure_and_success_resets():

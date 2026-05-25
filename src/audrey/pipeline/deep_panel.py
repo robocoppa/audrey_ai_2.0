@@ -57,16 +57,17 @@ _POOL_KEYS = {
 
 
 def pool_key_for(virtual_model: str) -> str:
-    return _POOL_KEYS.get(virtual_model, "deep_panel")
-
-
-def _location_of(model: str, registry: ModelRegistry) -> str:
-    """Look up the registry-declared location of a model. Default: local."""
-    for task in registry.all_task_types():
-        for spec in registry.candidates(task):  # type: ignore[arg-type]
-            if spec.name == model:
-                return spec.location
-    return "local"
+    pool = _POOL_KEYS.get(virtual_model)
+    if pool is None:
+        # Unknown virtual model — typo in config, or a new model added
+        # without a pool registration. Fall back to the default pool so
+        # something still answers, but log it so the operator notices.
+        log.warning(
+            "deep_panel: unknown virtual_model %r, falling back to default pool 'deep_panel'",
+            virtual_model,
+        )
+        return "deep_panel"
+    return pool
 
 
 def select_workers(
@@ -92,7 +93,7 @@ def select_workers(
         if not health.is_healthy(name):
             log.info("deep_panel: skipping unhealthy worker %s", name)
             continue
-        loc = _location_of(name, registry)
+        loc = registry.location_of(name)
         if loc == "cloud":
             if cloud_count >= max_workers_cloud:
                 continue
@@ -202,6 +203,13 @@ def _messages_for_subtask(base_messages: list[dict[str, Any]], subtask: str) -> 
 
     Keeps any prior system/assistant context intact so the worker still has
     conversation history — only the focal question changes.
+
+    Multi-turn contract: in a multi-turn conversation, "the last user
+    message" is this turn's question (the one the planner just decomposed),
+    not an arbitrary earlier turn. Earlier user/assistant pairs stay in
+    place as history so the worker sees the full thread, but the focal
+    question becomes the subtask. If no user message exists at all
+    (degenerate input), the subtask is appended as a fresh user turn.
     """
     out: list[dict[str, Any]] = []
     replaced = False
@@ -254,6 +262,9 @@ async def run_panel(
     )
     # If no workers from the pool are healthy, fall back to the registry's
     # top-N healthy models for this task so we always answer something.
+    # Cap at 2 to mirror the typical pool size (most pools have 2 workers);
+    # this is the emergency path so we don't want to flood the GPU gate or
+    # burn cloud quota — two drafts is enough material to synthesize from.
     if not workers:
         log.warning("deep_panel: no healthy pool workers for %s/%s; falling back to registry", pool_key, task)
         for spec in registry.candidates(task):
@@ -349,6 +360,8 @@ async def run_panel_streaming(
         cfg, registry, health,
         pool_key=pool_key, task=task, max_workers_cloud=max_workers_cloud,
     )
+    # Same registry-fallback shape as `run_panel`; see comment there for
+    # why we cap at 2.
     if not workers:
         log.warning("deep_panel: no healthy pool workers for %s/%s; falling back to registry", pool_key, task)
         for spec in registry.candidates(task):

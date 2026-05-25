@@ -47,6 +47,11 @@ async def plan(
     the default system prompt; missing/empty falls back to the default.
     """
     system_prompt = prompt_from_config(cfg, "planner", _PLANNER_SYSTEM)
+    if len(user_text) > 4000:
+        log.debug(
+            "planner: user_text truncated from %d to 4000 chars for planning",
+            len(user_text),
+        )
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_text[:4000]},
@@ -65,6 +70,8 @@ async def plan(
     body = (resp.get("message", {}) or {}).get("content", "") or ""
     subs = _parse_planner_output(body)
     if len(subs) < 2:
+        if len(subs) == 1:
+            log.debug("planner: only 1 subtask returned, treating as no decomposition")
         return []
     return subs[:max_subtasks]
 

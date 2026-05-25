@@ -133,6 +133,32 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
+def _validate_deep_panel_pools(merged: dict[str, Any]) -> None:
+    """Reject configs where any deep-panel task is missing `synthesizer`.
+
+    `pipeline/synthesize.pick_synthesizer` raises `KeyError` at request time
+    if a pool/task is missing its `synthesizer` key. Failing here instead
+    means a typo in `config.yaml` crashes the process at boot — same
+    fast-fail posture as `_load_yaml` — rather than 500ing the first deep
+    request after the deploy.
+    """
+    errors: list[str] = []
+    for pool_key in (k for k in merged if k.startswith("deep_panel")):
+        pool = merged.get(pool_key) or {}
+        if not isinstance(pool, dict):
+            errors.append(f"{pool_key}: expected dict, got {type(pool).__name__}")
+            continue
+        for task, body in pool.items():
+            if not isinstance(body, dict):
+                errors.append(f"{pool_key}/{task}: expected dict, got {type(body).__name__}")
+                continue
+            if not body.get("synthesizer"):
+                errors.append(f"{pool_key}/{task}: missing required `synthesizer` key")
+    if errors:
+        bullets = "\n  - " + "\n  - ".join(errors)
+        raise ValueError(f"Invalid deep-panel configuration:{bullets}")
+
+
 @lru_cache(maxsize=1)
 def get_config() -> Config:
     """Load config once per process. Tests can call `get_config.cache_clear()`."""
@@ -140,7 +166,9 @@ def get_config() -> Config:
     # Resolve config path relative to CWD if not absolute
     cfg_path = env.audrey_config if env.audrey_config.is_absolute() else Path.cwd() / env.audrey_config
     yaml_cfg = _load_yaml(cfg_path)
-    return Config(yaml_cfg, env)
+    cfg = Config(yaml_cfg, env)
+    _validate_deep_panel_pools(cfg.raw)
+    return cfg
 
 
 # Convenience for tests/REPL

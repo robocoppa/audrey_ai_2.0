@@ -538,19 +538,19 @@ raw_workers: list[str] = list(pool.get("workers", []) or [])
 ```
 
 The workers in the pool are model names, not full `ModelSpec` objects. So
-Audrey looks up each worker's location with `_location_of(...)` at
-[`deep_panel.py:63`](../../src/audrey/pipeline/deep_panel.py#L63):
+Audrey looks up each worker's location with `registry.location_of(...)` at
+[`registry.py:69`](../../src/audrey/models/registry.py#L69):
 
 ```python
-def _location_of(model: str, registry: ModelRegistry) -> str:
-    for task in registry.all_task_types():
-        for spec in registry.candidates(task):
+def location_of(self, model: str) -> Location:
+    for specs in self._by_task.values():
+        for spec in specs:
             if spec.name == model:
                 return spec.location
     return "local"
 ```
 
-This function scans the registry and returns the model's declared location. If
+This method scans the registry and returns the model's declared location. If
 it cannot find the model, it defaults to `local`. That default is conservative
 for scheduling: an unknown model should not bypass the local gate by accident.
 
@@ -653,7 +653,7 @@ for attempt, model in enumerate(candidates, start=1):
 Notice the repeated pattern:
 
 - Check health before choosing a model.
-- Use `_location_of(...)` so the gate knows local vs cloud.
+- Use `registry.location_of(...)` so the gate knows local vs cloud.
 - Call `ollama.chat(...)`.
 - On success, `record_success(...)`.
 - On `OllamaError`, `record_failure(...)`.

@@ -1,4 +1,4 @@
-# Lesson 11 — The KB lifecycle: watcher, reconcile, uploads
+# Lesson 12 — The KB lifecycle: watcher, reconcile, uploads
 
 **Estimated time:** 70-90 minutes if you keep
 [`kb/watcher.py`](../../src/audrey/kb/watcher.py),
@@ -11,7 +11,7 @@
 what keeps the KB in step with reality — and what catches drift when
 something slips through?"*
 
-Lesson 10 built the KB pipeline: file → chunks → embeddings → Qdrant
+Lesson 11 built the KB pipeline: file → chunks → embeddings → Qdrant
 points → searchable hits. It did the *building*. This lesson covers
 the *keeping in step* — three mechanisms that watch, repair, and
 extend the index over time.
@@ -28,7 +28,7 @@ uploads    - per-user side: browser upload → sqlite index + qdrant + bytes
 
 ### Why three different mechanisms?
 
-The pipeline from Lesson 10 takes a file and produces points. Once
+The pipeline from Lesson 11 takes a file and produces points. Once
 those points are in Qdrant, three things can happen that the
 pipeline itself doesn't notice:
 
@@ -47,7 +47,7 @@ pipeline itself doesn't notice:
 Each of those problems calls for a different mechanism. The watcher
 handles (1) in real time; the reconciler is the catch-up for (2);
 the uploads flow is its own pipeline for (3) with its own sqlite
-metadata index. They share the ingest helpers from Lesson 10 but
+metadata index. They share the ingest helpers from Lesson 11 but
 otherwise run independently.
 
 ### The "two sources of truth" problem
@@ -66,7 +66,7 @@ uploads (the startup reconcile in `uploads_db.py`). Watch for it.
 
 ### What sqlite is, and why it's here alongside Qdrant
 
-Lesson 10 introduced Qdrant. This lesson brings in a second
+Lesson 11 introduced Qdrant. This lesson brings in a second
 database — **sqlite** — for a different job. Before any code, the
 vocabulary:
 
@@ -608,7 +608,7 @@ and unwinds in reverse on failure:
 6. **Post-stream quota check** — catches uploads that crossed the
    line during streaming (we only know the actual size after).
 7. **Ingest into Qdrant**
-   ([`kb/ingest.py`](../../src/audrey/kb/ingest.py)). The Lesson 10
+   ([`kb/ingest.py`](../../src/audrey/kb/ingest.py)). The Lesson 11
    pipeline, writing to the per-user collection and stamping each
    point's payload with `user` and `file_id`.
 8. **Record in sqlite**
@@ -781,15 +781,13 @@ Qdrant by `(file_id, user)` filter, then disk unlink).
 ## When you're ready for the next lesson
 
 You've now seen the full lifecycle of a KB entry: how it's
-created (Lesson 10), how it stays in step with reality (this
-lesson's watcher and reconciler), and how it's managed at the
-per-user level (this lesson's uploads flow). The three mechanisms
-are independent in code but share the same Qdrant collections,
-the same embedders, and the same "two stores agree" pattern that
-runs through the uploads side.
+created (the previous lesson), how it stays in step with reality
+(this lesson's watcher and reconciler), and how it's managed at
+the per-user level (this lesson's uploads flow). The three
+mechanisms are independent in code but share the same Qdrant
+collections, the same embedders, and the same "two stores agree"
+pattern that runs through the uploads side.
 
-The next lesson opens the orchestration layer that ties all of
-this together at request time: how a chat message routes through
-the classifier, the fast path or deep panel, the synthesizer,
-and the reflect step, with KB and tool dispatches woven in
-between.
+The next lesson opens whichever subsystem comes after the KB pair
+in the published sequence — see `docs/lessons/` for what's
+landed since.

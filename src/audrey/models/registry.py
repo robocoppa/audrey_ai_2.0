@@ -66,6 +66,20 @@ class ModelRegistry:
     def all_task_types(self) -> list[str]:
         return list(self._by_task.keys())
 
+    def location_of(self, model: str) -> Location:
+        """Look up the registry-declared location of `model`. Default: local.
+
+        Walks every task list because a model can appear under multiple
+        task types with a single location; the first match wins. Used by
+        the deep panel and synthesizer to decide whether a chat call
+        counts against the local GPU gate or the cloud concurrency cap.
+        """
+        for specs in self._by_task.values():
+            for spec in specs:
+                if spec.name == model:
+                    return spec.location
+        return "local"
+
 
 def _parse_location(raw: object, *, task: str, model: str) -> Location:
     if isinstance(raw, str) and raw in _VALID_LOCATIONS:

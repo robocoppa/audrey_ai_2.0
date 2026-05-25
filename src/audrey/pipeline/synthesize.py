@@ -27,7 +27,6 @@ from audrey.metrics import dispatch_total
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
-from audrey.pipeline.deep_panel import _location_of
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.prompts import SYNTH_SYSTEM, prompt_from_config
 from audrey.pipeline.state import TaskType, WorkerDraft
@@ -94,6 +93,7 @@ def _build_synth_messages(
     prior_messages: list[dict[str, Any]],
     drafts_block: str,
     *,
+    draft_count: int,
     cfg: Config | None = None,
 ) -> list[dict[str, Any]]:
     """Forward original system messages, then append synth-system + user.
@@ -109,6 +109,11 @@ def _build_synth_messages(
     from the original conversation are already represented in
     `drafts_block` so we don't replay them.
 
+    `draft_count` is the number of drafts the synthesizer is being asked
+    to merge — passed explicitly rather than re-derived from the block
+    text so a future change to the draft separator can't silently break
+    the count.
+
     When `cfg` is supplied, `agentic.prompts.synthesizer` overrides the
     default synth system prompt; missing/empty falls back to the default.
     """
@@ -118,7 +123,7 @@ def _build_synth_messages(
         *system_msgs,
         {"role": "system", "content": synth_system},
         {"role": "user", "content": (
-            f"Original user request and {drafts_block.count('--- draft ')} drafts follow."
+            f"Original user request and {draft_count} drafts follow."
             f" Produce the final answer now.\n\n{drafts_block}"
         )},
     ]
@@ -133,13 +138,16 @@ async def _try_synth(
     location: str,
     user_text: str,
     drafts_block: str,
+    draft_count: int,
     prior_messages: list[dict[str, Any]],
     timeout_s: float,
     user_id: str | None = None,
     cfg: Config | None = None,
 ) -> tuple[str, int, int]:
     """Run one synthesizer attempt. Returns (content, prompt_tokens, completion_tokens)."""
-    messages = _build_synth_messages(prior_messages, drafts_block, cfg=cfg)
+    messages = _build_synth_messages(
+        prior_messages, drafts_block, draft_count=draft_count, cfg=cfg,
+    )
     async with gate.acquire(model, location=location, user_id=user_id):
         resp = await ollama.chat(
             model=model,
@@ -193,7 +201,7 @@ async def synthesize(
         if not health.is_healthy(model):
             log.warning("synth: %s unhealthy, skipping (attempt %d)", model, attempt)
             continue
-        loc = _location_of(model, registry)
+        loc = registry.location_of(model)
         dispatch_total.labels(
             model=model,
             task_type=str(task),
@@ -205,6 +213,7 @@ async def synthesize(
                 ollama, health, gate,
                 model=model, location=loc,
                 user_text=user_text, drafts_block=drafts_block,
+                draft_count=len(drafts),
                 prior_messages=messages,
                 timeout_s=timeout_s,
                 user_id=user_id,
@@ -301,7 +310,9 @@ async def synthesize_stream(
     primary, fallback = pick_synthesizer(cfg, pool_key=pool_key, task=task)
     user_text = _last_user_text(messages)
     drafts_block = _format_drafts_for_synth(user_text, drafts, subtasks)
-    synth_messages = _build_synth_messages(messages, drafts_block, cfg=cfg)
+    synth_messages = _build_synth_messages(
+        messages, drafts_block, draft_count=len(drafts), cfg=cfg,
+    )
 
     candidates = [primary] if primary == fallback else [primary, fallback]
 
@@ -313,7 +324,7 @@ async def synthesize_stream(
         if not health.is_healthy(model):
             log.warning("synth: %s unhealthy, skipping (attempt %d)", model, attempt)
             continue
-        loc = _location_of(model, registry)
+        loc = registry.location_of(model)
         dispatch_total.labels(
             model=model,
             task_type=str(task),

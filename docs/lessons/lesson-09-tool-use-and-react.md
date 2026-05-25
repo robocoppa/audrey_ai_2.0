@@ -1,4 +1,4 @@
-# Lesson 8 - Tool use and the ReAct loop
+# Lesson 9 - Tool use and the ReAct loop
 
 **Estimated time:** 60-80 minutes if you read with the source files open.
 
@@ -254,7 +254,7 @@ straight away) or two rounds (one tool call, then the answer).
 The protocol-level details of this shape — where it comes from, why it
 looks the way it does, and how it differs between OpenAI, Anthropic,
 and Ollama — are covered in the next lesson
-([`lesson-09-how-function-calling-works.md`](lesson-09-how-function-calling-works.md)).
+([`lesson-10-how-function-calling-works.md`](lesson-10-how-function-calling-works.md)).
 Here we focus on what Audrey does with it.
 
 When the model decides to call a tool, the chat response looks like:

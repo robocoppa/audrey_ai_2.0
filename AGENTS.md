@@ -172,5 +172,6 @@ conventional-commit style message in a fenced block:
 docs: add repository agent guide
 ```
 
-Use one short message per concern. No `Commit:` prefix and no trailing period.
+One brief summary message per turn that covers everything shipped, even when
+the changes span multiple concerns. No `Commit:` prefix and no trailing period.
 For pure Q&A or investigation with no file changes, no commit message is needed.
