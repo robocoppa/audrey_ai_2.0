@@ -227,7 +227,8 @@ async def test_reconciler_disabled_when_interval_zero(tmp_path: Path):
 
 async def test_reconciler_clean_shutdown_on_stop(tmp_path: Path):
     # start → stop without crashing or leaking the task. The interval is
-    # huge so the task spends its whole life in `await asyncio.sleep`.
+    # huge so the task spends its whole life in `await asyncio.sleep`
+    # *after* the startup sweep returns.
     qdrant = _FakeQdrantKB({"kb_text": [], "kb_images": []})
     rec = KBReconciler(qdrant=qdrant, interval_s=3600)
 
@@ -237,3 +238,47 @@ async def test_reconciler_clean_shutdown_on_stop(tmp_path: Path):
 
     await rec.stop()
     assert rec._task is None  # type: ignore[attr-defined]
+
+
+async def test_reconciler_runs_one_sweep_immediately_at_startup(tmp_path: Path):
+    # Regression for the "first sweep waits one full interval" finding.
+    # Pre-fix: with `interval_s=1800` (default) the first sweep didn't
+    # fire until 30 minutes after boot, leaving stale state to accumulate
+    # if `KB_WATCHER_ENABLED=0` for a stretch beforehand.
+    # Post-fix: one sweep runs immediately, *then* the periodic cadence
+    # takes over.
+    #
+    # We count scroll_collection calls — a sweep scrolls both collections,
+    # so the first sweep should produce 2 calls. We give it a long
+    # interval so the periodic loop hasn't fired yet by the time we
+    # inspect, and use asyncio.wait_for + an event to know the sweep
+    # actually ran.
+    import asyncio as _asyncio
+
+    sweep_done = _asyncio.Event()
+
+    class _SignalingQdrantKB(_FakeQdrantKB):
+        def __init__(self) -> None:
+            super().__init__({"kb_text": [], "kb_images": []})
+            self.scroll_calls: list[str] = []
+
+        async def scroll_collection(
+            self, collection: str, *, page_size: int = 256,
+        ) -> list[tuple[str, dict]]:
+            self.scroll_calls.append(collection)
+            # Signal once both global collections have been scrolled.
+            if len(self.scroll_calls) >= 2:
+                sweep_done.set()
+            return await super().scroll_collection(collection, page_size=page_size)
+
+    qdrant = _SignalingQdrantKB()
+    rec = KBReconciler(qdrant=qdrant, interval_s=3600)
+
+    await rec.start()
+    try:
+        # If the startup sweep didn't run, this will time out — that's
+        # the pre-fix behavior we're guarding against.
+        await _asyncio.wait_for(sweep_done.wait(), timeout=2.0)
+        assert qdrant.scroll_calls == ["kb_text", "kb_images"]
+    finally:
+        await rec.stop()

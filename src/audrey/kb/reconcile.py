@@ -207,10 +207,22 @@ class KBReconciler:
             self._task = None
 
     async def _run(self) -> None:
-        # First sweep waits one full interval so we don't compete with
-        # startup's qdrant init. The admin endpoint is available
-        # immediately for ad-hoc sweeps if you need one sooner.
+        # Run one sweep immediately at startup, then settle into the
+        # periodic cadence. The startup sweep catches drift that
+        # accumulated while the watcher was off (container restart,
+        # `KB_WATCHER_ENABLED=0` stretch, bulk `rm`) — without it,
+        # stale state lives for one full `interval_s` after boot
+        # before the first reconcile cleans it up. The admin endpoint
+        # remains available for ad-hoc sweeps between intervals.
         try:
+            try:
+                await reconcile_once(
+                    self._qdrant,
+                    text_collection=self._text_collection,
+                    image_collection=self._image_collection,
+                )
+            except Exception as e:  # noqa: BLE001 — loop must survive a bad sweep
+                log.warning("kb.reconcile: startup sweep raised: %s", e)
             while True:
                 await asyncio.sleep(self._interval_s)
                 try:

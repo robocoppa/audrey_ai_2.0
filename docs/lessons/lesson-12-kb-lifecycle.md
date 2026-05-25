@@ -343,26 +343,39 @@ final action change.
 ### 2.4 Watcher delete handling
 
 When a file disappears (`rm`, the destination side of a rename
-already processed), we don't know whether it was text or image
-content without consulting Qdrant. Easier to just call
-`delete_by_source` against both collections and let Qdrant treat
-the wrong-collection call as a no-op
-([`kb/watcher.py:199`](../../src/audrey/kb/watcher.py#L199)):
+already processed), we want to delete its vectors from whichever
+collection actually has them — and only that one. The path's suffix
+tells us which: a text suffix (`.md`, `.txt`, `.pdf`, …) can only
+have lived in `kb_text`; an image suffix only in `kb_images`. We
+skip the wrong-collection call rather than firing both, which
+roughly halves watcher-driven Qdrant delete load on bulk operations
+([`kb/watcher.py:215`](../../src/audrey/kb/watcher.py#L215)):
 
 ```python
 async def _delete_vectors(self, path: Path) -> None:
     src = str(path)
+    suffix = path.suffix.lower()
     try:
-        await self._qdrant.delete_by_source(src, collection=self._qdrant.text_collection)
-        if self._image is not None:
-            await self._qdrant.delete_by_source(src, collection=self._qdrant.image_collection)
+        if suffix in IMAGE_SUFFIXES:
+            if self._image is not None:
+                await self._qdrant.delete_by_source(
+                    src, collection=self._qdrant.image_collection,
+                )
+        else:
+            await self._qdrant.delete_by_source(
+                src, collection=self._qdrant.text_collection,
+            )
         log.info("kb.watcher: requested delete of vectors for %s", path)
     except Exception as e:
         log.warning("kb.watcher: delete %s failed: %s", path, e)
 ```
 
-Two things to internalize from this small block:
+Three things to internalize from this small block:
 
+- **Branch on the suffix.** It's reliable here because the same
+  `_ALL_SUFFIXES` allowlist gated the file into the queue at
+  `_QueueHandler._enqueue`. Anything that reaches `_delete_vectors`
+  has a known-text or known-image suffix; nothing else gets through.
 - **Use the QdrantKB-supplied collection names** (`self._qdrant.text_collection`,
   not the literal string `"kb_text"`). If a future deployment
   renames collections in `config.yaml`, the watcher honors it
@@ -690,11 +703,14 @@ Five things that can go wrong, and what the system does about each:
 - **Upload crash mid-flight.** Orphan bytes left on disk under a
   `file_id` that was never recorded anywhere. Disk-space leak,
   not a correctness issue; cleanup is currently manual.
-- **Qdrant succeeds but sqlite write fails.** The rollback at
-  [`routes/files.py:259`](../../src/audrey/routes/files.py#L259)
-  deletes the just-upserted Qdrant points and 500s. Double-failure
-  (rollback delete also fails) leaves a phantom Qdrant point;
-  startup reconcile catches it.
+- **Qdrant succeeds but sqlite write fails.** The rollback in
+  [`routes/files.py:upload_file`](../../src/audrey/routes/files.py)
+  deletes the just-upserted Qdrant points and 500s. The rollback is
+  itself wrapped in a `try/except` so a Qdrant outage during cleanup
+  doesn't mask the original sqlite error — the rollback failure is
+  logged with the file_id, the original 500 still surfaces to the
+  client, and the next boot's `reconcile_with_qdrant` cleans up the
+  orphan points.
 - **User uploads while reconcile is mid-sweep.** The startup
   reconcile runs before serving traffic, and ad-hoc admin
   reconciles skip per-user collections — so concurrent uploads

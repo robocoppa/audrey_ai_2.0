@@ -158,6 +158,16 @@ class KBWatcher:
         # Debounce by (kind, path) so a delete-then-ingest sequence
         # (typical for `mv` or save-as-rename editors) doesn't collapse
         # into one event.
+        #
+        # Debounce restart-on-event is intentional: a file changing every
+        # `<debounce_s` seconds (an autosave-on-keystroke editor pointed
+        # at a watched directory) won't flush until the user stops, because
+        # `pending[(kind, path)] = time.monotonic()` overwrites the
+        # timestamp on every re-event. This is "wait until things settle"
+        # by design — we don't want to ingest a half-typed file. Accepted
+        # because the KB roots (`/mnt/user/knowledge/`) are curated content,
+        # not editor workspaces; nothing in the real workload looks like
+        # continuous autosave.
         pending: dict[tuple[EventKind, Path], float] = {}
         while True:
             try:
@@ -205,21 +215,38 @@ class KBWatcher:
     async def _delete_vectors(self, path: Path) -> None:
         """Remove KB vectors keyed off this source path.
 
-        We don't know whether a deleted file was text or image without
-        consulting qdrant, and probing is more work than just calling
-        `delete_by_source` on both collections — qdrant treats a no-op
-        delete as a successful empty operation. The qdrant-client
-        UpdateResult doesn't expose deleted-count, so we can't quiet
-        the log on no-op deletes; routed at debug to avoid noise from
-        editor swap-file churn (.tmp, ~ etc are already filtered by
-        the suffix allowlist, so we mostly only get here for real
-        deletes).
+        The path's suffix tells us which collection to target — text
+        suffixes (`.md`, `.txt`, `.pdf`, …) can only have lived in
+        `kb_text`, image suffixes only in `kb_images`. We skip the
+        wrong-collection call rather than firing both, which roughly
+        halves watcher-driven Qdrant delete load on bulk operations.
+
+        Suffix is reliable here because the same `_ALL_SUFFIXES`
+        allowlist gated the file into the queue in the first place
+        (`_QueueHandler._enqueue`). Anything that reaches this method
+        has a known-text or known-image suffix; nothing else gets
+        through.
+
+        The qdrant-client UpdateResult doesn't expose a deleted count,
+        so we can't quiet the log on no-op deletes — but with suffix
+        branching, no-ops should now only happen on files we never
+        actually ingested (e.g. an empty file the extractor refused).
         """
         src = str(path)
+        suffix = path.suffix.lower()
         try:
-            await self._qdrant.delete_by_source(src, collection=self._qdrant.text_collection)
-            if self._image is not None:
-                await self._qdrant.delete_by_source(src, collection=self._qdrant.image_collection)
+            if suffix in IMAGE_SUFFIXES:
+                if self._image is not None:
+                    await self._qdrant.delete_by_source(
+                        src, collection=self._qdrant.image_collection,
+                    )
+            else:
+                # Text-side suffix (or a stray non-image suffix that snuck
+                # through). Text is the default; matches the ingest path's
+                # text-vs-image branch in `_handle_ingest`.
+                await self._qdrant.delete_by_source(
+                    src, collection=self._qdrant.text_collection,
+                )
             log.info("kb.watcher: requested delete of vectors for %s", path)
         except Exception as e:  # noqa: BLE001 — watcher must stay alive
             log.warning("kb.watcher: delete %s failed: %s", path, e)

@@ -70,7 +70,12 @@ class UploadsDB:
             str(self._path), check_same_thread=False, isolation_level=None,
         )
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        # No journal_mode=WAL: we hold exactly one connection guarded by
+        # `self._lock`, so the multi-writer story WAL exists for doesn't
+        # apply. Default rollback journal avoids creating `-wal`/`-shm`
+        # sidecar files. `synchronous=NORMAL` is still worth keeping —
+        # rollback journal at NORMAL still gives us crash safety
+        # without paying for fsync on every commit.
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._lock = threading.Lock()
         self._conn.executescript(_SCHEMA)
@@ -182,6 +187,19 @@ async def reconcile_with_qdrant(db: UploadsDB, qdrant) -> dict[str, int]:
          band (manual purge, migration, etc.).
 
     Returns a small stats dict for the boot log.
+
+    PRECONDITION — call before serving traffic.
+
+    Step 2 reads `db.all_users()` and then reads the matching live ids
+    from Qdrant in two separate awaits. A fresh upload that lands
+    between those two reads would have its sqlite row recorded but its
+    Qdrant points not yet visible in the scroll, so step 2 would
+    incorrectly prune that user's just-uploaded sqlite row.
+
+    `main.py:lifespan` calls this during startup before uvicorn accepts
+    requests, so the race window is empty in production. If you ever
+    add a code path that calls this concurrently with the upload route,
+    add per-user locking around steps 1 and 2 first.
     """
     from audrey.kb.user_store import (
         USER_IMAGE_PREFIX,

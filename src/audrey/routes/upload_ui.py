@@ -17,15 +17,20 @@ from fastapi.responses import HTMLResponse
 router = APIRouter(tags=["ui"])
 
 _HTML_PATH = Path(__file__).resolve().parent.parent / "static" / "upload.html"
+_HTML_CACHE: str | None = None
 
 
 @router.api_route("/upload", methods=["GET", "HEAD"], response_class=HTMLResponse, include_in_schema=False)
 async def upload_page() -> HTMLResponse:
-    try:
-        html = _HTML_PATH.read_text(encoding="utf-8")
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=500, detail="Upload UI is missing from the image.") from e
-    return HTMLResponse(html)
+    # Cache on first read. The file ships in the container image and never
+    # changes at runtime, so re-reading per request is wasted I/O.
+    global _HTML_CACHE
+    if _HTML_CACHE is None:
+        try:
+            _HTML_CACHE = _HTML_PATH.read_text(encoding="utf-8")
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=500, detail="Upload UI is missing from the image.") from e
+    return HTMLResponse(_HTML_CACHE)
 
 
 __all__ = ["router"]

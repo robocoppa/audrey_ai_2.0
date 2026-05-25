@@ -103,7 +103,10 @@ async def lifespan(app: FastAPI):
 
     # SQLite index over per-user upload metadata. Reconciled against qdrant
     # on every boot — ghost rows pruned, missing rows backfilled from the
-    # user collections.
+    # user collections. Must run BEFORE uvicorn starts accepting traffic:
+    # `reconcile_with_qdrant`'s step-2 prune isn't safe under concurrent
+    # uploads (see its docstring). The lifespan runs everything before
+    # `yield`, so this ordering is structural — don't move the call below.
     uploads_db = UploadsDB(kb_cfg.get("uploads_db_path", "/data/uploads.sqlite"))
     try:
         await reconcile_with_qdrant(uploads_db, qdrant)

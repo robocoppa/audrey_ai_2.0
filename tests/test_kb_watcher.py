@@ -139,12 +139,13 @@ class _FakeQdrant:
 
 
 @pytest.mark.asyncio
-async def test_delete_vectors_uses_qdrant_supplied_collection_names():
-    # Regression for the bug where the watcher hardcoded "kb_text" /
-    # "kb_images" instead of using qdrant.text_collection /
-    # .image_collection. A deployment that renames collections via
-    # config would otherwise have deletes silently miss the actual
-    # collections.
+async def test_delete_vectors_text_suffix_only_hits_text_collection():
+    # The watcher branches on suffix so a text-only file's delete never
+    # fires against the image collection. Cuts watcher-driven Qdrant
+    # delete load roughly in half on bulk operations vs. the old "delete
+    # from both" behavior. Also exercises the rename-respecting
+    # qdrant.text_collection / .image_collection attributes — a renamed
+    # text collection still gets the call.
     qdrant = _FakeQdrant(text="custom_text", image="custom_images")
     watcher = KBWatcher(
         roots=[], qdrant=qdrant,  # type: ignore[arg-type]
@@ -153,14 +154,45 @@ async def test_delete_vectors_uses_qdrant_supplied_collection_names():
 
     await watcher._delete_vectors(Path("/datasets/topic/x.md"))
 
-    assert qdrant.deletes == [
-        ("/datasets/topic/x.md", "custom_text"),
-        ("/datasets/topic/x.md", "custom_images"),
-    ]
+    assert qdrant.deletes == [("/datasets/topic/x.md", "custom_text")]
 
 
 @pytest.mark.asyncio
-async def test_delete_vectors_skips_image_collection_when_no_image_embedder():
+async def test_delete_vectors_image_suffix_only_hits_image_collection():
+    # Mirror of the text-suffix test for the image-side branch.
+    qdrant = _FakeQdrant(text="custom_text", image="custom_images")
+    watcher = KBWatcher(
+        roots=[], qdrant=qdrant,  # type: ignore[arg-type]
+        text_embedder=MagicMock(), image_embedder=MagicMock(),
+    )
+
+    await watcher._delete_vectors(Path("/datasets/topic/photo.png"))
+
+    assert qdrant.deletes == [("/datasets/topic/photo.png", "custom_images")]
+
+
+@pytest.mark.asyncio
+async def test_delete_vectors_image_suffix_no_op_when_no_image_embedder():
+    # An image-side delete with no image embedder configured must not
+    # fire against the image collection (there's nothing to delete
+    # because nothing was ever ingested). Previously this would have
+    # fired against `kb_text` as a fallback because the code deleted
+    # from both; now it should be a clean no-op.
+    qdrant = _FakeQdrant(text="kb_text", image="kb_images")
+    watcher = KBWatcher(
+        roots=[], qdrant=qdrant,  # type: ignore[arg-type]
+        text_embedder=MagicMock(), image_embedder=None,
+    )
+
+    await watcher._delete_vectors(Path("/datasets/topic/photo.png"))
+
+    assert qdrant.deletes == []
+
+
+@pytest.mark.asyncio
+async def test_delete_vectors_text_suffix_works_with_no_image_embedder():
+    # Belt-and-suspenders: a text file's delete still works when there's
+    # no image embedder. The branch only gates the image-side call.
     qdrant = _FakeQdrant(text="kb_text", image="kb_images")
     watcher = KBWatcher(
         roots=[], qdrant=qdrant,  # type: ignore[arg-type]

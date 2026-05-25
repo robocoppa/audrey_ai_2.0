@@ -115,7 +115,10 @@ def _max_user_bytes(request: Request) -> int:
 async def _stream_to_disk(upload: UploadFile, dest: Path, *, limit_bytes: int) -> int:
     """Stream upload bytes to disk, stopping at limit_bytes. Returns written size.
 
-    Returns -1 if the cap is exceeded (caller should 413 and unlink dest).
+    Returns -1 if the cap would be exceeded (caller should 413 and unlink dest).
+    Checks the cap *before* extending — a single oversized chunk can't push
+    `written` past the limit. Same defense-in-depth pattern we use in
+    `kb/embed._fetch_image`.
     """
     written = 0
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -124,9 +127,9 @@ async def _stream_to_disk(upload: UploadFile, dest: Path, *, limit_bytes: int) -
             chunk = await upload.read(1024 * 1024)
             if not chunk:
                 break
-            written += len(chunk)
-            if written > limit_bytes:
+            if written + len(chunk) > limit_bytes:
                 return -1
+            written += len(chunk)
             f.write(chunk)
     return written
 
@@ -212,7 +215,9 @@ async def upload_file(
             ),
         )
 
-    filename = Path(file.filename or file_id).name  # strip any directory component
+    # Strip directory components, then cap at NAME_MAX (255) so a runaway
+    # 10 MB filename string can't bloat sqlite or the Qdrant payload.
+    filename = Path(file.filename or file_id).name[:255]
     kind = "image" if is_image_mime(mime) else "text"
     # Stamp once here so the qdrant payload + sqlite row agree to the second.
     stamp = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
@@ -254,7 +259,11 @@ async def upload_file(
 
     # Index the upload AFTER qdrant succeeded. If sqlite fails, roll back
     # qdrant so list/quota stay coherent — better to drop the upload than
-    # ship a phantom file the user can't see or delete.
+    # ship a phantom file the user can't see or delete. The rollback itself
+    # is wrapped: if Qdrant is the one that's flapping, the second exception
+    # would mask the first and could also leave behind points the sqlite
+    # row never recorded. Best-effort rollback + log + the next boot's
+    # `reconcile_with_qdrant` sweep is the recovery story.
     try:
         await db.record_upload(
             file_id=file_id, user=user, filename=filename, mime=mime,
@@ -263,7 +272,14 @@ async def upload_file(
         )
     except Exception as e:
         log.exception("files: uploads_db.record failed for %s (%s): %s", filename, user, e)
-        await qdrant.delete_by_file_id(file_id, user=user, collection=collection)
+        try:
+            await qdrant.delete_by_file_id(file_id, user=user, collection=collection)
+        except Exception as rollback_err:  # noqa: BLE001 — must not mask the original error
+            log.error(
+                "files: qdrant rollback ALSO failed for file_id=%s user=%s collection=%s: %s "
+                "(orphan points will be cleaned up by next boot's reconcile_with_qdrant)",
+                file_id, user, collection, rollback_err,
+            )
         _safe_unlink(dest)
         raise HTTPException(status_code=500, detail=f"Index write failed: {e}") from e
 
