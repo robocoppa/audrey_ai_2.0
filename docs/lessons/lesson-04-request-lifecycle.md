@@ -420,10 +420,11 @@ starts — you can't change a status code mid-stream. The streaming
 path has to encode the failure as an in-stream error frame instead.
 We'll trace that in detail when we cover the streaming route.
 
-## When you're ready for Lesson 5
+## When you're ready for the next lesson
 
-Lesson 5 covers `main.py` + `config.py` + `compose.yaml`. We'll learn
-how the app boots, what `app.state.*` is, how config flows from a YAML
-file into running code, and what the lifespan context manager does.
-That lesson is where we properly meet FastAPI dependency injection +
-async lifecycle.
+The next lesson covers `main.py` + `config.py` + `compose.yaml`:
+[Lesson 5 - Configuration and startup](lesson-05-configuration-and-startup.md).
+We'll learn how the app boots, what `app.state.*` is, how config flows
+from a YAML file into running code, and what the lifespan context
+manager does. That lesson is where we properly meet FastAPI dependency
+injection + async lifecycle.

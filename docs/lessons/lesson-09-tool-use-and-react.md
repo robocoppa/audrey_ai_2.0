@@ -6,11 +6,13 @@
 *"when a model needs to call a tool, how does Audrey find the right server,
 send the call, return the result, and decide when to stop?"*
 
-Lesson 7 traced how a request becomes a `task_type` and a `mode`. This lesson
-picks up after the fast path or a deep worker has chosen a model. If that
-model is tool-capable and tools exist, Audrey hands the request to the **ReAct
-loop**: a small driver that lets the model call tools, feeds the results back,
-and forces a final answer when the round budget runs out.
+Lesson 7 traced how a request becomes a `task_type` and a `mode`, and Lesson 8
+walked the four-stage deep pipeline (planner → panel → synthesize → reflect)
+that runs when `mode = deep`. This lesson picks up one step lower: after the
+fast path or a deep worker has chosen a model. If that model is tool-capable
+and tools exist, Audrey hands the request to the **ReAct loop**: a small
+driver that lets the model call tools, feeds the results back, and forces a
+final answer when the round budget runs out.
 
 There are four ideas to keep separate:
 
@@ -67,8 +69,11 @@ request arrives
 return answer
 ```
 
-This lesson focuses on the boxed middle section. Lesson 6 covered the model
-selection and gate scheduling; Lesson 7 covered classify/complexity/mode.
+This lesson focuses on the boxed middle section. Lesson 6 covered model
+selection and gate scheduling; Lesson 7 covered classify/complexity/mode;
+Lesson 8 covered how the panel dispatches deep workers in the first place.
+Here we open the *inside* of one of those workers (or of a fast-path
+single-model call) when that model decides to use a tool.
 
 ### Why "ReAct"?
 
@@ -93,11 +98,12 @@ Hold both in your head:
 | Fast path | one model answering directly | `agentic.react.max_rounds` (default 3) | Gate passed *into* ReAct; released between rounds during tool dispatch |
 | Deep worker | each worker in the panel | `agentic.react.deep_worker.max_rounds` (default 2) | Gate held *outside* the loop by `_run_one_worker`; ReAct gets `gate=None` |
 
-The reason for the gate difference comes from Lesson 6: the GPU fits one
-local model at a time. Fast-path tool dispatch is a good moment to let
-another user's request slip in. Deep workers run in parallel under
-`as_completed`, so each one needs to lock the GPU for its entire lifetime
-to avoid thrashing.
+The reason for the gate difference comes from Lessons 6 and 8: the GPU fits
+one local model at a time, and the deep panel holds the gate for the
+*whole* worker so the per-round release doesn't let another local worker
+slip in mid-loop. Fast-path tool dispatch *does* release the gate between
+rounds, because there's only one model running and the dispatch window is
+a good moment to let another user's request slip onto the GPU.
 
 
 ## 2. Read-along

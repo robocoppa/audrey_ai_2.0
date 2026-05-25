@@ -209,7 +209,7 @@ But Python type hints do not automatically validate YAML at runtime. YAML is
 just data loaded from a file.
 
 That is why Audrey also has `_parse_location(...)` at
-[`registry.py:70`](../../src/audrey/models/registry.py#L70):
+[`registry.py:84`](../../src/audrey/models/registry.py#L84):
 
 ```python
 def _parse_location(raw: object, *, task: str, model: str) -> Location:

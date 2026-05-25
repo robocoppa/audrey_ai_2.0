@@ -788,6 +788,8 @@ mechanisms are independent in code but share the same Qdrant
 collections, the same embedders, and the same "two stores agree"
 pattern that runs through the uploads side.
 
-The next lesson opens whichever subsystem comes after the KB pair
-in the published sequence — see `docs/lessons/` for what's
-landed since.
+Lesson 12 closes the current series — classification, routing, deep
+mode, tool use, function calling, and the KB are all covered. The
+likely next subject is `routes/openai.py` itself: the request-shaping,
+streaming-cancel cleanup, and `VIRTUAL_MODELS` validation that Lesson
+4 only previewed. Check `docs/lessons/` for what's landed since.

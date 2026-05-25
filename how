@@ -1,0 +1,9 @@
+○ wg-quick@wg0.service - WireGuard via wg-quick(8) for wg0
+     Loaded: loaded (]8;;file://RoboThinkPad/usr/lib/systemd/system/wg-quick@.service/usr/lib/systemd/system/wg-quick@.service]8;;; [0;1;38;5;185mdisabled[0m; preset: [0;1;32menabled[0m)
+     Active: inactive (dead)
+       Docs: ]8;;man:wg-quick(8)man:wg-quick(8)]8;;
+             ]8;;man:wg(8)man:wg(8)]8;;
+             ]8;;https://www.wireguard.com/https://www.wireguard.com/]8;;
+             ]8;;https://www.wireguard.com/quickstart/https://www.wireguard.com/quickstart/]8;;
+             ]8;;https://git.zx2c4.com/wireguard-tools/about/src/man/wg-quick.8https://git.zx2c4.com/wireguard-tools/about/src/man/wg-quick.8]8;;
+             ]8;;https://git.zx2c4.com/wireguard-tools/about/src/man/wg.8https://git.zx2c4.com/wireguard-tools/about/src/man/wg.8]8;;
