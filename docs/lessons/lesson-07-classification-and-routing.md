@@ -18,6 +18,17 @@ mode = fast | deep
 Those two values are different. `task_type` chooses the kind of model Audrey
 needs. `mode` chooses the shape of the answer path.
 
+The reason this routing layer matters: `mode = deep` is the gateway to
+Audrey's most interesting machinery. When the gate flips to `deep`, the
+request leaves the one-model-one-answer world and enters a four-stage
+pipeline — planner, panel, synthesizer, reflect — where several worker
+models run in parallel and a synthesizer merges their drafts into one
+voice. The next lesson opens that pipeline up; this one is about what
+decides which requests get sent through it. Get classification + routing
+right and the deep machinery does its best work on the right prompts; get
+it wrong and Audrey either burns wall-clock on simple requests or
+flat-lines short on hard ones.
+
 
 ## 1. Context
 

@@ -1,7 +1,7 @@
 # Agent/session memory — local only, pre-populated with real setup state.
-# AGENTS.md is the tracked entrypoint; these files are local continuity,
-# compatibility, archive, or audit state.
+# These files are local continuity, compatibility, archive, or audit state.
 .claude/
+AGENTS.md
 docs/PROJECT_STATE.md
 docs/campaign-1/HISTORY.md
 CLAUDE.md
@@ -9,9 +9,7 @@ CLAUDE.md
 # Lesson-side working docs that should not ship to GitHub.
 # AUDIT.md collects code-review findings raised during lesson writing —
 # it's an internal queue, not teaching material.
-# CONTINUITY.md is the lesson-plan tracker; same posture as HISTORY.md.
 docs/lessons/AUDIT.md
-docs/lessons/CONTINUITY.md
 
 # Python
 __pycache__/

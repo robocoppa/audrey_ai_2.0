@@ -88,9 +88,9 @@ from pathlib import Path
 DOCS_GLOB = os.environ.get("DOCS_GLOB", "docs/lessons/lesson-*.md")
 
 # Docs to skip even when they match DOCS_GLOB. Useful for excluding
-# scaffolding files (e.g. AUDIT.md, CONTINUITY.md) that contain
-# illustrative cites the checker shouldn't validate. Set DOCS_EXCLUDE
-# to a colon-separated list of glob patterns.
+# scaffolding files (e.g. AUDIT.md) that contain illustrative cites the
+# checker shouldn't validate. Set DOCS_EXCLUDE to a colon-separated list
+# of glob patterns.
 DOCS_EXCLUDE = [
     p for p in os.environ.get("DOCS_EXCLUDE", "").split(":") if p
 ]

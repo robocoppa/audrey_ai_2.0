@@ -7,45 +7,49 @@
 what actually happens to that request — and why does the answer take four
 stages instead of one?"*
 
-Lesson 7 left off with the complexity gate choosing `mode = deep`. This lesson
-opens the door that mode goes through. We will follow one request through
-four nodes:
+[Lesson 7](lesson-07-classification-and-routing.md) left off with two
+values pinned to the request: a `task_type` (`code`, `reasoning`,
+`general`, or `vl`) from the classifier, and a `mode` (`fast` or `deep`)
+from the complexity gate. This lesson picks up the instant `mode = deep`
+and opens the door that mode goes through — both of those Lesson-7 values
+ride along into deep mode and shape what happens next. We will follow one
+request through four nodes:
 
 ```text
 planner -> deep_panel -> synthesize -> reflect
 ```
 
 Each node has a different job, a different failure mode, and a different
-reason to exist. By the end you should be able to look at a deep-mode log
-line and predict which node produced it.
+reason to exist. By the end you should be able to glance at a deep-mode log
+line and name the node that wrote it.
 
 
 ## 1. Context
 
-Fast mode is a single chat call: one model writes the answer. Deep mode is
-deliberately not that. Deep mode runs several worker models in parallel,
-then merges their drafts. The trade-off is straightforward:
+Fast mode is one chat call — one model, one answer. Deep mode is the
+opposite bet: spend more wall-clock to ask several workers in parallel, then
+merge what they wrote. The contrast is straightforward:
 
-- **Fast mode**: low latency, one perspective, cheap.
-- **Deep mode**: higher latency, multiple perspectives merged, more expensive.
+- **Fast mode:** one chat call, one perspective, low latency, cheap.
+- **Deep mode:** several chat calls in parallel, merged into one voice, higher latency, more expensive.
 
-The user does not see the four stages — they see one answer streaming back.
-But inside Audrey, four distinct things happen between "request arrived" and
+The user never sees the four stages — only the one answer streaming back.
+Inside Audrey, four distinct things happen between "request arrived" and
 "answer ready."
 
 ### 1.1 Why four stages and not one
 
-The naive way to "answer harder" is to send the prompt to a bigger model.
-Audrey does not do that. Instead it sends the prompt to a small **panel** of
-workers and then merges them. Two reasons:
+The obvious way to "answer harder" is to throw a bigger model at the prompt.
+Audrey takes another path: a small **panel** of workers answers in
+parallel, and a synthesizer stitches their drafts into one voice. Two
+reasons it's shaped this way:
 
-1. **Different models miss different things.** A code-tuned model and a
-   reasoning-tuned model writing in parallel will catch each other's blind
-   spots more reliably than either one writing alone.
-2. **The merge step is cheap relative to the work.** Running the panel takes
-   the bulk of the wall-clock time. Adding a synthesis pass on top adds one
-   more chat call but produces an answer that reads as one voice instead of
-   a stitched-together quilt.
+1. **Different models miss different things.** A code-tuned worker and a
+   reasoning-tuned worker, writing the same prompt at the same time, cover
+   each other's blind spots more reliably than either one writing alone.
+2. **The merge is cheap relative to the work.** The panel owns the
+   wall-clock budget; the synthesis pass costs one extra chat call and turns
+   a stitched quilt into a single answer.
 
 The four stages map onto four questions Audrey has to answer:
 
@@ -63,32 +67,26 @@ If you remember the questions, the code falls into place.
 Here is the path in one pass, with the dispatcher choices that affect each
 stage:
 
-```text
-1. planner          (optional)
-     - skip if prompt is short (`planning.min_prompt_tokens`)
-     - skip if planner returned 0 or 1 subtask
-     - otherwise: 2-3 sub-questions assigned round-robin to workers
-
-2. deep_panel
-     - pick the pool from the virtual model
-       (audrey_deep / audrey_cloud / audrey_local)
-     - filter the pool's workers by health
-     - if no healthy workers, fall back to the model registry (cap 2)
-     - run all workers in parallel
-       - local workers serialize through the GPU gate
-       - cloud workers run concurrently (capped at `max_deep_workers_cloud`)
-       - tool-capable workers run a ReAct loop instead of one chat call
-
-3. synthesize
-     - look up the pool's synthesizer + fallback_synth
-     - run primary; on failure, run fallback
-     - if both fail, ship the longest non-empty draft verbatim
-
-4. reflect
-     - check the synth output meets `min_answer_chars`
-     - skip the floor if the user explicitly asked for brevity
-     - if it failed and we haven't already retried, loop back to deep_panel
-```
+1. **`planner`** *(optional)*
+   - Skip if the prompt is short (`planning.min_prompt_tokens`).
+   - Skip if the planner returned 0 or 1 subtask.
+   - Otherwise: 2-3 sub-questions assigned round-robin to workers.
+2. **`deep_panel`**
+   - Pick the pool from the virtual model (`audrey_deep` / `audrey_cloud` / `audrey_local`).
+   - Filter the pool's workers by health.
+   - If no healthy workers, fall back to the model registry (cap 2).
+   - Run all workers in parallel:
+     - Local workers serialize through the GPU gate.
+     - Cloud workers run concurrently (capped at `max_deep_workers_cloud`).
+     - Tool-capable workers run a ReAct loop instead of one chat call.
+3. **`synthesize`**
+   - Look up the pool's `synthesizer` + `fallback_synth`.
+   - Run primary; on failure, run fallback.
+   - If both fail, ship the longest non-empty draft verbatim.
+4. **`reflect`**
+   - Check the synth output meets `min_answer_chars`.
+   - Skip the floor if the user explicitly asked for brevity.
+   - If it failed and we haven't already retried, loop back to `deep_panel`.
 
 Two routing rules outside the four nodes matter for understanding the trace:
 
@@ -103,41 +101,15 @@ Two routing rules outside the four nodes matter for understanding the trace:
 
 ## 2. Read-along
 
-These are the files we'll reference:
+These are the files we'll reference. Open them as we go.
 
-- [`src/audrey/pipeline/graph.py:265`](../../src/audrey/pipeline/graph.py#L265)
-  — `node_planner`, the LangGraph entry to planning.
-- [`src/audrey/pipeline/planner.py:32`](../../src/audrey/pipeline/planner.py#L32)
-  — `plan()`, the planner LLM call and its parser.
-- [`src/audrey/pipeline/graph.py:283`](../../src/audrey/pipeline/graph.py#L283)
-  — `node_deep_panel`, the LangGraph entry to dispatch.
-- [`src/audrey/pipeline/deep_panel.py:59`](../../src/audrey/pipeline/deep_panel.py#L59)
-  — `pool_key_for`, the virtual-model → pool mapping.
-- [`src/audrey/pipeline/deep_panel.py:68`](../../src/audrey/pipeline/deep_panel.py#L68)
-  — `select_workers`, healthy-worker selection plus the registry fallback.
-- [`src/audrey/pipeline/deep_panel.py:105`](../../src/audrey/pipeline/deep_panel.py#L105)
-  — `_run_one_worker`, the per-worker chat or ReAct loop.
-- [`src/audrey/pipeline/deep_panel.py:200`](../../src/audrey/pipeline/deep_panel.py#L200)
-  — `_messages_for_subtask`, how each worker gets its slice of the prompt.
-- [`src/audrey/pipeline/deep_panel.py:220`](../../src/audrey/pipeline/deep_panel.py#L220)
-  — `run_panel`, the panel dispatcher.
-- [`src/audrey/pipeline/synthesize.py:41`](../../src/audrey/pipeline/synthesize.py#L41)
-  — `_format_drafts_for_synth`, the draft-bundling for the synth prompt.
-- [`src/audrey/pipeline/synthesize.py:81`](../../src/audrey/pipeline/synthesize.py#L81)
-  — `pick_synthesizer`, the primary/fallback selector.
-- [`src/audrey/pipeline/synthesize.py:167`](../../src/audrey/pipeline/synthesize.py#L167)
-  — `synthesize`, the merge orchestrator.
-- [`src/audrey/pipeline/reflect.py:69`](../../src/audrey/pipeline/reflect.py#L69)
-  — `reflect`, the deterministic quality gate.
-- [`config.yaml:79`](../../config.yaml#L79) — the `deep_panel` mixed pool.
-- [`config.yaml:99`](../../config.yaml#L99) — the `deep_panel_cloud` pool.
-- [`config.yaml:119`](../../config.yaml#L119) — the `deep_panel_local` pool.
-- [`src/audrey/pipeline/prompts.py:62`](../../src/audrey/pipeline/prompts.py#L62)
-  — `PLANNER_SYSTEM`, the planner instruction.
-- [`src/audrey/pipeline/prompts.py:74`](../../src/audrey/pipeline/prompts.py#L74)
-  — `SYNTH_SYSTEM`, the synthesizer instruction.
-
-Open them as we go.
+- [`src/audrey/pipeline/graph.py`](../../src/audrey/pipeline/graph.py) — the LangGraph nodes that enter each stage (`node_planner`, `node_deep_panel`, etc.).
+- [`src/audrey/pipeline/planner.py`](../../src/audrey/pipeline/planner.py) — the planner LLM call and its forgiving JSON parser.
+- [`src/audrey/pipeline/deep_panel.py`](../../src/audrey/pipeline/deep_panel.py) — pool selection, worker filtering, the registry fallback, per-worker dispatch, and the subtask round-robin.
+- [`src/audrey/pipeline/synthesize.py`](../../src/audrey/pipeline/synthesize.py) — draft bundling, primary/fallback synth selection, and the three-tier failure handling.
+- [`src/audrey/pipeline/reflect.py`](../../src/audrey/pipeline/reflect.py) — the deterministic quality gate and brevity-cue escape hatch.
+- [`src/audrey/pipeline/prompts.py`](../../src/audrey/pipeline/prompts.py) — the `PLANNER_SYSTEM` and `SYNTH_SYSTEM` instructions.
+- [`config.yaml`](../../config.yaml) — the three `deep_panel*` pools (mixed, cloud-only, local-only) keyed by task type.
 
 
 ### 2.1 Stage 1 — Planner
@@ -145,9 +117,9 @@ Open them as we go.
 The planner asks one question: *"Is this user request really one ask, or
 several asks bundled together?"*
 
-If it's one ask, the panel runs the prompt as-is. If it's several asks, the
+If it's one ask, the panel runs the prompt verbatim. If it's several, the
 panel splits them — one worker per sub-question — so each worker focuses on
-a tighter slice.
+a tighter slice instead of trying to cover everything at once.
 
 #### When the planner runs
 
@@ -161,9 +133,9 @@ async def node_planner(state: PipelineState) -> dict[str, Any]:
 ```
 
 Two early exits. If `agentic.planning.enabled` is off, return no subtasks.
-If the prompt is shorter than `planning.min_prompt_tokens` (default 40), also
-return no subtasks — the planner round-trip costs more than it saves on
-short prompts.
+If the prompt is shorter than `planning.min_prompt_tokens` (default 40),
+also return no subtasks — on short prompts the planner round-trip costs
+more than it saves.
 
 #### What the planner does
 
@@ -198,12 +170,12 @@ resp = await ollama.chat(
 ```
 
 `temperature=0.0` because we want deterministic decomposition. The planner
-isn't being creative — it's reading structure.
+isn't being creative; it's reading structure.
 
 #### The parser is intentionally forgiving
 
-LLM JSON output is unreliable in practice — leading prose, trailing
-markdown, mismatched braces. The parser handles that at
+LLM JSON output in practice is messy — leading prose, trailing markdown,
+mismatched braces. The parser shrugs all of that off at
 [`planner.py:79`](../../src/audrey/pipeline/planner.py#L79):
 
 ```python
@@ -221,25 +193,27 @@ def _parse_planner_output(raw: str) -> list[str]:
     ...
 ```
 
-`find('{')` + `rfind('}')` grabs the outermost brace pair, dropping any
-preamble or trailing commentary. The slice can still be malformed — a stray
-`}` in the prose, two JSON objects in one response — and in that case
-`json.loads` raises and the parser returns `[]`. That permissiveness is
-intentional: every planner failure mode degrades to "no decomposition," and
-the panel handles that fine.
+`find('{')` and `rfind('}')` grab the outermost brace pair, dropping
+preamble and trailing commentary in one move. The slice can still be
+malformed — a stray `}` in the prose, two JSON objects in one response — in
+which case `json.loads` raises and the parser quietly returns `[]`. The
+permissiveness is by design: every planner failure mode degrades to "no
+decomposition," and the panel handles that case fine.
 
 #### Three exits, all benign
 
-The planner has three ways to return `[]` (no decomposition):
+The planner has three exits, and all of them produce `[]`:
 
-1. The model returned 0 subtasks (recognized atomic prompt — by design).
-2. The model returned 1 subtask (probably failed to decompose; logged at
-   debug, treated as no decomposition).
-3. The model returned malformed JSON (parsing failed; degrades to `[]`).
+1. The model returned zero subtasks — recognized the prompt as atomic, by
+   design.
+2. The model returned one subtask — probably failed to decompose; logged at
+   debug, treated as no decomposition.
+3. The model returned malformed JSON — parsing failed; degrades to `[]`.
 
-All three paths produce the same downstream behavior: `subtasks = []` flows
-into the deep panel, and the panel runs every worker against the original
-prompt. The planner is opt-in routing, not a hard requirement.
+Every path lands in the same place. `subtasks = []` flows into the deep
+panel, the panel runs every worker against the original prompt, and life
+goes on. The planner is opt-in routing, not a hard requirement — when it
+works, it sharpens the panel; when it fails, the panel doesn't notice.
 
 When the planner *does* return subtasks, the log line at
 [`graph.py:278`](../../src/audrey/pipeline/graph.py#L278) shows the count
@@ -252,13 +226,14 @@ log.info("planner: %d subtasks: %s", len(subs), [s[:60] for s in subs])
 
 ### 2.2 Concept spotlight — `asyncio.gather` and the parallel-worker idea
 
-Before we open the deep panel, a quick aside on what "parallel" means here.
+Before we open the deep panel, a quick aside on what "parallel" actually
+means here.
 
 Python is single-threaded for CPU work, but `asyncio` lets one thread juggle
-many in-flight I/O operations. `await ollama.chat(...)` is mostly waiting
-for the network — the model generates tokens on the GPU (or in the cloud),
-the bytes come back over HTTP, and Python's event loop is free to do other
-things during the wait.
+many in-flight I/O operations at once. `await ollama.chat(...)` is mostly
+spent waiting on the network — the model generates tokens on the GPU (or in
+the cloud), the bytes trickle back over HTTP, and Python's event loop is
+free to do other things during the wait.
 
 `asyncio.gather(*coros)` takes a list of those coroutines and runs them
 **concurrently**. From the caller's perspective:
@@ -268,26 +243,28 @@ drafts = await asyncio.gather(coro_worker_a, coro_worker_b, coro_worker_c)
 ```
 
 …blocks until *all* of them finish, then returns a list of results in
-submission order. While it's blocking, the event loop interleaves the
-three workers' I/O. If worker A is waiting on the network, the loop dispatches
-B's next request, then C's, then comes back to A when bytes arrive.
+submission order. While it blocks, the event loop interleaves the three
+workers' I/O: if worker A is waiting on the network, the loop dispatches
+B's next request, then C's, then comes back to A the moment bytes arrive.
 
 For deep-panel workers, this is the entire reason multiple cloud workers
 finish in roughly the time of one. Three workers each waiting 12 seconds on
-the cloud take roughly 12 seconds total, not 36 — because their waits
-overlap.
+the cloud take roughly 12 seconds total, not 36, because their waits
+overlap rather than queue.
 
-Local workers don't get the same speedup, because they all want the same
-GPU. That's where the next concept comes in.
+Local workers don't enjoy the same speedup — they all want the same GPU.
+That constraint is what the next concept is built around.
 
 
 ### 2.3 Stage 2 — Deep panel
 
-The deep panel runs the actual workers. Three knobs decide who runs:
+The deep panel is where the actual work happens. Three knobs decide which
+workers run:
 
-1. Which **pool** to draw from (set by the virtual model).
-2. Which workers in the pool are **healthy** (set by `HealthTracker`).
-3. Whether each worker is **tool-capable** (set by `fast_path.tool_capable_models`).
+1. Which **pool** to draw from — set by the virtual model.
+2. Which workers in that pool are **healthy** — set by `HealthTracker`.
+3. Whether each worker is **tool-capable** — set by
+   `fast_path.tool_capable_models`.
 
 #### Picking the pool
 
@@ -308,9 +285,9 @@ def pool_key_for(virtual_model: str) -> str:
 ```
 
 The fallback exists because the function is also called from the streaming
-route, where a misspelled virtual model would otherwise cause a `KeyError` at
-request time. Instead it warns and uses the default pool — the answer still
-ships, but the operator sees the typo in the logs.
+route, where a misspelled virtual model would otherwise blow up with a
+`KeyError` mid-request. Warning and using the default pool means the user
+still gets an answer; the operator gets a typo in the logs to chase later.
 
 The pools themselves live in `config.yaml`. Open
 [`config.yaml:79`](../../config.yaml#L79):
@@ -328,9 +305,9 @@ deep_panel:
   ...
 ```
 
-Each pool is keyed by **task type** (code, reasoning, general, vl). So
-"which workers run" depends on both the virtual model (picks the pool) and
-the classifier output from Lesson 7 (picks the task entry within the pool).
+Each pool is keyed by **task type** (code, reasoning, general, vl), so
+"which workers run" is a two-axis lookup: the virtual model picks the pool,
+and the classifier output from Lesson 7 picks the task entry within it.
 
 #### Selecting healthy workers
 
@@ -357,10 +334,10 @@ Three filters:
   concurrent limit).
 - Local workers aren't capped here; the GPU gate handles that.
 
-`registry.location_of(name)` is the model-layer method that says "where
-does this model run?" — local or cloud. It walks the registry rather than
-trusting the pool's declared shape, so a renamed model still gets the right
-treatment.
+`registry.location_of(name)` answers a single question — "is this a local
+or a cloud model?" — by walking the registry rather than trusting whatever
+the pool config declared. A model that gets renamed still ends up on the
+right code path.
 
 #### The registry fallback
 
@@ -379,23 +356,24 @@ if not workers:
             break
 ```
 
-The cap of 2 mirrors the typical pool size — we want enough drafts to merge
-without flooding the GPU gate or burning cloud quota on what is already
-an emergency path. The log line is a `warning` so operators notice when the
-pool has lost its workers; if you see this in production, the pool's models
-need attention.
+The cap of 2 mirrors the typical pool size — enough drafts to merge,
+without flooding the GPU gate or burning cloud quota on what is already an
+emergency path. The log line is a `warning` precisely so operators notice
+when a pool has lost its workers; if you see this in production, the pool's
+models need attention now.
 
 #### Concept spotlight — the GPU gate and per-worker accounting
 
-Local workers go through a `FairLocalGate` semaphore (Lesson 6 introduced
-this). With `GPU_CONCURRENCY=1` — the production default — only one local
-worker can run at a time, because they all want the same GPU's VRAM.
+Local workers all squeeze through a `FairLocalGate` semaphore (Lesson 6
+introduced it). With `GPU_CONCURRENCY=1` — the production default — only
+one local worker can run at a time, because they're all competing for the
+same GPU's VRAM.
 
-Per-worker dispatch looks parallel on the dispatcher side
-([`deep_panel.py:294-313`](../../src/audrey/pipeline/deep_panel.py#L294))
+Per-worker dispatch *looks* parallel on the dispatcher side
+([`deep_panel.py:294-313`](../../src/audrey/pipeline/deep_panel.py#L294)),
 but execution serializes through the gate. A deep panel with two local
-workers will run them one after the other, not at the same time. Two cloud
-workers in the same panel run concurrently because they don't hold the gate.
+workers runs them back to back, not side by side. Two cloud workers in the
+same panel run concurrently because they never touch the gate.
 
 This is also why tool-capable local workers hold the gate for the *entire*
 ReAct loop, not just one chat call. Look at
@@ -412,21 +390,22 @@ async with gate.acquire(model, location=location, user_id=user_id):
         )
 ```
 
-The `gate=None` is the key detail. The ReAct loop is told to *not* acquire
-its own gate, because the panel already holds it. If ReAct acquired again
-mid-loop, a local worker would briefly release the GPU between rounds —
-giving another local worker (or another user's request) a window to grab
-it. Holding for the whole loop keeps tool-using workers atomic from the GPU
-gate's perspective.
+`gate=None` is the load-bearing detail. The ReAct loop is told *not* to
+acquire its own gate, because the panel already holds one. If ReAct
+acquired again mid-loop, a local worker would briefly release the GPU
+between rounds — handing another local worker (or another user's request)
+a window to slip in. Holding for the whole loop keeps tool-using workers
+atomic from the gate's perspective.
 
-One subtle consequence worth knowing for log-reading: when a worker runs
-ReAct, the `WorkerDraft.prompt_eval_count` and `eval_count` carry only the
-**final** chat call's token counts, not the sum across rounds. A
-tool-grounded worker that ran 3 rounds reports only the last round's
-tokens. This isn't a metrics bug — per-worker totals work for the
-dashboards Audrey actually uses — but if you compare a tool-grounded
-worker's token count to a one-shot worker's count, the tool-grounded one
-looks artificially light. That's the accounting working as designed.
+One subtlety worth knowing before you read deep-mode logs: when a worker
+runs ReAct, `WorkerDraft.prompt_eval_count` and `eval_count` carry only the
+**final** chat call's tokens, not the sum across rounds. A tool-grounded
+worker that ran three rounds reports just the last round's count. It isn't
+a metrics bug — the per-worker totals are exactly what the dashboards
+Audrey actually uses are reading — but if you compare a tool-grounded
+worker's token count against a one-shot worker's, the tool-grounded one
+looks artificially light. That's the accounting working as designed, not a
+worker cheating its way to a smaller number.
 
 #### Sub-question round-robin
 
@@ -444,12 +423,13 @@ else:
     per_worker_messages = [messages] * len(workers)
 ```
 
-Three subtasks and two workers: worker 0 gets subtask 0, worker 1 gets
-subtask 1, subtask 2 is dropped (the modulo would wrap, but with
-`len(workers) < len(subtasks)` the loop just doesn't reach it). Two
-subtasks and three workers: worker 0 gets subtask 0, worker 1 gets
-subtask 1, worker 2 gets subtask 0 again — two workers answer the same
-question with different perspectives, which the synthesizer reconciles.
+Two scenarios make the math concrete. Three subtasks and two workers:
+worker 0 gets subtask 0, worker 1 gets subtask 1, subtask 2 is dropped
+(the modulo would wrap, but with `len(workers) < len(subtasks)` the loop
+never reaches it). Two subtasks and three workers: worker 0 gets subtask 0,
+worker 1 gets subtask 1, worker 2 circles back to subtask 0 — two workers
+answer the same question with different perspectives, and the synthesizer
+reconciles them.
 
 `_messages_for_subtask` at
 [`deep_panel.py:216`](../../src/audrey/pipeline/deep_panel.py#L216) builds
@@ -466,32 +446,33 @@ for m in reversed(base_messages):
 out.reverse()
 ```
 
-The semantic matters in multi-turn conversations. "The last user message" is
-this turn's question — the one the planner just decomposed — not an
-arbitrary earlier turn. Earlier user/assistant pairs stay in place as
-context, so the worker still sees the full thread; only the focal question
-becomes the subtask.
+The "last user message" detail matters in multi-turn conversations. It's
+*this turn's* question — the one the planner just decomposed — not some
+arbitrary earlier turn. Earlier user/assistant pairs stay put as context,
+so the worker still sees the full thread; only the focal question gets
+swapped for the subtask.
 
 #### Worker output: `WorkerDraft`
 
-Each worker returns a `WorkerDraft` regardless of outcome — even on error.
-The shape is at [`pipeline/state.py`](../../src/audrey/pipeline/state.py),
-but for now the fields that matter are:
+Every worker returns a `WorkerDraft` regardless of outcome — success,
+empty answer, or outright error. The shape lives in
+[`pipeline/state.py`](../../src/audrey/pipeline/state.py), but for our
+purposes the fields that matter are:
 
 - `content` — the model's text output, possibly empty on failure.
 - `error` — populated only on `OllamaError`; truncated to 300 chars.
 - `tool_rounds` — `> 0` if the worker ran ReAct.
 - `model`, `elapsed_s`, `tool_calls` — observability fields.
 
-Never-raising is a load-bearing contract. The synthesizer needs the full
-draft list to be present, even if some entries are empty error rows —
-otherwise a single misbehaving worker could 502 the entire request.
+The never-raise rule is a load-bearing contract. The synthesizer needs the
+full draft list in front of it, even if some entries are empty error rows;
+otherwise one misbehaving worker could 502 the entire request.
 
 
 ### 2.4 Stage 3 — Synthesizer
 
-The synthesizer takes the worker drafts and merges them into one final
-answer. It runs one LLM call (or two, on retry).
+The synthesizer takes the worker drafts and merges them into a single
+final answer. One LLM call carries it most of the time; two on retry.
 
 #### Picking the synthesizer
 
@@ -518,11 +499,11 @@ def pick_synthesizer(cfg: Config, *, pool_key: str, task: TaskType) -> tuple[str
     return primary, fallback
 ```
 
-The `KeyError` would normally never trigger in production — startup
-validation in [`config.py`](../../src/audrey/config.py) walks every
-`deep_panel*` pool/task at boot and crashes the process if any synthesizer
-is missing. The function still raises defensively in case someone bypasses
-the validator.
+The `KeyError` should never fire in production — startup validation in
+[`config.py`](../../src/audrey/config.py) walks every `deep_panel*` pool/task
+at boot and crashes the process if any synthesizer is missing. The runtime
+guard is there anyway, in case someone wires Audrey up in a way that
+bypasses the validator. Defense in depth, costing nothing.
 
 #### Bundling the drafts
 
@@ -547,17 +528,17 @@ DRAFTS:
 <worker B's content>
 ```
 
-The `[tool-grounded: N rounds]` tag is informational. The synthesizer
-prompt (read it at
-[`prompts.py:74`](../../src/audrey/pipeline/prompts.py#L74)) explicitly
-tells the model to prefer tool-grounded drafts on factual disagreements:
+The `[tool-grounded: N rounds]` tag isn't just labeling — it's a signal.
+The synthesizer prompt (read it at
+[`prompts.py:74`](../../src/audrey/pipeline/prompts.py#L74)) tells the
+model to lean on tool-grounded drafts whenever the facts disagree:
 
 > When a tool-grounded draft and a tool-free draft disagree on a factual
 > point, prefer the tool-grounded one.
 
-This is how Audrey reconciles "the model thinks the answer is X" with "the
-search tool says the answer is Y." Y wins, but only because the synthesizer
-is told to read the tag.
+That single line is how Audrey reconciles "the model thinks the answer is
+X" with "the search tool says the answer is Y." Y wins — but only because
+the synthesizer is told to read the tag and trust what it implies.
 
 #### Forwarding original system context
 
@@ -584,20 +565,20 @@ def _build_synth_messages(
     ]
 ```
 
-The original system messages include the datetime context (set by
+The original system messages carry the datetime context (set by
 `node_datetime` — Lesson 7 covered the graph entry), memory recall hits,
-and any OWUI-supplied templates. Without them the synthesizer would
-"hedge" about "today" using its training cutoff, which makes the merged
-answer feel stale.
+and any OWUI-supplied templates. Strip them and the synthesizer starts
+hedging about "today" against its training cutoff — the merged answer
+suddenly feels months out of date.
 
-`draft_count` is passed explicitly so a future change to the draft
-separator string in `_format_drafts_for_synth` can't silently break the
-count the synthesizer is told to expect.
+`draft_count` is threaded through explicitly so that a future change to the
+draft separator string in `_format_drafts_for_synth` can't silently break
+the count the synthesizer was told to expect.
 
 #### Three-tier failure handling
 
-The synthesizer can fail in three ways. Each one is handled differently —
-read [`synthesize.py:211`](../../src/audrey/pipeline/synthesize.py#L211):
+The synthesizer can fail three different ways, and each gets its own
+handling — read [`synthesize.py:211`](../../src/audrey/pipeline/synthesize.py#L211):
 
 ```python
 candidates = [primary] if primary == fallback else [primary, fallback]
@@ -632,15 +613,16 @@ The tiers:
    user gets an answer (probably less polished than a real synth would
    produce), and the failure is visible in the metric labels.
 
-Never 502 the request because the synth failed. The worker drafts are
-the evidence base — at least one of them produced something the user
-can read, and Audrey ships that something rather than nothing.
+The rule across all three tiers: never 502 the request because the synth
+failed. The worker drafts are the evidence base — at least one of them
+produced something a user can read, and Audrey ships that something rather
+than handing back an error.
 
 
 ### 2.5 Stage 4 — Reflect
 
-Reflect is the cheapest stage in the pipeline. It runs no LLM calls — it
-only inspects the synthesized content. Open
+Reflect is the cheapest stage in the pipeline by a wide margin. No LLM
+calls; it only inspects what the synthesizer produced. Open
 [`reflect.py:69`](../../src/audrey/pipeline/reflect.py#L69):
 
 ```python
@@ -674,41 +656,42 @@ Three outcomes:
 
 #### Why the brevity escape hatch exists
 
-The synth prompt is permissive about length — it's told to write the best
-answer for the user, not to hit a word count. That works for ordinary
-requests, where the answer is naturally substantive. It breaks on
-"What year is it? Answer in one sentence" because the correct answer is
-~15 chars and gets retried as "too short" wastefully.
+The synth prompt is permissive about length on purpose — it's told to
+write the best answer for the user, not to hit a word count. That's fine
+for ordinary requests, where the answer turns out substantive on its own.
+It falls apart on "What year is it? Answer in one sentence" — the correct
+answer is roughly fifteen characters, fails the floor, and gets retried
+wastefully as "too short."
 
 The `_BREVITY_CUES` tuple at
 [`reflect.py:35`](../../src/audrey/pipeline/reflect.py#L35) is the
 hardcoded list of phrases that trip the escape hatch. It's English-only
-because Audrey is English-only; a non-English user asking for brevity
-in their own language would trigger the same wasteful retry the cues
-were added to prevent.
+because Audrey is English-only — a non-English user asking for brevity in
+their own language would trigger the same wasteful retry the cues exist to
+prevent.
 
 #### Retry routing
 
-The retry isn't in `reflect()` — `reflect()` only inspects. The retry
-decision is in `route_after_reflect` (graph router) and it gates on three
-things:
+The retry decision doesn't live in `reflect()` — `reflect()` only
+inspects. The retry lives one level up, in `route_after_reflect` (the
+graph router), and it gates on three things:
 
 1. `reflect_passed` must be False.
 2. `reflect_attempts` must be ≤ `reflection_max_retries` (default 1).
 3. `synth_error` must not be `"no_drafts"` (no point retrying with no
    workers).
 
-When the retry fires, the panel and synth run again with one nudge:
+When the retry fires, the panel and synth run again with a single nudge:
 `compose_system_messages` injects a brief "be more substantive" hint into
-the second pass. If the second pass still fails the length check, Audrey
-ships what it has and marks `reflect_passed=False` in the state — visible
-to whoever's reading logs.
+the second pass. If that pass still trips the length check, Audrey ships
+what it has and marks `reflect_passed=False` in the state — a quiet
+breadcrumb for whoever's reading the logs later.
 
 
 ### 2.6 The deep loop in one trace
 
-Here is what an info-level log for a typical deep request looks like, with
-the stage producing each line annotated on the right:
+Here's what an info-level log of a typical deep request looks like, with
+each line annotated by the stage that produced it:
 
 ```text
 classify: task=reasoning conf=0.72                       # Lesson 7
@@ -719,13 +702,12 @@ synth: qwen3.6:35b ok in 6.42s (attempt 1)               # node_synthesize
 reflect: attempt=1 passed=True reason=ok                 # node_reflect
 ```
 
-Each prefix maps to a stage. If a line in your trace doesn't match this
-pattern, the stage that produced it is either error-suppressing (e.g.
-a worker logged a warning during the panel call) or running on the
-streaming path (the streaming variant uses similar prefixes but emits
-extra `worker_done`/`first_token` events).
+Each prefix maps to a stage. A line that doesn't match this pattern is
+either coming from an error-suppressing path (a worker that logged a
+warning mid-panel) or from the streaming variant, which uses the same
+prefixes but also emits extra `worker_done` / `first_token` events.
 
-When something goes wrong, the trace looks like:
+When something goes wrong, the trace tells you a story:
 
 ```text
 deep_panel: skipping unhealthy worker qwen3-coder-next
@@ -737,16 +719,18 @@ reflect: attempt=1 passed=False reason=too_short
 reflect: attempt=2 passed=True reason=ok
 ```
 
-You can read off the cascade: the pool's primary worker was unhealthy, the
-fallback to registry kicked in, that worker timed out, the primary synth
-was also unhealthy, the fallback synth worked, but its output was too
-short, so the panel re-ran and the second pass cleared the gate.
+You can read the cascade right off the page: the pool's primary worker was
+unhealthy, the fallback to registry kicked in, that worker timed out, the
+primary synth was also unhealthy, the fallback synth worked, but its
+output was too short — so the panel re-ran and the second pass cleared the
+gate. Audrey didn't fail the request; it just had to work harder.
 
 
 ## 3. Comprehension questions
 
 These are scenario-based — work through them as if you were diagnosing a
-live system. Suggested answers follow.
+live system at 3 a.m. with the logs in front of you. Suggested answers
+follow.
 
 **Q1.** A user asks "What's the capital of France? Answer briefly." with
 `audrey_deep`. Walk through what happens stage by stage. Does the panel
@@ -782,60 +766,62 @@ logic.
 
 ### Suggested answers
 
-**A1.** Classification probably routes the request to `general` (capital
-of a country isn't code, reasoning, or VL). Complexity counts the prompt —
-it's short, well under the deep threshold, but `audrey_deep` is a forced-
-deep virtual model, so mode = deep anyway. The planner is gated on
-`planning.min_prompt_tokens` (default 40); a six-word prompt is well
-under that, so the planner returns `[]` without making an LLM call. The
-deep panel runs both workers from the `deep_panel/general` pool with the
-original prompt; both workers return short answers ("Paris."). The
-synthesizer merges them — short input, short output. Reflect sees the
-short output and would normally fail the `min_answer_chars` check, but
-"briefly" is in `_BREVITY_CUES` so it passes with `ok_brevity_requested`.
-End result: ~one second to "Paris."
+**A1.** Classification routes the request to `general` — "capital of a
+country" isn't code, reasoning, or VL. Complexity counts the prompt and
+finds it well under the deep threshold, but `audrey_deep` forces deep
+regardless, so mode = deep anyway. The planner is gated on
+`planning.min_prompt_tokens` (default 40); a six-word prompt is nowhere
+near it, so the planner returns `[]` without ever calling an LLM. The
+deep panel runs both workers from the `deep_panel/general` pool against
+the original prompt; both come back with short answers ("Paris."). The
+synthesizer merges them — short input in, short output out. Reflect sees
+the short output and would normally fail the `min_answer_chars` check —
+except "briefly" is in `_BREVITY_CUES`, so it passes with
+`ok_brevity_requested`. End result: roughly a second to "Paris."
 
-**A2.** `workers=1` means either the pool had one healthy worker out of
-N configured, or the registry fallback kicked in and stopped at one
-(possible since the cap is 2 — one match was found, then loop ended
-when the next candidate was unhealthy). The pool's other workers are
-either unhealthy (recent failures cooling down in `HealthTracker`) or
-were removed from the pool list. `tool_grounded=1` means the surviving
-worker is in `fast_path.tool_capable_models` and ran a ReAct loop —
-it made at least one tool call before answering. Mostly this is fine,
-but you should check `HealthTracker.snapshot()` (admin endpoint) to
-confirm the missing workers aren't permanently broken.
+**A2.** `workers=1` says one of two things happened: either the pool had
+exactly one healthy worker out of N configured, or the registry fallback
+kicked in and stopped at one (possible — the cap is 2, so one match could
+be found, the next candidate unhealthy, and the loop ends). Either way,
+the pool's other workers are either unhealthy (recent failures cooling
+down in `HealthTracker`) or were removed from the pool list. The
+`tool_grounded=1` field means the surviving worker is in
+`fast_path.tool_capable_models` and ran a ReAct loop — at least one tool
+call fired before the worker answered. None of this is alarming on its
+own, but it's a nudge to check `HealthTracker.snapshot()` (admin endpoint)
+and confirm the missing workers aren't permanently broken rather than
+just cooling off.
 
 **A3.** At boot, `_validate_deep_panel_pools` walks every `deep_panel*`
-pool/task and checks for `synthesizer`. `fallback_synth` is optional,
-so a missing fallback doesn't block boot. At request time,
-`pick_synthesizer` returns `(primary, primary)` when `fallback_synth`
-is missing — `if not fallback: fallback = primary`. The candidates list
-collapses to one entry, so there's effectively no retry on the synth
-side. If `qwen3.6:35b` is unhealthy, the synthesize loop logs `synth:
-qwen3.6:35b unhealthy, skipping (attempt 1)`, skips the only candidate,
-and falls through to the longest-draft degrade. The synth pass produces
-the worker's longest draft verbatim — less polished than a real synth
-would write, but the user still gets an answer.
+pool/task and checks for `synthesizer`. `fallback_synth` is optional, so
+a missing fallback slides past the validator without complaint. At request
+time, `pick_synthesizer` returns `(primary, primary)` when `fallback_synth`
+is missing — that's the `if not fallback: fallback = primary` line doing
+its work. The candidates list collapses to one entry, and the synth side
+loses its retry. If `qwen3.6:35b` is unhealthy in that state, the
+synthesize loop logs `synth: qwen3.6:35b unhealthy, skipping (attempt 1)`,
+runs out of candidates, and falls through to the longest-draft degrade.
+The synth pass ships the worker's longest draft verbatim — less polished
+than a real synthesis, but the user gets an answer rather than an error.
 
 **A4.** Round-robin assigns by `i % len(subtasks)`: worker 0 gets subtask 0
 ("explain X"), worker 1 gets subtask 1 ("compare X to Y"). Subtask 2
-("give an example of X") is dropped — there aren't enough workers to
-cover it. The synthesizer sees a DRAFTS block with two entries, plus a
-PLANNED SUB-QUESTIONS block listing all three subtasks (the planner output
-isn't filtered by what actually ran). This is intentional: the
-synthesizer sees what was *planned* even when the panel couldn't cover
-all of it, so it can flag gaps in its synthesis. The dropped subtask
-isn't a bug — it's the planner asking for more parallelism than the
-pool offered.
+("give an example of X") falls off the end — there aren't enough workers
+to cover it. The synthesizer sees a DRAFTS block with two entries, plus a
+PLANNED SUB-QUESTIONS block listing all three (the planner output isn't
+filtered by what actually ran). This mismatch is deliberate: the
+synthesizer sees what was *planned* even when the panel couldn't cover all
+of it, so it can flag the gap explicitly in its synthesis. The dropped
+subtask isn't a bug — it's the planner asking for more parallelism than
+the pool offered.
 
-**A5.** Even though `audrey_local` and `audrey_deep` both have two
-workers in most pool/task entries, the `audrey_deep` pool is one local +
-one cloud, so they run concurrently — the wall-clock is roughly the time
-of the slower one (usually the local). `audrey_local` is two locals,
-serialized through the GPU gate at `GPU_CONCURRENCY=1`. The two workers
-run sequentially, so the wall-clock is roughly the sum of both. Same
-worker count, different concurrency profile because of the gate.
+**A5.** Both pools have two workers, but the *shape* of those two is what
+differs. `audrey_deep` is one local plus one cloud — they run concurrently,
+so the wall-clock is roughly the time of the slower one (usually the local
+worker). `audrey_local` is two locals, both squeezing through the GPU gate
+at `GPU_CONCURRENCY=1`. They run back to back, so the wall-clock is
+roughly the sum of both. Same worker count, very different concurrency
+profile — and the gate is the reason.
 
 **A6.** `reason=no_drafts` is special — the route_after_reflect router
 checks `synth_error` and doesn't retry if it's `"no_drafts"`. Retrying
