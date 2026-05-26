@@ -50,8 +50,10 @@ def _format_drafts_for_synth(
         parts.append("")
     parts.append("DRAFTS:")
     shown = 0
+    per_draft_chars: list[int] = []
     for i, d in enumerate(drafts, 1):
         content = (d.get("content") or "").strip()
+        per_draft_chars.append(len(content))
         err = d.get("error") or ""
         if not content:
             parts.append(f"\n--- draft {i} (model={d.get('model')}) — empty ({err or 'no content'})")
@@ -63,6 +65,16 @@ def _format_drafts_for_synth(
                      f"elapsed={d.get('elapsed_s', 0)}s){tool_tag} ---\n{content}")
     if shown == 0:
         parts.append("\n[no drafts produced usable output]")
+    # Phase-12 instrumentation: emit a parseable line so
+    # `scripts/analyze_draft_sizes.py` can build the production
+    # draft-size distribution. Used to decide whether
+    # `_format_drafts_for_synth` needs a per-draft cap (see the
+    # deferred Lesson 8 truncation finding in AUDIT.md). Single
+    # log.info per synth call; bounded cardinality; no PII.
+    log.info(
+        "synth_draft_sizes: drafts=%d shown=%d total_chars=%d per_draft_chars=%s",
+        len(drafts), shown, sum(per_draft_chars), per_draft_chars,
+    )
     return "\n".join(parts)
 
 
