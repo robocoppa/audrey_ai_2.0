@@ -52,6 +52,13 @@ services:
       - "3000:3000"
     volumes:
       - /mnt/user/appdata/prometheus/grafana-data:/var/lib/grafana
+      # Phase 9 (Campaign 2): provision the Prometheus datasource +
+      # dashboard provider from the repo, and ship dashboards as JSON
+      # files. `git pull` on Unraid is now enough to deploy a new
+      # dashboard or panel; no clicking in the UI.
+      # See monitoring/README.md "Provisioning" section.
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
     environment:
       TZ: America/Denver
       # Phase 26: must be set in the environment when running `compose up`

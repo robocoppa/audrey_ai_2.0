@@ -8,12 +8,18 @@ deployment.
 
 ```
 monitoring/
-├── compose.yaml           # prometheus + grafana services, repo-managed
+├── compose.yaml                              # prometheus + grafana services
 ├── config/
-│   └── prometheus.yml     # scrape config (audrey-ai + self-scrape)
+│   └── prometheus.yml                        # scrape config (audrey-ai + self-scrape)
 ├── prometheus-rules/
-│   └── audrey.yml         # 4 alert rules (Phase 22)
-└── README.md              # this file
+│   └── audrey.yml                            # 4 alert rules (Phase 22)
+├── grafana/
+│   ├── provisioning/
+│   │   ├── datasources/prometheus.yaml       # Prometheus datasource (uid: prometheus)
+│   │   └── dashboards/audrey.yaml            # dashboard provider pointed at dashboards/
+│   └── dashboards/
+│       └── audrey-tools.json                 # per-tool dispatch dashboard (Phase 9)
+└── README.md                                 # this file
 ```
 
 Persistent state lives **outside the repo** at the existing Unraid
@@ -45,6 +51,56 @@ compose) so Prometheus can resolve `audrey-ai:8000` for scrapes.
 - Grafana UI: <http://192.168.1.11:3000> (default `admin` / `changeme`)
 
 Both are LAN-only — not tunneled by `cloudflared`.
+
+## Provisioning (Grafana datasource + dashboards)
+
+Phase 9 moved Grafana off "click in the UI" onto file-based
+provisioning. The datasource, dashboard provider, and dashboard
+JSONs live in `grafana/` and are bind-mounted into the container:
+
+- `grafana/provisioning/` → `/etc/grafana/provisioning` (read at
+  Grafana startup; defines the Prometheus datasource and the
+  dashboard provider).
+- `grafana/dashboards/` → `/etc/grafana/dashboards` (the dashboard
+  provider watches this directory and reloads JSON changes within
+  `updateIntervalSeconds=30`).
+
+`allowUiUpdates: false` on the dashboard provider — the JSON file
+is the source of truth, UI edits don't persist. To change a
+dashboard, edit the JSON, commit, `git pull` on Unraid.
+
+The datasource UID (`prometheus`) is pinned in
+`provisioning/datasources/prometheus.yaml` so dashboard JSONs can
+hard-reference it. If you ever rename the UID, grep `grafana/`
+for the old name and update every match in lockstep.
+
+### Adding a new dashboard
+
+1. Export the dashboard JSON from the UI (one-time, for the shape)
+   or hand-write it using `audrey-tools.json` as a reference.
+2. Drop the file into `monitoring/grafana/dashboards/`.
+3. Make sure:
+   - `uid` is unique across all dashboards (used as the stable
+     identifier across reloads).
+   - Every panel's `datasource` block uses
+     `{"type": "prometheus", "uid": "prometheus"}` (not the
+     human-readable name — UID is what provisioning binds).
+   - `editable: false` at the top level — the JSON is the
+     source of truth.
+4. `git add` and commit.
+5. `git pull` on Unraid. Grafana picks it up within ~30 seconds
+   without a container restart.
+
+### Editing an existing dashboard
+
+Same flow as above — edit the JSON, commit, pull. The dashboard
+reloads in place; bumping the `version` field at the bottom is
+optional but lets you see in the UI that it actually reloaded.
+
+If you accidentally edited in the UI, the changes won't survive
+the next reload anyway (since `allowUiUpdates: false`). To capture
+a UI experiment, use the UI's **JSON Model** view, copy the JSON
+back into the file, and commit.
 
 ## Adding or editing alert rules
 

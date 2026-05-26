@@ -1,0 +1,29 @@
+###
+# Grafana datasource provisioning — Prometheus.
+#
+# Read once at Grafana startup. The `name` is referenced by every
+# dashboard JSON in `monitoring/grafana/dashboards/`. Don't rename
+# without updating those dashboards too.
+#
+# `access: proxy` routes queries through the Grafana server (not the
+# browser), so Prometheus stays LAN-only and Grafana is the only
+# exposed query surface.
+###
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    # UID is pinned so dashboard JSON can hard-reference it
+    # (`"datasource": {"type": "prometheus", "uid": "prometheus"}`).
+    # If you rename the UID, every dashboard JSON in
+    # ../dashboards/ needs the matching edit — grep for it.
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    # Inside `ollama-net`, Prometheus resolves by container name.
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false  # provisioned-from-file, don't edit in UI
+    jsonData:
+      timeInterval: "15s"  # matches the scrape interval in prometheus.yml

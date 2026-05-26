@@ -1,0 +1,31 @@
+###
+# Grafana dashboard-provider — file-based dashboards under
+# /etc/grafana/dashboards (bind-mounted from
+# monitoring/grafana/dashboards/ in the repo).
+#
+# Grafana watches the directory: edit a JSON file, `git pull` on
+# Unraid, the dashboard reloads automatically within `updateIntervalSeconds`.
+# No container restart required.
+#
+# `allowUiUpdates: false` keeps the file the source of truth — saving
+# in the UI is a one-way trip we don't want. To change a dashboard,
+# edit the JSON, commit, pull.
+#
+# `foldersFromFilesStructure` is off because we only have one folder
+# right now. Switch to true if/when we grow subdirectories per area
+# (e.g. dashboards/fairness/, dashboards/kb/).
+###
+
+apiVersion: 1
+
+providers:
+  - name: audrey
+    orgId: 1
+    folder: Audrey
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false
