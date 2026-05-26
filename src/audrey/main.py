@@ -251,14 +251,16 @@ app = FastAPI(
     description=(
         "OpenAI-compatible orchestrator over Ollama (local + cloud-bridge "
         "models) with a shared LangGraph pipeline: classify → complexity "
-        "gate → fast path or deep panel → synth → reflect. Five virtual "
-        "models — `audrey_deep`/`audrey_cloud`/`audrey_local` (always deep, "
-        "different pools), `audrey_auto` (adaptive), `audrey_fast` (always "
-        "fast, no escalation). Tool dispatch via custom-tools (Brave web "
-        "search, Qdrant text + CLIP-image KB, per-user memory). Per-user "
-        "fair scheduling at the local-GPU gate, OWUI-backed auth, "
-        "Prometheus metrics at `/metrics`, streaming progress banners + "
-        "per-worker tools-used footer on streamed responses."
+        "gate → fast path or planner → deep panel → synth → reflect. Five "
+        "virtual models — `audrey_deep`/`audrey_cloud`/`audrey_local` (always "
+        "deep, different pools), `audrey_auto` (adaptive), `audrey_fast` "
+        "(always fast, no escalation). Tool dispatch via custom-tools (Brave "
+        "web search, Qdrant text + CLIP-image KB, per-user memory, per-user "
+        "chat-history search). Per-user fair scheduling at the local-GPU "
+        "gate, OWUI-backed auth, Prometheus metrics at `/metrics`, KB "
+        "watcher + periodic reconcile keeping global collections drift-free, "
+        "streaming progress banners + per-worker tools-used footer on "
+        "streamed responses."
     ),
     lifespan=lifespan,
 )

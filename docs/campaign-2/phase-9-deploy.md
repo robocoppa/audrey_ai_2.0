@@ -20,18 +20,34 @@ finishes the same arc by moving Grafana's *contents* into git too.
 Both the scrape config and the dashboards are now versioned alongside
 the code that produces the metrics.
 
-## Closure verification — *pending*
+## Closure verification — 2026-05-26
 
-Pending the Unraid-side deploy walk in §1. The repo-side changes are
-ready; verification adds:
+All four smoke tests passed on Unraid the day after the repo-side ship:
 
-- `docker compose up -d grafana` recreates the container with the
-  two new bind-mounts.
-- Grafana logs show the datasource and dashboard provider loaded
-  (`Datasources provisioned`, `Dashboards provisioned`).
-- Browsing to <http://192.168.1.11:3000/dashboards> shows the
-  **Audrey** folder containing **Audrey — Tools**.
-- Each of the four panels renders against live Prometheus data.
+- **2.1 Datasource provisioned.** Grafana logs showed
+  `inserting datasource from configuration name=Prometheus uid=prometheus`
+  — UID matches what the dashboard JSON expects.
+- **2.2 Dashboard provisioned.**
+  `starting to provision dashboards` → `finished to provision dashboards`
+  (~70ms apart) with no error lines between them. The absence of
+  `failed to load dashboard from JSON` is the silent "all clear" —
+  Grafana doesn't emit per-dashboard load lines at default log level.
+- **2.3 Dashboard renders.** Confirmed by Bart in the UI; the
+  **Audrey** folder contains **Audrey — Tools** with all four
+  panels rendering against live Prometheus data.
+- **2.4 Live tool call updates the rate panel.** Confirmed; the
+  dispatch rate panel picked up a new sample within the next scrape
+  window.
+
+Two benign warnings appeared in the logs and are expected:
+`/etc/grafana/provisioning/plugins` and
+`/etc/grafana/provisioning/alerting` "no such file or directory" —
+Grafana always probes for those subdirs even when not present. Our
+provisioning bind-mount only ships `datasources/` and `dashboards/`,
+which is the minimal set.
+
+Phase 9 is fully verified. The Grafana per-tool dispatch panel
+followup is closed.
 
 ---
 
