@@ -114,6 +114,25 @@ docker compose up -d
   Stripping is assistant-only — user content is never stripped, even if it
   starts with a blockquote.
 
+## Hand-off commands for Unraid
+
+When you hand Bart commands to run on Unraid (or in any audrey-repo
+checkout), do not use bare `python3` or `python`. Neither is reliably on
+`$PATH` on the Unraid host — the project's Python lives in the repo's
+local venv. Use one of these patterns instead:
+
+- `.venv/bin/python scripts/<script>.py …` — preferred when a script
+  needs the audrey package or any dep from `pyproject.toml`.
+- `uv run python scripts/<script>.py …` — equivalent and works even
+  before `uv sync` has built the venv.
+- `uv run audrey` / `uv run audrey-ingest` — for the console entry
+  points.
+
+If `.venv` doesn't exist yet (fresh checkout), the bootstrap is
+`uv sync --extra dev` from the repo root. Hand commands that work
+copy-pasted into a fresh shell session; don't assume any `PYTHONPATH`,
+`source .venv/bin/activate`, or aliased `python`.
+
 ## Lesson Workflow
 
 The lessons teach Bart the codebase so he can maintain it solo. Bart's Python

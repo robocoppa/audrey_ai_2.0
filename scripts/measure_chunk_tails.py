@@ -92,7 +92,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 # Audrey's own loader + tokenizer — same code path as ingest.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+# Resolve `audrey.*` from one of:
+#   - the repo checkout's `src/` (running on the laptop / dev box)
+#   - the container's `/app` (running inside audrey-ai via `docker exec`,
+#     where the audrey package is installed system-wide and `/app` is
+#     the PYTHONPATH)
+# Falls through to a plain `import` if neither path-insert helps —
+# `pip install -e .` setups will resolve `audrey` directly.
+for _candidate in (
+    Path(__file__).resolve().parent.parent / "src",
+    Path("/app"),
+):
+    if (_candidate / "audrey").exists():
+        sys.path.insert(0, str(_candidate))
+        break
 from audrey.kb.chunk import (
     IMAGE_SUFFIXES,
     TEXT_SUFFIXES,
