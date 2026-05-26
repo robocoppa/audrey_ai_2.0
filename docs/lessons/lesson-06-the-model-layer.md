@@ -659,7 +659,7 @@ Notice the repeated pattern:
 - On `OllamaError`, `record_failure(...)`.
 
 If both synthesizers fail, Audrey degrades to the longest worker draft at
-[`synthesize.py:238`](../../src/audrey/pipeline/synthesize.py#L238):
+[`synthesize.py:250`](../../src/audrey/pipeline/synthesize.py#L250):
 
 ```python
 best = max(drafts, key=lambda d: len(d.get("content") or ""))

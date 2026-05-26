@@ -503,7 +503,7 @@ fallback_synth: "glm-5.1:cloud"
 ```
 
 `pick_synthesizer` at
-[`synthesize.py:81`](../../src/audrey/pipeline/synthesize.py#L81) reads
+[`synthesize.py:92`](../../src/audrey/pipeline/synthesize.py#L92) reads
 them:
 
 ```python
@@ -562,7 +562,7 @@ is told to read the tag.
 #### Forwarding original system context
 
 The synthesizer runs against the same system messages the workers saw. Open
-[`synthesize.py:93`](../../src/audrey/pipeline/synthesize.py#L93):
+[`synthesize.py:104`](../../src/audrey/pipeline/synthesize.py#L104):
 
 ```python
 def _build_synth_messages(
@@ -597,7 +597,7 @@ count the synthesizer is told to expect.
 #### Three-tier failure handling
 
 The synthesizer can fail in three ways. Each one is handled differently —
-read [`synthesize.py:191`](../../src/audrey/pipeline/synthesize.py#L191):
+read [`synthesize.py:211`](../../src/audrey/pipeline/synthesize.py#L211):
 
 ```python
 candidates = [primary] if primary == fallback else [primary, fallback]

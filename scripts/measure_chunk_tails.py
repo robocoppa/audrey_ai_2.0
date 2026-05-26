@@ -106,7 +106,7 @@ for _candidate in (
     if (_candidate / "audrey").exists():
         sys.path.insert(0, str(_candidate))
         break
-from audrey.kb.chunk import (
+from audrey.kb.chunk import (  # noqa: E402 — import follows runtime sys.path manipulation
     IMAGE_SUFFIXES,
     TEXT_SUFFIXES,
     _encoder,

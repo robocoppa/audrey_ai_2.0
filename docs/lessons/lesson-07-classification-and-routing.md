@@ -99,7 +99,7 @@ These are the files we'll reference in this lesson:
 - [`src/audrey/pipeline/complexity.py:24`](../../src/audrey/pipeline/complexity.py#L24)
   - token counting for the fast/deep gate.
 - [`config.yaml:7`](../../config.yaml#L7) - router-model config.
-- [`config.yaml:244`](../../config.yaml#L244) - complexity threshold config.
+- [`config.yaml:258`](../../config.yaml#L258) - complexity threshold config.
 - [`tests/test_classify.py:61`](../../tests/test_classify.py#L61) - tests that
   pin down one important classifier ordering rule.
 
@@ -404,7 +404,7 @@ def is_complex(messages: list[dict], *, threshold: int) -> tuple[bool, int]:
 
 That function starts at
 [`complexity.py:41`](../../src/audrey/pipeline/complexity.py#L41). The
-threshold comes from [`config.yaml:244`](../../config.yaml#L244):
+threshold comes from [`config.yaml:258`](../../config.yaml#L258):
 
 ```yaml
 complexity:

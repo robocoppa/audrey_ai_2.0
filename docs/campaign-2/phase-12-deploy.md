@@ -66,22 +66,25 @@ safety clamp on `overlap_tokens >= chunk_tokens`.
     the 2026-05-26 date. The Deferred section's Lesson 11 entry
     is now empty (only Lesson 4 entries remain there).
 
-## Closure verification — *pending*
+## Closure verification — 2026-05-26
 
-This phase ships entirely in the repo. Verification is:
+All verification steps passed:
 
-  - All 343 tests pass (320 before Phase 11; +13 from Phase 10 admin
-    tests; +10 new from this phase). Counted: 333 pre-Phase-12, +10
-    new = 343.
+  - 343 hermetic pytests pass (333 before Phase 12 + 10 new
+    `test_kb_chunk.py` cases).
   - Ruff clean on `kb/chunk.py` and `tests/test_kb_chunk.py`.
-  - The fix's chunks-emitted prediction (from the measurement
-    script) matches what the real chunker emits — validated locally
-    against `docs/` (339 → 335 chunks, ~1.2 % savings on that
-    corpus; matches the script's prediction).
-  - Re-running `measure_chunk_tails.py` against `/datasets` on
-    Unraid after deploy should report `0` files where the fix
-    would drop the tail — because the chunker actually drops them
-    now, so the script's "would drop" prediction is moot.
+  - Cite checker reports 0 confident drift on `kb/chunk.py`.
+  - Locally on `docs/`: real chunker output went from 339 → 335
+    chunks after the fix, matching the script's prediction.
+  - On Unraid against `/datasets`: deploy succeeded; smoke test
+    (re-running `measure_chunk_tails.py` inside the container)
+    produced output identical to the pre-deploy run. That's the
+    correct outcome — the script simulates chunking from disk and
+    doesn't query Qdrant, so its "would drop" prediction column
+    keeps describing what the live chunker now actually does on
+    fresh ingests. Existing Qdrant points from pre-fix ingests are
+    left in place (benign duplicates; they only get rewritten when
+    a source file changes or is re-ingested).
 
 ## 1. Deploy
 
