@@ -173,7 +173,7 @@ now is just: **the pipeline is a graph, and each node is a function.**
 
 ### 2.3 What a node looks like
 
-Look at [`graph.py:128`](../../src/audrey/pipeline/graph.py#L128) —
+Look at [`graph.py:139`](../../src/audrey/pipeline/graph.py#L139) —
 the `node_datetime` function:
 
 ```python

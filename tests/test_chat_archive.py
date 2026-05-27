@@ -137,7 +137,6 @@ def test_build_chunks_oversize_assistant_splits_with_overlap():
 from audrey.pipeline.chat_archive import (  # noqa: E402
     ChatArchiveClient,
     StreamCollector,
-    last_user_text,
     resolve_conversation_id,
 )
 
@@ -225,15 +224,6 @@ def test_resolve_different_users_get_different_ids():
     a = resolve_conversation_id(user_id="alice@example.com", raw_payload=None, messages=msgs)
     b = resolve_conversation_id(user_id="bob@example.com", raw_payload=None, messages=msgs)
     assert a != b
-
-
-def test_last_user_text_handles_list_content():
-    msgs = [
-        {"role": "user", "content": "first"},
-        {"role": "assistant", "content": "ack"},
-        {"role": "user", "content": [{"type": "text", "text": "second"}]},
-    ]
-    assert last_user_text(msgs) == "second"
 
 
 # ─── ChatArchiveClient ────────────────────────────────────────────────

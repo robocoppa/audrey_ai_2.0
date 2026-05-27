@@ -28,6 +28,7 @@ from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.pipeline.messages import last_user_text
 from audrey.pipeline.prompts import SYNTH_SYSTEM, prompt_from_config
 from audrey.pipeline.state import TaskType, WorkerDraft
 
@@ -76,17 +77,6 @@ def _format_drafts_for_synth(
         len(drafts), shown, sum(per_draft_chars), per_draft_chars,
     )
     return "\n".join(parts)
-
-
-def _last_user_text(messages: list[dict[str, Any]]) -> str:
-    for m in reversed(messages):
-        if m.get("role") == "user":
-            c = m.get("content", "")
-            if isinstance(c, str):
-                return c
-            if isinstance(c, list):
-                return "\n".join(p.get("text", "") for p in c if isinstance(p, dict))
-    return ""
 
 
 def pick_synthesizer(cfg: Config, *, pool_key: str, task: TaskType) -> tuple[str, str]:
@@ -205,7 +195,7 @@ async def synthesize(
         }
 
     primary, fallback = pick_synthesizer(cfg, pool_key=pool_key, task=task)
-    user_text = _last_user_text(messages)
+    user_text = last_user_text(messages)
     drafts_block = _format_drafts_for_synth(user_text, drafts, subtasks)
 
     candidates = [primary] if primary == fallback else [primary, fallback]
@@ -320,7 +310,7 @@ async def synthesize_stream(
         return
 
     primary, fallback = pick_synthesizer(cfg, pool_key=pool_key, task=task)
-    user_text = _last_user_text(messages)
+    user_text = last_user_text(messages)
     drafts_block = _format_drafts_for_synth(user_text, drafts, subtasks)
     synth_messages = _build_synth_messages(
         messages, drafts_block, draft_count=len(drafts), cfg=cfg,

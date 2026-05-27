@@ -51,9 +51,6 @@ from audrey.pipeline.chat_archive import (
     StreamCollector,
     resolve_conversation_id,
 )
-from audrey.pipeline.chat_archive import (
-    last_user_text as _archive_last_user_text,
-)
 from audrey.pipeline.classify import classify_with_registry
 from audrey.pipeline.complexity import (
     count_last_user_tokens,
@@ -69,6 +66,7 @@ from audrey.pipeline.memory import (
     memory_system_message,
     recall_for_request,
 )
+from audrey.pipeline.messages import last_user_text
 from audrey.pipeline.planner import plan as planner_plan
 from audrey.pipeline.prompts import compose_system_messages
 from audrey.pipeline.synthesize import synthesize_stream
@@ -185,7 +183,7 @@ async def chat_completions(
     conversation_id = resolve_conversation_id(
         user_id=me.email, raw_payload=raw_payload, messages=messages,
     )
-    user_turn_text = _archive_last_user_text(messages)
+    user_turn_text = last_user_text(messages)
 
     if payload.stream:
         return StreamingResponse(
@@ -341,7 +339,7 @@ async def _stream_via_pipeline(
 
     try:
         async with inflight.slot(user_id):
-            user_text = _last_user_text(messages)
+            user_text = last_user_text(messages)
             # Shared helper threads tool names into the classifier so
             # prompts that explicitly name a tool (e.g. "use kb_image_search
             # …") route through the tool-capable fast path. The non-
@@ -528,17 +526,6 @@ async def _stream_via_pipeline(
                 virtual_model=payload.model,
                 concrete_model=chosen_concrete,
             )
-
-
-def _last_user_text(messages):
-    for m in reversed(messages):
-        if m.get("role") == "user":
-            c = m.get("content", "")
-            if isinstance(c, str):
-                return c
-            if isinstance(c, list):
-                return "\n".join(p.get("text", "") for p in c if isinstance(p, dict))
-    return ""
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────
@@ -976,7 +963,7 @@ async def _phase_thinking(
 
     subtasks: list[str] = []
     if planning_enabled and prompt_tokens >= planning_min_tokens:
-        user_text = _last_user_text(messages)
+        user_text = last_user_text(messages)
         subtasks = await planner_plan(
             ollama,
             planner_model=router_cfg.get("model", "qwen3:4b"),

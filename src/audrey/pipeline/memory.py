@@ -23,6 +23,7 @@ from typing import Any
 
 import httpx
 
+from audrey.pipeline.messages import last_user_text
 from audrey.pipeline.prompts import MEMORY_STORE_HINT, prompt_from_config
 from audrey.tools.discovery import ToolRegistry
 from audrey.tools.dispatch import dispatch_one
@@ -37,17 +38,6 @@ DEFAULT_TOP_K = 3              # three hits is usually plenty for context
 # Hint text lives in pipeline/prompts.py. The `{user_id}` placeholder is
 # replaced at call time below.
 _MEMORY_STORE_HINT = MEMORY_STORE_HINT
-
-
-def _last_user_text(messages: list[dict[str, Any]]) -> str:
-    for m in reversed(messages):
-        if m.get("role") == "user":
-            c = m.get("content", "")
-            if isinstance(c, str):
-                return c
-            if isinstance(c, list):
-                return "\n".join(p.get("text", "") for p in c if isinstance(p, dict))
-    return ""
 
 
 def _format_memory_hint(hits: list[dict[str, Any]]) -> str:
@@ -79,7 +69,7 @@ async def recall_for_request(
         return []
     if registry is None or MEMORY_SEARCH_TOOL not in registry.by_name:
         return []
-    query = _last_user_text(messages).strip()
+    query = last_user_text(messages).strip()
     if not query:
         return []
     if len(query) > MAX_QUERY_CHARS:

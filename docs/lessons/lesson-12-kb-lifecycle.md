@@ -804,8 +804,9 @@ mechanisms are independent in code but share the same Qdrant
 collections, the same embedders, and the same "two stores agree"
 pattern that runs through the uploads side.
 
-Lesson 12 closes the current series — classification, routing, deep
-mode, tool use, function calling, and the KB are all covered. The
-likely next subject is `routes/openai.py` itself: the request-shaping,
-streaming-cancel cleanup, and `VIRTUAL_MODELS` validation that Lesson
-4 only previewed. Check `docs/lessons/` for what's landed since.
+The published lessons cover the request hot path end-to-end —
+classification, routing, deep mode, tool use, function calling, and
+the KB. The next lesson backs up to the very front of the pipeline:
+the two earliest graph nodes that prepend context (datetime and
+memory recall) before classify reads a single user word. It lives in
+[`lesson-13-memory-and-context-injection.md`](lesson-13-memory-and-context-injection.md).

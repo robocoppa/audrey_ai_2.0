@@ -205,13 +205,18 @@ small context steps:
 - `memory_recall` may prepend relevant durable user memories.
 
 The classifier still looks for the last user message, not the system messages.
-That helper is at [`graph.py:438`](../../src/audrey/pipeline/graph.py#L451):
+That helper lives in
+[`pipeline/messages.py:20`](../../src/audrey/pipeline/messages.py#L20):
 
 ```python
-def _last_user_text(messages: list[dict[str, Any]]) -> str:
+def last_user_text(messages: list[dict[str, Any]]) -> str:
     for m in reversed(messages):
-        if m.get("role") == "user":
-            ...
+        if m.get("role") != "user":
+            continue
+        content = m.get("content", "")
+        if isinstance(content, str):
+            return content
+        ...
 ```
 
 This is a good example of "context is available, but routing still centers the
@@ -225,7 +230,7 @@ The graph node lives at [`graph.py:182`](../../src/audrey/pipeline/graph.py#L182
 async def node_classify(state: PipelineState) -> dict[str, Any]:
     task, reason, conf = await classify_with_registry(
         ollama,
-        user_text=_last_user_text(state["messages"]),
+        user_text=last_user_text(state["messages"]),
         router_cfg=router_cfg,
         cfg=cfg,
         registry=tools,
@@ -508,7 +513,7 @@ block.
 
 After `fast_path` returns, Audrey may still decide the answer was not good
 enough. The router for that is
-[`graph.py:351`](../../src/audrey/pipeline/graph.py#L351).
+[`graph.py:362`](../../src/audrey/pipeline/graph.py#L362).
 
 The first guard is simple: if escalation is disabled, stop.
 

@@ -111,20 +111,6 @@ def resolve_conversation_id(
     return f"fresh-{uuid.uuid4().hex}"
 
 
-def last_user_text(messages: list[dict[str, Any]]) -> str:
-    """Find the most recent user turn's text content, flattening list-form
-    multi-modal content the same way pipeline/memory.py does."""
-    for m in reversed(messages):
-        if m.get("role") != "user":
-            continue
-        content = m.get("content", "")
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            return "\n".join(p.get("text", "") for p in content if isinstance(p, dict))
-    return ""
-
-
 # ─── StreamCollector ──────────────────────────────────────────────────
 
 class StreamCollector:
@@ -289,5 +275,4 @@ __all__ = [
     "ChatArchiveClient",
     "StreamCollector",
     "resolve_conversation_id",
-    "last_user_text",
 ]

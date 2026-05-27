@@ -11,6 +11,10 @@ CLAUDE.md
 # it's an internal queue, not teaching material.
 docs/lessons/AUDIT.md
 
+# OpenClaw prototype plan — laptop-local; references Unraid LAN IP and
+# a personal experiment with no place in the public repo.
+docs/campaign-2/openclaw-prototype-plan.md
+
 # Python
 __pycache__/
 *.py[cod]

@@ -65,6 +65,7 @@ from audrey.pipeline.memory import (
     memory_system_message,
     recall_for_request,
 )
+from audrey.pipeline.messages import last_user_text
 from audrey.pipeline.planner import plan as planner_plan
 from audrey.pipeline.prompts import compose_system_messages
 from audrey.pipeline.reflect import reflect as reflect_fn
@@ -196,7 +197,7 @@ def build_graph(
         # streaming path in routes/openai.py.
         task, reason, conf = await classify_with_registry(
             ollama,
-            user_text=_last_user_text(state["messages"]),
+            user_text=last_user_text(state["messages"]),
             router_cfg=router_cfg,
             cfg=cfg,
             registry=tools,
@@ -265,7 +266,7 @@ def build_graph(
     async def node_planner(state: PipelineState) -> dict[str, Any]:
         if not planning_enabled or state.get("prompt_tokens", 0) < planning_min_tokens:
             return {"subtasks": []}
-        user_text = _last_user_text(state["messages"])
+        user_text = last_user_text(state["messages"])
         subs = await planner_plan(
             ollama,
             planner_model=router_cfg.get("model", "qwen3:4b"),
@@ -341,7 +342,7 @@ def build_graph(
             content=state.get("content", "") or "",
             synth_error=state.get("synth_error", "") or "",
             min_chars=reflection_min_chars,
-            user_text=_last_user_text(state["messages"]),
+            user_text=last_user_text(state["messages"]),
         )
         log.info("reflect: attempt=%d passed=%s reason=%s", attempts + 1, result.passed, result.reason)
         return {
@@ -451,17 +452,6 @@ def _options_from_state(state: PipelineState) -> dict[str, Any]:
     if (m := state.get("max_tokens")) is not None:
         options["num_predict"] = m
     return options
-
-
-def _last_user_text(messages: list[dict[str, Any]]) -> str:
-    for m in reversed(messages):
-        if m.get("role") == "user":
-            c = m.get("content", "")
-            if isinstance(c, str):
-                return c
-            if isinstance(c, list):
-                return "\n".join(p.get("text", "") for p in c if isinstance(p, dict))
-    return ""
 
 
 __all__ = ["build_graph"]

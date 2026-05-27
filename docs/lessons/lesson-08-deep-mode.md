@@ -566,10 +566,11 @@ def _build_synth_messages(
 ```
 
 The original system messages carry the datetime context (set by
-`node_datetime` — Lesson 7 covered the graph entry), memory recall hits,
-and any OWUI-supplied templates. Strip them and the synthesizer starts
-hedging about "today" against its training cutoff — the merged answer
-suddenly feels months out of date.
+`node_datetime`, the first graph node — its module is walked in the
+[memory + context injection lesson](lesson-13-memory-and-context-injection.md)),
+memory recall hits, and any OWUI-supplied templates. Strip them and
+the synthesizer starts hedging about "today" against its training
+cutoff — the merged answer suddenly feels months out of date.
 
 `draft_count` is threaded through explicitly so that a future change to the
 draft separator string in `_format_drafts_for_synth` can't silently break
@@ -728,48 +729,14 @@ gate. Audrey didn't fail the request; it just had to work harder.
 
 ## 3. Comprehension questions
 
-These are scenario-based — work through them as if you were diagnosing a
-live system at 3 a.m. with the logs in front of you. Suggested answers
-follow.
-
-**Q1.** A user asks "What's the capital of France? Answer briefly." with
+**1. A user asks "What's the capital of France? Answer briefly." with
 `audrey_deep`. Walk through what happens stage by stage. Does the panel
-actually run all its workers, and does reflect catch anything?
+actually run all its workers, and does reflect catch anything?**
 
-**Q2.** You're reading the logs and see:
-
-```text
-deep_panel: pool=deep_panel task=code workers=1 ok=1 tool_grounded=1
-```
-
-Only one worker ran. The `tool_grounded=1` field is set. What does this
-combination tell you about the pool's health and the worker's behavior?
-
-**Q3.** The synthesizer pool config has `synthesizer: "qwen3.6:35b"` but
-no `fallback_synth` entry. What happens at boot? What happens if
-`qwen3.6:35b` is unhealthy when a deep request arrives?
-
-**Q4.** The planner returned `["explain X", "compare X to Y", "give an
-example of X"]` but the pool has 2 healthy workers. How are the subtasks
-distributed? What does the synthesizer see in its DRAFTS block?
-
-**Q5.** A user reports that `audrey_local` (the local-only deep pool)
-feels slower than `audrey_deep` (mixed local+cloud) on the same prompt.
-The pools have the same number of workers configured. Why might that
-be, even with GPU concurrency unchanged?
-
-**Q6.** Reflect returns `reflect_passed=False reason=no_drafts`. Should
-the graph retry, and what would change on the retry? Trace the routing
-logic.
-
----
-
-### Suggested answers
-
-**A1.** Classification routes the request to `general` — "capital of a
-country" isn't code, reasoning, or VL. Complexity counts the prompt and
-finds it well under the deep threshold, but `audrey_deep` forces deep
-regardless, so mode = deep anyway. The planner is gated on
+Classification routes the request to `general` — "capital of a country"
+isn't code, reasoning, or VL. Complexity counts the prompt and finds it
+well under the deep threshold, but `audrey_deep` forces deep regardless,
+so mode = deep anyway. The planner is gated on
 `planning.min_prompt_tokens` (default 40); a six-word prompt is nowhere
 near it, so the planner returns `[]` without ever calling an LLM. The
 deep panel runs both workers from the `deep_panel/general` pool against
@@ -779,56 +746,92 @@ the short output and would normally fail the `min_answer_chars` check —
 except "briefly" is in `_BREVITY_CUES`, so it passes with
 `ok_brevity_requested`. End result: roughly a second to "Paris."
 
-**A2.** `workers=1` says one of two things happened: either the pool had
-exactly one healthy worker out of N configured, or the registry fallback
-kicked in and stopped at one (possible — the cap is 2, so one match could
-be found, the next candidate unhealthy, and the loop ends). Either way,
-the pool's other workers are either unhealthy (recent failures cooling
-down in `HealthTracker`) or were removed from the pool list. The
+**2. You're reading the logs and see
+`deep_panel: pool=deep_panel task=code workers=1 ok=1 tool_grounded=1`.
+Only one worker ran. The `tool_grounded=1` field is set. What does this
+combination tell you about the pool's health and the worker's behavior?**
+
+`workers=1` says one of two things happened: either the pool had exactly
+one healthy worker out of N configured, or the registry fallback kicked
+in and stopped at one (possible — the cap is 2, so one match could be
+found, the next candidate unhealthy, and the loop ends). Either way, the
+pool's other workers are either unhealthy (recent failures cooling down
+in `HealthTracker`) or were removed from the pool list. The
 `tool_grounded=1` field means the surviving worker is in
 `fast_path.tool_capable_models` and ran a ReAct loop — at least one tool
 call fired before the worker answered. None of this is alarming on its
-own, but it's a nudge to check `HealthTracker.snapshot()` (admin endpoint)
-and confirm the missing workers aren't permanently broken rather than
-just cooling off.
+own, but it's a nudge to check `HealthTracker.snapshot()` (admin
+endpoint) and confirm the missing workers aren't permanently broken
+rather than just cooling off.
 
-**A3.** At boot, `_validate_deep_panel_pools` walks every `deep_panel*`
+**3. The synthesizer pool config has `synthesizer: "qwen3.6:35b"` but no
+`fallback_synth` entry. What happens at boot? What happens if
+`qwen3.6:35b` is unhealthy when a deep request arrives?**
+
+At boot, `_validate_deep_panel_pools` walks every `deep_panel*`
 pool/task and checks for `synthesizer`. `fallback_synth` is optional, so
-a missing fallback slides past the validator without complaint. At request
-time, `pick_synthesizer` returns `(primary, primary)` when `fallback_synth`
-is missing — that's the `if not fallback: fallback = primary` line doing
-its work. The candidates list collapses to one entry, and the synth side
-loses its retry. If `qwen3.6:35b` is unhealthy in that state, the
-synthesize loop logs `synth: qwen3.6:35b unhealthy, skipping (attempt 1)`,
-runs out of candidates, and falls through to the longest-draft degrade.
-The synth pass ships the worker's longest draft verbatim — less polished
-than a real synthesis, but the user gets an answer rather than an error.
+a missing fallback slides past the validator without complaint. At
+request time, `pick_synthesizer` returns `(primary, primary)` when
+`fallback_synth` is missing — that's the `if not fallback: fallback =
+primary` line doing its work. The candidates list collapses to one
+entry, and the synth side loses its retry. If `qwen3.6:35b` is unhealthy
+in that state, the synthesize loop logs `synth: qwen3.6:35b unhealthy,
+skipping (attempt 1)`, runs out of candidates, and falls through to the
+longest-draft degrade. The synth pass ships the worker's longest draft
+verbatim — less polished than a real synthesis, but the user gets an
+answer rather than an error.
 
-**A4.** Round-robin assigns by `i % len(subtasks)`: worker 0 gets subtask 0
+**4. The planner returned `["explain X", "compare X to Y", "give an
+example of X"]` but the pool has 2 healthy workers. How are the
+subtasks distributed? What does the synthesizer see in its DRAFTS
+block?**
+
+Round-robin assigns by `i % len(subtasks)`: worker 0 gets subtask 0
 ("explain X"), worker 1 gets subtask 1 ("compare X to Y"). Subtask 2
 ("give an example of X") falls off the end — there aren't enough workers
-to cover it. The synthesizer sees a DRAFTS block with two entries, plus a
-PLANNED SUB-QUESTIONS block listing all three (the planner output isn't
-filtered by what actually ran). This mismatch is deliberate: the
-synthesizer sees what was *planned* even when the panel couldn't cover all
-of it, so it can flag the gap explicitly in its synthesis. The dropped
-subtask isn't a bug — it's the planner asking for more parallelism than
-the pool offered.
+to cover it. The synthesizer sees a DRAFTS block with two entries, plus
+a PLANNED SUB-QUESTIONS block listing all three (the planner output
+isn't filtered by what actually ran). This mismatch is deliberate: the
+synthesizer sees what was *planned* even when the panel couldn't cover
+all of it, so it can flag the gap explicitly in its synthesis. The
+dropped subtask isn't a bug — it's the planner asking for more
+parallelism than the pool offered.
 
-**A5.** Both pools have two workers, but the *shape* of those two is what
-differs. `audrey_deep` is one local plus one cloud — they run concurrently,
-so the wall-clock is roughly the time of the slower one (usually the local
-worker). `audrey_local` is two locals, both squeezing through the GPU gate
-at `GPU_CONCURRENCY=1`. They run back to back, so the wall-clock is
-roughly the sum of both. Same worker count, very different concurrency
-profile — and the gate is the reason.
+**5. A user reports that `audrey_local` (the local-only deep pool) feels
+slower than `audrey_deep` (mixed local+cloud) on the same prompt. The
+pools have the same number of workers configured. Why might that be,
+even with GPU concurrency unchanged?**
 
-**A6.** `reason=no_drafts` is special — the route_after_reflect router
-checks `synth_error` and doesn't retry if it's `"no_drafts"`. Retrying
-would be pointless: the panel produced zero usable drafts on the first
-pass, the second pass would hit the same unhealthy workers and produce
-zero drafts again. The graph routes straight to END with
+Both pools have two workers, but the *shape* of those two is what
+differs. `audrey_deep` is one local plus one cloud — they run
+concurrently, so the wall-clock is roughly the time of the slower one
+(usually the local worker). `audrey_local` is two locals, both squeezing
+through the GPU gate at `GPU_CONCURRENCY=1`. They run back to back, so
+the wall-clock is roughly the sum of both. Same worker count, very
+different concurrency profile — and the gate is the reason.
+
+**6. Reflect returns `reflect_passed=False reason=no_drafts`. Should the
+graph retry, and what would change on the retry? Trace the routing
+logic.**
+
+`reason=no_drafts` is special — the `route_after_reflect` router checks
+`synth_error` and doesn't retry if it's `"no_drafts"`. Retrying would be
+pointless: the panel produced zero usable drafts on the first pass, the
+second pass would hit the same unhealthy workers and produce zero
+drafts again. The graph routes straight to END with
 `reflect_passed=False` in state, and the user gets the placeholder
 message ("[deep panel produced no usable drafts — all workers failed]").
 Operationally, this is a "your model layer is having a bad day" signal —
 check `HealthTracker.snapshot()` and the Ollama / Ollama-Pro health.
+
+
+## When you're ready for the next lesson
+
+We have walked the four deep stages — planner, panel, synthesize, reflect —
+and seen how the graph routes between them. This lesson treated each
+worker's model call as a single round trip. The next lesson opens that
+black box: when a model wants to invoke a tool (fast path or a single
+deep worker), how does Audrey discover what tools exist, dispatch the
+call, feed the result back, and stop the loop when the round budget
+runs out? It lives in
+[`lesson-09-tool-use-and-react.md`](lesson-09-tool-use-and-react.md).
