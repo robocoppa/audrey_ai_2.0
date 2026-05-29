@@ -110,11 +110,27 @@ async def passthrough_stream(
     total_tool_calls = 0
     last_eval_count = 0
     last_done_reason = "?"
+    chunks_received = 0
+    # Dump request shape before sending so we can diagnose empty-response
+    # turns. Counts message roles by type; truncates tool/user content
+    # heads so the log isn't flooded.
+    role_counts: dict[str, int] = {}
+    for m in messages:
+        r = str(m.get("role") or "?")
+        role_counts[r] = role_counts.get(r, 0) + 1
+    last_msg = messages[-1] if messages else {}
+    last_role = str(last_msg.get("role") or "?")
+    last_content_head = str(last_msg.get("content") or "")[:120].replace("\n", "\\n")
+    log.info(
+        "passthrough.stream.req model=%s user=%s roles=%s last_role=%s last_head=%r",
+        concrete, _safe_user(user_id), role_counts, last_role, last_content_head,
+    )
     async with gate.acquire(concrete, location=location, user_id=user_id):
         async for chunk in ollama.chat_stream(
             model=concrete, messages=messages, options=options,
             tools=tools, timeout_s=timeout_s,
         ):
+            chunks_received += 1
             cmsg = chunk.get("message") or {}
             total_content_len += len(str(cmsg.get("content") or ""))
             total_tool_calls += len(list(cmsg.get("tool_calls") or []))
@@ -124,10 +140,10 @@ async def passthrough_stream(
             yield chunk
     log.info(
         "passthrough.stream model=%s user=%s tools=%d elapsed=%.2fs "
-        "content_len=%d tool_calls=%d eval_count=%d done_reason=%s",
+        "chunks=%d content_len=%d tool_calls=%d eval_count=%d done_reason=%s",
         concrete, _safe_user(user_id), len(tools or []),
         time.perf_counter() - t0,
-        total_content_len, total_tool_calls,
+        chunks_received, total_content_len, total_tool_calls,
         last_eval_count, last_done_reason,
     )
 
