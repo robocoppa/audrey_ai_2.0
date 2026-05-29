@@ -426,6 +426,13 @@ async def _passthrough_stream_sse(
     }
     yield f"data: {json.dumps(first)}\n\n"
 
+    # Ollama's streaming protocol emits `message.tool_calls` in a
+    # non-final chunk (typically the one *before* `done: true`), not
+    # in the final chunk itself. Accumulate any tool_calls seen across
+    # the entire stream so we can attach them to the closing delta.
+    # Without this, streaming + tools silently produces an empty stream
+    # from the client's perspective (no content, no tool_calls).
+    accumulated_tool_calls: list[dict[str, Any]] = []
     try:
         async for chunk in passthrough_stream(
             ollama, gate,
@@ -435,6 +442,9 @@ async def _passthrough_stream_sse(
         ):
             msg = chunk.get("message", {}) or {}
             content = msg.get("content", "") or ""
+            chunk_tool_calls = msg.get("tool_calls") or []
+            if chunk_tool_calls:
+                accumulated_tool_calls.extend(chunk_tool_calls)
             done = bool(chunk.get("done"))
             if content:
                 frame = {
@@ -444,7 +454,7 @@ async def _passthrough_stream_sse(
                 }
                 yield f"data: {json.dumps(frame)}\n\n"
             if done:
-                tool_calls = _ollama_to_openai_tool_calls(msg.get("tool_calls"))
+                tool_calls = _ollama_to_openai_tool_calls(accumulated_tool_calls)
                 final_delta: dict[str, Any] = {}
                 if tool_calls:
                     final_delta["tool_calls"] = tool_calls

@@ -498,6 +498,63 @@ async def test_handle_passthrough_streaming_emits_tool_calls_on_final_frame():
 
 
 @pytest.mark.asyncio
+async def test_handle_passthrough_streaming_collects_tool_calls_from_pre_done_chunk():
+    # Real Ollama streaming behavior (verified against qwen3.6:35b-64k
+    # on 2026-05-29): the model emits `tool_calls` in a chunk with
+    # `done: false`, then sends a separate `done: true` chunk that
+    # carries no tool_calls. The SSE emitter must accumulate
+    # tool_calls across ALL chunks and attach them to the final delta,
+    # not only look at the done chunk's message. Without this fix,
+    # streaming + tools produced an empty SSE stream from the client's
+    # perspective, even though tool_calls were on the wire.
+    import json as _json
+
+    ollama = _FakeOllama(stream_chunks=[
+        # Thinking/reasoning tokens (qwen3.6 emits these with empty content).
+        {"message": {"role": "assistant", "content": "", "thinking": "Let me check"}, "done": False},
+        # Tool call lands on a non-final chunk.
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"function": {"name": "read_file", "arguments": {"path": "/etc/hosts"}}},
+                ],
+            },
+            "done": False,
+        },
+        # Final chunk has no tool_calls.
+        {"message": {"role": "assistant", "content": ""}, "done": True},
+    ])
+    gate = _RecordingGate()
+    inflight = UserInflightRegistry(max_inflight_per_user=3)
+    app = _stub_app(ollama=ollama, gate=gate, inflight=inflight)
+
+    payload = ChatCompletionRequest(
+        model=f"{PASSTHROUGH_PREFIX}qwen3.6:35b-64k",
+        messages=[{"role": "user", "content": "read /etc/hosts"}],
+        stream=True,
+        tools=[_SAMPLE_TOOL],
+    )
+    resp = await _handle_passthrough(
+        app, request=SimpleNamespace(app=app),
+        payload=payload, me=_stub_user(),
+    )
+    chunks: list[str] = []
+    async for raw in resp.body_iterator:
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        chunks.append(raw)
+    body = "".join(chunks)
+    # tool_calls must surface in the closing SSE frame with the right
+    # finish reason. Pre-fix this assertion failed (no tool_calls in body).
+    assert '"finish_reason": "tool_calls"' in body
+    assert '"read_file"' in body
+    assert _json.dumps({"path": "/etc/hosts"}) in body or '\\"path\\": \\"/etc/hosts\\"' in body
+    assert body.rstrip().endswith("data: [DONE]")
+
+
+@pytest.mark.asyncio
 async def test_handle_passthrough_without_tools_does_not_set_tool_calls():
     # A passthrough request without `tools` in the payload should send
     # no tools array to Ollama and produce a vanilla stop-reason response.
