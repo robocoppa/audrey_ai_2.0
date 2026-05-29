@@ -19,6 +19,10 @@ docs/campaign-2/openclaw-prototype-plan.md
 # OpenClaw route through Audrey's fair-scheduling layers.
 docs/campaign-2/passthrough-virtual-model-plan.md
 
+# Hermes reference — laptop-local working notes on the NousResearch
+# Hermes Agent integration via passthrough; references LAN IP + OWUI.
+docs/campaign-2/hermes-reference.md
+
 # Python
 __pycache__/
 *.py[cod]

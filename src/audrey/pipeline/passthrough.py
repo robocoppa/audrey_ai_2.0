@@ -64,10 +64,16 @@ async def passthrough_chat(
             model=concrete, messages=messages, options=options,
             tools=tools, timeout_s=timeout_s,
         )
+    msg = resp.get("message") or {}
     log.info(
-        "passthrough.chat model=%s user=%s tools=%d elapsed=%.2fs",
+        "passthrough.chat model=%s user=%s tools=%d elapsed=%.2fs "
+        "content_len=%d tool_calls=%d eval_count=%d done_reason=%s",
         concrete, _safe_user(user_id), len(tools or []),
         time.perf_counter() - t0,
+        len(str(msg.get("content") or "")),
+        len(list(msg.get("tool_calls") or [])),
+        int(resp.get("eval_count", 0) or 0),
+        resp.get("done_reason", "?"),
     )
     return resp
 
@@ -100,16 +106,29 @@ async def passthrough_stream(
         model=concrete, task_type="passthrough", path="passthrough_stream",
     ).inc()
     t0 = time.perf_counter()
+    total_content_len = 0
+    total_tool_calls = 0
+    last_eval_count = 0
+    last_done_reason = "?"
     async with gate.acquire(concrete, location=location, user_id=user_id):
         async for chunk in ollama.chat_stream(
             model=concrete, messages=messages, options=options,
             tools=tools, timeout_s=timeout_s,
         ):
+            cmsg = chunk.get("message") or {}
+            total_content_len += len(str(cmsg.get("content") or ""))
+            total_tool_calls += len(list(cmsg.get("tool_calls") or []))
+            if chunk.get("done"):
+                last_eval_count = int(chunk.get("eval_count", 0) or 0)
+                last_done_reason = chunk.get("done_reason", "?")
             yield chunk
     log.info(
-        "passthrough.stream model=%s user=%s tools=%d elapsed=%.2fs",
+        "passthrough.stream model=%s user=%s tools=%d elapsed=%.2fs "
+        "content_len=%d tool_calls=%d eval_count=%d done_reason=%s",
         concrete, _safe_user(user_id), len(tools or []),
         time.perf_counter() - t0,
+        total_content_len, total_tool_calls,
+        last_eval_count, last_done_reason,
     )
 
 
