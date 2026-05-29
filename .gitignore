@@ -15,6 +15,10 @@ docs/lessons/AUDIT.md
 # a personal experiment with no place in the public repo.
 docs/campaign-2/openclaw-prototype-plan.md
 
+# Passthrough virtual model plan — laptop-local design doc for letting
+# OpenClaw route through Audrey's fair-scheduling layers.
+docs/campaign-2/passthrough-virtual-model-plan.md
+
 # Python
 __pycache__/
 *.py[cod]

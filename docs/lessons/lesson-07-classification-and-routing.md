@@ -121,7 +121,7 @@ shape is the sequence of decisions.
 
 The non-streaming route handler hands off to a helper that builds a
 plain dictionary named `state`. Open
-[`routes/openai.py:240`](../../src/audrey/routes/openai.py#L240),
+[`routes/openai.py:479`](../../src/audrey/routes/openai.py#L479),
 which is the start of `_generate_via_pipeline`:
 
 ```python

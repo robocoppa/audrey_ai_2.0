@@ -277,6 +277,20 @@ fairness:
   max_inflight_per_user: 3               # concurrent requests per user
   max_tracked_users: 1024                # LRU cap on the in-flight registry
 
+# ─── Passthrough virtual model ─────────────────────────────────────────
+# audrey_passthrough/<concrete_model> forwards the request directly to
+# Ollama with no classifier, no complexity gate, no banners. Both fair-
+# scheduling layers (FairLocalGate, UserInflightRegistry) still fire so
+# direct-Ollama clients can be brought under Audrey's GPU contention
+# story. The prefix scheme lets clients pick the concrete model per
+# request. /v1/models lists one entry per allowed concrete.
+passthrough:
+  enabled: true
+  allowed_models:                        # concrete models clients may target
+    - qwen3.6:35b-64k
+    - qwen3-coder-next-64k:latest
+  require_role: null                     # null | "admin" — gate by OWUI role
+
 # ─── Classification pre-filter ─────────────────────────────────────────
 classification:
   keyword_prefilter:
