@@ -11,6 +11,7 @@ Each metric is tied to a specific operational question:
   audrey_kb_search_hits            — hits returned per query (zero = retrieval miss)
   audrey_auth_cache_size           — OWUI token cache occupancy
   audrey_user_inflight_blocked_seconds — wait at the per-user concurrency cap
+  audrey_inflight_cap_breached_total — soft cap on tracked users exceeded
   audrey_tool_calls_total          — tool dispatches inside ReAct, by outcome
   audrey_tool_call_seconds         — per-tool dispatch latency
 
@@ -132,6 +133,12 @@ user_inflight_blocked_seconds = Histogram(
     buckets=_INFLIGHT_BUCKETS,
 )
 
+inflight_cap_breached_total = Counter(
+    "audrey_inflight_cap_breached_total",
+    "Times the in-flight registry admitted a new user while at its soft cap "
+    "(every tracked user was busy, so no eviction was possible).",
+)
+
 # ─── Per-tool dispatch ────────────────────────────────────────────────
 
 # Tool cardinality is bounded (currently 6: kb_search, kb_image_search,
@@ -189,6 +196,7 @@ __all__ = [
     "kb_search_hits",
     "auth_cache_size",
     "user_inflight_blocked_seconds",
+    "inflight_cap_breached_total",
     "tool_calls_total",
     "tool_call_seconds",
     "chat_archive_writes_total",

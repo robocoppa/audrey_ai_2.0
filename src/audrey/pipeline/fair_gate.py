@@ -7,7 +7,7 @@ fairness rather than first-come-first-served.
 
 Design:
 
-- One `concurrency` slot total (default 1, same as before).
+- One `concurrency` slot total (default 1).
 - Per-user FIFO of waiters. When the slot frees, we pick the next user
   in round-robin order, then dequeue their head waiter.
 - Cloud calls (location != "local") bypass entirely.
@@ -36,17 +36,17 @@ FIFO-by-bucket, not round-robin. Tracking the last granted bucket and
 skipping it on the next pick gives true alternation.
 
 Cancellation safety: when a waiter's coroutine is cancelled (e.g. client
-disconnected), their Future is marked cancelled. The release path checks
-`fut.done()` before resolving and skips the dead waiter, popping the
-next.
+disconnected), their Future is marked cancelled. There is an unavoidable
+window between cancellation marking the future done and the except
+handler in `acquire` removing it from the deque — during that window a
+release could otherwise pick a dead future and try to set_result on it
+(raising InvalidStateError). `_release` therefore sweeps done futures
+off the head of each deque before picking. That sweep is load-bearing,
+not belt-and-suspenders.
 
-Same `acquire(model, *, location, user_id=None)` interface as `GpuGate`,
-plus the `user_id` kwarg. Callers that pass nothing get bucketed as
-`__anon__`.
-
-Usage:
+Surface:
     gate = FairLocalGate(concurrency=cfg.gpu_concurrency)
-    async with gate.acquire(model, location="local", user_id="bart"):
+    async with gate.acquire(model, location="local", user_id="alice"):
         await ollama.chat(...)
 """
 
@@ -59,14 +59,13 @@ from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
 
 from audrey.metrics import gpu_gate_wait_seconds
+from audrey.scheduling import ANON_USER_BUCKET
 
 log = logging.getLogger(__name__)
 
-ANON_USER_BUCKET = "__anon__"
-
 
 class FairLocalGate:
-    """Per-user fair gate. Same surface as `GpuGate` plus `user_id` kwarg."""
+    """Per-user fair gate around the local GPU slot."""
 
     def __init__(self, *, concurrency: int = 1) -> None:
         if concurrency < 1:
@@ -109,7 +108,7 @@ class FairLocalGate:
 
         if not granted_directly:
             # Slow path: park a waiter under our user bucket.
-            fut: asyncio.Future[None] = asyncio.get_event_loop().create_future()
+            fut: asyncio.Future[None] = asyncio.get_running_loop().create_future()
             async with self._lock:
                 dq = self._waiters.get(bucket)
                 if dq is None:
@@ -120,8 +119,8 @@ class FairLocalGate:
                 await fut
             except asyncio.CancelledError:
                 # Clean ourselves out of the queue if we were cancelled
-                # before being granted. The grant loop also tolerates
-                # already-done futures, so this is belt+suspenders.
+                # before being granted. `_release`'s done-future sweep
+                # also tolerates a cancelled head, so this races safely.
                 async with self._lock:
                     dq = self._waiters.get(bucket)
                     if dq is not None:
@@ -137,9 +136,9 @@ class FairLocalGate:
         try:
             yield
         finally:
-            await self._release(bucket)
+            await self._release()
 
-    async def _release(self, _released_bucket: str) -> None:
+    async def _release(self) -> None:
         """Free one slot and grant it to the next round-robin waiter.
 
         Skips the bucket that just released (`self._last_granted`) when
@@ -149,8 +148,11 @@ class FairLocalGate:
         sole queued user.
         """
         async with self._lock:
-            # First sweep: garbage-collect cancelled/dead futures and
-            # empty buckets. Keeps the picker logic below clean.
+            # First sweep: garbage-collect cancelled/dead futures off the
+            # head of every deque, and drop empty buckets. Load-bearing
+            # against the cancel/release race documented in the module
+            # docstring — without this, `set_result` on the picked future
+            # could raise InvalidStateError.
             for bucket in list(self._waiters.keys()):
                 dq = self._waiters[bucket]
                 while dq and dq[0].done():
@@ -190,10 +192,12 @@ class FairLocalGate:
     def snapshot(self) -> dict[str, int]:
         """Best-effort snapshot of current queue depth per user.
 
-        Not synchronized — values may shift mid-iteration. Intended for
-        debugging logs, not anything that requires consistency.
+        Reads the waiters dict outside the lock; values may shift
+        mid-iteration. Intended for debugging logs, not anything that
+        requires consistency. Materializes into a list first to avoid
+        "dictionary changed size during iteration" under load.
         """
-        return {bucket: len(dq) for bucket, dq in self._waiters.items()}
+        return {bucket: len(dq) for bucket, dq in list(self._waiters.items())}
 
 
 __all__ = ["FairLocalGate", "ANON_USER_BUCKET"]
