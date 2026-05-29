@@ -48,17 +48,17 @@ class _FakeOllama:
         self.chat_calls: list[dict] = []
         self.stream_calls: list[dict] = []
 
-    async def chat(self, *, model, messages, options=None, timeout_s=None):
+    async def chat(self, *, model, messages, options=None, tools=None, timeout_s=None):
         self.chat_calls.append({
             "model": model, "messages": messages,
-            "options": options, "timeout_s": timeout_s,
+            "options": options, "tools": tools, "timeout_s": timeout_s,
         })
         return self.chat_response
 
-    async def chat_stream(self, *, model, messages, options=None, timeout_s=None):
+    async def chat_stream(self, *, model, messages, options=None, tools=None, timeout_s=None):
         self.stream_calls.append({
             "model": model, "messages": messages,
-            "options": options, "timeout_s": timeout_s,
+            "options": options, "tools": tools, "timeout_s": timeout_s,
         })
         for chunk in self.stream_chunks:
             yield chunk
@@ -350,3 +350,173 @@ async def test_handle_passthrough_403_when_disabled():
             me=_stub_user(),
         )
     assert exc_info.value.status_code == 403
+
+
+# ─── Tool forwarding (agent client transparency) ───────────────────────
+
+# Sample OpenAI-shaped tool definition. Agent clients (Hermes, OpenClaw)
+# send these in `payload.tools`; without forwarding, the model sees no
+# tool schema and falls back to emitting tool syntax as plain text.
+_SAMPLE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "read_file",
+        "description": "Read a file from the local filesystem.",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+    },
+}
+
+
+@pytest.mark.asyncio
+async def test_handle_passthrough_forwards_tools_to_ollama():
+    ollama = _FakeOllama()
+    gate = _RecordingGate()
+    inflight = UserInflightRegistry(max_inflight_per_user=3)
+    app = _stub_app(ollama=ollama, gate=gate, inflight=inflight)
+
+    payload = ChatCompletionRequest(
+        model=f"{PASSTHROUGH_PREFIX}qwen3.6:35b-64k",
+        messages=[{"role": "user", "content": "what's in /etc/hosts"}],
+        tools=[_SAMPLE_TOOL],
+    )
+    await _handle_passthrough(
+        app, request=SimpleNamespace(app=app),
+        payload=payload, me=_stub_user(),
+    )
+    assert len(ollama.chat_calls) == 1
+    forwarded = ollama.chat_calls[0]["tools"]
+    assert forwarded is not None
+    assert forwarded == [_SAMPLE_TOOL], (
+        "passthrough must forward tools verbatim; otherwise the model "
+        "sees no schema and free-styles tool syntax as plain text"
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_passthrough_returns_openai_shaped_tool_calls():
+    # When Ollama returns tool_calls, the non-streaming response must
+    # surface them in the OpenAI shape (with id, type, JSON-string args)
+    # so agent clients can execute them. Validates the Ollama→OpenAI
+    # tool_call conversion.
+    import json as _json
+
+    ollama = _FakeOllama(chat_response={
+        "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"function": {"name": "read_file", "arguments": {"path": "/etc/hosts"}}},
+            ],
+        },
+        "prompt_eval_count": 8,
+        "eval_count": 16,
+    })
+    gate = _RecordingGate()
+    inflight = UserInflightRegistry(max_inflight_per_user=3)
+    app = _stub_app(ollama=ollama, gate=gate, inflight=inflight)
+
+    payload = ChatCompletionRequest(
+        model=f"{PASSTHROUGH_PREFIX}qwen3.6:35b-64k",
+        messages=[{"role": "user", "content": "read /etc/hosts"}],
+        tools=[_SAMPLE_TOOL],
+    )
+    resp = await _handle_passthrough(
+        app, request=SimpleNamespace(app=app),
+        payload=payload, me=_stub_user(),
+    )
+    choice = resp["choices"][0]
+    assert choice["finish_reason"] == "tool_calls"
+    msg = choice["message"]
+    assert msg["role"] == "assistant"
+    tool_calls = msg["tool_calls"]
+    assert len(tool_calls) == 1
+    call = tool_calls[0]
+    assert call["type"] == "function"
+    assert call["function"]["name"] == "read_file"
+    # Arguments must be a JSON string, not a dict — OpenAI clients
+    # call json.loads on this field.
+    assert isinstance(call["function"]["arguments"], str)
+    assert _json.loads(call["function"]["arguments"]) == {"path": "/etc/hosts"}
+    # And an id was synthesized.
+    assert call["id"]
+
+
+@pytest.mark.asyncio
+async def test_handle_passthrough_streaming_emits_tool_calls_on_final_frame():
+    # Ollama typically populates tool_calls on the final stream chunk
+    # rather than as deltas. The SSE emitter must surface them in the
+    # terminal frame's delta with finish_reason="tool_calls".
+    import json as _json
+
+    ollama = _FakeOllama(stream_chunks=[
+        {"message": {"role": "assistant", "content": ""}, "done": False},
+        {
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"function": {"name": "read_file", "arguments": {"path": "/etc/hosts"}}},
+                ],
+            },
+            "done": True,
+        },
+    ])
+    gate = _RecordingGate()
+    inflight = UserInflightRegistry(max_inflight_per_user=3)
+    app = _stub_app(ollama=ollama, gate=gate, inflight=inflight)
+
+    payload = ChatCompletionRequest(
+        model=f"{PASSTHROUGH_PREFIX}qwen3.6:35b-64k",
+        messages=[{"role": "user", "content": "read /etc/hosts"}],
+        stream=True,
+        tools=[_SAMPLE_TOOL],
+    )
+    resp = await _handle_passthrough(
+        app, request=SimpleNamespace(app=app),
+        payload=payload, me=_stub_user(),
+    )
+    chunks: list[str] = []
+    async for raw in resp.body_iterator:
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        chunks.append(raw)
+    body = "".join(chunks)
+    # The final frame must carry the tool_calls delta + tool_calls finish.
+    assert '"finish_reason": "tool_calls"' in body
+    assert '"tool_calls"' in body
+    assert '"read_file"' in body
+    # Arguments serialized as a JSON string (escaped).
+    assert _json.dumps({"path": "/etc/hosts"}) in body or '\\"path\\": \\"/etc/hosts\\"' in body
+    # Stream still terminates.
+    assert body.rstrip().endswith("data: [DONE]")
+    # And the tools array was forwarded to ollama.chat_stream.
+    assert ollama.stream_calls[0]["tools"] == [_SAMPLE_TOOL]
+
+
+@pytest.mark.asyncio
+async def test_handle_passthrough_without_tools_does_not_set_tool_calls():
+    # A passthrough request without `tools` in the payload should send
+    # no tools array to Ollama and produce a vanilla stop-reason response.
+    ollama = _FakeOllama()
+    gate = _RecordingGate()
+    inflight = UserInflightRegistry(max_inflight_per_user=3)
+    app = _stub_app(ollama=ollama, gate=gate, inflight=inflight)
+
+    payload = ChatCompletionRequest(
+        model=f"{PASSTHROUGH_PREFIX}qwen3.6:35b-64k",
+        messages=[{"role": "user", "content": "hi"}],
+    )
+    resp = await _handle_passthrough(
+        app, request=SimpleNamespace(app=app),
+        payload=payload, me=_stub_user(),
+    )
+    # No tools forwarded.
+    assert ollama.chat_calls[0]["tools"] is None
+    # Vanilla response, no tool_calls in the message.
+    choice = resp["choices"][0]
+    assert choice["finish_reason"] == "stop"
+    assert "tool_calls" not in choice["message"]

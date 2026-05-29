@@ -110,7 +110,7 @@ Audrey just remembers the answer briefly.*
 **dependency**. A dependency in FastAPI is a function whose return
 value gets injected into a route handler automatically. The chat
 route declares it at
-[`routes/openai.py:221`](../../src/audrey/routes/openai.py#L221):
+[`routes/openai.py:232`](../../src/audrey/routes/openai.py#L232):
 
 ```python
 async def chat_completions(
@@ -213,7 +213,7 @@ Three things happen on the way to `me`:
 
 Once `require_user` returns, the route has a trusted `AuthedUser` and
 uses `me.email` everywhere a `user_id` is needed. Notice this guard
-at [`routes/openai.py:243-250`](../../src/audrey/routes/openai.py#L243):
+at [`routes/openai.py:254-261`](../../src/audrey/routes/openai.py#L254):
 
 ```python
 # Identity comes from the Authorization header via require_user, NOT from

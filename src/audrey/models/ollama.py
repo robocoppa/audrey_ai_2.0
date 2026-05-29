@@ -117,16 +117,23 @@ class OllamaClient:
         model: str,
         messages: list[dict[str, Any]],
         options: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
         timeout_s: float | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Streaming chat completion. Yields each Ollama chunk as a dict.
 
         Each chunk has the shape `{"model": ..., "message": {"role": "assistant",
         "content": "..."}, "done": false}` until the final one with `done: true`.
+
+        When `tools` is supplied, Ollama may populate `message.tool_calls`
+        in chunks (typically the final one); the caller is responsible for
+        executing them and feeding results back as `role=tool` messages.
         """
-        payload = {"model": model, "messages": messages, "stream": True}
+        payload: dict[str, Any] = {"model": model, "messages": messages, "stream": True}
         if options:
             payload["options"] = options
+        if tools:
+            payload["tools"] = tools
         timeout = httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT
         t0 = time.perf_counter()
         outcome = "ok"

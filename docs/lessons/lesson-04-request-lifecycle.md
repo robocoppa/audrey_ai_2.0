@@ -399,7 +399,7 @@ and the underlying httpx call fails. Audrey's Ollama client wrapper
 catches the httpx error and re-raises it as the project's own typed
 `OllamaError`. That exception propagates up through the pipeline
 to the route handler, which catches it explicitly (see
-[`routes/openai.py:269-273`](../../src/audrey/routes/openai.py#L269))
+[`routes/openai.py:280-284`](../../src/audrey/routes/openai.py#L280))
 and converts it to **HTTP 502 Bad Gateway** with a JSON error body
 explaining the upstream failure:
 

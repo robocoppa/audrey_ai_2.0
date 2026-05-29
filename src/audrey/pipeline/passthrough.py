@@ -42,12 +42,18 @@ async def passthrough_chat(
     messages: list[dict[str, Any]],
     options: dict[str, Any],
     user_id: str,
+    tools: list[dict[str, Any]] | None = None,
     timeout_s: float | None = None,
 ) -> dict[str, Any]:
     """Non-streaming passthrough: gate-guarded `ollama.chat` forward.
 
     Returns the raw Ollama response dict. The caller is responsible for
     reshaping it into the OpenAI chat-completion contract.
+
+    `tools` is forwarded verbatim. Agent clients (Hermes, OpenClaw) that
+    advertise their own tools to the model rely on this forwarding —
+    without it the model sees no schema, can't issue structured
+    `tool_calls`, and falls back to emitting tool syntax as plain text.
     """
     dispatch_total.labels(
         model=concrete, task_type="passthrough", path="passthrough",
@@ -55,11 +61,13 @@ async def passthrough_chat(
     t0 = time.perf_counter()
     async with gate.acquire(concrete, location=location, user_id=user_id):
         resp = await ollama.chat(
-            model=concrete, messages=messages, options=options, timeout_s=timeout_s,
+            model=concrete, messages=messages, options=options,
+            tools=tools, timeout_s=timeout_s,
         )
     log.info(
-        "passthrough.chat model=%s user=%s elapsed=%.2fs",
-        concrete, _safe_user(user_id), time.perf_counter() - t0,
+        "passthrough.chat model=%s user=%s tools=%d elapsed=%.2fs",
+        concrete, _safe_user(user_id), len(tools or []),
+        time.perf_counter() - t0,
     )
     return resp
 
@@ -73,6 +81,7 @@ async def passthrough_stream(
     messages: list[dict[str, Any]],
     options: dict[str, Any],
     user_id: str,
+    tools: list[dict[str, Any]] | None = None,
     timeout_s: float | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Streaming passthrough: yield raw Ollama chunks, gate held across all.
@@ -82,6 +91,10 @@ async def passthrough_stream(
     generating, and they'd contend at the model level anyway. Holding
     across the stream is the only granularity that gives real
     fairness on local generation.
+
+    `tools` is forwarded verbatim. Ollama may populate
+    `message.tool_calls` on the final chunk; the caller passes that
+    through to the OpenAI SSE shape unchanged.
     """
     dispatch_total.labels(
         model=concrete, task_type="passthrough", path="passthrough_stream",
@@ -89,12 +102,14 @@ async def passthrough_stream(
     t0 = time.perf_counter()
     async with gate.acquire(concrete, location=location, user_id=user_id):
         async for chunk in ollama.chat_stream(
-            model=concrete, messages=messages, options=options, timeout_s=timeout_s,
+            model=concrete, messages=messages, options=options,
+            tools=tools, timeout_s=timeout_s,
         ):
             yield chunk
     log.info(
-        "passthrough.stream model=%s user=%s elapsed=%.2fs",
-        concrete, _safe_user(user_id), time.perf_counter() - t0,
+        "passthrough.stream model=%s user=%s tools=%d elapsed=%.2fs",
+        concrete, _safe_user(user_id), len(tools or []),
+        time.perf_counter() - t0,
     )
 
 

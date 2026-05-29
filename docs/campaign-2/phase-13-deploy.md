@@ -45,19 +45,51 @@ based on task type — neither is what a passthrough caller wants.
 Skipping those gives you "send this exact prompt to that exact
 model" with fair scheduling layered on, and nothing else.
 
+## Why `tools` must round-trip
+
+Agent clients (Hermes, OpenClaw) advertise their own tools to the
+model via the OpenAI `tools` array. If Audrey strips this on the
+way through, the model sees a system prompt telling it "you have
+access to read_file, write_file, …" but receives no schema for
+how to call them. It can't issue structured `tool_calls`, so it
+falls back to **emitting the tool syntax as plain text** like
+`<read_file(path='…')>`. The agent client expects structured
+calls, doesn't parse the text form, and forwards the raw model
+output to the end user (Telegram, etc.). Result: tool syntax
+leaking into chat output instead of actual tool execution.
+
+The fix is to forward `tools` verbatim and reshape Ollama's
+response `tool_calls` (which arrive as `{"function": {"name":
+…, "arguments": {dict}}}`) into the OpenAI shape (`{"id": …,
+"type": "function", "function": {"name": …, "arguments":
+"<json-string>"}}`). The arguments-shape mismatch (dict vs
+JSON-string) is the main thing — clients call `json.loads` on
+the field and crash on a dict.
+
+This applies to passthrough only. Audrey's pipeline modes
+(`audrey_fast`, `audrey_deep`, …) use the server-side tool
+registry from `tools/discovery.py` and ignore `payload.tools`
+on purpose — they're using Audrey's tools, not the client's.
+
 ## What's in scope
 
   - **[`src/audrey/routes/openai.py`](../../src/audrey/routes/openai.py)** —
     prefix parser (`_is_passthrough`, `_passthrough_concrete`),
     config-driven validation (`_resolve_passthrough_model`), the
     route entry (`_handle_passthrough`), the streaming SSE emitter
-    (`_passthrough_stream_sse`), and the `/v1/models` listing now
-    expanded to include passthrough variants.
+    (`_passthrough_stream_sse`), the `/v1/models` listing expanded
+    to include passthrough variants, and an
+    `_ollama_to_openai_tool_calls` shape converter for the
+    tool-forwarding path. `ChatCompletionRequest` gains a `tools`
+    field — honored only on passthrough.
   - **[`src/audrey/pipeline/passthrough.py`](../../src/audrey/pipeline/passthrough.py)** —
     new module. Two thin helpers (`passthrough_chat`,
     `passthrough_stream`) that hold the GPU gate around the actual
-    Ollama call and increment `audrey_dispatch_total` with
-    `task_type="passthrough"`.
+    Ollama call, forward `tools` verbatim, and increment
+    `audrey_dispatch_total` with `task_type="passthrough"`.
+  - **[`src/audrey/models/ollama.py`](../../src/audrey/models/ollama.py)** —
+    `chat_stream` gained an optional `tools` kwarg matching `chat`'s
+    surface; needed so streaming passthrough can advertise tools.
   - **[`config.yaml`](../../config.yaml)** — new `passthrough` block
     next to `fairness`: `enabled`, `allowed_models`, `require_role`.
   - **[`tests/test_passthrough_route.py`](../../tests/test_passthrough_route.py)** —
@@ -65,13 +97,18 @@ model" with fair scheduling layered on, and nothing else.
     decisions (disabled, missing config block, allowlist enforcement,
     role gate), and the `/v1/models` prefix expansion.
   - **[`tests/test_passthrough_dispatch.py`](../../tests/test_passthrough_dispatch.py)** —
-    9 tests covering the dispatch path end-to-end. Stubs the Ollama
+    13 tests covering the dispatch path end-to-end. Stubs the Ollama
     client so no network is involved; asserts the gate is acquired
     with the right concrete model + user, the inflight slot is held
     around the call, OpenAI-shaped non-streaming response is built
     correctly, streaming emits the expected SSE sequence, `OllamaError`
-    surfaces as HTTP 502, and the configuration gates fire before
-    Ollama is reached.
+    surfaces as HTTP 502, the configuration gates fire before Ollama
+    is reached, AND (the four tool-forwarding tests) `tools` flows
+    through to Ollama on both non-streaming and streaming, Ollama's
+    `tool_calls` get reshaped to OpenAI form (arguments as JSON
+    string, synthetic call id, `finish_reason="tool_calls"`), and
+    omitting `tools` produces a vanilla stop response with no
+    `tool_calls` field on the assistant message.
 
 No metric additions — the existing `pipeline_seconds`, `pipeline_total`,
 and `dispatch_total` histograms gain `mode="passthrough"`,
@@ -243,6 +280,36 @@ If Hermes auto-discovers models via `GET /v1/models`, the listing
 already returns the prefixed IDs (verified by
 `tests/test_passthrough_route.py::test_list_models_includes_passthrough_when_enabled`),
 so the dropdown should show them correctly without manual entry.
+
+For the **API compatibility mode**, pick **Chat Completions**.
+Audrey only serves `POST /v1/chat/completions` — there's no
+`/v1/responses` or `/v1/messages` endpoint. Auto-detect probably
+lands there too based on the URL, but pinning explicitly avoids
+heuristic surprises.
+
+For the **context length**, both shipped passthrough models
+(`qwen3.6:35b-64k`, `qwen3-coder-next-64k:latest`) are Modelfile
+variants explicitly built with a 65536-token window. Hermes can
+set anywhere from the model's default up to that ceiling. Guidance:
+
+  - **Default 32768.** Plenty for chat-style prompting; uses about
+    half the KV-cache VRAM of 65536. Leaves headroom for the model
+    swap between the two passthrough models on the 24 GB 3090 Ti
+    without thrashing.
+  - **Bump to 65536** only if you hit context-length errors in
+    real prompts — long-document RAG, long-conversation continuity,
+    multi-file code review. Most interactive use doesn't approach
+    32k tokens.
+  - Asking for more than 65536 on these tags either gets clamped
+    silently by Ollama or produces garbled output. Don't.
+  - The KV cache for 65536 tokens on a 35B Q4 model is roughly
+    4-8 GB on top of model weights. With `qwen3.6:35b-64k` (23 GB
+    on disk) at full context the box is already tight; the coder
+    variant (51 GB) won't fit on one GPU at any meaningful context
+    and will offload layers to CPU, slowing generation
+    significantly. First request after a model swap eats the load
+    penalty (~30s for the coder); subsequent calls hit the warm
+    cache.
 
 After save, send a test prompt. Look for the same `passthrough.chat`
 or `passthrough.stream` log lines on the Audrey side.

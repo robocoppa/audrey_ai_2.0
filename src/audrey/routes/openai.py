@@ -168,6 +168,17 @@ class ChatCompletionRequest(BaseModel):
     temperature: float | None = None
     top_p: float | None = None
     max_tokens: int | None = None
+    tools: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "OpenAI-spec tools array. **Only honored on the passthrough "
+            "path** (`audrey_passthrough/<concrete>`) — Audrey's pipeline "
+            "modes (`audrey_fast`, `audrey_deep`, …) use the server-side "
+            "tool registry from `tools/discovery.py` and ignore this field. "
+            "Forwarded verbatim to Ollama on passthrough so agent clients "
+            "(Hermes, OpenClaw) can advertise their own tools."
+        ),
+    )
     user: str | None = Field(
         default=None,
         description=(
@@ -325,7 +336,7 @@ async def _handle_passthrough(
                         ollama, gate,
                         virtual=payload.model, concrete=concrete, location=location,
                         messages=messages, options=options,
-                        user_id=me.email, timeout_s=timeout_s,
+                        user_id=me.email, tools=payload.tools, timeout_s=timeout_s,
                     ):
                         yield frame
             except OllamaError:
@@ -351,7 +362,7 @@ async def _handle_passthrough(
                 ollama, gate,
                 concrete=concrete, location=location,
                 messages=messages, options=options,
-                user_id=me.email, timeout_s=timeout_s,
+                user_id=me.email, tools=payload.tools, timeout_s=timeout_s,
             )
     except OllamaError as e:
         outcome = "error"
@@ -370,12 +381,14 @@ async def _handle_passthrough(
     ).inc()
 
     msg = resp.get("message") or {}
+    tool_calls = _ollama_to_openai_tool_calls(msg.get("tool_calls"))
     return _to_openai_response(
         virtual=payload.model,
         concrete=concrete,
         content=str(msg.get("content") or ""),
         prompt_tokens=int(resp.get("prompt_eval_count", 0) or 0),
         completion_tokens=int(resp.get("eval_count", 0) or 0),
+        tool_calls=tool_calls,
     )
 
 
@@ -389,14 +402,18 @@ async def _passthrough_stream_sse(
     messages: list[dict[str, Any]],
     options: dict[str, Any],
     user_id: str,
+    tools: list[dict[str, Any]] | None,
     timeout_s: float | None,
 ):
     """Stream Ollama chunks as OpenAI-shaped SSE frames.
 
-    Mirrors `_stream_openai` exactly — the only reason this is a
-    separate function is that the gate-acquire path runs through
-    `passthrough_stream` so the dispatch_total label fires with
-    `path=passthrough_stream`.
+    Mirrors `_stream_openai` for the content path. When `tools` is
+    supplied, Ollama typically populates `message.tool_calls` on the
+    final chunk (rather than streaming deltas); we translate that
+    into an OpenAI `tool_calls` delta in the terminal frame and set
+    `finish_reason="tool_calls"` instead of `"stop"` so agent clients
+    parsing the SSE stream see the structured calls and don't fall
+    back to scraping plain text.
     """
     created = int(time.time())
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
@@ -414,7 +431,7 @@ async def _passthrough_stream_sse(
             ollama, gate,
             concrete=concrete, location=location,
             messages=messages, options=options,
-            user_id=user_id, timeout_s=timeout_s,
+            user_id=user_id, tools=tools, timeout_s=timeout_s,
         ):
             msg = chunk.get("message", {}) or {}
             content = msg.get("content", "") or ""
@@ -427,10 +444,17 @@ async def _passthrough_stream_sse(
                 }
                 yield f"data: {json.dumps(frame)}\n\n"
             if done:
+                tool_calls = _ollama_to_openai_tool_calls(msg.get("tool_calls"))
+                final_delta: dict[str, Any] = {}
+                if tool_calls:
+                    final_delta["tool_calls"] = tool_calls
+                    finish_reason = "tool_calls"
+                else:
+                    finish_reason = "stop"
                 final = {
                     "id": cid, "object": "chat.completion.chunk", "created": created,
                     "model": virtual, "system_fingerprint": fingerprint,
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                    "choices": [{"index": 0, "delta": final_delta, "finish_reason": finish_reason}],
                 }
                 yield f"data: {json.dumps(final)}\n\n"
                 break
@@ -789,7 +813,13 @@ def _to_openai_response(
     content: str,
     prompt_tokens: int,
     completion_tokens: int,
+    tool_calls: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    message: dict[str, Any] = {"role": "assistant", "content": content}
+    finish_reason = "stop"
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+        finish_reason = "tool_calls"
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
         "object": "chat.completion",
@@ -799,8 +829,8 @@ def _to_openai_response(
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": content},
-                "finish_reason": "stop",
+                "message": message,
+                "finish_reason": finish_reason,
             }
         ],
         "usage": {
@@ -809,6 +839,43 @@ def _to_openai_response(
             "total_tokens": prompt_tokens + completion_tokens,
         },
     }
+
+
+def _ollama_to_openai_tool_calls(
+    ollama_tool_calls: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]] | None:
+    """Convert Ollama's tool_calls shape to OpenAI's.
+
+    Ollama returns:
+        [{"function": {"name": str, "arguments": dict}}, ...]
+    OpenAI clients expect:
+        [{"id": str, "type": "function",
+          "function": {"name": str, "arguments": str (JSON)}}]
+
+    The argument shape difference (dict vs JSON-string) is the main
+    thing — clients that parse OpenAI responses will try `json.loads`
+    on `arguments` and crash if it's already a dict. Audrey synthesizes
+    the `id` since Ollama doesn't emit one.
+    """
+    if not ollama_tool_calls:
+        return None
+    out: list[dict[str, Any]] = []
+    for call in ollama_tool_calls:
+        fn = call.get("function") or {}
+        name = fn.get("name") or ""
+        raw_args = fn.get("arguments")
+        if isinstance(raw_args, str):
+            arguments = raw_args
+        elif raw_args is None:
+            arguments = "{}"
+        else:
+            arguments = json.dumps(raw_args)
+        out.append({
+            "id": call.get("id") or f"call_{uuid.uuid4().hex[:24]}",
+            "type": "function",
+            "function": {"name": name, "arguments": arguments},
+        })
+    return out
 
 
 async def _stream_deep_with_banners(
