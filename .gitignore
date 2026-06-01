@@ -11,13 +11,9 @@ CLAUDE.md
 # it's an internal queue, not teaching material.
 docs/lessons/AUDIT.md
 
-# OpenClaw prototype plan — laptop-local; references Unraid LAN IP and
-# a personal experiment with no place in the public repo.
-docs/campaign-2/openclaw-prototype-plan.md
-
-# Passthrough virtual model plan — laptop-local design doc for letting
-# OpenClaw route through Audrey's fair-scheduling layers.
-docs/campaign-2/passthrough-virtual-model-plan.md
+# OpenClaw builder's guide — laptop-local; references Unraid LAN IP
+# and personal channel tokens. Reference doc for building agents.
+docs/campaign-2/openclaw-builders-guide.md
 
 # Hermes reference — laptop-local working notes on the NousResearch
 # Hermes Agent integration via passthrough; references LAN IP + OWUI.

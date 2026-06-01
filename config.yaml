@@ -15,6 +15,7 @@ router:
 model_registry:
   code:
     - { name: "qwen3-coder-next:latest",  priority: 100, speed: 60, quality: 95, location: local }
+    - { name: "minimax-m3:cloud",         priority:  98, speed: 85, quality: 96, location: cloud }
     - { name: "qwen2.5-coder:32b",        priority:  90, speed: 70, quality: 90, location: local }
     - { name: "devstral-small-2:latest",  priority:  85, speed: 85, quality: 82, location: local }
     - { name: "granite4.1:30b",           priority:  82, speed: 80, quality: 86, location: local }
@@ -28,16 +29,17 @@ model_registry:
   reasoning:
     - { name: "qwen3.6:35b",              priority: 100, speed: 70, quality: 93, location: local }
     - { name: "deepseek-v4-pro:cloud",    priority:  97, speed: 80, quality: 95, location: cloud }
+    - { name: "minimax-m3:cloud",         priority:  96, speed: 85, quality: 95, location: cloud }
     - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 94, location: cloud }
     - { name: "deepseek-r1:32b",          priority:  85, speed: 65, quality: 90, location: local }
     - { name: "nemotron-cascade-2:latest",priority:  80, speed: 65, quality: 88, location: local }
     - { name: "cogito-2.1:671b-cloud",    priority:  75, speed: 80, quality: 93, location: cloud }
     - { name: "nemotron-3-super:cloud",   priority:  70, speed: 85, quality: 90, location: cloud }
-    - { name: "minimax-m2.7:cloud",       priority:  65, speed: 85, quality: 89, location: cloud }
 
   general:
     - { name: "qwen3.6:35b",              priority: 100, speed: 75, quality: 92, location: local }
     - { name: "deepseek-v4-pro:cloud",    priority:  97, speed: 80, quality: 95, location: cloud }
+    - { name: "minimax-m3:cloud",         priority:  96, speed: 85, quality: 95, location: cloud }
     - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 93, location: cloud }
     - { name: "qwen3.5:397b-cloud",       priority:  90, speed: 80, quality: 94, location: cloud }
     - { name: "deepseek-v4-flash:cloud",  priority:  82, speed: 92, quality: 89, location: cloud }
@@ -49,6 +51,7 @@ model_registry:
   vl:
     - { name: "nemotron3:33b",            priority: 105, speed: 70, quality: 92, location: local }
     - { name: "qwen3-vl:32b",             priority: 100, speed: 70, quality: 90, location: local }
+    - { name: "minimax-m3:cloud",         priority:  95, speed: 85, quality: 93, location: cloud }
     - { name: "llava:34b",                priority:  85, speed: 65, quality: 85, location: local }
     - { name: "kimi-k2.6:cloud",          priority:  75, speed: 90, quality: 88, location: cloud }
 
@@ -69,7 +72,7 @@ fast_path:
     - "qwen3.5:397b-cloud"
     - "cogito-2.1:671b-cloud"
     - "nemotron-3-super:cloud"
-    - "minimax-m2.7:cloud"
+    - "minimax-m3:cloud"
     - "glm-5.1:cloud"
 
 # ─── Deep panel: mixed (audrey_deep) ───────────────────────────────────
@@ -98,7 +101,7 @@ deep_panel:
 # Both workers run in parallel (Ollama Pro caps at 3 concurrent cloud).
 deep_panel_cloud:
   code:
-    workers: ["deepseek-v4-pro:cloud", "kimi-k2.6:cloud"]
+    workers: ["deepseek-v4-pro:cloud", "minimax-m3:cloud"]
     synthesizer: "deepseek-v4-pro:cloud"
     fallback_synth: "glm-5.1:cloud"
   reasoning:
