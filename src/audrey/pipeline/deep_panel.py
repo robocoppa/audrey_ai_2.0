@@ -70,6 +70,22 @@ def pool_key_for(virtual_model: str) -> str:
     return pool
 
 
+def pick_panel_timeout(cfg: Config, pool_key: str) -> float:
+    """Pick the per-worker timeout for a deep-panel pool.
+
+    `deep_panel_cloud` (cloud-only pool) uses `cfg.timeouts.cloud` because
+    cloud workers run in parallel under Ollama Pro's concurrency cap.
+    All other pools (`deep_panel`, `deep_panel_local`) use
+    `cfg.timeouts.deep_worker` because at least one worker holds the local
+    GPU gate and can't overlap with the others. Shared between
+    `routes/openai.py` (streaming deep) and `pipeline/graph.py`
+    (non-streaming deep) so the two paths can't drift.
+    """
+    cloud_timeout = float(cfg.timeouts.get("cloud", 120))
+    deep_worker_timeout = float(cfg.timeouts.get("deep_worker", 240))
+    return cloud_timeout if pool_key == "deep_panel_cloud" else deep_worker_timeout
+
+
 def select_workers(
     cfg: Config,
     registry: ModelRegistry,
@@ -426,4 +442,4 @@ async def run_panel_streaming(
     yield {"type": "final", "drafts": drafts, "attempted": attempted}
 
 
-__all__ = ["pool_key_for", "select_workers", "run_panel", "run_panel_streaming"]
+__all__ = ["pick_panel_timeout", "pool_key_for", "run_panel", "run_panel_streaming", "select_workers"]

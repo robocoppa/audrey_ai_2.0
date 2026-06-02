@@ -276,6 +276,16 @@ async def synthesize_stream(
           Emitted exactly once, immediately before the first non-empty
           delta. The route uses this to close the Synthesizing banner
           and emit the separator before answer text starts streaming.
+
+          **Ordering contract: `first_token` precedes every `delta`.**
+          Callers may rely on this — a `delta` arriving before
+          `first_token` is a contract violation, not a corner case. The
+          implementation enforces this structurally: every `delta` yield
+          is guarded by a flag that's only set after emitting
+          `first_token`. If you refactor this generator, preserve the
+          ordering — the route's pre-first-token branch in
+          `_stream_deep_with_banners` is a now-unreachable safety net
+          and would silently mask the bug.
       {"type": "fallback_attempt", "model": str, "error": str}
           Primary synth failed before any tokens; fallback is starting.
           Purely informational — the route logs it but doesn't surface

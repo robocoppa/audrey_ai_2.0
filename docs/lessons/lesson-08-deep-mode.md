@@ -312,7 +312,7 @@ and the classifier output from Lesson 7 picks the task entry within it.
 #### Selecting healthy workers
 
 `select_workers` at
-[`deep_panel.py:92`](../../src/audrey/pipeline/deep_panel.py#L92) walks the
+[`deep_panel.py:108`](../../src/audrey/pipeline/deep_panel.py#L108) walks the
 configured worker list and filters:
 
 ```python
@@ -343,7 +343,7 @@ right code path.
 
 If `select_workers` returns nothing — every pool worker is unhealthy —
 `run_panel` falls back to the model registry itself at
-[`deep_panel.py:264`](../../src/audrey/pipeline/deep_panel.py#L264):
+[`deep_panel.py:284`](../../src/audrey/pipeline/deep_panel.py#L284):
 
 ```python
 if not workers:
@@ -377,7 +377,7 @@ same panel run concurrently because they never touch the gate.
 
 This is also why tool-capable local workers hold the gate for the *entire*
 ReAct loop, not just one chat call. Look at
-[`deep_panel.py:134-155`](../../src/audrey/pipeline/deep_panel.py#L134):
+[`deep_panel.py:151-172`](../../src/audrey/pipeline/deep_panel.py#L151):
 
 ```python
 async with gate.acquire(model, location=location, user_id=user_id):
@@ -411,7 +411,7 @@ worker cheating its way to a smaller number.
 
 If the planner produced subtasks, each worker gets one. `run_panel`
 distributes them round-robin at
-[`deep_panel.py:281-285`](../../src/audrey/pipeline/deep_panel.py#L281):
+[`deep_panel.py:295-299`](../../src/audrey/pipeline/deep_panel.py#L295):
 
 ```python
 if subtasks:
@@ -432,7 +432,7 @@ answer the same question with different perspectives, and the synthesizer
 reconciles them.
 
 `_messages_for_subtask` at
-[`deep_panel.py:216`](../../src/audrey/pipeline/deep_panel.py#L216) builds
+[`deep_panel.py:232`](../../src/audrey/pipeline/deep_panel.py#L232) builds
 the per-worker message list by replacing the **last** user message with
 the subtask:
 

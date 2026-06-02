@@ -66,7 +66,7 @@ from audrey.pipeline.complexity import (
     is_owui_task_request,
 )
 from audrey.pipeline.context import datetime_system_message
-from audrey.pipeline.deep_panel import pool_key_for, run_panel_streaming
+from audrey.pipeline.deep_panel import pick_panel_timeout, pool_key_for, run_panel_streaming
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.memory import (
     MEMORY_STORE_TOOL,
@@ -806,6 +806,13 @@ async def _stream_via_pipeline(
 # ─── Helpers ──────────────────────────────────────────────────────────
 
 def _options_from_request(req: ChatCompletionRequest) -> dict[str, Any]:
+    """Map OpenAI-shape sampling knobs onto Ollama's options dict.
+
+    Sibling: `pipeline.graph._options_from_state` does the same conceptual
+    mapping from the LangGraph state dict. The two helpers stay parallel
+    rather than unified because their input shapes genuinely differ
+    (Pydantic model vs. dict); keep them in sync if the knob set changes.
+    """
     opts: dict[str, Any] = {}
     if req.temperature is not None:
         opts["temperature"] = req.temperature
@@ -996,9 +1003,8 @@ async def _stream_deep_with_banners(
 
         # ── Stage 2: Dispatching panel ──────────────────────────────────
         pool_key = pool_key_for(payload.model)
-        cloud_timeout = float(cfg.timeouts.get("cloud", 120))
         deep_worker_timeout = float(cfg.timeouts.get("deep_worker", 240))
-        timeout_s = cloud_timeout if pool_key == "deep_panel_cloud" else deep_worker_timeout
+        timeout_s = pick_panel_timeout(cfg, pool_key)
         max_workers_cloud = int(agentic.get("max_deep_workers_cloud", 3))
         fast_path_cfg = cfg.raw.get("fast_path", {}) or {}
         tool_capable_models = set(fast_path_cfg.get("tool_capable_models", []) or [])
@@ -1092,10 +1098,13 @@ async def _stream_deep_with_banners(
                                  evt.get("model"), evt.get("error"))
                         continue
                     if etype == "delta":
-                        # Should not arrive before first_token — synth_stream
-                        # always emits first_token first. Surface defensively
-                        # without losing the text: stash it for emission once
-                        # the banner closes.
+                        # Unreachable safety net: `synthesize_stream` documents
+                        # `first_token` as preceding every `delta` and enforces
+                        # the ordering structurally. We keep this branch so a
+                        # future refactor that violates the contract degrades
+                        # to text-loss rather than dropping content silently —
+                        # the resulting "missing banner ✅" is the visible
+                        # symptom that points back to the broken invariant.
                         first_token_seen = True
                         text = evt.get("text", "") or ""
                         if text:
@@ -1258,7 +1267,18 @@ async def _phase_thinking(
     planning_enabled, planning_min_tokens, planning_max_subtasks,
     prompt_tokens, router_cfg, cfg=None,
 ):
-    """Run datetime injection + memory recall + planner. Returns (messages_with_context, subtasks)."""
+    """Run datetime injection + memory recall + planner. Returns (messages_with_context, subtasks).
+
+    Used by the streaming deep path. Mirrors the non-streaming graph's
+    `node_datetime` → `node_memory_recall` → planner sequence in
+    `pipeline/graph.py`. Both paths call the same underlying helpers
+    (`datetime_system_message`, `recall_for_request`, `memory_system_message`,
+    `compose_system_messages`, `planner_plan`) in the same order; only the
+    orchestration shape differs (graph nodes pass state in/out, this returns
+    a tuple). If you add a new context-injection step here, add the matching
+    node in `pipeline/graph.py` too — otherwise streaming-deep and
+    non-streaming runs will silently disagree.
+    """
     # Datetime first so it sits at the top of the system-message stack.
     # Mirrors what node_datetime does for the non-streaming graph.
     msgs = [datetime_system_message(), *messages]

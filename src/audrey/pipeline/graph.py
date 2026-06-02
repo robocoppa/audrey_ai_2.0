@@ -57,7 +57,7 @@ from audrey.pipeline.complexity import (
     is_owui_task_request,
 )
 from audrey.pipeline.context import datetime_system_message
-from audrey.pipeline.deep_panel import pool_key_for, run_panel
+from audrey.pipeline.deep_panel import pick_panel_timeout, pool_key_for, run_panel
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.fast_path import run_fast_path
 from audrey.pipeline.memory import (
@@ -91,7 +91,6 @@ def build_graph(
     complexity_log_breakdown = bool(complexity_cfg.get("log_breakdown", False))
     fast_timeout = float(cfg.timeouts.get("fast_path", 180))
     deep_worker_timeout = float(cfg.timeouts.get("deep_worker", 240))
-    cloud_timeout = float(cfg.timeouts.get("cloud", 120))
     router_timeout = float(router_cfg.get("timeout_s", 20))
 
     fast_path_cfg = cfg.raw.get("fast_path", {}) or {}
@@ -142,6 +141,12 @@ def build_graph(
         Runs first so every downstream node — memory_recall, classify,
         fast_path, deep_panel workers, synth — sees the same timestamp.
         Cheap, no network calls; just a string + a list prepend.
+
+        Sibling on the streaming deep path: `_phase_thinking` in
+        `routes/openai.py` runs the same datetime injection + memory
+        recall + planner sequence inline. If you change the context-
+        injection ordering or add a new step here, update the streaming
+        path too — they have to stay in sync.
         """
         sys_msg = datetime_system_message()
         return {"messages": [sys_msg, *state["messages"]]}
@@ -283,8 +288,7 @@ def build_graph(
 
     async def node_deep_panel(state: PipelineState) -> dict[str, Any]:
         pool_key = pool_key_for(state["virtual_model"])
-        # Cloud-only pool uses cloud timeout; otherwise the deep-worker timeout.
-        timeout_s = cloud_timeout if pool_key == "deep_panel_cloud" else deep_worker_timeout
+        timeout_s = pick_panel_timeout(cfg, pool_key)
         options = _options_from_state(state)
         drafts, attempted = await run_panel(
             cfg, ollama, registry, health, gate,
@@ -444,6 +448,14 @@ def build_graph(
 # ─── Helpers ──────────────────────────────────────────────────────────
 
 def _options_from_state(state: PipelineState) -> dict[str, Any]:
+    """Map LangGraph state's sampling knobs onto Ollama's options dict.
+
+    Sibling: `routes.openai._options_from_request` does the same conceptual
+    mapping from a Pydantic `ChatCompletionRequest`. The two helpers stay
+    parallel rather than unified because their input shapes genuinely
+    differ (dict vs. Pydantic model); keep them in sync if the knob set
+    changes.
+    """
     options: dict[str, Any] = {}
     if (t := state.get("temperature")) is not None:
         options["temperature"] = t

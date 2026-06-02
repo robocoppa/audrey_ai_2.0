@@ -1,20 +1,23 @@
-"""Tests for the deep-panel startup validator and `pool_key_for` warning.
+"""Tests for the deep-panel startup validator, `pool_key_for`, and `pick_panel_timeout`.
 
 `_validate_deep_panel_pools` runs from `get_config()` so a misconfigured
 `config.yaml` crashes the process at boot instead of 500ing the first
 deep request. `pool_key_for` warns when an unknown virtual model falls
 back to the default pool, so a typo doesn't silently route to the wrong
-worker list.
+worker list. `pick_panel_timeout` is shared between `routes/openai.py`
+(streaming deep) and `pipeline/graph.py` (non-streaming deep) — testing
+it once here keeps the two callers from drifting.
 """
 
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 
 import pytest
 
 from audrey.config import _validate_deep_panel_pools
-from audrey.pipeline.deep_panel import pool_key_for
+from audrey.pipeline.deep_panel import pick_panel_timeout, pool_key_for
 
 # ─── _validate_deep_panel_pools ────────────────────────────────────────
 
@@ -136,3 +139,35 @@ def test_pool_key_for_unknown_virtual_model_warns_and_falls_back(caplog):
     assert len(warnings) == 1
     assert "audrey_typo" in warnings[0].getMessage()
     assert "deep_panel" in warnings[0].getMessage()
+
+
+# ─── pick_panel_timeout ────────────────────────────────────────────────
+
+def _cfg(timeouts: dict[str, float]):
+    """Minimal cfg stub. The helper only reads `cfg.timeouts.get(...)`."""
+    return SimpleNamespace(timeouts=timeouts)
+
+
+def test_pick_panel_timeout_cloud_pool_uses_cloud_timeout():
+    cfg = _cfg({"cloud": 90.0, "deep_worker": 180.0})
+    assert pick_panel_timeout(cfg, "deep_panel_cloud") == 90.0
+
+
+def test_pick_panel_timeout_mixed_pool_uses_deep_worker_timeout():
+    cfg = _cfg({"cloud": 90.0, "deep_worker": 180.0})
+    assert pick_panel_timeout(cfg, "deep_panel") == 180.0
+
+
+def test_pick_panel_timeout_local_pool_uses_deep_worker_timeout():
+    # `deep_panel_local` workers serialize through the local GPU gate just
+    # like the mixed pool's local workers, so they share the same timeout.
+    cfg = _cfg({"cloud": 90.0, "deep_worker": 180.0})
+    assert pick_panel_timeout(cfg, "deep_panel_local") == 180.0
+
+
+def test_pick_panel_timeout_defaults_when_keys_missing():
+    # Empty timeouts dict — fall back to the helper's documented defaults
+    # (cloud=120, deep_worker=240).
+    cfg = _cfg({})
+    assert pick_panel_timeout(cfg, "deep_panel_cloud") == 120.0
+    assert pick_panel_timeout(cfg, "deep_panel") == 240.0

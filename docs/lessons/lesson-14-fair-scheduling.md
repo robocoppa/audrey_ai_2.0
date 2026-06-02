@@ -63,9 +63,6 @@ competing for local VRAM.
 
 ### 2.1 Why two layers, not one
 
-A reasonable first instinct is "one queue should be enough." Walk
-through why it isn't.
-
 A single global queue at the front door (say, an `asyncio.Semaphore`
 sized to N) protects memory but has no idea who's queued. Alice's
 twelfth research prompt blocks Bob's first question — back to the
@@ -116,7 +113,7 @@ grants can be controlled.
 
 #### The two data structures
 
-[`fair_gate.py:80-84`](../../src/audrey/pipeline/fair_gate.py#L80-L84):
+[`fair_gate.py:80-84`](../../src/audrey/pipeline/fair_gate.py#L80):
 
 ```python
 self._waiters: OrderedDict[str, deque[asyncio.Future[None]]] = OrderedDict()
@@ -139,12 +136,35 @@ true alternation — more on that below.
 
 #### Concept spotlight: `asyncio.Future` as a one-shot signal
 
-If you've used `asyncio` before, you've probably mostly used
-coroutines (`async def` functions you `await`). A `Future` is a
-lower-level primitive: an *object* that represents a result that
-will be set later. You can `await` a Future, which suspends until
-someone calls `.set_result(value)` (or `.set_exception(...)`) on
-it. The awaiter then resumes with that value.
+So far in this course every `await` has been on a coroutine — an
+`async def` function whose body the event loop runs and whose
+return value eventually flows back. Coroutines are the high-level
+shape of async work: "run this work, suspend me while it's
+pending, and hand me back what it produced."
+
+A `Future` is a **lower-level primitive**. In this context
+"primitive" means a small building block that the higher-level
+machinery is built out of — coroutines, `asyncio.gather`,
+`asyncio.sleep`, even Locks and Semaphores all sit on top of
+Futures internally. "Lower-level" means it doesn't wrap any work
+to be done; it's just a plain object with two states (pending,
+done) and a result slot. There's no body that runs, no function
+that returns. The future just exists until somebody resolves it.
+
+The shape: you create one, and somewhere a task `await`s it. The
+awaiter suspends — exactly like awaiting a coroutine — but with
+nothing executing in the background. The future stays pending
+until some *other* task, anywhere in the program, calls
+`.set_result(value)` on it (or `.set_exception(...)` to fail it
+instead). That call wakes every awaiter, and they resume with the
+value.
+
+That's why "one-shot signal" fits as the mental model: a Future
+is the right tool when one task needs to park until another task
+explicitly says "go," and the trigger is an event in the program
+rather than the return value of a function call. Once resolved,
+a Future is done — you don't reuse it for the next signal, you
+make a new one.
 
 The gate uses Futures as cross-task signals. When user A's task
 needs to wait for the slot, it does:
@@ -166,11 +186,28 @@ That resolves A's `await fut` and A's coroutine resumes. The Future
 is a *signal*, not a value — `None` is fine because what we care
 about is "go," not "go with payload." Semaphores work this way
 under the hood too; we're just doing it explicitly so we can
-control which Future gets resolved next.
+control *which* Future gets resolved next.
+
+That last word is the whole reason this code exists. An
+`asyncio.Semaphore` is a fixed-count slot with a FIFO waiter
+list: when a slot frees, the *longest-waiting* waiter wakes,
+full stop. There's no hook to say "skip waiter A this time —
+they just had a turn — wake waiter B instead." The choice of
+who wakes is baked into the primitive.
+
+By holding the Futures ourselves, in our own per-user deques,
+we're the ones deciding. The release path can look across all
+users, pick the bucket that's most owed a turn (round-robin
+across users, not across requests), and resolve *that* user's
+Future. From the waiting tasks' point of view nothing has
+changed — they're each parked on `await fut` like always —
+but the gate has quietly reordered who runs next. The Future
+is the steering wheel; the policy on top of it is what makes
+the gate fair instead of just first-come-first-served.
 
 #### The acquire path
 
-[`fair_gate.py:91-140`](../../src/audrey/pipeline/fair_gate.py#L91-L140)
+[`fair_gate.py:91-140`](../../src/audrey/pipeline/fair_gate.py#L91)
 is an `@asynccontextmanager` — the surface is `async with`. The
 flow:
 
@@ -199,24 +236,28 @@ flow:
 
 #### The release path and the `_last_granted` trick
 
-[`fair_gate.py:141-188`](../../src/audrey/pipeline/fair_gate.py#L141-L188)
+[`fair_gate.py:141-188`](../../src/audrey/pipeline/fair_gate.py#L141)
 is where the fairness actually happens. The intent is round-robin:
 when the slot frees, prefer a *different* user from the one that
 just had it. But why is this hard?
 
-Imagine the OrderedDict is `{alice: [a2, a3], bob: [b1]}` after
-Alice's first acquire releases. The naive picker — "take the head
-of the dict" — would grant to Alice again (she's at the head), and
-the round-robin never happens. You might fix this by moving Alice
-to the back of the dict after each grant. But Alice still has
-queued waiters, so on the *next* release, she's at the back of the
-dict, Bob is at the head — fine. But what if Alice fires a fourth
-request after Bob is served? It appends to Alice's existing
-deque (because her key already exists), so dict order doesn't
-move. She's still at the back, Bob is at the head, and now there's
-nobody at the back to take a turn from Alice — but Alice is *also*
-the only one left if Bob's deque drains. The naive scheme fails
-silently in the multi-arrival case.
+Picture the OrderedDict as `{alice: [a2, a3], bob: [b1]}` right
+after Alice's first request releases the slot. The obvious picker
+— "grant to whoever's at the head of the dict" — gives Alice the
+slot again. No round-robin happens.
+
+The natural fix is to move Alice's key to the back of the dict
+each time she's granted, so Bob floats to the head. That works
+for one round. But OrderedDict has a quirk that breaks it on the
+next: appending to a key that already exists *doesn't* move that
+key. So if Alice queues another request while she still has
+waiters in her deque, her position in the dict doesn't update —
+and the dict's insertion order stops reflecting "who is most
+owed a turn."
+
+The dict alone can't track that signal, because the signal isn't
+about insertion order; it's about *who just got served.* That's a
+separate fact, and it needs a separate variable.
 
 `_last_granted` cuts through the muddle. The picker rule is:
 
@@ -239,7 +280,7 @@ this form rather than as a plain semaphore.
 #### The done-future sweep
 
 Before picking, `_release` walks every deque and pops `done()`
-futures from the head ([`fair_gate.py:150-161`](../../src/audrey/pipeline/fair_gate.py#L150-L161)).
+futures from the head ([`fair_gate.py:150-161`](../../src/audrey/pipeline/fair_gate.py#L150)).
 A future is `done()` if it's been resolved, cancelled, or had an
 exception set. Where do dead futures come from?
 
@@ -358,11 +399,11 @@ The fix is to track *reservations*, not just *holders*. The
 registry now bumps a counter under its lock the moment it hands a
 semaphore out, before the caller awaits acquisition. Eviction
 treats any non-zero reservation as "in use" and skips that bucket.
-[`routes/inflight.py:58-98`](../../src/audrey/routes/inflight.py#L58-L98)
+[`routes/inflight.py:58-98`](../../src/audrey/routes/inflight.py#L58)
 shows the rule: `_reserve` increments inside the same `async with
 self._lock` block where it inspects or creates the semaphore;
 `_drop_reservation`
-([`inflight.py:100-103`](../../src/audrey/routes/inflight.py#L100-L103))
+([`inflight.py:100-103`](../../src/audrey/routes/inflight.py#L100))
 decrements on cancellation; the `slot()` context manager decrements
 at the same time it drops `_inuse`.
 
@@ -375,7 +416,7 @@ caller — and bumps the breach counter so you can graph it.
 If a waiter is cancelled while parked on `sem.acquire()`, the
 `slot()` context manager's `except BaseException` clause calls
 `_drop_reservation`
-([`inflight.py:116-121`](../../src/audrey/routes/inflight.py#L116-L121)).
+([`inflight.py:116-121`](../../src/audrey/routes/inflight.py#L116)).
 Without that, the reservation counter would leak — the bucket
 would look perpetually in-use, never eligible for eviction.
 `BaseException` is intentional: it covers both `CancelledError`
@@ -384,7 +425,7 @@ other unusual exit. Whatever happens, the reservation comes off.
 
 #### `_safe_bucket`
 
-[`inflight.py:148-153`](../../src/audrey/routes/inflight.py#L148-L153):
+[`inflight.py:148-153`](../../src/audrey/routes/inflight.py#L148):
 when the wait time exceeds one second, the registry logs a line so
 you can see who's getting throttled. The log uses `_safe_bucket`,
 which trims an email to an 8-character local-part prefix. The user
@@ -397,7 +438,7 @@ gesture worth keeping.
 ### 2.4 How they fit together at the route boundary
 
 Both objects are constructed in the lifespan handler in
-[`main.py:60-66`](../../src/audrey/main.py#L60-L66), stashed on
+[`main.py:60-66`](../../src/audrey/main.py#L60), stashed on
 `app.state.gate` and `app.state.inflight`, and pulled by the route
 per request. The in-flight cap wraps the *whole* pipeline call:
 
@@ -425,34 +466,162 @@ queued).
 
 ## 3. Comprehension questions
 
-1. **A user complains their first prompt of the day takes 8
-   seconds to start. The Grafana board shows
-   `audrey_user_inflight_blocked_seconds` near zero but
-   `audrey_gpu_gate_wait_seconds` p99 at 7 seconds. Which layer is
-   the bottleneck and what would you try first?**
+For each scenario below, sketch your answer before reading the
+discussion. Operational judgment, not trivia.
 
-2. **You bump `gpu.concurrency` from 1 to 2. What changes about
-   the fair gate's behavior, and what risks have you taken on at
-   the box level?**
+**1. A user complains their first prompt of the day takes 8
+seconds to start. The Grafana board shows
+`audrey_user_inflight_blocked_seconds` near zero but
+`audrey_gpu_gate_wait_seconds` p99 at 7 seconds. Which layer is
+the bottleneck and what would you try first?**
 
-3. **A buggy client retries aggressively and pushes 200 requests
-   in five seconds, all under the same `user_id`. Walk what
-   happens: which layer triggers first, what does the user see,
-   what does memory look like, and what would the operator see in
-   metrics?**
+The GPU gate, not the in-flight cap. `inflight_blocked_seconds`
+near zero means nobody is parked at the front door — this user's
+request walked straight through the route boundary. The 7-second
+wait is happening at
+[`fair_gate.py:91`](../../src/audrey/pipeline/fair_gate.py#L91),
+the local-only branch of `gate.acquire()`. Almost certainly the
+slot is held by someone else's deep-mode request: deep panels
+acquire the gate per worker and the synthesizer also takes a
+turn, so a single deep request can hold the slot for tens of
+seconds at a time. First thing to check is what other request
+was in flight when this user's started — Grafana's per-user
+panel or the dispatch logs will show it. Bumping
+`gpu.concurrency` is *not* the fix (see Q2); the fairness
+protocol is doing exactly what it should — your slow user is in
+line behind someone whose turn is taking a while.
 
-4. **`audrey_auto` routes a small chitchat prompt to fast mode
-   over a cloud model. Does either layer acquire anything? Why?**
+**2. You bump `gpu.concurrency` from 1 to 2. What changes about
+the fair gate's behavior, and what risks have you taken on at
+the box level?**
 
-5. **A streaming deep-mode request is cancelled mid-flight — the
-   browser tab closed. The deep panel had six sub-question
-   workers; two had already finished and returned, one was inside
-   `gate.acquire()` and held the slot, three were parked on
-   `await fut` waiting for the gate. What needs to happen for the
-   gate to end up in a clean state, and which line of
-   `fair_gate.py` does the load-bearing cleanup?**
+The gate's `_available` counter now starts at 2, so two waiters
+can be granted slots concurrently. The round-robin policy still
+applies — when a slot frees, `_last_granted` is checked to
+prefer a different bucket — but two requests can hit Ollama at
+the same time instead of strictly alternating. The risk is at
+the GPU layer below: the box was sized around one model loaded
+in VRAM at a time, and two simultaneous calls to *different*
+models will force Ollama to swap weights, eating model-load
+latency on every alternation. Two simultaneous calls to the
+*same* model fit fine on a 24 GB 3090 Ti for the 30-35B Q4
+range, but a deep panel routinely picks heterogeneous workers,
+so "same model both times" isn't a reliable assumption. If
+you're going to raise concurrency, pin to a single model first.
 
-6. **You see `audrey_inflight_cap_breached_total` ticking up a
-   few times an hour. The default `max_tracked_users` is 1024.
-   What does this tell you about your user base, and would you
-   change the cap?**
+**3. A buggy client retries aggressively and pushes 200 requests
+in five seconds, all under the same `user_id`. Walk what
+happens: which layer triggers first, what does the user see,
+what does memory look like, and what would the operator see in
+metrics?**
+
+The in-flight cap fires first, at the route boundary. The user's
+semaphore allows `max_inflight_per_user` concurrent requests
+(default 3); requests 4 through 200 each `await sem.acquire()`
+at
+[`inflight.py:117`](../../src/audrey/routes/inflight.py#L117)
+and park. The user sees their first three requests proceed
+normally; the rest hang on the connection — no error response,
+just open HTTP sockets waiting their turn. Memory stays bounded:
+the only state per parked request is the route's local stack
+frame plus the connection itself, and the registry holds one
+semaphore per user (not per request), so 200 retries from one
+user grows the registry by zero entries. In metrics,
+`audrey_user_inflight_blocked_seconds` would spike (197 of those
+requests are waiting at the door),
+`audrey_user_inflight_blocked_total{user_id=…}` increments per
+parked request, and `audrey_inflight_cap_breached_total` stays
+flat — the cap is per-user, not a tracked-users-overflow cap.
+The gate sees only the 3 that got through; everybody else is
+upstream of it.
+
+**4. `audrey_auto` routes a small chitchat prompt to fast mode
+over a cloud model. Does either layer acquire anything? Why?**
+
+The in-flight cap acquires at the route boundary, same as every
+authenticated request — that layer doesn't care about
+fast-vs-deep or local-vs-cloud, it caps how many of one user's
+requests are alive in the scheduler at all. The fair gate, on
+the other hand, *skips entirely* for cloud calls: the
+`location != "local"` branch at the top of `acquire` yields
+immediately without touching `_available`. The reasoning is that
+the gate's purpose is to serialize access to local VRAM. A cloud
+call doesn't compete for VRAM, so making it wait for the local
+slot would just slow down cloud traffic for no fairness
+benefit. Net effect for this question: one acquire (in-flight),
+zero gate touches.
+
+**5. A streaming deep-mode request is cancelled mid-flight — the
+browser tab closed. The deep panel had six sub-question
+workers; two had already finished and returned, one was inside
+`gate.acquire()` and held the slot, three were parked on
+`await fut` waiting for the gate. What needs to happen for the
+gate to end up in a clean state, and which line of
+`fair_gate.py` does the load-bearing cleanup?**
+
+Three transitions need to happen cleanly. The worker that held
+the slot is inside the `@asynccontextmanager`'s body when
+cancellation arrives; its `async with gate.acquire(...)` exit
+runs `await self._release()` at
+[`fair_gate.py:139`](../../src/audrey/pipeline/fair_gate.py#L139),
+returning the slot. That part is the easy case — `try/finally`
+semantics give it to you for free. The harder case is the three
+parked waiters: their `await fut` gets a `CancelledError`, and
+the
+[`fair_gate.py:120`](../../src/audrey/pipeline/fair_gate.py#L120)
+`except` clause is what removes their Futures from the bucket's
+deque so the next `_release` doesn't try to grant a slot to a
+ghost. There's still a narrow race — a Future can be cancelled
+between marking itself done and the except clause running — so
+the load-bearing cleanup is actually the done-future sweep at
+the top of `_release`
+([`fair_gate.py:150`](../../src/audrey/pipeline/fair_gate.py#L150)),
+which pops cancelled futures off each deque before picking a
+winner. Without that sweep, the racy cancellation would
+silently turn into a "slot granted to nobody" bug — the gate
+would resolve a cancelled Future, the wake-up would no-op, and
+the slot stays held forever.
+
+**6. You see `audrey_inflight_cap_breached_total` ticking up a
+few times an hour. The default `max_tracked_users` is 1024.
+What does this tell you about your user base, and would you
+change the cap?**
+
+This metric increments at
+[`inflight.py:85`](../../src/audrey/routes/inflight.py#L85)
+when the registry already holds 1024 user semaphores and a
+new user arrives needing one — the eviction loop evicts an
+idle entry to make room, and the metric records that the
+eviction happened. A few ticks an hour means you have more
+than 1024 *distinct* users hitting the box per
+eviction-window, but most of them are idle by the time the
+next new user shows up. That's churn, not pressure: nobody
+actually got rejected, and no user's cap was lost while they
+were active (only idle semaphores get evicted). Whether to
+raise the cap depends on what evictions cost you. The cost is
+near-zero — the only thing thrown away is a semaphore object
+with `_max_per_user` permits, which gets recreated on the
+user's next request — so the metric is informational rather
+than alarming. Bumping `max_tracked_users` to 4096 would
+silence it, but the cap's real job is bounding memory growth
+under abuse, not under organic churn, so the default is
+probably fine. Worth investigating only if the rate climbs
+into the hundreds-per-hour or if you see the same handful of
+users repeatedly evicted (i.e., a real working set larger
+than 1024).
+
+
+## When you're ready for the next lesson
+
+This lesson covered the two layers that protect Audrey when more
+than one request is in flight: the per-user inflight cap at the
+door and the round-robin gate around the GPU. Both sit *behind*
+the route — they're acquired inside `_generate_via_pipeline` and
+`_stream_via_pipeline`, not in the route handler itself. The next
+lesson opens the route, the door those layers sit behind. You'll
+see where `inflight.slot()` is acquired, where the streaming
+machinery decides what frames to emit token-by-token, and how the
+cancellation story this lesson sketched at the bottom — the gate's
+done-future sweep, the inflight slot's context-managed release —
+actually composes with the cleanup the route does on its own when
+a client disconnects mid-stream.
