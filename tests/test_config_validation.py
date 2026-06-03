@@ -95,6 +95,78 @@ def test_validator_collects_every_error_into_one_message():
     assert "deep_panel_cloud/vl" in message
 
 
+def test_validator_accepts_pool_models_present_in_registry():
+    # When a model_registry exists, every worker/synth/fallback must be in
+    # it. This config is internally consistent and must pass.
+    cfg = {
+        "model_registry": {
+            "general": [
+                {"name": "qwen3.6:35b", "location": "local"},
+                {"name": "kimi-k2.6:cloud", "location": "cloud"},
+            ],
+        },
+        "deep_panel": {
+            "general": {
+                "workers": ["qwen3.6:35b", "kimi-k2.6:cloud"],
+                "synthesizer": "qwen3.6:35b",
+                "fallback_synth": "qwen3.6:35b",
+            },
+        },
+    }
+
+    _validate_deep_panel_pools(cfg)  # must not raise
+
+
+def test_validator_rejects_dangling_fallback_synth_not_in_registry():
+    # Regression guard for the dangling-tag bug: a fallback_synth naming a
+    # model absent from the registry would silently waste a GPU-gate slot on
+    # a model that can't load before degrading. Catch it at boot instead.
+    cfg = {
+        "model_registry": {
+            "code": [{"name": "qwen3.6:35b", "location": "local"}],
+        },
+        "deep_panel_local": {
+            "code": {
+                "workers": ["qwen3.6:35b"],
+                "synthesizer": "qwen3.6:35b",
+                "fallback_synth": "ghost-model:31b",  # not in registry
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match=r"fallback_synth 'ghost-model:31b' is not in model_registry"):
+        _validate_deep_panel_pools(cfg)
+
+
+def test_validator_rejects_unknown_worker_name():
+    cfg = {
+        "model_registry": {
+            "general": [{"name": "qwen3.6:35b", "location": "local"}],
+        },
+        "deep_panel": {
+            "general": {
+                "workers": ["qwen3.6:35b", "typo-worker:latest"],
+                "synthesizer": "qwen3.6:35b",
+            },
+        },
+    }
+
+    with pytest.raises(ValueError, match=r"worker 'typo-worker:latest' is not in model_registry"):
+        _validate_deep_panel_pools(cfg)
+
+
+def test_validator_skips_name_check_when_no_registry():
+    # Stripped-down configs with no model_registry have nothing to validate
+    # names against — the name check must not invent failures.
+    cfg = {
+        "deep_panel": {
+            "general": {"workers": ["anything"], "synthesizer": "whatever"},
+        },
+    }
+
+    _validate_deep_panel_pools(cfg)  # must not raise
+
+
 def test_validator_rejects_non_dict_pool():
     cfg = {"deep_panel": "not-a-dict"}
 

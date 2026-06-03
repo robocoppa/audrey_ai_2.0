@@ -145,7 +145,7 @@ right slot of the YAML dict." The YAML dict is the merged result;
 You set `GPU_CONCURRENCY=2` in the environment Python sees at boot.
 Here's what happens:
 
-1. `lifespan()` calls [`get_config()`](../../src/audrey/config.py#L136).
+1. `lifespan()` calls [`get_config()`](../../src/audrey/config.py#L163).
 2. `get_config()` creates `EnvOverrides()`.
 3. Pydantic Settings sees `GPU_CONCURRENCY=2`, matches it to
    `gpu_concurrency`, and converts it to an integer.
@@ -234,7 +234,7 @@ long-lived objects from the new merged config.
 
 ### 2.3 `lifespan`: the startup and shutdown owner
 
-Open [`main.py:47`](../../src/audrey/main.py#L47):
+Open [`main.py:51`](../../src/audrey/main.py#L51):
 
 ```python
 @asynccontextmanager
@@ -373,8 +373,8 @@ returned, because it captured that object.
 
 Audrey's graph does the same thing with `tool_registry`. The snippet below is
 the **correct pattern Audrey uses** in
-[`rediscover_tools`](../../src/audrey/main.py#L229). It refreshes the existing
-registry object in place:
+[`rediscover_tools` (main.py:323)](../../src/audrey/main.py#L323). It refreshes
+the existing registry object in place:
 
 ```python
 fresh = await discover_all(tool_servers)

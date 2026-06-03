@@ -134,14 +134,29 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def _validate_deep_panel_pools(merged: dict[str, Any]) -> None:
-    """Reject configs where any deep-panel task is missing `synthesizer`.
+    """Reject deep-panel configs with a missing `synthesizer` or an unknown
+    model name in any worker / synthesizer / fallback_synth slot.
 
-    `pipeline/synthesize.pick_synthesizer` raises `KeyError` at request time
-    if a pool/task is missing its `synthesizer` key. Failing here instead
-    means a typo in `config.yaml` crashes the process at boot — same
-    fast-fail posture as `_load_yaml` — rather than 500ing the first deep
-    request after the deploy.
+    Two failure modes this catches at boot instead of at request time:
+
+    1. A pool/task missing its `synthesizer` key — `pipeline/synthesize.
+       pick_synthesizer` would `KeyError` on the first deep request.
+    2. A worker/synth/fallback naming a model absent from `model_registry`.
+       At request time an unknown model passes `HealthTracker.is_healthy`
+       (unknown → True), defaults to `location="local"` in
+       `ModelRegistry.location_of`, then fails the Ollama call — wasting a
+       GPU-gate slot on a model that can't load before degrading. Catching
+       it here turns a silent dud-fallback into a loud boot failure.
+
+    Same fast-fail posture as `_load_yaml`.
     """
+    registry_names: set[str] = set()
+    for specs in (merged.get("model_registry") or {}).values():
+        if isinstance(specs, list):
+            for spec in specs:
+                if isinstance(spec, dict) and spec.get("name"):
+                    registry_names.add(str(spec["name"]))
+
     errors: list[str] = []
     for pool_key in (k for k in merged if k.startswith("deep_panel")):
         pool = merged.get(pool_key) or {}
@@ -154,6 +169,23 @@ def _validate_deep_panel_pools(merged: dict[str, Any]) -> None:
                 continue
             if not body.get("synthesizer"):
                 errors.append(f"{pool_key}/{task}: missing required `synthesizer` key")
+            # Every named model must exist in the registry, or scheduling
+            # (local vs cloud) and health checks operate on a phantom. Skip
+            # this check entirely when no registry is present (stripped-down
+            # configs have nothing to validate against).
+            if not registry_names:
+                continue
+            named: list[tuple[str, str]] = []
+            for w in (body.get("workers") or []):
+                named.append(("worker", str(w)))
+            for slot in ("synthesizer", "fallback_synth"):
+                if body.get(slot):
+                    named.append((slot, str(body[slot])))
+            for slot, name in named:
+                if name not in registry_names:
+                    errors.append(
+                        f"{pool_key}/{task}: {slot} {name!r} is not in model_registry"
+                    )
     if errors:
         bullets = "\n  - " + "\n  - ".join(errors)
         raise ValueError(f"Invalid deep-panel configuration:{bullets}")

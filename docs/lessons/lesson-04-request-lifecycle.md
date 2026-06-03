@@ -45,7 +45,7 @@ every line yet — just *locate* the things we point at.
 ### 2.1 The HTTP entry point
 
 Open [`src/audrey/routes/openai.py`](../../src/audrey/routes/openai.py).
-Scroll to **line 124**:
+Scroll to **line 232**:
 
 ```python
 @router.post("/chat/completions")
@@ -56,16 +56,16 @@ async def chat_completions(
 ):
 ```
 
-This is where every request lands. Read the function (lines 124-158)
+This is where every request lands. Read the function (lines 232-305)
 top to bottom. Notice:
 
 - **`@router.post("/chat/completions")`** — a FastAPI decorator. It
   registers this function as the handler for `POST /v1/chat/completions`
-  HTTP requests. The `/v1` prefix is set on line 63
+  HTTP requests. The `/v1` prefix is set on line 84
   (`router = APIRouter(prefix="/v1")`).
 - **`payload: ChatCompletionRequest`** — FastAPI parses the incoming
   JSON body into a `ChatCompletionRequest` object (defined at line
-  84). If the JSON doesn't match, FastAPI returns 422 automatically
+  164). If the JSON doesn't match, FastAPI returns 422 automatically
   before your code runs.
 - **`me: AuthedUser = Depends(require_user)`** — FastAPI's dependency
   injection. Before `chat_completions` runs, FastAPI calls
@@ -73,7 +73,7 @@ top to bottom. Notice:
   Bearer <token>` header against Open WebUI. If it fails, the user
   gets 401 and `chat_completions` never runs. If it succeeds, `me`
   contains their email + role.
-- **The `if payload.stream:` branch (lines 152-156)** — OpenAI's API
+- **The `if payload.stream:` branch (line 289)** — OpenAI's API
   supports two modes: Streaming (server pushes tokens as they're
   generated) and non-streaming (server waits, returns full answer in
   one JSON response). Audrey supports both. Streaming is what OWUI
@@ -87,7 +87,7 @@ the result is returned to the client*.
 ### 2.2 The pipeline graph
 
 Open [`src/audrey/pipeline/graph.py`](../../src/audrey/pipeline/graph.py).
-Scroll to **line 376**:
+Scroll to **line 413**:
 
 ```python
 g: StateGraph = StateGraph(PipelineState)
@@ -105,10 +105,10 @@ g.add_node("reflect", node_reflect)
 
 This is the whole pipeline laid out as a graph. **Ten nodes.** Each
 one is a Python `async def` function defined earlier in the same file
-(grep `def node_` — you'll see them at lines 128, 138, 171, 188, 208, 235, 252, 284, 303, 369).
+(grep `def node_` — you'll see them at lines 138, 154, 197, 213, 242, 271, 289, 321, 340, 406).
 
 The graph topology — which node runs after which — is on **lines
-388-407**:
+425-442**:
 
 ```python
 g.set_entry_point("datetime")
@@ -173,7 +173,7 @@ now is just: **the pipeline is a graph, and each node is a function.**
 
 ### 2.3 What a node looks like
 
-Look at [`graph.py:139`](../../src/audrey/pipeline/graph.py#L139) —
+Look at [`graph.py:138`](../../src/audrey/pipeline/graph.py#L138) —
 the `node_datetime` function:
 
 ```python
@@ -219,19 +219,19 @@ follow along in `openai.py`.
    request.
 
 3. **FastAPI runs `require_user`** (the `Depends(...)` we saw in
-   line 124). This calls Open WebUI's `/api/v1/auths/` endpoint to
+   line 232). This calls Open WebUI's `/api/v1/auths/` endpoint to
    verify the token. On success, `me: AuthedUser` gets populated
    with the user's email + role.
 
-4. **`chat_completions` runs** (line 124). It validates the model
-   name against `VIRTUAL_MODELS` (line 67), splits messages out of
+4. **`chat_completions` runs** (line 232). It validates the model
+   name against `VIRTUAL_MODELS` (line 88), splits messages out of
    the payload, and — because `stream=true` — calls
    `_stream_via_pipeline()` wrapped in a `StreamingResponse` (a
    FastAPI primitive that holds the HTTP connection open and pushes
    bytes as the inner generator yields them — we'll see the frame
    format at the end of this section).
 
-5. **`_stream_via_pipeline()`** (line 240) does the routing:
+5. **`_stream_via_pipeline()`** (line 580) does the routing:
    `audrey_deep` / `audrey_cloud` / `audrey_local` always go through
    the deep panel; `audrey_fast` always uses the fast path;
    `audrey_auto` decides based on prompt length. For our "what is
@@ -254,7 +254,7 @@ follow along in `openai.py`.
      it knows what BTRFS is.
 
 7. **The model's tokens stream back** through `_stream_openai` (line
-   809), which converts Ollama's chunks into OpenAI-format SSE frames
+   1348), which converts Ollama's chunks into OpenAI-format SSE frames
    and yields them. FastAPI passes each frame through to OWUI as it's
    produced. The user sees the answer typing itself out.
 
@@ -262,8 +262,8 @@ follow along in `openai.py`.
    minimum length. If not, it might retry with the deep panel. For our
    case, the answer is fine.
 
-9. **`pipeline_total` metric increments** (line 181), the request
-   completes, the connection closes.
+9. **`pipeline_total` metric increments** (in `_run_graph_with_metrics`,
+   line 482), the request completes, the connection closes.
 
 That's it. Every Audrey request is some variation of those nine steps.
 
@@ -271,8 +271,8 @@ The streaming protocol Audrey speaks is **SSE (Server-Sent Events)** —
 the server keeps the HTTP connection open and pushes text-formatted
 "frames" (each starts with `data: ` and ends with a blank line) until
 done. OpenAI's chat-completion streaming is SSE; FastAPI's
-`StreamingResponse` is how Audrey produces it. Lesson 14 walks the
-exact frame format.
+`StreamingResponse` is how Audrey produces it. A later lesson — the one
+that opens the OpenAI route in detail — walks the exact frame format.
 
 ### 2.5 Where the heavy lifting lives
 
@@ -281,11 +281,11 @@ something deeply, here's where to look first.
 
 | If you're asking… | Look in… |
 |---|---|
-| "Where does a request enter Audrey?" | [`routes/openai.py:124`](../../src/audrey/routes/openai.py#L124) |
-| "How does the pipeline decide what to do?" | [`pipeline/graph.py:376`](../../src/audrey/pipeline/graph.py#L376) (the graph topology) |
+| "Where does a request enter Audrey?" | [`routes/openai.py:232`](../../src/audrey/routes/openai.py#L232) |
+| "How does the pipeline decide what to do?" | [`pipeline/graph.py:413`](../../src/audrey/pipeline/graph.py#L413) (the graph topology) |
 | "Why did it pick model X?" | [`pipeline/classify.py`](../../src/audrey/pipeline/classify.py) + [`models/registry.py`](../../src/audrey/models/registry.py) |
 | "Why did the request hang?" | [`pipeline/fair_gate.py`](../../src/audrey/pipeline/fair_gate.py) (GPU queue) + Ollama logs |
-| "How did the answer get streamed?" | [`routes/openai.py:401`](../../src/audrey/routes/openai.py#L401) (`_stream_deep_with_banners`) |
+| "How did the answer get streamed?" | [`routes/openai.py:898`](../../src/audrey/routes/openai.py#L898) (`_stream_deep_with_banners`) |
 | "Where do tools get called?" | [`pipeline/react.py`](../../src/audrey/pipeline/react.py) |
 
 Bookmark this. You'll come back.
@@ -399,7 +399,7 @@ and the underlying httpx call fails. Audrey's Ollama client wrapper
 catches the httpx error and re-raises it as the project's own typed
 `OllamaError`. That exception propagates up through the pipeline
 to the route handler, which catches it explicitly (see
-[`routes/openai.py:280-284`](../../src/audrey/routes/openai.py#L280))
+[`routes/openai.py:524`](../../src/audrey/routes/openai.py#L524))
 and converts it to **HTTP 502 Bad Gateway** with a JSON error body
 explaining the upstream failure:
 

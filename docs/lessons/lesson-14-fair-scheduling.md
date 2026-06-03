@@ -89,8 +89,8 @@ and the synthesizer runs after — each touch of the GPU is a separate
 [`pipeline/react.py`](../../src/audrey/pipeline/react.py). The
 in-flight cap, by contrast, is acquired exactly *once per request*,
 right at the route boundary in
-[`routes/openai.py:246`](../../src/audrey/routes/openai.py#L246) and
-[`routes/openai.py:341`](../../src/audrey/routes/openai.py#L341).
+[`routes/openai.py:521`](../../src/audrey/routes/openai.py#L521) and
+[`routes/openai.py:616`](../../src/audrey/routes/openai.py#L616).
 The whole pipeline executes inside that single `async with` block.
 
 ### 2.2 The fair gate
@@ -113,7 +113,7 @@ grants can be controlled.
 
 #### The two data structures
 
-[`fair_gate.py:80-84`](../../src/audrey/pipeline/fair_gate.py#L80):
+[`fair_gate.py:79-83`](../../src/audrey/pipeline/fair_gate.py#L79):
 
 ```python
 self._waiters: OrderedDict[str, deque[asyncio.Future[None]]] = OrderedDict()
@@ -280,7 +280,7 @@ this form rather than as a plain semaphore.
 #### The done-future sweep
 
 Before picking, `_release` walks every deque and pops `done()`
-futures from the head ([`fair_gate.py:150-161`](../../src/audrey/pipeline/fair_gate.py#L150)).
+futures from the head ([`fair_gate.py:156-161`](../../src/audrey/pipeline/fair_gate.py#L156)).
 A future is `done()` if it's been resolved, cancelled, or had an
 exception set. Where do dead futures come from?
 
@@ -416,7 +416,7 @@ caller — and bumps the breach counter so you can graph it.
 If a waiter is cancelled while parked on `sem.acquire()`, the
 `slot()` context manager's `except BaseException` clause calls
 `_drop_reservation`
-([`inflight.py:116-121`](../../src/audrey/routes/inflight.py#L116)).
+([`inflight.py:118-121`](../../src/audrey/routes/inflight.py#L118)).
 Without that, the reservation counter would leak — the bucket
 would look perpetually in-use, never eligible for eviction.
 `BaseException` is intentional: it covers both `CancelledError`
@@ -438,7 +438,7 @@ gesture worth keeping.
 ### 2.4 How they fit together at the route boundary
 
 Both objects are constructed in the lifespan handler in
-[`main.py:60-66`](../../src/audrey/main.py#L60), stashed on
+[`main.py:61-63`](../../src/audrey/main.py#L61), stashed on
 `app.state.gate` and `app.state.inflight`, and pulled by the route
 per request. The in-flight cap wraps the *whole* pipeline call:
 
@@ -575,7 +575,7 @@ ghost. There's still a narrow race — a Future can be cancelled
 between marking itself done and the except clause running — so
 the load-bearing cleanup is actually the done-future sweep at
 the top of `_release`
-([`fair_gate.py:150`](../../src/audrey/pipeline/fair_gate.py#L150)),
+([`fair_gate.py:156`](../../src/audrey/pipeline/fair_gate.py#L156)),
 which pops cancelled futures off each deque before picking a
 winner. Without that sweep, the racy cancellation would
 silently turn into a "slot granted to nobody" bug — the gate

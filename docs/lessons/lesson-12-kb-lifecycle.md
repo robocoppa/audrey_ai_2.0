@@ -177,7 +177,7 @@ mutate it. You can't just call queue methods from watchdog's thread.
 The standard fix: `loop.call_soon_threadsafe()`. It schedules a
 callback to run *on the asyncio loop's own thread*, from any other
 thread, safely. The watcher uses this at
-[`kb/watcher.py:91-103`](../../src/audrey/kb/watcher.py#L91):
+[`kb/watcher.py:88-104`](../../src/audrey/kb/watcher.py#L88):
 
 ```python
 def _enqueue(self, kind, raw_path, event):
@@ -432,8 +432,8 @@ async def _scroll_sources(qdrant: QdrantKB, *, collection: str) -> dict[str, int
 `qdrant.scroll_collection` is the facade method that hands us
 `[(point_id, payload), ...]` for every point in the collection.
 Reconcile aggregates by `source` and counts points per source so
-we can log "deleted 1 orphan with 47 chunks" rather than just "1
-orphan."
+we can log "deleted 1 orphan with several dozen chunks" rather than
+just "1 orphan."
 
 The "is this orphan?" check is one line —
 [`kb/reconcile.py:123`](../../src/audrey/kb/reconcile.py#L123):
@@ -593,7 +593,7 @@ Qdrant collection, and show up in the user's file list without
 scrolling Qdrant on every request.
 
 `POST /v1/files`
-([`routes/files.py:142`](../../src/audrey/routes/files.py#L142))
+([`routes/files.py:145`](../../src/audrey/routes/files.py#L145))
 runs eight steps in order — each one assumes the previous succeeded
 and unwinds in reverse on failure:
 
@@ -677,7 +677,7 @@ disk unlink are housekeeping that can take their own time.
 But what about drift that happens *outside* the request flow?
 Manual `qdrant` purges, container restarts mid-upload, a sqlite
 file restored from an old backup? That's what
-[`reconcile_with_qdrant`](../../src/audrey/kb/uploads_db.py#L171)
+[`reconcile_with_qdrant`](../../src/audrey/kb/uploads_db.py#L176)
 is for — a two-direction sweep:
 - **Backfill.** Anything in Qdrant that's missing from sqlite gets
   added. So if sqlite was restored from an old backup, any uploads
@@ -780,8 +780,9 @@ disk, Qdrant, and sqlite."**
 - **Disk.** Streamed to
   `<upload_root>/alice_email/<file_id>.pdf` in 1 MB chunks.
   Stays there as the source of truth for the original bytes.
-- **Qdrant.** PDF text is extracted (pypdf), chunked (~5 chunks
-  for 5 MB), each chunk gets embedded (~768-d via nomic-embed),
+- **Qdrant.** PDF text is extracted (pypdf), chunked (a handful of
+  chunks for a few MB of text), each chunk gets embedded (768-d via
+  nomic-embed),
   written as a point in `kb_user_text_alice_email` with payload
   including `user`, `file_id`, `filename`, `mime`, `bytes`,
   `uploaded_at`, `chunk_idx`, the chunk text itself.

@@ -99,20 +99,18 @@ the short local spur or the longer panel route.
 
 These are the files we'll reference in this lesson:
 
-- [`src/audrey/routes/openai.py:224`](../../src/audrey/routes/openai.py#L224)
+- [`src/audrey/routes/openai.py:513`](../../src/audrey/routes/openai.py#L513)
   - where the non-streaming route builds the initial graph state.
 - [`src/audrey/pipeline/state.py:27`](../../src/audrey/pipeline/state.py#L27)
   - the shared request state that graph nodes read and update.
-- [`src/audrey/pipeline/graph.py:73`](../../src/audrey/pipeline/graph.py#L73)
-  - the LangGraph builder and routing nodes.
-- [`src/audrey/pipeline/classify.py:32`](../../src/audrey/pipeline/classify.py#L32)
+- [`src/audrey/pipeline/graph.py:138`](../../src/audrey/pipeline/graph.py#L138)
+  - the LangGraph node functions and routing edges.
+- [`src/audrey/pipeline/classify.py:33`](../../src/audrey/pipeline/classify.py#L33)
   - keyword signals, router model, and fallback classification.
-- [`src/audrey/pipeline/complexity.py:24`](../../src/audrey/pipeline/complexity.py#L24)
+- [`src/audrey/pipeline/complexity.py:60`](../../src/audrey/pipeline/complexity.py#L60)
   - token counting for the fast/deep gate.
 - [`config.yaml:7`](../../config.yaml#L7) - router-model config.
-- [`config.yaml:258`](../../config.yaml#L258) - complexity threshold config.
-- [`tests/test_classify.py:61`](../../tests/test_classify.py#L61) - tests that
-  pin down one important classifier ordering rule.
+- [`config.yaml:261`](../../config.yaml#L261) - complexity threshold config.
 
 Open them as we go, but do not try to memorize all the code at once. The useful
 shape is the sequence of decisions.
@@ -121,7 +119,7 @@ shape is the sequence of decisions.
 
 The non-streaming route handler hands off to a helper that builds a
 plain dictionary named `state`. Open
-[`routes/openai.py:503`](../../src/audrey/routes/openai.py#L503),
+[`routes/openai.py:506`](../../src/audrey/routes/openai.py#L506),
 which is the start of `_generate_via_pipeline`:
 
 ```python
@@ -136,7 +134,7 @@ state = {
 ```
 
 That dictionary is built at
-[`routes/openai.py:224`](../../src/audrey/routes/openai.py#L224).
+[`routes/openai.py:513`](../../src/audrey/routes/openai.py#L513).
 This dictionary is the graph's starting memory for one request. The user asked
 for a virtual model, sent messages, maybe set generation options, and was
 authenticated as a particular user.
@@ -178,7 +176,7 @@ node reads state
 
 ### 2.2 The graph order puts context before classification
 
-Open [`graph.py:390`](../../src/audrey/pipeline/graph.py#L404). The graph adds
+Open [`graph.py:414`](../../src/audrey/pipeline/graph.py#L414). The graph adds
 nodes in one block:
 
 ```python
@@ -188,7 +186,7 @@ g.add_node("classify", node_classify)
 g.add_node("complexity", node_complexity)
 ```
 
-Then the edges at [`graph.py:402`](../../src/audrey/pipeline/graph.py#L415)
+Then the edges at [`graph.py:425`](../../src/audrey/pipeline/graph.py#L425)
 make the order explicit:
 
 ```python
@@ -206,7 +204,7 @@ small context steps:
 
 The classifier still looks for the last user message, not the system messages.
 That helper lives in
-[`pipeline/messages.py:20`](../../src/audrey/pipeline/messages.py#L20):
+[`pipeline/messages.py:17`](../../src/audrey/pipeline/messages.py#L17):
 
 ```python
 def last_user_text(messages: list[dict[str, Any]]) -> str:
@@ -247,7 +245,7 @@ The returned keys matter:
 
 The node does almost no work itself. It delegates to a shared helper,
 `classify_with_registry`, at
-[`classify.py:233`](../../src/audrey/pipeline/classify.py#L233). That
+[`classify.py:234`](../../src/audrey/pipeline/classify.py#L234). That
 helper exists because the streaming route in `routes/openai.py` needs to
 do the same thing — read the router config, extract `tool_names` from the
 live tool registry, and call `classify(...)`. When that setup was inlined
@@ -256,7 +254,7 @@ in two places it silently diverged: the streaming path forgot to pass
 helper kills the duplication and pins both paths to the same call shape.
 
 The interesting line inside the helper is at
-[`classify.py:253`](../../src/audrey/pipeline/classify.py#L253):
+[`classify.py:254`](../../src/audrey/pipeline/classify.py#L254):
 
 ```python
 tool_names = set(registry.names()) if registry is not None else set()
@@ -273,18 +271,18 @@ tool-name set.
 
 ### 2.4 The classifier has a cheap first pass
 
-Now open [`classify.py:32`](../../src/audrey/pipeline/classify.py#L32). The top
+Now open [`classify.py:33`](../../src/audrey/pipeline/classify.py#L33). The top
 of the file defines regex signals:
 
-- code signals start at [`classify.py:32`](../../src/audrey/pipeline/classify.py#L32)
-- reasoning signals start at [`classify.py:46`](../../src/audrey/pipeline/classify.py#L46)
-- vision-language signals start at [`classify.py:52`](../../src/audrey/pipeline/classify.py#L52)
+- code signals start at [`classify.py:33`](../../src/audrey/pipeline/classify.py#L33)
+- reasoning signals start at [`classify.py:48`](../../src/audrey/pipeline/classify.py#L48)
+- vision-language signals start at [`classify.py:54`](../../src/audrey/pipeline/classify.py#L54)
 
 Regex means "pattern match against text." It is much cheaper than asking a
 model. Audrey uses it for strong obvious cases.
 
 The helper `keyword_classify(...)` starts at
-[`classify.py:91`](../../src/audrey/pipeline/classify.py#L91). Its order is
+[`classify.py:93`](../../src/audrey/pipeline/classify.py#L93). Its order is
 important:
 
 ```python
@@ -304,8 +302,9 @@ if _VL_STRONG.search(text):
 Two special cases are worth slowing down for.
 
 First, tool mentions win. `_tool_mention_signal(...)` starts at
-[`classify.py:87`](../../src/audrey/pipeline/classify.py#L87). It returns
-`general` when the user explicitly names a registered tool:
+[`classify.py:75`](../../src/audrey/pipeline/classify.py#L75); when the
+user explicitly names a registered tool it returns `general`
+([`classify.py:89`](../../src/audrey/pipeline/classify.py#L89)):
 
 ```python
 return KeywordSignal("general", "strong", f"tool_mention:{name}")
@@ -319,12 +318,12 @@ use kb_image_search to find this rock image
 ```
 
 contains the word "image," but the user's real instruction is "use this tool."
-The tests at [`tests/test_classify.py:61`](../../tests/test_classify.py#L61)
-pin that down.
+Routing it as `general` keeps it on the tool-capable answer path rather
+than letting the `_VL_STRONG` regex sweep it toward a vision-only model.
 
 Second, code review is reasoning. `_REVIEW_OVERRIDE` starts at
-[`classify.py:59`](../../src/audrey/pipeline/classify.py#L59), and the check is
-at [`classify.py:101`](../../src/audrey/pipeline/classify.py#L101). If the user
+[`classify.py:61`](../../src/audrey/pipeline/classify.py#L61), and the check is
+at [`classify.py:103`](../../src/audrey/pipeline/classify.py#L103). If the user
 says:
 
 ```text
@@ -345,7 +344,10 @@ Could you help me think through whether this backup plan is sensible?
 the classifier asks a small router model.
 
 The router prompt is `_ROUTER_SYSTEM` at
-[`classify.py:122`](../../src/audrey/pipeline/classify.py#L122). It tells the
+[`classify.py:122`](../../src/audrey/pipeline/classify.py#L122) — which is
+just an alias (`_ROUTER_SYSTEM = CLASSIFIER_SYSTEM`); the actual prompt
+text lives in
+[`prompts.py:50`](../../src/audrey/pipeline/prompts.py#L50). It tells the
 model to return only JSON:
 
 ```json
@@ -353,24 +355,25 @@ model to return only JSON:
 ```
 
 `router_classify(...)` starts at
-[`classify.py:141`](../../src/audrey/pipeline/classify.py#L141). It sends only
-the first part of the user text:
+[`classify.py:127`](../../src/audrey/pipeline/classify.py#L127). It sends only
+the first part of the user text
+([`classify.py:143`](../../src/audrey/pipeline/classify.py#L143)):
 
 ```python
 {"role": "user", "content": user_text[:2000]}
 ```
 
-That cap is at [`classify.py:141`](../../src/audrey/pipeline/classify.py#L141).
+That cap is at [`classify.py:143`](../../src/audrey/pipeline/classify.py#L143).
 Routing should be cheap. The router does not need the whole long paste to
 decide "this is code" or "this is reasoning."
 
-The parser starts at [`classify.py:160`](../../src/audrey/pipeline/classify.py#L160).
+The parser starts at [`classify.py:162`](../../src/audrey/pipeline/classify.py#L162).
 It is forgiving: if the model wraps JSON in extra text, Audrey extracts the
 first `{...}` block. It also clamps confidence into the `0.0` to `1.0` range at
-[`classify.py:176`](../../src/audrey/pipeline/classify.py#L176).
+[`classify.py:178`](../../src/audrey/pipeline/classify.py#L178).
 
 The top-level `classify(...)` function starts at
-[`classify.py:184`](../../src/audrey/pipeline/classify.py#L184). Its decision
+[`classify.py:186`](../../src/audrey/pipeline/classify.py#L186). Its decision
 order is:
 
 ```text
@@ -390,13 +393,13 @@ router:
 ```
 
 That last value matters. The loop at
-[`classify.py:214`](../../src/audrey/pipeline/classify.py#L214) lets Audrey try
+[`classify.py:216`](../../src/audrey/pipeline/classify.py#L216) lets Audrey try
 the router more than once before falling back.
 
 ### 2.6 Complexity is a separate gate
 
 After classification, the graph runs
-[`graph.py:200`](../../src/audrey/pipeline/graph.py#L200).
+[`graph.py:213`](../../src/audrey/pipeline/graph.py#L213).
 
 This node asks a different question:
 
@@ -405,10 +408,10 @@ Is this prompt large enough that one fast answer is probably the wrong shape?
 ```
 
 The token counter lives in
-[`complexity.py:24`](../../src/audrey/pipeline/complexity.py#L24). It walks all
+[`complexity.py:60`](../../src/audrey/pipeline/complexity.py#L60). It walks all
 message content and counts text tokens. Multimodal messages get special care:
 for list-shaped content, Audrey counts only text parts at
-[`complexity.py:114`](../../src/audrey/pipeline/complexity.py#L114).
+[`complexity.py:106`](../../src/audrey/pipeline/complexity.py#L106).
 
 `is_complex(...)` is tiny:
 
@@ -419,8 +422,8 @@ def is_complex(messages: list[dict], *, threshold: int) -> tuple[bool, int]:
 ```
 
 That function starts at
-[`complexity.py:41`](../../src/audrey/pipeline/complexity.py#L41). The
-threshold comes from [`config.yaml:258`](../../config.yaml#L258):
+[`complexity.py:114`](../../src/audrey/pipeline/complexity.py#L114). The
+threshold comes from [`config.yaml:261`](../../config.yaml#L261):
 
 ```yaml
 complexity:
@@ -461,7 +464,7 @@ else:
     mode = "fast"
 ```
 
-That code is at [`graph.py:205`](../../src/audrey/pipeline/graph.py#L205).
+That code is at [`graph.py:218`](../../src/audrey/pipeline/graph.py#L218).
 
 So the virtual model lineup means:
 
@@ -474,7 +477,7 @@ So the virtual model lineup means:
 | `audrey_auto` | Fast for short prompts, deep for large prompts. |
 
 The graph returns `prompt_tokens`, `complex`, and `mode` at
-[`graph.py:218`](../../src/audrey/pipeline/graph.py#L218). Later nodes do not
+[`graph.py:240`](../../src/audrey/pipeline/graph.py#L240). Later nodes do not
 need to repeat the complexity calculation.
 
 ### 2.8 LangGraph chooses the next branch
@@ -486,9 +489,9 @@ def route_after_complexity(state: PipelineState) -> str:
     return "fast" if state.get("mode") == "fast" else "deep"
 ```
 
-That is at [`graph.py:419`](../../src/audrey/pipeline/graph.py#L419).
+That is at [`graph.py:360`](../../src/audrey/pipeline/graph.py#L360).
 
-The wiring at [`graph.py:419`](../../src/audrey/pipeline/graph.py#L419) tells
+The wiring at [`graph.py:429`](../../src/audrey/pipeline/graph.py#L429) tells
 LangGraph what those return strings mean:
 
 ```python
@@ -513,7 +516,7 @@ block.
 
 After `fast_path` returns, Audrey may still decide the answer was not good
 enough. The router for that is
-[`graph.py:362`](../../src/audrey/pipeline/graph.py#L362).
+[`graph.py:363`](../../src/audrey/pipeline/graph.py#L363).
 
 The first guard is simple: if escalation is disabled, stop.
 
@@ -524,14 +527,14 @@ if state.get("virtual_model") == "audrey_fast":
     return "end"
 ```
 
-That is at [`graph.py:343`](../../src/audrey/pipeline/graph.py#L343).
+That is at [`graph.py:366`](../../src/audrey/pipeline/graph.py#L366).
 `audrey_fast` means "do the fast thing." It should not secretly become deep
 because the answer was short.
 
 Two other guards stop escalation:
 
-- tool-grounded fast answers at [`graph.py:351`](../../src/audrey/pipeline/graph.py#L351)
-- memory-grounded fast answers at [`graph.py:355`](../../src/audrey/pipeline/graph.py#L355)
+- tool-grounded fast answers at [`graph.py:374`](../../src/audrey/pipeline/graph.py#L374)
+- memory-grounded fast answers at [`graph.py:378`](../../src/audrey/pipeline/graph.py#L378)
 
 Those guards exist because a short answer grounded in tools or recalled memory
 may be exactly right. Re-running it through deep workers can wash out the
@@ -545,9 +548,9 @@ too_short = len(content) < escalation_min_chars
 low_confidence = conf < escalation_conf_ceiling and conf > 0
 ```
 
-That starts at [`graph.py:364`](../../src/audrey/pipeline/graph.py#L364). If
+That starts at [`graph.py:387`](../../src/audrey/pipeline/graph.py#L387). If
 either condition trips, the graph routes to `escalate_bridge`, then into the
-deep branch at [`graph.py:414`](../../src/audrey/pipeline/graph.py#L414).
+deep branch at [`graph.py:437`](../../src/audrey/pipeline/graph.py#L437).
 
 The mental model:
 
@@ -561,18 +564,18 @@ audrey_auto fast answer
 ### 2.10 Streaming uses a separate driver
 
 Non-streaming requests run the compiled graph through
-[`_generate_via_pipeline` at routes/openai.py:217](../../src/audrey/routes/openai.py#L217).
+[`_generate_via_pipeline` at routes/openai.py:506](../../src/audrey/routes/openai.py#L506).
 
 Streaming has to interleave progress banners and token chunks, so it has a
 separate route driver beginning at
-[`_stream_via_pipeline` at routes/openai.py:291](../../src/audrey/routes/openai.py#L291).
+[`_stream_via_pipeline` at routes/openai.py:580](../../src/audrey/routes/openai.py#L580).
 
 The streaming route still performs the same major decisions:
 
-- classify at [`routes/openai.py:329`](../../src/audrey/routes/openai.py#L329)
-- count complexity at [`routes/openai.py:337`](../../src/audrey/routes/openai.py#L337)
-- force deep/fast from the virtual model at [`routes/openai.py:338`](../../src/audrey/routes/openai.py#L338)
-- choose deep banners or fast streaming at [`routes/openai.py:352`](../../src/audrey/routes/openai.py#L352)
+- classify at [`routes/openai.py:622`](../../src/audrey/routes/openai.py#L622)
+- count complexity at [`routes/openai.py:630`](../../src/audrey/routes/openai.py#L630)
+- force deep/fast from the virtual model at [`routes/openai.py:631`](../../src/audrey/routes/openai.py#L631)
+- choose deep banners or fast streaming at [`routes/openai.py:659`](../../src/audrey/routes/openai.py#L659)
 
 But it is not literally the graph. It mirrors the same ideas so it can stream
 the right user experience. We will revisit the streaming route in a later

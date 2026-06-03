@@ -474,7 +474,7 @@ that bites in production months later.
 - `@asynccontextmanager async def lifespan(app: FastAPI):` in
   [`main.py`](../../src/audrey/main.py) — FastAPI's lifecycle hook.
   Code before `yield` runs at startup; after `yield` runs at
-  shutdown. We'll meet this properly in Lesson 5 when we open
+  shutdown. We'll meet this properly in a later lesson when we open
   `main.py`.
 
 ---
@@ -691,5 +691,5 @@ to move on.
 covers the three libraries that *shape* Audrey — FastAPI for HTTP,
 Pydantic for validation, LangGraph for pipeline orchestration. Now
 that the language pieces are in place, those sit on top cleanly.
-Lesson 3 then covers the satellite libraries (httpx, Qdrant,
+The lesson after that covers the satellite libraries (httpx, Qdrant,
 Prometheus, pytest).

@@ -87,7 +87,7 @@ These are the files we'll reference in this lesson, open each one as we go:
   - single-model selection.
 - [`src/audrey/pipeline/deep_panel.py`](../../src/audrey/pipeline/deep_panel.py#L52)
   - worker-pool selection.
-- [`src/audrey/pipeline/synthesize.py`](../../src/audrey/pipeline/synthesize.py#L98)
+- [`src/audrey/pipeline/synthesize.py`](../../src/audrey/pipeline/synthesize.py#L82)
   - synthesizer primary/fallback selection.
 
 Don't get too bogged down with how much code is contained within these files. We're going to focus on specific sections that are pertinent to what we're learning. By the end of the course you may be surprised how differently you see the code compared to when you started.
@@ -457,7 +457,7 @@ task type -> ranked registry list -> first model not cooling down
 ```
 
 Then `run_fast_path(...)` decides whether to use tools at
-[`fast_path.py:69`](../../src/audrey/pipeline/fast_path.py#L69):
+[`fast_path.py:71`](../../src/audrey/pipeline/fast_path.py#L71):
 
 ```python
 use_tools = bool(
@@ -473,7 +473,7 @@ the same selected model; it just gives the model a chance to call tools before
 writing the final answer.
 
 If tools are not used, the fast path is a single Ollama chat call at
-[`fast_path.py:83`](../../src/audrey/pipeline/fast_path.py#L83):
+[`fast_path.py:85`](../../src/audrey/pipeline/fast_path.py#L85):
 
 ```python
 async with gate.acquire(spec.name, location=spec.location, user_id=user_id):
@@ -493,7 +493,7 @@ Both local and cloud models still go through `OllamaClient`. In Audrey's setup,
 concurrency hint.
 
 If the Ollama call raises `OllamaError`, the fast path records a failure at
-[`fast_path.py:90`](../../src/audrey/pipeline/fast_path.py#L90):
+[`fast_path.py:92`](../../src/audrey/pipeline/fast_path.py#L92):
 
 ```python
 except OllamaError as e:
@@ -564,7 +564,7 @@ if not health.is_healthy(name):
 ```
 
 And it caps cloud workers at
-[`deep_panel.py:113`](../../src/audrey/pipeline/deep_panel.py#L113):
+[`deep_panel.py:114`](../../src/audrey/pipeline/deep_panel.py#L114):
 
 ```python
 if loc == "cloud":
@@ -585,17 +585,18 @@ cloud cap -> avoid too many cloud workers at once
 
 If the configured pool has no healthy workers, Audrey falls back to healthy
 registry candidates for that task. The non-streaming fallback path starts at
-[`deep_panel.py:248`](../../src/audrey/pipeline/deep_panel.py#L248), and the
+[`deep_panel.py:285`](../../src/audrey/pipeline/deep_panel.py#L285), and the
 streaming version does the same kind of fallback at
-[`deep_panel.py:342`](../../src/audrey/pipeline/deep_panel.py#L342). That keeps
+[`deep_panel.py:382`](../../src/audrey/pipeline/deep_panel.py#L382). That keeps
 deep mode from becoming brittle when a pool entry is temporarily unavailable.
 
-Each worker runs through `_run_one_worker(...)` at
-[`deep_panel.py:141`](../../src/audrey/pipeline/deep_panel.py#L141). The most
-important behavior is in the docstring:
+Each worker runs through `_run_one_worker(...)` (defined at
+[`deep_panel.py:121`](../../src/audrey/pipeline/deep_panel.py#L121)). The most
+important behavior is in its docstring at
+[`deep_panel.py:141`](../../src/audrey/pipeline/deep_panel.py#L141):
 
 ```python
-"""Execute one worker. Always returns a WorkerDraft - never raises."""
+"""Execute one worker. Always returns a WorkerDraft — never raises."""
 ```
 
 A deep worker failure becomes a draft with an `error` field at
@@ -622,7 +623,7 @@ deep panel: one worker fails -> keep the error as a draft and continue
 ### 2.8 Synthesis: primary, fallback, then graceful degradation
 
 Open
-[`src/audrey/pipeline/synthesize.py:98`](../../src/audrey/pipeline/synthesize.py#L98).
+[`src/audrey/pipeline/synthesize.py:82`](../../src/audrey/pipeline/synthesize.py#L82).
 
 After the deep panel runs, Audrey may have several worker drafts. The
 synthesizer turns those drafts into one final answer.
@@ -659,7 +660,7 @@ Notice the repeated pattern:
 - On `OllamaError`, `record_failure(...)`.
 
 If both synthesizers fail, Audrey degrades to the longest worker draft at
-[`synthesize.py:250`](../../src/audrey/pipeline/synthesize.py#L250):
+[`synthesize.py:240`](../../src/audrey/pipeline/synthesize.py#L240):
 
 ```python
 best = max(drafts, key=lambda d: len(d.get("content") or ""))
@@ -708,7 +709,7 @@ All public methods are `async`:
 - [`tags()`](../../src/audrey/models/ollama.py#L56)
 - [`chat()`](../../src/audrey/models/ollama.py#L71)
 - [`chat_stream()`](../../src/audrey/models/ollama.py#L114)
-- [`embed()`](../../src/audrey/models/ollama.py#L154)
+- [`embed()`](../../src/audrey/models/ollama.py#L161)
 
 That means callers must use `await` or `async for`. Audrey is an async web app;
 while one request waits on Ollama, the event loop can keep serving other work.
@@ -743,7 +744,7 @@ There are three broad failure types:
 
 That last one is easy to miss. A "successful" HTTP status is not enough. Audrey
 expects a JSON object from Ollama. `_json_object(...)` enforces that at
-[`ollama.py:201`](../../src/audrey/models/ollama.py#L201):
+[`ollama.py:208`](../../src/audrey/models/ollama.py#L208):
 
 ```python
 def _json_object(r: httpx.Response, op: str) -> dict[str, Any]:
@@ -795,7 +796,7 @@ truncation/error message instead of silently retrying from scratch.
 #### Embeddings
 
 `embed(...)` calls `/api/embed` and expects one vector per input text, starting
-at [`ollama.py:154`](../../src/audrey/models/ollama.py#L154).
+at [`ollama.py:161`](../../src/audrey/models/ollama.py#L161).
 
 This is not used for normal chat answers. It supports the knowledge-base path:
 text needs to become embedding vectors before Audrey can store or search it in
@@ -824,9 +825,9 @@ Here is what happens after the request reaches the graph:
 1. The classifier labels the request as `general`.
 2. Complexity routing keeps it in fast mode because the prompt is short and the
    user chose `audrey_fast`; the forced-fast check lives at
-   [`graph.py:204`](../../src/audrey/pipeline/graph.py#L204).
+   [`graph.py:217`](../../src/audrey/pipeline/graph.py#L217).
 3. `node_fast_path` calls `run_fast_path(...)` at
-   [`graph.py:222`](../../src/audrey/pipeline/graph.py#L222).
+   [`graph.py:244`](../../src/audrey/pipeline/graph.py#L244).
 4. `run_fast_path(...)` calls `pick_fast_model(...)` at
    [`fast_path.py:70`](../../src/audrey/pipeline/fast_path.py#L70).
 5. `pick_fast_model(...)` asks the registry for the first healthy `general`

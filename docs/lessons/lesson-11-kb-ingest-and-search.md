@@ -267,9 +267,10 @@ Five steps. Read top to bottom:
 4. **Delete-before-upsert.** Crucial for shrinking files (someone
    trims a stale section, a script regenerates a doc with less
    output, a user re-uploads a smaller v2). If yesterday's ingest
-   produced 12 chunks and today the file shrank to 3, we want chunks
-   4-12 gone. `delete_by_source` clears every point whose payload
-   `source` matches this file before the upsert writes the current 3.
+   produced a dozen chunks and today the file shrank to a few, we
+   want the now-orphaned tail gone. `delete_by_source` clears every
+   point whose payload `source` matches this file before the upsert
+   writes the current set.
 5. **Upsert.** Build a `PointStruct` per chunk with a deterministic
    ID and write the batch.
 
@@ -679,17 +680,18 @@ These are operational scenarios. Try to answer by yourself
 first, then check against the code.
 
 **1. "I re-ingested a Markdown file after editing it down. The file
-used to be 12 chunks; now it's 3. What happens to chunks 4-12 in
-Qdrant?"**
+used to chunk into a dozen pieces; now it chunks into a few. What
+happens to the now-surplus chunks in Qdrant?"**
 
 `ingest_text_file` runs `delete_by_source(source,
 collection=qdrant.text_collection)` before the upsert
 ([`kb/ingest.py:122`](../../src/audrey/kb/ingest.py#L122)). That
 clears every point in `kb_text` whose payload `source` matches the
-file's absolute path — all 12 old chunks. The upsert then writes the
-3 current ones with deterministic IDs. Net effect: 12 points gone,
-3 points present, no stale orphans. The deterministic-ID + delete-
-before-upsert combo is what makes ingest idempotent even when chunk
+file's absolute path — all of the old chunks. The upsert then writes
+the current ones with deterministic IDs. Net effect: the old points
+are gone, the current points present, no stale orphans. The
+deterministic-ID + delete-before-upsert combo is what makes ingest
+idempotent even when chunk
 counts shift.
 
 **2. "We want to switch from `nomic-embed-text` (768-d) to a 1024-d

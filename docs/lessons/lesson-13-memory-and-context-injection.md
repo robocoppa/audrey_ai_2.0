@@ -48,7 +48,7 @@ this as the present moment." Two functions in
 [`pipeline/context.py`](../../src/audrey/pipeline/context.py), no I/O,
 no skip path; the instruction defuses models that would otherwise
 reason about the timestamp as data. The node wrapper at
-[`graph.py:139`](../../src/audrey/pipeline/graph.py#L139) prepends it
+[`graph.py:138`](../../src/audrey/pipeline/graph.py#L138) prepends it
 to `state["messages"]`. That's the whole subsystem; the rest of the
 lesson is per-user.)
 
@@ -213,7 +213,7 @@ Three things happen on the way to `me`:
 
 Once `require_user` returns, the route has a trusted `AuthedUser` and
 uses `me.email` everywhere a `user_id` is needed. Notice this guard
-at [`routes/openai.py:254-261`](../../src/audrey/routes/openai.py#L254):
+at [`routes/openai.py:257`](../../src/audrey/routes/openai.py#L257):
 
 ```python
 # Identity comes from the Authorization header via require_user, NOT from
@@ -310,7 +310,7 @@ block stays under roughly a kilobyte total.
 **The `{user_id}` substitution.** Memory writes happen via the model
 calling the `memory_store` tool. For the model to know when, the
 composer adds a hint from
-[`prompts.py:105`](../../src/audrey/pipeline/prompts.py#L105) telling
+[`prompts.py:109`](../../src/audrey/pipeline/prompts.py#L109) telling
 it to use `tags="user:{user_id}"`. At injection time the placeholder
 is replaced with the real email. If the substitution didn't happen,
 every entry would store under the literal string `user:{user_id}` and
@@ -366,7 +366,7 @@ Two details:
   synth deltas (not the banner emissions) — the docstring on
   `StreamCollector` spells out the contract, and
   `_stream_deep_with_banners` at
-  [`routes/openai.py:884`](../../src/audrey/routes/openai.py#L884)
+  [`routes/openai.py:898`](../../src/audrey/routes/openai.py#L898)
   honors it.
 - **`partial=True` on client disconnect.** `wrap()` catches
   `CancelledError` from the source generator and sets
@@ -417,7 +417,7 @@ Step 5 only fires when there are no messages and no user — a true
 edge case (anonymous request with empty history).
 
 The route resolves this once before pipeline branching at
-[`routes/openai.py:183`](../../src/audrey/routes/openai.py#L183), then
+[`routes/openai.py:284`](../../src/audrey/routes/openai.py#L284), then
 threads `conversation_id` through both the streaming and non-streaming
 paths so capture and archive write agree.
 
@@ -433,11 +433,11 @@ called **once per request, after the assistant content is known.**
 non-streaming request, the full reply is built inside the pipeline
 and returned as one chunk — the archive call fires after the graph
 finishes, just before the route hands the JSON response back to the
-client (see [`routes/openai.py:255-268`](../../src/audrey/routes/openai.py#L255)).
+client (see [`routes/openai.py:532`](../../src/audrey/routes/openai.py#L532)).
 For a streaming-deep request, the reply is *only* fully known once
 the SSE stream has been fully emitted — so the archive call lives at
 the very end of `_stream_deep_with_banners` (see
-[`routes/openai.py:884-895`](../../src/audrey/routes/openai.py#L884)),
+[`routes/openai.py:1213`](../../src/audrey/routes/openai.py#L1213)),
 using `final_content` accumulated by the narrow `StreamCollector.wrap`
 discussed in §2.3. Two call sites, two different "the content is now
 known" moments, one writer.
@@ -526,7 +526,7 @@ ingest pipeline (covered in the KB-ingest lesson).
 request, before the model sees the prompt. The chat archive does not.
 The model decides when to search it via the `chat_history_search`
 tool. The reasoning is in
-[`prompts.py:116`](../../src/audrey/pipeline/prompts.py#L116):
+[`prompts.py:117`](../../src/audrey/pipeline/prompts.py#L117):
 
 ```python
 "Use `chat_history_search` only when the user references something "
@@ -548,11 +548,11 @@ recall are wrappers; the *building blocks* (`datetime_system_message`,
 `recall_for_request`, `compose_system_messages`) are plain functions
 in `pipeline/context.py` and `pipeline/memory.py`. That's because the
 streaming-deep route bypasses the graph and calls them directly at
-[`routes/openai.py:937`](../../src/audrey/routes/openai.py#L937).
+[`routes/openai.py:1284`](../../src/audrey/routes/openai.py#L1284).
 
 | | Non-streaming | Streaming-deep |
 |---|---|---|
-| Lives in | [`graph.py:139, 149`](../../src/audrey/pipeline/graph.py#L139) | [`routes/openai.py:937`](../../src/audrey/routes/openai.py#L937) |
+| Lives in | [`graph.py:138, 154`](../../src/audrey/pipeline/graph.py#L138) | [`routes/openai.py:1284`](../../src/audrey/routes/openai.py#L1284) |
 | Datetime | `node_datetime` | direct `datetime_system_message()` call |
 | Recall | `node_memory_recall` | direct `recall_for_request()` call |
 | Composer | `compose_system_messages(...)` | `compose_system_messages(...)` |

@@ -328,15 +328,23 @@ chat completion endpoint that:
 Concrete value Pydantic adds, with examples drawn from the real
 `ChatCompletionRequest` schema:
 
-- **`temperature: float | None = Field(default=None, ge=0.0, le=2.0)`**
-  is the line preventing a malicious client from passing
-  `temperature=999` and seeing what Ollama does. Without it, you'd
-  hand-write that check in the route, *or* skip it and hope.
 - **`messages: list[ChatMessage] = Field(min_length=1)`** rejects
   empty-conversation requests at the boundary, before they reach the
   pipeline. Without it, the empty list silently flows to the
   classifier and produces a confusing "no user message found" error
   ten frames deeper.
+- **Typed optional fields like `temperature: float | None = None`**
+  validate for free from the annotation alone: a client that sends
+  `"temperature": "hot"` gets a clean 422 ("Input should be a valid
+  number") instead of that string reaching Ollama. Pydantic enforces
+  the *type* without any extra code. Note Audrey deliberately does
+  *not* bound the *range* here — you could add
+  `Field(ge=0.0, le=2.0)` to reject out-of-range values at the
+  boundary, but Audrey leaves that off because the field exists mainly
+  for OpenAI-client compatibility and Ollama clamps out-of-range
+  sampling values itself. The lesson here is the split: Pydantic gives
+  you type-validation for nothing, and range-validation is a
+  deliberate choice you opt into per field.
 - **The schema is the contract.** When OWUI's request format changes
   in some future version, the Pydantic model is the single place
   that has to be updated. Without it, the contract lives implicitly
@@ -396,6 +404,12 @@ That schema enforces:
 - `messages` is a list with at least one item, each a `ChatMessage`.
 - `stream` is a bool, defaulting to false.
 - `temperature` is either missing/null, or a float between 0 and 2.
+
+(This is an *illustrative* schema showing what a `Field(...)` range
+constraint looks like — Audrey's real `ChatCompletionRequest` keeps
+`messages = Field(min_length=1)` but leaves `temperature` unbounded,
+as §2.2 explains. The `ge`/`le` here is the example, not Audrey's
+actual rule.)
 
 A client sending `{"model": "x", "messages": []}` gets back a 422 with
 a precise error: `messages: List should have at least 1 item`.

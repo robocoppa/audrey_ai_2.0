@@ -110,13 +110,13 @@ a good moment to let another user's request slip onto the GPU.
 
 These are the files we'll reference in this lesson:
 
-- [`src/audrey/tools/discovery.py:74`](../../src/audrey/tools/discovery.py#L74)
+- [`src/audrey/tools/discovery.py:76`](../../src/audrey/tools/discovery.py#L76)
   - turns OpenAPI specs into Ollama tool schemas.
-- [`src/audrey/tools/dispatch.py:68`](../../src/audrey/tools/dispatch.py#L68)
+- [`src/audrey/tools/dispatch.py:79`](../../src/audrey/tools/dispatch.py#L79)
   - executes one tool call, returns a `ToolResult`, never raises.
 - [`src/audrey/pipeline/react.py:101`](../../src/audrey/pipeline/react.py#L101)
   - the loop: chat, dispatch, repeat.
-- [`config.yaml:138`](../../config.yaml#L138) - `agentic.react.*` knobs.
+- [`config.yaml:142`](../../config.yaml#L142) - `agentic.react.*` knobs.
 - [`tools-server/app.py`](../../tools-server/app.py) - the FastAPI service
   that exposes the actual tools.
 
@@ -191,7 +191,7 @@ down. Getting that wrong would silently drop every property in your schema.
 ### 2.3 `ToolSpec` carries enough to dispatch later
 
 A discovered tool is held in this dataclass at
-[`tools/discovery.py:38`](../../src/audrey/tools/discovery.py#L38):
+[`tools/discovery.py:39`](../../src/audrey/tools/discovery.py#L39):
 
 ```python
 @dataclass(slots=True)
@@ -368,7 +368,7 @@ The dispatcher refuses. It replaces `args["user"]` with whatever
 model's value is ignored entirely.
 
 For `memory_store` the user identity lives inside the free-form `tags`
-string as `user:<id>`. `_force_user_tag` at line 61 strips any existing
+string as `user:<id>`. `_force_user_tag` at line 72 strips any existing
 `user:` token from the tag string and appends the real one. Same
 invariant, different field.
 
@@ -384,7 +384,7 @@ of ingested documentation can easily run to 8-15 KB. A `web_search` for a
 busy topic can return paragraphs of snippets.
 
 `max_tool_result_chars` (default 2000, from
-[`config.yaml:142`](../../config.yaml#L142)) is the single-shot cap. The
+[`config.yaml:145`](../../config.yaml#L145)) is the single-shot cap. The
 dispatcher truncates to that length and appends `…[truncated]` so the
 model knows it didn't see everything. The helper lives at
 [`tools/dispatch.py:66`](../../src/audrey/tools/dispatch.py#L66):
@@ -406,7 +406,7 @@ query," not "raise the cap."
 ### 2.9 Concept spotlight — concurrent dispatch
 
 Tool dispatch within one ReAct round is parallel. From
-[`react.py:170`](../../src/audrey/pipeline/react.py#L170):
+[`react.py:171`](../../src/audrey/pipeline/react.py#L171):
 
 ```python
 results = await asyncio.gather(*[
@@ -487,7 +487,7 @@ and "the user just asked me to wrap up" is a very clear mode signal.
 
 Each `ollama.chat` call in ReAct is wrapped in `health.record_success`
 and `health.record_failure`. From
-[`react.py:138`](../../src/audrey/pipeline/react.py#L138):
+[`react.py:144`](../../src/audrey/pipeline/react.py#L144):
 
 ```python
 try:

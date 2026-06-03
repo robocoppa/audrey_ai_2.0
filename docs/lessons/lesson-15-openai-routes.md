@@ -63,9 +63,10 @@ The five non-passthrough names are listed once in `VIRTUAL_MODELS`
 at [`routes/openai.py:88`](../../src/audrey/routes/openai.py#L88).
 Passthrough uses a *prefix* (`audrey_passthrough/`) so one virtual
 model can route to any concrete model in
-`passthrough.allowed_models`; that's covered in Phase 13's notes
+`passthrough.allowed_models`; the deploy notes for the passthrough
+family
 ([`docs/campaign-2/phase-13-deploy.md`](../campaign-2/phase-13-deploy.md))
-and we'll only touch the route-side branch here.
+cover the wiring, and we'll only touch the route-side branch here.
 
 ### 1.3 Streaming vs. non-streaming as different code paths
 
@@ -211,7 +212,7 @@ OpenAI's chat-completion streaming spec is more structured: each
 frame is a JSON object describing a *delta* (a piece of the response
 being built), with a final `data: [DONE]\n\n` marker. Audrey emits
 that shape directly. You can see the helpers at
-[`routes/openai.py:927-941`](../../src/audrey/routes/openai.py#L927)
+[`routes/openai.py:934-948`](../../src/audrey/routes/openai.py#L934)
 inside `_stream_deep_with_banners`:
 
 ```python
@@ -270,21 +271,29 @@ the orchestration; the route just hands it a state dict, awaits a
 result, and shapes the result into an OpenAI response. One coroutine,
 one return.
 
-The interesting wrinkle is `is_owui_task_request(messages)` at
-[`routes/openai.py:633`](../../src/audrey/routes/openai.py#L633):
-OWUI fires "generate title" and "generate tags" utility prompts
-that bundle the whole conversation as one user message. They always
-want a short, cheap answer, regardless of which virtual model the
-user selected. The check forces fast mode for these whenever they
-show up, overriding `audrey_deep`. This is the only place in the
-file where an operational concern overrides a user-facing config —
-and that's only because OWUI's task prompts are an *invisible*
-behavior the user didn't choose.
+The interesting wrinkle is `is_owui_task_request(messages)`. For the
+non-streaming path you're reading here, that check runs *inside the
+graph* — the complexity node calls it from
+[`pipeline/complexity.py:99`](../../src/audrey/pipeline/complexity.py#L99),
+so `_generate_via_pipeline` itself never touches it (it just hands the
+graph a state dict and awaits the result). OWUI fires "generate title"
+and "generate tags" utility prompts that bundle the whole conversation
+as one user message. These fire in the *background* — OWUI issues them
+itself, after a turn, to populate the sidebar. No human picks a mode
+for them; the request just inherits whatever virtual model the
+conversation is pinned to (`audrey_deep`, say). So when the check
+forces fast mode for these, it isn't overriding a choice the user made
+— it's declining to act on a choice nobody made, refusing to burn a
+full deep-panel run on a string OWUI will truncate to one line. The
+streaming path runs the *same* check inline at
+[`routes/openai.py:633`](../../src/audrey/routes/openai.py#L633)
+(because it bypasses the graph — §2.5); this is a deliberate two-gate
+behavior, not a streaming-path one-off.
 
 ### 2.5 The streaming deep path — `_stream_deep_with_banners`
 
 Open
-[`routes/openai.py:891`](../../src/audrey/routes/openai.py#L891).
+[`routes/openai.py:898`](../../src/audrey/routes/openai.py#L898).
 This function is the single longest in the file (~330 lines) and
 the most complicated. It's a streaming deep panel: a 30-second
 response built from multiple parallel workers, with banner text
@@ -382,11 +391,11 @@ Trace the cancel through:
      `asyncio.CancelledError` into the generator that's producing
      SSE frames.
   2. **The generator's `try` block catches it** at
-     [`routes/openai.py:1172`](../../src/audrey/routes/openai.py#L1172).
+     [`routes/openai.py:1181`](../../src/audrey/routes/openai.py#L1181).
      The route records `pipeline_outcome = "cancelled"` (so the
      metric reflects "user left," not "ok") and re-raises.
   3. **The inner `try/finally` at
-     [`routes/openai.py:1164-1170`](../../src/audrey/routes/openai.py#L1164)**
+     [`routes/openai.py:1173-1179`](../../src/audrey/routes/openai.py#L1173)**
      cancels the synth producer task explicitly:
 
      ```python
@@ -432,8 +441,8 @@ is a sibling of the pipeline dispatch — same `inflight.slot()` wrap,
 same fair-gate acquisition (inside the helper), but no classifier,
 no complexity gate, no banners. It exists for one specific use case:
 LAN clients that already know what model they want and just need
-the GPU-fairness layer in front of Ollama. Phase 13 covers the
-design rationale and the per-client wiring.
+the GPU-fairness layer in front of Ollama. The passthrough deploy
+notes cover the design rationale and the per-client wiring.
 
 The route-side fork is small. It splits into streaming
 (`_passthrough_stream_sse` at
@@ -442,13 +451,12 @@ and non-streaming. The streaming variant *doesn't share*
 `_stream_deep_with_banners` because there are no banners — Ollama's
 own chunks get reshaped to OpenAI SSE format and forwarded
 verbatim. The `_ollama_to_openai_tool_calls` helper at
-[`routes/openai.py:854`](../../src/audrey/routes/openai.py#L854)
+[`routes/openai.py:861`](../../src/audrey/routes/openai.py#L861)
 handles one specific format mismatch: Ollama returns tool-call
 arguments as a dict, OpenAI clients expect a JSON string. Audrey
 serializes it before forwarding.
 
-If a passthrough lesson ever exists, it'd live in Phase 13's deploy
-doc rather than here. For purposes of this lesson, treat the
+For purposes of this lesson, treat the
 passthrough fork as "a near-clone of the pipeline path with most of
 the smarts stripped out, for callers who already made every routing
 decision themselves."
@@ -459,6 +467,11 @@ decision themselves."
 
 ```python
 def _options_from_request(req: ChatCompletionRequest) -> dict[str, Any]:
+    """Map OpenAI-shape sampling knobs onto Ollama's options dict.
+
+    Sibling: `pipeline.graph._options_from_state` does the same conceptual
+    mapping from the LangGraph state dict. ...
+    """
     opts: dict[str, Any] = {}
     if req.temperature is not None:
         opts["temperature"] = req.temperature
@@ -470,8 +483,10 @@ def _options_from_request(req: ChatCompletionRequest) -> dict[str, Any]:
 ```
 
 Small helper that maps OpenAI-shape sampling knobs onto Ollama's
-options dict. There's a near-twin in
-[`pipeline/graph.py:408`](../../src/audrey/pipeline/graph.py#L408)
+options dict. (That `Sibling:` docstring note — shipped during this
+lesson's own audit — points straight at the near-twin.) There's a
+near-twin in
+[`pipeline/graph.py:450`](../../src/audrey/pipeline/graph.py#L450)
 called `_options_from_state` that does the same conceptual mapping
 from the LangGraph state dict instead of a Pydantic object. The
 two functions look like they want to be one, but their input shapes
@@ -487,9 +502,6 @@ inputs are structurally different.
 
 
 ## 3. Comprehension questions
-
-For each scenario below, sketch your answer before reading the
-discussion. Operational judgment, not trivia.
 
 **1. A client POSTs to `/v1/chat/completions` with `messages: []`
 and a valid bearer token. What HTTP status do they get, and at
@@ -522,18 +534,18 @@ to deep mode (in `audrey_auto`) is bypassed. The user explicitly
 chose fast; the route respects that.
 
 This is the inverse of the OWUI utility-prompt case in §2.4: there,
-operational concerns *override* a user-facing model choice; here,
-a user-facing model choice *overrides* the complexity heuristic.
-Both are deliberate. The rule of thumb: invisible behaviors (OWUI
-title-gen) get forced into the cheap path; explicit user choices
-(picking `audrey_fast`) get honored even when a heuristic would
+a request *nobody* chose a mode for gets forced cheap; here, a mode
+the user *explicitly* chose overrides the complexity heuristic.
+Both are deliberate, and they share one rule of thumb: invisible
+behaviors (OWUI title-gen) get forced into the cheap path; explicit
+user choices (picking `audrey_fast`) get honored even when a heuristic would
 disagree.
 
 **3. A streaming deep request's synth model dies mid-stream. What
 does the client see? What does the archive write look like?**
 
 The `_stream_deep_with_banners` exception handler at
-[`routes/openai.py:1179-1190`](../../src/audrey/routes/openai.py#L1179)
+[`routes/openai.py:1188-1199`](../../src/audrey/routes/openai.py#L1188)
 catches the failure, sets `pipeline_outcome = "error"`, and yields
 two final frames: a delta containing `"\n\n[ollama error: ...]"`
 (or `"\n\n[internal error]"` for non-Ollama exceptions) and a stop
@@ -543,7 +555,7 @@ the HTTP response already started streaming and the status was
 committed to `200 OK` the moment the first frame went out.
 
 The archive write at
-[`routes/openai.py:1199-1213`](../../src/audrey/routes/openai.py#L1199)
+[`routes/openai.py:1200-1213`](../../src/audrey/routes/openai.py#L1200)
 runs in the `finally` block, which fires *after* the error
 handling. It captures whatever `final_content` accumulated up to
 the failure (which may be partial or empty if the failure came
@@ -568,7 +580,7 @@ anything; in pipeline modes, the field is dropped on the floor
 Reshaping happens *on the way back*. Ollama returns tool-call
 arguments as a Python dict, but the OpenAI streaming spec expects
 arguments as a JSON-encoded *string*. The reshape lives at
-[`routes/openai.py:854`](../../src/audrey/routes/openai.py#L854)
+[`routes/openai.py:861`](../../src/audrey/routes/openai.py#L861)
 (`_ollama_to_openai_tool_calls`) and serializes each call's
 arguments via `json.dumps`, plus generating a synthetic `id`
 (Ollama doesn't supply one). Agent clients like Hermes and
@@ -584,14 +596,14 @@ Five things have to land cleanly:
 
 - **The route generator** receives `asyncio.CancelledError` from
   Starlette. It catches at
-  [`routes/openai.py:1172`](../../src/audrey/routes/openai.py#L1172),
+  [`routes/openai.py:1181`](../../src/audrey/routes/openai.py#L1181),
   records `outcome="cancelled"`, and re-raises.
-- **The inner `try/finally` at routes/openai.py:1164** cancels
+- **The inner `try/finally` at routes/openai.py:1173** cancels
   `synth_task` and awaits it — making sure the synth producer
   doesn't keep streaming into a queue nobody reads.
 - **The four worker tasks** are awaited via `panel_task` (the
   `_phase_dispatch` background task at
-  [`routes/openai.py:1018`](../../src/audrey/routes/openai.py#L1018)).
+  [`routes/openai.py:1024`](../../src/audrey/routes/openai.py#L1024)).
   Cancellation propagates through `panel_task` into the deep-panel's
   worker coroutines, which were already inside `async with
   gate.acquire(...)` blocks. The gate's release fires via context-manager
@@ -620,8 +632,10 @@ have selected `audrey_deep`. What runs and why?**
 Fast mode runs, not deep. The `is_owui_task_request(messages)`
 check at
 [`routes/openai.py:633`](../../src/audrey/routes/openai.py#L633)
-detects OWUI's utility prompts by their message-shape pattern (one
-giant user message with a `### Task:` instruction header). When it
+detects OWUI's utility prompts by a single tell: the latest user
+message opens with the `### Task:` header OWUI stamps on its
+internal prompts (the conversation is bundled into the body, but
+it's the header — not the size — that the check keys on). When it
 fires, `use_deep` is forced to `False` regardless of the virtual
 model.
 
@@ -634,13 +648,16 @@ panel-of-workers GPU time on every turn. Forcing fast for OWUI's
 internal prompts keeps deep mode reserved for what the user
 actually asked.
 
-This is the only place in the file where an operational concern
-overrides the user's `model` choice. It works because OWUI's
-utility prompts are structurally distinct (the `### Task:` header
-isn't something a real user types) — pattern-matching has a low
-false-positive rate. If a real user *did* type that header, the
-override would misfire, but that's a corner case worth accepting
-for the common-case win.
+It works because OWUI's utility prompts are structurally distinct
+(the `### Task:` header isn't something a real user types) —
+pattern-matching has a low false-positive rate. The fragile part
+isn't the forcing-fast decision, which is plainly right; it's the
+detection. The prefix belongs to OWUI, not to Audrey, so an OWUI
+upgrade that renames it would silently break the match — no error,
+just title-gen quietly starting to route by token count again. If a
+real user *did* type that header, the check would misfire the other
+way, but that's a corner case worth accepting for the common-case
+win.
 
 
 ## When you're ready for the next lesson

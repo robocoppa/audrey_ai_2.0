@@ -124,7 +124,7 @@ a tighter slice instead of trying to cover everything at once.
 #### When the planner runs
 
 The graph node is at
-[`graph.py:265`](../../src/audrey/pipeline/graph.py#L265):
+[`graph.py:271`](../../src/audrey/pipeline/graph.py#L271):
 
 ```python
 async def node_planner(state: PipelineState) -> dict[str, Any]:
@@ -158,7 +158,7 @@ Notice the prompt explicitly invites `{"subtasks": []}` as a valid output.
 The planner is allowed — encouraged, even — to say "this isn't decomposable."
 
 The call itself is at
-[`planner.py:54`](../../src/audrey/pipeline/planner.py#L54):
+[`planner.py:60`](../../src/audrey/pipeline/planner.py#L60):
 
 ```python
 resp = await ollama.chat(
@@ -216,7 +216,7 @@ goes on. The planner is opt-in routing, not a hard requirement — when it
 works, it sharpens the panel; when it fails, the panel doesn't notice.
 
 When the planner *does* return subtasks, the log line at
-[`graph.py:278`](../../src/audrey/pipeline/graph.py#L278) shows the count
+[`graph.py:284`](../../src/audrey/pipeline/graph.py#L284) shows the count
 and the first 60 chars of each:
 
 ```python
@@ -484,7 +484,7 @@ fallback_synth: "glm-5.1:cloud"
 ```
 
 `pick_synthesizer` at
-[`synthesize.py:92`](../../src/audrey/pipeline/synthesize.py#L92) reads
+[`synthesize.py:82`](../../src/audrey/pipeline/synthesize.py#L82) reads
 them:
 
 ```python
@@ -543,7 +543,7 @@ the synthesizer is told to read the tag and trust what it implies.
 #### Forwarding original system context
 
 The synthesizer runs against the same system messages the workers saw. Open
-[`synthesize.py:104`](../../src/audrey/pipeline/synthesize.py#L104):
+[`synthesize.py:94`](../../src/audrey/pipeline/synthesize.py#L94):
 
 ```python
 def _build_synth_messages(
@@ -579,7 +579,7 @@ the count the synthesizer was told to expect.
 #### Three-tier failure handling
 
 The synthesizer can fail three different ways, and each gets its own
-handling — read [`synthesize.py:211`](../../src/audrey/pipeline/synthesize.py#L211):
+handling — read [`synthesize.py:201`](../../src/audrey/pipeline/synthesize.py#L201):
 
 ```python
 candidates = [primary] if primary == fallback else [primary, fallback]
@@ -602,7 +602,7 @@ for attempt, model in enumerate(candidates, start=1):
 The tiers:
 
 1. **Empty drafts list**: short-circuits before any LLM call —
-   [`synthesize.py:186-193`](../../src/audrey/pipeline/synthesize.py#L186)
+   [`synthesize.py:188-193`](../../src/audrey/pipeline/synthesize.py#L188)
    returns `synth_error="no_drafts"` with a placeholder message. Reflect
    will see this and pass it through (it's a deterministic failure, not a
    retryable one).
