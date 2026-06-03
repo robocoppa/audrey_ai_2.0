@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -52,6 +52,23 @@ class Settings(BaseSettings):
     # retention policy doesn't need a schema migration.
     chat_archive_retention_days: int = Field(default=0, alias="CHAT_ARCHIVE_RETENTION_DAYS")
     chat_archive_max_bytes: int = Field(default=0, alias="CHAT_ARCHIVE_MAX_BYTES")
+
+    @model_validator(mode="after")
+    def _check_chunk_overlap(self) -> Settings:
+        """Overlap must be strictly less than the chunk cap.
+
+        `_split_long`'s hard-split path steps by `max_chars - overlap`; an
+        overlap >= max_chars makes that step <= 0 and crashes archive writes
+        at runtime. Fail fast at boot with a clear message instead.
+        """
+        if self.chat_archive_chunk_overlap_chars >= self.chat_archive_chunk_max_chars:
+            raise ValueError(
+                "CHAT_ARCHIVE_CHUNK_OVERLAP_CHARS "
+                f"({self.chat_archive_chunk_overlap_chars}) must be less than "
+                "CHAT_ARCHIVE_CHUNK_MAX_CHARS "
+                f"({self.chat_archive_chunk_max_chars})"
+            )
+        return self
 
     @property
     def chat_archive_db_path(self) -> Path:

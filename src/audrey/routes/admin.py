@@ -5,18 +5,27 @@ users with `role == "admin"`. Non-admins get 403; missing/invalid token
 gets 401 from the underlying `require_user` chain.
 
 Endpoints:
-  POST /v1/admin/auth/clear         — evict every cached AuthedUser.
-                                      Used after revoking a token in OWUI,
-                                      or as an incident-response lever.
-  POST /v1/admin/auth/clear/{email} — evict cache entries for one user.
-                                      Used after deleting/banning a user in
-                                      OWUI; surgically clears their sessions
-                                      without disturbing other users.
-  GET  /v1/admin/auth/status        — cache size visibility.
-  POST /v1/admin/kb/reconcile       — trigger one KB reconcile sweep on
-                                      demand. Useful after a bulk delete on
-                                      disk, or to confirm the periodic loop
-                                      is functioning.
+  POST /v1/admin/auth/clear          — evict every cached AuthedUser.
+                                       Used after revoking a token in OWUI,
+                                       or as an incident-response lever.
+  POST /v1/admin/auth/clear/{email}  — evict cache entries for one user.
+                                       Used after deleting/banning a user in
+                                       OWUI; surgically clears their sessions
+                                       without disturbing other users.
+  GET  /v1/admin/auth/status         — cache size visibility.
+  POST /v1/admin/chat_archive/prune  — apply the chat archive's retention
+                                       policy on demand (SQLite rows + Qdrant
+                                       points older than the cutoff).
+  GET  /v1/admin/chat_archive/stats  — chat-archive row counts (messages,
+                                       chunks, chunks_unindexed).
+  POST /v1/admin/kb/reconcile        — trigger one KB reconcile sweep on
+                                       demand. Useful after a bulk delete on
+                                       disk, or to confirm the periodic loop
+                                       is functioning.
+
+The tool-rediscovery admin route (`POST /v1/tools/rediscover`) is
+admin-gated by the same `require_admin` dependency but lives in `main.py`,
+not here — it closes over `app.state` to mutate the live ToolRegistry.
 
 Eviction is intentionally manual — OWUI doesn't notify Audrey of user
 lifecycle events, so the admin operator (you) signals via these
@@ -28,7 +37,8 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, Request
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from audrey.auth import (
@@ -110,12 +120,11 @@ async def chat_archive_prune(
     archive_client = getattr(request.app.state, "archive_client", None)
     registry = request.app.state.tools
     if archive_client is None:
-        return {"error": "archive_client_unavailable"}
+        raise HTTPException(status_code=503, detail="archive_client_unavailable")
     host = archive_client.host_url(registry)
     if host is None:
-        return {"error": "chat_history_search_not_registered"}
-    import httpx as _httpx
-    async with _httpx.AsyncClient(timeout=30.0) as http:
+        raise HTTPException(status_code=503, detail="chat_history_search_not_registered")
+    async with httpx.AsyncClient(timeout=30.0) as http:
         r = await http.post(f"{host}/chat_history/prune")
     log.warning("admin: chat_archive prune triggered by %s; result=%s",
                 me.email, r.text[:200])
@@ -138,12 +147,11 @@ async def chat_archive_stats(
     archive_client = getattr(request.app.state, "archive_client", None)
     registry = request.app.state.tools
     if archive_client is None:
-        return {"error": "archive_client_unavailable"}
+        raise HTTPException(status_code=503, detail="archive_client_unavailable")
     host = archive_client.host_url(registry)
     if host is None:
-        return {"error": "chat_history_search_not_registered"}
-    import httpx as _httpx
-    async with _httpx.AsyncClient(timeout=10.0) as http:
+        raise HTTPException(status_code=503, detail="chat_history_search_not_registered")
+    async with httpx.AsyncClient(timeout=10.0) as http:
         r = await http.get(f"{host}/chat_history/stats")
     if r.status_code >= 400:
         return {"error": "stats_failed", "status": r.status_code}

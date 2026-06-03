@@ -5,12 +5,12 @@ progresses:
 
     > _Thinking_
     > _Thinking._
-    > _Thinking ✅_
+    > _Thinking_ ✅
     > _Dispatching panel_
-    > _Dispatching panel..  ✅ kimi-k2.6:cloud_
-    > _Dispatching panel...  ✅ kimi-k2.6:cloud  ❌ qwen3.6:35b_
+    > _Dispatching panel.._  ✅ kimi-k2.6:cloud
+    > _Dispatching panel..._  ✅ kimi-k2.6:cloud  ❌ qwen3.6:35b
     > _Synthesizing_
-    > _Synthesizing ✅_
+    > _Synthesizing_ ✅
 
 The `PhaseTicker` is the only public surface. Used as an async context
 manager from the route handler:
@@ -148,7 +148,8 @@ class PhaseTicker:
       __aenter__:  emit header                ('> _Thinking_')
       tick task:   emit '.' every TICK_INTERVAL_S
       append_tail: emit a fragment NOW (interleaves with dots)
-      __aexit__:   cancel ticker, emit ' ✅\\n' (or ' ❌\\n' on error)
+      __aexit__:   cancel ticker, emit ' ✅\\n' (or ' ❌\\n' on error) —
+                   the mark sits outside the header's italics
     """
 
     def __init__(
@@ -194,8 +195,8 @@ class PhaseTicker:
         # Closing mark. ❌ on exception so the user sees the phase failed.
         closing = " ❌\n" if exc_type is not None else " ✅\n"
         await self._emit(closing)
-        # Don't suppress the exception — let it propagate.
-        return None
+        # Falling off the end returns None (falsy), so __aexit__ does not
+        # suppress — any in-flight exception propagates to the caller.
 
     def append_tail(self, fragment: str) -> None:
         """Push a fragment to be emitted between dots.
@@ -212,12 +213,14 @@ class PhaseTicker:
             log.warning("banner: tail queue full, dropping fragment: %r", fragment)
 
     async def _tick_loop(self) -> None:
-        try:
-            while True:
-                await asyncio.sleep(self._tick_interval_s)
-                await self._emit(".")
-        except asyncio.CancelledError:
-            raise
+        # Runs as its own task. __aexit__ cancels it; the resulting
+        # CancelledError propagates and ends the loop — no handler needed.
+        while True:
+            await asyncio.sleep(self._tick_interval_s)
+            # Awaiting the emitter blocks THIS tick task only on a slow
+            # consumer, never the caller doing the model work — that's why
+            # the model side never stalls on banner emission.
+            await self._emit(".")
 
     async def _drain_tail(self) -> None:
         while True:

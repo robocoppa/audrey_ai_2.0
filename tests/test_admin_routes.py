@@ -17,6 +17,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 # ─── kb_reconcile admin endpoint ───────────────────────────────────────
 
@@ -143,3 +144,56 @@ async def test_kb_reconcile_logs_trigger_with_admin_email(monkeypatch, caplog):
     message = warnings[0].getMessage()
     assert "ops@example.com" in message
     assert "orphans_deleted=2" in message
+
+
+# ─── chat_archive admin endpoints: failure paths ──────────────────────
+#
+# These pin the audit-driven behavior change (2026-06-03): when the chat
+# archive isn't reachable, the handlers raise HTTP 503 rather than return
+# HTTP 200 with an {"error": ...} body. A monitoring script must be able
+# to read the failure from the status code, not parse the body.
+
+
+def _archive_request(archive_client, registry=None):
+    """Build the request shape the chat_archive handlers read.
+
+    They access `request.app.state.archive_client` and
+    `request.app.state.tools`.
+    """
+    return SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(archive_client=archive_client, tools=registry)
+        )
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handler_name", ["chat_archive_prune", "chat_archive_stats"])
+async def test_chat_archive_503_when_client_unavailable(handler_name):
+    # archive_client is None (custom-tools never wired) → 503, not 200.
+    from audrey.routes import admin as admin_module
+
+    handler = getattr(admin_module, handler_name)
+    request = _archive_request(archive_client=None)
+
+    with pytest.raises(HTTPException) as exc:
+        await handler(request, _fake_admin())
+    assert exc.value.status_code == 503
+    assert "archive_client_unavailable" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handler_name", ["chat_archive_prune", "chat_archive_stats"])
+async def test_chat_archive_503_when_tool_not_registered(handler_name):
+    # archive_client exists but host_url() returns None (chat_history_search
+    # not in the registry, e.g. custom-tools booted late) → 503.
+    from audrey.routes import admin as admin_module
+
+    archive_client = SimpleNamespace(host_url=lambda _registry: None)
+    handler = getattr(admin_module, handler_name)
+    request = _archive_request(archive_client=archive_client, registry=object())
+
+    with pytest.raises(HTTPException) as exc:
+        await handler(request, _fake_admin())
+    assert exc.value.status_code == 503
+    assert "not_registered" in str(exc.value.detail)

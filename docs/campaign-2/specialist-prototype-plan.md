@@ -24,6 +24,140 @@ OWUI sees this as one more virtual model. No OWUI-side
 configuration needed beyond making sure the model is enabled
 for the workspace.
 
+## Client target: a Hermes agent (added 2026-06-03)
+
+The first real consumer of this specialist is not OWUI — it's a
+**Hermes agent** that needs to consult Audrey's RAG. OWUI still
+works (it's just another virtual model), but the design below is
+driven by the Hermes use case. Full Hermes wiring facts live in
+`hermes-reference.md`; this section records the decisions specific
+to the specialist.
+
+### The constraint that shaped the design
+
+Hermes's tool calling only works reliably when pointed **direct at
+Ollama** (`:11434`). Routed **through Audrey's passthrough**, Hermes
+struggles with tool calls (the whole saga in `hermes-reference.md` —
+streaming tool_calls accumulation, `tool_choice`, message-shape
+edge cases). So the naive "point Hermes's main model at the
+specialist" approach would reintroduce that pain, because Hermes
+sends its 47-tool `hermes-cli` bundle on every main-model call
+(`agent.tool_use_enforcement: auto`) and would try to drive its own
+agent loop *through* the specialist path.
+
+### Why the specialist path sidesteps it entirely
+
+Two different code paths, and they must not be confused:
+
+- **Passthrough** (`audrey_passthrough/<model>`) — Audrey is a bare
+  proxy; Hermes drives its own tool loop and Audrey relays the
+  `tools` array and reshapes `tool_calls`. This is the path that
+  struggles. **Not used for the specialist.**
+- **Pipeline** (`audrey_<topic>`) — Audrey runs its *own* ReAct loop
+  (kb_search etc.) and returns finished prose. On this path **Hermes
+  sends no tools array** — it just asks a question and gets an
+  answer. There is no tool-call relay to get wrong, because Hermes
+  isn't calling tools through Audrey; **Audrey** is.
+
+So the specialist must be reached as a **first-class virtual model**
+(`audrey_<topic>`), never via the `audrey_passthrough/` prefix —
+passthrough deliberately skips tool discovery and would leave the
+specialist with no `kb_search` at all.
+
+### Role split (locked in)
+
+- **Audrey drives the tool loop.** The specialist is a Q&A endpoint:
+  Hermes asks `audrey_<topic>` a question, Audrey runs classify →
+  ReAct → kb_search → synthesize, returns prose. Hermes does **no**
+  tool calling on this path.
+- **Hermes keeps its own agent loop on direct Ollama** for its
+  machine-local tools (filesystem, terminal, browser) — unchanged,
+  where tool calls already work.
+
+Clean separation, same one the Hermes reference doc landed on
+independently: Hermes-side tools for client-machine-local stuff;
+Audrey-side tools (KB, memory) behind the specialist.
+
+### Model (locked in): `qwen3.6:35b`
+
+Both paths use `qwen3.6:35b`:
+
+- It is already the local pool's primary — fast-path local model
+  (`config.yaml`) and the worker + synthesizer for the local
+  deep_panel tasks. The specialist is "`audrey_auto` + a topic
+  prompt," so it inherits this model with no new pin.
+- It's the same tag Hermes runs direct-to-Ollama, so Hermes's main
+  loop is unchanged.
+- One model resident fits `GPU_CONCURRENCY=1`: the specialist call
+  and Hermes's direct calls hit the *same* loaded weights — no
+  eviction thrash. They contend only for the GPU **gate**, which the
+  specialist path arbitrates via `FairLocalGate` + the inflight
+  registry. Hermes's *direct* path bypasses those gates; if
+  contention ever bites, route Hermes's direct calls through Audrey
+  passthrough too. **Later-if-it-hurts, not a blocker.**
+
+### How Hermes reaches the specialist (decision: auxiliary provider)
+
+Hermes config uses named `custom_providers:` with model syntax
+`<provider-name>:<model>`. The specialist is a named provider:
+
+```yaml
+custom_providers:
+- name: audrey-kb
+  base_url: http://192.168.1.11:8000/v1
+  api_key: sk-<owui key for hermes's user>
+  api_mode: chat_completions
+  model: audrey_<topic>          # specialist — NOT audrey_passthrough/
+```
+
+The decision (2026-06-03) is to route **one of Hermes's
+`auxiliary.*` blocks** at this provider, keeping Hermes's **main**
+model on direct Ollama:
+
+```yaml
+model:
+  default: "ollama:qwen3.6:35b"  # main loop stays direct, tools work
+
+auxiliary:
+  triage_specifier:              # example — pick the block that fits
+    provider: audrey-kb
+    model: audrey_<topic>
+```
+
+Why this works: auxiliary tasks (`triage_specifier`,
+`kanban_decomposer`, `title_generation`, etc.) run as **separate
+chat completions** with `tools=1` or none — *not* the 47-tool main
+conversation (verified in `hermes-reference.md`). So the aux call to
+the specialist is naturally tool-less, which is exactly the clean
+pipeline path.
+
+### Open caveat on the aux-block choice (resolve before building the Hermes side)
+
+The auxiliary blocks fire on **Hermes's schedule** (their built-in
+trigger semantics — triage, decomposition, titling), **not**
+"whenever the agent wants to look something up." If the mental model
+is "the agent should be able to consult the KB on demand mid-task,"
+the aux-provider route may not fit, and the better option is
+**Audrey-KB-as-a-Hermes-tool** (a single `ask_knowledge_base` tool
+that POSTs to `audrey_<topic>` or directly to `/v1/kb/query`). That
+*is* a Hermes tool call — but Hermes tool calls work fine
+direct-to-Ollama, and it fires exactly when the model decides it
+needs the KB.
+
+**Action before wiring Hermes (not before building Audrey):** read
+the aux-block trigger logic in the local Hermes checkout
+(`~/.hermes/hermes-agent/`, the `agent/` and aux task source) to
+confirm a block's trigger matches "consult KB." If none fit, switch
+to the tool option. The **Audrey-side build is identical either
+way**, so this decision does not block starting the build.
+
+### Build order
+
+The `audrey_<topic>` virtual model (Steps 2–5 below) is needed for
+*any* client wiring and is wasted by neither outcome of the aux-vs-
+tool question. Build the Audrey side first; settle the Hermes
+integration shape against a working endpoint.
+
 ## Scope decisions (locked in)
 
 - **Domain:** deferred. The prototype is written generically

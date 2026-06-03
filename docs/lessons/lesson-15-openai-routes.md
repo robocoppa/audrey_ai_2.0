@@ -379,6 +379,84 @@ banner ticker emits dozens of fragments over a single deep call;
 each fragment needs to flow through and be consumed independently.
 A Queue is the right shape when *many* signals flow one direction.
 
+### 2.6.1 What `PhaseTicker` actually is
+
+§2.6 named the producer — `PhaseTicker` — but treated it as a box that
+"posts dots." It's worth a few lines on what's inside that box, because
+it's the piece that turns "work is happening" into the growing
+`> _Dispatching panel..._  ✅ kimi-k2.6:cloud  ❌ qwen3.6:35b` line you
+watch during a deep request. It lives in
+[`pipeline/banners.py`](../../src/audrey/pipeline/banners.py), and it is
+deliberately small: it knows nothing about synthesis, drafts, or models.
+It receives a header string and an *emitter*, and it manages one thing —
+the lifecycle of a single phase's progress line.
+
+**It's an async context manager.** You met those in Lesson 1; here's one
+doing real work. The route uses it like this (the actual call site for the
+panel phase is
+[routes/openai.py:1023](../../src/audrey/routes/openai.py#L1023)):
+
+```python
+async with PhaseTicker(BANNER_DISPATCHING, emit) as ticker:
+    drafts = await run_the_panel(..., ticker)
+```
+
+The context-manager shape *is* the design. `__aenter__` emits the header
+(`> _Dispatching panel_`) and starts a background task. `__aexit__` stops
+that task and emits the closing mark — and crucially, it emits ` ❌` if the
+block raised and ` ✅` if it didn't. So phase failure is visible to the
+user for free: any exception inside the `async with` body produces a
+red-cross banner on the way out, and then propagates (the context manager
+does not swallow it). You don't write error-banner code at each call site;
+the lifecycle handles it.
+
+**It runs two background tasks, not one,** and the reason is a small race.
+One task is the *tick loop*: every five seconds it appends a `.` to the
+header so the line looks alive during a long phase. The other is the *tail
+drainer*: it emits fragments pushed via `ticker.append_tail(...)` — the
+per-worker `✅ model` / `❌ model` marks that arrive as workers finish.
+These are kept on separate tasks so a worker-result mark and a dot can't
+interleave incorrectly with the closing checkmark. On exit, the tick task
+is cancelled *first* (so no stray dot lands after the ✅), then the tail
+queue is drained, then the closing mark is emitted — a fixed order that
+keeps the rendered line coherent.
+
+**Two queues, two backpressure policies — don't conflate them.** This is
+the easy thing to get wrong. There are two queues in play:
+
+  - The **route's** `banner_q` (the one §2.6 showed, `maxsize=128`). The
+    emitter the route hands to `PhaseTicker` does `await banner_q.put(text)`.
+    So when the ticker emits a *dot* or a *header*, and the client is slow,
+    the `await put` blocks — but it blocks the **tick task only**, never the
+    coroutine running the actual model work. That's why a slow network
+    stutters the dots without ever stalling synthesis. (The tick loop's
+    comment in `banners.py` now says exactly this.)
+  - The **ticker's internal** `_tail_q` (`maxsize=64`), used only for
+    `append_tail` fragments. This one uses `put_nowait` with **drop-on-full**:
+    if per-worker marks arrive faster than a congested client drains them,
+    the ticker drops a mark rather than block. The reasoning is a deliberate
+    tradeoff — for progress decoration, a missing checkmark under transient
+    congestion is better than stalling the panel. Compare this with the dot
+    path, which *does* block (on the tick task): dots are the heartbeat, so
+    blocking the tick task is acceptable; worker marks are nice-to-have, so
+    they're droppable.
+
+**The pure formatters.** The rest of `banners.py` is plain string
+functions, no async: `worker_ok(model)` / `worker_fail(model)` produce the
+inline `  ✅ model` tail fragments, and `tool_summary_block(...)` renders
+the per-worker "Tools used" footer that appears below the answer. These are
+shared identically by the deep panel and the fast path — the same footer
+shape regardless of which path ran. They're independent formatters by
+design (the inline-tail producers and the footer producer render into
+different contexts), not a single shared convention; don't read a common
+format contract into them that isn't there.
+
+The takeaway: banners are a thin UX layer wrapped around the real work.
+The route owns delivery (the `banner_q`, the SSE framing); `PhaseTicker`
+owns one phase's progress lifecycle; and synthesis itself — the part that
+makes the answer — happens inside the `async with` body and is covered in
+the deep-mode lesson, not here.
+
 ### 2.7 Cancellation — what actually happens when the client hangs up
 
 The deferred Lesson 4 question: *when the browser tab closes
@@ -663,11 +741,18 @@ win.
 ## When you're ready for the next lesson
 
 This lesson opened Audrey's only public chat surface end-to-end —
-schema, dispatch, streaming machinery, and cancellation cleanup.
-What it didn't open was the *banner* layer those streams use:
-the `PhaseTicker` background task, the "Thinking" / "Planning" /
-"Dispatching panel" / "Synthesizing" sequence, the dots emitter,
-and the per-worker success/fail markers. Those live in
-[`pipeline/banners.py`](../../src/audrey/pipeline/banners.py)
-and they're the UX layer on top of the SSE plumbing this lesson
-covered. The next lesson is likely to be that one.
+schema, dispatch, streaming machinery, cancellation cleanup, and
+(in §2.6.1) the `PhaseTicker` progress-banner layer that rides
+along those streams. That's the route surface fully covered.
+
+The remaining subsystem isn't a route at all — it's the *other side*
+of every tool call. Each time the model invokes `web_search`,
+`kb_search`, or `memory_store`, the request crosses to a separate
+service: the custom-tools sidecar. The next lesson opens it — how a
+tool route becomes a model-callable tool, and what lives behind each
+one.
+
+(The admin surface — `routes/admin.py` plus the `require_admin`-gated
+`/v1/tools/rediscover` in `main.py` — isn't covered by its own lesson;
+those endpoints are operator levers documented in their own
+docstrings.)

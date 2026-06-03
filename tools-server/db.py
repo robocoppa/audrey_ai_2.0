@@ -37,7 +37,7 @@ log = logging.getLogger(__name__)
 # The user tag lives inside the free-form `tags` string as `user:<id>`. We
 # pull it out at write time and duplicate it into a dedicated payload field
 # so filters can match exactly (substring filters on `tags` are fragile —
-# `user:bart` would match `user:bartholomew`).
+# `user:al` would match `user:alice`).
 _USER_TAG_PREFIX = "user:"
 
 
@@ -206,7 +206,7 @@ class MemoryStore:
             )
             if existing:
                 created_at = existing[0].payload.get("created_at", now) or now
-        except Exception as e:  # retrieve failure is non-fatal — just use now
+        except Exception as e:  # noqa: BLE001 — created_at preservation is best-effort; any retrieve failure just falls back to `now`
             log.debug("memory: retrieve for created_at failed: %s", e)
 
         await self._qdrant.upsert(

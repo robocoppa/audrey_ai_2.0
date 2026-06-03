@@ -30,12 +30,11 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 import httpx
-from fastapi import FastAPI, HTTPException, status
-from pydantic import BaseModel, Field
-
 from brave import BraveClient, BraveRateLimitError, SearchResult
 from chat_archive import ChatArchiveStore
 from db import MemoryEntry, MemoryStore
+from fastapi import FastAPI, HTTPException, status
+from pydantic import BaseModel, Field
 from settings import settings
 
 log = logging.getLogger("custom-tools")
@@ -183,12 +182,12 @@ class MemoryStoreRequest(BaseModel):
 
 
 class MemoryRecallRequest(BaseModel):
-    user: Annotated[str, Field(min_length=1, max_length=200, description="User id to scope the recall to. Required — memories are per-user; relaxing this would leak across accounts.")]
+    user: Annotated[str, Field(min_length=1, max_length=200, description="User scope. Filled in automatically by Audrey — you don't need to supply it. Memories are per-user; the scope can't be relaxed without leaking across accounts.")]
     key: Annotated[str, Field(min_length=1, max_length=200)]
 
 
 class MemorySearchRequest(BaseModel):
-    user: Annotated[str, Field(min_length=1, max_length=200, description="User id to scope the search to. Required — memories are per-user.")]
+    user: Annotated[str, Field(min_length=1, max_length=200, description="User scope. Filled in automatically by Audrey — you don't need to supply it. Memories are per-user.")]
     query: Annotated[str, Field(min_length=1, max_length=1000, description="Text to keyword-match against memory keys, values, and tags.")]
     top_k: Annotated[int, Field(ge=1, le=20)] = 5
 
@@ -201,7 +200,7 @@ class MemoryEntryResponse(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_entry(cls, e: MemoryEntry) -> "MemoryEntryResponse":
+    def from_entry(cls, e: MemoryEntry) -> MemoryEntryResponse:
         return cls(
             key=e.key, value=e.value, tags=e.tags,
             created_at=e.created_at, updated_at=e.updated_at,
@@ -335,11 +334,10 @@ async def kb_image_search(req: KBImageSearchRequest) -> KBSearchResponse:
     summary="Save a persistent memory for a specific user",
     description=(
         "Persist a key-value note to long-term memory, scoped to one user. "
-        "`tags` MUST contain `user:<id>` (e.g. `user:bart@proton.me`) — "
-        "memories without a user tag are rejected. Add further comma-"
-        "separated topic tags to improve recall (e.g. "
-        "`user:bart@proton.me,topic:hardware`). Overwrites any existing "
-        "value for the same (user, key) pair."
+        "The user scope is filled in automatically by Audrey — you don't "
+        "need to supply it. Add comma-separated topic tags to improve "
+        "recall (e.g. `topic:hardware,topic:preferences`). Overwrites any "
+        "existing value for the same (user, key) pair."
     ),
 )
 async def memory_store(req: MemoryStoreRequest) -> MemoryEntryResponse:
@@ -399,7 +397,7 @@ async def memory_search(req: MemorySearchRequest) -> MemorySearchResponse:
 # ─── Chat archive ─────────────────────────────────────────────────────
 
 class ChatHistorySearchRequest(BaseModel):
-    user: Annotated[str, Field(min_length=1, max_length=200, description="User id to scope the search to. Required — chat history is per-user.")]
+    user: Annotated[str, Field(min_length=1, max_length=200, description="User scope. Filled in automatically by Audrey — you don't need to supply it. Chat history is per-user.")]
     query: Annotated[str, Field(min_length=1, max_length=1000, description="Natural-language search over the user's previous conversations.")]
     limit: Annotated[int, Field(
         ge=1, le=20,
