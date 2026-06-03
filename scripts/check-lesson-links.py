@@ -12,21 +12,33 @@ or
     [<label>](relative/path#L42-L51)
 
 in your docs, the script opens the target file and verifies the cite.
-Two strategies, in order:
+Three strategies, in order of strength:
 
-  1. **Snippet match (preferred).** When the cite is followed shortly
+  1. **Snippet match (strongest).** When the cite is followed shortly
      by a fenced code block in the same doc, the script treats that
      block's first code line as the canonical anchor — the line the
      prose is showing the reader. If the cited line number doesn't
      match where that first line actually lives in the file, the script
      prints the correct line so you can fix the cite in place.
 
-  2. **Landmark heuristic (fallback).** When there's no nearby snippet,
-     the script falls back to checking whether the cited line "looks
-     like a landmark" — a def/class/constant/decorator/YAML key. The
-     heuristic catches most stale cites but yields false positives on
-     deliberate "into the body" cites; in fallback mode the script only
-     flags drift, it doesn't propose a fix.
+  2. **Label-symbol anchor.** When the cite has no snippet but its
+     *visible label* is a code identifier — `` [`require_user`](...#L126) ``,
+     `` [`Class.method`](...) `` — that symbol is a content anchor. The
+     script finds where the symbol is *defined* (def/class/assignment)
+     and checks the cite points there. This closes the landmark
+     heuristic's blind spot: a cite that drifted to a different line
+     which still *looks* load-bearing (another `def`) passes the shape
+     check but fails here, because the named symbol isn't at the cited
+     line. Confident DRIFT with a proposed fix.
+
+  3. **Landmark heuristic (weakest fallback).** When there's neither a
+     snippet nor a label symbol, the script falls back to checking
+     whether the cited line "looks like a landmark" — a
+     def/class/constant/decorator/YAML key. This catches gross drift
+     but yields false positives on deliberate "into the body" cites
+     (an `if`, a `raise`, a field assignment); in fallback mode it only
+     emits a soft `DRIFT?`, never a confident fix. The bare `file.py:NN`
+     cites that carry no symbol in their label land here.
 
 WHAT IT DOES NOT DO
 
@@ -138,8 +150,17 @@ LANDMARK_RE = re.compile(r"^\s*(?:" + "|".join(LANDMARK_PATTERNS) + r")")
 YAML_KEY_RE = re.compile(r"^\s*[A-Za-z0-9_-]+:\s*(#.*)?$")
 
 # Cite extractor: matches a Markdown link whose URL has a #L<num>
-# anchor, optionally a range. Captures the URL part only.
-CITE_RE = re.compile(r"\]\(([^)]*#L\d+(?:-L\d+)?)\)")
+# anchor, optionally a range. Captures the label text and the URL.
+CITE_RE = re.compile(r"\[([^\]]+)\]\(([^)]*#L\d+(?:-L\d+)?)\)")
+
+# Identifier extractor for the link label. When a cite's visible label is
+# a backticked code symbol — `require_user`, `ChatArchiveStore.archive_turn`,
+# `get_config()` — that symbol is a content anchor we can verify against the
+# cited line even when there's no fenced snippet. We take the last
+# dotted/parenthesized component (the method/function name) since that's
+# what appears at a `def`/`class` line. Labels that are file:line
+# (`app.py:117`) or plain prose yield no symbol and fall through.
+_LABEL_SYMBOL_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_.]*)(?:\(\))?`")
 
 
 # ─── Data types ──────────────────────────────────────────────────────
@@ -155,6 +176,7 @@ class Cite:
     start: int          # cited line number (start of range)
     end: int            # cited line number (end of range; == start if not a range)
     snippet: str | None  # first code line of the following fenced block, if any
+    label_symbol: str | None  # code identifier from the link label, if any
 
 
 @dataclass
@@ -222,7 +244,7 @@ def extract_cites(doc: Path) -> Iterable[Cite]:
     lines = doc.read_text().splitlines()
     for i, line in enumerate(lines):
         for match in CITE_RE.finditer(line):
-            url = match.group(1)
+            label, url = match.group(1), match.group(2)
             rel_path, anchor = url.split("#", 1)
             target = resolve_cite_path(doc, rel_path)
             start, end = parse_anchor(anchor)
@@ -230,7 +252,33 @@ def extract_cites(doc: Path) -> Iterable[Cite]:
             yield Cite(
                 doc=doc, doc_line=i + 1, url=url, target=target,
                 start=start, end=end, snippet=snippet,
+                label_symbol=_extract_label_symbol(label),
             )
+
+
+def _extract_label_symbol(label: str) -> str | None:
+    """Pull a verifiable code identifier out of a link label, or None.
+
+    `require_user`              → "require_user"
+    `ChatArchiveStore.archive_turn` → "archive_turn"  (last component)
+    `get_config()`             → "get_config"
+    `app.py:117`               → None  (file:line, not a symbol)
+    plain prose                → None
+
+    We take the trailing dotted component because that's the name that
+    appears at the `def`/`class` line the cite points to — for
+    `Class.method` the method is what's defined there.
+    """
+    m = _LABEL_SYMBOL_RE.fullmatch(label.strip())
+    if not m:
+        return None
+    ident = m.group(1)
+    # A file basename like `app.py` matches the identifier shape; reject
+    # anything that looks like a filename (has a known source suffix).
+    last = ident.split(".")[-1]
+    if last in {"py", "yaml", "yml", "sh", "md", "txt"}:
+        return None
+    return last
 
 
 def _find_following_snippet(lines: list[str], cite_line_idx: int) -> str | None:
@@ -386,11 +434,43 @@ def check_cite(cite: Cite) -> Finding:
             proposed_line=None,
         )
 
-    # Strategy 2: landmark heuristic. No snippet to anchor against,
-    # so all we can do is judge whether the cited line "looks load-
-    # bearing" — a function/class/constant/etc. False positives happen
-    # for deliberate "into the body" cites, hence "DRIFT?" (with the
-    # question mark) rather than confident "DRIFT".
+    # Strategy 2: label-symbol anchor. When the cite's visible label is a
+    # code identifier (`require_user`, `Class.method`), it's a real content
+    # anchor even without a fenced snippet. Verify the symbol is *defined*
+    # at or near the cited line. This catches the landmark heuristic's
+    # blind spot: a cite that drifted to a different-but-still-landmark
+    # line (e.g. `def some_other_fn`) — the shape check passes, but the
+    # symbol won't be there.
+    if cite.label_symbol is not None:
+        defined_at = _find_definition_line(text, cite.label_symbol, cite.start)
+        if defined_at is not None:
+            if abs(defined_at - cite.start) <= NEAR_CITE_RANGE:
+                return Finding(cite, "OK",
+                               f"label symbol {cite.label_symbol!r} defined near cited line", None)
+            return Finding(
+                cite, "DRIFT",
+                f"label symbol {cite.label_symbol!r} is defined at line "
+                f"{defined_at}, not near cited line {cite.start}",
+                proposed_line=defined_at,
+            )
+        # Symbol not defined anywhere — either removed (real drift) or the
+        # cite points into a call site rather than a definition. If the
+        # cited line itself mentions the symbol, accept; else flag soft.
+        if cite.label_symbol in cited_text:
+            return Finding(cite, "OK",
+                           f"label symbol {cite.label_symbol!r} on cited line", None)
+        return Finding(
+            cite, "DRIFT?",
+            f"label symbol {cite.label_symbol!r} not found at/near cited line "
+            f"{cite.start} (reads: {cited_text.strip()!r})",
+            None,
+        )
+
+    # Strategy 3: landmark heuristic. No snippet and no label symbol to
+    # anchor against, so all we can do is judge whether the cited line
+    # "looks load-bearing" — a function/class/constant/etc. False
+    # positives happen for deliberate "into the body" cites, hence
+    # "DRIFT?" (with the question mark) rather than confident "DRIFT".
     if _is_landmark(cited_text):
         return Finding(cite, "OK", "landmark heuristic passed", None)
     return Finding(
@@ -398,6 +478,29 @@ def check_cite(cite: Cite) -> Finding:
         f"cited line is not a landmark: {cited_text.strip()!r}",
         None,
     )
+
+
+def _find_definition_line(
+    text: list[str], symbol: str, near: int,
+) -> int | None:
+    """Locate where `symbol` is defined: `def symbol`, `class symbol`,
+    `async def symbol`, or `symbol =` / `symbol:` (constant/field).
+
+    Returns the 1-indexed line nearest to `near`, or None if the symbol
+    is defined nowhere. A definition is a much stronger signal than a
+    bare mention — we only want the line that *introduces* the symbol,
+    not every call site, so the cite resolves to the right place.
+    """
+    pat = re.compile(
+        r"^\s*(?:async\s+def\s+|def\s+|class\s+)"
+        + re.escape(symbol)
+        + r"\b"
+        + r"|^\s*" + re.escape(symbol) + r"\s*[:=]"
+    )
+    candidates = [i + 1 for i, line in enumerate(text) if pat.match(line)]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda x: abs(x - near))
 
 
 def _is_landmark(line: str) -> bool:
