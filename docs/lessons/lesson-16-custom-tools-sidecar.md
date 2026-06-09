@@ -1,4 +1,4 @@
-# Lesson 18 — The custom-tools sidecar
+# Lesson 16 — The custom-tools sidecar
 
 Throughout this course Audrey has been *calling tools* — `web_search`,
 `kb_search`, `memory_store`, `chat_history_search`. Lesson 9 showed the
@@ -152,7 +152,7 @@ into three groups with very different implementations:
 | **External** | `web_search` | Calls a third-party API (Brave) via `brave.py`. |
 | **Stateful** | `memory_*`, `chat_history_search` | Reads/writes Qdrant + SQLite via `db.py` / `chat_archive.py`. |
 
-The **proxy** kind is worth a beat because it's counterintuitive: the
+The **proxy** kind is worth pausing on because it's counterintuitive: the
 sidecar calls *back into Audrey*. Here's the whole of `kb_search`
 ([app.py:269](../../tools-server/app.py#L269)), which is representative:
 
@@ -327,7 +327,7 @@ user, but they answer different questions:
 |---|---|---|
 | Question | "what's stored under *this exact key*?" | "what memories are *about this*?" |
 | Mechanism | Qdrant **scroll** — payload filter, no vector | **vector search** + payload filter + threshold |
-| Returns | one entry (newest if dupes) | up to `top_k` ranked entries |
+| Returns | one entry (newest if duplicates) | up to `top_k` ranked entries |
 
 `recall` ([db.py:229](../../tools-server/db.py#L229)) is a pure payload
 lookup — it never embeds anything, just scrolls for points where `key` and
@@ -438,53 +438,89 @@ the model can't call them; Audrey's admin surface and archive client can.
 
 **1. You add a new route `@app.post("/summarize_url")` to the sidecar and
 redeploy, but the model never calls it. List three things that could be
-wrong.** — (a) Missing or wrong `operation_id`, so the tool has an
-unusable auto-generated name; (b) `include_in_schema=False` left on, so
-it's hidden from discovery; (c) Audrey discovered tools *before* your
-redeploy and hasn't re-read `/openapi.json` — hit the admin rediscover
-route, or the tool only appears after an Audrey restart.
+wrong.**
+
+Three independent failure points, all from §2.1–§2.2. (a) A missing or
+wrong `operation_id` — without it FastAPI auto-generates an unusable name,
+so even if the tool is discovered the model can't call it cleanly (contrast
+the explicit `operation_id="web_search"` at
+[`app.py:227`](../../tools-server/app.py#L227)). (b) `include_in_schema=False`
+left on (the flag at [`app.py:493`](../../tools-server/app.py#L493) on the
+internal routes), which hides the route from `/openapi.json`, so discovery
+never sees it. (c) Discovery already ran: Audrey reads `/openapi.json` *once
+at startup*, so a route added after that boot is invisible until you hit the
+admin rediscover route or restart Audrey — the `tools=0`-style staleness from
+§1.1.
 
 **2. `kb_search` returns a 502 to the model. Whose fault — the sidecar or
-Audrey?** — Audrey's (or the network between them). `kb_search` is a proxy
-tool: the sidecar caught a connection failure reaching back into Audrey's
-`/v1/kb/query`. The sidecar is up and working; the KB endpoint it depends
-on isn't answering.
+Audrey?**
+
+Audrey's (or the network between them), not the sidecar. `kb_search` is a
+*proxy* tool ([`app.py:269`](../../tools-server/app.py#L269)): its handler
+reaches *back into* Audrey's `/v1/kb/query` via the
+`app.state.audrey` httpx client. A 502 means that upstream call failed — the
+sidecar is up and serving, but the Audrey KB endpoint it depends on isn't
+answering. This is the proxy kind's signature from §2.3: a failure here lives
+on the *other* side of the wire than the tool's name suggests.
 
 **3. Why can the model call `chat_history_search` but not
-`chat_history/prune`?** — `chat_history_search` is a normal route, visible
-in `/openapi.json`, so discovery turns it into a tool. `chat_history/prune`
-is declared `include_in_schema=False`, so it never appears in the schema
-Audrey reads — the model has no name to call. The route still works over
-HTTP for the admin operator.
+`chat_history/prune`?**
+
+`chat_history_search` ([`app.py:427`](../../tools-server/app.py#L427)) is a
+normal route — visible in `/openapi.json`, so discovery turns it into a tool.
+`chat_history/prune` ([`app.py:493`](../../tools-server/app.py#L493)) is
+declared `include_in_schema=False`, so it never appears in the schema Audrey
+reads — the model has no name to call. The route still works over HTTP for the
+admin operator who knows the path; it's just not a *tool*. This is the §2.2
+privilege boundary: schema-visible routes are tools, `include_in_schema=False`
+routes are internal plumbing.
 
 **4. A user reports seeing another user's stored memory in a recall. Where
-do you look first?** — The `user` payload filter. `recall` and `search`
-must filter on the exact `user` keyword field, never a substring of `tags`.
-Also confirm Audrey's dispatch is still overriding the `user` argument with
-the authenticated user (`_USER_SCOPED_TOOLS`) — if the model's supplied
-`user` ever reached the store unmodified, scoping would be defeated.
+do you look first?**
+
+The `user` payload filter, in two places. First, `recall` and `search` must
+filter on the exact `user` keyword field — see the `FieldCondition(key="user", …)`
+in `recall` ([`db.py:241`](../../tools-server/db.py#L241)) and `search`
+([`db.py:279`](../../tools-server/db.py#L279)) — never a substring of `tags`.
+Second, confirm Audrey's dispatch is still overriding the model-supplied `user`
+argument with the *authenticated* user: the `_USER_SCOPED_TOOLS` membership
+check at [`dispatch.py:130`](../../src/audrey/tools/dispatch.py#L130) is what
+forces that override. If the model's own `user` value ever reached the store
+unmodified, scoping would be defeated — a model could read another account by
+guessing its id.
 
 **5. Brave starts rate-limiting you mid-conversation. What does the model
-see, and what keeps it from taking down the whole request?** — After four
-backoff retries exhaust, `brave.py` raises `BraveRateLimitError`, which the
-`web_search` handler converts to a 503. The ReAct loop sees a failed tool
-result, not a crash — it can apologize, try a different approach, or answer
-without the web. Failure isolation: one tool degraded, the request lives.
+see, and what keeps it from taking down the whole request?**
+
+After the retry budget exhausts, `brave.py` raises `BraveRateLimitError`
+([`brave.py:92`](../../tools-server/brave.py#L92)), and the `web_search`
+handler converts it to a 503
+([`app.py:241`](../../tools-server/app.py#L241)). The model doesn't see a
+crash — it sees a *failed tool result*, which the ReAct loop (Lesson 9) feeds
+back like any other: the model can apologize, try a different approach, or
+answer without the web. That's the failure-isolation payoff of the separate
+process from §1.1 — one tool degraded, the request lives.
 
 **6. You set `CHAT_ARCHIVE_CHUNK_OVERLAP_CHARS=3000` with the default
-`MAX_CHARS=2500`. What happens, and when?** — The sidecar refuses to start:
-the `Settings` validator raises at boot because overlap ≥ max_chars, naming
-both env vars. Before this validator existed, it would instead have crashed
-later, on the first archive write large enough to trigger a hard split —
-a much harder failure to diagnose. Fail-fast at boot turned a lurking
-runtime bug into an obvious config error.
+`MAX_CHARS=2500`. What happens, and when?**
 
-## When you're ready
+The sidecar refuses to start. The `Settings` validator
+([`settings.py:57`](../../tools-server/settings.py#L57)) raises at boot
+because overlap ≥ max_chars, naming both env vars in the message. Before this
+validator existed, the bad config would have crashed *later* — on the first
+archive write large enough to trigger a hard split, where the chunk step
+`max_chars - overlap` goes ≤ 0 — a much harder failure to trace back to its
+cause. This is fail-fast at boot turning a lurking runtime bug into an obvious
+config error (the §2.5 pattern).
 
-This was the last subsystem. The course now traces a request from the
+## That's it for the course
+
+That was the last subsystem — nice work seeing the course through to the
+end. The course now traces a request from the
 public route (Lesson 15), through classification and routing (Lesson 7),
-fast path and deep mode (Lessons 8–9), the model and KB layers (Lessons
-6, 11–12), per-user context (Lesson 13), and fair scheduling (Lesson 14) —
+deep mode and the tool/ReAct loop (Lessons 8–9), the model and KB layers
+(Lessons 6, 11–12), per-user context (Lesson 13), and fair scheduling
+(Lesson 14) —
 and out to the tools that live on the other side of the wire, here. You
 have seen every load-bearing file in Audrey and the sidecar that serves it.
 

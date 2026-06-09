@@ -8,8 +8,10 @@ CLAUDE.md
 
 # Lesson-side working docs that should not ship to GitHub.
 # AUDIT.md collects code-review findings raised during lesson writing —
-# it's an internal queue, not teaching material.
+# it's an internal queue, not teaching material. One per course.
 docs/lessons/AUDIT.md
+docs/python-course/AUDIT.md
+docs/python-course/_LESSON-*-HANDOFF.md
 
 # OpenClaw builder's guide — laptop-local; references Unraid LAN IP
 # and personal channel tokens. Reference doc for building agents.

@@ -11,6 +11,7 @@ cl100k_base is accurate enough (within ~15%) and cheap.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from functools import lru_cache
 
 import tiktoken
@@ -39,22 +40,33 @@ def _encoder() -> tiktoken.Encoding:
     return tiktoken.get_encoding("cl100k_base")
 
 
-def _count_message_tokens(m: dict, enc: tiktoken.Encoding) -> int:
-    c = m.get("content")
-    role = m.get("role")
-    if isinstance(c, str):
-        text = _strip_audrey_markup(c) if role == "assistant" else c
-        return len(enc.encode(text))
-    # Multimodal content (list of parts) — only text parts contribute;
-    # image bytes don't have meaningful token counts at this layer.
-    if isinstance(c, list):
-        n = 0
-        for part in c:
+def _iter_text_parts(content: object) -> Iterable[str]:
+    """Yield the text of a message's `content`, in order.
+
+    Messages carry `content` as either a plain string or a multimodal list of
+    parts (`{"type": "text", "text": ...}`, image parts, …). This yields the
+    string for a `str` content, or each part's `text` for a list — and nothing
+    at all for an image part or any unexpected shape (the token gate treats an
+    unreadable message as contributing nothing). Both the token counter and the
+    OWUI-task sniffer walk content the same way; this is the one place that
+    knows its shape.
+    """
+    if isinstance(content, str):
+        yield content
+    elif isinstance(content, list):
+        for part in content:
             if isinstance(part, dict) and isinstance(part.get("text"), str):
-                text = _strip_audrey_markup(part["text"]) if role == "assistant" else part["text"]
-                n += len(enc.encode(text))
-        return n
-    return 0
+                yield part["text"]
+
+
+def _count_message_tokens(m: dict, enc: tiktoken.Encoding) -> int:
+    role = m.get("role")
+    n = 0
+    for text in _iter_text_parts(m.get("content")):
+        if role == "assistant":
+            text = _strip_audrey_markup(text)
+        n += len(enc.encode(text))
+    return n
 
 
 def count_tokens(messages: list[dict]) -> int:
@@ -100,14 +112,10 @@ def is_owui_task_request(messages: list[dict]) -> bool:
     """True when the latest user message is an OWUI-generated utility prompt."""
     for m in reversed(messages):
         if m.get("role") == "user":
-            content = m.get("content")
-            if isinstance(content, str):
-                return content.lstrip().startswith(_OWUI_TASK_PREFIX)
-            if isinstance(content, list):
-                for part in content:
-                    if isinstance(part, dict) and isinstance(part.get("text"), str):
-                        return part["text"].lstrip().startswith(_OWUI_TASK_PREFIX)
-            return False
+            first_text = next(_iter_text_parts(m.get("content")), None)
+            if first_text is None:
+                return False
+            return first_text.lstrip().startswith(_OWUI_TASK_PREFIX)
     return False
 
 
