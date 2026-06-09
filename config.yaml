@@ -49,11 +49,16 @@ model_registry:
     - { name: "glm-5.1:cloud",            priority:  60, speed: 90, quality: 85, location: cloud }
 
   vl:
-    - { name: "nemotron3:33b",            priority: 105, speed: 70, quality: 92, location: local }
+    # Vision-language pool — image turns on the chat path route here.
+    # Local-only on purpose: only genuinely image-capable models belong in
+    # this pool, and both locals below are vision models that are pulled on
+    # the box. The previous pool led with nemotron3:33b (a text/reasoning
+    # model) and listed unverified cloud entries — an image routed there
+    # would be answered blind. qwen3-vl is the primary; llava the fallback.
+    # nemotron3:33b keeps its reasoning + deep-panel-worker roles elsewhere.
+    # (To add a cloud vl model later, confirm it actually accepts images.)
     - { name: "qwen3-vl:32b",             priority: 100, speed: 70, quality: 90, location: local }
-    - { name: "minimax-m3:cloud",         priority:  95, speed: 85, quality: 93, location: cloud }
-    - { name: "llava:34b",                priority:  85, speed: 65, quality: 85, location: local }
-    - { name: "kimi-k2.6:cloud",          priority:  75, speed: 90, quality: 88, location: cloud }
+    - { name: "llava:34b",                priority:  90, speed: 65, quality: 85, location: local }
 
 # ─── Fast path ─────────────────────────────────────────────────────────
 fast_path:

@@ -73,7 +73,7 @@ from audrey.pipeline.memory import (
     memory_system_message,
     recall_for_request,
 )
-from audrey.pipeline.messages import last_user_text
+from audrey.pipeline.messages import has_image_part, last_user_text
 from audrey.pipeline.passthrough import passthrough_chat, passthrough_stream
 from audrey.pipeline.planner import plan as planner_plan
 from audrey.pipeline.prompts import compose_system_messages
@@ -157,7 +157,14 @@ def _resolve_passthrough_model(
 
 class ChatMessage(BaseModel):
     role: Literal["system", "user", "assistant", "tool"]
-    content: str
+    # A plain string for ordinary text turns, OR the OpenAI multimodal
+    # list-of-parts shape for image turns:
+    #   [{"type": "text", "text": "..."},
+    #    {"type": "image_url", "image_url": {"url": "data:..."}}]
+    # OWUI sends the list form when a user attaches an image. The pipeline
+    # flattens it to text where it only needs words (complexity gate,
+    # classify) and forwards it verbatim to a vision model on the vl pool.
+    content: str | list[dict[str, Any]]
     name: str | None = None
 
 
@@ -631,7 +638,18 @@ async def _stream_via_pipeline(
             forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local")
             forced_fast = payload.model == "audrey_fast"
             owui_task = is_owui_task_request(messages)
-            if owui_task:
+            image_turn = has_image_part(messages)
+            if image_turn:
+                # An attached image must reach a vision model. Override the
+                # text classifier (neutral wording like "describe this" won't
+                # trip the vl keywords) and force the fast path: the vl pool
+                # answers directly, and the deep path rebuilds prompts
+                # text-only so it would drop the image. Highest priority —
+                # an image turn is a vision turn regardless of token count
+                # or virtual model.
+                task = "vl"
+                use_deep = False
+            elif owui_task:
                 # OWUI utility tasks (title gen, tags, follow-up suggestions)
                 # bundle the whole conversation as one user message. They
                 # always want a short, cheap answer — force fast regardless
@@ -645,10 +663,11 @@ async def _stream_via_pipeline(
                 use_deep = complex_  # audrey_auto
 
             log.info(
-                "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=%s%s",
+                "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=%s%s%s",
                 payload.model, task, reason, conf, n,
                 "deep" if use_deep else "fast",
                 " owui_task=1" if owui_task else "",
+                " image=1" if image_turn else "",
             )
             if complexity_cfg.get("log_breakdown", False):
                 by_role = count_tokens_by_role(messages)

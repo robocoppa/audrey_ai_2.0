@@ -34,4 +34,28 @@ def last_user_text(messages: list[dict[str, Any]]) -> str:
     return ""
 
 
-__all__ = ["last_user_text"]
+def has_image_part(messages: list[dict[str, Any]]) -> bool:
+    """True if the most recent `role: "user"` turn carries an image.
+
+    OWUI (and any OpenAI-compatible client) sends an attached image as a
+    multimodal `content` list with an `{"type": "image_url", ...}` part
+    alongside the text part. Detecting this lets the gate force such turns
+    onto the vision (`vl`) pool — neutral wording like "describe this"
+    wouldn't trip the text-keyword classifier on its own.
+
+    Only the latest user turn matters: that's the turn being answered. A
+    plain-string content (the ordinary text case) is never an image turn.
+    """
+    for m in reversed(messages):
+        if m.get("role") != "user":
+            continue
+        content = m.get("content")
+        if isinstance(content, list):
+            return any(
+                isinstance(p, dict) and p.get("type") == "image_url" for p in content
+            )
+        return False
+    return False
+
+
+__all__ = ["last_user_text", "has_image_part"]

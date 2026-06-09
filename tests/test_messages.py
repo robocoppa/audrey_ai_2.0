@@ -1,8 +1,8 @@
-"""Hermetic tests for `pipeline/messages.py` — the `last_user_text` helper."""
+"""Hermetic tests for `pipeline/messages.py` — `last_user_text` + `has_image_part`."""
 
 from __future__ import annotations
 
-from audrey.pipeline.messages import last_user_text
+from audrey.pipeline.messages import has_image_part, last_user_text
 
 
 def test_last_user_text_returns_string_content():
@@ -58,3 +58,41 @@ def test_last_user_text_skips_non_dict_parts_in_list_content():
     ]
     # Non-dict parts contribute nothing; the dict part lands.
     assert last_user_text(msgs) == "real"
+
+
+def test_has_image_part_true_for_image_turn():
+    msgs = [
+        {"role": "user", "content": [
+            {"type": "text", "text": "describe this"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+        ]},
+    ]
+    assert has_image_part(msgs) is True
+
+
+def test_has_image_part_false_for_plain_text():
+    assert has_image_part([{"role": "user", "content": "just words"}]) is False
+
+
+def test_has_image_part_false_for_text_only_list():
+    # A list content with only text parts is not an image turn.
+    msgs = [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]
+    assert has_image_part(msgs) is False
+
+
+def test_has_image_part_only_inspects_latest_user_turn():
+    # An image in an earlier turn doesn't make the current text turn a vision turn.
+    msgs = [
+        {"role": "user", "content": [
+            {"type": "text", "text": "old"},
+            {"type": "image_url", "image_url": {"url": "..."}},
+        ]},
+        {"role": "assistant", "content": "ack"},
+        {"role": "user", "content": "follow-up, no image"},
+    ]
+    assert has_image_part(msgs) is False
+
+
+def test_has_image_part_false_when_no_user_turn():
+    assert has_image_part([{"role": "system", "content": "alone"}]) is False
+    assert has_image_part([]) is False

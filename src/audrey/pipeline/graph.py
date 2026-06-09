@@ -65,7 +65,7 @@ from audrey.pipeline.memory import (
     memory_system_message,
     recall_for_request,
 )
-from audrey.pipeline.messages import last_user_text
+from audrey.pipeline.messages import has_image_part, last_user_text
 from audrey.pipeline.planner import plan as planner_plan
 from audrey.pipeline.prompts import compose_system_messages
 from audrey.pipeline.reflect import reflect as reflect_fn
@@ -216,7 +216,19 @@ def build_graph(
         forced_deep = vm in ("audrey_deep", "audrey_cloud", "audrey_local")
         forced_fast = vm == "audrey_fast"
         owui_task = is_owui_task_request(state["messages"])
-        if owui_task:
+        image_turn = has_image_part(state["messages"])
+        task_override: str | None = None
+        if image_turn:
+            # An attached image must reach a vision model: force the fast path
+            # (the deep path rebuilds prompts text-only and would drop the
+            # image) and override the task to `vl` so the fast path picks from
+            # the vision pool. Highest priority — mirrors the streaming gate in
+            # routes/openai.py. See node_classify for why text classification
+            # alone can miss an image turn.
+            mode = "fast"
+            reason = "image"
+            task_override = "vl"
+        elif owui_task:
             mode = "fast"
             reason = "owui_task"
         elif forced_deep:
@@ -237,7 +249,10 @@ def build_graph(
             last_user = count_last_user_tokens(state["messages"])
             parts = " ".join(f"{r}={by_role[r]}" for r in sorted(by_role))
             log.info("complexity.breakdown: %s last_user=%d", parts, last_user)
-        return {"prompt_tokens": n, "complex": complex_, "mode": mode}
+        out: dict[str, Any] = {"prompt_tokens": n, "complex": complex_, "mode": mode}
+        if task_override is not None:
+            out["task_type"] = task_override
+        return out
 
     async def node_fast_path(state: PipelineState) -> dict[str, Any]:
         options = _options_from_state(state)
