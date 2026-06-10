@@ -273,5 +273,3 @@ string. The next lesson stays in `complexity.py` and tackles values whose
 *shape* can vary, the `isinstance` checks that handle them, and how to read a
 function's type annotations to know what it eats and returns before you read a
 line of its body.
-
-Keep the REPL handy. We'll keep poking at the real objects, live.

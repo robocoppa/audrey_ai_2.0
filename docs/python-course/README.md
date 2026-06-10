@@ -39,17 +39,17 @@ know, you start reading actual production files. From there, every new
 concept is taught by pointing at where Audrey uses it, building up to the
 point where you can trace a whole request through the system and change it.
 
-- **Part 1 — Get in and oriented (Lessons 1–5).** Stand up a real dev
+- **Part 1 — Get in and oriented (Lessons 1–6).** Stand up a real dev
   environment, sharpen the fundamentals you already have, and read your first
   real Audrey files — small ones, fully understood.
-- **Part 2 — The shapes production code is made of (Lessons 6–11).** The next
+- **Part 2 — The shapes production code is made of (Lessons 7–12).** The next
   tier you don't have yet, each taught through Audrey's own code: classes and
   dataclasses, type hints, modules and imports, error handling, comprehensions
   and iteration patterns, decorators and caching.
-- **Part 3 — The hard, important parts (Lessons 12–15).** Context managers,
+- **Part 3 — The hard, important parts (Lessons 13–16).** Context managers,
   `async`/`await`, the libraries Audrey leans on (FastAPI, Pydantic, httpx),
   and how its data flows from an HTTP request into typed pipeline state.
-- **Part 4 — Read it, test it, change it (Lessons 16–18).** Trace one request
+- **Part 4 — Read it, test it, change it (Lessons 17–19).** Trace one request
   end-to-end through the system, learn the test-and-lint workflow, and make a
   real change to Audrey as a capstone.
 
@@ -68,27 +68,28 @@ Each lesson follows the same rhythm:
 1. [Your environment and the project](lesson-01-setup.md)
 2. [How a conversation becomes data](lesson-02-values-and-types.md)
 3. [When a value has more than one shape](lesson-03-one-field-two-shapes.md)
-4. [Reading a function's signature](lesson-04-reading-a-signature.md)
-5. Reading your first real files (navigating the repo)
+4. [`None`, `or`, and falsy defaults](lesson-04-none-and-falsy-defaults.md)
+5. [Reading a function's signature](lesson-05-reading-a-signature.md)
+6. [Reading your first real files (navigating the repo)](lesson-06-navigating-the-repo.md)
 
 **Part 2 — The shapes production code is made of**
-6. Classes and dataclasses
-7. Type hints for real
-8. Modules, imports, and how a package fits together
-9. Errors and exceptions: failing on purpose
-10. Comprehensions and iteration patterns
-11. Decorators and caching
+7. Classes and dataclasses
+8. Type hints for real
+9. Modules, imports, and how a package fits together
+10. Errors and exceptions: failing on purpose
+11. Comprehensions and iteration patterns
+12. Decorators and caching
 
 **Part 3 — The hard, important parts**
-12. Context managers and the `with` statement
-13. `async` and `await`
-14. The libraries Audrey is built on
-15. From HTTP request to typed pipeline state
+13. Context managers and the `with` statement
+14. `async` and `await`
+15. The libraries Audrey is built on
+16. From HTTP request to typed pipeline state
 
 **Part 4 — Read it, test it, change it**
-16. Reading one request end-to-end
-17. The test-and-lint workflow
-18. Make a real change (capstone)
+17. Reading one request end-to-end
+18. The test-and-lint workflow
+19. Make a real change (capstone)
 
 ## What is Audrey, briefly?
 

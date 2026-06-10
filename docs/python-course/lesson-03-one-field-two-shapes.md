@@ -180,18 +180,16 @@ One small helper, but it taught the move you'll use most when reading real code:
   answer usually explains the whole design.
 
 Hold onto that `isinstance`-then-branch habit; the next lesson uses it again
-while it adds the other half of reading a function fluently — its signature.
+while it turns to the *other* kind of uncertain value — the one that isn't
+there at all.
 
 ---
 
 ## 5. Where we're headed next
 
-You've been reading function *bodies* to figure out what they do. The next
-lesson shows you the shortcut: a function's **signature** — the `: list[dict]`
-and `-> int` annotations on its very first line — often tells you what it eats
-and returns before you read a single line inside. We stay in `complexity.py`,
-look at how `None` becomes a deliberate fallback (`m.get("role") or "other"`),
-read the annotations on the functions you've already met, and finish by reading
-a whole function you've *never* seen, cold.
-
-Keep the REPL handy. We'll keep poking at the real objects, live.
+So far we've handled values whose *type* could vary. The next lesson turns to
+the value that isn't there at all: what `None` means when a key is missing, the
+`m.get("role") or "other"` idiom that fills it in, and the sharp edge hiding
+inside that `or`. We stay in `complexity.py` — these "missing → default"
+decisions are scattered all through it, and reading them is reading the code's
+intent.
