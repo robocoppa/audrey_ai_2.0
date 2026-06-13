@@ -20,6 +20,7 @@ model_registry:
     - { name: "devstral-small-2:latest",  priority:  85, speed: 85, quality: 82, location: local }
     - { name: "granite4.1:30b",           priority:  82, speed: 80, quality: 86, location: local }
     - { name: "deepseek-v4-pro:cloud",    priority:  82, speed: 80, quality: 95, location: cloud }
+    - { name: "kimi-k2.7-code:cloud",     priority:  92, speed: 90, quality: 94, location: cloud }
     - { name: "qwen3.6:35b",              priority:  80, speed: 70, quality: 90, location: local }
     - { name: "kimi-k2.6:cloud",          priority:  78, speed: 90, quality: 92, location: cloud }
     - { name: "deepseek-v4-flash:cloud",  priority:  72, speed: 92, quality: 90, location: cloud }
@@ -31,6 +32,7 @@ model_registry:
     - { name: "deepseek-v4-pro:cloud",    priority:  97, speed: 80, quality: 95, location: cloud }
     - { name: "minimax-m3:cloud",         priority:  96, speed: 85, quality: 95, location: cloud }
     - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 94, location: cloud }
+    - { name: "kimi-k2.7-code:cloud",     priority:  88, speed: 90, quality: 93, location: cloud }
     - { name: "deepseek-r1:32b",          priority:  85, speed: 65, quality: 90, location: local }
     - { name: "nemotron-cascade-2:latest",priority:  80, speed: 65, quality: 88, location: local }
     - { name: "cogito-2.1:671b-cloud",    priority:  75, speed: 80, quality: 93, location: cloud }
@@ -41,6 +43,7 @@ model_registry:
     - { name: "deepseek-v4-pro:cloud",    priority:  97, speed: 80, quality: 95, location: cloud }
     - { name: "minimax-m3:cloud",         priority:  96, speed: 85, quality: 95, location: cloud }
     - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 93, location: cloud }
+    - { name: "kimi-k2.7-code:cloud",     priority:  88, speed: 90, quality: 92, location: cloud }
     - { name: "qwen3.5:397b-cloud",       priority:  90, speed: 80, quality: 94, location: cloud }
     - { name: "deepseek-v4-flash:cloud",  priority:  82, speed: 92, quality: 89, location: cloud }
     - { name: "glm-4.7-flash:q8_0",       priority:  80, speed: 85, quality: 87, location: local }
@@ -66,6 +69,7 @@ fast_path:
   confidence_threshold: 0.88
   tool_capable_models:
     - "qwen3.6:35b"
+    - "kimi-k2.7-code:cloud"
     - "kimi-k2.6:cloud"
     - "qwen3-coder-next:latest"
     - "qwen2.5-coder:32b"
@@ -86,7 +90,7 @@ fast_path:
 # local model at a time (GPU_CONCURRENCY=1).
 deep_panel:
   code:
-    workers: ["qwen3-coder-next:latest", "kimi-k2.6:cloud"]
+    workers: ["qwen3-coder-next:latest", "kimi-k2.7-code:cloud"]
     synthesizer: "qwen3.6:35b"
     fallback_synth: "glm-5.1:cloud"
   reasoning:
