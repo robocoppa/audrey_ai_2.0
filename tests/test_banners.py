@@ -25,6 +25,7 @@ from audrey.pipeline.banners import (
     BANNER_THINKING,
     _format_calls,
     tool_summary_block,
+    worker_ok,
 )
 
 # ─── _format_calls ─────────────────────────────────────────────────────
@@ -195,3 +196,12 @@ def test_banner_separator_is_horizontal_rule_with_padding():
     # `---` as a horizontal rule, not a continuation of the blockquote
     # above. Phase 7 fast-path banner relies on this exact shape.
     assert BANNER_SEPARATOR == "\n\n---\n\n"
+
+
+def test_fast_path_thinking_line_shows_model():
+    # The plain fast path closes the Thinking banner with the concrete
+    # model name, same `  ✅ <model>` fragment the deep panel uses per
+    # worker — so a fast turn tells the user which model answered, not
+    # just a bare checkmark. `> _Thinking_` + this fragment renders as
+    # `> _Thinking_  ✅ qwen3-vl:32b`.
+    assert BANNER_THINKING + worker_ok("qwen3-vl:32b") == "> _Thinking_  ✅ qwen3-vl:32b"

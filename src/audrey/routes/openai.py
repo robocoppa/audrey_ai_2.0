@@ -743,13 +743,19 @@ async def _stream_via_pipeline(
 
                 graph_task: asyncio.Task[Any] | None = None
                 try:
-                    async with PhaseTicker(BANNER_THINKING, _banner_emit):
+                    async with PhaseTicker(BANNER_THINKING, _banner_emit) as ticker:
                         graph_task = asyncio.create_task(
                             _run_graph_with_metrics(graph, state)
                         )
                         async for frame in _drain_q_until_task(banner_q, graph_task, _fast_delta):
                             yield frame
                         final = graph_task.result()
+                        # Surface the model on the Thinking line, right before
+                        # the ticker's closing ✅ — mirrors the deep panel's
+                        # per-worker name. The graph's `concrete_model` is the
+                        # model that actually ran (health rerouting may differ
+                        # from the initial pick); fall back to `spec.name`.
+                        ticker.append_tail(f"  {final.get('concrete_model', spec.name)}")
                 except OllamaError as e:
                     async for frame in _emit_single_message(
                         payload.model, "error", f"[ollama error: {e}]"
@@ -788,7 +794,7 @@ async def _stream_via_pipeline(
             # so the user sees an immediate "Thinking" ack without the dot
             # animation machinery overhead.
             yield _fast_delta(BANNER_THINKING)
-            yield _fast_delta(" ✅\n")
+            yield _fast_delta(worker_ok(spec.name) + "\n")
             yield _fast_delta(BANNER_SEPARATOR)
 
             timeout = float(cfg.timeouts.get("fast_path", 180))
