@@ -26,6 +26,60 @@ class OllamaError(Exception):
     """Raised for Ollama HTTP, transport, or response parsing failures."""
 
 
+def _data_uri_to_b64(url: str) -> str | None:
+    """Strip a `data:image/...;base64,XXXX` URI down to its base64 payload.
+
+    Ollama's `/api/chat` wants raw base64 in the per-message `images` list,
+    not the full data-URI an OpenAI-compatible client sends. Returns None for
+    anything that isn't an inline base64 data URI (e.g. an `http(s)://` URL),
+    which the caller drops — Ollama can't fetch remote URLs on this path.
+    """
+    if not isinstance(url, str) or not url.startswith("data:"):
+        return None
+    marker = ";base64,"
+    idx = url.find(marker)
+    if idx == -1:
+        return None
+    return url[idx + len(marker) :] or None
+
+
+def _to_ollama_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert OpenAI-shaped messages into Ollama's native `/api/chat` shape.
+
+    The OpenAI-compatible content field can be a plain string OR a list of
+    typed parts (`[{"type": "text", ...}, {"type": "image_url", ...}]`) for
+    multimodal turns. Ollama's API rejects the list form: it wants
+    `content` as a string plus a sibling `images: ["<base64>"]` list. String
+    content is passed through untouched (the common text case); list content
+    is flattened — text parts joined with `\\n`, `image_url` data-URIs lifted
+    into `images`. Every other key on the message (role, name, tool_calls) is
+    preserved. Mirrors the flatten logic in `pipeline/messages.py`.
+    """
+    out: list[dict[str, Any]] = []
+    for m in messages:
+        content = m.get("content")
+        if not isinstance(content, list):
+            out.append(m)  # plain string (or absent) — already Ollama-shaped
+            continue
+        texts: list[str] = []
+        images: list[str] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "text":
+                texts.append(part.get("text", ""))
+            elif part.get("type") == "image_url":
+                url = (part.get("image_url") or {}).get("url", "")
+                b64 = _data_uri_to_b64(url)
+                if b64:
+                    images.append(b64)
+        converted = {**m, "content": "\n".join(texts)}
+        if images:
+            converted["images"] = images
+        out.append(converted)
+    return out
+
+
 class OllamaClient:
     """Thin async wrapper over the Ollama HTTP API.
 
@@ -84,7 +138,11 @@ class OllamaClient:
         make. Caller (the ReAct loop) is responsible for executing them and
         feeding results back as `role=tool` messages.
         """
-        payload: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": _to_ollama_messages(messages),
+            "stream": False,
+        }
         if options:
             payload["options"] = options
         if tools:
@@ -129,7 +187,11 @@ class OllamaClient:
         in chunks (typically the final one); the caller is responsible for
         executing them and feeding results back as `role=tool` messages.
         """
-        payload: dict[str, Any] = {"model": model, "messages": messages, "stream": True}
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": _to_ollama_messages(messages),
+            "stream": True,
+        }
         if options:
             payload["options"] = options
         if tools:
