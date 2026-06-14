@@ -17,7 +17,6 @@ model_registry:
     - { name: "qwen3-coder-next:latest",  priority: 100, speed: 60, quality: 95, location: local }
     - { name: "minimax-m3:cloud",         priority:  98, speed: 85, quality: 96, location: cloud }
     - { name: "qwen2.5-coder:32b",        priority:  90, speed: 70, quality: 90, location: local }
-    - { name: "devstral-small-2:latest",  priority:  85, speed: 85, quality: 82, location: local }
     - { name: "granite4.1:30b",           priority:  82, speed: 80, quality: 86, location: local }
     - { name: "deepseek-v4-pro:cloud",    priority:  82, speed: 80, quality: 95, location: cloud }
     - { name: "kimi-k2.7-code:cloud",     priority:  92, speed: 90, quality: 94, location: cloud }
@@ -34,7 +33,6 @@ model_registry:
     - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 94, location: cloud }
     - { name: "kimi-k2.7-code:cloud",     priority:  88, speed: 90, quality: 93, location: cloud }
     - { name: "deepseek-r1:32b",          priority:  85, speed: 65, quality: 90, location: local }
-    - { name: "nemotron-cascade-2:latest",priority:  80, speed: 65, quality: 88, location: local }
     - { name: "cogito-2.1:671b-cloud",    priority:  75, speed: 80, quality: 93, location: cloud }
     - { name: "nemotron-3-super:cloud",   priority:  70, speed: 85, quality: 90, location: cloud }
 
@@ -73,7 +71,6 @@ fast_path:
     - "kimi-k2.6:cloud"
     - "qwen3-coder-next:latest"
     - "qwen2.5-coder:32b"
-    - "devstral-small-2:latest"
     - "granite4.1:30b"
     - "deepseek-v4-pro:cloud"
     - "deepseek-v4-flash:cloud"
