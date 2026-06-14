@@ -102,7 +102,7 @@ deep_panel:
     synthesizer: "qwen3.6:35b"
     fallback_synth: "glm-5.1:cloud"
   vl:
-    workers: ["nemotron3:33b", "kimi-k2.6:cloud"]
+    workers: ["qwen3-vl:32b", "kimi-k2.6:cloud"]
     synthesizer: "qwen3.6:35b"
     fallback_synth: "glm-5.1:cloud"
 
@@ -142,7 +142,7 @@ deep_panel_local:
     synthesizer: "qwen3.6:35b"
     fallback_synth: "qwen3.6:35b"
   vl:
-    workers: ["nemotron3:33b", "qwen3-vl:32b"]
+    workers: ["qwen3-vl:32b", "llava:34b"]
     synthesizer: "qwen3.6:35b"
     fallback_synth: "qwen3.6:35b"
 
