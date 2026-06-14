@@ -12,12 +12,16 @@ it once here keeps the two callers from drifting.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from audrey.config import _validate_deep_panel_pools
+from audrey.config import Config, EnvOverrides, _load_yaml, _validate_deep_panel_pools
 from audrey.pipeline.deep_panel import pick_panel_timeout, pool_key_for
+
+# Repo root holds the real config.yaml the app boots with.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # ─── _validate_deep_panel_pools ────────────────────────────────────────
 
@@ -185,6 +189,42 @@ def test_validator_passes_when_no_deep_panel_keys_exist():
     # Edge case: a stripped-down test config with no panel pools at all.
     # The validator should not invent failures out of thin air.
     _validate_deep_panel_pools({"router": {}, "tools": {}})
+
+
+# ─── Real config.yaml boots clean ──────────────────────────────────────
+
+def test_committed_config_yaml_passes_boot_validation():
+    """The actual `config.yaml` must survive the boot path.
+
+    Every other test in this file feeds the validator a synthetic dict, so a
+    broken *committed* config (a deep-panel worker absent from the registry, a
+    missing synthesizer) slips through `pytest` and only crash-loops on
+    deploy — exactly how an unregistered `nemotron3:33b` vl worker took the
+    process down once. This loads the real file and runs the same three steps
+    `get_config()` does at startup, so that class of bug fails here instead.
+    """
+    cfg = Config(_load_yaml(_REPO_ROOT / "config.yaml"), EnvOverrides())
+    _validate_deep_panel_pools(cfg.raw)  # must not raise
+
+
+def test_committed_config_deep_panel_models_are_registered():
+    """Belt-and-braces: every deep-panel worker/synth resolves to a registry
+    entry. `_validate_deep_panel_pools` already enforces this, but asserting it
+    independently pins the invariant even if the validator's scope ever changes.
+    """
+    raw = _load_yaml(_REPO_ROOT / "config.yaml")
+    registry_names = {
+        spec["name"]
+        for specs in raw.get("model_registry", {}).values()
+        for spec in specs
+        if spec.get("name")
+    }
+    for pool_key in (k for k in raw if k.startswith("deep_panel")):
+        for task, body in raw[pool_key].items():
+            named = list(body.get("workers") or [])
+            named += [body[s] for s in ("synthesizer", "fallback_synth") if body.get(s)]
+            for name in named:
+                assert name in registry_names, f"{pool_key}/{task}: {name!r} not in registry"
 
 
 # ─── pool_key_for warning ──────────────────────────────────────────────
