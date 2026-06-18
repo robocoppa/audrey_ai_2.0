@@ -20,6 +20,7 @@ model_registry:
     - { name: "granite4.1:30b",           priority:  82, speed: 80, quality: 86, location: local }
     - { name: "deepseek-v4-pro:cloud",    priority:  82, speed: 80, quality: 95, location: cloud }
     - { name: "kimi-k2.7-code:cloud",     priority:  92, speed: 90, quality: 94, location: cloud }
+    - { name: "glm-5.2:cloud",            priority:  88, speed: 90, quality: 91, location: cloud }
     - { name: "qwen3.6:35b",              priority:  80, speed: 70, quality: 90, location: local }
     - { name: "kimi-k2.6:cloud",          priority:  78, speed: 90, quality: 92, location: cloud }
     - { name: "deepseek-v4-flash:cloud",  priority:  72, speed: 92, quality: 90, location: cloud }
@@ -47,7 +48,7 @@ model_registry:
     - { name: "glm-4.7-flash:q8_0",       priority:  80, speed: 85, quality: 87, location: local }
     - { name: "olmo-3.1:32b",             priority:  70, speed: 75, quality: 85, location: local }
     - { name: "llama4:latest",            priority:  65, speed: 55, quality: 90, location: local }
-    - { name: "glm-5.1:cloud",            priority:  60, speed: 90, quality: 85, location: cloud }
+    - { name: "glm-5.2:cloud",            priority:  62, speed: 90, quality: 88, location: cloud }
 
   vl:
     # Vision-language pool — image turns on the chat path route here.
@@ -79,7 +80,7 @@ fast_path:
     - "cogito-2.1:671b-cloud"
     - "nemotron-3-super:cloud"
     - "minimax-m3:cloud"
-    - "glm-5.1:cloud"
+    - "glm-5.2:cloud"
 
 # ─── Deep panel: mixed (audrey_deep) ───────────────────────────────────
 # Two workers per task: one local + one cloud so the cloud worker can run
@@ -89,19 +90,19 @@ deep_panel:
   code:
     workers: ["qwen3-coder-next:latest", "kimi-k2.7-code:cloud"]
     synthesizer: "qwen3.6:35b"
-    fallback_synth: "glm-5.1:cloud"
+    fallback_synth: "glm-5.2:cloud"
   reasoning:
     workers: ["qwen3.6:35b", "kimi-k2.6:cloud"]
     synthesizer: "qwen3.6:35b"
-    fallback_synth: "glm-5.1:cloud"
+    fallback_synth: "glm-5.2:cloud"
   general:
     workers: ["qwen3.6:35b", "kimi-k2.6:cloud"]
     synthesizer: "qwen3.6:35b"
-    fallback_synth: "glm-5.1:cloud"
+    fallback_synth: "glm-5.2:cloud"
   vl:
     workers: ["qwen3-vl:32b", "kimi-k2.6:cloud"]
     synthesizer: "qwen3.6:35b"
-    fallback_synth: "glm-5.1:cloud"
+    fallback_synth: "glm-5.2:cloud"
 
 # ─── Deep panel: cloud-only (audrey_cloud) ─────────────────────────────
 # Both workers run in parallel (Ollama Pro caps at 3 concurrent cloud).
@@ -109,19 +110,19 @@ deep_panel_cloud:
   code:
     workers: ["deepseek-v4-pro:cloud", "minimax-m3:cloud"]
     synthesizer: "deepseek-v4-pro:cloud"
-    fallback_synth: "glm-5.1:cloud"
+    fallback_synth: "glm-5.2:cloud"
   reasoning:
     workers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud"]
     synthesizer: "deepseek-v4-pro:cloud"
-    fallback_synth: "glm-5.1:cloud"
+    fallback_synth: "glm-5.2:cloud"
   general:
     workers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud"]
     synthesizer: "deepseek-v4-pro:cloud"
-    fallback_synth: "glm-5.1:cloud"
+    fallback_synth: "glm-5.2:cloud"
   vl:
     workers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud"]
     synthesizer: "deepseek-v4-pro:cloud"
-    fallback_synth: "glm-5.1:cloud"
+    fallback_synth: "glm-5.2:cloud"
 
 # ─── Deep panel: local-only (audrey_local) ─────────────────────────────
 # Both workers serialize through GpuGate (GPU_CONCURRENCY=1) — no parallelism.
