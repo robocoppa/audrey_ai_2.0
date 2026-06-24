@@ -6,10 +6,14 @@ A focused plan for four items surfaced by a fresh-eyes codebase review
 
 | Item | Phase | Deploy doc            | Status                    |
 |------|-------|-----------------------|---------------------------|
-| 1    | 16    | `phase-16-deploy.md`  | ✅ code + tests shipped (laptop) |
-| 2    | 17    | `phase-17-deploy.md`  | planned                   |
-| 3    | 18    | `phase-18-deploy.md`  | planned                   |
+| 1    | 16    | `phase-16-deploy.md`  | ✅ deployed + verified (2026-06-24) |
+| 2    | 17    | `phase-17-deploy.md`  | ✅ shipped (laptop); awaiting smoke test |
+| 3    | 18    | `phase-18-deploy.md`  | 🔜 next                   |
 | 4    | 19    | `phase-19-deploy.md`  | planned                   |
+
+Phase 16 also absorbed the fast-path banner-latency fix (early `> _Thinking_`
+emit + `router.skip_llm_under_tokens`), reported and verified after the plan
+was first written.
 
 Ordered by value. Each item names the problem, the fix, the test coverage it
 needs, and what "done" looks like. Items 1–3 are self-contained and shippable

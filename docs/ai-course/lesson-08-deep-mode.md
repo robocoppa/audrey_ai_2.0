@@ -342,8 +342,10 @@ right code path.
 #### The registry fallback
 
 If `select_workers` returns nothing — every pool worker is unhealthy —
-`run_panel` falls back to the model registry itself at
-[`deep_panel.py:284`](../../src/audrey/pipeline/deep_panel.py#L284):
+the panel falls back to the model registry itself. This selection logic lives
+in a shared helper, `_prepare_panel`, that both the non-streaming `run_panel`
+and the streaming `run_panel_streaming` call, at
+[`deep_panel.py:288`](../../src/audrey/pipeline/deep_panel.py#L288):
 
 ```python
 if not workers:
@@ -370,7 +372,7 @@ one local worker can run at a time, because they're all competing for the
 same GPU's VRAM.
 
 Per-worker dispatch *looks* parallel on the dispatcher side
-([`deep_panel.py:294-313`](../../src/audrey/pipeline/deep_panel.py#L294)),
+([`deep_panel.py:309-328`](../../src/audrey/pipeline/deep_panel.py#L309)),
 but execution serializes through the gate. A deep panel with two local
 workers runs them back to back, not side by side. Two cloud workers in the
 same panel run concurrently because they never touch the gate.
@@ -409,9 +411,9 @@ worker cheating its way to a smaller number.
 
 #### Sub-question round-robin
 
-If the planner produced subtasks, each worker gets one. `run_panel`
+If the planner produced subtasks, each worker gets one. `_prepare_panel`
 distributes them round-robin at
-[`deep_panel.py:295-299`](../../src/audrey/pipeline/deep_panel.py#L295):
+[`deep_panel.py:299-304`](../../src/audrey/pipeline/deep_panel.py#L299):
 
 ```python
 if subtasks:

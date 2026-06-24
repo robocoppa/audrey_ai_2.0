@@ -594,10 +594,11 @@ cloud cap -> avoid too many cloud workers at once
 ```
 
 If the configured pool has no healthy workers, Audrey falls back to healthy
-registry candidates for that task. The non-streaming fallback path starts at
-[`deep_panel.py:285`](../../src/audrey/pipeline/deep_panel.py#L285), and the
-streaming version does the same kind of fallback at
-[`deep_panel.py:382`](../../src/audrey/pipeline/deep_panel.py#L382). That keeps
+registry candidates for that task. This selection-and-fallback logic lives in
+one shared helper, `_prepare_panel`, that both the non-streaming `run_panel`
+and the streaming `run_panel_streaming` call — so the fallback can't drift
+between the two paths. The fallback block is at
+[`deep_panel.py:288`](../../src/audrey/pipeline/deep_panel.py#L288). That keeps
 deep mode from becoming brittle when a pool entry is temporarily unavailable.
 
 Each worker runs through `_run_one_worker(...)` (defined at

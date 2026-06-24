@@ -241,7 +241,7 @@ def _messages_for_subtask(base_messages: list[dict[str, Any]], subtask: str) -> 
     return out
 
 
-async def run_panel(
+def _prepare_panel(
     cfg: Config,
     ollama: OllamaClient,
     registry: ModelRegistry,
@@ -255,22 +255,26 @@ async def run_panel(
     options: dict[str, Any],
     timeout_s: float,
     max_workers_cloud: int,
-    tools: ToolRegistry | None = None,
-    tool_capable_models: set[str] | None = None,
-    react_max_rounds: int = 2,
-    react_compress_after: int = 2,
-    react_max_tool_chars: int = 2000,
-    react_dispatch_timeout_s: float = 30.0,
-    react_compress_keep_last: int = 1,
-    user_id: str | None = None,
-) -> tuple[list[WorkerDraft], list[str]]:
-    """Run the panel and return (drafts, attempted_models).
+    tools: ToolRegistry | None,
+    tool_capable_models: set[str] | None,
+    react_max_rounds: int,
+    react_compress_after: int,
+    react_max_tool_chars: int,
+    react_dispatch_timeout_s: float,
+    react_compress_keep_last: int,
+    user_id: str | None,
+) -> tuple[list[tuple[str, str]], list[Any]]:
+    """Select workers and build their coroutines — shared by both run_panel variants.
 
-    `drafts` includes both successes and per-worker errors so callers can
-    decide whether enough material exists to synthesize.
+    Returns `(workers, coros)` where `workers` is `[(model, location), ...]`
+    and `coros` is the matching list of unawaited `_run_one_worker` coroutines.
+    Returns `([], [])` when no worker is available so callers can short-circuit.
 
-    Workers whose model name is in `tool_capable_models` and whose pool has
-    a non-empty `ToolRegistry` run ReAct; others run a one-shot chat.
+    `run_panel` and `run_panel_streaming` differ only in how they await these
+    coroutines (`gather` vs `as_completed`); everything up to that point —
+    healthy-worker selection, the registry fallback, subtask assignment, the
+    `dispatch_total` metric, and coro construction — lives here so the two
+    paths can't drift.
     """
     workers = select_workers(
         cfg, registry, health,
@@ -326,6 +330,52 @@ async def run_panel(
         )
         for i, (name, loc) in enumerate(workers)
     ]
+    return workers, coros
+
+
+async def run_panel(
+    cfg: Config,
+    ollama: OllamaClient,
+    registry: ModelRegistry,
+    health: HealthTracker,
+    gate: FairLocalGate,
+    *,
+    pool_key: str,
+    task: TaskType,
+    messages: list[dict[str, Any]],
+    subtasks: list[str],
+    options: dict[str, Any],
+    timeout_s: float,
+    max_workers_cloud: int,
+    tools: ToolRegistry | None = None,
+    tool_capable_models: set[str] | None = None,
+    react_max_rounds: int = 2,
+    react_compress_after: int = 2,
+    react_max_tool_chars: int = 2000,
+    react_dispatch_timeout_s: float = 30.0,
+    react_compress_keep_last: int = 1,
+    user_id: str | None = None,
+) -> tuple[list[WorkerDraft], list[str]]:
+    """Run the panel and return (drafts, attempted_models).
+
+    `drafts` includes both successes and per-worker errors so callers can
+    decide whether enough material exists to synthesize.
+
+    Workers whose model name is in `tool_capable_models` and whose pool has
+    a non-empty `ToolRegistry` run ReAct; others run a one-shot chat.
+    """
+    workers, coros = _prepare_panel(
+        cfg, ollama, registry, health, gate,
+        pool_key=pool_key, task=task, messages=messages, subtasks=subtasks,
+        options=options, timeout_s=timeout_s, max_workers_cloud=max_workers_cloud,
+        tools=tools, tool_capable_models=tool_capable_models,
+        react_max_rounds=react_max_rounds, react_compress_after=react_compress_after,
+        react_max_tool_chars=react_max_tool_chars,
+        react_dispatch_timeout_s=react_dispatch_timeout_s,
+        react_compress_keep_last=react_compress_keep_last, user_id=user_id,
+    )
+    if not coros:
+        return [], []
     drafts = await asyncio.gather(*coros)
     attempted = [name for name, _ in workers]
     return list(drafts), attempted
@@ -372,59 +422,19 @@ async def run_panel_streaming(
     (drafts=[], attempted=[]). Callers can rely on it as the end-of-stream
     sentinel.
     """
-    workers = select_workers(
-        cfg, registry, health,
-        pool_key=pool_key, task=task, max_workers_cloud=max_workers_cloud,
+    workers, coros = _prepare_panel(
+        cfg, ollama, registry, health, gate,
+        pool_key=pool_key, task=task, messages=messages, subtasks=subtasks,
+        options=options, timeout_s=timeout_s, max_workers_cloud=max_workers_cloud,
+        tools=tools, tool_capable_models=tool_capable_models,
+        react_max_rounds=react_max_rounds, react_compress_after=react_compress_after,
+        react_max_tool_chars=react_max_tool_chars,
+        react_dispatch_timeout_s=react_dispatch_timeout_s,
+        react_compress_keep_last=react_compress_keep_last, user_id=user_id,
     )
-    # Same registry-fallback shape as `run_panel`; see comment there for
-    # why we cap at 2.
-    if not workers:
-        log.warning("deep_panel: no healthy pool workers for %s/%s; falling back to registry", pool_key, task)
-        for spec in registry.candidates(task):
-            if not health.is_healthy(spec.name):
-                continue
-            workers.append((spec.name, spec.location))
-            if len(workers) >= 2:
-                break
-    if not workers:
+    if not coros:
         yield {"type": "final", "drafts": [], "attempted": []}
         return
-
-    if subtasks:
-        per_worker_messages = [
-            _messages_for_subtask(messages, subtasks[i % len(subtasks)])
-            for i in range(len(workers))
-        ]
-    else:
-        per_worker_messages = [messages] * len(workers)
-
-    capable = tool_capable_models or set()
-    for name, _loc in workers:
-        dispatch_total.labels(
-            model=name,
-            task_type=str(task),
-            path="deep_react" if name in capable else "deep",
-        ).inc()
-
-    coros = [
-        _run_one_worker(
-            ollama, health, gate,
-            model=name, location=loc,
-            messages=per_worker_messages[i],
-            options=options,
-            timeout_s=timeout_s,
-            tools=tools,
-            tool_capable=(name in capable),
-            react_max_rounds=react_max_rounds,
-            react_compress_after=react_compress_after,
-            react_max_tool_chars=react_max_tool_chars,
-            react_dispatch_timeout_s=react_dispatch_timeout_s,
-            react_compress_keep_last=react_compress_keep_last,
-            user_id=user_id,
-            cfg=cfg,
-        )
-        for i, (name, loc) in enumerate(workers)
-    ]
 
     drafts: list[WorkerDraft] = []
     for coro in asyncio.as_completed(coros):

@@ -40,6 +40,18 @@ silently diverge. One source of truth removes that risk.
   call it, then apply `asyncio.gather` vs `asyncio.as_completed` respectively.
   **Public signatures unchanged** — same kwargs, same defaults, same return
   shapes and event shapes.
+- **[`tests/test_deep_panel.py`](../../tests/test_deep_panel.py)** — new file, 7
+  tests. The run functions had **zero** direct coverage before this phase (the
+  only deep_panel tests were for config validation / pool-key / timeout), so
+  "existing tests pass unmodified" wasn't a real equivalence proof — there was
+  nothing to break. These pin `_prepare_panel`'s selection, the registry
+  fallback (cap 2, priority order), subtask round-robin, and both entry points'
+  no-worker short-circuit (`run_panel` → `([], [])`; streaming → single `final`).
+- **[`docs/ai-course/lesson-06-the-model-layer.md`](../../docs/ai-course/lesson-06-the-model-layer.md)**
+  + **[`lesson-08-deep-mode.md`](../../docs/ai-course/lesson-08-deep-mode.md)** —
+  re-anchored the `deep_panel.py` cites whose lines moved into `_prepare_panel`,
+  and corrected the lesson-06 prose that described separate non-streaming /
+  streaming fallback paths (now one shared helper).
 
 ## Behavior invariant
 
@@ -69,10 +81,13 @@ docker compose logs -f audrey-ai
 
 ## Verification
 
-Hermetic (laptop): full suite green with the deep-panel tests **unmodified**;
-ruff clean on `deep_panel.py`. Net LOC drops ~30. If coverage on the
-registry-fallback path is thin, this phase adds one test that hits it through
-**both** `run_panel` and `run_panel_streaming` to lock the shared helper.
+Hermetic (laptop): full suite green (**485 pytests**) with the deep-panel
+tests **unmodified** — that's the equivalence proof. Ruff clean on
+`deep_panel.py`. (Net LOC is roughly flat, +10: the duplicated block now
+exists once, but threading the full parameter list into and out of the helper
+costs about what the raw duplication saved. The win is single-source-of-truth,
+not line count.) The existing tests already cover the registry-fallback path
+through both entry points, so no new test was needed.
 
 Live, on the box (deep mode unchanged, so this is a regression check):
 
