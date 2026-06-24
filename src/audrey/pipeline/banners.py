@@ -150,6 +150,11 @@ class PhaseTicker:
       append_tail: emit a fragment NOW (interleaves with dots)
       __aexit__:   cancel ticker, emit ' ✅\\n' (or ' ❌\\n' on error) —
                    the mark sits outside the header's italics
+
+    `emit_header=False` skips the `__aenter__` header emit — for callers that
+    already put the header on the wire (e.g. the fast path emits its Thinking
+    ack before classifying, then opens a ticker to dot/close the same line).
+    Ticking, tail fragments, and the closing mark are unaffected.
     """
 
     def __init__(
@@ -158,9 +163,11 @@ class PhaseTicker:
         emit: Emitter,
         *,
         tick_interval_s: float = TICK_INTERVAL_S,
+        emit_header: bool = True,
     ) -> None:
         self._header = header
         self._emit = emit
+        self._emit_header = emit_header
         self._tick_interval_s = tick_interval_s
         self._tick_task: asyncio.Task[None] | None = None
         # The tail queue is for fragments produced mid-phase (e.g. per-worker
@@ -170,7 +177,8 @@ class PhaseTicker:
         self._tail_drainer: asyncio.Task[None] | None = None
 
     async def __aenter__(self) -> PhaseTicker:
-        await self._emit(self._header)
+        if self._emit_header:
+            await self._emit(self._header)
         self._tick_task = asyncio.create_task(self._tick_loop(), name="banner-tick")
         self._tail_drainer = asyncio.create_task(self._drain_tail(), name="banner-tail")
         return self

@@ -622,17 +622,12 @@ async def _stream_via_pipeline(
     try:
         async with inflight.slot(user_id):
             user_text = last_user_text(messages)
-            # Shared helper threads tool names into the classifier so
-            # prompts that explicitly name a tool (e.g. "use kb_image_search
-            # …") route through the tool-capable fast path. The non-
-            # streaming graph node uses the same helper.
-            task, reason, conf = await classify_with_registry(
-                ollama,
-                user_text=user_text,
-                router_cfg=router_cfg,
-                cfg=cfg,
-                registry=app.state.tools,
-            )
+            # The deep-vs-fast decision uses only cheap local signals — it
+            # does NOT need the classifier LLM. (`task` selects the model;
+            # the route mode doesn't.) Deciding mode first lets the fast
+            # branch put its Thinking banner on the wire *before* paying for
+            # classification, so the user sees an ack immediately instead of
+            # staring at nothing while the router model runs under GPU load.
             complexity_cfg = cfg.raw.get("complexity", {}) or {}
             complex_, n = is_complex(messages, threshold=int(complexity_cfg.get("token_threshold", 500)))
             forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local")
@@ -640,20 +635,12 @@ async def _stream_via_pipeline(
             owui_task = is_owui_task_request(messages)
             image_turn = has_image_part(messages)
             if image_turn:
-                # An attached image must reach a vision model. Override the
-                # text classifier (neutral wording like "describe this" won't
-                # trip the vl keywords) and force the fast path: the vl pool
-                # answers directly, and the deep path rebuilds prompts
-                # text-only so it would drop the image. Highest priority —
-                # an image turn is a vision turn regardless of token count
-                # or virtual model.
-                task = "vl"
+                # An attached image must reach a vision model — force fast.
+                # (See the classify branch below: `task` is pinned to "vl".)
                 use_deep = False
             elif owui_task:
                 # OWUI utility tasks (title gen, tags, follow-up suggestions)
-                # bundle the whole conversation as one user message. They
-                # always want a short, cheap answer — force fast regardless
-                # of token count or virtual model.
+                # always want a short, cheap answer — force fast.
                 use_deep = False
             elif forced_deep:
                 use_deep = True
@@ -662,20 +649,24 @@ async def _stream_via_pipeline(
             else:
                 use_deep = complex_  # audrey_auto
 
-            log.info(
-                "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=%s%s%s",
-                payload.model, task, reason, conf, n,
-                "deep" if use_deep else "fast",
-                " owui_task=1" if owui_task else "",
-                " image=1" if image_turn else "",
-            )
-            if complexity_cfg.get("log_breakdown", False):
-                by_role = count_tokens_by_role(messages)
-                last_user = count_last_user_tokens(messages)
-                parts = " ".join(f"{r}={by_role[r]}" for r in sorted(by_role))
-                log.info("complexity.breakdown: %s last_user=%d", parts, last_user)
-
             if use_deep:
+                # Deep classification still needs the router LLM (the panel
+                # pools are task-keyed). Deep emits its own banner stream, so
+                # classify here and hand the task type down.
+                task, reason, conf = await classify_with_registry(
+                    ollama, user_text=user_text, router_cfg=router_cfg,
+                    cfg=cfg, registry=app.state.tools,
+                )
+                log.info(
+                    "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=deep%s",
+                    payload.model, task, reason, conf, n,
+                    " owui_task=1" if owui_task else "",
+                )
+                if complexity_cfg.get("log_breakdown", False):
+                    by_role = count_tokens_by_role(messages)
+                    last_user = count_last_user_tokens(messages)
+                    parts = " ".join(f"{r}={by_role[r]}" for r in sorted(by_role))
+                    log.info("complexity.breakdown: %s last_user=%d", parts, last_user)
                 is_deep_branch = True
                 async for frame in _stream_deep_with_banners(
                     app, payload, messages, options, task=task, conf=conf, user_id=user_id,
@@ -684,23 +675,16 @@ async def _stream_via_pipeline(
                     yield frame
                 return
 
-            spec = registry.first_healthy(task, health.is_healthy)
-            if spec is None:
-                async for frame in _emit_single_message(
-                    payload.model, "none", f"[no healthy model for task={task}]"
-                ):
-                    yield frame
-                return
-            chosen_concrete = spec.name
-
-            # Banner-emit machinery for the fast branch's Thinking ticker.
-            # Per-request `cid` / `created` / `fingerprint` mirror what
-            # `_stream_deep_with_banners` builds inline — banner frames must
-            # share the streaming request's identity so the client treats
-            # them as continuation chunks of the same response.
+            # ─── Fast branch: banner first, classify second ───────────────
+            # Emit the role frame + Thinking header now, using a
+            # model-independent fingerprint (the concrete model isn't known
+            # until classification picks it). The model name lands on the
+            # closing banner line after classify — same as the deep / tool
+            # paths. This is the latency fix: the ack is on the wire before
+            # the (possibly slow) router call.
             fast_created = int(time.time())
             fast_cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
-            fast_fingerprint = f"audrey-{__version__}/{spec.name}"
+            fast_fingerprint = f"audrey-{__version__}/{payload.model}"
 
             def _fast_delta(text: str) -> str:
                 frame = {
@@ -710,13 +694,61 @@ async def _stream_via_pipeline(
                 }
                 return f"data: {json.dumps(frame)}\n\n"
 
-            # Role frame first per OpenAI streaming spec, then the banner.
+            def _fast_stop() -> str:
+                frame = {
+                    "id": fast_cid, "object": "chat.completion.chunk", "created": fast_created,
+                    "model": payload.model, "system_fingerprint": fast_fingerprint,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                }
+                return f"data: {json.dumps(frame)}\n\n"
+
             role_frame = {
                 "id": fast_cid, "object": "chat.completion.chunk", "created": fast_created,
                 "model": payload.model, "system_fingerprint": fast_fingerprint,
                 "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
             }
             yield f"data: {json.dumps(role_frame)}\n\n"
+            yield _fast_delta(BANNER_THINKING)
+
+            # Now classify (model selection). Image turns are pinned to vl
+            # regardless of wording — the text classifier can't see the image.
+            if image_turn:
+                task, reason, conf = "vl", "image_turn", 1.0
+            else:
+                task, reason, conf = await classify_with_registry(
+                    ollama, user_text=user_text, router_cfg=router_cfg,
+                    cfg=cfg, registry=app.state.tools,
+                )
+            log.info(
+                "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=fast%s%s",
+                payload.model, task, reason, conf, n,
+                " owui_task=1" if owui_task else "",
+                " image=1" if image_turn else "",
+            )
+            if complexity_cfg.get("log_breakdown", False):
+                by_role = count_tokens_by_role(messages)
+                last_user = count_last_user_tokens(messages)
+                parts = " ".join(f"{r}={by_role[r]}" for r in sorted(by_role))
+                log.info("complexity.breakdown: %s last_user=%d", parts, last_user)
+
+            spec = registry.first_healthy(task, health.is_healthy)
+            if spec is None:
+                # Role frame + Thinking header are already on the wire. Close
+                # the banner line and deliver the error as content under the
+                # SAME stream identity — a fresh _emit_single_message would
+                # emit a second role frame and break the chunk sequence.
+                yield _fast_delta(" ❌\n")
+                yield _fast_delta(BANNER_SEPARATOR)
+                yield _fast_delta(f"[no healthy model for task={task}]")
+                yield _fast_stop()
+                yield "data: [DONE]\n\n"
+                return
+            chosen_concrete = spec.name
+
+            # The role frame + Thinking header are already on the wire (emitted
+            # before classify). `fast_cid` / `fast_created` / `fast_fingerprint`
+            # and `_fast_delta` were defined up there; reuse them so every frame
+            # in this response shares one identity.
 
             # If the chosen model is tool-capable and tools are registered, route
             # the streaming request through the graph so the ReAct loop can fire.
@@ -727,6 +759,8 @@ async def _stream_via_pipeline(
             if tools_active:
                 # Tool-capable path can take 1-3s on a `kb_search` round, so
                 # use a full PhaseTicker that emits dots while the graph runs.
+                # The Thinking header is already on the wire (emit_header=False)
+                # — the ticker just dots the open line and closes it.
                 graph = app.state.graph
                 state = {
                     "virtual_model": payload.model,
@@ -743,7 +777,9 @@ async def _stream_via_pipeline(
 
                 graph_task: asyncio.Task[Any] | None = None
                 try:
-                    async with PhaseTicker(BANNER_THINKING, _banner_emit) as ticker:
+                    async with PhaseTicker(
+                        BANNER_THINKING, _banner_emit, emit_header=False,
+                    ) as ticker:
                         graph_task = asyncio.create_task(
                             _run_graph_with_metrics(graph, state)
                         )
@@ -757,10 +793,17 @@ async def _stream_via_pipeline(
                         # from the initial pick); fall back to `spec.name`.
                         ticker.append_tail(f"  {final.get('concrete_model', spec.name)}")
                 except OllamaError as e:
-                    async for frame in _emit_single_message(
-                        payload.model, "error", f"[ollama error: {e}]"
-                    ):
+                    # The role frame + Thinking header are already on the wire,
+                    # and PhaseTicker's __aexit__ queued a closing ❌. Drain it,
+                    # then deliver the error as content under the SAME stream
+                    # identity (a fresh _emit_single_message would emit a second
+                    # role frame and break the chunk sequence).
+                    async for frame in _drain_q_now(banner_q, _fast_delta):
                         yield frame
+                    yield _fast_delta(BANNER_SEPARATOR)
+                    yield _fast_delta(f"[ollama error: {e}]")
+                    yield _fast_stop()
+                    yield "data: [DONE]\n\n"
                     return
                 # Drain the closing ✅\n that PhaseTicker pushed on exit.
                 async for frame in _drain_q_now(banner_q, _fast_delta):
@@ -779,21 +822,22 @@ async def _stream_via_pipeline(
                     content = content + footer
                 # Separator between banner and answer body — matches deep.
                 yield _fast_delta(BANNER_SEPARATOR)
-                # Tool-capable fast path emits the answer in one chunk; feed
-                # the answer text directly into the collector since the
-                # SSE-frame parser would also catch it but feeding text is
+                # Tool-capable fast path emits the answer in one chunk under the
+                # already-open stream identity (the role frame went out before
+                # classify). Feed the answer text directly into the collector —
+                # the SSE-frame parser would also catch it, but feeding text is
                 # cheaper and unambiguous.
                 collector.feed_text(str(final.get("content", "") or ""))
-                async for frame in _emit_single_message(payload.model, concrete, content):
-                    yield frame
+                yield _fast_delta(content)
+                yield _fast_stop()
+                yield "data: [DONE]\n\n"
                 return
 
             # Plain-chat fast path: no tools, tokens stream within ~200ms of
-            # first byte. A full PhaseTicker would emit no dots before the
-            # first token closes it; emit a static header + ✅ + separator
-            # so the user sees an immediate "Thinking" ack without the dot
-            # animation machinery overhead.
-            yield _fast_delta(BANNER_THINKING)
+            # first byte. The Thinking header is already on the wire (emitted
+            # before classify); close the line with the model name + ✅ and a
+            # separator, then stream the answer. No dot animation — the first
+            # token arrives fast enough that dots would never show.
             yield _fast_delta(worker_ok(spec.name) + "\n")
             yield _fast_delta(BANNER_SEPARATOR)
 
@@ -1448,17 +1492,6 @@ async def _stream_openai(
 @asynccontextmanager
 async def _noop_async_ctx():
     yield
-
-
-async def _emit_single_message(virtual: str, concrete: str, text: str):
-    """One-shot SSE emission: role delta, single content delta, stop."""
-    created = int(time.time())
-    cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
-    fingerprint = f"audrey-{__version__}/{concrete}"
-    yield f"data: {json.dumps({'id': cid, 'object': 'chat.completion.chunk', 'created': created, 'model': virtual, 'system_fingerprint': fingerprint, 'choices': [{'index': 0, 'delta': {'role': 'assistant'}, 'finish_reason': None}]})}\n\n"
-    yield f"data: {json.dumps({'id': cid, 'object': 'chat.completion.chunk', 'created': created, 'model': virtual, 'system_fingerprint': fingerprint, 'choices': [{'index': 0, 'delta': {'content': text}, 'finish_reason': None}]})}\n\n"
-    yield f"data: {json.dumps({'id': cid, 'object': 'chat.completion.chunk', 'created': created, 'model': virtual, 'system_fingerprint': fingerprint, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]})}\n\n"
-    yield "data: [DONE]\n\n"
 
 
 __all__ = ["router", "VIRTUAL_MODELS"]

@@ -183,6 +183,21 @@ def _parse_router_output(raw: str) -> tuple[TaskType | None, float]:
 
 # ─── Top-level classify() ─────────────────────────────────────────────
 
+def _short_prompt_tokens(user_text: str) -> int:
+    """Token count of the routing text, using the same encoder as the
+    complexity gate so 'short' means the same thing everywhere.
+
+    Imported lazily to keep `classify` importable without tiktoken in the
+    rare environments that stub it out; falls back to a coarse word count.
+    """
+    try:
+        from audrey.pipeline.complexity import count_tokens
+
+        return count_tokens([{"role": "user", "content": user_text}])
+    except Exception:  # noqa: BLE001 — encoder optional; coarse fallback is fine for a length gate
+        return len(user_text.split())
+
+
 async def classify(
     ollama: OllamaClient,
     *,
@@ -191,6 +206,7 @@ async def classify(
     max_router_strikes: int,
     user_text: str,
     tool_names: set[str] | None = None,
+    skip_llm_under_tokens: int = 0,
     cfg: Any = None,
 ) -> tuple[TaskType, str, float]:
     """Classify with keyword short-circuit + router fallback.
@@ -199,17 +215,34 @@ async def classify(
 
     Decision order:
       1. Strong keyword signal → use it immediately.
-      2. Run router up to `max_router_strikes` times.
-      3. If router still failed, use weak-keyword signal if any.
-      4. Default: "general", confidence 0.25.
+      2. Short prompt + no strong keyword → skip the router LLM, route by
+         the weak-keyword signal if any, else "general". (Gated by
+         `skip_llm_under_tokens`; 0 disables.)
+      3. Run router up to `max_router_strikes` times.
+      4. If router still failed, use weak-keyword signal if any.
+      5. Default: "general", confidence 0.25.
 
     `tool_names`: the set of registered tool names (e.g. {"kb_search",
     "web_search", ...}). When the user prompt explicitly names one,
     we classify as `general` so the tool-capable fast path runs.
+
+    `skip_llm_under_tokens`: when > 0, prompts at or below this token count
+    that produced no *strong* keyword signal skip the router model entirely.
+    Short plain prompts are almost always `general` (the tool-capable fast
+    path), so the LLM round-trip is low-value — and on a busy GPU it's the
+    main reason the fast-path Thinking banner used to lag. A weak keyword
+    signal (e.g. `code_weak`) is still honored over the `general` default.
     """
     signal = keyword_classify(user_text, tool_names=tool_names)
     if signal is not None and signal.strength == "strong":
         return signal.task, f"keyword:{signal.reason}", 0.95
+
+    # Cheap-route short, keyword-free prompts without paying for the router
+    # LLM call. Strong signals already returned above; only weak/none remain.
+    if skip_llm_under_tokens > 0 and _short_prompt_tokens(user_text) <= skip_llm_under_tokens:
+        if signal is not None:  # weak signal
+            return signal.task, f"short_skip_keyword:{signal.reason}", 0.6
+        return "general", "short_skip:general", 0.5
 
     strikes = 0
     last_err = ""
@@ -259,6 +292,7 @@ async def classify_with_registry(
         max_router_strikes=int(router_cfg.get("max_failures_before_fallback", 2)),
         user_text=user_text,
         tool_names=tool_names,
+        skip_llm_under_tokens=int(router_cfg.get("skip_llm_under_tokens", 0)),
         cfg=cfg,
     )
 

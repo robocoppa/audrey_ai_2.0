@@ -23,6 +23,7 @@ from audrey.pipeline.banners import (
     BANNER_SEPARATOR,
     BANNER_SYNTHESIZING,
     BANNER_THINKING,
+    PhaseTicker,
     _format_calls,
     tool_summary_block,
     worker_ok,
@@ -205,3 +206,36 @@ def test_fast_path_thinking_line_shows_model():
     # just a bare checkmark. `> _Thinking_` + this fragment renders as
     # `> _Thinking_  ✅ qwen3-vl:32b`.
     assert BANNER_THINKING + worker_ok("qwen3-vl:32b") == "> _Thinking_  ✅ qwen3-vl:32b"
+
+
+# ─── PhaseTicker emit_header (Phase 16 banner-latency fix) ────────────
+
+
+async def test_phase_ticker_emits_header_by_default():
+    """Default behavior unchanged: __aenter__ puts the header on the wire."""
+    emitted: list[str] = []
+
+    async def emit(text: str) -> None:
+        emitted.append(text)
+
+    async with PhaseTicker(BANNER_THINKING, emit, tick_interval_s=999):
+        pass
+
+    assert emitted[0] == BANNER_THINKING
+    assert emitted[-1] == " ✅\n"
+
+
+async def test_phase_ticker_skips_header_when_already_on_wire():
+    """emit_header=False suppresses the opening header — the fast path
+    already emitted `> _Thinking_` before classifying, so the ticker just
+    dots the open line and closes it. The closing ✅ still fires."""
+    emitted: list[str] = []
+
+    async def emit(text: str) -> None:
+        emitted.append(text)
+
+    async with PhaseTicker(BANNER_THINKING, emit, tick_interval_s=999, emit_header=False):
+        pass
+
+    assert BANNER_THINKING not in emitted   # header NOT re-emitted
+    assert emitted == [" ✅\n"]             # only the closing mark

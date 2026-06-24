@@ -245,7 +245,7 @@ The returned keys matter:
 
 The node does almost no work itself. It delegates to a shared helper,
 `classify_with_registry`, at
-[`classify.py:234`](../../src/audrey/pipeline/classify.py#L234). That
+[`classify.py:267`](../../src/audrey/pipeline/classify.py#L267). That
 helper exists because the streaming route in `routes/openai.py` needs to
 do the same thing — read the router config, extract `tool_names` from the
 live tool registry, and call `classify(...)`. When that setup was inlined
@@ -254,7 +254,7 @@ in two places it silently diverged: the streaming path forgot to pass
 helper kills the duplication and pins both paths to the same call shape.
 
 The interesting line inside the helper is at
-[`classify.py:254`](../../src/audrey/pipeline/classify.py#L254):
+[`classify.py:287`](../../src/audrey/pipeline/classify.py#L287):
 
 ```python
 tool_names = set(registry.names()) if registry is not None else set()

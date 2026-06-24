@@ -260,3 +260,108 @@ async def test_classify_with_registry_falls_through_to_router_on_plain_prose():
     assert task == "general"
     assert reason == "router:general"
     assert len(ollama.chat_calls) == 1
+
+
+# ─── skip_llm_under_tokens (Phase 16 banner-latency fix) ──────────────
+
+
+async def test_short_no_keyword_prompt_skips_router_llm():
+    """A short, keyword-free prompt under the token gate routes `general`
+    WITHOUT a router LLM call. This is the latency fix: the fast-path
+    Thinking banner no longer waits on the router model for chit-chat."""
+    from audrey.pipeline.classify import classify
+
+    ollama = _FakeOllama()
+    task, reason, conf = await classify(
+        ollama,
+        router_model="qwen3:4b",
+        router_timeout_s=5,
+        max_router_strikes=1,
+        user_text="hey there",
+        skip_llm_under_tokens=8,
+    )
+    assert task == "general"
+    assert reason == "short_skip:general"
+    assert conf == 0.5
+    assert ollama.chat_calls == []  # router never called
+
+
+async def test_short_prompt_with_weak_keyword_skips_llm_but_keeps_signal():
+    """A short prompt that tripped only a *weak* keyword (e.g. 'pip install')
+    still skips the router, but the weak signal wins over the bare `general`
+    default."""
+    from audrey.pipeline.classify import classify
+
+    ollama = _FakeOllama()
+    task, reason, conf = await classify(
+        ollama,
+        router_model="qwen3:4b",
+        router_timeout_s=5,
+        max_router_strikes=1,
+        user_text="pip install ruff",  # _CODE_WEAK, short
+        skip_llm_under_tokens=8,
+    )
+    assert task == "code"
+    assert reason.startswith("short_skip_keyword:")
+    assert conf == 0.6
+    assert ollama.chat_calls == []
+
+
+async def test_long_prompt_still_calls_router_even_when_skip_enabled():
+    """The skip only applies under the token gate. A longer keyword-free
+    prompt still reaches the router — we didn't disable classification."""
+    from audrey.pipeline.classify import classify
+
+    ollama = _FakeOllama()
+    task, reason, _conf = await classify(
+        ollama,
+        router_model="qwen3:4b",
+        router_timeout_s=5,
+        max_router_strikes=1,
+        user_text=(
+            "could you help me think carefully through whether this rather "
+            "involved migration plan is actually sensible before I commit to it"
+        ),
+        skip_llm_under_tokens=8,
+    )
+    assert task == "general"
+    assert reason == "router:general"
+    assert len(ollama.chat_calls) == 1
+
+
+async def test_skip_disabled_by_default_zero_threshold():
+    """skip_llm_under_tokens=0 (the default) preserves the old behavior:
+    even a one-word prompt reaches the router."""
+    from audrey.pipeline.classify import classify
+
+    ollama = _FakeOllama()
+    _task, reason, _conf = await classify(
+        ollama,
+        router_model="qwen3:4b",
+        router_timeout_s=5,
+        max_router_strikes=1,
+        user_text="hi",
+        skip_llm_under_tokens=0,
+    )
+    assert reason == "router:general"
+    assert len(ollama.chat_calls) == 1
+
+
+async def test_strong_keyword_still_wins_over_skip():
+    """A short prompt with a STRONG keyword keeps its keyword verdict — the
+    skip gate only governs the weak/none case."""
+    from audrey.pipeline.classify import classify
+
+    ollama = _FakeOllama()
+    task, reason, conf = await classify(
+        ollama,
+        router_model="qwen3:4b",
+        router_timeout_s=5,
+        max_router_strikes=1,
+        user_text="review this code",  # _REVIEW_OVERRIDE → reasoning, strong
+        skip_llm_under_tokens=8,
+    )
+    assert task == "reasoning"
+    assert reason == "keyword:review_override"
+    assert conf == 0.95
+    assert ollama.chat_calls == []

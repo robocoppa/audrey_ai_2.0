@@ -8,6 +8,12 @@ router:
   model: "qwen3:4b"
   timeout_s: 20
   max_failures_before_fallback: 2
+  # Skip the router LLM call for short prompts (<= N tokens) that produced no
+  # strong keyword signal — they're almost always `general` (the tool-capable
+  # fast path), so the round-trip is low-value and, on a busy GPU, the main
+  # reason the fast-path Thinking banner lagged. Weak keyword signals are still
+  # honored. Set 0 to always call the router. Conservative default.
+  skip_llm_under_tokens: 8
 
 # ─── Model registry ────────────────────────────────────────────────────
 # Per task type, ranked by priority (higher = preferred when healthy).
