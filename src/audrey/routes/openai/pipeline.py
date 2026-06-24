@@ -859,11 +859,9 @@ async def _phase_thinking(
             hits, user_id=user_id, include_store_hint=include_store_hint, cfg=cfg,
         )
         chat_history_available = tools is not None and "chat_history_search" in tools.by_name
-        web_search_available = tools is not None and "web_search" in tools.by_name
         composed = compose_system_messages(
             memory_hint=sys_msg,
             chat_history_guidance=chat_history_available,
-            web_search_guidance=web_search_available,
         )
         if composed:
             msgs = [msgs[0], *composed, *messages]

@@ -31,7 +31,6 @@ from audrey.pipeline.prompts import (
     PLANNER_SYSTEM,
     REACT_FINAL_ANSWER_USER,
     SYNTH_SYSTEM,
-    WEB_SEARCH_GUIDANCE,
     compose_system_messages,
     prompt_from_config,
 )
@@ -422,41 +421,4 @@ def test_compose_skips_blank_default_chat_history_text(flag, monkeypatch):
     override), composer must not emit a hollow system message."""
     monkeypatch.setattr(prompts, "CHAT_HISTORY_SEARCH_SYSTEM", "  ")
     out = compose_system_messages(chat_history_guidance=flag)
-    assert out == []
-
-
-# ─── web_search_guidance (Phase 23 — ground factual answers) ──────────
-
-
-def test_compose_adds_web_search_guidance_when_flag_on():
-    out = compose_system_messages(web_search_guidance=True)
-    assert out == [{"role": "system", "content": WEB_SEARCH_GUIDANCE}]
-
-
-def test_compose_omits_web_search_guidance_when_flag_off():
-    out = compose_system_messages(memory_hint={"role": "system", "content": "MEM"},
-                                  web_search_guidance=False)
-    assert out == [{"role": "system", "content": "MEM"}]
-
-
-def test_compose_web_search_guidance_comes_after_chat_history():
-    """Canonical order: memory → chat-history → web-search guidance."""
-    out = compose_system_messages(
-        memory_hint={"role": "system", "content": "MEM"},
-        chat_history_guidance=True,
-        web_search_guidance=True,
-    )
-    assert [m["content"] for m in out] == ["MEM", CHAT_HISTORY_SEARCH_SYSTEM, WEB_SEARCH_GUIDANCE]
-    assert all(m["role"] == "system" for m in out)
-
-
-def test_compose_uses_custom_web_search_text_when_provided():
-    out = compose_system_messages(web_search_guidance=True, web_search_text="CUSTOM")
-    assert out == [{"role": "system", "content": "CUSTOM"}]
-
-
-@pytest.mark.parametrize("flag", [True, False])
-def test_compose_skips_blank_default_web_search_text(flag, monkeypatch):
-    monkeypatch.setattr(prompts, "WEB_SEARCH_GUIDANCE", "  ")
-    out = compose_system_messages(web_search_guidance=flag)
     assert out == []

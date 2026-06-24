@@ -175,16 +175,14 @@ def build_graph(
         sys_msg = memory_system_message(
             hits, user_id=user_id, include_store_hint=include_store_hint, cfg=cfg,
         )
-        # Tool-gated guidance lands only when the live registry has the tool —
-        # telling a model how to use a tool it can't dispatch is wasted tokens.
-        # Composer enforces the canonical order: memory message first, then
-        # chat-history guidance, then web-search grounding guidance.
+        # Chat-history-search guidance lands only when the live registry
+        # has the tool — telling a model how to use a tool it can't
+        # dispatch is wasted tokens. Composer enforces the canonical
+        # order: memory message first, chat-history guidance after.
         chat_history_available = tools is not None and "chat_history_search" in tools.by_name
-        web_search_available = tools is not None and "web_search" in tools.by_name
         composed = compose_system_messages(
             memory_hint=sys_msg,
             chat_history_guidance=chat_history_available,
-            web_search_guidance=web_search_available,
         )
         if not composed:
             log.info("memory: no hits / no store hint for user=%s", user_id)
