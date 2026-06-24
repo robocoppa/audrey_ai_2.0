@@ -457,7 +457,7 @@ task type -> ranked registry list -> first model not cooling down
 ```
 
 Then `run_fast_path(...)` decides whether to use tools at
-[`fast_path.py:71`](../../src/audrey/pipeline/fast_path.py#L71):
+[`fast_path.py:114`](../../src/audrey/pipeline/fast_path.py#L114):
 
 ```python
 use_tools = bool(
@@ -472,20 +472,29 @@ ReAct loop. ReAct gets its own lesson later. For now, know that ReAct still uses
 the same selected model; it just gives the model a chance to call tools before
 writing the final answer.
 
-If tools are not used, the fast path is a single Ollama chat call at
-[`fast_path.py:85`](../../src/audrey/pipeline/fast_path.py#L85):
+If tools are not used, the fast path makes a single Ollama chat call, wrapped
+in a bounded fallback over the healthy candidates at
+[`fast_path.py:138`](../../src/audrey/pipeline/fast_path.py#L138):
 
 ```python
-async with gate.acquire(spec.name, location=spec.location, user_id=user_id):
+async with gate.acquire(cand.name, location=cand.location, user_id=user_id):
     resp = await ollama.chat(...)
-health.record_success(spec.name)
+health.record_success(cand.name)
 ```
 
 This line is where `location` matters.
 
-If `spec.location == "local"`, `FairLocalGate` may make the request wait for a
-GPU slot. If `spec.location == "cloud"`, the gate is a no-op and the call
+If `cand.location == "local"`, `FairLocalGate` may make the request wait for a
+GPU slot. If `cand.location == "cloud"`, the gate is a no-op and the call
 continues immediately.
+
+`cand` is the model being tried right now, not necessarily the top-ranked one.
+The non-tools fast path tries the highest-priority healthy model first; if that
+call raises, the model is cooled down and the next healthy candidate is tried
+(up to two). Only when every candidate fails does the error propagate. So a
+transient blip on the top model no longer fails the whole request when a healthy
+fallback exists. (The tools branch is single-shot — a tool call may have side
+effects, so it is not retried across models.)
 
 Both local and cloud models still go through `OllamaClient`. In Audrey's setup,
 `:cloud` models are exposed through the same Ollama-compatible API surface.
@@ -493,12 +502,13 @@ Both local and cloud models still go through `OllamaClient`. In Audrey's setup,
 concurrency hint.
 
 If the Ollama call raises `OllamaError`, the fast path records a failure at
-[`fast_path.py:92`](../../src/audrey/pipeline/fast_path.py#L92):
+[`fast_path.py:145`](../../src/audrey/pipeline/fast_path.py#L145):
 
 ```python
 except OllamaError as e:
-    health.record_failure(spec.name, str(e))
-    raise
+    health.record_failure(cand.name, str(e))
+    last_err = e
+    # ... continue to the next healthy candidate
 ```
 
 That is the model layer's central contract:
@@ -829,7 +839,7 @@ Here is what happens after the request reaches the graph:
 3. `node_fast_path` calls `run_fast_path(...)` at
    [`graph.py:244`](../../src/audrey/pipeline/graph.py#L244).
 4. `run_fast_path(...)` calls `pick_fast_model(...)` at
-   [`fast_path.py:70`](../../src/audrey/pipeline/fast_path.py#L70).
+   [`fast_path.py:113`](../../src/audrey/pipeline/fast_path.py#L113).
 5. `pick_fast_model(...)` asks the registry for the first healthy `general`
    candidate:
 
