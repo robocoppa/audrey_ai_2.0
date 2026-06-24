@@ -299,3 +299,60 @@ def test_tool_spec_to_ollama_tool_shape():
             "parameters": {"type": "object", "properties": {"user": {"type": "string"}}},
         },
     }
+
+
+# ─── discover_all concurrency + collision precedence (Phase 18) ────────
+
+
+async def test_discover_all_later_server_wins_on_collision(monkeypatch):
+    """Phase 18 fetches servers concurrently but must still fold them in
+    `server_urls` order, so the LATER-listed server wins a name collision —
+    the same precedence the old sequential loop gave. This is the one
+    behavior the gather reorder could threaten.
+
+    `discover_all` builds its own AsyncClient internally, so we patch the
+    module's `discover_one` to return scripted tools per URL instead of
+    hitting a transport.
+    """
+    from audrey.tools import discovery as discovery_mod
+
+    def _spec(name: str, server: str) -> ToolSpec:
+        return ToolSpec(
+            name=name, description=f"from {server}",
+            parameters={"type": "object", "properties": {}},
+            server_url=server, path=f"/{name}",
+        )
+
+    async def fake_discover_one(client, url, *, timeout_s=10.0):
+        # Both servers expose `shared`; only the second exposes `only_b`.
+        if url == "http://a.test":
+            return [_spec("shared", "http://a.test")]
+        return [_spec("shared", "http://b.test"), _spec("only_b", "http://b.test")]
+
+    monkeypatch.setattr(discovery_mod, "discover_one", fake_discover_one)
+
+    registry = await discover_all(["http://a.test", "http://b.test"])
+
+    assert sorted(registry.names()) == ["only_b", "shared"]
+    # Later server (b) wins the `shared` collision.
+    assert registry.get("shared").description == "from http://b.test"
+    assert registry.get("only_b").server_url == "http://b.test"
+
+
+async def test_discover_all_concurrent_fetch_preserves_first_server_on_no_collision(monkeypatch):
+    """Distinct tools from each server all register, regardless of which
+    coroutine finishes first — gather collects them, the fold is ordered."""
+    from audrey.tools import discovery as discovery_mod
+
+    async def fake_discover_one(client, url, *, timeout_s=10.0):
+        name = "tool_a" if url == "http://a.test" else "tool_b"
+        return [ToolSpec(
+            name=name, description="d",
+            parameters={"type": "object", "properties": {}},
+            server_url=url, path=f"/{name}",
+        )]
+
+    monkeypatch.setattr(discovery_mod, "discover_one", fake_discover_one)
+
+    registry = await discover_all(["http://a.test", "http://b.test"])
+    assert sorted(registry.names()) == ["tool_a", "tool_b"]

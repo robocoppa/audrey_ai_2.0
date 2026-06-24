@@ -35,9 +35,12 @@ failure handling is unchanged.
 - **[`src/audrey/tools/discovery.py`](../../src/audrey/tools/discovery.py)** —
   `discover_all` rewritten to gather concurrently and fold in input order.
   Per-server and final-total log lines preserved. `discover_one` unchanged.
-- **[`tests/test_discovery.py`](../../tests/test_discovery.py)** — a two-server
-  collision test asserting the later-listed server still wins after the
-  reorder (the one behavior the change could threaten).
+- **[`tests/test_discovery.py`](../../tests/test_discovery.py)** — two tests
+  (monkeypatching `discover_one`): the later-listed server still wins a name
+  collision after the reorder (the one behavior the change could threaten), and
+  distinct tools from each server all register regardless of completion order.
+- **`docs/ai-course/lesson-09` + `lesson-10`** — bumped the `discovery.py` cites
+  by +1 (the new `import asyncio` line shifted every symbol below it by one).
 
 ## Behavior invariant
 
@@ -64,8 +67,8 @@ docker compose logs -f audrey-ai
 
 ## Verification
 
-Hermetic (laptop): full suite green; the new collision test passes; ruff clean
-on `discovery.py`.
+Hermetic (laptop): **494 pytests pass** (+2 discovery tests); ruff clean on
+`discovery.py`; `discovery.py` lesson cites re-anchored (no drift).
 
 Live, on the box:
 

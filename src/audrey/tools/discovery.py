@@ -25,6 +25,7 @@ Failure modes:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -217,15 +218,26 @@ async def discover_one(
 
 
 async def discover_all(server_urls: list[str], *, timeout_s: float = 10.0) -> ToolRegistry:
-    """Discover tools across every configured server. Later names win on collision."""
+    """Discover tools across every configured server. Later names win on collision.
+
+    Servers are fetched concurrently (`asyncio.gather`), then folded into the
+    registry in `server_urls` order — so the collision precedence ("later names
+    win") is unchanged from the old sequential loop; only the network fetch now
+    overlaps. `discover_one` never raises (it returns `[]` on any error), so the
+    gather needs no `return_exceptions=True`.
+    """
     registry = ToolRegistry()
     if not server_urls:
         log.info("discovery: no tool servers configured, skipping")
         return registry
 
     async with httpx.AsyncClient() as client:
-        for url in server_urls:
-            tools = await discover_one(client, url, timeout_s=timeout_s)
+        results = await asyncio.gather(
+            *(discover_one(client, url, timeout_s=timeout_s) for url in server_urls)
+        )
+        # Fold in input order — `gather` preserves it, so the zip stays aligned
+        # and collision precedence matches the previous sequential behavior.
+        for url, tools in zip(server_urls, results, strict=True):
             for t in tools:
                 if t.name in registry.by_name:
                     log.warning("discovery: duplicate tool %r — %s overrides %s",

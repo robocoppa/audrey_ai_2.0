@@ -110,7 +110,7 @@ a good moment to let another user's request slip onto the GPU.
 
 These are the files we'll reference in this lesson:
 
-- [`src/audrey/tools/discovery.py:76`](../../src/audrey/tools/discovery.py#L76)
+- [`src/audrey/tools/discovery.py:77`](../../src/audrey/tools/discovery.py#L77)
   - turns OpenAPI specs into Ollama tool schemas.
 - [`src/audrey/tools/dispatch.py:79`](../../src/audrey/tools/dispatch.py#L79)
   - executes one tool call, returns a `ToolResult`, never raises.
@@ -125,7 +125,7 @@ call makes from registry to result.
 
 ### 2.1 Discovery happens once, at startup
 
-Open [`tools/discovery.py:177`](../../src/audrey/tools/discovery.py#L177).
+Open [`tools/discovery.py:178`](../../src/audrey/tools/discovery.py#L178).
 At startup, `lifespan` in `main.py` calls `discover_all(...)` once. That
 walks each tool server's `/openapi.json`, picks out the operations tagged
 `tools`, and builds a `ToolRegistry`:
@@ -160,7 +160,7 @@ Two practical consequences:
 The `name` is the FastAPI `operation_id`, the `description` is the route's
 summary or docstring, and `parameters` is the request-body schema with all
 `$ref`s inlined. That inlining lives in
-[`discovery.py:76`](../../src/audrey/tools/discovery.py#L76) (`_resolve_refs`).
+[`discovery.py:77`](../../src/audrey/tools/discovery.py#L77) (`_resolve_refs`).
 Ollama's tool-calling implementation does not follow refs at runtime, so
 Audrey resolves them ahead of time.
 
@@ -168,7 +168,7 @@ Audrey resolves them ahead of time.
 
 Models trip over JSON Schema keywords that aren't in their training-time
 tool format. Open
-[`tools/discovery.py:99`](../../src/audrey/tools/discovery.py#L99):
+[`tools/discovery.py:100`](../../src/audrey/tools/discovery.py#L100):
 
 ```python
 def _strip_unsupported_keywords(schema):
@@ -191,7 +191,7 @@ down. Getting that wrong would silently drop every property in your schema.
 ### 2.3 `ToolSpec` carries enough to dispatch later
 
 A discovered tool is held in this dataclass at
-[`tools/discovery.py:39`](../../src/audrey/tools/discovery.py#L39):
+[`tools/discovery.py:40`](../../src/audrey/tools/discovery.py#L40):
 
 ```python
 @dataclass(slots=True)
