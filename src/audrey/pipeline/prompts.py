@@ -121,6 +121,22 @@ CHAT_HISTORY_SEARCH_SYSTEM = (
     "burns context every time."
 )
 
+# Nudges tool-capable workers to *ground* factual answers instead of relying
+# on parametric memory. Without this, models with confident training-data
+# recall (e.g. on a well-known figure) answer directly while others search —
+# so a single panel can mix grounded and ungrounded drafts. Only injected when
+# `web_search` is in the registry; gated like CHAT_HISTORY_SEARCH_SYSTEM so it
+# costs nothing when the tool is absent. Kept conservative so it doesn't make
+# the model search trivia it obviously knows.
+WEB_SEARCH_GUIDANCE = (
+    "When a question turns on specific facts — names, dates, events, figures, "
+    "recent or niche information, or anything that may have changed since your "
+    "training — verify with `web_search` before answering rather than relying "
+    "on memory. Prefer a grounded answer with sources over a confident guess. "
+    "You don't need to search for things you plainly know (basic definitions, "
+    "common knowledge); reserve it for claims a reader would want checked."
+)
+
 
 # ─── Override loader ──────────────────────────────────────────────────
 
@@ -134,6 +150,7 @@ _PROMPT_KEYS = frozenset({
     "react_final_answer",
     "memory_store_hint",
     "chat_history_search",
+    "web_search_guidance",
 })
 
 
@@ -193,6 +210,8 @@ def compose_system_messages(
     memory_hint: dict[str, Any] | None = None,
     chat_history_guidance: bool = False,
     chat_history_text: str | None = None,
+    web_search_guidance: bool = False,
+    web_search_text: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return a list of system messages in canonical order.
 
@@ -212,6 +231,11 @@ def compose_system_messages(
          registry has `chat_history_search`. `chat_history_text`
          lets callers override the default text without going through
          the config loader (rare; mostly used in tests).
+      5. Web-search grounding guidance — included only when
+         `web_search_guidance=True`, signaling the live registry has
+         `web_search`. Nudges tool-capable workers to verify factual
+         claims instead of answering from parametric memory.
+         `web_search_text` lets callers pass a config-overridden body.
 
     Returns a fresh list. The caller is responsible for placing it
     relative to the user/assistant turns. Existing call sites prepend
@@ -230,6 +254,10 @@ def compose_system_messages(
         body = chat_history_text if chat_history_text is not None else CHAT_HISTORY_SEARCH_SYSTEM
         if body.strip():
             out.append({"role": "system", "content": body})
+    if web_search_guidance:
+        body = web_search_text if web_search_text is not None else WEB_SEARCH_GUIDANCE
+        if body.strip():
+            out.append({"role": "system", "content": body})
     return out
 
 
@@ -240,6 +268,7 @@ __all__ = [
     "REACT_FINAL_ANSWER_USER",
     "MEMORY_STORE_HINT",
     "CHAT_HISTORY_SEARCH_SYSTEM",
+    "WEB_SEARCH_GUIDANCE",
     "prompt_from_config",
     "compose_system_messages",
 ]
