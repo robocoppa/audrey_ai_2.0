@@ -89,22 +89,29 @@ fast_path:
     - "glm-5.2:cloud"
 
 # ─── Deep panel: mixed (audrey_deep) ───────────────────────────────────
-# Two workers per task: one local + one cloud so the cloud worker can run
-# while the local worker holds the GPU gate. VRAM on the host fits one
-# local model at a time (GPU_CONCURRENCY=1).
+# One local + TWO cloud workers per task (text tasks). The local worker holds
+# the GPU gate; both cloud workers run concurrently next to it (Ollama Pro caps
+# at `agentic.max_deep_workers_cloud`, default 3), so the second cloud draft is
+# near-free on wall-clock and gives the synthesizer a third, independent take.
+# The two cloud models are deliberately different vendors for draft diversity.
+# VRAM on the host fits one local model at a time (GPU_CONCURRENCY=1).
 deep_panel:
   code:
-    workers: ["qwen3-coder-next:latest", "kimi-k2.7-code:cloud"]
+    workers: ["qwen3-coder-next:latest", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud"]
     synthesizer: "qwen3.6:35b"
     fallback_synth: "glm-5.2:cloud"
   reasoning:
-    workers: ["qwen3.6:35b", "kimi-k2.6:cloud"]
+    workers: ["qwen3.6:35b", "kimi-k2.6:cloud", "deepseek-v4-pro:cloud"]
     synthesizer: "qwen3.6:35b"
     fallback_synth: "glm-5.2:cloud"
   general:
-    workers: ["qwen3.6:35b", "kimi-k2.6:cloud"]
+    workers: ["qwen3.6:35b", "kimi-k2.6:cloud", "deepseek-v4-pro:cloud"]
     synthesizer: "qwen3.6:35b"
     fallback_synth: "glm-5.2:cloud"
+  # vl stays one local + one cloud: the deep path rebuilds prompts text-only,
+  # so the cloud workers never see the image — and image turns force the fast
+  # path anyway (the local qwen3-vl is the real worker). A second cloud draft
+  # here would merge a blind text take, so it isn't worth the call.
   vl:
     workers: ["qwen3-vl:32b", "kimi-k2.6:cloud"]
     synthesizer: "qwen3.6:35b"
@@ -152,6 +159,11 @@ deep_panel_local:
 
 # ─── Agentic behavior ──────────────────────────────────────────────────
 agentic:
+  # Max concurrent cloud workers per deep request, across all deep pools.
+  # Ollama Pro caps parallel cloud calls (≈3); this keeps `2 cloud per
+  # request × concurrent users` from blowing past it and 429-ing. Was an
+  # implicit code default (3) — pinned here so it's visible and tunable.
+  max_deep_workers_cloud: 3
   react:
     max_rounds: 3
     compress_after_round: 2
@@ -175,7 +187,7 @@ agentic:
   planning:
     enabled: true
     min_prompt_tokens: 40
-    max_subtasks: 2        # matches deep-panel pool size; prevents dropped subtasks
+    max_subtasks: 3        # matches the 3-worker text deep-panel pools; prevents dropped subtasks
   reflection:
     enabled: true
     max_retries: 1
