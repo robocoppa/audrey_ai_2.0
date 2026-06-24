@@ -110,7 +110,7 @@ Audrey just remembers the answer briefly.*
 **dependency**. A dependency in FastAPI is a function whose return
 value gets injected into a route handler automatically. The chat
 route declares it at
-[`routes/openai.py:232`](../../src/audrey/routes/openai.py#L232):
+[`routes/openai/routes.py:87`](../../src/audrey/routes/openai/routes.py#L87):
 
 ```python
 async def chat_completions(
@@ -213,7 +213,7 @@ Three things happen on the way to `me`:
 
 Once `require_user` returns, the route has a trusted `AuthedUser` and
 uses `me.email` everywhere a `user_id` is needed. Notice this guard
-at [`routes/openai.py:257`](../../src/audrey/routes/openai.py#L257):
+at [`routes/openai/routes.py:102`](../../src/audrey/routes/openai/routes.py#L102):
 
 ```python
 # Identity comes from the Authorization header via require_user, NOT from
@@ -366,7 +366,7 @@ Two details:
   synth deltas (not the banner emissions) — the docstring on
   `StreamCollector` spells out the contract, and
   `_stream_deep_with_banners` at
-  [`routes/openai.py:898`](../../src/audrey/routes/openai.py#L898)
+  [`routes/openai/pipeline.py:460`](../../src/audrey/routes/openai/pipeline.py#L460)
   honors it.
 - **`partial=True` on client disconnect.** `wrap()` catches
   `CancelledError` from the source generator and sets
@@ -417,7 +417,7 @@ Step 5 only fires when there are no messages and no user — a true
 edge case (anonymous request with empty history).
 
 The route resolves this once before pipeline branching at
-[`routes/openai.py:284`](../../src/audrey/routes/openai.py#L284), then
+[`routes/openai/routes.py:136`](../../src/audrey/routes/openai/routes.py#L136), then
 threads `conversation_id` through both the streaming and non-streaming
 paths so capture and archive write agree.
 
@@ -433,11 +433,11 @@ called **once per request, after the assistant content is known.**
 non-streaming request, the full reply is built inside the pipeline
 and returned as one chunk — the archive call fires after the graph
 finishes, just before the route hands the JSON response back to the
-client (see [`routes/openai.py:532`](../../src/audrey/routes/openai.py#L532)).
+client (see [`routes/openai/pipeline.py:115`](../../src/audrey/routes/openai/pipeline.py#L115)).
 For a streaming-deep request, the reply is *only* fully known once
 the SSE stream has been fully emitted — so the archive call lives at
 the very end of `_stream_deep_with_banners` (see
-[`routes/openai.py:1213`](../../src/audrey/routes/openai.py#L1213)),
+[`routes/openai/pipeline.py:447`](../../src/audrey/routes/openai/pipeline.py#L447)),
 using `final_content` accumulated by the narrow `StreamCollector.wrap`
 discussed in §2.3. Two call sites, two different "the content is now
 known" moments, one writer.
@@ -548,11 +548,11 @@ recall are wrappers; the *building blocks* (`datetime_system_message`,
 `recall_for_request`, `compose_system_messages`) are plain functions
 in `pipeline/context.py` and `pipeline/memory.py`. That's because the
 streaming-deep route bypasses the graph and calls them directly at
-[`routes/openai.py:1284`](../../src/audrey/routes/openai.py#L1284).
+[`routes/openai/pipeline.py:846`](../../src/audrey/routes/openai/pipeline.py#L846).
 
 | | Non-streaming | Streaming-deep |
 |---|---|---|
-| Lives in | [`graph.py:138, 154`](../../src/audrey/pipeline/graph.py#L138) | [`routes/openai.py:1284`](../../src/audrey/routes/openai.py#L1284) |
+| Lives in | [`graph.py:138, 154`](../../src/audrey/pipeline/graph.py#L138) | [`routes/openai/pipeline.py:846`](../../src/audrey/routes/openai/pipeline.py#L846) |
 | Datetime | `node_datetime` | direct `datetime_system_message()` call |
 | Recall | `node_memory_recall` | direct `recall_for_request()` call |
 | Composer | `compose_system_messages(...)` | `compose_system_messages(...)` |

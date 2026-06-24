@@ -99,7 +99,7 @@ the short local spur or the longer panel route.
 
 These are the files we'll reference in this lesson:
 
-- [`src/audrey/routes/openai.py:513`](../../src/audrey/routes/openai.py#L513)
+- [`src/audrey/routes/openai/pipeline.py:96`](../../src/audrey/routes/openai/pipeline.py#L96)
   - where the non-streaming route builds the initial graph state.
 - [`src/audrey/pipeline/state.py:27`](../../src/audrey/pipeline/state.py#L27)
   - the shared request state that graph nodes read and update.
@@ -119,7 +119,7 @@ shape is the sequence of decisions.
 
 The non-streaming route handler hands off to a helper that builds a
 plain dictionary named `state`. Open
-[`routes/openai.py:506`](../../src/audrey/routes/openai.py#L506),
+[`routes/openai/pipeline.py:96`](../../src/audrey/routes/openai/pipeline.py#L96),
 which is the start of `_generate_via_pipeline`:
 
 ```python
@@ -134,7 +134,7 @@ state = {
 ```
 
 That dictionary is built at
-[`routes/openai.py:513`](../../src/audrey/routes/openai.py#L513).
+[`routes/openai/pipeline.py:103`](../../src/audrey/routes/openai/pipeline.py#L103).
 This dictionary is the graph's starting memory for one request. The user asked
 for a virtual model, sent messages, maybe set generation options, and was
 authenticated as a particular user.
@@ -564,18 +564,18 @@ audrey_auto fast answer
 ### 2.10 Streaming uses a separate driver
 
 Non-streaming requests run the compiled graph through
-[`_generate_via_pipeline` at routes/openai.py:506](../../src/audrey/routes/openai.py#L506).
+[`_generate_via_pipeline` at routes/openai/pipeline.py:96](../../src/audrey/routes/openai/pipeline.py#L96).
 
 Streaming has to interleave progress banners and token chunks, so it has a
 separate route driver beginning at
-[`_stream_via_pipeline` at routes/openai.py:580](../../src/audrey/routes/openai.py#L580).
+[`_stream_via_pipeline` at routes/openai/pipeline.py:171](../../src/audrey/routes/openai/pipeline.py#L171).
 
 The streaming route still performs the same major decisions:
 
-- classify at [`routes/openai.py:622`](../../src/audrey/routes/openai.py#L622)
-- count complexity at [`routes/openai.py:630`](../../src/audrey/routes/openai.py#L630)
-- force deep/fast from the virtual model at [`routes/openai.py:631`](../../src/audrey/routes/openai.py#L631)
-- choose deep banners or fast streaming at [`routes/openai.py:659`](../../src/audrey/routes/openai.py#L659)
+- count complexity at [`routes/openai/pipeline.py:216`](../../src/audrey/routes/openai/pipeline.py#L216)
+- force deep/fast from the virtual model at [`routes/openai/pipeline.py:217`](../../src/audrey/routes/openai/pipeline.py#L217)
+- choose deep banners or fast streaming at [`routes/openai/pipeline.py:236`](../../src/audrey/routes/openai/pipeline.py#L236)
+- classify (to pick the concrete model) at [`routes/openai/pipeline.py:240`](../../src/audrey/routes/openai/pipeline.py#L240) for deep, [`pipeline.py:302`](../../src/audrey/routes/openai/pipeline.py#L302) for fast
 
 But it is not literally the graph. It mirrors the same ideas so it can stream
 the right user experience. We will revisit the streaming route in a later

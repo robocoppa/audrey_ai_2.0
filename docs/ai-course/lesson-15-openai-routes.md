@@ -1,27 +1,40 @@
-# Lesson 15 — `routes/openai.py` end-to-end
+# Lesson 15 — the OpenAI routes, end-to-end
 
-**Estimated time:** 60-90 minutes. Keep
-[`routes/openai.py`](../../src/audrey/routes/openai.py) open.
+**Estimated time:** 60-90 minutes. Keep the
+[`routes/openai/`](../../src/audrey/routes/openai/) package open.
 
 **Goal:** by the end of this lesson, you can answer
-*"when a chat request lands, how does this file decide which pipeline
+*"when a chat request lands, how does the route decide which pipeline
 runs, how does it stream a deep panel without buffering the whole
 answer, and what happens when the client hangs up?"*
 
 Lesson 4 walked one request through Audrey at high altitude — enough
-to see where `routes/openai.py` fits in the request lifecycle, not
+to see where the OpenAI route fits in the request lifecycle, not
 enough to read any single function in it. This lesson lands on the
-file. It's the biggest in the project (~1400 lines, twenty-one
-functions) because it owns three responsibilities that don't share
-much code: schema validation, the five virtual models, and the
-streaming SSE machinery.
+code. It was once a single ~1500-line module, but it owns three
+responsibilities that don't share much code — schema validation, the
+five virtual models, and the streaming SSE machinery — so it's now a
+**package** split by responsibility:
+
+| Module                         | What it holds                                  |
+| ------------------------------ | ---------------------------------------------- |
+| `schemas.py`                   | `ChatMessage`, `ChatCompletionRequest`         |
+| `responses.py`                 | OpenAI response formatting (pure helpers)      |
+| `passthrough.py`               | the `audrey_passthrough/<concrete>` family     |
+| `pipeline.py`                  | the streaming + non-streaming engine           |
+| `routes.py`                    | the `@router` endpoints (the thin dispatch layer) |
+
+`__init__.py` re-exports the public surface, so `from
+audrey.routes.openai import …` still works for `main.py` and the
+tests. Read the modules in roughly the order above — each depends only
+on the ones before it.
 
 
 ## 1. Context
 
-### 1.1 What this file owns
+### 1.1 What the route owns
 
-`routes/openai.py` is Audrey's only public chat surface. Every request
+The OpenAI route is Audrey's only public chat surface. Every request
 a client sends to `POST /v1/chat/completions` lands here, gets
 validated against `ChatCompletionRequest`, gets dispatched to one of
 three entry points (passthrough, generate, stream), and eventually
@@ -60,7 +73,7 @@ custom `X-Audrey-Mode` header — which would fail through any client
 that doesn't expose custom header configuration (most of them).
 
 The five non-passthrough names are listed once in `VIRTUAL_MODELS`
-at [`routes/openai.py:88`](../../src/audrey/routes/openai.py#L88).
+at [`routes/openai/routes.py:39`](../../src/audrey/routes/openai/routes.py#L39).
 Passthrough uses a *prefix* (`audrey_passthrough/`) so one virtual
 model can route to any concrete model in
 `passthrough.allowed_models`; the deploy notes for the passthrough
@@ -97,7 +110,7 @@ else.
 
 ### 2.1 The schema
 
-[`routes/openai.py:158-191`](../../src/audrey/routes/openai.py#L158)
+[`routes/openai/schemas.py:16-57`](../../src/audrey/routes/openai/schemas.py#L16)
 defines two Pydantic models:
 
 ```python
@@ -137,14 +150,14 @@ Three fields earn special mention:
   identity**. Audrey's user ID comes from the bearer token
   (`require_user → AuthedUser.email`); `payload.user` is logged for
   drift-debugging at
-  [`routes/openai.py:257`](../../src/audrey/routes/openai.py#L257)
+  [`routes/openai/routes.py:102`](../../src/audrey/routes/openai/routes.py#L102)
   and otherwise ignored. The field is in the schema purely for
   client compat.
 
 ### 2.2 The dispatch decision tree
 
 The route entry is
-[`routes/openai.py:231-305`](../../src/audrey/routes/openai.py#L231).
+[`routes/openai/routes.py:84`](../../src/audrey/routes/openai/routes.py#L84).
 The ordering of checks is load-bearing — getting it wrong would
 either leak identity surface or let invalid passthrough requests
 escape into the pipeline.
@@ -166,7 +179,7 @@ payload.stream?
 ```
 
 Three things to notice in
-[`routes/openai.py:231-305`](../../src/audrey/routes/openai.py#L231):
+[`routes/openai/routes.py:84`](../../src/audrey/routes/openai/routes.py#L84):
 
   - **Passthrough is checked first** because it owns its own model-string
     space (`audrey_passthrough/<x>`) and isn't in `VIRTUAL_MODELS`. If
@@ -175,12 +188,12 @@ Three things to notice in
   - **`VIRTUAL_MODELS` is validated in the route, not the schema.** A
     Pydantic `Literal[...]` would push this to the 422 layer with
     less-helpful error text. The route check at
-    [`routes/openai.py:245-252`](../../src/audrey/routes/openai.py#L245)
+    [`routes/openai/routes.py:90`](../../src/audrey/routes/openai/routes.py#L90)
     emits `"Unknown model 'X'. Supported virtual models: [...]"` —
     actionable enough that a developer trying `audrey_deeo` (typo)
     can fix it without grepping the source.
   - **`conversation_id` is resolved once, before the branch** at
-    [`routes/openai.py:280-286`](../../src/audrey/routes/openai.py#L280).
+    [`routes/openai/routes.py:120`](../../src/audrey/routes/openai/routes.py#L120).
     Both pipeline paths receive the same id, so a stream and a
     non-stream completion of the same conversation thread into the
     archive correctly. Lesson 13 §2.5 covered how
@@ -212,7 +225,7 @@ OpenAI's chat-completion streaming spec is more structured: each
 frame is a JSON object describing a *delta* (a piece of the response
 being built), with a final `data: [DONE]\n\n` marker. Audrey emits
 that shape directly. You can see the helpers at
-[`routes/openai.py:934-948`](../../src/audrey/routes/openai.py#L934)
+[`routes/openai/responses.py:73`](../../src/audrey/routes/openai/responses.py#L73)
 inside `_stream_deep_with_banners`:
 
 ```python
@@ -243,7 +256,7 @@ streams — and why the next subsection's architecture matters.
 ### 2.4 The non-streaming path
 
 `_generate_via_pipeline` at
-[`routes/openai.py:506-578`](../../src/audrey/routes/openai.py#L506)
+[`routes/openai/pipeline.py:96`](../../src/audrey/routes/openai/pipeline.py#L96)
 is the simpler half. The shape:
 
 ```
@@ -286,14 +299,14 @@ forces fast mode for these, it isn't overriding a choice the user made
 — it's declining to act on a choice nobody made, refusing to burn a
 full deep-panel run on a string OWUI will truncate to one line. The
 streaming path runs the *same* check inline at
-[`routes/openai.py:633`](../../src/audrey/routes/openai.py#L633)
+[`routes/openai/pipeline.py:218`](../../src/audrey/routes/openai/pipeline.py#L218)
 (because it bypasses the graph — §2.5); this is a deliberate two-gate
 behavior, not a streaming-path one-off.
 
 ### 2.5 The streaming deep path — `_stream_deep_with_banners`
 
 Open
-[`routes/openai.py:898`](../../src/audrey/routes/openai.py#L898).
+[`routes/openai/pipeline.py:460`](../../src/audrey/routes/openai/pipeline.py#L460).
 This function is the single longest in the file (~330 lines) and
 the most complicated. It's a streaming deep panel: a 30-second
 response built from multiple parallel workers, with banner text
@@ -394,7 +407,7 @@ the lifecycle of a single phase's progress line.
 **It's an async context manager.** You met those in Lesson 1; here's one
 doing real work. The route uses it like this (the actual call site for the
 panel phase is
-[routes/openai.py:1023](../../src/audrey/routes/openai.py#L1023)):
+[routes/openai/pipeline.py:585](../../src/audrey/routes/openai/pipeline.py#L585)):
 
 ```python
 async with PhaseTicker(BANNER_DISPATCHING, emit) as ticker:
@@ -469,11 +482,11 @@ Trace the cancel through:
      `asyncio.CancelledError` into the generator that's producing
      SSE frames.
   2. **The generator's `try` block catches it** at
-     [`routes/openai.py:1181`](../../src/audrey/routes/openai.py#L1181).
+     [`routes/openai/pipeline.py:700`](../../src/audrey/routes/openai/pipeline.py#L700).
      The route records `pipeline_outcome = "cancelled"` (so the
      metric reflects "user left," not "ok") and re-raises.
   3. **The inner `try/finally` at
-     [`routes/openai.py:1173-1179`](../../src/audrey/routes/openai.py#L1173)**
+     [`routes/openai/pipeline.py:624`](../../src/audrey/routes/openai/pipeline.py#L624)**
      cancels the synth producer task explicitly:
 
      ```python
@@ -514,7 +527,7 @@ Audrey can't fix on its own.
 
 ### 2.8 The passthrough fork
 
-[`_handle_passthrough` at routes/openai.py:308](../../src/audrey/routes/openai.py#L308)
+[`_handle_passthrough` at routes/openai/routes.py:95](../../src/audrey/routes/openai/routes.py#L95)
 is a sibling of the pipeline dispatch — same `inflight.slot()` wrap,
 same fair-gate acquisition (inside the helper), but no classifier,
 no complexity gate, no banners. It exists for one specific use case:
@@ -524,12 +537,12 @@ notes cover the design rationale and the per-client wiring.
 
 The route-side fork is small. It splits into streaming
 (`_passthrough_stream_sse` at
-[`routes/openai.py:395`](../../src/audrey/routes/openai.py#L395))
+[`routes/openai/passthrough.py:180`](../../src/audrey/routes/openai/passthrough.py#L180))
 and non-streaming. The streaming variant *doesn't share*
 `_stream_deep_with_banners` because there are no banners — Ollama's
 own chunks get reshaped to OpenAI SSE format and forwarded
 verbatim. The `_ollama_to_openai_tool_calls` helper at
-[`routes/openai.py:861`](../../src/audrey/routes/openai.py#L861)
+[`routes/openai/pipeline.py:445`](../../src/audrey/routes/openai/pipeline.py#L445)
 handles one specific format mismatch: Ollama returns tool-call
 arguments as a dict, OpenAI clients expect a JSON string. Audrey
 serializes it before forwarding.
@@ -541,7 +554,7 @@ decision themselves."
 
 ### 2.9 Why `_options_from_request` exists
 
-[`routes/openai.py:808-816`](../../src/audrey/routes/openai.py#L808):
+[`routes/openai/pipeline.py:392`](../../src/audrey/routes/openai/pipeline.py#L392):
 
 ```python
 def _options_from_request(req: ChatCompletionRequest) -> dict[str, Any]:
@@ -588,7 +601,7 @@ what point in the request lifecycle does it fire?**
 422, before `require_user` even runs. FastAPI resolves request
 validation as part of dependency injection, and Pydantic's
 `Field(min_length=1)` on `ChatCompletionRequest.messages`
-([`routes/openai.py:166`](../../src/audrey/routes/openai.py#L166))
+([`routes/openai/schemas.py:24`](../../src/audrey/routes/openai/schemas.py#L24))
 rejects the empty list during schema validation — which happens
 *before* the route's body and *before* its declared dependencies
 get awaited. The user gets a structured 422 with a path-based error
@@ -604,7 +617,7 @@ prompt. What runs?**
 
 Fast path, unconditionally. The `audrey_fast` virtual model is the
 "always fast" override: at
-[`routes/openai.py:632`](../../src/audrey/routes/openai.py#L632)
+[`routes/openai/pipeline.py:216`](../../src/audrey/routes/openai/pipeline.py#L216)
 the route sets `forced_fast = payload.model == "audrey_fast"`, and
 the subsequent branch picks fast regardless of `is_complex()`'s
 verdict. The complexity gate that normally escalates long prompts
@@ -623,7 +636,7 @@ disagree.
 does the client see? What does the archive write look like?**
 
 The `_stream_deep_with_banners` exception handler at
-[`routes/openai.py:1188-1199`](../../src/audrey/routes/openai.py#L1188)
+[`routes/openai/pipeline.py:693`](../../src/audrey/routes/openai/pipeline.py#L693)
 catches the failure, sets `pipeline_outcome = "error"`, and yields
 two final frames: a delta containing `"\n\n[ollama error: ...]"`
 (or `"\n\n[internal error]"` for non-Ollama exceptions) and a stop
@@ -633,7 +646,7 @@ the HTTP response already started streaming and the status was
 committed to `200 OK` the moment the first frame went out.
 
 The archive write at
-[`routes/openai.py:1200-1213`](../../src/audrey/routes/openai.py#L1200)
+[`routes/openai/pipeline.py:704`](../../src/audrey/routes/openai/pipeline.py#L704)
 runs in the `finally` block, which fires *after* the error
 handling. It captures whatever `final_content` accumulated up to
 the failure (which may be partial or empty if the failure came
@@ -646,19 +659,19 @@ got; the archive records what actually streamed.
 what gets forwarded and what gets reshaped.**
 
 The route hits
-[`routes/openai.py:242`](../../src/audrey/routes/openai.py#L242),
+[`routes/openai/routes.py:87`](../../src/audrey/routes/openai/routes.py#L87),
 recognizes the `audrey_passthrough/` prefix, and dispatches to
 `_handle_passthrough`. There the `tools` array is forwarded
 *verbatim* to Ollama — Audrey doesn't filter, validate, or
 substitute. This is the only path where `payload.tools` does
 anything; in pipeline modes, the field is dropped on the floor
 (see §2.1 and the field's docstring at
-[`routes/openai.py:171`](../../src/audrey/routes/openai.py#L171)).
+[`routes/openai/schemas.py:29`](../../src/audrey/routes/openai/schemas.py#L29)).
 
 Reshaping happens *on the way back*. Ollama returns tool-call
 arguments as a Python dict, but the OpenAI streaming spec expects
 arguments as a JSON-encoded *string*. The reshape lives at
-[`routes/openai.py:861`](../../src/audrey/routes/openai.py#L861)
+[`routes/openai/pipeline.py:445`](../../src/audrey/routes/openai/pipeline.py#L445)
 (`_ollama_to_openai_tool_calls`) and serializes each call's
 arguments via `json.dumps`, plus generating a synthetic `id`
 (Ollama doesn't supply one). Agent clients like Hermes and
@@ -674,14 +687,14 @@ Five things have to land cleanly:
 
 - **The route generator** receives `asyncio.CancelledError` from
   Starlette. It catches at
-  [`routes/openai.py:1181`](../../src/audrey/routes/openai.py#L1181),
+  [`routes/openai/pipeline.py:700`](../../src/audrey/routes/openai/pipeline.py#L700),
   records `outcome="cancelled"`, and re-raises.
-- **The inner `try/finally` at routes/openai.py:1173** cancels
+- **The inner `try/finally` at routes/openai/pipeline.py:666** cancels
   `synth_task` and awaits it — making sure the synth producer
   doesn't keep streaming into a queue nobody reads.
 - **The four worker tasks** are awaited via `panel_task` (the
   `_phase_dispatch` background task at
-  [`routes/openai.py:1024`](../../src/audrey/routes/openai.py#L1024)).
+  [`routes/openai/pipeline.py:585`](../../src/audrey/routes/openai/pipeline.py#L585)).
   Cancellation propagates through `panel_task` into the deep-panel's
   worker coroutines, which were already inside `async with
   gate.acquire(...)` blocks. The gate's release fires via context-manager
@@ -709,7 +722,7 @@ have selected `audrey_deep`. What runs and why?**
 
 Fast mode runs, not deep. The `is_owui_task_request(messages)`
 check at
-[`routes/openai.py:633`](../../src/audrey/routes/openai.py#L633)
+[`routes/openai/pipeline.py:218`](../../src/audrey/routes/openai/pipeline.py#L218)
 detects OWUI's utility prompts by a single tell: the latest user
 message opens with the `### Task:` header OWUI stamps on its
 internal prompts (the conversation is bundled into the body, but

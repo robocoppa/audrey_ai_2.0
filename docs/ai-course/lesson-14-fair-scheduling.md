@@ -89,8 +89,8 @@ and the synthesizer runs after — each touch of the GPU is a separate
 [`pipeline/react.py`](../../src/audrey/pipeline/react.py). The
 in-flight cap, by contrast, is acquired exactly *once per request*,
 right at the route boundary in
-[`routes/openai.py:521`](../../src/audrey/routes/openai.py#L521) and
-[`routes/openai.py:616`](../../src/audrey/routes/openai.py#L616).
+[`routes/openai/pipeline.py:111`](../../src/audrey/routes/openai/pipeline.py#L111) and
+[`routes/openai/pipeline.py:207`](../../src/audrey/routes/openai/pipeline.py#L207).
 The whole pipeline executes inside that single `async with` block.
 
 ### 2.2 The fair gate

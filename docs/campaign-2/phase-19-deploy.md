@@ -105,6 +105,17 @@ the package layout (a lesson edit — match the course style per `AGENTS.md`).
 > to `docs/lessons/`. Always pass the `DOCS_GLOB` override above, or it
 > reports "no docs found."
 
+**Done (2026-06-24, commit 2):** all 51 cites across the 6 published lessons
+(02/04/07/13/14/15) re-anchored to the new package paths — zero confident
+DRIFT on the `routes/openai/` package, convention checker clean on all six,
+494 pytests still green. Lesson 15's title/intro/§1.1 reframed from "the
+1497-line file" to the package layout (added a module table). **AUDIT.md's 31
+cites were deliberately left** — that's the gitignored, dated audit-queue
+record; its cites describe `routes/openai.py` *as it existed when each finding
+was filed* (several literally log prior cite-drift fixes), so rewriting them to
+the new paths would falsify the history. AUDIT.md is an internal log, not a
+reader-followed citation set.
+
 ## Risk / rollback
 
 - **Import cycle** between `routes` and `streaming` → move shared SSE helpers

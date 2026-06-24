@@ -281,11 +281,11 @@ something deeply, here's where to look first.
 
 | If you're asking… | Look in… |
 |---|---|
-| "Where does a request enter Audrey?" | [`routes/openai.py:232`](../../src/audrey/routes/openai.py#L232) |
+| "Where does a request enter Audrey?" | [`routes/openai/routes.py:84`](../../src/audrey/routes/openai/routes.py#L84) (`chat_completions`) |
 | "How does the pipeline decide what to do?" | [`pipeline/graph.py:413`](../../src/audrey/pipeline/graph.py#L413) (the graph topology) |
 | "Why did it pick model X?" | [`pipeline/classify.py`](../../src/audrey/pipeline/classify.py) + [`models/registry.py`](../../src/audrey/models/registry.py) |
 | "Why did the request hang?" | [`pipeline/fair_gate.py`](../../src/audrey/pipeline/fair_gate.py) (GPU queue) + Ollama logs |
-| "How did the answer get streamed?" | [`routes/openai.py:898`](../../src/audrey/routes/openai.py#L898) (`_stream_deep_with_banners`) |
+| "How did the answer get streamed?" | [`routes/openai/pipeline.py:460`](../../src/audrey/routes/openai/pipeline.py#L460) (`_stream_deep_with_banners`) |
 | "Where do tools get called?" | [`pipeline/react.py`](../../src/audrey/pipeline/react.py) |
 
 Bookmark this. You'll come back.
@@ -399,7 +399,7 @@ and the underlying httpx call fails. Audrey's Ollama client wrapper
 catches the httpx error and re-raises it as the project's own typed
 `OllamaError`. That exception propagates up through the pipeline
 to the route handler, which catches it explicitly (see
-[`routes/openai.py:524`](../../src/audrey/routes/openai.py#L524))
+[`routes/openai/pipeline.py:115`](../../src/audrey/routes/openai/pipeline.py#L115))
 and converts it to **HTTP 502 Bad Gateway** with a JSON error body
 explaining the upstream failure:
 

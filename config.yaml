@@ -139,17 +139,22 @@ deep_panel_cloud:
 
 # ─── Deep panel: local-only (audrey_local) ─────────────────────────────
 # Both workers serialize through GpuGate (GPU_CONCURRENCY=1) — no parallelism.
+# Worker ORDER matters here: the first-listed worker runs first (and loads
+# cold first), so it's the de-facto primary. reasoning + general lead with
+# deepseek-r1:32b, then qwen3.6:35b. (Dropped glm-4.7-flash:q8_0 from general:
+# it was hitting the 240s deep_worker ReadTimeout — too slow to cold-load +
+# generate when it ran second behind qwen3.6 through the single GPU.)
 deep_panel_local:
   code:
     workers: ["qwen3-coder-next:latest", "qwen2.5-coder:32b"]
     synthesizer: "qwen3.6:35b"
     fallback_synth: "qwen3.6:35b"
   reasoning:
-    workers: ["qwen3.6:35b", "deepseek-r1:32b"]
+    workers: ["deepseek-r1:32b", "qwen3.6:35b"]
     synthesizer: "qwen3.6:35b"
     fallback_synth: "qwen3.6:35b"
   general:
-    workers: ["qwen3.6:35b", "glm-4.7-flash:q8_0"]
+    workers: ["deepseek-r1:32b", "qwen3.6:35b"]
     synthesizer: "qwen3.6:35b"
     fallback_synth: "qwen3.6:35b"
   vl:
@@ -212,7 +217,12 @@ timeouts:
   medium: 180
   large: 360
   cloud: 240
-  deep_worker: 240
+  # Per-worker deadline for local-holding deep pools (deep_panel,
+  # deep_panel_local). Local workers serialize through the single GPU gate,
+  # so a worker that runs second cold-loads after the first is evicted —
+  # load + generate has to fit in this window. Bumped 240 → 360 after a
+  # local worker hit a 240.00s ReadTimeout mid-cold-load (Phase 21).
+  deep_worker: 360
   fast_path: 180
 
 # ─── Cache ─────────────────────────────────────────────────────────────

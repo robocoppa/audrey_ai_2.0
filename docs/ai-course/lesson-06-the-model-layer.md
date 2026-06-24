@@ -175,9 +175,9 @@ Location decides whether local GPU fairness applies.
 
 Below `model_registry`, `config.yaml` also defines deep-panel pools:
 
-- [`deep_panel`](../../config.yaml#L76)
-- [`deep_panel_cloud`](../../config.yaml#L96)
-- [`deep_panel_local`](../../config.yaml#L116)
+- [`deep_panel`](../../config.yaml#L98)
+- [`deep_panel_cloud`](../../config.yaml#L122)
+- [`deep_panel_local`](../../config.yaml#L147)
 
 Those pools are different from the registry. The registry is a ranked menu of
 possible models by task. A deep-panel pool is a more explicit recipe: "for this

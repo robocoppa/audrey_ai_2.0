@@ -9,11 +9,19 @@ A focused plan for four items surfaced by a fresh-eyes codebase review
 | 1    | 16    | `phase-16-deploy.md`  | ✅ deployed + verified (2026-06-24) |
 | 2    | 17    | `phase-17-deploy.md`  | ✅ deployed + verified (2026-06-24) |
 | 3    | 18    | `phase-18-deploy.md`  | ✅ deployed + verified (2026-06-24) |
-| 4    | 19    | `phase-19-deploy.md`  | 🔧 in progress            |
+| 4    | 19    | `phase-19-deploy.md`  | ✅ deployed + verified (2026-06-24) |
+| —    | 20    | `phase-20-deploy.md`  | ✅ shipped (laptop); awaiting smoke test |
+| —    | 21    | `phase-21-deploy.md`  | ✅ shipped (laptop); awaiting smoke test |
 
 Phase 16 also absorbed the fast-path banner-latency fix (early `> _Thinking_`
 emit + `router.skip_llm_under_tokens`), reported and verified after the plan
 was first written.
+
+**Phases 20–21 are follow-ons from live observation, not the original review:**
+20 = `audrey_deep` → 1 local + 2 cloud workers (more draft diversity at ~0
+wall-clock); 21 = fix the `audrey_local` worker timeout (reorder the local pool
+to lead with `deepseek-r1:32b`, drop the timing-out `glm-4.7-flash:q8_0`, bump
+`timeouts.deep_worker` 240 → 360 for cold-load headroom).
 
 Ordered by value. Each item names the problem, the fix, the test coverage it
 needs, and what "done" looks like. Items 1–3 are self-contained and shippable
