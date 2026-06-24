@@ -8,8 +8,8 @@ A focused plan for four items surfaced by a fresh-eyes codebase review
 |------|-------|-----------------------|---------------------------|
 | 1    | 16    | `phase-16-deploy.md`  | ✅ deployed + verified (2026-06-24) |
 | 2    | 17    | `phase-17-deploy.md`  | ✅ deployed + verified (2026-06-24) |
-| 3    | 18    | `phase-18-deploy.md`  | ✅ shipped (laptop); awaiting smoke test |
-| 4    | 19    | `phase-19-deploy.md`  | 🔜 next                   |
+| 3    | 18    | `phase-18-deploy.md`  | ✅ deployed + verified (2026-06-24) |
+| 4    | 19    | `phase-19-deploy.md`  | 🔧 in progress            |
 
 Phase 16 also absorbed the fast-path banner-latency fix (early `> _Thinking_`
 emit + `router.skip_llm_under_tokens`), reported and verified after the plan

@@ -1,24 +1,14 @@
-"""OpenAI-compatible routes.
+"""Pipeline request handling — non-streaming + streaming, incl. deep banners.
 
-Exposes five virtual models plus `/v1/chat/completions`:
-  audrey_deep   — always deep (mixed pool)
-  audrey_cloud  — always deep (cloud-only pool)
-  audrey_local  — always deep (local-only pool)
-  audrey_auto   — adaptive: fast for short prompts, deep for long ones
-  audrey_fast   — always fast (no escalation, even on long prompts)
+This is the engine room: it runs the compiled graph for non-streaming
+requests (`_generate_via_pipeline`) and hand-rolls the streaming path
+(`_stream_via_pipeline` + `_stream_deep_with_banners` + the phase/queue
+helpers) so progress banners can interleave with SSE frames.
 
-Plus an opt-in passthrough family selected via a model-string prefix:
-  audrey_passthrough/<concrete>  — forward straight to Ollama, no
-                                   classifier, no banners. Both fair-
-                                   scheduling layers still fire so the
-                                   request shares the GPU under the
-                                   same rules as pipeline traffic.
-
-Pipeline requests go through:
-  classify → complexity gate → fast path | deep panel + synth.
-
-Response shape is the OpenAI chat-completion contract so Open WebUI and
-any other client can consume it unchanged.
+Depends on `responses` (envelope + tool_call conversion) and `schemas`; never
+on `passthrough` (the route layer forks to passthrough before reaching here).
+The streaming ordering contract (`first_token` precedes every `delta`) is
+documented on `synthesize_stream`; preserve it if you refactor.
 """
 
 from __future__ import annotations
@@ -30,14 +20,11 @@ import time
 import uuid
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from typing import Any, Literal
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from fastapi import HTTPException
 
 from audrey import __version__
-from audrey.auth import AuthedUser, require_user
 from audrey.metrics import pipeline_seconds, pipeline_total
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
@@ -56,7 +43,6 @@ from audrey.pipeline.banners import (
 from audrey.pipeline.chat_archive import (
     ChatArchiveClient,
     StreamCollector,
-    resolve_conversation_id,
 )
 from audrey.pipeline.classify import classify_with_registry
 from audrey.pipeline.complexity import (
@@ -74,416 +60,13 @@ from audrey.pipeline.memory import (
     recall_for_request,
 )
 from audrey.pipeline.messages import has_image_part, last_user_text
-from audrey.pipeline.passthrough import passthrough_chat, passthrough_stream
 from audrey.pipeline.planner import plan as planner_plan
 from audrey.pipeline.prompts import compose_system_messages
 from audrey.pipeline.synthesize import synthesize_stream
+from audrey.routes.openai.responses import _to_openai_response
+from audrey.routes.openai.schemas import ChatCompletionRequest
 
 log = logging.getLogger(__name__)
-
-router = APIRouter(prefix="/v1", tags=["openai"])
-
-# The three virtual models Audrey exposes. Each is a *pipeline mode*, not a
-# real Ollama model. Mapping to concrete models happens inside the pipeline.
-VIRTUAL_MODELS = (
-    "audrey_deep",   # always deep (mixed pool)
-    "audrey_cloud",  # always deep (cloud-only pool)
-    "audrey_local",  # always deep (local-only pool)
-    "audrey_auto",   # adaptive: fast for short prompts, deep for long ones
-    "audrey_fast",   # always fast (no escalation, even on long prompts)
-)
-
-# Passthrough virtual model — `audrey_passthrough/<concrete_model>`
-# strips the prefix and forwards directly to Ollama. The bare form
-# `audrey_passthrough` is rejected with a 400 (must name a concrete).
-PASSTHROUGH_PREFIX = "audrey_passthrough/"
-PASSTHROUGH_BARE = "audrey_passthrough"
-
-
-def _is_passthrough(model: str) -> bool:
-    return model == PASSTHROUGH_BARE or model.startswith(PASSTHROUGH_PREFIX)
-
-
-def _passthrough_concrete(model: str) -> str:
-    """Return the concrete model name from `audrey_passthrough/<name>`.
-
-    Raises 400 for the bare form or an empty suffix.
-    """
-    if not model.startswith(PASSTHROUGH_PREFIX):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Passthrough requires {PASSTHROUGH_PREFIX}<model_name>, "
-                f"got {model!r}."
-            ),
-        )
-    concrete = model[len(PASSTHROUGH_PREFIX):].strip()
-    if not concrete:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Empty concrete model after {PASSTHROUGH_PREFIX!r}.",
-        )
-    return concrete
-
-
-def _resolve_passthrough_model(
-    payload_model: str, cfg, registry: ModelRegistry, me: AuthedUser,
-) -> tuple[str, str]:
-    """Return (concrete_model, location) for a passthrough request.
-
-    Raises 400 (parse error), 403 (disabled / not allowed / role gate).
-    """
-    pt_cfg = (cfg.raw.get("passthrough") or {})
-    if not pt_cfg.get("enabled"):
-        raise HTTPException(status_code=403, detail="Passthrough disabled.")
-    required_role = pt_cfg.get("require_role")
-    if required_role and me.role != required_role:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Passthrough requires role={required_role!r}.",
-        )
-    concrete = _passthrough_concrete(payload_model)
-    allowed = set(pt_cfg.get("allowed_models") or [])
-    if allowed and concrete not in allowed:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Passthrough not allowed for model {concrete!r}.",
-        )
-    location = registry.location_of(concrete)
-    return concrete, location
-
-
-# ─── Schemas (OpenAI-compatible subset) ───────────────────────────────
-
-class ChatMessage(BaseModel):
-    role: Literal["system", "user", "assistant", "tool"]
-    # A plain string for ordinary text turns, OR the OpenAI multimodal
-    # list-of-parts shape for image turns:
-    #   [{"type": "text", "text": "..."},
-    #    {"type": "image_url", "image_url": {"url": "data:..."}}]
-    # OWUI sends the list form when a user attaches an image. The pipeline
-    # flattens it to text where it only needs words (complexity gate,
-    # classify) and forwards it verbatim to a vision model on the vl pool.
-    content: str | list[dict[str, Any]]
-    name: str | None = None
-
-
-class ChatCompletionRequest(BaseModel):
-    model: str
-    messages: list[ChatMessage] = Field(min_length=1)
-    stream: bool = False
-    temperature: float | None = None
-    top_p: float | None = None
-    max_tokens: int | None = None
-    tools: list[dict[str, Any]] | None = Field(
-        default=None,
-        description=(
-            "OpenAI-spec tools array. **Only honored on the passthrough "
-            "path** (`audrey_passthrough/<concrete>`) — Audrey's pipeline "
-            "modes (`audrey_fast`, `audrey_deep`, …) use the server-side "
-            "tool registry from `tools/discovery.py` and ignore this field. "
-            "Forwarded verbatim to Ollama on passthrough so agent clients "
-            "(Hermes, OpenClaw) can advertise their own tools."
-        ),
-    )
-    user: str | None = Field(
-        default=None,
-        description=(
-            "OpenAI-spec passthrough field. Audrey **ignores** this for "
-            "identity purposes — the canonical user id comes from the "
-            "Authorization header (require_user → AuthedUser.email). Kept "
-            "in the schema for OpenAI client compatibility; logged for "
-            "debugging client-vs-resolved identity drift but never trusted."
-        ),
-    )
-
-
-# ─── /v1/models ───────────────────────────────────────────────────────
-
-@router.get("/models")
-async def list_models(request: Request) -> dict[str, Any]:
-    """List Audrey's virtual models plus any configured passthrough variants.
-
-    Pipeline virtual models are static (`VIRTUAL_MODELS`). Passthrough
-    variants are derived from `passthrough.allowed_models` in config —
-    one `audrey_passthrough/<concrete>` id per allowed concrete model,
-    so OpenAI-shaped clients can present a dropdown without knowing
-    the prefix scheme out of band.
-    """
-    now = int(time.time())
-    entries: list[dict[str, Any]] = [
-        {
-            "id": name,
-            "object": "model",
-            "created": now,
-            "owned_by": f"audrey-{__version__}",
-        }
-        for name in VIRTUAL_MODELS
-    ]
-    cfg = request.app.state.cfg
-    pt_cfg = (cfg.raw.get("passthrough") or {})
-    if pt_cfg.get("enabled"):
-        for concrete in (pt_cfg.get("allowed_models") or []):
-            entries.append({
-                "id": f"{PASSTHROUGH_PREFIX}{concrete}",
-                "object": "model",
-                "created": now,
-                "owned_by": f"audrey-{__version__}",
-            })
-    return {"object": "list", "data": entries}
-
-
-# ─── /v1/chat/completions ─────────────────────────────────────────────
-
-@router.post("/chat/completions")
-async def chat_completions(
-    payload: ChatCompletionRequest,
-    request: Request,
-    me: AuthedUser = Depends(require_user),
-):
-    app = request.app
-
-    # Passthrough branch — bypasses the pipeline entirely. Both fair-
-    # scheduling layers still fire so passthrough traffic competes for
-    # the GPU on the same terms as pipeline traffic.
-    if _is_passthrough(payload.model):
-        return await _handle_passthrough(app, request, payload, me)
-
-    if payload.model not in VIRTUAL_MODELS:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Unknown model {payload.model!r}. "
-                f"Supported virtual models: {list(VIRTUAL_MODELS)}."
-            ),
-        )
-
-    # Identity comes from the Authorization header via require_user, NOT from
-    # payload.user (OpenAI-spec passthrough, trusted for nothing). If a client
-    # sent a different `user` field, log once for drift-debugging then ignore.
-    if payload.user and payload.user != me.email:
-        log.debug(
-            "chat.completions: payload.user=%r ignored (auth user=%r)",
-            payload.user, me.email,
-        )
-
-    messages = [m.model_dump(exclude_none=True) for m in payload.messages]
-    debug_cfg = app.state.cfg.raw.get("debug", {}) or {}
-    if debug_cfg.get("log_incoming_payload", False):
-        shape = [(m.get("role"), len(str(m.get("content") or ""))) for m in messages]
-        log.info("incoming.payload: n=%d roles=%s", len(messages), shape)
-    if debug_cfg.get("log_incoming_payload_content", False):
-        heads = [
-            {"role": m.get("role"), "head": str(m.get("content") or "")[:500]}
-            for m in messages
-        ]
-        log.info("incoming.payload.content: %s", heads)
-    options = _options_from_request(payload)
-
-    # Resolve conversation id once, before pipeline branches. Reads OWUI
-    # `chat_id` from the raw request body when present so a continued OWUI
-    # thread stitches in the archive; falls back to a deterministic hash
-    # of the message-history prefix otherwise.
-    try:
-        raw_payload = await request.json()
-    except (json.JSONDecodeError, ValueError):
-        raw_payload = None
-    conversation_id = resolve_conversation_id(
-        user_id=me.email, raw_payload=raw_payload, messages=messages,
-    )
-    user_turn_text = last_user_text(messages)
-
-    if payload.stream:
-        return StreamingResponse(
-            _stream_via_pipeline(
-                app, payload, messages, options,
-                user_id=me.email,
-                conversation_id=conversation_id,
-                user_turn_text=user_turn_text,
-            ),
-            media_type="text/event-stream",
-        )
-
-    return await _generate_via_pipeline(
-        app, payload, messages, options,
-        user_id=me.email,
-        conversation_id=conversation_id,
-        user_turn_text=user_turn_text,
-    )
-
-
-async def _handle_passthrough(
-    app, request: Request, payload: ChatCompletionRequest, me: AuthedUser,
-):
-    """Route a passthrough request: validate, wrap in inflight, forward.
-
-    The inflight wrap mirrors what the pipeline branches do
-    (`async with inflight.slot(user_id)` around the whole call). The
-    passthrough helpers acquire the GPU gate around the actual Ollama
-    request, so both fair-scheduling layers fire.
-    """
-    cfg = app.state.cfg
-    registry: ModelRegistry = app.state.registry
-    concrete, location = _resolve_passthrough_model(payload.model, cfg, registry, me)
-
-    messages = [m.model_dump(exclude_none=True) for m in payload.messages]
-    options = _options_from_request(payload)
-    timeout_s = float(cfg.timeouts.get("medium", 180))
-    inflight = app.state.inflight
-    ollama: OllamaClient = app.state.ollama
-    gate: FairLocalGate = app.state.gate
-
-    if payload.stream:
-        async def _emit_passthrough_sse():
-            t0 = time.perf_counter()
-            outcome = "ok"
-            try:
-                async with inflight.slot(me.email):
-                    async for frame in _passthrough_stream_sse(
-                        ollama, gate,
-                        virtual=payload.model, concrete=concrete, location=location,
-                        messages=messages, options=options,
-                        user_id=me.email, tools=payload.tools, timeout_s=timeout_s,
-                    ):
-                        yield frame
-            except OllamaError:
-                outcome = "error"
-                raise
-            finally:
-                elapsed = time.perf_counter() - t0
-                pipeline_seconds.labels(
-                    mode="passthrough", task_type="passthrough",
-                ).observe(elapsed)
-                pipeline_total.labels(
-                    mode="passthrough", task_type="passthrough", outcome=outcome,
-                ).inc()
-        return StreamingResponse(
-            _emit_passthrough_sse(), media_type="text/event-stream",
-        )
-
-    t0 = time.perf_counter()
-    outcome = "ok"
-    try:
-        async with inflight.slot(me.email):
-            resp = await passthrough_chat(
-                ollama, gate,
-                concrete=concrete, location=location,
-                messages=messages, options=options,
-                user_id=me.email, tools=payload.tools, timeout_s=timeout_s,
-            )
-    except OllamaError as e:
-        outcome = "error"
-        pipeline_seconds.labels(
-            mode="passthrough", task_type="passthrough",
-        ).observe(time.perf_counter() - t0)
-        pipeline_total.labels(
-            mode="passthrough", task_type="passthrough", outcome=outcome,
-        ).inc()
-        raise HTTPException(status_code=502, detail=f"Ollama error: {e}") from e
-    pipeline_seconds.labels(
-        mode="passthrough", task_type="passthrough",
-    ).observe(time.perf_counter() - t0)
-    pipeline_total.labels(
-        mode="passthrough", task_type="passthrough", outcome=outcome,
-    ).inc()
-
-    msg = resp.get("message") or {}
-    tool_calls = _ollama_to_openai_tool_calls(msg.get("tool_calls"))
-    return _to_openai_response(
-        virtual=payload.model,
-        concrete=concrete,
-        content=str(msg.get("content") or ""),
-        prompt_tokens=int(resp.get("prompt_eval_count", 0) or 0),
-        completion_tokens=int(resp.get("eval_count", 0) or 0),
-        tool_calls=tool_calls,
-    )
-
-
-async def _passthrough_stream_sse(
-    ollama: OllamaClient,
-    gate: FairLocalGate,
-    *,
-    virtual: str,
-    concrete: str,
-    location: str,
-    messages: list[dict[str, Any]],
-    options: dict[str, Any],
-    user_id: str,
-    tools: list[dict[str, Any]] | None,
-    timeout_s: float | None,
-):
-    """Stream Ollama chunks as OpenAI-shaped SSE frames.
-
-    Mirrors `_stream_openai` for the content path. When `tools` is
-    supplied, Ollama typically populates `message.tool_calls` on the
-    final chunk (rather than streaming deltas); we translate that
-    into an OpenAI `tool_calls` delta in the terminal frame and set
-    `finish_reason="tool_calls"` instead of `"stop"` so agent clients
-    parsing the SSE stream see the structured calls and don't fall
-    back to scraping plain text.
-    """
-    created = int(time.time())
-    cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
-    fingerprint = f"audrey-{__version__}/{concrete}"
-
-    first = {
-        "id": cid, "object": "chat.completion.chunk", "created": created,
-        "model": virtual, "system_fingerprint": fingerprint,
-        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-    }
-    yield f"data: {json.dumps(first)}\n\n"
-
-    # Ollama's streaming protocol emits `message.tool_calls` in a
-    # non-final chunk (typically the one *before* `done: true`), not
-    # in the final chunk itself. Accumulate any tool_calls seen across
-    # the entire stream so we can attach them to the closing delta.
-    # Without this, streaming + tools silently produces an empty stream
-    # from the client's perspective (no content, no tool_calls).
-    accumulated_tool_calls: list[dict[str, Any]] = []
-    try:
-        async for chunk in passthrough_stream(
-            ollama, gate,
-            concrete=concrete, location=location,
-            messages=messages, options=options,
-            user_id=user_id, tools=tools, timeout_s=timeout_s,
-        ):
-            msg = chunk.get("message", {}) or {}
-            content = msg.get("content", "") or ""
-            chunk_tool_calls = msg.get("tool_calls") or []
-            if chunk_tool_calls:
-                accumulated_tool_calls.extend(chunk_tool_calls)
-            done = bool(chunk.get("done"))
-            if content:
-                frame = {
-                    "id": cid, "object": "chat.completion.chunk", "created": created,
-                    "model": virtual, "system_fingerprint": fingerprint,
-                    "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
-                }
-                yield f"data: {json.dumps(frame)}\n\n"
-            if done:
-                tool_calls = _ollama_to_openai_tool_calls(accumulated_tool_calls)
-                final_delta: dict[str, Any] = {}
-                if tool_calls:
-                    final_delta["tool_calls"] = tool_calls
-                    finish_reason = "tool_calls"
-                else:
-                    finish_reason = "stop"
-                final = {
-                    "id": cid, "object": "chat.completion.chunk", "created": created,
-                    "model": virtual, "system_fingerprint": fingerprint,
-                    "choices": [{"index": 0, "delta": final_delta, "finish_reason": finish_reason}],
-                }
-                yield f"data: {json.dumps(final)}\n\n"
-                break
-    except OllamaError as e:
-        err = {
-            "id": cid, "object": "chat.completion.chunk", "created": created,
-            "model": virtual, "system_fingerprint": fingerprint,
-            "choices": [{"index": 0, "delta": {"content": f"\n\n[error: {e}]"}, "finish_reason": "stop"}],
-        }
-        yield f"data: {json.dumps(err)}\n\n"
-
-    yield "data: [DONE]\n\n"
 
 
 async def _run_graph_with_metrics(graph, state: dict[str, Any]) -> dict[str, Any]:
@@ -582,6 +165,7 @@ async def _generate_via_pipeline(
         prompt_tokens=int(final.get("prompt_eval_count", 0)),
         completion_tokens=int(final.get("eval_count", 0)),
     )
+
 
 
 async def _stream_via_pipeline(
@@ -871,97 +455,6 @@ async def _stream_via_pipeline(
                 concrete_model=chosen_concrete,
             )
 
-
-# ─── Helpers ──────────────────────────────────────────────────────────
-
-def _options_from_request(req: ChatCompletionRequest) -> dict[str, Any]:
-    """Map OpenAI-shape sampling knobs onto Ollama's options dict.
-
-    Sibling: `pipeline.graph._options_from_state` does the same conceptual
-    mapping from the LangGraph state dict. The two helpers stay parallel
-    rather than unified because their input shapes genuinely differ
-    (Pydantic model vs. dict); keep them in sync if the knob set changes.
-    """
-    opts: dict[str, Any] = {}
-    if req.temperature is not None:
-        opts["temperature"] = req.temperature
-    if req.top_p is not None:
-        opts["top_p"] = req.top_p
-    if req.max_tokens is not None:
-        opts["num_predict"] = req.max_tokens
-    return opts
-
-
-def _to_openai_response(
-    *,
-    virtual: str,
-    concrete: str,
-    content: str,
-    prompt_tokens: int,
-    completion_tokens: int,
-    tool_calls: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    message: dict[str, Any] = {"role": "assistant", "content": content}
-    finish_reason = "stop"
-    if tool_calls:
-        message["tool_calls"] = tool_calls
-        finish_reason = "tool_calls"
-    return {
-        "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": virtual,
-        "system_fingerprint": f"audrey-{__version__}/{concrete}",
-        "choices": [
-            {
-                "index": 0,
-                "message": message,
-                "finish_reason": finish_reason,
-            }
-        ],
-        "usage": {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens,
-        },
-    }
-
-
-def _ollama_to_openai_tool_calls(
-    ollama_tool_calls: list[dict[str, Any]] | None,
-) -> list[dict[str, Any]] | None:
-    """Convert Ollama's tool_calls shape to OpenAI's.
-
-    Ollama returns:
-        [{"function": {"name": str, "arguments": dict}}, ...]
-    OpenAI clients expect:
-        [{"id": str, "type": "function",
-          "function": {"name": str, "arguments": str (JSON)}}]
-
-    The argument shape difference (dict vs JSON-string) is the main
-    thing — clients that parse OpenAI responses will try `json.loads`
-    on `arguments` and crash if it's already a dict. Audrey synthesizes
-    the `id` since Ollama doesn't emit one.
-    """
-    if not ollama_tool_calls:
-        return None
-    out: list[dict[str, Any]] = []
-    for call in ollama_tool_calls:
-        fn = call.get("function") or {}
-        name = fn.get("name") or ""
-        raw_args = fn.get("arguments")
-        if isinstance(raw_args, str):
-            arguments = raw_args
-        elif raw_args is None:
-            arguments = "{}"
-        else:
-            arguments = json.dumps(raw_args)
-        out.append({
-            "id": call.get("id") or f"call_{uuid.uuid4().hex[:24]}",
-            "type": "function",
-            "function": {"name": name, "arguments": arguments},
-        })
-    return out
 
 
 async def _stream_deep_with_banners(
@@ -1492,6 +985,3 @@ async def _stream_openai(
 @asynccontextmanager
 async def _noop_async_ctx():
     yield
-
-
-__all__ = ["router", "VIRTUAL_MODELS"]
