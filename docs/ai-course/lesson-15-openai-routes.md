@@ -256,7 +256,7 @@ streams — and why the next subsection's architecture matters.
 ### 2.4 The non-streaming path
 
 `_generate_via_pipeline` at
-[`routes/openai/pipeline.py:96`](../../src/audrey/routes/openai/pipeline.py#L96)
+[`routes/openai/pipeline.py:97`](../../src/audrey/routes/openai/pipeline.py#L97)
 is the simpler half. The shape:
 
 ```
@@ -554,7 +554,7 @@ decision themselves."
 
 ### 2.9 Why `_options_from_request` exists
 
-[`routes/openai/pipeline.py:392`](../../src/audrey/routes/openai/pipeline.py#L392):
+[`routes/openai/responses.py:20`](../../src/audrey/routes/openai/responses.py#L20):
 
 ```python
 def _options_from_request(req: ChatCompletionRequest) -> dict[str, Any]:

@@ -5,9 +5,12 @@ from audrey.pipeline.complexity import (
     count_last_user_tokens,
     count_tokens,
     count_tokens_by_role,
+    has_deep_intent,
     is_complex,
     is_owui_task_request,
 )
+
+_PHRASES = ["think hard", "deep dive", "comprehensive", "thorough", "step by step"]
 
 
 def test_count_tokens_sums_string_content():
@@ -242,3 +245,58 @@ def test_is_complex_returns_tuple():
     assert complex_ is False
     assert isinstance(n, int)
     assert n > 0
+
+
+# ─── has_deep_intent (Phase 22 — short-but-demanding prompts) ─────────
+
+
+def test_deep_intent_matches_the_reported_prompts():
+    """The two short prompts that wrongly went to fast now trip the gate."""
+    math = [{"role": "user", "content": (
+        "List the top 3 most influential mathematical theorems and give me a "
+        "concise but thorough explanation of them. Think hard about this"
+    )}]
+    philo = [{"role": "user", "content": (
+        "Give me a comprehensive deep dive into the lost works of philosophy "
+        "of the great masters like aristotle and plato"
+    )}]
+    assert has_deep_intent(math, _PHRASES) is True     # "thorough" / "think hard"
+    assert has_deep_intent(philo, _PHRASES) is True    # "comprehensive" / "deep dive"
+
+
+def test_deep_intent_is_case_insensitive():
+    msg = [{"role": "user", "content": "THINK HARD and be COMPREHENSIVE"}]
+    assert has_deep_intent(msg, _PHRASES) is True
+
+
+def test_deep_intent_false_for_casual_short_prompt():
+    msg = [{"role": "user", "content": "what is the capital of france"}]
+    assert has_deep_intent(msg, _PHRASES) is False
+
+
+def test_deep_intent_empty_phrases_disables_feature():
+    """No configured phrases → always False, even on an obvious depth prompt."""
+    msg = [{"role": "user", "content": "think hard and be comprehensive"}]
+    assert has_deep_intent(msg, []) is False
+
+
+def test_deep_intent_only_checks_latest_user_message():
+    """A depth cue in an earlier turn must not force a later short follow-up."""
+    messages = [
+        {"role": "user", "content": "give me a comprehensive deep dive"},
+        {"role": "assistant", "content": "...long answer..."},
+        {"role": "user", "content": "thanks, and the capital of spain?"},
+    ]
+    assert has_deep_intent(messages, _PHRASES) is False
+
+
+def test_deep_intent_matches_across_multimodal_text_parts():
+    msg = [{"role": "user", "content": [
+        {"type": "text", "text": "please be"},
+        {"type": "text", "text": "thorough about this"},
+    ]}]
+    assert has_deep_intent(msg, _PHRASES) is True
+
+
+def test_deep_intent_no_user_message_returns_false():
+    assert has_deep_intent([{"role": "system", "content": "think hard"}], _PHRASES) is False

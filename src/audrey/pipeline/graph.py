@@ -53,6 +53,7 @@ from audrey.pipeline.classify import classify_with_registry
 from audrey.pipeline.complexity import (
     count_last_user_tokens,
     count_tokens_by_role,
+    has_deep_intent,
     is_complex,
     is_owui_task_request,
 )
@@ -89,6 +90,7 @@ def build_graph(
     complexity_cfg = cfg.raw.get("complexity", {}) or {}
     complexity_threshold = int(complexity_cfg.get("token_threshold", 500))
     complexity_log_breakdown = bool(complexity_cfg.get("log_breakdown", False))
+    deep_intent_phrases: list[str] = complexity_cfg.get("deep_intent_phrases") or []
     fast_timeout = float(cfg.timeouts.get("fast_path", 180))
     deep_worker_timeout = float(cfg.timeouts.get("deep_worker", 240))
     router_timeout = float(router_cfg.get("timeout_s", 20))
@@ -212,6 +214,7 @@ def build_graph(
 
     async def node_complexity(state: PipelineState) -> dict[str, Any]:
         complex_, n = is_complex(state["messages"], threshold=complexity_threshold)
+        deep_intent = has_deep_intent(state["messages"], deep_intent_phrases)
         vm = state.get("virtual_model")
         forced_deep = vm in ("audrey_deep", "audrey_cloud", "audrey_local")
         forced_fast = vm == "audrey_fast"
@@ -240,6 +243,11 @@ def build_graph(
         elif complex_:
             mode = "deep"
             reason = f"tokens>={complexity_threshold}"
+        elif deep_intent:
+            # Short prompt, but it explicitly asks for depth — escalate
+            # audrey_auto to the deep panel. Mirrors the streaming gate.
+            mode = "deep"
+            reason = "deep_intent"
         else:
             mode = "fast"
             reason = f"tokens<{complexity_threshold}"

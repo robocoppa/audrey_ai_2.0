@@ -125,10 +125,37 @@ def is_complex(messages: list[dict], *, threshold: int) -> tuple[bool, int]:
     return n >= threshold, n
 
 
+def has_deep_intent(messages: list[dict], phrases: list[str]) -> bool:
+    """True when the latest user message asks for depth, by phrase match.
+
+    The token-count gate (`is_complex`) catches *long* prompts but misses the
+    "short prompt, large task" case — e.g. a 30-token "compare the top 3 X,
+    concise but thorough, think hard." Those read as trivial to a length gate
+    yet genuinely want multi-draft synthesis. This matches explicit depth cues
+    ("think hard", "in depth", "step by step", …) in the latest user turn so
+    `audrey_auto` can escalate them to deep regardless of length.
+
+    Substring match on the lowercased user text — phrases are written as the
+    literal cue to look for. Empty `phrases` disables the check (returns
+    False), so the feature is off unless `complexity.deep_intent_phrases` is
+    configured. Only the latest user turn is inspected, mirroring
+    `is_owui_task_request`: a depth cue three turns ago shouldn't force every
+    later short follow-up to deep.
+    """
+    if not phrases:
+        return False
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            text = " ".join(_iter_text_parts(m.get("content"))).lower()
+            return any(p.lower() in text for p in phrases if p)
+    return False
+
+
 __all__ = [
     "count_last_user_tokens",
     "count_tokens",
     "count_tokens_by_role",
+    "has_deep_intent",
     "is_complex",
     "is_owui_task_request",
 ]

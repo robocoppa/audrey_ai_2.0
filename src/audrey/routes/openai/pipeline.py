@@ -48,6 +48,7 @@ from audrey.pipeline.classify import classify_with_registry
 from audrey.pipeline.complexity import (
     count_last_user_tokens,
     count_tokens_by_role,
+    has_deep_intent,
     is_complex,
     is_owui_task_request,
 )
@@ -214,6 +215,7 @@ async def _stream_via_pipeline(
             # staring at nothing while the router model runs under GPU load.
             complexity_cfg = cfg.raw.get("complexity", {}) or {}
             complex_, n = is_complex(messages, threshold=int(complexity_cfg.get("token_threshold", 500)))
+            deep_intent = has_deep_intent(messages, complexity_cfg.get("deep_intent_phrases") or [])
             forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local")
             forced_fast = payload.model == "audrey_fast"
             owui_task = is_owui_task_request(messages)
@@ -231,7 +233,9 @@ async def _stream_via_pipeline(
             elif forced_fast:
                 use_deep = False
             else:
-                use_deep = complex_  # audrey_auto
+                # audrey_auto: deep if the prompt is long OR explicitly asks for
+                # depth (short-but-demanding prompts the length gate misses).
+                use_deep = complex_ or deep_intent
 
             if use_deep:
                 # Deep classification still needs the router LLM (the panel
@@ -242,9 +246,10 @@ async def _stream_via_pipeline(
                     cfg=cfg, registry=app.state.tools,
                 )
                 log.info(
-                    "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=deep%s",
+                    "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=deep%s%s",
                     payload.model, task, reason, conf, n,
                     " owui_task=1" if owui_task else "",
+                    " deep_intent=1" if (deep_intent and not complex_) else "",
                 )
                 if complexity_cfg.get("log_breakdown", False):
                     by_role = count_tokens_by_role(messages)
