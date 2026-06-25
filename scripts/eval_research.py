@@ -24,10 +24,20 @@ with the session JWT — the same supported path OpenClaw/Hermes use.
 
     Settings → Account → API Keys in OWUI mints the `sk-…` key.
 
-    export AUDREY_EVAL_BASE_URL="http://192.168.1.11:3000/api"   # OWUI host:port + /api
-    export AUDREY_EVAL_API_KEY="sk-..."                          # OWUI API key
+PERMANENT SETUP (laptop-local, gitignored)
 
-(`--base-url` / `--api-key` flags override the env vars. If you instead want
+Put the two values in `.env.test.local` at the repo root (gitignored via the
+`.env.*.local` rule — separate from the app's `.env`, so the key never leaves
+your laptop and can't be committed). The script auto-loads them:
+
+    # .env.test.local  (repo root)
+    AUDREY_EVAL_BASE_URL=http://192.168.1.11:8080/api    # OWUI host:port + /api
+    AUDREY_EVAL_API_KEY=sk-...                           # OWUI API key
+
+Then just run `.venv/bin/python scripts/eval_research.py` — no exports needed.
+A one-off `export AUDREY_EVAL_*` or a `--flag` still overrides the file.
+
+(`--base-url` / `--api-key` flags override env / .env. If you instead want
 to hit Audrey directly, point `--base-url` at `http://192.168.1.11:8000/v1`
 and pass a valid OWUI JWT as `--api-key` — but JWTs expire, so the OWUI path
 is the repeatable one.)
@@ -93,6 +103,36 @@ except ImportError:
 
 
 DEFAULT_CASES = Path(__file__).parent / "eval_prompts.json"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+ENV_KEYS = ("AUDREY_EVAL_BASE_URL", "AUDREY_EVAL_API_KEY")
+
+
+def load_dotenv(path: Path = REPO_ROOT / ".env.test.local") -> None:
+    """Populate AUDREY_EVAL_* from the repo's `.env.test.local`, if present.
+
+    `.env.test.local` is the eval harness's own secret file — kept separate
+    from the app's `.env` (which `config.py` reads for AUDREY_* settings) so a
+    test credential never mingles with app config. It's gitignored (matches the
+    `.env.*.local` rule), laptop-local; the OWUI API key lives there so you
+    don't re-enter it each run. Only fills a variable that is NOT already set in
+    the real environment, so an explicit `export` or a `--flag` always wins.
+    Tiny hand parser (KEY=VALUE, `#` comments, optional surrounding quotes) — no
+    python-dotenv dependency, and it only ever reads our own `AUDREY_EVAL_*`
+    keys so it can't disturb anything else.
+    """
+    if not path.exists():
+        return
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key not in ENV_KEYS or key in os.environ:
+            continue
+        value = value.strip().strip('"').strip("'")
+        if value:
+            os.environ[key] = value
 # Banners each mode emits, in order. Substrings (the live text is markdown
 # blockquote, e.g. '> _Researching_'); we match the inner word.
 _DEEP_BANNERS = ["Planning", "Dispatching panel", "Synthesizing"]
@@ -276,6 +316,9 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
 
 
 def main() -> int:
+    # Load the gitignored .env.test.local first, so the env-var defaults below
+    # see AUDREY_EVAL_*. A real export or an explicit --flag still overrides it.
+    load_dotenv()
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--base-url", default=os.environ.get("AUDREY_EVAL_BASE_URL", ""),

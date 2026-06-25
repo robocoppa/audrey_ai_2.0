@@ -137,7 +137,11 @@ def test_verifier_system_unchanged():
         "sources hedge). For each, say briefly why and how it should be softened. "
         "Be especially cautious with ancient or poorly-documented biography, "
         "disputed authorship or attribution, precise dates, and superlatives or "
-        "rankings. If the findings are sound, say so plainly rather than "
+        "rankings. Demote claim-strengthening words to their weaker, supported "
+        "form unless the findings explicitly back the strong one — \"authored\" "
+        "(prefer \"is attributed to\"), \"proved\", \"complete\", and over-specific "
+        "attributions (\"Proclus states\" where a source only mentions it). "
+        "If the findings are sound, say so plainly rather than "
         "inventing problems. Output your critique as a short list of flags."
     )
     assert VERIFIER_SYSTEM == expected

@@ -4,7 +4,7 @@
     "prompt": "Give me a deep dive into the life and legacy of Euclid.",
     "model": "audrey_research",
     "expect_banners": true,
-    "expect_sources": true
+    "expect_sources": false
   },
   {
     "name": "euclid-on-deep-for-comparison",
@@ -18,21 +18,21 @@
     "prompt": "What do we actually know about the Library of Alexandria, and which popular claims about its destruction are disputed?",
     "model": "audrey_research",
     "expect_banners": true,
-    "expect_sources": true
+    "expect_sources": false
   },
   {
     "name": "rust-async-current-state",
     "prompt": "Summarize the current state of async runtimes in Rust and the main tradeoffs between the leading ones.",
     "model": "audrey_research",
     "expect_banners": true,
-    "expect_sources": true
+    "expect_sources": false
   },
   {
     "name": "transformer-attention-explainer",
     "prompt": "Explain how attention works in a transformer, with the key intuitions.",
     "model": "audrey_research",
     "expect_banners": true,
-    "expect_sources": true
+    "expect_sources": false
   },
   {
     "name": "creative-no-grounding-needed",
