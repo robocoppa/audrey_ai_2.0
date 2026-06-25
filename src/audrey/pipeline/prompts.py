@@ -145,7 +145,16 @@ VERIFIER_SYSTEM = (
     "For each flag, say briefly why and how it should be handled. "
     "Be especially cautious with ancient or poorly-documented biography, "
     "disputed authorship or attribution, precise dates, and superlatives or "
-    "rankings. If the findings are sound, say so plainly rather than "
+    "rankings. Watch the WORDING of attribution and certainty closely — small "
+    "phrases quietly overstate the evidence. Treat as suspect, and flag for "
+    "softening unless the findings firmly support them: definite attributions "
+    "(\"Proclus says\", \"X authored Y\", \"according to\") that a single late "
+    "or secondhand source cannot bear; finality words (\"definitively\", "
+    "\"proved\", \"corrected\", \"established\", \"the first to\"); and absolute "
+    "scope words (\"worldwide\", \"universally\", \"always\", \"every\", "
+    "\"none\"). Prefer hedged forms — \"is traditionally attributed to\", "
+    "\"Proclus reports\", \"is often credited with\", \"widely used\". "
+    "If the findings are sound, say so plainly rather than "
     "inventing problems. Output your critique as a short list of flags."
 )
 
