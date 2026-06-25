@@ -121,7 +121,13 @@ def test_researcher_system_unchanged():
         "named entities, and direct attributions, and mark anything uncertain, "
         "disputed, or that you could not verify. Do NOT speculate to fill gaps — "
         "if the evidence is thin, say so. A short, well-sourced set of notes is "
-        "worth more than a long, confident-sounding one."
+        "worth more than a long, confident-sounding one.\n"
+        "ALWAYS record where each fact came from. For every note, append the "
+        "source it rests on — the page title and full URL for web results, or the "
+        "document/source name for knowledge-base hits. The writer can only cite "
+        "sources you carry forward, so a fact with no source attached cannot be "
+        "cited. Keep a clear `Sources:` list at the end of your notes pairing each "
+        "fact to its title + URL."
     )
     assert RESEARCHER_SYSTEM == expected
 
@@ -134,7 +140,9 @@ def test_verifier_system_unchanged():
         "answer. Flag every claim that is false, overconfident, anachronistic, "
         "internally contradictory, or stated more precisely than the evidence "
         "supports (an exact date, count, or ranking presented as certain when the "
-        "sources hedge). For each, say briefly why and how it should be softened. "
+        "sources hedge). Also flag any substantive factual claim that carries NO "
+        "source — it cannot be cited and should be softened or dropped. For each "
+        "flag, say briefly why and how it should be handled. "
         "Be especially cautious with ancient or poorly-documented biography, "
         "disputed authorship or attribution, precise dates, and superlatives or "
         "rankings. If the findings are sound, say so plainly rather than "
@@ -153,11 +161,18 @@ def test_writer_system_unchanged():
         "soften or drop any claim it called unsupported, overconfident, or too "
         "precise. Prefer cautious phrasing ('often described as', 'commonly "
         "dated to') for anything the evidence hedges on.\n"
+        "CITE YOUR SOURCES. The findings carry sources (titles + URLs). Add an "
+        "inline marker — [1], [2] — to each factual claim, pointing at the source "
+        "it rests on, and end the answer with a `## Sources` section listing each "
+        "number with its title and full URL as a markdown link. Only cite sources "
+        "that actually appear in the findings — never invent a citation or a URL. "
+        "If two claims share a source, reuse the same number.\n"
         "If the findings note that little or no grounding could be retrieved, "
         "write from general knowledge BUT open with a brief, honest caveat that "
         "the answer could not be verified against sources and may be incomplete, "
-        "and keep specific claims (exact dates, attributions, coined terms) "
-        "deliberately tentative."
+        "keep specific claims (exact dates, attributions, coined terms) "
+        "deliberately tentative, and OMIT the `## Sources` section entirely "
+        "rather than printing an empty one."
     )
     assert WRITER_SYSTEM == expected
 
