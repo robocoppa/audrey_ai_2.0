@@ -67,6 +67,12 @@ def _fake_request(qdrant_obj):
     )
 
 
+def _fake_qdrant(text="kb_text", image="kb_images"):
+    """Stand-in qdrant carrying the configured collection names the handler
+    forwards to `reconcile_once`. `QdrantKB` exposes these as plain attrs."""
+    return SimpleNamespace(text_collection=text, image_collection=image)
+
+
 def _fake_admin(email: str = "admin@example.com"):
     """Build the minimal `AuthedUser` shape the handler reads."""
     # Handler only reads `me.email` for the log line.
@@ -75,26 +81,38 @@ def _fake_admin(email: str = "admin@example.com"):
 
 @pytest.mark.asyncio
 async def test_kb_reconcile_returns_structured_summary(monkeypatch):
-    # The handler should call `reconcile_once(qdrant)`, log the orphan
-    # count + the admin's email, and return `result.to_dict()` to the
-    # client. We pin all three.
-    captured_args: list[object] = []
+    # The handler should call `reconcile_once(qdrant, text_collection=...,
+    # image_collection=...)` with the qdrant's *configured* collection names
+    # (so a renamed collection is swept, not the defaults), log the orphan
+    # count + the admin's email, and return `result.to_dict()`. We pin all.
+    captured: dict[str, object] = {}
 
-    async def _fake_reconcile_once(qdrant):
-        captured_args.append(qdrant)
+    async def _fake_reconcile_once(qdrant, *, text_collection, image_collection):
+        captured["qdrant"] = qdrant
+        captured["text_collection"] = text_collection
+        captured["image_collection"] = image_collection
         return _FakeReconcileResult(total_orphans_deleted=1)
 
     from audrey.routes import admin as admin_module
     monkeypatch.setattr(admin_module, "reconcile_once", _fake_reconcile_once)
 
-    sentinel_qdrant = object()  # handler shouldn't introspect — pass-through
+    # Stand-in qdrant carrying *non-default* configured names (a post-rename
+    # deployment) so we can prove the handler forwards them rather than letting
+    # reconcile_once fall back to "kb_text"/"kb_images".
+    sentinel_qdrant = SimpleNamespace(
+        text_collection="renamed_text",
+        image_collection="renamed_images",
+    )
     request = _fake_request(sentinel_qdrant)
     me = _fake_admin()
 
     response = await admin_module.kb_reconcile(request, me)
 
-    # Handler called reconcile_once with the qdrant from app.state.
-    assert captured_args == [sentinel_qdrant]
+    # Handler called reconcile_once with the qdrant from app.state AND its
+    # configured collection names (not the defaults).
+    assert captured["qdrant"] is sentinel_qdrant
+    assert captured["text_collection"] == "renamed_text"
+    assert captured["image_collection"] == "renamed_images"
     # Response is the structured dict from result.to_dict().
     assert response["total_orphans_deleted"] == 1
     assert "by_collection" in response
@@ -106,13 +124,13 @@ async def test_kb_reconcile_zero_orphans_still_returns_summary(monkeypatch):
     # A clean sweep (no orphans) shouldn't 404 or short-circuit — the
     # operator wants to see "I asked for a reconcile and 0 came back" as
     # a positive signal too.
-    async def _fake_reconcile_once(_qdrant):
+    async def _fake_reconcile_once(_qdrant, *, text_collection, image_collection):
         return _FakeReconcileResult(total_orphans_deleted=0)
 
     from audrey.routes import admin as admin_module
     monkeypatch.setattr(admin_module, "reconcile_once", _fake_reconcile_once)
 
-    request = _fake_request(object())
+    request = _fake_request(_fake_qdrant())
     response = await admin_module.kb_reconcile(request, _fake_admin())
 
     assert response["total_orphans_deleted"] == 0
@@ -125,13 +143,13 @@ async def test_kb_reconcile_logs_trigger_with_admin_email(monkeypatch, caplog):
     # tell who did it after the fact.
     import logging as _logging
 
-    async def _fake_reconcile_once(_qdrant):
+    async def _fake_reconcile_once(_qdrant, *, text_collection, image_collection):
         return _FakeReconcileResult(total_orphans_deleted=2)
 
     from audrey.routes import admin as admin_module
     monkeypatch.setattr(admin_module, "reconcile_once", _fake_reconcile_once)
 
-    request = _fake_request(object())
+    request = _fake_request(_fake_qdrant())
     me = _fake_admin(email="ops@example.com")
 
     with caplog.at_level(_logging.WARNING, logger="audrey.routes.admin"):

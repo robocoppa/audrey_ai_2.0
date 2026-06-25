@@ -566,7 +566,7 @@ panel based on prompt complexity.
 >
 > They're designed to play together, but you can use either alone.
 > **Audrey uses LangGraph and not LangChain.** Audrey talks to Ollama
-> through its own ~180-line client (`models/ollama.py`) rather than
+> through its own small client (`models/ollama.py`) rather than
 > LangChain's `ChatOllama`, because the abstraction tax wasn't worth
 > the dependency for the limited surface we use.
 

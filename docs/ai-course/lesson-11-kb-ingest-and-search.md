@@ -344,9 +344,9 @@ match for the query. Overlap means *both* chunks contain the bridging
 sentences, so both score reasonably and at least one will likely
 clear top-K.
 
-**Short docs are a single chunk.** Line 109's
+**Short docs are a single chunk.** The
 `if len(tokens) <= chunk_tokens: return [Chunk(...)]` short-circuit
-exists so a half-page note isn't pointlessly windowed.
+(line 118) exists so a half-page note isn't pointlessly windowed.
 
 **One consequence worth internalizing: paragraphs don't always land
 in exactly one location.** Tokens inside an overlap region (e.g.
@@ -357,12 +357,10 @@ via one point; a sentence near a boundary is searchable via two and
 may show up twice in the top-K results. That's the cost overlap buys
 you for the straddling-sentence fix.
 
-There's a subtle issue with the tail of the loop — when the final
-stride lands close to the end, the last iteration produces a chunk
-that's mostly inside the prior chunk's overlap region. It's logged
-in `docs/lessons/AUDIT.md` as a `consider` finding pending
-measurement; not a correctness bug, just wasted index space. Worth
-knowing the loop has this character.
+The tail of the loop has one extra guard in the current code: if the final
+window would add very little new content beyond the previous chunk, Audrey skips
+that near-duplicate tail chunk. That prevents a wasted embed call and Qdrant
+point while preserving the content that was already covered by the overlap.
 
 ### 2.4 The embedder, in code
 

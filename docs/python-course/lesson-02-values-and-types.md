@@ -41,10 +41,11 @@ message looks like this:
 
 Two labels — Python calls them *keys* — carry the whole thing:
 
-- **`"role"`** — *who said it.* Almost always one of three values: `"user"`
-  (you, the human), `"assistant"` (the AI's past replies), or `"system"`
-  (hidden setup instructions the app sends before you ever type). The role is
-  how the model tells its own words apart from yours.
+- **`"role"`** — *who said it.* Most messages are `"user"` (you, the
+  human), `"assistant"` (the AI's past replies), or `"system"` (hidden setup
+  instructions the app sends before you ever type). Tool-using turns can also
+  include `"tool"` messages, which hold the result of a tool call. The role is
+  how the model tells each kind of message apart.
 - **`"content"`** — *what was said*: the actual text, like `"what's the
   weather?"`.
 
@@ -86,7 +87,7 @@ code stops being a wall of plausible-looking lines and starts telling you what
 it expects.
 
 We'll work mostly inside one file, [`src/audrey/pipeline/complexity.py`](../../src/audrey/pipeline/complexity.py). It's
-about 125 lines, it has no exotic machinery, and by the end of the lesson
+short, it has no exotic machinery, and by the end of the lesson
 you'll understand all of it.
 
 ---

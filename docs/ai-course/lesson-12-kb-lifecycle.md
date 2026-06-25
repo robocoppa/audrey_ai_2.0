@@ -549,6 +549,10 @@ class KBReconciler:
 
     async def _run(self) -> None:
         try:
+            try:
+                await reconcile_once(self._qdrant, ...)
+            except Exception as e:
+                log.warning("kb.reconcile: startup sweep raised: %s", e)
             while True:
                 await asyncio.sleep(self._interval_s)
                 try:
@@ -578,12 +582,11 @@ The orchestrator's lifespan (Lesson 5) calls `start()` on each at
 startup and `stop()` on each during shutdown. That's the entire
 integration.
 
-The first reconcile sweep waits one full `interval_s` before
-running — the default is 30 minutes. So if the watcher was off for
-hours before this process started, you have a window of
-"orphans still in the index" between Audrey coming up and the
-first sweep landing. The admin endpoint `POST /v1/admin/kb/reconcile`
-exists for the case where you need a sweep sooner.
+The first reconcile sweep runs immediately at startup, then the task settles
+into the configured `interval_s` cadence. That startup pass catches drift that
+accumulated while the watcher was off before Audrey serves for long. The admin
+endpoint `POST /v1/admin/kb/reconcile` still exists for ad-hoc sweeps between
+periodic intervals.
 
 ### 2.9 The per-user uploads flow
 
@@ -723,27 +726,24 @@ Five things that can go wrong, and what the system does about each:
 deleted 30 files from `/datasets` during that time. What happens
 to their vectors?"**
 
-The watcher missed every delete event. The vectors stay in
-`kb_text` / `kb_images` indefinitely until the next reconcile
-sweep notices that `Path(source).exists()` returns False for each
-of the 30 sources. With the default 30-minute interval, that's at
-most 30 minutes after Audrey is back up. If you want it sooner,
-the admin endpoint `POST /v1/admin/kb/reconcile` triggers a sweep
-on demand.
+The watcher missed every delete event. The vectors stay in `kb_text` /
+`kb_images` until reconcile notices that `Path(source).exists()` returns False
+for each of the 30 sources. On current Audrey, the reconciler runs one sweep
+immediately at startup, so those stale vectors should be cleaned up soon after
+boot; later drift is caught on the normal interval. The admin endpoint
+`POST /v1/admin/kb/reconcile` triggers a sweep on demand between intervals.
 
 **2. "I uploaded a file, got a 200 response, then immediately
 called `GET /v1/files` and didn't see it. What broke and how would
 I diagnose?"**
 
-Almost certainly the sqlite `record_upload` failed *after* Qdrant
-succeeded *and* the rollback Qdrant delete also failed. The upload
-route would have returned 500 in that case, not 200 — so if the
-200 is real, the second-most-likely cause is a race where the
-list query ran on a different worker before sqlite committed.
-Check `audrey-ai` logs for `uploads_db.record failed` or
-`files: ingest failed`. If neither is present, the upload is in
-sqlite and the read query is suspect. Next restart's
-`reconcile_with_qdrant` would catch a real drift.
+If the 200 is real and the same authenticated user immediately calls
+`GET /v1/files`, the sqlite row should already exist: the upload route records
+sqlite before returning success. First confirm the list request is using the
+same OWUI identity and that the client is not showing stale UI state. Then
+check `audrey-ai` logs for `uploads_db.record failed` or `files: ingest
+failed`; those would normally pair with a 500, not a 200. If neither is
+present, the upload is in sqlite and the list/read path is the thing to inspect.
 
 **3. "Why does reconcile skip per-user collections, but the
 watcher doesn't even know per-user collections exist?"**
@@ -764,15 +764,14 @@ authority, not the disk.
 `audrey_text` in `config.yaml`. What still works, what breaks?"**
 
 Ingest works (`ingest_text_file` uses `qdrant.text_collection`).
-Search works (`search_text` uses it too). Reconcile works (it
-walks `qdrant.text_collection` / `.image_collection`). The
-watcher works (since the recent fix, it uses
-`self._qdrant.text_collection` instead of the literal
-`"kb_text"`). What breaks is **anything that was already in the
-old `kb_text` collection** — it's still there, but nothing
-references it, so those vectors become a separate orphan problem
-the reconcile can't help with (different collection name entirely).
-You'd drop the old collection manually after the rename.
+Search works (`search_text` uses it too). The periodic reconciler and watcher
+work because they use the configured collection names. The admin one-shot
+reconcile endpoint is a current exception: it calls `reconcile_once(qdrant)`
+without passing configured names, so it still sweeps the default collection
+names. What also breaks is **anything that was already in the old `kb_text`
+collection** — it is still there, but nothing references it, so those vectors
+become a separate orphan problem the configured reconcile cannot help with.
+You would manually sweep or drop the old collection after the rename.
 
 **5. "A user uploads a 5 MB PDF. Trace what happens to it across
 disk, Qdrant, and sqlite."**

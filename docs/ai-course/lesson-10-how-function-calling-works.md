@@ -239,16 +239,14 @@ Provider tooling helps in two ways:
 1. **Training.** Modern instruction-tuned models have seen huge
    quantities of "here is a schema, emit a conforming call" examples.
    They are biased toward valid output, but it is bias, not a
-   guarantee.
-2. **Constrained decoding.** Some inference stacks force the model's
-   output through a grammar derived from the schema. Each token is
-   sampled only from the set that keeps the output parseable. This is
-   what powers OpenAI's "strict mode" and Anthropic's tool-use
-   guardrails. Ollama supports constrained decoding for plain JSON
-   output (the `format` parameter) but **not for the `tool_calls`
-   path** as of this writing — Ollama's tool calling is unconstrained,
-   which is part of why small local models hallucinate arguments more
-   often than larger cloud models.
+   guarantee — a smaller or under-trained model can still emit
+   arguments that miss required fields or invent ones.
+2. **Constrained decoding.** Some inference stacks can force model output
+   through a grammar derived from a schema, so each token is sampled only from
+   the set that keeps the output parseable. Audrey does not rely on constrained
+   decoding for tool calls. It treats tool arguments as untrusted model output
+   and validates them at dispatch time, which is why small local models can
+   still hallucinate malformed arguments.
 
 This is why Audrey strips schema features the protocol theoretically
 supports but small models choke on. From
@@ -365,7 +363,7 @@ Request:
 
 ```json
 {
-  "model": "claude-opus-4-7",
+  "model": "claude-opus-4-8",
   "messages": [...],
   "tools": [
     {
@@ -602,8 +600,8 @@ question about current events, prefer web_search over your own
 knowledge"), or use `tool_choice: "required"` if your provider
 supports it.
 
-These are the protocol's failure modes. Audrey's loop design — Lesson
-8 — is largely the catalogue of how it handles them.
+These are the protocol's failure modes. The ReAct loop design — Lesson
+9 — is largely the catalogue of how it handles them.
 
 
 ## 3. Comprehension questions

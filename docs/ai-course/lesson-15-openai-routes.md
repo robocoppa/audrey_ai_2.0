@@ -150,7 +150,7 @@ Three fields earn special mention:
   identity**. Audrey's user ID comes from the bearer token
   (`require_user → AuthedUser.email`); `payload.user` is logged for
   drift-debugging at
-  [`routes/openai/routes.py:102`](../../src/audrey/routes/openai/routes.py#L102)
+  [`routes/openai/routes.py:109`](../../src/audrey/routes/openai/routes.py#L109)
   and otherwise ignored. The field is in the schema purely for
   client compat.
 
@@ -188,12 +188,12 @@ Three things to notice in
   - **`VIRTUAL_MODELS` is validated in the route, not the schema.** A
     Pydantic `Literal[...]` would push this to the 422 layer with
     less-helpful error text. The route check at
-    [`routes/openai/routes.py:90`](../../src/audrey/routes/openai/routes.py#L90)
+    [`routes/openai/routes.py:101`](../../src/audrey/routes/openai/routes.py#L101)
     emits `"Unknown model 'X'. Supported virtual models: [...]"` —
     actionable enough that a developer trying `audrey_deeo` (typo)
     can fix it without grepping the source.
   - **`conversation_id` is resolved once, before the branch** at
-    [`routes/openai/routes.py:120`](../../src/audrey/routes/openai/routes.py#L120).
+    [`routes/openai/routes.py:136`](../../src/audrey/routes/openai/routes.py#L136).
     Both pipeline paths receive the same id, so a stream and a
     non-stream completion of the same conversation thread into the
     archive correctly. Lesson 13 §2.5 covered how
@@ -225,7 +225,7 @@ OpenAI's chat-completion streaming spec is more structured: each
 frame is a JSON object describing a *delta* (a piece of the response
 being built), with a final `data: [DONE]\n\n` marker. Audrey emits
 that shape directly. You can see the helpers at
-[`routes/openai/responses.py:73`](../../src/audrey/routes/openai/responses.py#L73)
+[`routes/openai/pipeline.py:501`](../../src/audrey/routes/openai/pipeline.py#L501)
 inside `_stream_deep_with_banners`:
 
 ```python
@@ -404,7 +404,7 @@ the lifecycle of a single phase's progress line.
 **It's an async context manager.** You met those in Lesson 1; here's one
 doing real work. The route uses it like this (the actual call site for the
 panel phase is
-[routes/openai/pipeline.py:591](../../src/audrey/routes/openai/pipeline.py#L591)):
+[routes/openai/pipeline.py:589](../../src/audrey/routes/openai/pipeline.py#L589)):
 
 ```python
 async with PhaseTicker(BANNER_DISPATCHING, emit) as ticker:
@@ -479,11 +479,11 @@ Trace the cancel through:
      `asyncio.CancelledError` into the generator that's producing
      SSE frames.
   2. **The generator's `try` block catches it** at
-     [`routes/openai/pipeline.py:748`](../../src/audrey/routes/openai/pipeline.py#L748).
+     [`routes/openai/pipeline.py:755`](../../src/audrey/routes/openai/pipeline.py#L755).
      The route records `pipeline_outcome = "cancelled"` (so the
      metric reflects "user left," not "ok") and re-raises.
   3. **The inner `try/finally` at
-     [`routes/openai/pipeline.py:624`](../../src/audrey/routes/openai/pipeline.py#L624)**
+     [`routes/openai/pipeline.py:742`](../../src/audrey/routes/openai/pipeline.py#L742)**
      cancels the synth producer task explicitly:
 
      ```python
@@ -509,6 +509,7 @@ Trace the cancel through:
      calls close the socket the same way, *but the upstream
      provider may keep generating and billing* until they notice
      the client is gone. That's outside Audrey's control.
+
   5. **The `async with inflight.slot(user_id)` and
      `gate.acquire()` blocks** unwind via the `try/finally` that
      `@asynccontextmanager` adds. The inflight semaphore is
@@ -516,11 +517,15 @@ Trace the cancel through:
      covered the gate's cancellation handling at
      `fair_gate.py:120`). Other parked waiters wake up cleanly.
 
-Net result: **local cleanup is solid.** Inflight slot released,
-GPU gate released, synth task cancelled, Ollama socket closed,
-archive write skipped (we re-raised before reaching it). The one
-gap is cloud-billing for already-dispatched cloud workers, which
-Audrey can't fix on its own.
+Net result: the route releases the in-flight slot, unwinds any active gate
+contexts, cancels the synth producer when cancellation reaches that stage, and
+closes the Ollama socket. The archive write is still attempted from the deep
+stream `finally` block with `partial=True` when the route knows the stream was
+cancelled. One remaining cleanup gap is earlier background phase tasks:
+`think_task` and `panel_task` are awaited in the normal drain path, but unlike
+`synth_task` they do not have their own explicit cancel-and-await `finally` if
+the client disconnects while that phase task is running. Cloud-billing for
+already-dispatched cloud workers is outside Audrey's control.
 
 ### 2.8 The passthrough fork
 
@@ -534,7 +539,7 @@ notes cover the design rationale and the per-client wiring.
 
 The route-side fork is small. It splits into streaming
 (`_passthrough_stream_sse` at
-[`routes/openai/passthrough.py:180`](../../src/audrey/routes/openai/passthrough.py#L180))
+[`routes/openai/passthrough.py:187`](../../src/audrey/routes/openai/passthrough.py#L187))
 and non-streaming. The streaming variant *doesn't share*
 `_stream_deep_with_banners` because there are no banners — Ollama's
 own chunks get reshaped to OpenAI SSE format and forwarded
@@ -574,7 +579,7 @@ Small helper that maps OpenAI-shape sampling knobs onto Ollama's
 options dict. (That `Sibling:` docstring note — shipped during this
 lesson's own audit — points straight at the near-twin.) There's a
 near-twin in
-[`pipeline/graph.py:450`](../../src/audrey/pipeline/graph.py#L450)
+[`pipeline/graph.py:474`](../../src/audrey/pipeline/graph.py#L474)
 called `_options_from_state` that does the same conceptual mapping
 from the LangGraph state dict instead of a Pydantic object. The
 two functions look like they want to be one, but their input shapes
@@ -598,7 +603,7 @@ what point in the request lifecycle does it fire?**
 422, before `require_user` even runs. FastAPI resolves request
 validation as part of dependency injection, and Pydantic's
 `Field(min_length=1)` on `ChatCompletionRequest.messages`
-([`routes/openai/schemas.py:24`](../../src/audrey/routes/openai/schemas.py#L24))
+([`routes/openai/schemas.py:31`](../../src/audrey/routes/openai/schemas.py#L31))
 rejects the empty list during schema validation — which happens
 *before* the route's body and *before* its declared dependencies
 get awaited. The user gets a structured 422 with a path-based error
@@ -614,7 +619,7 @@ prompt. What runs?**
 
 Fast path, unconditionally. The `audrey_fast` virtual model is the
 "always fast" override: at
-[`routes/openai/pipeline.py:216`](../../src/audrey/routes/openai/pipeline.py#L216)
+[`routes/openai/pipeline.py:220`](../../src/audrey/routes/openai/pipeline.py#L220)
 the route sets `forced_fast = payload.model == "audrey_fast"`, and
 the subsequent branch picks fast regardless of `is_complex()`'s
 verdict. The complexity gate that normally escalates long prompts
@@ -663,7 +668,7 @@ recognizes the `audrey_passthrough/` prefix, and dispatches to
 substitute. This is the only path where `payload.tools` does
 anything; in pipeline modes, the field is dropped on the floor
 (see §2.1 and the field's docstring at
-[`routes/openai/schemas.py:35`](../../src/audrey/routes/openai/schemas.py#L35)).
+[`routes/openai/schemas.py:36`](../../src/audrey/routes/openai/schemas.py#L36)).
 
 Reshaping happens *on the way back*. Ollama returns tool-call
 arguments as a Python dict, but the OpenAI streaming spec expects
@@ -684,22 +689,22 @@ Five things have to land cleanly:
 
 - **The route generator** receives `asyncio.CancelledError` from
   Starlette. It catches at
-  [`routes/openai/pipeline.py:748`](../../src/audrey/routes/openai/pipeline.py#L748),
+  [`routes/openai/pipeline.py:755`](../../src/audrey/routes/openai/pipeline.py#L755),
   records `outcome="cancelled"`, and re-raises.
-- **The inner `try/finally` at [`routes/openai/pipeline.py:741`](../../src/audrey/routes/openai/pipeline.py#L741)** cancels
+- **The inner `try/finally` at [`routes/openai/pipeline.py:742`](../../src/audrey/routes/openai/pipeline.py#L742)** cancels
   `synth_task` and awaits it — making sure the synth producer
   doesn't keep streaming into a queue nobody reads.
-- **The four worker tasks** are awaited via `panel_task` (the
-  `_phase_dispatch` background task at
-  [`routes/openai/pipeline.py:591`](../../src/audrey/routes/openai/pipeline.py#L591)).
-  Cancellation propagates through `panel_task` into the deep-panel's
-  worker coroutines, which were already inside `async with
-  gate.acquire(...)` blocks. The gate's release fires via context-manager
-  exit (Lesson 14 §2.5).
+- **The panel phase task** is the current weak point. In the normal path,
+  `_phase_dispatch` runs inside `panel_task` at
+  [`routes/openai/pipeline.py:590`](../../src/audrey/routes/openai/pipeline.py#L590)
+  and is awaited before synthesis begins. If cancellation arrives while the
+  route is already in synthesis, the panel workers have already finished and
+  their gate contexts have exited. If cancellation arrives while `panel_task`
+  itself is still running, the route does not currently have a dedicated
+  cancel-and-await `finally` for that task the way it does for `synth_task`.
 - **The `async with inflight.slot(user_id)`** at the top of
   `_stream_via_pipeline` releases the per-user semaphore on its way
-  out, so the user's next request isn't blocked by the orphaned
-  slot.
+  out, so the user's next request is not blocked by the orphaned slot.
 - **Cloud workers' upstream sockets** close via httpx's cancel
   handling. The cloud *provider* may keep billing for already-dispatched
   tokens, since the cancel doesn't reach them as a "stop now"
@@ -707,11 +712,10 @@ Five things have to land cleanly:
   for tokens already generated; the cloud provider does whatever
   they do.
 
-The load-bearing seam is the `async with` wrapping pattern. Every
-resource that needs cleanup lives inside one. The explicit
-`synth_task.cancel()` is the only manual cleanup the route does
-itself — everything else inherits cancellation from Python's
-context-manager protocol.
+The load-bearing pattern is still `async with` cleanup, plus the explicit
+`synth_task.cancel()` block. The practical audit note is that synth has the
+manual cleanup path; planning and panel phase tasks currently rely on normal
+await/cancellation propagation and are not cancelled explicitly by the route.
 
 **6. OWUI fires a "generate title" utility request with the user's
 whole conversation bundled as one user message. The user happens to

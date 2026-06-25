@@ -44,8 +44,9 @@ possibility is the whole reason the next line is shaped the way it is.
 
 Now the idiom. `m.get("role") or "other"` pairs two everyday Python moves, and
 now you have the background to read it. `m.get("role")` returns the role string
-if it's there — `"user"`, `"assistant"`, `"system"` — or `None` if the key is
-missing. Then the `... or "other"` half takes over, and *that* half is one of
+if it is there — usually `"user"`, `"assistant"`, `"system"`, or sometimes
+`"tool"` in tool-using conversations — or `None` if the key is missing.
+Then the `... or "other"` half takes over, and *that* half is one of
 the most common fallbacks in Python: `a or b` evaluates to `a` when `a` is
 "truthy," otherwise to `b`. So the whole expression means: *"use the role if
 there is a real one; otherwise fall back to `"other"`."* It's the "missing →
@@ -107,7 +108,7 @@ overrode a deliberate setting. *This* is the case worth recognizing: the idiom
 works for every request except the one that matters most here.
 
 So Audrey doesn't use `or` for this. The real line that applies a request's
-temperature ([graph.py:475](../../src/audrey/pipeline/graph.py#L475)) steps off
+temperature ([graph.py:484](../../src/audrey/pipeline/graph.py#L484)) steps off
 the idiom and tests for *absence* directly:
 
 ```python

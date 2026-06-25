@@ -142,12 +142,11 @@ async def discover_one(client, server_url, *, timeout_s=10.0):
 
 Two practical consequences:
 
-- **Discovery does not retry by default.** If `custom-tools` was still
-  starting when Audrey came up, the registry is empty and the live tool
-  count says `tools=0`. The boot-order retry task added later (see
-  [`main.py`](../../src/audrey/main.py)) re-runs discovery every few seconds
-  when the registry is empty; `POST /v1/tools/rediscover` is the manual
-  escape hatch.
+- **Discovery is boot-time, with a bounded empty-registry retry.** Audrey
+  performs discovery during startup. If `custom-tools` is still coming up and
+  the registry is empty, a background retry task in [`main.py`](../../src/audrey/main.py)
+  re-runs discovery a few times. After that, `POST /v1/tools/rediscover` is
+  the manual escape hatch.
 - **Models never see HTTP routes.** They see a JSON object per tool:
 
 ```python
@@ -542,8 +541,8 @@ A request that uses `web_search`:
 1. User: *"What is the latest stable BTRFS release as of this week?"*
 2. Classify picks `general`. Fast path picks `qwen3.6:35b`. That model is
    in `tool_capable_models`, so the tool-capable branch fires.
-3. `run_fast_path` calls `run_react`. The registry has 7 tools including
-   `web_search`. ReAct converts each into Ollama's tool schema.
+3. `run_fast_path` calls `run_react`. The registry includes `web_search`.
+   ReAct converts the discovered tools into Ollama tool schemas.
 4. Round 0: `ollama.chat(messages, tools=[...])`. The model emits a
    `tool_calls` array:
    `[{"function": {"name": "web_search", "arguments": {"query": "btrfs latest stable release"}}}]`
@@ -564,9 +563,8 @@ A request that uses `web_search`:
     returns to the graph.
 11. The graph emits the answer to the route. The user sees it.
 
-Total: 2 chat calls, 1 dispatch, 1 truncation. The whole tour fits in
-about half a second on warm models.
-
+Total: 2 chat calls, 1 dispatch, 1 truncation. The exact wall time depends
+on the chosen model, Brave latency, and whether the model is already warm.
 ### 2.15 Where to look in the source
 
 Once you have the story above, the source files read in this order:
@@ -645,8 +643,11 @@ The GPU gate. Fast path passes a real `FairLocalGate` into ReAct, so the
 gate is released between rounds during tool dispatch — another user's
 request can run on the GPU while a slow web search resolves. Deep workers
 hold the gate at the whole-worker level (one acquire across all rounds)
-and pass `gate=None` into ReAct, because local workers run serialized
-under `as_completed` and can't share the GPU mid-round without thrashing.
+and pass `gate=None` into ReAct, because each local worker needs one
+uninterrupted GPU turn while it reasons, calls tools, and finishes its draft.
+In streaming deep mode the route receives worker completions as they finish;
+in non-streaming deep mode it gathers the worker results, but the gate policy
+is the same.
 
 **6. The Prometheus counter
 `audrey_tool_calls_total{tool="web_search", outcome="timeout"}` keeps

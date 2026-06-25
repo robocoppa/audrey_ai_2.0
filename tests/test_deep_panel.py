@@ -261,3 +261,55 @@ async def test_synth_uses_deep_worker_timeout_for_local_pools():
     for vm in ("audrey_deep", "audrey_local"):
         expected = pick_panel_timeout(cfg, pool_key_for(vm))
         assert await _captured_synth_timeout_for(vm) == expected
+
+
+# ─── reflect routing ends on deterministic no_drafts ───────────────────
+#
+# Regression guard: `route_after_reflect` must NOT retry when the failure is
+# `reflect_reason == "no_drafts"`. That reason means synthesis found zero usable
+# drafts — a deterministic dead-panel outcome. Retrying re-runs the same dead
+# panel and produces no_drafts again, wasting a deep-panel pass. A retryable
+# failure like `too_short` (under the retry budget) must still retry. `reflect()`
+# itself is covered in `test_reflect.py`; this pins the *router* decision.
+
+
+def _route_after_reflect():
+    """Pull the compiled graph's `route_after_reflect` conditional-edge fn.
+
+    It's a closure inside `build_graph`, reachable via the LangGraph branch
+    registry. Kept in one helper so a LangGraph internals change is a one-line
+    fix here, not scattered across tests.
+    """
+    cfg = get_config()
+    ollama = OllamaClient(base_url="http://unused")
+    registry = ModelRegistry(cfg)
+    compiled = gmod.build_graph(
+        cfg, ollama, registry, HealthTracker(), FairLocalGate(concurrency=1), _NoTools()
+    )
+    branch = compiled.builder.branches["reflect"]["route_after_reflect"]
+    return branch.path.func
+
+
+def test_route_after_reflect_ends_on_no_drafts():
+    route = _route_after_reflect()
+    # Deterministic failure, retry budget untouched → must end, not retry.
+    assert route({
+        "reflect_passed": False,
+        "reflect_reason": "no_drafts",
+        "reflect_attempts": 1,
+    }) == "end"
+
+
+def test_route_after_reflect_still_retries_too_short_under_budget():
+    route = _route_after_reflect()
+    # Retryable failure under the retry budget → still retries (no regression).
+    assert route({
+        "reflect_passed": False,
+        "reflect_reason": "too_short",
+        "reflect_attempts": 1,
+    }) == "retry"
+
+
+def test_route_after_reflect_ends_when_passed():
+    route = _route_after_reflect()
+    assert route({"reflect_passed": True}) == "end"

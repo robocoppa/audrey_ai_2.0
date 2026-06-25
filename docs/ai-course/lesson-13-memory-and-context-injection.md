@@ -48,7 +48,7 @@ this as the present moment." Two functions in
 [`pipeline/context.py`](../../src/audrey/pipeline/context.py), no I/O,
 no skip path; the instruction defuses models that would otherwise
 reason about the timestamp as data. The node wrapper at
-[`graph.py:138`](../../src/audrey/pipeline/graph.py#L138) prepends it
+[`graph.py:139`](../../src/audrey/pipeline/graph.py#L139) prepends it
 to `state["messages"]`. That's the whole subsystem; the rest of the
 lesson is per-user.)
 
@@ -213,7 +213,7 @@ Three things happen on the way to `me`:
 
 Once `require_user` returns, the route has a trusted `AuthedUser` and
 uses `me.email` everywhere a `user_id` is needed. Notice this guard
-at [`routes/openai/routes.py:102`](../../src/audrey/routes/openai/routes.py#L102):
+at [`routes/openai/routes.py:109`](../../src/audrey/routes/openai/routes.py#L109):
 
 ```python
 # Identity comes from the Authorization header via require_user, NOT from
@@ -360,14 +360,13 @@ know about accumulation; it just wraps the generator and reads
 Two details:
 
 - **Banner frames are also `delta.content`-shaped.** The
-  `> _Thinking_` / `> _Planning_` progress banners come through as
-  content deltas, indistinguishable from real synth output at the
-  frame level. So the deep-streaming path narrowly wraps **only** the
-  synth deltas (not the banner emissions) — the docstring on
-  `StreamCollector` spells out the contract, and
-  `_stream_deep_with_banners` at
-  [`routes/openai/pipeline.py:460`](../../src/audrey/routes/openai/pipeline.py#L460)
-  honors it.
+  `> _Thinking_` / `> _Planning_` progress banners arrive as content
+  deltas, indistinguishable from real synth output at the frame level. The
+  fast streaming branch can wrap the model stream in `StreamCollector`. The
+  deep-streaming branch instead keeps banners out of the archive by
+  accumulating the answer body manually in `final_content` inside
+  `_stream_deep_with_banners`
+  ([`routes/openai/pipeline.py:465`](../../src/audrey/routes/openai/pipeline.py#L465)).
 - **`partial=True` on client disconnect.** `wrap()` catches
   `CancelledError` from the source generator and sets
   `self.partial = True` before re-raising. Cancellation happens when
@@ -495,10 +494,11 @@ does three things in order:
    archive_chunks SET indexed_at = ...` to mark them indexed.
 
 Steps 2-3 can fail without losing data. If embedding or Qdrant errors,
-the chunk row stays in SQLite with `indexed_at IS NULL`, and a future
-reconcile can pick it up. SQLite is the source of truth; Qdrant is the
-index.
-
+the chunk row stays in SQLite with `indexed_at IS NULL`, and the stats route
+reports that as `chunks_unindexed`. SQLite is still the source of truth and
+Qdrant is still the index, but there is not yet an automatic reindex worker for
+those rows; search will not see the missed chunk until an operator repairs or
+re-archives it.
 **Idempotency.** Every id is derived deterministically:
 
 ```python
@@ -547,11 +547,11 @@ recall are wrappers; the *building blocks* (`datetime_system_message`,
 `recall_for_request`, `compose_system_messages`) are plain functions
 in `pipeline/context.py` and `pipeline/memory.py`. That's because the
 streaming-deep route bypasses the graph and calls them directly at
-[`routes/openai/pipeline.py:831`](../../src/audrey/routes/openai/pipeline.py#L831).
+[`routes/openai/pipeline.py:853`](../../src/audrey/routes/openai/pipeline.py#L853).
 
 | | Non-streaming | Streaming-deep |
 |---|---|---|
-| Lives in | [`graph.py:140, 156`](../../src/audrey/pipeline/graph.py#L140) | [`routes/openai/pipeline.py:831`](../../src/audrey/routes/openai/pipeline.py#L831) |
+| Lives in | [`graph.py:139, 155`](../../src/audrey/pipeline/graph.py#L139) | [`routes/openai/pipeline.py:853`](../../src/audrey/routes/openai/pipeline.py#L853) |
 | Datetime | `node_datetime` | direct `datetime_system_message()` call |
 | Recall | `node_memory_recall` | direct `recall_for_request()` call |
 | Composer | `compose_system_messages(...)` | `compose_system_messages(...)` |

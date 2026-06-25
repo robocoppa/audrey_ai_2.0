@@ -178,7 +178,11 @@ async def kb_reconcile(
     independently — calling this endpoint doesn't reset its timer.
     """
     qdrant = request.app.state.qdrant
-    result = await reconcile_once(qdrant)
+    result = await reconcile_once(
+        qdrant,
+        text_collection=qdrant.text_collection,
+        image_collection=qdrant.image_collection,
+    )
     log.warning("admin: kb reconcile triggered by %s; orphans_deleted=%d",
                 me.email, result.total_orphans_deleted)
     return result.to_dict()

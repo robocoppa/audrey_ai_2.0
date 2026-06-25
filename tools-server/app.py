@@ -30,7 +30,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 import httpx
-from brave import BraveClient, BraveRateLimitError, SearchResult
+from brave import BraveClient, BraveRateLimitError, BraveUpstreamError, SearchResult
 from chat_archive import ChatArchiveStore
 from db import MemoryEntry, MemoryStore
 from fastapi import FastAPI, HTTPException, status
@@ -242,6 +242,11 @@ async def web_search(req: WebSearchRequest) -> WebSearchResponse:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Brave Search rate-limited: {e}",
+        ) from e
+    except BraveUpstreamError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Brave Search unavailable: {e}",
         ) from e
     except ValueError as e:
         raise HTTPException(

@@ -28,9 +28,9 @@ Audrey is a *gateway*. It rarely does the actual work itself; mostly
 it forwards requests to other services and waits for replies. In one
 chat completion, Audrey typically makes:
 
-- **A POST to OWUI** (`http://open-webui:8080/api/v1/auths/`) to
-  validate the user's bearer token. Sub-millisecond on the local
-  network.
+- **A GET to OWUI** (`http://open-webui:8080/api/v1/auths/`) to
+  validate the bearer token. Fast on the local network, but still an
+  outbound HTTP call Audrey must await.
 - **A GET to Ollama for `/api/tags`** at startup, to find out which
   models are loaded.
 - **One or more POSTs to Ollama's `/api/chat`** to actually generate

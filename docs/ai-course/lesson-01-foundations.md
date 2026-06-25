@@ -549,9 +549,6 @@ Audrey shuffles small, structured records between layers constantly:
 
 - `AuthedUser` (email + role + owui_id) — produced by `auth.py`,
   consumed by every protected route.
-- `WorkerDraft` (a single deep-panel worker's output: model, content,
-  tool calls, errors) — produced by `deep_panel.py`, consumed by
-  `synthesize.py`.
 - `KBHit` (qdrant search result: source, text, score) — produced by
   `kb/qdrant.py`, consumed by tools and routes.
 - `ReactResult` — the per-iteration state of a ReAct loop.

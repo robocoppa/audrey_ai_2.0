@@ -91,7 +91,7 @@ the result is returned to the client*.
 ### 2.2 The pipeline graph
 
 Open [`src/audrey/pipeline/graph.py`](../../src/audrey/pipeline/graph.py).
-Scroll to **line 413**:
+Scroll to **line 437**:
 
 ```python
 g: StateGraph = StateGraph(PipelineState)
@@ -109,10 +109,10 @@ g.add_node("reflect", node_reflect)
 
 This is the whole pipeline laid out as a graph. **Ten nodes.** Each
 one is a Python `async def` function defined earlier in the same file
-(grep `def node_` — you'll see them at lines 138, 154, 197, 213, 242, 271, 289, 321, 340, 406).
+(grep `def node_` — you'll see them at lines 139, 155, 198, 214, 264, 293, 311, 343, 364, 430).
 
 The graph topology — which node runs after which — is on **lines
-425-442**:
+449-466**:
 
 ```python
 g.set_entry_point("datetime")
@@ -177,7 +177,7 @@ now is just: **the pipeline is a graph, and each node is a function.**
 
 ### 2.3 What a node looks like
 
-Look at [`graph.py:138`](../../src/audrey/pipeline/graph.py#L138) —
+Look at [`graph.py:139`](../../src/audrey/pipeline/graph.py#L139) —
 the `node_datetime` function:
 
 ```python
@@ -263,17 +263,18 @@ follow along in `openai.py`.
      it knows what BTRFS is.
 
 7. **The model's tokens stream back** through `_stream_openai` at
-   [`pipeline.py:915`](../../src/audrey/routes/openai/pipeline.py#L915),
+   [`pipeline.py:917`](../../src/audrey/routes/openai/pipeline.py#L917),
    which converts Ollama's chunks into OpenAI-format SSE frames and
    yields them. FastAPI passes each frame through to OWUI as it's
    produced. The user sees the answer typing itself out.
 
-8. **The `reflect` node runs** at the end to check the answer met a
-   minimum length. If not, it might retry with the deep panel. For our
-   case, the answer is fine.
+8. **The fast answer ends there unless it escalates.** Reflection belongs to
+   the deep branch. A normal fast answer returns straight to the route after
+   the fast-path node; if the fast answer looks too short or low-confidence,
+   the graph can bridge into the deep branch and reflection happens after synthesis.
 
 9. **`pipeline_total` metric increments** (in `_run_graph_with_metrics`,
-   line 482), the request completes, the connection closes.
+   line 93), the request completes, the connection closes.
 
 That's it. Every Audrey request is some variation of those nine steps.
 

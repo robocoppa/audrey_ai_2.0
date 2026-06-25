@@ -17,7 +17,6 @@ from typing import Any
 import httpx
 from tenacity import (
     AsyncRetrying,
-    RetryError,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -35,6 +34,16 @@ class SearchResult:
 
 class BraveRateLimitError(Exception):
     """Raised when Brave returns 429 after retries are exhausted."""
+
+
+class BraveUpstreamError(Exception):
+    """Raised when a non-429 Brave HTTP error survives the retry budget.
+
+    Without this the raw `httpx.HTTPStatusError` escaped `search()` and the
+    `web_search` handler — which only catches `BraveRateLimitError`/`ValueError`
+    — let it fall through to FastAPI as a generic 500. Normalizing it here lets
+    the handler map it to a controlled 503 like the rate-limit path.
+    """
 
 
 class BraveClient:
@@ -93,6 +102,10 @@ class BraveClient:
             r.raise_for_status()
             return r
 
+        # `reraise=True` means the *last* attempt's exception escapes (not a
+        # RetryError). A 429 stays a `BraveRateLimitError` (handler → 503); a
+        # non-429 `HTTPStatusError` would otherwise escape raw and become a
+        # generic 500, so normalize it to `BraveUpstreamError` (handler → 503).
         try:
             async for attempt in AsyncRetrying(
                 retry=retry_if_exception_type((BraveRateLimitError, httpx.HTTPStatusError)),
@@ -102,8 +115,8 @@ class BraveClient:
             ):
                 with attempt:
                     resp = await _do()
-        except RetryError as e:
-            raise BraveRateLimitError(str(e)) from e
+        except httpx.HTTPStatusError as e:
+            raise BraveUpstreamError(f"Brave upstream error after retries: {e}") from e
 
         data: dict[str, Any] = resp.json()
         web_results = data.get("web", {}).get("results", []) or []

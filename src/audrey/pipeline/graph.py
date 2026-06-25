@@ -419,6 +419,11 @@ def build_graph(
     def route_after_reflect(state: PipelineState) -> str:
         if state.get("reflect_passed"):
             return "end"
+        if state.get("reflect_reason") == "no_drafts":
+            # Deterministic failure: the panel produced no usable drafts.
+            # Retrying re-runs the same dead panel and yields no_drafts again,
+            # so end now and ship the degraded answer instead of burning a retry.
+            return "end"
         if int(state.get("reflect_attempts", 0)) > reflection_max_retries:
             log.warning("reflect: out of retries (%d), shipping degraded answer",
                         state.get("reflect_attempts", 0))

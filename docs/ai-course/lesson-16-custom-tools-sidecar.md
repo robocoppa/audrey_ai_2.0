@@ -37,9 +37,10 @@ Why split it out at all, instead of putting the tools inside Audrey?
   model. (That discovery handshake is Lesson 9's territory; here we're on
   the *other* end of it — the thing being discovered.)
 
-That last point is the one to hold onto: **the sidecar's HTTP routes
-*are* the model's tools.** Add a route, and — if you shape it right — the
-model gains a tool. That's the whole contract, and §2 unpacks it.
+That last point is the one to hold onto: **the sidecar schema-visible, POST,
+`tools`-tagged routes are the model's tools.** Add a route, and — if you shape it
+right — the model gains a tool. Health/internal routes and routes hidden from
+OpenAPI remain service plumbing, not model-callable tools.
 
 > **The `tools=0` boot race.** Because discovery happens once at Audrey
 > startup, if the sidecar isn't healthy yet when Audrey boots, Audrey comes
@@ -84,14 +85,15 @@ and its route decorator + handler at [app.py:225](../../tools-server/app.py#L225
     "/web_search",
     operation_id="web_search",                          # ② tool name
     response_model=WebSearchResponse,                   # ③ response schema
-    summary="Search the web via Brave Search API",      # ④ model-facing docs
+    tags=["tools"],                                    # ④ discovery-visible tag
+    summary="Search the web via Brave Search API",      # ⑤ model-facing docs
     description="Query the public web for current information. ...",
 )
 async def web_search(req: WebSearchRequest) -> WebSearchResponse:
     ...
 ```
 
-Each part has a job, and three of the four are *for the model*, not for you:
+Each part has a job, and most of them are for the model or the discovery machinery, not for you:
 
 1. **The request schema** becomes the tool's JSON-Schema parameters. The
    `Field` constraints (`min_length`, `le=10`) are advertised to the model
@@ -104,7 +106,10 @@ Each part has a job, and three of the four are *for the model*, not for you:
    prompt or memory that referenced the old name.
 3. **`response_model`** shapes what comes back. It also documents the return
    shape in `/openapi.json`, though the model mostly cares about the call.
-4. **`summary` / `description`** are the model-facing documentation. The
+4. **`tags=["tools"]`** is the discovery-visible intent marker. Audrey's discovery
+   only turns POST operations tagged `tools` into `ToolSpec`s, so an otherwise
+   valid route without that tag stays out of the model's tool list.
+5. **`summary` / `description`** are the model-facing documentation. The
    `description` is sent to the model as the tool's description on *every
    request that advertises this tool*. This is prompt real estate — it's
    where you tell the model *when* to use the tool, not just what it does.
@@ -112,7 +117,7 @@ Each part has a job, and three of the four are *for the model*, not for you:
    [app.py:426](../../tools-server/app.py#L426): half of it is "use only
    when…" — actively steering the model away from over-calling it.)
 
-That's the contract. Get all four right and the model gains a working tool;
+That's the contract. Get all five right and the model gains a working tool;
 get `operation_id` wrong and the tool is misnamed; get the `description`
 wrong and the model calls it at the wrong times.
 
@@ -143,7 +148,7 @@ add a route, that one flag decides which side of the line it's on.
 
 ### 2.3 The three kinds of tool
 
-The six model-facing tools look uniform from §2.1, but underneath they fall
+The model-facing tools look uniform from §2.1, but underneath they fall
 into three groups with very different implementations:
 
 | Kind | Tools | What the handler does |
@@ -215,7 +220,7 @@ The next two sections take the External and Stateful kinds in depth.
 small but it models how to call a rate-limited, paid third-party service
 without abusing it. Two mechanisms carry the weight.
 
-**A TTL cache** ([brave.py:119](../../tools-server/brave.py#L119)). The
+**A TTL cache** ([brave.py:132](../../tools-server/brave.py#L132)). The
 client keeps an in-memory `OrderedDict` keyed by `(query, count)`, each
 entry stamped with a `time.monotonic()` expiry. The read path is small but
 does three things at once:
@@ -247,7 +252,7 @@ The point of all this is the free tier: Brave's quota is small, and a
 is keyed on `(query, count)` because a different `count` is a genuinely
 different result set.
 
-**Retry with backoff** ([brave.py:97](../../tools-server/brave.py#L97)).
+**Retry with backoff** ([brave.py:110](../../tools-server/brave.py#L110)).
 The actual fetch wraps the HTTP call in `tenacity`'s `AsyncRetrying`:
 
 ```python
@@ -262,13 +267,13 @@ async for attempt in AsyncRetrying(
 ```
 
 `_do()` raises `BraveRateLimitError` on a 429 and `raise_for_status()` on
-other HTTP errors; both are in the `retry=` set, so a transient failure
-backs off and tries again — 1s, then 2s, then 4s, capped at 15s. The
-exponential wait is what makes this *polite*: hammering a rate-limited API
-with immediate retries just deepens the limit. If all four attempts fail,
-`reraise=True` lets the last exception out, which the client converts to a
-`BraveRateLimitError`. The `web_search` handler catches that and returns a
-503 ([app.py:240](../../tools-server/app.py#L240)).
+other HTTP errors; both are in the `retry=` set, so a transient failure backs
+off and tries again — 1s, then 2s, then 4s, capped at 15s. The exponential wait
+is what makes this *polite*: hammering a rate-limited API with immediate retries
+just deepens the limit. If all four attempts fail, `reraise=True` lets the last
+exception out. The 429 case remains a `BraveRateLimitError`, which the
+`web_search` handler catches and returns as 503 ([app.py:240](../../tools-server/app.py#L240));
+other HTTP status failures can currently escape as a generic server error.
 
 So from the model's seat, a rate-limited Brave looks like a tool that
 returned an error — the ReAct loop (Lesson 9) sees the failed tool result
@@ -350,16 +355,13 @@ filters on that exact field ([recall, db.py:229](../../tools-server/db.py#L229);
 [search, db.py:258](../../tools-server/db.py#L258)). The docstrings on both
 read methods carry the same warning: never relax the `user` filter.
 
-**The model never supplies `user`.** This is the key safety property, and
-it connects to a fixed audit finding. The `user` field is required in the
-schemas, but the model is told (in the field descriptions) that *Audrey
-fills it in automatically*. That's because Audrey's dispatch layer
-overrides the `user` argument with the authenticated pipeline user before
-the call ever reaches the sidecar — the `_USER_SCOPED_TOOLS` mechanism from
-Lesson 9. A model can't write to another user's memory even if it tries to,
-because Audrey rewrites the `user` argument regardless of what the model
-emitted. The sidecar trusts that the `user` it receives is already
-authenticated.
+**The model never controls user scope.** This is the key safety property.
+Some user-scoped tools expose a `user` argument in their schema; `memory_store`
+uses tags instead. Either way, Audrey's dispatch rewrites the scope before the
+call reaches the sidecar: it overrides `user` for user-scoped read/search tools
+and forces the authenticated `user:<id>` tag for `memory_store`. A model cannot
+write to or read from another user's memory by inventing a different scope value;
+the sidecar trusts that the scope Audrey sends is already authenticated.
 
 **Legacy migration on boot** ([db.py:144](../../tools-server/db.py#L144)).
 An earlier version of memory used SQLite. On first startup, if a legacy
@@ -493,7 +495,7 @@ guessing its id.
 see, and what keeps it from taking down the whole request?**
 
 After the retry budget exhausts, `brave.py` raises `BraveRateLimitError`
-([`brave.py:92`](../../tools-server/brave.py#L92)), and the `web_search`
+([`brave.py:101`](../../tools-server/brave.py#L101)), and the `web_search`
 handler converts it to a 503
 ([`app.py:241`](../../tools-server/app.py#L241)). The model doesn't see a
 crash — it sees a *failed tool result*, which the ReAct loop (Lesson 9) feeds

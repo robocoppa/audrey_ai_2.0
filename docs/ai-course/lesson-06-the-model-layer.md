@@ -73,9 +73,9 @@ harder to test.
 
 These are the files we'll reference in this lesson, open each one as we go:
 
-- [`config.yaml`](../../config.yaml#L15) - the model registry and
+- [`config.yaml`](../../config.yaml#L21) - the model registry and
   deep-panel pools.
-- [`src/audrey/main.py`](../../src/audrey/main.py#L53) - where the
+- [`src/audrey/main.py`](../../src/audrey/main.py#L56) - where the
   model-layer objects are built at startup.
 - [`src/audrey/models/registry.py`](../../src/audrey/models/registry.py#L16)
   - the ranked model registry.
@@ -94,7 +94,7 @@ Don't get too bogged down with how much code is contained within these files. We
 
 ### 2.1 Startup builds the shared model objects
 
-Start in [`src/audrey/main.py`](../../src/audrey/main.py#L53), inside
+Start in [`src/audrey/main.py`](../../src/audrey/main.py#L56), inside
 `lifespan`. Lesson 5 covered this function as startup code. This time, focus
 only on the model-layer objects:
 
@@ -118,7 +118,7 @@ This is the same closure idea from Lesson 5. The compiled graph keeps
 references to these objects. Every request uses the same `OllamaClient`, the
 same `ModelRegistry`, the same `HealthTracker`, and the same `FairLocalGate`.
 The same objects are also stored on `app.state` starting at
-[`main.py:132`](../../src/audrey/main.py#L132), so routes can reach them too.
+[`main.py:151`](../../src/audrey/main.py#L151), so routes can reach them too.
 
 That matters because health is process-local memory. If a model times out on
 one request, the next request should know to avoid it for a little while. That
@@ -134,7 +134,7 @@ startup creates the model-layer objects once
 
 ### 2.2 `config.yaml` is the source of model choices
 
-Open [`config.yaml`](../../config.yaml#L15) and find `model_registry`.
+Open [`config.yaml`](../../config.yaml#L21) and find `model_registry`.
 
 The registry is grouped by **task type**:
 
@@ -148,7 +148,7 @@ does not choose them directly. Audrey classifies the prompt and then asks the
 model layer for a model that fits the task.
 
 A registry entry looks like this at
-[`config.yaml:38`](../../config.yaml#L38):
+[`config.yaml:47`](../../config.yaml#L47):
 
 ```yaml
 - { name: "qwen3.6:35b", priority: 100, speed: 75, quality: 92, location: local }
@@ -619,18 +619,20 @@ except OllamaError as e:
     return WorkerDraft(model=model, content="", error=str(e)[:300], ...)
 ```
 
-That is different from the fast path. In fast mode, one model is the whole
-answer path, so a failure bubbles up. In deep mode, one failed worker does not
-mean the whole request is useless. Another worker may still produce a good
-draft, and the synthesizer can still answer.
+That is different from the fast path. In the ordinary non-tool fast path,
+Audrey can try a bounded fallback model before giving up; in the tool-capable
+fast path, the selected model owns the ReAct loop. Either way, fast mode is
+still trying to produce one direct answer. Deep mode treats worker failures as
+input material: one failed worker does not mean the whole request is useless.
+Another worker may still produce a good draft, and the synthesizer can still
+answer.
 
 The mental model:
 
 ```text
-fast path: one model fails -> the fast attempt fails
+fast path: one direct-answer attempt, with limited fallback in the non-tool case
 deep panel: one worker fails -> keep the error as a draft and continue
 ```
-
 ### 2.8 Synthesis: primary, fallback, then graceful degradation
 
 Open
@@ -847,9 +849,9 @@ Here is what happens after the request reaches the graph:
 1. The classifier labels the request as `general`.
 2. Complexity routing keeps it in fast mode because the prompt is short and the
    user chose `audrey_fast`; the forced-fast check lives at
-   [`graph.py:217`](../../src/audrey/pipeline/graph.py#L217).
+   [`graph.py:219`](../../src/audrey/pipeline/graph.py#L219).
 3. `node_fast_path` calls `run_fast_path(...)` at
-   [`graph.py:244`](../../src/audrey/pipeline/graph.py#L244).
+   [`graph.py:266`](../../src/audrey/pipeline/graph.py#L266).
 4. `run_fast_path(...)` calls `pick_fast_model(...)` at
    [`fast_path.py:113`](../../src/audrey/pipeline/fast_path.py#L113).
 5. `pick_fast_model(...)` asks the registry for the first healthy `general`

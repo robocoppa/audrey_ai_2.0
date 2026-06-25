@@ -125,7 +125,7 @@ a tighter slice instead of trying to cover everything at once.
 #### When the planner runs
 
 The graph node is at
-[`graph.py:294`](../../src/audrey/pipeline/graph.py#L294):
+[`graph.py:293`](../../src/audrey/pipeline/graph.py#L293):
 
 ```python
 async def node_planner(state: PipelineState) -> dict[str, Any]:
@@ -217,7 +217,7 @@ goes on. The planner is opt-in routing, not a hard requirement — when it
 works, it sharpens the panel; when it fails, the panel doesn't notice.
 
 When the planner *does* return subtasks, the log line at
-[`graph.py:307`](../../src/audrey/pipeline/graph.py#L307) shows the count
+[`graph.py:306`](../../src/audrey/pipeline/graph.py#L306) shows the count
 and the first 60 chars of each:
 
 ```python
@@ -285,10 +285,11 @@ def pool_key_for(virtual_model: str) -> str:
     return pool
 ```
 
-The fallback exists because the function is also called from the streaming
-route, where a misspelled virtual model would otherwise blow up with a
-`KeyError` mid-request. Warning and using the default pool means the user
-still gets an answer; the operator gets a typo in the logs to chase later.
+The fallback is defensive. The public route validates virtual model names
+before this helper runs, so a normal client typo should be rejected earlier.
+Keeping the fallback here protects internal and future call sites from turning
+an unexpected model string into a mid-request `KeyError`; the operator still
+gets a warning in the logs.
 
 The pools themselves live in `config.yaml`. Open
 [`config.yaml:98`](../../config.yaml#L98):
@@ -296,13 +297,13 @@ The pools themselves live in `config.yaml`. Open
 ```yaml
 deep_panel:
   code:
-    workers: ["qwen3-coder-next:latest", "kimi-k2.6:cloud"]
+    workers: ["qwen3-coder-next:latest", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud"]
     synthesizer: "qwen3.6:35b"
-    fallback_synth: "glm-5.1:cloud"
+    fallback_synth: "glm-5.2:cloud"
   reasoning:
-    workers: [...]
+    workers: ["qwen3.6:35b", "kimi-k2.6:cloud", "deepseek-v4-pro:cloud"]
     synthesizer: "qwen3.6:35b"
-    fallback_synth: "glm-5.1:cloud"
+    fallback_synth: "glm-5.2:cloud"
   ...
 ```
 
@@ -359,11 +360,11 @@ if not workers:
             break
 ```
 
-The cap of 2 mirrors the typical pool size — enough drafts to merge,
-without flooding the GPU gate or burning cloud quota on what is already an
-emergency path. The log line is a `warning` precisely so operators notice
-when a pool has lost its workers; if you see this in production, the pool's
-models need attention now.
+The cap of 2 keeps the emergency path bounded — enough drafts to merge,
+without flooding the GPU gate or burning cloud quota when the configured pool
+has already failed. The log line is a `warning` precisely so operators notice
+when a pool has lost its workers; if you see this in production, those models
+need attention now.
 
 #### Concept spotlight — the GPU gate and per-worker accounting
 
@@ -402,13 +403,12 @@ atomic from the gate's perspective.
 
 One subtlety worth knowing before you read deep-mode logs: when a worker
 runs ReAct, `WorkerDraft.prompt_eval_count` and `eval_count` carry only the
-**final** chat call's tokens, not the sum across rounds. A tool-grounded
-worker that ran three rounds reports just the last round's count. It isn't
-a metrics bug — the per-worker totals are exactly what the dashboards
-Audrey actually uses are reading — but if you compare a tool-grounded
-worker's token count against a one-shot worker's, the tool-grounded one
-looks artificially light. That's the accounting working as designed, not a
-worker cheating its way to a smaller number.
+**final** chat call's tokens, not the sum across rounds. A tool-grounded worker
+that ran three rounds reports just the last round's count. It is not a metrics
+bug — current Audrey dashboards treat these as per-final-call counters — but
+if you compare a tool-grounded worker's token count against a one-shot worker
+count, the tool-grounded one looks artificially light. That is the accounting
+working as designed, not a worker cheating its way to a smaller number.
 
 #### Sub-question round-robin
 
@@ -483,7 +483,7 @@ The pool config has two slots:
 
 ```yaml
 synthesizer: "qwen3.6:35b"
-fallback_synth: "glm-5.1:cloud"
+fallback_synth: "glm-5.2:cloud"
 ```
 
 `pick_synthesizer` at
@@ -718,7 +718,7 @@ deep_panel: skipping unhealthy worker qwen3-coder-next
 deep_panel: no healthy pool workers for deep_panel/code; falling back to registry
 deep_panel: worker qwen3.6:35b failed in 4.12s: timeout
 synth: qwen3.6:35b unhealthy, skipping (attempt 1)
-synth: glm-5.1:cloud ok in 8.21s (attempt 2)
+synth: glm-5.2:cloud ok in 8.21s (attempt 2)
 reflect: attempt=1 passed=False reason=too_short
 reflect: attempt=2 passed=True reason=ok
 ```

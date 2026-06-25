@@ -186,7 +186,7 @@ g.add_node("classify", node_classify)
 g.add_node("complexity", node_complexity)
 ```
 
-Then the edges at [`graph.py:448`](../../src/audrey/pipeline/graph.py#L448)
+Then the edges at [`graph.py:449`](../../src/audrey/pipeline/graph.py#L449)
 make the order explicit:
 
 ```python
@@ -222,7 +222,7 @@ user's actual ask."
 
 ### 2.3 `node_classify`: the graph asks for a task type
 
-The graph node lives at [`graph.py:197`](../../src/audrey/pipeline/graph.py#L197):
+The graph node lives at [`graph.py:198`](../../src/audrey/pipeline/graph.py#L198):
 
 ```python
 async def node_classify(state: PipelineState) -> dict[str, Any]:
@@ -373,7 +373,7 @@ first `{...}` block. It also clamps confidence into the `0.0` to `1.0` range at
 [`classify.py:178`](../../src/audrey/pipeline/classify.py#L178).
 
 The top-level `classify(...)` function starts at
-[`classify.py:186`](../../src/audrey/pipeline/classify.py#L186). Its decision
+[`classify.py:201`](../../src/audrey/pipeline/classify.py#L201). Its decision
 order is:
 
 ```text
@@ -393,13 +393,13 @@ router:
 ```
 
 That last value matters. The loop at
-[`classify.py:216`](../../src/audrey/pipeline/classify.py#L216) lets Audrey try
+[`classify.py:249`](../../src/audrey/pipeline/classify.py#L249) lets Audrey try
 the router more than once before falling back.
 
 ### 2.6 Complexity is a separate gate
 
 After classification, the graph runs
-[`graph.py:215`](../../src/audrey/pipeline/graph.py#L215).
+[`graph.py:214`](../../src/audrey/pipeline/graph.py#L214).
 
 This node asks a different question:
 
@@ -449,7 +449,7 @@ task family.
 ### 2.7 Virtual models can force the route
 
 Now read the middle of `node_complexity`, starting at
-[`graph.py:215`](../../src/audrey/pipeline/graph.py#L215):
+[`graph.py:214`](../../src/audrey/pipeline/graph.py#L214):
 
 ```python
 complex_, n = is_complex(...)
@@ -481,7 +481,7 @@ else:
     mode = "fast"
 ```
 
-That code starts at [`graph.py:217`](../../src/audrey/pipeline/graph.py#L217).
+That code starts at [`graph.py:223`](../../src/audrey/pipeline/graph.py#L223).
 
 So the virtual model lineup means:
 
@@ -498,7 +498,7 @@ with the vision task, and OWUI background utility prompts force fast mode even
 if the conversation is pinned to a deep virtual model.
 
 The graph returns `prompt_tokens`, `complex`, and `mode` at
-[`graph.py:257`](../../src/audrey/pipeline/graph.py#L257). Later nodes do not
+[`graph.py:259`](../../src/audrey/pipeline/graph.py#L259). Later nodes do not
 need to repeat the complexity calculation.
 
 ### 2.8 LangGraph chooses the next branch
@@ -510,9 +510,9 @@ def route_after_complexity(state: PipelineState) -> str:
     return "fast" if state.get("mode") == "fast" else "deep"
 ```
 
-That is at [`graph.py:383`](../../src/audrey/pipeline/graph.py#L383).
+That is at [`graph.py:384`](../../src/audrey/pipeline/graph.py#L384).
 
-The wiring at [`graph.py:452`](../../src/audrey/pipeline/graph.py#L452) tells
+The wiring at [`graph.py:453`](../../src/audrey/pipeline/graph.py#L453) tells
 LangGraph what those return strings mean:
 
 ```python
@@ -537,7 +537,7 @@ block.
 
 After `fast_path` returns, Audrey may still decide the answer was not good
 enough. The router for that is
-[`graph.py:386`](../../src/audrey/pipeline/graph.py#L386).
+[`graph.py:387`](../../src/audrey/pipeline/graph.py#L387).
 
 The first guard is simple: if escalation is disabled, stop.
 
@@ -555,7 +555,7 @@ because the answer was short.
 Two other guards stop escalation:
 
 - tool-grounded fast answers at [`graph.py:398`](../../src/audrey/pipeline/graph.py#L398)
-- memory-grounded fast answers at [`graph.py:404`](../../src/audrey/pipeline/graph.py#L404)
+- memory-grounded fast answers at [`graph.py:402`](../../src/audrey/pipeline/graph.py#L402)
 
 Those guards exist because a short answer grounded in tools or recalled memory
 may be exactly right. Re-running it through deep workers can wash out the
@@ -571,7 +571,7 @@ low_confidence = conf < escalation_conf_ceiling and conf > 0
 
 That starts at [`graph.py:413`](../../src/audrey/pipeline/graph.py#L413). If
 either condition trips, the graph routes to `escalate_bridge`, then into the
-deep branch at [`graph.py:463`](../../src/audrey/pipeline/graph.py#L463).
+deep branch at [`graph.py:461`](../../src/audrey/pipeline/graph.py#L461).
 
 The mental model:
 

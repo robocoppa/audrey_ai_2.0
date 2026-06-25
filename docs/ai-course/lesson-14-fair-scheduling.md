@@ -78,17 +78,16 @@ about *who gets the GPU next* — a scheduling decision. The other is
 about *how many of one user's requests should exist at all* — an
 admission decision. The clean fix is to make them separate.
 
-The lookup is also different. The gate is acquired *every time
-Audrey calls Ollama locally*. In fast mode that's once per request;
-in deep mode the planner fans out to a pool of sub-question workers
-and the synthesizer runs after — each touch of the GPU is a separate
-`gate.acquire()`. So you'll see the gate threaded through
+The lookup is also different. The gate is acquired around Audrey's main local
+generation calls: fast path, deep-panel workers, synthesis, ReAct rounds, and
+passthrough. So you will see the gate threaded through
 [`pipeline/fast_path.py`](../../src/audrey/pipeline/fast_path.py),
 [`pipeline/deep_panel.py`](../../src/audrey/pipeline/deep_panel.py),
-[`pipeline/synthesize.py`](../../src/audrey/pipeline/synthesize.py),
-[`pipeline/react.py`](../../src/audrey/pipeline/react.py). The
-in-flight cap, by contrast, is acquired exactly *once per request*,
-right at the route boundary in
+[`pipeline/synthesize.py`](../../src/audrey/pipeline/synthesize.py), and
+[`pipeline/react.py`](../../src/audrey/pipeline/react.py). The planner is a
+current exception: if configured to use a local model, it calls Ollama directly
+without the fair gate. The in-flight cap, by contrast, is acquired exactly
+*once per request*, right at the route boundary in
 [`routes/openai/pipeline.py:111`](../../src/audrey/routes/openai/pipeline.py#L111) and
 [`routes/openai/pipeline.py:207`](../../src/audrey/routes/openai/pipeline.py#L207).
 The whole pipeline executes inside that single `async with` block.
@@ -338,10 +337,11 @@ request failed."
 
 The registry as a whole holds a `OrderedDict[str, Semaphore]` —
 one semaphore per active user — capped by `max_tracked_users`
-(default 1024). That cap is a soft guideline, not a hard ceiling.
-When you exceed it, the registry logs a warning and increments
-`audrey_inflight_cap_breached_total` so you can see how often it
-happens.
+(default 1024). That cap is a soft guideline, not a hard ceiling. When a new
+user arrives at the cap, the registry first evicts least-recently-used idle
+buckets. It logs a warning and increments `audrey_inflight_cap_breached_total`
+only when every tracked bucket has a reservation and there is no idle bucket to
+evict.
 
 #### Concept spotlight: `asyncio.Semaphore` as a counter
 
@@ -495,19 +495,17 @@ line behind someone whose turn is taking a while.
 the fair gate's behavior, and what risks have you taken on at
 the box level?**
 
-The gate's `_available` counter now starts at 2, so two waiters
-can be granted slots concurrently. The round-robin policy still
-applies — when a slot frees, `_last_granted` is checked to
-prefer a different bucket — but two requests can hit Ollama at
-the same time instead of strictly alternating. The risk is at
-the GPU layer below: the box was sized around one model loaded
-in VRAM at a time, and two simultaneous calls to *different*
-models will force Ollama to swap weights, eating model-load
-latency on every alternation. Two simultaneous calls to the
-*same* model fit fine on a 24 GB 3090 Ti for the 30-35B Q4
-range, but a deep panel routinely picks heterogeneous workers,
-so "same model both times" isn't a reliable assumption. If
-you're going to raise concurrency, pin to a single model first.
+The internal `_available` counter now starts at 2, so two waiters can be granted
+slots concurrently. The round-robin policy still applies — when a slot frees,
+`_last_granted` is checked to prefer a different bucket — but two requests can
+hit Ollama at the same time instead of strictly alternating. The risk is at the
+GPU layer below: the box may have been sized around one local model running at a
+time, and two simultaneous calls to *different* models can force Ollama to
+juggle weights, adding model-load latency on every alternation. Two simultaneous
+calls to the *same* small-enough model may be fine on some hardware, but a deep
+panel routinely picks heterogeneous workers, so "same model both times" is not
+a reliable assumption. If you are going to raise concurrency, test with the
+actual local models and watch VRAM/load latency.
 
 **3. A buggy client retries aggressively and pushes 200 requests
 in five seconds, all under the same `user_id`. Walk what
@@ -527,13 +525,11 @@ the only state per parked request is the route's local stack
 frame plus the connection itself, and the registry holds one
 semaphore per user (not per request), so 200 retries from one
 user grows the registry by zero entries. In metrics,
-`audrey_user_inflight_blocked_seconds` would spike (197 of those
-requests are waiting at the door),
-`audrey_user_inflight_blocked_total{user_id=…}` increments per
-parked request, and `audrey_inflight_cap_breached_total` stays
-flat — the cap is per-user, not a tracked-users-overflow cap.
-The gate sees only the 3 that got through; everybody else is
-upstream of it.
+`audrey_user_inflight_blocked_seconds` would spike because 197 of those
+requests are waiting at the door. There is no per-user labelled blocked-total
+counter in current Audrey; the histogram and the `inflight: user=... waited`
+log lines are the observability surface. `audrey_inflight_cap_breached_total`
+stays flat unless the registry also runs out of idle user buckets to evict.
 
 **4. `audrey_auto` routes a small chitchat prompt to fast mode
 over a cloud model. Does either layer acquire anything? Why?**
@@ -589,26 +585,15 @@ change the cap?**
 
 This metric increments at
 [`inflight.py:85`](../../src/audrey/routes/inflight.py#L85)
-when the registry already holds 1024 user semaphores and a
-new user arrives needing one — the eviction loop evicts an
-idle entry to make room, and the metric records that the
-eviction happened. A few ticks an hour means you have more
-than 1024 *distinct* users hitting the box per
-eviction-window, but most of them are idle by the time the
-next new user shows up. That's churn, not pressure: nobody
-actually got rejected, and no user's cap was lost while they
-were active (only idle semaphores get evicted). Whether to
-raise the cap depends on what evictions cost you. The cost is
-near-zero — the only thing thrown away is a semaphore object
-with `_max_per_user` permits, which gets recreated on the
-user's next request — so the metric is informational rather
-than alarming. Bumping `max_tracked_users` to 4096 would
-silence it, but the cap's real job is bounding memory growth
-under abuse, not under organic churn, so the default is
-probably fine. Worth investigating only if the rate climbs
-into the hundreds-per-hour or if you see the same handful of
-users repeatedly evicted (i.e., a real working set larger
-than 1024).
+when the registry already holds 1024 user semaphores, a new user arrives, and
+**none** of the tracked buckets are idle enough to evict. That means the active
+or waiting user set briefly exceeded the tracking cap; Audrey accepts the
+overflow rather than blocking the request. A few ticks an hour is worth
+watching but not automatically alarming: nobody got rejected, and the cap is a
+memory-bound guideline rather than a hard admission limit. Raising the cap only
+makes sense if this reflects a real concurrent working set larger than 1024;
+otherwise the default is doing its job of bounding abuse while tolerating short
+bursts.
 
 
 ## When you're ready for the next lesson

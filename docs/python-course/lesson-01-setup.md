@@ -79,8 +79,12 @@ live and move there — `git clone` drops the repo into whatever directory your
 terminal is currently in, so pick a parent folder you'll remember rather than
 cloning blind:
 
+Use whatever parent folder you keep projects in. This example uses `~/code`;
+create it first if it does not exist.
+
 ```bash
-cd ~/code          # or wherever you keep projects; make it first if needed
+mkdir -p ~/code
+cd ~/code
 git clone https://github.com/robocoppa/audrey_ai_2.0.git
 cd audrey_ai_2.0
 uv sync --extra dev
@@ -89,10 +93,9 @@ uv sync --extra dev
 (Heads-up: `uv sync` pulls PyTorch and the CUDA libraries, so expect a one-time
 download of several GB — no GPU required to install or test.)
 
-(If `~/code` doesn't exist yet, `mkdir -p ~/code` first; on Windows use a path
-like `~\code`.) After cloning, point Cursor at the repo: **File → Open
-Folder…** → `audrey_ai_2.0`, so the editor and its terminal both work inside
-the project from here on.
+(On Windows use a path like `~\code`.) After cloning, point Cursor at the
+repo: **File → Open Folder…** → `audrey_ai_2.0`, so the editor and its terminal
+both work inside the project from here on.
 
 `uv sync` reads `pyproject.toml` + `uv.lock` and installs *exactly* the
 dependency versions the project was built and tested against, into a project

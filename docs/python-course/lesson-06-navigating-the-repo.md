@@ -31,7 +31,8 @@ src/audrey/
 ├── models/
 ├── pipeline/
 ├── routes/
-└── tools/
+├── tools/
+└── static/
 ```
 
 Two words cover everything here. A **module** is a single `.py` file — `auth.py`
@@ -53,18 +54,15 @@ src/audrey/pipeline/
 └── …
 ```
 
-Here's the thing worth noticing: in Audrey, those `__init__.py` files are
-**empty**. Every one of them — `pipeline/__init__.py`, `routes/__init__.py`, and
-the rest — is a zero-byte file. They're empty *on purpose*. The file doesn't need
-to contain anything; its mere presence is the signal that says "this folder is a
-package, not just a folder of loose scripts." Think of it as a flag planted in
-the folder. *Why* Python needs that flag, and the more advanced things an
-`__init__.py` can do when it isn't empty, is a topic of its own — we'll get to it
-in the modules-and-imports lesson. For now: empty `__init__.py` = "this folder is
-a package," and that's all you need.
+Here is the thing worth noticing: most of Audrey's package-marker `__init__.py`
+files are **empty**. `pipeline/__init__.py`, `routes/__init__.py`,
+`kb/__init__.py`, and several others are zero-byte files. They are empty *on
+purpose*. The file does not need to contain anything; its mere presence is the
+signal that says "this folder is a package, not just a folder of loose scripts."
+Think of it as a flag planted in the folder.
 
-The one exception is the package's *top-level* `__init__.py`
-([\_\_init\_\_.py:1](../../src/audrey/__init__.py#L1)), which holds a single line:
+There are two useful exceptions. The package's top-level `__init__.py`
+([__init__.py:1](../../src/audrey/__init__.py#L1)) holds a single line:
 
 ```python
 __version__ = "7.0.0"
@@ -72,6 +70,11 @@ __version__ = "7.0.0"
 
 That's Audrey's version number, kept in one place so the rest of the code can
 read it. You'll see exactly who reads it in a minute.
+
+The other exception is [`routes/openai/__init__.py`](../../src/audrey/routes/openai/__init__.py),
+which re-exports the OpenAI route objects after that route grew into a small
+package. So the rule is: empty `__init__.py` usually means "package marker
+only," while a non-empty one is a tiny public doorway for that package.
 
 ---
 
@@ -165,8 +168,8 @@ a message starting with `### Task:` specially (you met this in Lesson 5's
 `is_owui_task_request`), and you want to find where that prefix actually lives.
 Search for the literal text across the source:
 
-```text
-grep -rn "Task:" src/audrey/
+```bash
+rg -n "Task:" src/audrey/
 ```
 
 (Or use Cursor's project-wide search — the magnifying glass in the sidebar — and

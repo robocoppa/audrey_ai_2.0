@@ -112,10 +112,12 @@ model can search prior conversations via `chat_history_search`.
 
 - **`AGENTS.md`** — start here. Tool-agnostic agent guide: project shape,
   runtime rules, deploy boundaries, git/change hygiene.
-- **`docs/lessons/`** — codebase walk-through. Lesson 4 is the end-to-end
-  request lifecycle; later lessons drill into specific subsystems
-  (model layer, classify+route, deep mode, ReAct, KB ingest/lifecycle,
-  fair scheduling, the OpenAI-compatible routes, the custom-tools sidecar).
+- **`docs/ai-course/`** — codebase walk-through (maintainer course). Lesson 4
+  is the end-to-end request lifecycle; later lessons drill into specific
+  subsystems (model layer, classify+route, deep mode, ReAct, KB
+  ingest/lifecycle, fair scheduling, the OpenAI-compatible routes, the
+  custom-tools sidecar). `docs/python-course/` is a separate beginner course
+  that teaches Python by reading the same real codebase.
 - **`docs/campaign-1/phase-N-deploy.md`** — original 31-phase build history.
 - **`docs/campaign-2/phase-N-deploy.md`** — post-1.0 feature work
   (chat archive, prompt centralization, KB audit fixes, complexity-gate
