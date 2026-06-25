@@ -1,0 +1,153 @@
+"""Integration test for the streaming `audrey_research` route (Phase 24).
+
+`_stream_research_with_banners` is the orchestration glue: it drives the
+staged pipeline (`run_research_pipeline_streaming`) and turns its stage events
+into the Planning → Researching → Verifying → Writing banner stream plus the
+live answer. The executor's event order is unit-tested in `test_deep_panel.py`;
+this pins the *route* — that the phase banners appear in order, the separator
+lands before the answer, and the writer's tokens stream through as content.
+
+We stub `app.state` with fakes so no real model runs.
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+from types import SimpleNamespace
+from typing import Any, ClassVar
+
+from audrey.config import Config, EnvOverrides, get_config
+from audrey.models.health import HealthTracker
+from audrey.models.registry import ModelRegistry
+from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.routes.openai.pipeline import _stream_research_with_banners
+from audrey.routes.openai.schemas import ChatCompletionRequest
+
+
+class _FakeOllama:
+    """Returns canned content per model for chat (researchers/verifier) and
+    chat_stream (writer). Mirrors the stub in test_deep_panel.py."""
+
+    def __init__(self, responses: dict[str, str]):
+        self.responses = responses
+
+    async def chat(self, *, model, messages, options=None, timeout_s=0):
+        return {"message": {"content": self.responses.get(model, "")},
+                "prompt_eval_count": 1, "eval_count": 1}
+
+    async def chat_stream(self, *, model, messages, options=None, timeout_s=0):
+        text = self.responses.get(model, "")
+        mid = len(text) // 2
+        yield {"message": {"content": text[:mid]}, "done": False}
+        yield {"message": {"content": text[mid:]}, "done": True,
+               "prompt_eval_count": 1, "eval_count": 1}
+
+    async def aclose(self):
+        pass
+
+
+class _FakeTools:
+    """Empty tool registry — `_phase_thinking` reads `.by_name`; researchers
+    run tool-free (not in tool_capable_models)."""
+    by_name: ClassVar[dict[str, Any]] = {}
+
+
+def _fake_app(responses: dict[str, str]):
+    # Build a FRESH Config from a deep-copied raw so mutating the research
+    # pool can't leak into the shared `get_config()` singleton other tests use.
+    base = get_config()
+    cfg = Config(copy.deepcopy(base.raw), EnvOverrides())
+    # Point the research pool at the fake models so the route resolves them.
+    cfg.raw["deep_panel_research"] = {
+        "reasoning": {
+            "researchers": ["r1", "r2"],
+            "verifier": "v",
+            "writer": "w",
+            "fallback_synth": "fb",
+        }
+    }
+    cfg.raw.setdefault("model_registry", {})["reasoning"] = [
+        {"name": "r1", "priority": 100, "location": "cloud"},
+        {"name": "r2", "priority": 90, "location": "cloud"},
+        {"name": "v", "priority": 80, "location": "cloud"},
+        {"name": "w", "priority": 70, "location": "local"},
+        {"name": "fb", "priority": 60, "location": "cloud"},
+    ]
+    registry = ModelRegistry(cfg)
+    state = SimpleNamespace(
+        cfg=cfg,
+        ollama=_FakeOllama(responses),
+        registry=registry,
+        health=HealthTracker(),
+        gate=FairLocalGate(concurrency=1),
+        tools=_FakeTools(),
+        # archive_client intentionally absent → getattr default None.
+    )
+    return SimpleNamespace(state=state)
+
+
+def _content_frames(frames: list[str]) -> list[str]:
+    """Extract the delta content strings from raw SSE frames."""
+    out: list[str] = []
+    for f in frames:
+        if not f.startswith("data: ") or f.strip() == "data: [DONE]":
+            continue
+        payload = json.loads(f[len("data: "):])
+        delta = payload["choices"][0].get("delta", {})
+        if delta.get("content"):
+            out.append(delta["content"])
+    return out
+
+
+async def _collect(app, model="audrey_research"):
+    # The route receives `messages` as plain dicts (the caller converts the
+    # pydantic request into dicts before dispatching), so pass dicts here.
+    msgs = [{"role": "user", "content": "tell me about euclid"}]
+    payload = ChatCompletionRequest(model=model, messages=msgs, stream=True)
+    frames = [
+        frame async for frame in _stream_research_with_banners(
+            app, payload, msgs, {}, task="reasoning", conf=0.9,
+            user_id="", conversation_id="", user_turn_text="tell me about euclid",
+        )
+    ]
+    return frames
+
+
+async def test_research_stream_banner_order_and_answer():
+    app = _fake_app({"r1": "fact A", "r2": "fact B", "v": "looks fine",
+                     "w": "Euclid was a Greek mathematician."})
+    frames = await _collect(app)
+    content = _content_frames(frames)
+    joined = "".join(content)
+
+    # All four phase banners appear, in order.
+    for banner in ("_Planning_", "_Researching_", "_Verifying_", "_Writing_"):
+        assert banner in joined, f"missing banner {banner}"
+    assert (joined.index("_Researching_") < joined.index("_Verifying_")
+            < joined.index("_Writing_"))
+
+    # Separator precedes the answer body; the writer's text streamed through.
+    assert "\n\n---\n\n" in joined
+    answer_region = joined.split("\n\n---\n\n", 1)[1]
+    assert "Euclid was a Greek mathematician." in answer_region
+
+    # Terminates with stop + DONE.
+    assert frames[-1] == "data: [DONE]\n\n"
+
+
+async def test_research_stream_empty_research_skips_verify_banner():
+    # No researchers healthy → no findings → verify skipped. Writer still runs
+    # (flagged), so the answer still streams and the stream still terminates.
+    app = _fake_app({"w": "Caveat: unverified. Euclid..."})
+    app.state.health.record_failure("r1", "down")
+    app.state.health.record_failure("r2", "down")
+    frames = await _collect(app)
+    joined = "".join(_content_frames(frames))
+
+    assert "_Researching_" in joined
+    assert "_Writing_" in joined
+    # Answer still streamed despite zero grounding.
+    answer_region = joined.split("\n\n---\n\n", 1)[1]
+    assert "Caveat: unverified." in answer_region
+    assert frames[-1] == "data: [DONE]\n\n"

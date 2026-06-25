@@ -52,6 +52,11 @@ BANNER_PLANNING = "> _Planning_"
 BANNER_DISPATCHING = "> _Dispatching panel_"
 BANNER_SYNTHESIZING = "> _Synthesizing_"
 
+# audrey_research staged-pipeline phase banners (research → verify → write).
+BANNER_RESEARCHING = "> _Researching_"
+BANNER_VERIFYING = "> _Verifying_"
+BANNER_WRITING = "> _Writing_"
+
 # Separator emitted between the last banner and the actual answer body.
 # Two newlines on each side so the markdown renderer treats it as a
 # horizontal rule rather than concatenating with the blockquote above.
@@ -243,6 +248,9 @@ __all__ = [
     "BANNER_PLANNING",
     "BANNER_DISPATCHING",
     "BANNER_SYNTHESIZING",
+    "BANNER_RESEARCHING",
+    "BANNER_VERIFYING",
+    "BANNER_WRITING",
     "BANNER_SEPARATOR",
     "Emitter",
     "PhaseTicker",

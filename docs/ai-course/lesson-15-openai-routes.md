@@ -225,7 +225,7 @@ OpenAI's chat-completion streaming spec is more structured: each
 frame is a JSON object describing a *delta* (a piece of the response
 being built), with a final `data: [DONE]\n\n` marker. Audrey emits
 that shape directly. You can see the helpers at
-[`routes/openai/pipeline.py:501`](../../src/audrey/routes/openai/pipeline.py#L501)
+[`routes/openai/pipeline.py:516`](../../src/audrey/routes/openai/pipeline.py#L516)
 inside `_stream_deep_with_banners`:
 
 ```python
@@ -404,7 +404,7 @@ the lifecycle of a single phase's progress line.
 **It's an async context manager.** You met those in Lesson 1; here's one
 doing real work. The route uses it like this (the actual call site for the
 panel phase is
-[routes/openai/pipeline.py:589](../../src/audrey/routes/openai/pipeline.py#L589)):
+[routes/openai/pipeline.py:604](../../src/audrey/routes/openai/pipeline.py#L604)):
 
 ```python
 async with PhaseTicker(BANNER_DISPATCHING, emit) as ticker:
@@ -483,7 +483,7 @@ Trace the cancel through:
      The route records `pipeline_outcome = "cancelled"` (so the
      metric reflects "user left," not "ok") and re-raises.
   3. **The inner `try/finally` at
-     [`routes/openai/pipeline.py:742`](../../src/audrey/routes/openai/pipeline.py#L742)**
+     [`routes/openai/pipeline.py:757`](../../src/audrey/routes/openai/pipeline.py#L757)**
      cancels the synth producer task explicitly:
 
      ```python
@@ -691,7 +691,7 @@ Five things have to land cleanly:
   Starlette. It catches at
   [`routes/openai/pipeline.py:755`](../../src/audrey/routes/openai/pipeline.py#L755),
   records `outcome="cancelled"`, and re-raises.
-- **The inner `try/finally` at [`routes/openai/pipeline.py:742`](../../src/audrey/routes/openai/pipeline.py#L742)** cancels
+- **The inner `try/finally` at [`routes/openai/pipeline.py:757`](../../src/audrey/routes/openai/pipeline.py#L757)** cancels
   `synth_task` and awaits it — making sure the synth producer
   doesn't keep streaming into a queue nobody reads.
 - **The panel phase task** is the current weak point. In the normal path,

@@ -191,6 +191,79 @@ def test_validator_passes_when_no_deep_panel_keys_exist():
     _validate_deep_panel_pools({"router": {}, "tools": {}})
 
 
+# ─── Staged pool (deep_panel_research) ─────────────────────────────────
+# A body with a `researchers` list is the staged audrey_research shape:
+# required roles are researchers/verifier/writer (no synthesizer), and the
+# model-bearing slots are researchers[*]/verifier/writer/fallback_synth.
+
+def test_validator_accepts_well_formed_research_pool():
+    cfg = {
+        "deep_panel_research": {
+            "reasoning": {
+                "researchers": ["r1", "r2"],
+                "verifier": "v",
+                "writer": "w",
+                "fallback_synth": "f",
+            },
+        },
+    }
+    _validate_deep_panel_pools(cfg)  # must not raise
+
+
+def test_validator_research_pool_does_not_require_synthesizer():
+    # The staged shape has no `synthesizer` — the writer produces the answer.
+    # The flat-pool "missing synthesizer" check must not fire here.
+    cfg = {
+        "deep_panel_research": {
+            "general": {"researchers": ["r1"], "verifier": "v", "writer": "w"},
+        },
+    }
+    _validate_deep_panel_pools(cfg)  # must not raise
+
+
+def test_validator_rejects_empty_researchers():
+    cfg = {
+        "deep_panel_research": {
+            "reasoning": {"researchers": [], "verifier": "v", "writer": "w"},
+        },
+    }
+    with pytest.raises(ValueError, match=r"deep_panel_research/reasoning:.*researchers.*non-empty"):
+        _validate_deep_panel_pools(cfg)
+
+
+def test_validator_rejects_missing_verifier_or_writer():
+    cfg = {
+        "deep_panel_research": {
+            "reasoning": {"researchers": ["r1"], "writer": "w"},   # no verifier
+            "general": {"researchers": ["r1"], "verifier": "v"},   # no writer
+        },
+    }
+    with pytest.raises(ValueError) as exc:
+        _validate_deep_panel_pools(cfg)
+    message = str(exc.value)
+    assert "deep_panel_research/reasoning: missing required `verifier`" in message
+    assert "deep_panel_research/general: missing required `writer`" in message
+
+
+def test_validator_rejects_unknown_research_model_names():
+    # Every researcher/verifier/writer/fallback name must resolve to the
+    # registry, same posture as the flat-pool worker/synth check.
+    cfg = {
+        "model_registry": {
+            "reasoning": [{"name": "r1"}, {"name": "v"}, {"name": "w"}],
+        },
+        "deep_panel_research": {
+            "reasoning": {
+                "researchers": ["r1", "ghost-researcher:cloud"],  # second is unknown
+                "verifier": "v",
+                "writer": "w",
+            },
+        },
+    }
+    with pytest.raises(ValueError, match=r"researcher 'ghost-researcher:cloud' is not in model_registry"):
+        _validate_deep_panel_pools(cfg)
+
+
 # ─── Real config.yaml boots clean ──────────────────────────────────────
 
 def test_committed_config_yaml_passes_boot_validation():
@@ -221,8 +294,12 @@ def test_committed_config_deep_panel_models_are_registered():
     }
     for pool_key in (k for k in raw if k.startswith("deep_panel")):
         for task, body in raw[pool_key].items():
-            named = list(body.get("workers") or [])
-            named += [body[s] for s in ("synthesizer", "fallback_synth") if body.get(s)]
+            if "researchers" in body:  # staged audrey_research shape
+                named = list(body.get("researchers") or [])
+                named += [body[s] for s in ("verifier", "writer", "fallback_synth") if body.get(s)]
+            else:  # flat panel shape
+                named = list(body.get("workers") or [])
+                named += [body[s] for s in ("synthesizer", "fallback_synth") if body.get(s)]
             for name in named:
                 assert name in registry_names, f"{pool_key}/{task}: {name!r} not in registry"
 

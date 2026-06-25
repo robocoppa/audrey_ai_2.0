@@ -41,6 +41,13 @@ from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.pipeline.messages import last_user_text
+from audrey.pipeline.prompts import (
+    RESEARCHER_SYSTEM,
+    VERIFIER_SYSTEM,
+    WRITER_SYSTEM,
+    prompt_from_config,
+)
 from audrey.pipeline.react import ReactResult, run_react
 from audrey.pipeline.state import TaskType, WorkerDraft
 from audrey.tools.discovery import ToolRegistry
@@ -53,6 +60,7 @@ _POOL_KEYS = {
     "audrey_deep": "deep_panel",
     "audrey_cloud": "deep_panel_cloud",
     "audrey_local": "deep_panel_local",
+    "audrey_research": "deep_panel_research",
 }
 
 
@@ -452,4 +460,353 @@ async def run_panel_streaming(
     yield {"type": "final", "drafts": drafts, "attempted": attempted}
 
 
-__all__ = ["pick_panel_timeout", "pool_key_for", "run_panel", "run_panel_streaming", "select_workers"]
+# ─── Research mode (audrey_research) — staged pipeline ─────────────────
+# A three-stage pipeline behind the `audrey_research` virtual model:
+#   Stage 1  RESEARCH  — parallel fan-out of tool-capable researchers that
+#                        ground with web_search/kb_search. Cloud researchers
+#                        run concurrently (capped at max_research_workers_cloud);
+#                        a local researcher serializes through the GPU gate.
+#   Stage 2  VERIFY    — one pass auditing the merged findings for unsupported
+#                        / overconfident / anachronistic claims.
+#   Stage 3  WRITE     — one pass turning verified findings into the answer.
+# The Write stage output IS the final answer (no separate synthesizer). Each
+# stage degrades gracefully; the pipeline never raises — like `run_panel`.
+
+
+def select_researchers(
+    cfg: Config,
+    registry: ModelRegistry,
+    health: HealthTracker,
+    *,
+    task: TaskType,
+    max_researchers_cloud: int,
+) -> list[tuple[str, str]]:
+    """Return [(model, location), ...] for healthy Stage-1 researchers.
+
+    Mirrors `select_workers` but reads the staged pool's `researchers` list
+    and caps cloud researchers at `max_researchers_cloud` (research fans wider
+    than normal deep, so it has its own ceiling). Local researchers are not
+    capped here — the GPU gate serializes them.
+    """
+    pool = cfg.raw.get("deep_panel_research", {}).get(task, {})
+    names: list[str] = list(pool.get("researchers", []) or [])
+    out: list[tuple[str, str]] = []
+    cloud_count = 0
+    for name in names:
+        if not health.is_healthy(name):
+            log.info("research: skipping unhealthy researcher %s", name)
+            continue
+        loc = registry.location_of(name)
+        if loc == "cloud":
+            if cloud_count >= max_researchers_cloud:
+                continue
+            cloud_count += 1
+        out.append((name, loc))
+    return out
+
+
+def _research_pool(cfg: Config, task: TaskType) -> dict[str, Any]:
+    return cfg.raw.get("deep_panel_research", {}).get(task, {}) or {}
+
+
+def _with_role_system(messages: list[dict[str, Any]], role_prompt: str) -> list[dict[str, Any]]:
+    """Prepend a role system message ahead of the conversation."""
+    return [{"role": "system", "content": role_prompt}, *messages]
+
+
+def _format_findings(drafts: list[WorkerDraft]) -> str:
+    """Merge successful researcher drafts into one findings block.
+
+    Empty/errored drafts are skipped. Returns "" when nothing usable came
+    back — the caller treats that as the no-grounding case.
+    """
+    parts: list[str] = []
+    n = 0
+    for d in drafts:
+        content = (d.get("content") or "").strip()
+        if not content:
+            continue
+        n += 1
+        rounds = int(d.get("tool_rounds", 0) or 0)
+        tag = f" (grounded: {rounds} tool rounds)" if rounds > 0 else " (no tools used)"
+        parts.append(f"--- researcher {n}{tag} ---\n{content}")
+    return "\n\n".join(parts)
+
+
+async def _single_chat_stage(
+    ollama: OllamaClient,
+    health: HealthTracker,
+    gate: FairLocalGate,
+    *,
+    model: str,
+    location: str,
+    messages: list[dict[str, Any]],
+    timeout_s: float,
+    user_id: str | None,
+) -> str:
+    """Run one non-tool chat call (Verify or Write), gate-held for local.
+
+    Returns the content string, or "" on failure (the pipeline degrades
+    rather than raising — same posture as `_run_one_worker`).
+    """
+    try:
+        async with gate.acquire(model, location=location, user_id=user_id):
+            resp = await ollama.chat(
+                model=model,
+                messages=messages,
+                options={"temperature": 0.2},
+                timeout_s=timeout_s,
+            )
+        health.record_success(model)
+        return (resp.get("message", {}) or {}).get("content", "") or ""
+    except OllamaError as e:
+        health.record_failure(model, str(e))
+        log.warning("research: stage model %s failed: %s", model, e)
+        return ""
+
+
+def _verify_user_block(user_text: str, findings: str) -> str:
+    return (
+        f"ORIGINAL REQUEST:\n{user_text.strip()}\n\n"
+        f"RESEARCHER FINDINGS:\n{findings}\n\n"
+        "Audit the findings now. Output your flags."
+    )
+
+
+def _write_user_block(user_text: str, findings: str, critique: str) -> str:
+    parts = [f"ORIGINAL REQUEST:\n{user_text.strip()}\n"]
+    if findings:
+        parts.append(f"VERIFIED FINDINGS:\n{findings}\n")
+    else:
+        parts.append(
+            "VERIFIED FINDINGS:\n[No grounding could be retrieved — the "
+            "research stage produced no usable findings.]\n"
+        )
+    if critique:
+        parts.append(f"VERIFIER FLAGS (apply these):\n{critique}\n")
+    parts.append("Write the final answer for the user now.")
+    return "\n".join(parts)
+
+
+def _research_react_budget(cfg: Config) -> dict[str, int]:
+    """Read `agentic.react.research_worker`, falling back to `react` defaults."""
+    react = (cfg.raw.get("agentic", {}) or {}).get("react", {}) or {}
+    rw = react.get("research_worker", {}) or {}
+    return {
+        "max_rounds": int(rw.get("max_rounds", react.get("max_rounds", 5))),
+        "compress_after": int(rw.get("compress_after_round", react.get("compress_after_round", 3))),
+        "max_tool_chars": int(rw.get("max_tool_result_chars", react.get("max_tool_result_chars", 6000))),
+        "compress_keep_last": int(rw.get("compress_keep_last", react.get("compress_keep_last", 1))),
+        "dispatch_timeout_s": int(rw.get("dispatch_timeout_s", react.get("dispatch_timeout_s", 30))),
+    }
+
+
+async def run_research_pipeline_streaming(
+    cfg: Config,
+    ollama: OllamaClient,
+    registry: ModelRegistry,
+    health: HealthTracker,
+    gate: FairLocalGate,
+    *,
+    task: TaskType,
+    messages: list[dict[str, Any]],
+    options: dict[str, Any],
+    timeout_s: float,
+    max_researchers_cloud: int,
+    tools: ToolRegistry | None = None,
+    tool_capable_models: set[str] | None = None,
+    user_id: str | None = None,
+) -> AsyncIterator[dict[str, Any]]:
+    """Run the staged research pipeline, yielding stage events.
+
+    Event shapes (in order):
+      {"type": "researcher_done", "model": str, "ok": bool, "elapsed_s": float}
+          One per researcher as Stage 1 completes (completion order).
+      {"type": "findings_ready", "grounded": bool}
+          Stage 1 merged; `grounded` False means no usable findings.
+      {"type": "verify_done", "ok": bool}
+          Stage 2 finished (skipped → not emitted).
+      {"type": "write_delta", "text": str}
+          A chunk of the Writer's answer (streamed live).
+      {"type": "done", "content": str, "writer_model": str, "drafts": list,
+       "findings": str, "critique": str, "error": str}
+          Always emitted last. `error` is "" on success, or "no_writer" /
+          "write_failed" when the write stage could not produce an answer.
+
+    Never raises — each stage degrades. The Write stage always runs (even
+    with no findings) so the user gets a flagged answer rather than nothing.
+    """
+    pool = _research_pool(cfg, task)
+    budget = _research_react_budget(cfg)
+    capable = tool_capable_models or set()
+    user_text = last_user_text(messages)
+
+    # ── Stage 1: research fan-out ──────────────────────────────────────
+    researchers = select_researchers(
+        cfg, registry, health, task=task, max_researchers_cloud=max_researchers_cloud,
+    )
+    drafts: list[WorkerDraft] = []
+    if researchers:
+        researcher_msgs = _with_role_system(messages, prompt_from_config(cfg, "researcher", RESEARCHER_SYSTEM))
+        for name, _loc in researchers:
+            dispatch_total.labels(model=name, task_type=str(task), path="research").inc()
+        coros = [
+            _run_one_worker(
+                ollama, health, gate,
+                model=name, location=loc,
+                messages=researcher_msgs,
+                options=options,
+                timeout_s=timeout_s,
+                tools=tools,
+                tool_capable=(name in capable),
+                react_max_rounds=budget["max_rounds"],
+                react_compress_after=budget["compress_after"],
+                react_max_tool_chars=budget["max_tool_chars"],
+                react_dispatch_timeout_s=float(budget["dispatch_timeout_s"]),
+                react_compress_keep_last=budget["compress_keep_last"],
+                user_id=user_id,
+                cfg=cfg,
+            )
+            for name, loc in researchers
+        ]
+        for coro in asyncio.as_completed(coros):
+            draft = await coro
+            ok = bool((draft.get("content") or "").strip())
+            drafts.append(draft)
+            yield {
+                "type": "researcher_done",
+                "model": draft.get("model", "?"),
+                "ok": ok,
+                "elapsed_s": float(draft.get("elapsed_s", 0.0) or 0.0),
+            }
+    else:
+        log.warning("research: no healthy researchers for task %s", task)
+
+    findings = _format_findings(drafts)
+    grounded = bool(findings)
+    yield {"type": "findings_ready", "grounded": grounded}
+
+    # ── Stage 2: verify (skipped when no grounding) ────────────────────
+    critique = ""
+    if grounded:
+        verifier = pool.get("verifier")
+        if verifier and health.is_healthy(verifier):
+            dispatch_total.labels(model=verifier, task_type=str(task), path="research_verify").inc()
+            v_msgs = [
+                {"role": "system", "content": prompt_from_config(cfg, "verifier", VERIFIER_SYSTEM)},
+                {"role": "user", "content": _verify_user_block(user_text, findings)},
+            ]
+            critique = await _single_chat_stage(
+                ollama, health, gate,
+                model=verifier, location=registry.location_of(verifier),
+                messages=v_msgs, timeout_s=timeout_s, user_id=user_id,
+            )
+        yield {"type": "verify_done", "ok": bool(critique)}
+
+    # ── Stage 3: write (always runs) ───────────────────────────────────
+    writer = pool.get("writer")
+    fallback = pool.get("fallback_synth")
+    candidates = [m for m in (writer, fallback) if m]
+    accumulated = ""
+    writer_model = ""
+    write_error = "no_writer" if not candidates else "write_failed"
+
+    w_msgs = [
+        {"role": "system", "content": prompt_from_config(cfg, "writer", WRITER_SYSTEM)},
+        {"role": "user", "content": _write_user_block(user_text, findings, critique)},
+    ]
+    for model in candidates:
+        if not health.is_healthy(model):
+            continue
+        loc = registry.location_of(model)
+        dispatch_total.labels(model=model, task_type=str(task), path="research_write").inc()
+        started = False
+        try:
+            async with gate.acquire(model, location=loc, user_id=user_id):
+                async for chunk in ollama.chat_stream(
+                    model=model, messages=w_msgs,
+                    options={"temperature": 0.3}, timeout_s=timeout_s,
+                ):
+                    text = (chunk.get("message", {}) or {}).get("content", "") or ""
+                    if text:
+                        started = True
+                        accumulated += text
+                        yield {"type": "write_delta", "text": text}
+                    if chunk.get("done"):
+                        break
+            health.record_success(model)
+            if accumulated.strip():
+                writer_model = model
+                write_error = ""
+                break
+        except OllamaError as e:
+            health.record_failure(model, str(e))
+            log.warning("research: writer %s failed: %s", model, e)
+            if started:
+                # Partial answer already on the wire — can't fall back.
+                write_error = "write_truncated"
+                writer_model = model
+                break
+
+    yield {
+        "type": "done",
+        "content": accumulated,
+        "writer_model": writer_model or "none",
+        "drafts": drafts,
+        "findings": findings,
+        "critique": critique,
+        "error": write_error,
+    }
+
+
+async def run_research_pipeline(
+    cfg: Config,
+    ollama: OllamaClient,
+    registry: ModelRegistry,
+    health: HealthTracker,
+    gate: FairLocalGate,
+    *,
+    task: TaskType,
+    messages: list[dict[str, Any]],
+    options: dict[str, Any],
+    timeout_s: float,
+    max_researchers_cloud: int,
+    tools: ToolRegistry | None = None,
+    tool_capable_models: set[str] | None = None,
+    user_id: str | None = None,
+) -> dict[str, Any]:
+    """Non-streaming staged research pipeline. Returns a dict to merge into state.
+
+    Keys: content, writer_model, drafts, research_findings, research_critique,
+    error. Drains the streaming variant so the two paths share one
+    implementation and can't drift.
+    """
+    final: dict[str, Any] = {}
+    async for evt in run_research_pipeline_streaming(
+        cfg, ollama, registry, health, gate,
+        task=task, messages=messages, options=options,
+        timeout_s=timeout_s, max_researchers_cloud=max_researchers_cloud,
+        tools=tools, tool_capable_models=tool_capable_models, user_id=user_id,
+    ):
+        if evt.get("type") == "done":
+            final = evt
+    return {
+        "content": final.get("content", "") or "",
+        "writer_model": final.get("writer_model", "none"),
+        "drafts": final.get("drafts", []),
+        "research_findings": final.get("findings", ""),
+        "research_critique": final.get("critique", ""),
+        "error": final.get("error", ""),
+    }
+
+
+__all__ = [
+    "pick_panel_timeout",
+    "pool_key_for",
+    "run_panel",
+    "run_panel_streaming",
+    "run_research_pipeline",
+    "run_research_pipeline_streaming",
+    "select_researchers",
+    "select_workers",
+]

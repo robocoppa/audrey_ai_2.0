@@ -53,11 +53,17 @@ class PipelineState(TypedDict, total=False):
     subtasks: list[str]              # may be empty; full prompt is run as-is when so
 
     # Deep-panel results
-    panel_pool: str                  # "deep_panel" | "deep_panel_cloud" | "deep_panel_local"
+    panel_pool: str                  # "deep_panel" | "deep_panel_cloud" | "deep_panel_local" | "deep_panel_research"
     workers_attempted: list[str]     # model names dispatched
     drafts: list[WorkerDraft]        # one per worker (success or error)
-    synthesizer_model: str           # which synth was used
+    synthesizer_model: str           # which synth was used (or the writer, for research mode)
     synth_error: str                 # non-empty if synthesis failed (then fallback synth tried)
+
+    # Research mode (audrey_research) — staged pipeline intermediate outputs.
+    # `drafts` above holds the Stage-1 researcher drafts (so reflect/archive
+    # see the grounding); these two carry the Verify/Write stage products.
+    research_findings: str           # merged researcher notes fed to verify+write
+    research_critique: str           # verifier's flags ("" if verify skipped/empty)
 
     # Reflection
     reflect_attempts: int            # 0 = not attempted, 1 = ran once, etc.

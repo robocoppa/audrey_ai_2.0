@@ -30,7 +30,10 @@ from audrey.pipeline.prompts import (
     MEMORY_STORE_HINT,
     PLANNER_SYSTEM,
     REACT_FINAL_ANSWER_USER,
+    RESEARCHER_SYSTEM,
     SYNTH_SYSTEM,
+    VERIFIER_SYSTEM,
+    WRITER_SYSTEM,
     compose_system_messages,
     prompt_from_config,
 )
@@ -106,6 +109,74 @@ def test_synth_system_unchanged():
         "write '## Caveats\\n- none' or any placeholder.\n"
     )
     assert SYNTH_SYSTEM == expected
+
+
+def test_researcher_system_unchanged():
+    expected = (
+        "You are a researcher on a panel. Your job is to find the factual "
+        "backbone of the answer, not to write the final prose. Use the tools "
+        "available (web search, knowledge-base search) to ground your claims in "
+        "retrieved evidence — prefer reliable, primary, or widely-corroborated "
+        "sources. Report what you found as concise factual notes: include dates, "
+        "named entities, and direct attributions, and mark anything uncertain, "
+        "disputed, or that you could not verify. Do NOT speculate to fill gaps — "
+        "if the evidence is thin, say so. A short, well-sourced set of notes is "
+        "worth more than a long, confident-sounding one."
+    )
+    assert RESEARCHER_SYSTEM == expected
+
+
+def test_verifier_system_unchanged():
+    expected = (
+        "You are the verifier on a research panel. You receive the original "
+        "request and the merged findings from the researchers. Your job is to "
+        "audit those findings for reliability — you are NOT writing the final "
+        "answer. Flag every claim that is false, overconfident, anachronistic, "
+        "internally contradictory, or stated more precisely than the evidence "
+        "supports (an exact date, count, or ranking presented as certain when the "
+        "sources hedge). For each, say briefly why and how it should be softened. "
+        "Be especially cautious with ancient or poorly-documented biography, "
+        "disputed authorship or attribution, precise dates, and superlatives or "
+        "rankings. If the findings are sound, say so plainly rather than "
+        "inventing problems. Output your critique as a short list of flags."
+    )
+    assert VERIFIER_SYSTEM == expected
+
+
+def test_writer_system_unchanged():
+    expected = (
+        "You are the writer on a research panel. You receive the original "
+        "request, the researchers' verified findings, and the verifier's "
+        "critique. Turn them into one clear, engaging answer for the user, "
+        "speaking directly to them. Two hard rules: introduce NO new facts beyond "
+        "what the findings contain, and apply every flag the verifier raised — "
+        "soften or drop any claim it called unsupported, overconfident, or too "
+        "precise. Prefer cautious phrasing ('often described as', 'commonly "
+        "dated to') for anything the evidence hedges on.\n"
+        "If the findings note that little or no grounding could be retrieved, "
+        "write from general knowledge BUT open with a brief, honest caveat that "
+        "the answer could not be verified against sources and may be incomplete, "
+        "and keep specific claims (exact dates, attributions, coined terms) "
+        "deliberately tentative."
+    )
+    assert WRITER_SYSTEM == expected
+
+
+def test_research_role_override_keys_resolve():
+    # The three research roles must be overridable via agentic.prompts.*,
+    # like the synthesizer. An unknown key would fall back to the default
+    # with a warning — these must NOT do that. `_cfg_with` is defined below;
+    # name resolution is at call time, so the forward reference is fine.
+    cfg = _cfg_with({
+        "researcher": "R_OVERRIDE",
+        "verifier": "V_OVERRIDE",
+        "writer": "W_OVERRIDE",
+    })
+    assert prompt_from_config(cfg, "researcher", RESEARCHER_SYSTEM) == "R_OVERRIDE"
+    assert prompt_from_config(cfg, "verifier", VERIFIER_SYSTEM) == "V_OVERRIDE"
+    assert prompt_from_config(cfg, "writer", WRITER_SYSTEM) == "W_OVERRIDE"
+    # Empty/missing falls back to the default.
+    assert prompt_from_config(_cfg_with({}), "researcher", RESEARCHER_SYSTEM) == RESEARCHER_SYSTEM
 
 
 def test_react_final_answer_unchanged():

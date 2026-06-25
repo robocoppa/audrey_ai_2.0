@@ -37,11 +37,12 @@ router = APIRouter(prefix="/v1", tags=["openai"])
 # The five virtual models Audrey exposes. Each is a *pipeline mode*, not a
 # real Ollama model. Mapping to concrete models happens inside the pipeline.
 VIRTUAL_MODELS = (
-    "audrey_deep",   # always deep (mixed pool)
-    "audrey_cloud",  # always deep (cloud-only pool)
-    "audrey_local",  # always deep (local-only pool)
-    "audrey_auto",   # adaptive: fast for short prompts, deep for long ones
-    "audrey_fast",   # always fast (no escalation, even on long prompts)
+    "audrey_deep",     # always deep (mixed pool)
+    "audrey_cloud",    # always deep (cloud-only pool)
+    "audrey_local",    # always deep (local-only pool)
+    "audrey_research", # always deep, staged: research → verify → write
+    "audrey_auto",     # adaptive: fast for short prompts, deep for long ones
+    "audrey_fast",     # always fast (no escalation, even on long prompts)
 )
 
 

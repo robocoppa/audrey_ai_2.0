@@ -99,7 +99,7 @@ the short local spur or the longer panel route.
 
 These are the files we'll reference in this lesson:
 
-- [`src/audrey/routes/openai/pipeline.py:97`](../../src/audrey/routes/openai/pipeline.py#L97)
+- [`src/audrey/routes/openai/pipeline.py:112`](../../src/audrey/routes/openai/pipeline.py#L112)
   - where the non-streaming route builds the initial graph state.
 - [`src/audrey/pipeline/state.py:27`](../../src/audrey/pipeline/state.py#L27)
   - the shared request state that graph nodes read and update.
@@ -110,7 +110,7 @@ These are the files we'll reference in this lesson:
 - [`src/audrey/pipeline/complexity.py:72`](../../src/audrey/pipeline/complexity.py#L72)
   - token counting and depth-intent helpers for the fast/deep gate.
 - [`config.yaml:7`](../../config.yaml#L7) - router-model config.
-- [`config.yaml:296`](../../config.yaml#L296) - complexity threshold and depth-intent config.
+- [`config.yaml:350`](../../config.yaml#L350) - complexity threshold and depth-intent config.
 
 Open them as we go, but do not try to memorize all the code at once. The useful
 shape is the sequence of decisions.
@@ -119,7 +119,7 @@ shape is the sequence of decisions.
 
 The non-streaming route handler hands off to a helper that builds a
 plain dictionary named `state`. Open
-[`routes/openai/pipeline.py:97`](../../src/audrey/routes/openai/pipeline.py#L97),
+[`routes/openai/pipeline.py:112`](../../src/audrey/routes/openai/pipeline.py#L112),
 which is the start of `_generate_via_pipeline`:
 
 ```python
@@ -176,7 +176,7 @@ node reads state
 
 ### 2.2 The graph order puts context before classification
 
-Open [`graph.py:437`](../../src/audrey/pipeline/graph.py#L437). The graph adds
+Open [`graph.py:496`](../../src/audrey/pipeline/graph.py#L496). The graph adds
 nodes in one block:
 
 ```python
@@ -186,7 +186,7 @@ g.add_node("classify", node_classify)
 g.add_node("complexity", node_complexity)
 ```
 
-Then the edges at [`graph.py:449`](../../src/audrey/pipeline/graph.py#L449)
+Then the edges at [`graph.py:508`](../../src/audrey/pipeline/graph.py#L508)
 make the order explicit:
 
 ```python
@@ -426,7 +426,7 @@ def is_complex(messages: list[dict], *, threshold: int) -> tuple[bool, int]:
 That function starts at
 [`complexity.py:122`](../../src/audrey/pipeline/complexity.py#L122). The
 threshold and explicit depth cues come from
-[`config.yaml:296`](../../config.yaml#L296):
+[`config.yaml:350`](../../config.yaml#L350):
 
 ```yaml
 complexity:
@@ -512,7 +512,7 @@ def route_after_complexity(state: PipelineState) -> str:
 
 That is at [`graph.py:384`](../../src/audrey/pipeline/graph.py#L384).
 
-The wiring at [`graph.py:453`](../../src/audrey/pipeline/graph.py#L453) tells
+The wiring at [`graph.py:512`](../../src/audrey/pipeline/graph.py#L512) tells
 LangGraph what those return strings mean:
 
 ```python
@@ -537,7 +537,7 @@ block.
 
 After `fast_path` returns, Audrey may still decide the answer was not good
 enough. The router for that is
-[`graph.py:387`](../../src/audrey/pipeline/graph.py#L387).
+[`graph.py:435`](../../src/audrey/pipeline/graph.py#L435).
 
 The first guard is simple: if escalation is disabled, stop.
 
@@ -585,7 +585,7 @@ audrey_auto fast answer
 ### 2.10 Streaming uses a separate driver
 
 Non-streaming requests run the compiled graph through
-[`_generate_via_pipeline` at routes/openai/pipeline.py:97](../../src/audrey/routes/openai/pipeline.py#L97).
+[`_generate_via_pipeline` at routes/openai/pipeline.py:112](../../src/audrey/routes/openai/pipeline.py#L112).
 
 Streaming has to interleave progress banners and token chunks, so it has a
 separate route driver beginning at

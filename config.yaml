@@ -162,6 +162,44 @@ deep_panel_local:
     synthesizer: "qwen3.6:35b"
     fallback_synth: "qwen3.6:35b"
 
+# ─── Deep panel: research (audrey_research) ────────────────────────────
+# A STAGED pipeline, not a flat panel. Each task type carries:
+#   researchers  — Stage-1 fan-out (run concurrently; cloud doesn't touch the
+#                  GPU gate, local serializes through it). Each grounds with
+#                  web_search/kb_search on the bigger `react.research_worker`
+#                  budget. Capped at `agentic.max_research_workers_cloud`.
+#   verifier     — Stage-2 single pass: flags unsupported/anachronistic/
+#                  too-precise claims in the merged findings.
+#   writer       — Stage-3 single pass: turns verified findings into the
+#                  answer (no new facts). Its output IS the final answer.
+#   fallback_synth — degrade target if the write stage fails.
+# Validated by `_validate_deep_panel_pools` (staged branch). Opt-in only:
+# selecting `audrey_research` is the signal — there is no auto-routing into it.
+deep_panel_research:
+  code:
+    researchers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud", "qwen3.6:35b"]
+    verifier: "deepseek-v4-pro:cloud"
+    writer: "qwen3.6:35b"
+    fallback_synth: "glm-5.2:cloud"
+  reasoning:
+    researchers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud", "qwen3.6:35b"]
+    verifier: "deepseek-v4-pro:cloud"
+    writer: "qwen3.6:35b"
+    fallback_synth: "glm-5.2:cloud"
+  general:
+    researchers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud", "qwen3.6:35b"]
+    verifier: "deepseek-v4-pro:cloud"
+    writer: "qwen3.6:35b"
+    fallback_synth: "glm-5.2:cloud"
+  # vl: the research path grounds with text tools; image turns force fast
+  # anyway. Kept here so the pool resolves for every task type, with a
+  # text-only researcher set (the deep path rebuilds prompts text-only).
+  vl:
+    researchers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud"]
+    verifier: "deepseek-v4-pro:cloud"
+    writer: "qwen3.6:35b"
+    fallback_synth: "glm-5.2:cloud"
+
 # ─── Agentic behavior ──────────────────────────────────────────────────
 agentic:
   # Max concurrent cloud workers per deep request, across all deep pools.
@@ -169,6 +207,12 @@ agentic:
   # request × concurrent users` from blowing past it and 429-ing. Was an
   # implicit code default (3) — pinned here so it's visible and tunable.
   max_deep_workers_cloud: 3
+  # Max concurrent cloud researchers for `audrey_research`'s Stage-1 fan-out,
+  # independent of `max_deep_workers_cloud`. Research fans wider than normal
+  # deep but must stay under Ollama Pro's ~3 parallel-cloud limit. Default 2:
+  # two cloud researchers + one local fits the proven pool and leaves cloud
+  # headroom for a concurrent normal-deep request.
+  max_research_workers_cloud: 2
   react:
     max_rounds: 3
     compress_after_round: 2
@@ -188,6 +232,16 @@ agentic:
       max_rounds: 2
       compress_after_round: 2
       max_tool_result_chars: 2000
+      compress_keep_last: 1
+    # `audrey_research` Stage-1 researchers run with a deliberately bigger
+    # budget than deep_worker: the +10 Euclid post-mortem found the tight
+    # deep_worker budget (2 rounds, 2000 chars) made grounded workers rush
+    # final answers from truncated snippets. Research mode is opt-in and
+    # thoroughness-first, so researchers get room to search, read, and refine.
+    research_worker:
+      max_rounds: 5
+      compress_after_round: 3
+      max_tool_result_chars: 6000
       compress_keep_last: 1
   planning:
     enabled: true

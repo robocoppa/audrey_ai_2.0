@@ -145,7 +145,7 @@ right slot of the YAML dict." The YAML dict is the merged result;
 You set `GPU_CONCURRENCY=2` in the environment Python sees at boot.
 Here's what happens:
 
-1. `lifespan()` calls [`get_config()`](../../src/audrey/config.py#L195).
+1. `lifespan()` calls [`get_config()`](../../src/audrey/config.py#L224).
 2. `get_config()` creates `EnvOverrides()`.
 3. Pydantic Settings sees `GPU_CONCURRENCY=2`, matches it to
    `gpu_concurrency`, and converts it to an integer.

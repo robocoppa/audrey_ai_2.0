@@ -27,7 +27,9 @@ too short or low-confidence, the graph re-enters in deep mode. `retry?` is
 the reflection loop — at most one extra deep-panel pass.
 
 Virtual-model routing (decided by `node_complexity`):
-  audrey_deep / audrey_cloud / audrey_local — always deep
+  audrey_deep / audrey_cloud / audrey_local — always deep (panel → synthesize)
+  audrey_research — always deep, staged: research → verify → write (skips
+    synthesize; the Write stage is the answer). Forks off `planner`.
   audrey_fast — always fast, escalation suppressed in `route_after_fast_path`
   audrey_auto — adaptive: deep when prompt ≥ token_threshold, fast otherwise
 
@@ -58,7 +60,12 @@ from audrey.pipeline.complexity import (
     is_owui_task_request,
 )
 from audrey.pipeline.context import datetime_system_message
-from audrey.pipeline.deep_panel import pick_panel_timeout, pool_key_for, run_panel
+from audrey.pipeline.deep_panel import (
+    pick_panel_timeout,
+    pool_key_for,
+    run_panel,
+    run_research_pipeline,
+)
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.fast_path import run_fast_path
 from audrey.pipeline.memory import (
@@ -133,6 +140,7 @@ def build_graph(
     memory_timeout_s = float(memory_cfg.get("timeout_s", 5))
 
     max_workers_cloud = int(agentic.get("max_deep_workers_cloud", 3))
+    max_researchers_cloud = int(agentic.get("max_research_workers_cloud", 2))
 
     # ── Nodes ─────────────────────────────────────────────────────────
 
@@ -215,7 +223,7 @@ def build_graph(
         complex_, n = is_complex(state["messages"], threshold=complexity_threshold)
         deep_intent = has_deep_intent(state["messages"], deep_intent_phrases)
         vm = state.get("virtual_model")
-        forced_deep = vm in ("audrey_deep", "audrey_cloud", "audrey_local")
+        forced_deep = vm in ("audrey_deep", "audrey_cloud", "audrey_local", "audrey_research")
         forced_fast = vm == "audrey_fast"
         owui_task = is_owui_task_request(state["messages"])
         image_turn = has_image_part(state["messages"])
@@ -361,6 +369,43 @@ def build_graph(
             "concrete_model": result.get("synthesizer_model", "deep_panel"),
         }
 
+    async def node_research(state: PipelineState) -> dict[str, Any]:
+        # audrey_research: staged research → verify → write. The Write stage
+        # IS the answer, so this node writes `content` directly and skips the
+        # synthesize node entirely (it routes straight to reflect). Mirrors the
+        # streaming research path in routes/openai/pipeline.py — keep the two
+        # in sync (same caution as node_deep_panel ↔ _stream_deep_with_banners).
+        pool_key = pool_key_for(state["virtual_model"])  # "deep_panel_research"
+        timeout_s = pick_panel_timeout(cfg, pool_key)
+        options = _options_from_state(state)
+        result = await run_research_pipeline(
+            cfg, ollama, registry, health, gate,
+            task=state["task_type"],
+            messages=state["messages"],
+            options=options,
+            timeout_s=timeout_s,
+            max_researchers_cloud=max_researchers_cloud,
+            tools=tools,
+            tool_capable_models=tool_capable_models,
+            user_id=(state.get("user_id") or None),
+        )
+        drafts = list(result.get("drafts") or [])
+        ok = sum(1 for d in drafts if (d.get("content") or "").strip())
+        log.info("research: pool=%s task=%s researchers=%d ok=%d writer=%s error=%s",
+                 pool_key, state["task_type"], len(drafts), ok,
+                 result.get("writer_model"), result.get("error") or "ok")
+        return {
+            "panel_pool": pool_key,
+            "workers_attempted": [d.get("model", "?") for d in drafts],
+            "drafts": drafts,
+            "content": result.get("content", "") or "",
+            "research_findings": result.get("research_findings", ""),
+            "research_critique": result.get("research_critique", ""),
+            "synthesizer_model": result.get("writer_model", "none"),
+            "synth_error": result.get("error", ""),
+            "concrete_model": result.get("writer_model", "none"),
+        }
+
     async def node_reflect(state: PipelineState) -> dict[str, Any]:
         if not reflection_enabled:
             return {"reflect_attempts": state.get("reflect_attempts", 0),
@@ -430,7 +475,15 @@ def build_graph(
             return "end"
         log.info("reflect: retrying deep panel (attempt %d/%d)",
                  state.get("reflect_attempts", 0), reflection_max_retries + 1)
-        return "retry"
+        # Re-enter the branch the request used so a research retry re-runs the
+        # staged pipeline, not the standard panel.
+        return "retry_research" if state.get("virtual_model") == "audrey_research" else "retry"
+
+    def route_deep_kind(state: PipelineState) -> str:
+        # audrey_research takes the staged research branch; every other deep
+        # virtual model takes the standard panel. Used both off the planner
+        # and off a reflect retry so a retry re-runs the right branch.
+        return "research" if state.get("virtual_model") == "audrey_research" else "panel"
 
     async def node_mark_escalated(state: PipelineState) -> dict[str, Any]:
         # Bridge between fast_path and the deep branch — flag that we're in
@@ -448,6 +501,7 @@ def build_graph(
     g.add_node("escalate_bridge", node_mark_escalated)
     g.add_node("planner", node_planner)
     g.add_node("deep_panel", node_deep_panel)
+    g.add_node("research", node_research)
     g.add_node("synthesize", node_synthesize)
     g.add_node("reflect", node_reflect)
 
@@ -464,12 +518,21 @@ def build_graph(
         {"end": END, "escalate": "escalate_bridge"},
     )
     g.add_edge("escalate_bridge", "planner")
-    g.add_edge("planner", "deep_panel")
+    # audrey_research forks to the staged research branch; all other deep
+    # virtual models take the standard panel → synthesize path.
+    g.add_conditional_edges(
+        "planner", route_deep_kind,
+        {"panel": "deep_panel", "research": "research"},
+    )
     g.add_edge("deep_panel", "synthesize")
     g.add_edge("synthesize", "reflect")
+    # The research node writes `content` itself (the Writer is the answer), so
+    # it skips synthesize and goes straight to reflect.
+    g.add_edge("research", "reflect")
+    # On a reflect retry, re-enter the same branch the request used.
     g.add_conditional_edges(
         "reflect", route_after_reflect,
-        {"end": END, "retry": "deep_panel"},
+        {"end": END, "retry": "deep_panel", "retry_research": "research"},
     )
     return g.compile()
 

@@ -313,3 +313,233 @@ def test_route_after_reflect_still_retries_too_short_under_budget():
 def test_route_after_reflect_ends_when_passed():
     route = _route_after_reflect()
     assert route({"reflect_passed": True}) == "end"
+
+
+def test_route_after_reflect_research_retries_into_research_branch():
+    # A retryable failure on audrey_research must re-enter the staged research
+    # branch ("retry_research"), not the standard panel ("retry").
+    route = _route_after_reflect()
+    assert route({
+        "reflect_passed": False,
+        "reflect_reason": "too_short",
+        "reflect_attempts": 1,
+        "virtual_model": "audrey_research",
+    }) == "retry_research"
+    # Non-research deep modes still take the standard retry edge.
+    assert route({
+        "reflect_passed": False,
+        "reflect_reason": "too_short",
+        "reflect_attempts": 1,
+        "virtual_model": "audrey_deep",
+    }) == "retry"
+
+
+def _route_deep_kind():
+    """Pull the compiled graph's `route_deep_kind` planner-fork conditional."""
+    cfg = get_config()
+    compiled = gmod.build_graph(
+        cfg, OllamaClient(base_url="http://unused"), ModelRegistry(cfg),
+        HealthTracker(), FairLocalGate(concurrency=1), _NoTools(),
+    )
+    branch = compiled.builder.branches["planner"]["route_deep_kind"]
+    return branch.path.func
+
+
+def test_route_deep_kind_forks_research_vs_panel():
+    route = _route_deep_kind()
+    assert route({"virtual_model": "audrey_research"}) == "research"
+    assert route({"virtual_model": "audrey_deep"}) == "panel"
+    assert route({"virtual_model": "audrey_cloud"}) == "panel"
+
+
+async def test_node_complexity_forces_deep_for_research():
+    # audrey_research must force the deep path in the non-streaming gate, even
+    # on a short prompt that would otherwise route fast.
+    cfg = get_config()
+    ollama = OllamaClient(base_url="http://unused")
+    compiled = gmod.build_graph(
+        cfg, ollama, ModelRegistry(cfg), HealthTracker(),
+        FairLocalGate(concurrency=1), _NoTools(),
+    )
+    node = compiled.nodes["complexity"].bound
+    out = await node.ainvoke({
+        "virtual_model": "audrey_research",
+        "messages": [{"role": "user", "content": "hi"}],  # short → would be fast
+    })
+    await ollama.aclose()
+    assert out["mode"] == "deep"
+
+
+# ─── audrey_research staged pipeline (Phase 24) ────────────────────────
+#
+# The staged executor: research fan-out → verify → write. We stub a fake
+# OllamaClient so no real model runs. Researchers are NOT tool-capable here
+# (tool_capable_models=None), so `_run_one_worker` takes the single-`chat`
+# branch; the writer streams via `chat_stream`.
+
+from audrey.pipeline.deep_panel import (  # noqa: E402
+    run_research_pipeline,
+    run_research_pipeline_streaming,
+    select_researchers,
+)
+
+
+class _FakeOllama:
+    """Records calls; returns canned content per model.
+
+    `chat` (researchers + verifier) returns `responses[model]`; `chat_stream`
+    (writer) yields it in two chunks. A model in `fail` raises OllamaError.
+    """
+
+    def __init__(self, responses: dict[str, str], fail: set[str] | None = None):
+        self.responses = responses
+        self.fail = fail or set()
+        self.chat_models: list[str] = []
+        self.stream_models: list[str] = []
+
+    async def chat(self, *, model, messages, options=None, timeout_s=0):
+        self.chat_models.append(model)
+        if model in self.fail:
+            from audrey.models.ollama import OllamaError
+            raise OllamaError(f"{model} down")
+        return {"message": {"content": self.responses.get(model, "")}, "prompt_eval_count": 1, "eval_count": 1}
+
+    async def chat_stream(self, *, model, messages, options=None, timeout_s=0):
+        self.stream_models.append(model)
+        if model in self.fail:
+            from audrey.models.ollama import OllamaError
+            raise OllamaError(f"{model} down")
+        text = self.responses.get(model, "")
+        mid = len(text) // 2
+        yield {"message": {"content": text[:mid]}, "done": False}
+        yield {"message": {"content": text[mid:]}, "done": True, "prompt_eval_count": 1, "eval_count": 1}
+
+
+def _research_cfg(
+    researchers: list[str], verifier: str, writer: str,
+    registry_models: tuple, fallback: str | None = None,
+) -> _Cfg:
+    body: dict[str, Any] = {"researchers": researchers, "verifier": verifier, "writer": writer}
+    if fallback:
+        body["fallback_synth"] = fallback
+    return _Cfg({
+        "model_registry": {
+            "reasoning": [
+                {"name": n, "priority": p, "location": loc} for n, p, loc in registry_models
+            ],
+        },
+        "deep_panel_research": {"reasoning": body},
+    })
+
+
+async def _run_research(cfg, reg, health, ollama, *, max_cloud=2):
+    return await run_research_pipeline(
+        cfg, ollama, reg, health, FairLocalGate(concurrency=1),
+        task="reasoning", messages=[{"role": "user", "content": "tell me about euclid"}],
+        options={}, timeout_s=5.0, max_researchers_cloud=max_cloud,
+        tools=None, tool_capable_models=None, user_id=None,
+    )
+
+
+async def test_research_pipeline_happy_path():
+    reg = _registry(("r1", 100, "cloud"), ("r2", 90, "cloud"), ("v", 80, "cloud"), ("w", 70, "local"))
+    cfg = _research_cfg(["r1", "r2"], "v", "w",
+                        (("r1", 100, "cloud"), ("r2", 90, "cloud"), ("v", 80, "cloud"), ("w", 70, "local")))
+    health = HealthTracker()
+    ollama = _FakeOllama({"r1": "fact A", "r2": "fact B", "v": "looks fine", "w": "Euclid was a mathematician."})
+
+    out = await _run_research(cfg, reg, health, ollama)
+
+    assert out["content"] == "Euclid was a mathematician."
+    assert out["writer_model"] == "w"
+    assert out["error"] == ""
+    assert out["research_critique"] == "looks fine"
+    assert "fact A" in out["research_findings"] and "fact B" in out["research_findings"]
+    assert len(out["drafts"]) == 2
+    # Verifier ran via chat; writer streamed.
+    assert "v" in ollama.chat_models
+    assert ollama.stream_models == ["w"]
+
+
+async def test_research_pipeline_empty_research_skips_verify_and_flags_writer():
+    # All researchers fail → no findings → verify skipped, writer still runs.
+    reg = _registry(("r1", 100, "cloud"), ("v", 80, "cloud"), ("w", 70, "local"))
+    cfg = _research_cfg(["r1"], "v", "w",
+                        (("r1", 100, "cloud"), ("v", 80, "cloud"), ("w", 70, "local")))
+    health = HealthTracker()
+    ollama = _FakeOllama({"w": "Caveat: unverified. Euclid..."}, fail={"r1"})
+
+    out = await _run_research(cfg, reg, health, ollama)
+
+    assert out["research_findings"] == ""       # no grounding
+    assert out["research_critique"] == ""        # verify skipped
+    assert "v" not in ollama.chat_models         # verifier never called
+    assert out["content"] == "Caveat: unverified. Euclid..."
+    assert out["writer_model"] == "w"
+    assert out["error"] == ""
+
+
+async def test_research_pipeline_writer_falls_back():
+    reg = _registry(("r1", 100, "cloud"), ("v", 80, "cloud"), ("w", 70, "local"), ("fb", 60, "cloud"))
+    cfg = _research_cfg(["r1"], "v", "w",
+                        (("r1", 100, "cloud"), ("v", 80, "cloud"), ("w", 70, "local"), ("fb", 60, "cloud")),
+                        fallback="fb")
+    health = HealthTracker()
+    # Primary writer fails before any token → fallback writes.
+    ollama = _FakeOllama({"r1": "fact", "v": "ok", "fb": "fallback answer"}, fail={"w"})
+
+    out = await _run_research(cfg, reg, health, ollama)
+
+    assert out["content"] == "fallback answer"
+    assert out["writer_model"] == "fb"
+    assert out["error"] == ""
+
+
+async def test_research_pipeline_no_writer_configured_errors_gracefully():
+    reg = _registry(("r1", 100, "cloud"), ("v", 80, "cloud"), ("w", 70, "local"))
+    cfg = _research_cfg(["r1"], "v", "w",
+                        (("r1", 100, "cloud"), ("v", 80, "cloud"), ("w", 70, "local")))
+    health = HealthTracker()
+    # Writer unhealthy, no fallback → no usable candidate.
+    health.record_failure("w", "down")
+    ollama = _FakeOllama({"r1": "fact", "v": "ok"})
+
+    out = await _run_research(cfg, reg, health, ollama)
+
+    assert out["content"] == ""
+    assert out["writer_model"] == "none"
+    assert out["error"] == "write_failed"
+
+
+async def test_select_researchers_caps_cloud():
+    reg = _registry(("r1", 100, "cloud"), ("r2", 90, "cloud"), ("r3", 80, "cloud"), ("r4", 70, "local"))
+    cfg = _research_cfg(["r1", "r2", "r3", "r4"], "v", "w",
+                        (("r1", 100, "cloud"), ("r2", 90, "cloud"), ("r3", 80, "cloud"), ("r4", 70, "local")))
+    health = HealthTracker()
+    chosen = select_researchers(cfg, reg, health, task="reasoning", max_researchers_cloud=2)
+    locs = [loc for _, loc in chosen]
+    # 2 cloud (capped) + 1 local = 3 total; the 3rd cloud is dropped.
+    assert locs.count("cloud") == 2
+    assert locs.count("local") == 1
+
+
+async def test_research_pipeline_streaming_event_order():
+    reg = _registry(("r1", 100, "cloud"), ("v", 80, "cloud"), ("w", 70, "local"))
+    cfg = _research_cfg(["r1"], "v", "w",
+                        (("r1", 100, "cloud"), ("v", 80, "cloud"), ("w", 70, "local")))
+    health = HealthTracker()
+    ollama = _FakeOllama({"r1": "fact", "v": "ok", "w": "answer text"})
+
+    types = [
+        evt["type"] async for evt in run_research_pipeline_streaming(
+            cfg, ollama, reg, health, FairLocalGate(concurrency=1),
+            task="reasoning", messages=[{"role": "user", "content": "q"}],
+            options={}, timeout_s=5.0, max_researchers_cloud=2,
+            tools=None, tool_capable_models=None, user_id=None,
+        )
+    ]
+    # Stage order: researcher_done → findings_ready → verify_done → write_delta(s) → done.
+    assert types[0] == "researcher_done"
+    assert "findings_ready" in types
+    assert types.index("verify_done") < types.index("write_delta")
+    assert types[-1] == "done"

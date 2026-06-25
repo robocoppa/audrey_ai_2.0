@@ -108,7 +108,7 @@ overrode a deliberate setting. *This* is the case worth recognizing: the idiom
 works for every request except the one that matters most here.
 
 So Audrey doesn't use `or` for this. The real line that applies a request's
-temperature ([graph.py:484](../../src/audrey/pipeline/graph.py#L484)) steps off
+temperature ([graph.py:552](../../src/audrey/pipeline/graph.py#L552)) steps off
 the idiom and tests for *absence* directly:
 
 ```python

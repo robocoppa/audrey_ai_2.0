@@ -32,9 +32,12 @@ from audrey.models.registry import ModelRegistry
 from audrey.pipeline.banners import (
     BANNER_DISPATCHING,
     BANNER_PLANNING,
+    BANNER_RESEARCHING,
     BANNER_SEPARATOR,
     BANNER_SYNTHESIZING,
     BANNER_THINKING,
+    BANNER_VERIFYING,
+    BANNER_WRITING,
     PhaseTicker,
     tool_summary_block,
     worker_fail,
@@ -53,7 +56,12 @@ from audrey.pipeline.complexity import (
     is_owui_task_request,
 )
 from audrey.pipeline.context import datetime_system_message
-from audrey.pipeline.deep_panel import pick_panel_timeout, pool_key_for, run_panel_streaming
+from audrey.pipeline.deep_panel import (
+    pick_panel_timeout,
+    pool_key_for,
+    run_panel_streaming,
+    run_research_pipeline_streaming,
+)
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.memory import (
     MEMORY_STORE_TOOL,
@@ -216,7 +224,7 @@ async def _stream_via_pipeline(
             complexity_cfg = cfg.raw.get("complexity", {}) or {}
             complex_, n = is_complex(messages, threshold=int(complexity_cfg.get("token_threshold", 500)))
             deep_intent = has_deep_intent(messages, complexity_cfg.get("deep_intent_phrases") or [])
-            forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local")
+            forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local", "audrey_research")
             forced_fast = payload.model == "audrey_fast"
             owui_task = is_owui_task_request(messages)
             image_turn = has_image_part(messages)
@@ -257,6 +265,13 @@ async def _stream_via_pipeline(
                     parts = " ".join(f"{r}={by_role[r]}" for r in sorted(by_role))
                     log.info("complexity.breakdown: %s last_user=%d", parts, last_user)
                 is_deep_branch = True
+                if payload.model == "audrey_research":
+                    async for frame in _stream_research_with_banners(
+                        app, payload, messages, options, task=task, conf=conf, user_id=user_id,
+                        conversation_id=conversation_id, user_turn_text=user_turn_text,
+                    ):
+                        yield frame
+                    return
                 async for frame in _stream_deep_with_banners(
                     app, payload, messages, options, task=task, conf=conf, user_id=user_id,
                     conversation_id=conversation_id, user_turn_text=user_turn_text,
@@ -788,6 +803,270 @@ async def _stream_deep_with_banners(
                 partial=(pipeline_outcome == "cancelled"),
                 virtual_model=payload.model,
                 concrete_model=synth_model,
+            )
+
+
+async def _stream_research_with_banners(
+    app, payload: ChatCompletionRequest, messages, options,
+    *, task: str, conf: float, user_id: str,
+    conversation_id: str = "",
+    user_turn_text: str = "",
+):
+    """Streaming `audrey_research` path: Planning → Researching → Verifying → Writing.
+
+    Same banner machinery as `_stream_deep_with_banners` (PhaseTicker + the
+    queue/drain helpers) with two extra stages. The single staged pipeline
+    (`run_research_pipeline_streaming`) runs as one background task; its events
+    drive the three phase banners and stream the Writer's tokens live as the
+    answer. Mirrors the non-streaming `node_research` in `pipeline/graph.py` —
+    keep the two in sync.
+    """
+    cfg = app.state.cfg
+    ollama: OllamaClient = app.state.ollama
+    registry: ModelRegistry = app.state.registry
+    health: HealthTracker = app.state.health
+    gate = app.state.gate
+    tools = app.state.tools
+    router_cfg = cfg.router
+    agentic = cfg.raw.get("agentic", {}) or {}
+
+    created = int(time.time())
+    cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+    concrete = "deep_panel_research"
+    fingerprint = f"audrey-{__version__}/{concrete}"
+
+    def _delta_frame(text: str) -> str:
+        frame = {
+            "id": cid, "object": "chat.completion.chunk", "created": created,
+            "model": payload.model, "system_fingerprint": fingerprint,
+            "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
+        }
+        return f"data: {json.dumps(frame)}\n\n"
+
+    def _stop_frame() -> str:
+        frame = {
+            "id": cid, "object": "chat.completion.chunk", "created": created,
+            "model": payload.model, "system_fingerprint": fingerprint,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        }
+        return f"data: {json.dumps(frame)}\n\n"
+
+    role = {
+        "id": cid, "object": "chat.completion.chunk", "created": created,
+        "model": payload.model, "system_fingerprint": fingerprint,
+        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+    }
+    yield f"data: {json.dumps(role)}\n\n"
+
+    banner_q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=128)
+
+    async def emit(text: str) -> None:
+        await banner_q.put(text)
+
+    t0 = time.perf_counter()
+    pipeline_outcome = "ok"
+    drafts: list[dict[str, Any]] = []
+    final_content = ""
+    writer_model = "deep_panel_research"
+
+    try:
+        # ── Stage 0: Planning (memory recall + planner, reused verbatim) ──
+        memory_cfg = agentic.get("memory", {}) or {}
+        memory_enabled = bool(memory_cfg.get("enabled", True))
+        planning_cfg = agentic.get("planning", {}) or {}
+        complexity_threshold = int(cfg.raw.get("complexity", {}).get("token_threshold", 500))
+        _, prompt_tokens = is_complex(messages, threshold=complexity_threshold)
+
+        async with PhaseTicker(BANNER_PLANNING, emit):
+            think_task = asyncio.create_task(_phase_thinking(
+                ollama=ollama, tools=tools, user_id=user_id, messages=messages,
+                memory_enabled=memory_enabled,
+                memory_top_k=int(memory_cfg.get("top_k", 3)),
+                memory_timeout_s=float(memory_cfg.get("timeout_s", 5)),
+                planning_enabled=bool(planning_cfg.get("enabled", True)),
+                planning_min_tokens=int(planning_cfg.get("min_prompt_tokens", 40)),
+                planning_max_subtasks=int(planning_cfg.get("max_subtasks", 3)),
+                prompt_tokens=prompt_tokens,
+                router_cfg=router_cfg,
+                cfg=cfg,
+            ))
+            async for frame in _drain_q_until_task(banner_q, think_task, _delta_frame):
+                yield frame
+            # Research workers answer the full prompt; planner subtasks are not
+            # used (the research fan-out grounds the whole question).
+            messages_with_memory, _subtasks = think_task.result()
+        async for frame in _drain_q_now(banner_q, _delta_frame):
+            yield frame
+
+        # Drive the whole staged pipeline as one background task; its events
+        # feed the three phase banners and the live answer stream.
+        events_q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(maxsize=256)
+        timeout_s = pick_panel_timeout(cfg, "deep_panel_research")
+        max_researchers_cloud = int(agentic.get("max_research_workers_cloud", 2))
+        fast_path_cfg = cfg.raw.get("fast_path", {}) or {}
+        tool_capable_models = set(fast_path_cfg.get("tool_capable_models", []) or [])
+
+        async def _run_pipeline() -> None:
+            try:
+                async for evt in run_research_pipeline_streaming(
+                    cfg, ollama, registry, health, gate,
+                    task=task, messages=messages_with_memory, options=options,
+                    timeout_s=timeout_s, max_researchers_cloud=max_researchers_cloud,
+                    tools=tools, tool_capable_models=tool_capable_models,
+                    user_id=user_id or None,
+                ):
+                    await events_q.put(evt)
+            finally:
+                await events_q.put(None)
+
+        pipe_task = asyncio.create_task(_run_pipeline())
+
+        # ── Stage 1: Researching (banner; tails per researcher) ───────────
+        async with PhaseTicker(BANNER_RESEARCHING, emit) as ticker:
+            while True:
+                # Surface any banner dots queued by the ticker.
+                while not banner_q.empty():
+                    item = banner_q.get_nowait()
+                    if item is not None:
+                        yield _delta_frame(item)
+                try:
+                    evt = await asyncio.wait_for(events_q.get(), timeout=0.05)
+                except TimeoutError:
+                    continue
+                if evt is None:
+                    break
+                etype = evt.get("type")
+                if etype == "researcher_done":
+                    ticker.append_tail(
+                        worker_ok(evt["model"]) if evt["ok"] else worker_fail(evt["model"])
+                    )
+                elif etype == "findings_ready":
+                    break
+        async for frame in _drain_q_now(banner_q, _delta_frame):
+            yield frame
+
+        # ── Stage 2: Verifying → Stage 3: Writing ─────────────────────────
+        # Event order from run_research_pipeline_streaming after findings_ready
+        # is: optionally `verify_done`, then zero+ `write_delta`, then `done`.
+        # We show the Verifying banner until the first non-verify event, then
+        # close it, open Writing, and on the first write_delta close Writing,
+        # emit the separator, and stream the answer live. `first_write` is the
+        # event that ended the Verifying wait (a write_delta or done) so we
+        # never drop it.
+        done_evt: dict[str, Any] = {}
+        first_write: dict[str, Any] | None = None
+        async with PhaseTicker(BANNER_VERIFYING, emit):
+            while True:
+                while not banner_q.empty():
+                    item = banner_q.get_nowait()
+                    if item is not None:
+                        yield _delta_frame(item)
+                try:
+                    evt = await asyncio.wait_for(events_q.get(), timeout=0.05)
+                except TimeoutError:
+                    continue
+                if evt is None:
+                    break
+                etype = evt.get("type")
+                if etype == "verify_done":
+                    continue  # verify finished; banner closes on loop exit
+                # First write_delta or done ends the verify wait. (When research
+                # was empty, verify is skipped and this is the first event.)
+                first_write = evt
+                break
+        async for frame in _drain_q_now(banner_q, _delta_frame):
+            yield frame
+
+        # Writing banner: it closes as soon as we have the first answer token.
+        async with PhaseTicker(BANNER_WRITING, emit):
+            # `first_write` already in hand — close immediately. A brief tick
+            # may queue; drain it after exit.
+            pass
+        async for frame in _drain_q_now(banner_q, _delta_frame):
+            yield frame
+        yield _delta_frame(BANNER_SEPARATOR)
+
+        # Emit the first write chunk (if any), then stream the rest.
+        def _consume(evt: dict[str, Any]) -> str:
+            nonlocal done_evt
+            if evt.get("type") == "write_delta":
+                return evt.get("text", "") or ""
+            if evt.get("type") == "done":
+                done_evt = evt
+            return ""
+
+        if first_write is not None:
+            text = _consume(first_write)
+            if text:
+                final_content += text
+                yield _delta_frame(text)
+        if not done_evt:
+            while True:
+                evt = await events_q.get()
+                if evt is None:
+                    break
+                text = _consume(evt)
+                if text:
+                    final_content += text
+                    yield _delta_frame(text)
+
+        await pipe_task
+
+        if done_evt:
+            writer_model = str(done_evt.get("writer_model") or writer_model)
+            drafts = list(done_evt.get("drafts") or [])
+            if not final_content:
+                final_content = done_evt.get("content", "") or "[empty]"
+            if done_evt.get("error"):
+                pipeline_outcome = "error"
+        elif not final_content:
+            final_content = "[empty]"
+            pipeline_outcome = "error"
+
+        footer = tool_summary_block([
+            (str(d.get("model") or "?"), list(d.get("tool_calls") or []))
+            for d in drafts
+        ])
+        if footer:
+            yield _delta_frame(footer)
+
+        yield _stop_frame()
+        yield "data: [DONE]\n\n"
+
+    except asyncio.CancelledError:
+        pipeline_outcome = "cancelled"
+        raise
+    except OllamaError as e:
+        pipeline_outcome = "error"
+        log.warning("stream research: ollama error: %s", e)
+        yield _delta_frame(f"\n\n[ollama error: {e}]")
+        yield _stop_frame()
+        yield "data: [DONE]\n\n"
+    except Exception:
+        pipeline_outcome = "error"
+        log.exception("stream research: unexpected error")
+        yield _delta_frame("\n\n[internal error]")
+        yield _stop_frame()
+        yield "data: [DONE]\n\n"
+    finally:
+        elapsed = time.perf_counter() - t0
+        pipeline_seconds.labels(mode="deep", task_type=task).observe(elapsed)
+        pipeline_total.labels(mode="deep", task_type=task, outcome=pipeline_outcome).inc()
+        log.info(
+            "stream research done model=%s task=%s writer=%s outcome=%s elapsed=%.2fs",
+            payload.model, task, writer_model, pipeline_outcome, elapsed,
+        )
+        archive_client: ChatArchiveClient | None = getattr(app.state, "archive_client", None)
+        if archive_client is not None and conversation_id:
+            await archive_client.archive_turn(
+                registry=app.state.tools,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                user_content=user_turn_text,
+                assistant_content=final_content,
+                partial=(pipeline_outcome == "cancelled"),
+                virtual_model=payload.model,
+                concrete_model=writer_model,
             )
 
 
