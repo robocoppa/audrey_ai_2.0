@@ -570,7 +570,6 @@ async def _stream_deep_with_banners(
 
         # ── Stage 2: Dispatching panel ──────────────────────────────────
         pool_key = pool_key_for(payload.model)
-        deep_worker_timeout = float(cfg.timeouts.get("deep_worker", 240))
         timeout_s = pick_panel_timeout(cfg, pool_key)
         max_workers_cloud = int(agentic.get("max_deep_workers_cloud", 3))
         fast_path_cfg = cfg.raw.get("fast_path", {}) or {}
@@ -622,7 +621,10 @@ async def _stream_deep_with_banners(
                     cfg, ollama, registry, health, gate,
                     pool_key=pool_key, task=task,
                     messages=messages_with_memory, drafts=drafts,
-                    subtasks=subtasks, timeout_s=deep_worker_timeout,
+                    # Pool-aware, matching the panel (`timeout_s` above):
+                    # cloud-only pools get `timeouts.cloud` rather than the
+                    # longer `deep_worker` budget.
+                    subtasks=subtasks, timeout_s=timeout_s,
                     user_id=user_id or None,
                 ):
                     await events_q.put(evt)

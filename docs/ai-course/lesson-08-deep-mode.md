@@ -92,8 +92,9 @@ Two routing rules outside the four nodes matter for understanding the trace:
 
 - **Virtual model picks the pool.** `audrey_deep` uses the mixed
   local+cloud pool, `audrey_cloud` uses the cloud-only pool, `audrey_local`
-  uses the local-only pool. `audrey_auto` lands here only when the
-  complexity gate said deep — its pool is the same as `audrey_deep`.
+  uses the local-only pool. `audrey_auto` lands here when the gate
+  chooses deep — a long prompt or an explicit depth cue — and its pool is
+  the same as `audrey_deep`.
 - **Reflection is best-effort, bounded.** At most one retry of
   panel+synth. If the second attempt still fails the quality check,
   Audrey ships what it has rather than 502 the request.
@@ -124,7 +125,7 @@ a tighter slice instead of trying to cover everything at once.
 #### When the planner runs
 
 The graph node is at
-[`graph.py:271`](../../src/audrey/pipeline/graph.py#L271):
+[`graph.py:294`](../../src/audrey/pipeline/graph.py#L294):
 
 ```python
 async def node_planner(state: PipelineState) -> dict[str, Any]:
@@ -216,7 +217,7 @@ goes on. The planner is opt-in routing, not a hard requirement — when it
 works, it sharpens the panel; when it fails, the panel doesn't notice.
 
 When the planner *does* return subtasks, the log line at
-[`graph.py:284`](../../src/audrey/pipeline/graph.py#L284) shows the count
+[`graph.py:307`](../../src/audrey/pipeline/graph.py#L307) shows the count
 and the first 60 chars of each:
 
 ```python
@@ -290,7 +291,7 @@ route, where a misspelled virtual model would otherwise blow up with a
 still gets an answer; the operator gets a typo in the logs to chase later.
 
 The pools themselves live in `config.yaml`. Open
-[`config.yaml:79`](../../config.yaml#L79):
+[`config.yaml:98`](../../config.yaml#L98):
 
 ```yaml
 deep_panel:
@@ -698,7 +699,7 @@ each line annotated by the stage that produced it:
 
 ```text
 classify: task=reasoning conf=0.72                       # Lesson 7
-complexity: tokens=287 mode=deep reason=token_count      # Lesson 7
+complexity: 640 tokens -> deep (tokens>=500)             # Lesson 7
 planner: 2 subtasks: ['How does ...', 'What about ...']  # node_planner
 deep_panel: pool=deep_panel task=reasoning workers=2     # node_deep_panel
 synth: qwen3.6:35b ok in 6.42s (attempt 1)               # node_synthesize

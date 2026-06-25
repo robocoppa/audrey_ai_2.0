@@ -44,8 +44,8 @@ every line yet — just *locate* the things we point at.
 
 ### 2.1 The HTTP entry point
 
-Open [`src/audrey/routes/openai.py`](../../src/audrey/routes/openai.py).
-Scroll to **line 232**:
+Open [`src/audrey/routes/openai/routes.py`](../../src/audrey/routes/openai/routes.py).
+Scroll to [`routes.py:83`](../../src/audrey/routes/openai/routes.py#L83):
 
 ```python
 @router.post("/chat/completions")
@@ -56,25 +56,29 @@ async def chat_completions(
 ):
 ```
 
-This is where every request lands. Read the function (lines 232-305)
+This is where every request lands. Read the function starting at
+[`routes.py:84`](../../src/audrey/routes/openai/routes.py#L84)
 top to bottom. Notice:
 
 - **`@router.post("/chat/completions")`** — a FastAPI decorator. It
   registers this function as the handler for `POST /v1/chat/completions`
-  HTTP requests. The `/v1` prefix is set on line 84
+  HTTP requests. The `/v1` prefix is set at
+  [`routes.py:35`](../../src/audrey/routes/openai/routes.py#L35)
   (`router = APIRouter(prefix="/v1")`).
 - **`payload: ChatCompletionRequest`** — FastAPI parses the incoming
-  JSON body into a `ChatCompletionRequest` object (defined at line
-  164). If the JSON doesn't match, FastAPI returns 422 automatically
-  before your code runs.
+  JSON body into a `ChatCompletionRequest` object (defined in
+  [`schemas.py:29`](../../src/audrey/routes/openai/schemas.py#L29)).
+  If the JSON doesn't match, FastAPI returns 422 automatically before
+  your code runs.
 - **`me: AuthedUser = Depends(require_user)`** — FastAPI's dependency
   injection. Before `chat_completions` runs, FastAPI calls
   `require_user()` (in `auth.py`), which checks the `Authorization:
   Bearer <token>` header against Open WebUI. If it fails, the user
   gets 401 and `chat_completions` never runs. If it succeeds, `me`
   contains their email + role.
-- **The `if payload.stream:` branch (line 289)** — OpenAI's API
-  supports two modes: Streaming (server pushes tokens as they're
+- **The `if payload.stream:` branch at
+  [`routes.py:141`](../../src/audrey/routes/openai/routes.py#L141)** —
+  OpenAI's API supports two modes: Streaming (server pushes tokens as they're
   generated) and non-streaming (server waits, returns full answer in
   one JSON response). Audrey supports both. Streaming is what OWUI
   uses; non-streaming is what programmatic clients use.
@@ -219,24 +223,29 @@ follow along in `openai.py`.
    request.
 
 3. **FastAPI runs `require_user`** (the `Depends(...)` we saw in
-   line 232). This calls Open WebUI's `/api/v1/auths/` endpoint to
+   [`routes.py:84`](../../src/audrey/routes/openai/routes.py#L84)).
+   This calls Open WebUI's `/api/v1/auths/` endpoint to
    verify the token. On success, `me: AuthedUser` gets populated
    with the user's email + role.
 
-4. **`chat_completions` runs** (line 232). It validates the model
-   name against `VIRTUAL_MODELS` (line 88), splits messages out of
-   the payload, and — because `stream=true` — calls
+4. **`chat_completions` runs** at
+   [`routes.py:84`](../../src/audrey/routes/openai/routes.py#L84).
+   It validates the model name against `VIRTUAL_MODELS`
+   ([`routes.py:39`](../../src/audrey/routes/openai/routes.py#L39)),
+   splits messages out of the payload, and — because `stream=true` — calls
    `_stream_via_pipeline()` wrapped in a `StreamingResponse` (a
    FastAPI primitive that holds the HTTP connection open and pushes
    bytes as the inner generator yields them — we'll see the frame
    format at the end of this section).
 
-5. **`_stream_via_pipeline()`** (line 580) does the routing:
-   `audrey_deep` / `audrey_cloud` / `audrey_local` always go through
-   the deep panel; `audrey_fast` always uses the fast path;
-   `audrey_auto` decides based on prompt length. For our "what is
-   BTRFS?" example with `audrey_auto`, the prompt is short — fast path
-   wins.
+5. **`_stream_via_pipeline()`** at
+   [`pipeline.py:172`](../../src/audrey/routes/openai/pipeline.py#L172)
+   does the routing: `audrey_deep` / `audrey_cloud` / `audrey_local`
+   always go through the deep panel; `audrey_fast` always uses the fast
+   path; `audrey_auto` goes deep for long prompts or explicit depth cues.
+   Attached image turns and OWUI utility tasks are forced fast. For our
+   "what is BTRFS?" example with `audrey_auto`, the prompt is short and
+   ordinary — fast path wins.
 
 6. **The fast path runs through the LangGraph nodes:**
    - `datetime` adds an ISO-8601 timestamp to the message stack so the
@@ -253,9 +262,10 @@ follow along in `openai.py`.
      `kb_search` if it wanted. For this question it doesn't bother —
      it knows what BTRFS is.
 
-7. **The model's tokens stream back** through `_stream_openai` (line
-   1348), which converts Ollama's chunks into OpenAI-format SSE frames
-   and yields them. FastAPI passes each frame through to OWUI as it's
+7. **The model's tokens stream back** through `_stream_openai` at
+   [`pipeline.py:915`](../../src/audrey/routes/openai/pipeline.py#L915),
+   which converts Ollama's chunks into OpenAI-format SSE frames and
+   yields them. FastAPI passes each frame through to OWUI as it's
    produced. The user sees the answer typing itself out.
 
 8. **The `reflect` node runs** at the end to check the answer met a
@@ -282,10 +292,10 @@ something deeply, here's where to look first.
 | If you're asking… | Look in… |
 |---|---|
 | "Where does a request enter Audrey?" | [`routes/openai/routes.py:84`](../../src/audrey/routes/openai/routes.py#L84) (`chat_completions`) |
-| "How does the pipeline decide what to do?" | [`pipeline/graph.py:413`](../../src/audrey/pipeline/graph.py#L413) (the graph topology) |
+| "How does the pipeline decide what to do?" | [`pipeline/graph.py:437`](../../src/audrey/pipeline/graph.py#L437) (the graph topology) |
 | "Why did it pick model X?" | [`pipeline/classify.py`](../../src/audrey/pipeline/classify.py) + [`models/registry.py`](../../src/audrey/models/registry.py) |
 | "Why did the request hang?" | [`pipeline/fair_gate.py`](../../src/audrey/pipeline/fair_gate.py) (GPU queue) + Ollama logs |
-| "How did the answer get streamed?" | [`routes/openai/pipeline.py:460`](../../src/audrey/routes/openai/pipeline.py#L460) (`_stream_deep_with_banners`) |
+| "How did the answer get streamed?" | [`routes/openai/pipeline.py:465`](../../src/audrey/routes/openai/pipeline.py#L465) (`_stream_deep_with_banners`) |
 | "Where do tools get called?" | [`pipeline/react.py`](../../src/audrey/pipeline/react.py) |
 
 Bookmark this. You'll come back.

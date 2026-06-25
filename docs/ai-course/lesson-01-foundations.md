@@ -584,7 +584,6 @@ a much weirder downstream symptom.
 
 Dataclasses:
 - `AuthedUser` in [`src/audrey/auth.py`](../../src/audrey/auth.py)
-- `WorkerDraft` in [`src/audrey/pipeline/state.py`](../../src/audrey/pipeline/state.py)
 - `ReactResult` in [`src/audrey/pipeline/react.py`](../../src/audrey/pipeline/react.py)
 - `KBHit` in [`src/audrey/kb/qdrant.py`](../../src/audrey/kb/qdrant.py)
 

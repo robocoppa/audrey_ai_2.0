@@ -433,14 +433,13 @@ called **once per request, after the assistant content is known.**
 non-streaming request, the full reply is built inside the pipeline
 and returned as one chunk — the archive call fires after the graph
 finishes, just before the route hands the JSON response back to the
-client (see [`routes/openai/pipeline.py:115`](../../src/audrey/routes/openai/pipeline.py#L115)).
+client (see [`routes/openai/pipeline.py:123`](../../src/audrey/routes/openai/pipeline.py#L123)).
 For a streaming-deep request, the reply is *only* fully known once
 the SSE stream has been fully emitted — so the archive call lives at
 the very end of `_stream_deep_with_banners` (see
-[`routes/openai/pipeline.py:447`](../../src/audrey/routes/openai/pipeline.py#L447)),
-using `final_content` accumulated by the narrow `StreamCollector.wrap`
-discussed in §2.3. Two call sites, two different "the content is now
-known" moments, one writer.
+[`routes/openai/pipeline.py:780`](../../src/audrey/routes/openai/pipeline.py#L780)),
+using the `final_content` string accumulated from synthesizer deltas. Two call
+sites, two different "the content is now known" moments, one writer.
 
 Both call sites share the same posture: **never raise out of the
 chat path.** The archive is a best-effort observability surface, not
@@ -548,11 +547,11 @@ recall are wrappers; the *building blocks* (`datetime_system_message`,
 `recall_for_request`, `compose_system_messages`) are plain functions
 in `pipeline/context.py` and `pipeline/memory.py`. That's because the
 streaming-deep route bypasses the graph and calls them directly at
-[`routes/openai/pipeline.py:846`](../../src/audrey/routes/openai/pipeline.py#L846).
+[`routes/openai/pipeline.py:831`](../../src/audrey/routes/openai/pipeline.py#L831).
 
 | | Non-streaming | Streaming-deep |
 |---|---|---|
-| Lives in | [`graph.py:138, 154`](../../src/audrey/pipeline/graph.py#L138) | [`routes/openai/pipeline.py:846`](../../src/audrey/routes/openai/pipeline.py#L846) |
+| Lives in | [`graph.py:140, 156`](../../src/audrey/pipeline/graph.py#L140) | [`routes/openai/pipeline.py:831`](../../src/audrey/routes/openai/pipeline.py#L831) |
 | Datetime | `node_datetime` | direct `datetime_system_message()` call |
 | Recall | `node_memory_recall` | direct `recall_for_request()` call |
 | Composer | `compose_system_messages(...)` | `compose_system_messages(...)` |

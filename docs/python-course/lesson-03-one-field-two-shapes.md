@@ -69,12 +69,12 @@ function past it gets to pretend `content` was simple. Absorbing the outside
 world's irregularity at one chokepoint, so the rest of the code stays clean, is
 the job of a great many small helpers in a real codebase.
 
-(One honest note, because reading real code means noticing these: today
-Audrey's request schema actually pins `content` to a plain string, so the
-list-of-parts branch below isn't exercised on the live path *yet*. It's written
-to the full standard on purpose — the day Audrey accepts image messages, this
-helper already copes, and nothing downstream has to change. Writing to the
-contract, not just to today's input, is a deliberate move you'll see often.)
+(One honest note, because reading real code means noticing these: this
+branch began as defensive, standard-shaped code before inline image turns were
+wired through the live chat path. Now Audrey's request schema accepts both the
+plain string shape and the list-of-parts shape, and `OllamaClient` converts image
+parts into the format Ollama expects. That makes the lesson sharper: writing to
+the outside contract gave the later image path a clean place to land.)
 
 ---
 

@@ -92,7 +92,6 @@ def build_graph(
     complexity_log_breakdown = bool(complexity_cfg.get("log_breakdown", False))
     deep_intent_phrases: list[str] = complexity_cfg.get("deep_intent_phrases") or []
     fast_timeout = float(cfg.timeouts.get("fast_path", 180))
-    deep_worker_timeout = float(cfg.timeouts.get("deep_worker", 240))
     router_timeout = float(router_cfg.get("timeout_s", 20))
 
     fast_path_cfg = cfg.raw.get("fast_path", {}) or {}
@@ -350,7 +349,9 @@ def build_graph(
             messages=state["messages"],
             drafts=list(state.get("drafts") or []),
             subtasks=list(state.get("subtasks") or []),
-            timeout_s=deep_worker_timeout,
+            # Pool-aware, matching the panel: cloud-only pools get
+            # `timeouts.cloud`, local-holding pools get `timeouts.deep_worker`.
+            timeout_s=pick_panel_timeout(cfg, pool_key),
             user_id=(state.get("user_id") or None),
         )
         # Concrete_model exposed to the caller is the synthesizer (or the

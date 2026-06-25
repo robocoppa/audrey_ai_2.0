@@ -72,20 +72,21 @@ forces the call site to be self-documenting — a stray `500` floating in an
 argument list tells you nothing; `threshold=500` tells you everything. Small
 courtesy, big readability win, and now you'll recognize it when you see it.
 
-Finally, the bottom of the file ([complexity.py:128](../../src/audrey/pipeline/complexity.py#L128)):
+Finally, the bottom of the file ([complexity.py:154](../../src/audrey/pipeline/complexity.py#L154)):
 
 ```python
 __all__ = [
     "count_last_user_tokens",
     "count_tokens",
     "count_tokens_by_role",
+    "has_deep_intent",
     "is_complex",
     "is_owui_task_request",
 ]
 ```
 
 The same `__all__` you met in `scheduling.py`, doing the same job at a larger
-scale: these five are the module's public surface. Notice what's *absent* —
+scale: these names are the module's public surface. Notice what's *absent* —
 `_count_message_tokens`, `_encoder`, `_strip_audrey_markup`. The leading
 underscore on those names is the convention for "internal, don't import me from
 outside," and `__all__` makes it official. Reading `__all__` is the fastest way

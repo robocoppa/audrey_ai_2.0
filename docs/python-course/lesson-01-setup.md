@@ -148,7 +148,7 @@ wired correctly and pointed at the real package.
 
 ---
 
-## 5. Your turn
+## 5. Practice the workflow
 
 1. **Run the suite and read the summary.** Run `.venv/bin/pytest tests/ -q`
    and note the count and the time. Then run it again with `-v` instead of

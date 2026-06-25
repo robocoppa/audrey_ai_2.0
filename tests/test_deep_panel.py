@@ -16,11 +16,17 @@ real model. The unawaited coroutines are closed so pytest doesn't warn.
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import patch
 
+from audrey.config import get_config
 from audrey.models.health import HealthTracker
+from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
+from audrey.pipeline import graph as gmod
 from audrey.pipeline.deep_panel import (
     _prepare_panel,
+    pick_panel_timeout,
+    pool_key_for,
     run_panel,
     run_panel_streaming,
 )
@@ -191,3 +197,67 @@ async def test_run_panel_streaming_emits_only_final_when_no_workers():
     ]
     # Exactly one event — the final sentinel — with empty drafts/attempted.
     assert events == [{"type": "final", "drafts": [], "attempted": []}]
+
+
+# ─── synth timeout is pool-aware (Phase 23a) ───────────────────────────
+#
+# Regression guard: the synthesizer must use `pick_panel_timeout(cfg, pool_key)`
+# — the same source the panel uses — not the raw `deep_worker` timeout. Before
+# Phase 23a both deep paths passed `cfg.timeouts.deep_worker` to synthesis, so a
+# cloud-only (`deep_panel_cloud`) request synthesized on 360s while its panel ran
+# on `cfg.timeouts.cloud` (240s). These pin the call-site contract so the two
+# can't drift again. `pick_panel_timeout` itself is unit-tested in
+# `test_config_validation.py`; here we prove the synth node forwards its value.
+
+
+class _NoTools:
+    def all_specs(self) -> list:
+        return []
+
+    def __iter__(self):
+        return iter([])
+
+
+async def _captured_synth_timeout_for(virtual_model: str) -> float | None:
+    """Build the graph with `synthesize_fn` stubbed, invoke just the synthesize
+    node for `virtual_model`, and return the `timeout_s` it forwarded."""
+    cfg = get_config()
+    ollama = OllamaClient(base_url="http://unused")
+    registry = ModelRegistry(cfg)
+    health = HealthTracker()
+    gate = FairLocalGate(concurrency=1)
+
+    captured: dict[str, Any] = {}
+
+    async def _fake_synth(*_args: Any, **kwargs: Any) -> dict[str, Any]:
+        captured["timeout_s"] = kwargs.get("timeout_s")
+        return {"final_answer": "ok", "synthesizer_model": "m"}
+
+    with patch.object(gmod, "synthesize_fn", _fake_synth):
+        compiled = gmod.build_graph(cfg, ollama, registry, health, gate, _NoTools())
+        node = compiled.nodes["synthesize"].bound
+        await node.ainvoke({
+            "virtual_model": virtual_model,
+            "task_type": "reasoning",
+            "messages": [{"role": "user", "content": "q"}],
+            "drafts": [{"model": "a", "content": "d"}],
+            "subtasks": [],
+            "user_id": None,
+        })
+    await ollama.aclose()
+    return captured.get("timeout_s")
+
+
+async def test_synth_uses_cloud_timeout_for_cloud_pool():
+    cfg = get_config()
+    expected = pick_panel_timeout(cfg, pool_key_for("audrey_cloud"))
+    assert await _captured_synth_timeout_for("audrey_cloud") == expected
+
+
+async def test_synth_uses_deep_worker_timeout_for_local_pools():
+    cfg = get_config()
+    # Mixed (`deep_panel`) and local-only (`deep_panel_local`) both hold the GPU
+    # gate, so both keep the `deep_worker` budget — unchanged by Phase 23a.
+    for vm in ("audrey_deep", "audrey_local"):
+        expected = pick_panel_timeout(cfg, pool_key_for(vm))
+        assert await _captured_synth_timeout_for(vm) == expected

@@ -443,7 +443,7 @@ Both objects are constructed in the lifespan handler in
 per request. The in-flight cap wraps the *whole* pipeline call:
 
 ```python
-# routes/openai.py
+# routes/openai/pipeline.py
 async with inflight.slot(user_id):
     final = await _run_graph_with_metrics(graph, state)
 ```

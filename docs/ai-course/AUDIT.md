@@ -80,6 +80,36 @@ status. Group by status; within each status, group by lesson.
 
 ### Open
 
+#### Full-course accuracy sweep 2026-06-24 (Lessons 0-16)
+
+Initial sweep: convention checker clean; link checker found 18 confident
+`DRIFT`, 88 advisory `DRIFT?`, and 0 broken links. The substantive lesson
+findings from that sweep have been resolved in lesson prose (Lessons 1, 4, 6,
+7, 8, 9, 13, 14, and 15). Recheck after edits: `DOCS_GLOB='docs/ai-course/lesson-*.md'`
+found 332 cites checked, 252 ok, **0 confident drift**, 80 advisory `DRIFT?`,
+0 broken; convention checker found 0 issues across the edited lesson files.
+The remaining open item from this sweep is the code review followup below.
+
+- **`consider` - CODEBASE: deep synthesis timeout bypasses
+  `pick_panel_timeout` -> `resolved` 2026-06-24 (Phase 23a).** Both deep paths
+  calculated pool-aware panel timeouts but passed the raw `deep_worker` timeout
+  to the synthesizer: `graph.py` used `pick_panel_timeout(...)` for `run_panel`,
+  then `synthesize(..., timeout_s=deep_worker_timeout)`; the streaming path did
+  the same. Config has `cloud: 240` and `deep_worker: 360`, so cloud-only
+  (`deep_panel_cloud`) synthesis got 360s while its panel ran on 240s — harmless
+  latency headroom but a drift from the helper whose whole job is keeping the two
+  paths aligned. **Fix:** both synth call sites now pass
+  `pick_panel_timeout(cfg, pool_key)` (the `pool_key` was already in scope at
+  each); the orphaned `deep_worker_timeout` local was removed from both
+  `build_graph` and the streaming `_stream_via_pipeline`. Cloud-only synthesis
+  now uses 240s (matching its panel); `deep_panel`/`deep_panel_local` unchanged
+  (the helper returns `deep_worker` for them). Regression test added in
+  `tests/test_deep_panel.py` (drives the compiled `synthesize` node with
+  `synthesize_fn` stubbed, asserts the forwarded `timeout_s` equals
+  `pick_panel_timeout` per virtual model). 503 pytests pass, ruff clean on
+  touched files, no new confident cite drift (the 1-line deletions added 8
+  advisory `DRIFT?` flags below them — fold into the 23d cite sweep).
+
 #### Lesson 16 (custom-tools sidecar, `tools-server/`) — pre-write audit 2026-06-03
 
 > **✅ DRAINED 2026-06-03** before the lesson write. #1, #2, #4, #5 fixed;
@@ -793,6 +823,18 @@ auto-propose a fix; they need manual re-anchoring. **`should-fix`**
 *(none)*
 
 ### Resolved
+
+#### Full-course accuracy sweep 2026-06-24 — lesson-doc fixes
+
+- **`should-fix` — Lesson 1, 4, 6, 7, 8, 9, 13, 14, and 15 documentation drift
+  -> `resolved` 2026-06-24.** Updated the maintainer course for the current
+  OpenAI route package split, multimodal `ChatMessage.content`, Ollama message
+  conversion via `_to_ollama_messages`, deep-intent/image/OWUI routing order,
+  deep-mode log shape, `agentic.react` config anchors, streaming archive
+  anchors, and passthrough/tool-call response helpers. Verification: lesson
+  conventions clean for the edited files; maintainer-course citation checker
+  reports 332 checked, 252 ok, 0 confident drift, 80 advisory `DRIFT?`, 0
+  broken.
 
 #### Lesson 16 (custom-tools sidecar, `tools-server/`) — pre-write drain 2026-06-03
 

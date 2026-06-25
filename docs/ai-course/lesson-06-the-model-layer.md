@@ -690,13 +690,20 @@ When there is answer material but synthesis fails, return the best available mat
 
 ### 2.9 `OllamaClient`: the HTTP boundary
 
-Open [`src/audrey/models/ollama.py`](../../src/audrey/models/ollama.py#L29).
+Open [`src/audrey/models/ollama.py`](../../src/audrey/models/ollama.py#L46).
 
 This is the only file in the model layer that actually speaks HTTP to Ollama.
 Everything else chooses model names and handles success/failure policy.
 
+Before the client sends anything, Audrey normalizes message shapes with
+[`_to_ollama_messages`](../../src/audrey/models/ollama.py#L46). This helper is
+load-bearing for image turns: OpenAI-style messages may contain a `content`
+list with text and image parts, while Ollama expects a plain text `content`
+field plus an `images` list. The helper absorbs that protocol mismatch so the
+rest of the model layer can pass one `messages` value around.
+
 The client owns an `httpx.AsyncClient` at
-[`ollama.py:44`](../../src/audrey/models/ollama.py#L44):
+[`ollama.py:98`](../../src/audrey/models/ollama.py#L98):
 
 ```python
 self._client = httpx.AsyncClient(
@@ -717,10 +724,10 @@ network connection.
 
 All public methods are `async`:
 
-- [`tags()`](../../src/audrey/models/ollama.py#L56)
-- [`chat()`](../../src/audrey/models/ollama.py#L71)
-- [`chat_stream()`](../../src/audrey/models/ollama.py#L114)
-- [`embed()`](../../src/audrey/models/ollama.py#L161)
+- [`tags()`](../../src/audrey/models/ollama.py#L110)
+- [`chat()`](../../src/audrey/models/ollama.py#L125)
+- [`chat_stream()`](../../src/audrey/models/ollama.py#L172)
+- [`embed()`](../../src/audrey/models/ollama.py#L223)
 
 That means callers must use `await` or `async for`. Audrey is an async web app;
 while one request waits on Ollama, the event loop can keep serving other work.
@@ -728,10 +735,14 @@ while one request waits on Ollama, the event loop can keep serving other work.
 #### Non-streaming chat
 
 `chat(...)` builds an Ollama `/api/chat` payload at
-[`ollama.py:87`](../../src/audrey/models/ollama.py#L87):
+[`ollama.py:141`](../../src/audrey/models/ollama.py#L141):
 
 ```python
-payload: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
+payload: dict[str, Any] = {
+    "model": model,
+    "messages": _to_ollama_messages(messages),
+    "stream": False,
+}
 if options:
     payload["options"] = options
 if tools:
@@ -739,7 +750,7 @@ if tools:
 ```
 
 Then it sends the request at
-[`ollama.py:94`](../../src/audrey/models/ollama.py#L94):
+[`ollama.py:152`](../../src/audrey/models/ollama.py#L152):
 
 ```python
 r = await self._client.post("/api/chat", json=payload, timeout=...)
@@ -755,7 +766,7 @@ There are three broad failure types:
 
 That last one is easy to miss. A "successful" HTTP status is not enough. Audrey
 expects a JSON object from Ollama. `_json_object(...)` enforces that at
-[`ollama.py:208`](../../src/audrey/models/ollama.py#L208):
+[`ollama.py:270`](../../src/audrey/models/ollama.py#L270):
 
 ```python
 def _json_object(r: httpx.Response, op: str) -> dict[str, Any]:
@@ -778,7 +789,7 @@ One exception type keeps the failure contract simple.
 #### Streaming chat
 
 `chat_stream(...)` is different at
-[`ollama.py:114`](../../src/audrey/models/ollama.py#L114):
+[`ollama.py:172`](../../src/audrey/models/ollama.py#L172):
 
 ```python
 async def chat_stream(...) -> AsyncIterator[dict[str, Any]]:
@@ -807,7 +818,7 @@ truncation/error message instead of silently retrying from scratch.
 #### Embeddings
 
 `embed(...)` calls `/api/embed` and expects one vector per input text, starting
-at [`ollama.py:161`](../../src/audrey/models/ollama.py#L161).
+at [`ollama.py:223`](../../src/audrey/models/ollama.py#L223).
 
 This is not used for normal chat answers. It supports the knowledge-base path:
 text needs to become embedding vectors before Audrey can store or search it in

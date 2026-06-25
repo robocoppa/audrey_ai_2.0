@@ -73,7 +73,7 @@ And a user-selected virtual model can override the normal length-based choice:
 ```text
 audrey_fast -> fast
 audrey_deep / audrey_cloud / audrey_local -> deep
-audrey_auto -> decide from prompt length
+audrey_auto -> decide from images, utility prompts, length, and depth cues
 ```
 
 Here is the routing path in one pass:
@@ -84,8 +84,8 @@ OpenAI request
   -> graph prepends datetime context
   -> graph recalls durable user memory
   -> classify chooses task_type
-  -> complexity counts prompt tokens
-  -> virtual model + complexity choose mode
+  -> complexity counts prompt tokens and checks explicit depth cues
+  -> image/utility/virtual-model/complexity rules choose mode
   -> fast_path or planner -> deep_panel -> synthesize
   -> fast answer may escalate to deep unless guarded
 ```
@@ -99,18 +99,18 @@ the short local spur or the longer panel route.
 
 These are the files we'll reference in this lesson:
 
-- [`src/audrey/routes/openai/pipeline.py:96`](../../src/audrey/routes/openai/pipeline.py#L96)
+- [`src/audrey/routes/openai/pipeline.py:97`](../../src/audrey/routes/openai/pipeline.py#L97)
   - where the non-streaming route builds the initial graph state.
 - [`src/audrey/pipeline/state.py:27`](../../src/audrey/pipeline/state.py#L27)
   - the shared request state that graph nodes read and update.
-- [`src/audrey/pipeline/graph.py:138`](../../src/audrey/pipeline/graph.py#L138)
+- [`src/audrey/pipeline/graph.py:215`](../../src/audrey/pipeline/graph.py#L215)
   - the LangGraph node functions and routing edges.
 - [`src/audrey/pipeline/classify.py:33`](../../src/audrey/pipeline/classify.py#L33)
   - keyword signals, router model, and fallback classification.
-- [`src/audrey/pipeline/complexity.py:60`](../../src/audrey/pipeline/complexity.py#L60)
-  - token counting for the fast/deep gate.
+- [`src/audrey/pipeline/complexity.py:72`](../../src/audrey/pipeline/complexity.py#L72)
+  - token counting and depth-intent helpers for the fast/deep gate.
 - [`config.yaml:7`](../../config.yaml#L7) - router-model config.
-- [`config.yaml:261`](../../config.yaml#L261) - complexity threshold config.
+- [`config.yaml:296`](../../config.yaml#L296) - complexity threshold and depth-intent config.
 
 Open them as we go, but do not try to memorize all the code at once. The useful
 shape is the sequence of decisions.
@@ -119,7 +119,7 @@ shape is the sequence of decisions.
 
 The non-streaming route handler hands off to a helper that builds a
 plain dictionary named `state`. Open
-[`routes/openai/pipeline.py:96`](../../src/audrey/routes/openai/pipeline.py#L96),
+[`routes/openai/pipeline.py:97`](../../src/audrey/routes/openai/pipeline.py#L97),
 which is the start of `_generate_via_pipeline`:
 
 ```python
@@ -176,7 +176,7 @@ node reads state
 
 ### 2.2 The graph order puts context before classification
 
-Open [`graph.py:414`](../../src/audrey/pipeline/graph.py#L414). The graph adds
+Open [`graph.py:437`](../../src/audrey/pipeline/graph.py#L437). The graph adds
 nodes in one block:
 
 ```python
@@ -186,7 +186,7 @@ g.add_node("classify", node_classify)
 g.add_node("complexity", node_complexity)
 ```
 
-Then the edges at [`graph.py:425`](../../src/audrey/pipeline/graph.py#L425)
+Then the edges at [`graph.py:448`](../../src/audrey/pipeline/graph.py#L448)
 make the order explicit:
 
 ```python
@@ -399,7 +399,7 @@ the router more than once before falling back.
 ### 2.6 Complexity is a separate gate
 
 After classification, the graph runs
-[`graph.py:213`](../../src/audrey/pipeline/graph.py#L213).
+[`graph.py:215`](../../src/audrey/pipeline/graph.py#L215).
 
 This node asks a different question:
 
@@ -408,12 +408,14 @@ Is this prompt large enough that one fast answer is probably the wrong shape?
 ```
 
 The token counter lives in
-[`complexity.py:60`](../../src/audrey/pipeline/complexity.py#L60). It walks all
+[`complexity.py:72`](../../src/audrey/pipeline/complexity.py#L72). It walks all
 message content and counts text tokens. Multimodal messages get special care:
-for list-shaped content, Audrey counts only text parts at
-[`complexity.py:106`](../../src/audrey/pipeline/complexity.py#L106).
+`_iter_text_parts` at
+[`complexity.py:43`](../../src/audrey/pipeline/complexity.py#L43) yields text
+parts and ignores image parts, so the gate counts words rather than bytes.
 
-`is_complex(...)` is tiny:
+The actual complexity decision starts at
+[`complexity.py:122`](../../src/audrey/pipeline/complexity.py#L122):
 
 ```python
 def is_complex(messages: list[dict], *, threshold: int) -> tuple[bool, int]:
@@ -422,19 +424,23 @@ def is_complex(messages: list[dict], *, threshold: int) -> tuple[bool, int]:
 ```
 
 That function starts at
-[`complexity.py:114`](../../src/audrey/pipeline/complexity.py#L114). The
-threshold comes from [`config.yaml:261`](../../config.yaml#L261):
+[`complexity.py:122`](../../src/audrey/pipeline/complexity.py#L122). The
+threshold and explicit depth cues come from
+[`config.yaml:296`](../../config.yaml#L296):
 
 ```yaml
 complexity:
   token_threshold: 500
+  deep_intent_phrases:
+    - deep dive
+    - think hard
 ```
 
 Important distinction:
 
 ```text
 classification decides what kind of model Audrey needs
-complexity decides whether one answer pass is enough
+complexity decides whether one answer pass is enough, including short prompts that explicitly ask for depth
 ```
 
 They are deliberately separate because long and short prompts exist in every
@@ -446,25 +452,36 @@ Now read the middle of `node_complexity`, starting at
 [`graph.py:215`](../../src/audrey/pipeline/graph.py#L215):
 
 ```python
+complex_, n = is_complex(...)
+deep_intent = has_deep_intent(...)
 vm = state.get("virtual_model")
 forced_deep = vm in ("audrey_deep", "audrey_cloud", "audrey_local")
 forced_fast = vm == "audrey_fast"
+owui_task = is_owui_task_request(...)
+image_turn = has_image_part(...)
 ```
 
 Then the mode decision is:
 
 ```python
-if forced_deep:
+if image_turn:
+    mode = "fast"
+    task_override = "vl"
+elif owui_task:
+    mode = "fast"
+elif forced_deep:
     mode = "deep"
 elif forced_fast:
     mode = "fast"
 elif complex_:
     mode = "deep"
+elif deep_intent:
+    mode = "deep"
 else:
     mode = "fast"
 ```
 
-That code is at [`graph.py:218`](../../src/audrey/pipeline/graph.py#L218).
+That code starts at [`graph.py:217`](../../src/audrey/pipeline/graph.py#L217).
 
 So the virtual model lineup means:
 
@@ -474,10 +491,14 @@ So the virtual model lineup means:
 | `audrey_deep` | Always deep, mixed local/cloud pool. |
 | `audrey_cloud` | Always deep, cloud-only pool. |
 | `audrey_local` | Always deep, local-only pool. |
-| `audrey_auto` | Fast for short prompts, deep for large prompts. |
+| `audrey_auto` | Fast for ordinary short prompts, deep for large prompts or explicit depth cues. |
+
+Two higher-priority cases sit above that table: attached images force fast mode
+with the vision task, and OWUI background utility prompts force fast mode even
+if the conversation is pinned to a deep virtual model.
 
 The graph returns `prompt_tokens`, `complex`, and `mode` at
-[`graph.py:240`](../../src/audrey/pipeline/graph.py#L240). Later nodes do not
+[`graph.py:257`](../../src/audrey/pipeline/graph.py#L257). Later nodes do not
 need to repeat the complexity calculation.
 
 ### 2.8 LangGraph chooses the next branch
@@ -489,9 +510,9 @@ def route_after_complexity(state: PipelineState) -> str:
     return "fast" if state.get("mode") == "fast" else "deep"
 ```
 
-That is at [`graph.py:360`](../../src/audrey/pipeline/graph.py#L360).
+That is at [`graph.py:383`](../../src/audrey/pipeline/graph.py#L383).
 
-The wiring at [`graph.py:429`](../../src/audrey/pipeline/graph.py#L429) tells
+The wiring at [`graph.py:452`](../../src/audrey/pipeline/graph.py#L452) tells
 LangGraph what those return strings mean:
 
 ```python
@@ -516,7 +537,7 @@ block.
 
 After `fast_path` returns, Audrey may still decide the answer was not good
 enough. The router for that is
-[`graph.py:363`](../../src/audrey/pipeline/graph.py#L363).
+[`graph.py:386`](../../src/audrey/pipeline/graph.py#L386).
 
 The first guard is simple: if escalation is disabled, stop.
 
@@ -527,14 +548,14 @@ if state.get("virtual_model") == "audrey_fast":
     return "end"
 ```
 
-That is at [`graph.py:366`](../../src/audrey/pipeline/graph.py#L366).
+That is at [`graph.py:390`](../../src/audrey/pipeline/graph.py#L390).
 `audrey_fast` means "do the fast thing." It should not secretly become deep
 because the answer was short.
 
 Two other guards stop escalation:
 
-- tool-grounded fast answers at [`graph.py:374`](../../src/audrey/pipeline/graph.py#L374)
-- memory-grounded fast answers at [`graph.py:378`](../../src/audrey/pipeline/graph.py#L378)
+- tool-grounded fast answers at [`graph.py:398`](../../src/audrey/pipeline/graph.py#L398)
+- memory-grounded fast answers at [`graph.py:404`](../../src/audrey/pipeline/graph.py#L404)
 
 Those guards exist because a short answer grounded in tools or recalled memory
 may be exactly right. Re-running it through deep workers can wash out the
@@ -548,9 +569,9 @@ too_short = len(content) < escalation_min_chars
 low_confidence = conf < escalation_conf_ceiling and conf > 0
 ```
 
-That starts at [`graph.py:387`](../../src/audrey/pipeline/graph.py#L387). If
+That starts at [`graph.py:413`](../../src/audrey/pipeline/graph.py#L413). If
 either condition trips, the graph routes to `escalate_bridge`, then into the
-deep branch at [`graph.py:437`](../../src/audrey/pipeline/graph.py#L437).
+deep branch at [`graph.py:463`](../../src/audrey/pipeline/graph.py#L463).
 
 The mental model:
 
@@ -564,18 +585,18 @@ audrey_auto fast answer
 ### 2.10 Streaming uses a separate driver
 
 Non-streaming requests run the compiled graph through
-[`_generate_via_pipeline` at routes/openai/pipeline.py:96](../../src/audrey/routes/openai/pipeline.py#L96).
+[`_generate_via_pipeline` at routes/openai/pipeline.py:97](../../src/audrey/routes/openai/pipeline.py#L97).
 
 Streaming has to interleave progress banners and token chunks, so it has a
 separate route driver beginning at
-[`_stream_via_pipeline` at routes/openai/pipeline.py:171](../../src/audrey/routes/openai/pipeline.py#L171).
+[`_stream_via_pipeline` at routes/openai/pipeline.py:172](../../src/audrey/routes/openai/pipeline.py#L172).
 
 The streaming route still performs the same major decisions:
 
-- count complexity at [`routes/openai/pipeline.py:216`](../../src/audrey/routes/openai/pipeline.py#L216)
-- force deep/fast from the virtual model at [`routes/openai/pipeline.py:217`](../../src/audrey/routes/openai/pipeline.py#L217)
-- choose deep banners or fast streaming at [`routes/openai/pipeline.py:236`](../../src/audrey/routes/openai/pipeline.py#L236)
-- classify (to pick the concrete model) at [`routes/openai/pipeline.py:240`](../../src/audrey/routes/openai/pipeline.py#L240) for deep, [`pipeline.py:302`](../../src/audrey/routes/openai/pipeline.py#L302) for fast
+- count complexity and depth intent at [`routes/openai/pipeline.py:217`](../../src/audrey/routes/openai/pipeline.py#L217)
+- force image, OWUI utility, or virtual-model decisions at [`routes/openai/pipeline.py:223`](../../src/audrey/routes/openai/pipeline.py#L223)
+- choose deep banners or fast streaming at [`routes/openai/pipeline.py:240`](../../src/audrey/routes/openai/pipeline.py#L240)
+- classify (to pick the concrete model) at [`routes/openai/pipeline.py:242`](../../src/audrey/routes/openai/pipeline.py#L242) for deep, [`pipeline.py:304`](../../src/audrey/routes/openai/pipeline.py#L304) for fast
 
 But it is not literally the graph. It mirrors the same ideas so it can stream
 the right user experience. We will revisit the streaming route in a later
@@ -607,8 +628,8 @@ Here is the path:
 4. `node_classify` extracts the last user text.
 5. `keyword_classify(...)` sees the review override.
 6. The task becomes `reasoning`, with reason `keyword:review_override`.
-7. `node_complexity` counts the prompt tokens.
-8. Because the virtual model is `audrey_auto`, length decides fast vs deep.
+7. `node_complexity` counts the prompt tokens and checks for explicit depth cues.
+8. Because the virtual model is `audrey_auto`, no image is attached, and this is not an OWUI utility task, token count plus depth intent decides fast vs deep.
 9. If the prompt is under the threshold, `mode="fast"`.
 10. LangGraph routes to `fast_path`.
 11. The model layer receives `task="reasoning"` and picks a reasoning model.
@@ -682,7 +703,7 @@ still continue.
 
 **7. What does `audrey_auto` do that `audrey_fast` does not?**
 
-`audrey_auto` lets Audrey choose fast or deep based on prompt length. It can
+`audrey_auto` lets Audrey choose fast or deep based on prompt length and explicit depth cues. It can
 also escalate from fast to deep if the fast answer looks inadequate.
 
 `audrey_fast` forces fast mode and suppresses escalation. It means "I really
