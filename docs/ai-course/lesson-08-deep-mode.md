@@ -534,14 +534,23 @@ DRAFTS:
 The `[tool-grounded: N rounds]` tag isn't just labeling — it's a signal.
 The synthesizer prompt (read it at
 [`prompts.py:74`](../../src/audrey/pipeline/prompts.py#L74)) tells the
-model to lean on tool-grounded drafts whenever the facts disagree:
+model to treat a tool-grounded draft as the factual spine of the answer:
 
-> When a tool-grounded draft and a tool-free draft disagree on a factual
-> point, prefer the tool-grounded one.
+> FACTUAL ANCHORING: when one or more drafts are `[tool-grounded]`, treat
+> them as the factual spine of the answer. [...] A specific, checkable
+> claim [...] that appears ONLY in tool-free drafts and is absent from
+> every tool-grounded draft is unverified — soften it [...] or drop it,
+> even if several tool-free drafts assert it confidently.
 
-That single line is how Audrey reconciles "the model thinks the answer is
-X" with "the search tool says the answer is Y." Y wins — but only because
-the synthesizer is told to read the tag and trust what it implies.
+This does two things at once. On a direct conflict ("the model thinks the
+answer is X" vs. "the search tool says Y"), Y wins. But it also closes the
+subtler hole: a confident-sounding claim that only the *non*-grounded
+drafts make — and the grounded draft simply never mentions — gets softened
+or dropped rather than promoted just because two workers happened to agree
+on it. Agreement between models isn't corroboration; they share the same
+training blind spots. The rule deliberately goes quiet when *no* draft is
+grounded, so a strong all-from-memory panel on a well-known topic isn't
+needlessly hedged.
 
 #### Forwarding original system context
 

@@ -310,7 +310,7 @@ block stays under roughly a kilobyte total.
 **The `{user_id}` substitution.** Memory writes happen via the model
 calling the `memory_store` tool. For the model to know when, the
 composer adds a hint from
-[`prompts.py:109`](../../src/audrey/pipeline/prompts.py#L109) telling
+[`prompts.py:118`](../../src/audrey/pipeline/prompts.py#L118) telling
 it to use `tags="user:{user_id}"`. At injection time the placeholder
 is replaced with the real email. If the substitution didn't happen,
 every entry would store under the literal string `user:{user_id}` and
@@ -319,7 +319,7 @@ added when `user_id` is non-empty — anonymous requests can't write to
 memory anyway.
 
 The composer at
-[`prompts.py:189`](../../src/audrey/pipeline/prompts.py#L189) pins the
+[`prompts.py:202`](../../src/audrey/pipeline/prompts.py#L202) pins the
 slot order: incoming system messages first, then task-role prompt,
 then memory hint, then chat-history search guidance. The chat-history
 guidance only appears when `chat_history_search` is in the registry —
@@ -525,7 +525,7 @@ ingest pipeline (covered in the KB-ingest lesson).
 request, before the model sees the prompt. The chat archive does not.
 The model decides when to search it via the `chat_history_search`
 tool. The reasoning is in
-[`prompts.py:117`](../../src/audrey/pipeline/prompts.py#L117):
+[`prompts.py:129`](../../src/audrey/pipeline/prompts.py#L129):
 
 ```python
 "Use `chat_history_search` only when the user references something "
