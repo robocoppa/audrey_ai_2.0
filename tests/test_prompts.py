@@ -27,6 +27,7 @@ from audrey.pipeline import prompts
 from audrey.pipeline.prompts import (
     CHAT_HISTORY_SEARCH_SYSTEM,
     CLASSIFIER_SYSTEM,
+    FACTCHECK_SYSTEM,
     MEMORY_STORE_HINT,
     PLANNER_SYSTEM,
     REACT_FINAL_ANSWER_USER,
@@ -162,6 +163,9 @@ def test_writer_system_unchanged():
         "soften or drop any claim it called unsupported, overconfident, or too "
         "precise. Prefer cautious phrasing ('often described as', 'commonly "
         "dated to') for anything the evidence hedges on.\n"
+        "If a FACT-CHECK CORRECTIONS block is present, it overrides the findings on "
+        "any claim it touches: use the corrected value for a CORRECT line, and "
+        "hedge or drop anything marked UNVERIFIED.\n"
         "If the findings note that little or no grounding could be retrieved, "
         "write from general knowledge BUT open with a brief, honest caveat that "
         "the answer could not be verified against sources and may be incomplete, "
@@ -169,6 +173,31 @@ def test_writer_system_unchanged():
         "deliberately tentative."
     )
     assert WRITER_SYSTEM == expected
+
+
+def test_factcheck_system_unchanged():
+    expected = (
+        "You are the fact-checker on a research panel. You receive the original "
+        "request, the researchers' findings, and the verifier's critique. Your job "
+        "is to CONFIRM the specific, checkable claims against real sources — you "
+        "are NOT writing the answer and NOT doing open-ended research. Use the "
+        "web_search tool to verify the high-risk claims: exact dates, version "
+        "numbers, release/launch timing, licenses, named entities, and "
+        "status/authorship assertions (\"deprecated\", \"first\", \"only\", "
+        "\"proved\", \"invented\", \"authored\"). Prioritize CURRENT and recent "
+        "facts (2024 onward) and anything stated with surprising precision. Prefer "
+        "official or primary sources — vendor docs, the project's own repo/release "
+        "notes, peer-reviewed papers, and reference works (Britannica, MacTutor, "
+        "Stanford Encyclopedia) — over random blogs.\n"
+        "Check only a handful of the most load-bearing claims; do not try to verify "
+        "everything. Output a short corrections list, one line per claim checked:\n"
+        "  - CONFIRMED: <claim> (source)\n"
+        "  - CORRECT: the findings say <X>, but <source> shows <Y> — use <Y> (url)\n"
+        "  - UNVERIFIED: <claim> — no reliable source found; the writer should hedge\n"
+        "Do NOT rewrite the answer or add prose. If every checked claim holds, say "
+        "so plainly. If you could not run tools, output exactly: NO CORRECTIONS."
+    )
+    assert FACTCHECK_SYSTEM == expected
 
 
 def test_research_role_override_keys_resolve():
@@ -179,10 +208,12 @@ def test_research_role_override_keys_resolve():
     cfg = _cfg_with({
         "researcher": "R_OVERRIDE",
         "verifier": "V_OVERRIDE",
+        "factchecker": "FC_OVERRIDE",
         "writer": "W_OVERRIDE",
     })
     assert prompt_from_config(cfg, "researcher", RESEARCHER_SYSTEM) == "R_OVERRIDE"
     assert prompt_from_config(cfg, "verifier", VERIFIER_SYSTEM) == "V_OVERRIDE"
+    assert prompt_from_config(cfg, "factchecker", FACTCHECK_SYSTEM) == "FC_OVERRIDE"
     assert prompt_from_config(cfg, "writer", WRITER_SYSTEM) == "W_OVERRIDE"
     # Empty/missing falls back to the default.
     assert prompt_from_config(_cfg_with({}), "researcher", RESEARCHER_SYSTEM) == RESEARCHER_SYSTEM

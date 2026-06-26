@@ -43,6 +43,7 @@ from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.messages import last_user_text
 from audrey.pipeline.prompts import (
+    FACTCHECK_SYSTEM,
     RESEARCHER_SYSTEM,
     VERIFIER_SYSTEM,
     WRITER_SYSTEM,
@@ -573,7 +574,41 @@ def _verify_user_block(user_text: str, findings: str) -> str:
     )
 
 
-def _write_user_block(user_text: str, findings: str, critique: str) -> str:
+def _factcheck_user_block(user_text: str, findings: str, critique: str) -> str:
+    parts = [
+        f"ORIGINAL REQUEST:\n{user_text.strip()}\n",
+        f"RESEARCHER FINDINGS:\n{findings}\n",
+    ]
+    if critique:
+        parts.append(f"VERIFIER FLAGS:\n{critique}\n")
+    parts.append(
+        "Verify the most load-bearing checkable claims with web_search now, "
+        "then output your corrections list."
+    )
+    return "\n".join(parts)
+
+
+# A corrections payload that carries no real corrections — used to detect when
+# the fact-check stage found nothing to fix (or could not run) so the writer
+# block can omit the block entirely.
+_NO_CORRECTIONS = "NO CORRECTIONS"
+
+
+def _has_corrections(corrections: str) -> bool:
+    """True when the fact-checker returned actionable corrections."""
+    c = (corrections or "").strip()
+    if not c:
+        return False
+    # The prompt's explicit "nothing to fix" sentinel, plus the case where every
+    # line merely CONFIRMED a claim (no CORRECT/UNVERIFIED → nothing to apply).
+    if c == _NO_CORRECTIONS:
+        return False
+    return ("CORRECT:" in c) or ("UNVERIFIED:" in c)
+
+
+def _write_user_block(
+    user_text: str, findings: str, critique: str, corrections: str = "",
+) -> str:
     parts = [f"ORIGINAL REQUEST:\n{user_text.strip()}\n"]
     if findings:
         parts.append(f"VERIFIED FINDINGS:\n{findings}\n")
@@ -584,21 +619,33 @@ def _write_user_block(user_text: str, findings: str, critique: str) -> str:
         )
     if critique:
         parts.append(f"VERIFIER FLAGS (apply these):\n{critique}\n")
+    if _has_corrections(corrections):
+        parts.append(f"FACT-CHECK CORRECTIONS (apply these):\n{corrections}\n")
     parts.append("Write the final answer for the user now.")
     return "\n".join(parts)
 
 
-def _research_react_budget(cfg: Config) -> dict[str, int]:
-    """Read `agentic.react.research_worker`, falling back to `react` defaults."""
+def _react_budget(cfg: Config, key: str, *, default_rounds: int) -> dict[str, int]:
+    """Read `agentic.react.<key>`, falling back to the base `react` defaults."""
     react = (cfg.raw.get("agentic", {}) or {}).get("react", {}) or {}
-    rw = react.get("research_worker", {}) or {}
+    rw = react.get(key, {}) or {}
     return {
-        "max_rounds": int(rw.get("max_rounds", react.get("max_rounds", 5))),
+        "max_rounds": int(rw.get("max_rounds", react.get("max_rounds", default_rounds))),
         "compress_after": int(rw.get("compress_after_round", react.get("compress_after_round", 3))),
         "max_tool_chars": int(rw.get("max_tool_result_chars", react.get("max_tool_result_chars", 6000))),
         "compress_keep_last": int(rw.get("compress_keep_last", react.get("compress_keep_last", 1))),
         "dispatch_timeout_s": int(rw.get("dispatch_timeout_s", react.get("dispatch_timeout_s", 30))),
     }
+
+
+def _research_react_budget(cfg: Config) -> dict[str, int]:
+    """Stage-1 researcher ReAct budget (`agentic.react.research_worker`)."""
+    return _react_budget(cfg, "research_worker", default_rounds=5)
+
+
+def _factcheck_react_budget(cfg: Config) -> dict[str, int]:
+    """Stage-3 fact-checker ReAct budget (`agentic.react.factcheck_worker`)."""
+    return _react_budget(cfg, "factcheck_worker", default_rounds=3)
 
 
 async def run_research_pipeline_streaming(
@@ -625,11 +672,15 @@ async def run_research_pipeline_streaming(
       {"type": "findings_ready", "grounded": bool}
           Stage 1 merged; `grounded` False means no usable findings.
       {"type": "verify_done", "ok": bool}
-          Stage 2 finished (skipped → not emitted).
+          Stage 2 finished (skipped → not emitted when no grounding).
+      {"type": "factcheck_done", "ok": bool}
+          Stage 3 finished; `ok` True means actionable corrections were found.
+          Emitted only when grounded (skipped → not emitted), and the stage
+          itself only runs when a `factchecker` is configured + tool-capable.
       {"type": "write_delta", "text": str}
           A chunk of the Writer's answer (streamed live).
       {"type": "done", "content": str, "writer_model": str, "drafts": list,
-       "findings": str, "critique": str, "error": str}
+       "findings": str, "critique": str, "corrections": str, "error": str}
           Always emitted last. `error` is "" on success, or "no_writer" /
           "write_failed" when the write stage could not produce an answer.
 
@@ -703,7 +754,60 @@ async def run_research_pipeline_streaming(
             )
         yield {"type": "verify_done", "ok": bool(critique)}
 
-    # ── Stage 3: write (always runs) ───────────────────────────────────
+    # ── Stage 3: fact-check (optional; skipped when no grounding, no
+    # factchecker configured, or no tools) ─────────────────────────────
+    # The fact-checker is a tool-using ReAct loop: it web_search-confirms the
+    # high-risk/dated claims and returns a corrections block the writer applies.
+    # Bounded + fail-soft like every stage — any problem returns "" and the
+    # pipeline proceeds exactly as the verify→write flow did before.
+    corrections = ""
+    factchecker = pool.get("factchecker")
+    fc_can_run = bool(
+        grounded and factchecker and health.is_healthy(factchecker)
+        and tools is not None and tools.by_name and factchecker in capable
+    )
+    if fc_can_run:
+        fc_budget = _factcheck_react_budget(cfg)
+        dispatch_total.labels(model=factchecker, task_type=str(task), path="research_factcheck").inc()
+        fc_msgs = [
+            {"role": "system", "content": prompt_from_config(cfg, "factchecker", FACTCHECK_SYSTEM)},
+            {"role": "user", "content": _factcheck_user_block(user_text, findings, critique)},
+        ]
+        try:
+            async with gate.acquire(factchecker, location=registry.location_of(factchecker), user_id=user_id):
+                fc: ReactResult = await run_react(
+                    ollama, health, tools,  # type: ignore[arg-type]
+                    model=factchecker,
+                    messages=fc_msgs,
+                    options=options,
+                    timeout_s=timeout_s,
+                    max_rounds=fc_budget["max_rounds"],
+                    compress_after_round=fc_budget["compress_after"],
+                    max_tool_result_chars=fc_budget["max_tool_chars"],
+                    tool_dispatch_timeout_s=float(fc_budget["dispatch_timeout_s"]),
+                    compress_keep_last=fc_budget["compress_keep_last"],
+                    user_id=user_id,
+                    gate=None,  # gate held for the whole stage (as deep panel does)
+                    location=registry.location_of(factchecker),
+                    cfg=cfg,
+                )
+            corrections = (fc.content or "").strip()
+        except OllamaError as e:
+            health.record_failure(factchecker, str(e))
+            log.warning("research: fact-check stage failed: %s", e)
+            corrections = ""
+        except Exception:
+            # The fact-check stage is optional — any unexpected error must
+            # degrade to "no corrections", never break the answer.
+            log.exception("research: fact-check stage errored; continuing without corrections")
+            corrections = ""
+    # Only signal the stage when it actually ran — a research request with no
+    # factchecker configured (or no tools) skips it silently, so the route
+    # doesn't render an empty Fact-checking banner.
+    if fc_can_run:
+        yield {"type": "factcheck_done", "ok": _has_corrections(corrections)}
+
+    # ── Stage 4: write (always runs) ───────────────────────────────────
     writer = pool.get("writer")
     fallback = pool.get("fallback_synth")
     candidates = [m for m in (writer, fallback) if m]
@@ -713,7 +817,7 @@ async def run_research_pipeline_streaming(
 
     w_msgs = [
         {"role": "system", "content": prompt_from_config(cfg, "writer", WRITER_SYSTEM)},
-        {"role": "user", "content": _write_user_block(user_text, findings, critique)},
+        {"role": "user", "content": _write_user_block(user_text, findings, critique, corrections)},
     ]
     for model in candidates:
         if not health.is_healthy(model):
@@ -755,6 +859,7 @@ async def run_research_pipeline_streaming(
         "drafts": drafts,
         "findings": findings,
         "critique": critique,
+        "corrections": corrections,
         "error": write_error,
     }
 
@@ -778,8 +883,8 @@ async def run_research_pipeline(
     """Non-streaming staged research pipeline. Returns a dict to merge into state.
 
     Keys: content, writer_model, drafts, research_findings, research_critique,
-    error. Drains the streaming variant so the two paths share one
-    implementation and can't drift.
+    research_factcheck, error. Drains the streaming variant so the two paths
+    share one implementation and can't drift.
     """
     final: dict[str, Any] = {}
     async for evt in run_research_pipeline_streaming(
@@ -796,6 +901,7 @@ async def run_research_pipeline(
         "drafts": final.get("drafts", []),
         "research_findings": final.get("findings", ""),
         "research_critique": final.get("critique", ""),
+        "research_factcheck": final.get("corrections", ""),
         "error": final.get("error", ""),
     }
 

@@ -256,7 +256,7 @@ streams — and why the next subsection's architecture matters.
 ### 2.4 The non-streaming path
 
 `_generate_via_pipeline` at
-[`routes/openai/pipeline.py:97`](../../src/audrey/routes/openai/pipeline.py#L97)
+[`routes/openai/pipeline.py:106`](../../src/audrey/routes/openai/pipeline.py#L106)
 is the simpler half. The shape:
 
 ```

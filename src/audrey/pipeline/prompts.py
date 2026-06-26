@@ -150,6 +150,28 @@ VERIFIER_SYSTEM = (
     "inventing problems. Output your critique as a short list of flags."
 )
 
+FACTCHECK_SYSTEM = (
+    "You are the fact-checker on a research panel. You receive the original "
+    "request, the researchers' findings, and the verifier's critique. Your job "
+    "is to CONFIRM the specific, checkable claims against real sources — you "
+    "are NOT writing the answer and NOT doing open-ended research. Use the "
+    "web_search tool to verify the high-risk claims: exact dates, version "
+    "numbers, release/launch timing, licenses, named entities, and "
+    "status/authorship assertions (\"deprecated\", \"first\", \"only\", "
+    "\"proved\", \"invented\", \"authored\"). Prioritize CURRENT and recent "
+    "facts (2024 onward) and anything stated with surprising precision. Prefer "
+    "official or primary sources — vendor docs, the project's own repo/release "
+    "notes, peer-reviewed papers, and reference works (Britannica, MacTutor, "
+    "Stanford Encyclopedia) — over random blogs.\n"
+    "Check only a handful of the most load-bearing claims; do not try to verify "
+    "everything. Output a short corrections list, one line per claim checked:\n"
+    "  - CONFIRMED: <claim> (source)\n"
+    "  - CORRECT: the findings say <X>, but <source> shows <Y> — use <Y> (url)\n"
+    "  - UNVERIFIED: <claim> — no reliable source found; the writer should hedge\n"
+    "Do NOT rewrite the answer or add prose. If every checked claim holds, say "
+    "so plainly. If you could not run tools, output exactly: NO CORRECTIONS."
+)
+
 WRITER_SYSTEM = (
     "You are the writer on a research panel. You receive the original "
     "request, the researchers' verified findings, and the verifier's "
@@ -159,6 +181,9 @@ WRITER_SYSTEM = (
     "soften or drop any claim it called unsupported, overconfident, or too "
     "precise. Prefer cautious phrasing ('often described as', 'commonly "
     "dated to') for anything the evidence hedges on.\n"
+    "If a FACT-CHECK CORRECTIONS block is present, it overrides the findings on "
+    "any claim it touches: use the corrected value for a CORRECT line, and "
+    "hedge or drop anything marked UNVERIFIED.\n"
     "If the findings note that little or no grounding could be retrieved, "
     "write from general knowledge BUT open with a brief, honest caveat that "
     "the answer could not be verified against sources and may be incomplete, "
@@ -204,6 +229,7 @@ _PROMPT_KEYS = frozenset({
     "synthesizer",
     "researcher",
     "verifier",
+    "factchecker",
     "writer",
     "react_final_answer",
     "memory_store_hint",
@@ -313,6 +339,7 @@ __all__ = [
     "SYNTH_SYSTEM",
     "RESEARCHER_SYSTEM",
     "VERIFIER_SYSTEM",
+    "FACTCHECK_SYSTEM",
     "WRITER_SYSTEM",
     "REACT_FINAL_ANSWER_USER",
     "MEMORY_STORE_HINT",

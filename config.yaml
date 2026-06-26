@@ -170,8 +170,13 @@ deep_panel_local:
 #                  budget. Capped at `agentic.max_research_workers_cloud`.
 #   verifier     — Stage-2 single pass: flags unsupported/anachronistic/
 #                  too-precise claims in the merged findings.
-#   writer       — Stage-3 single pass: turns verified findings into the
-#                  answer (no new facts). Its output IS the final answer.
+#   factchecker  — Stage-3 single pass (tool-capable): web_search-confirms the
+#                  high-risk/dated/current claims and emits a corrections block
+#                  the writer applies. OPTIONAL — omit it and the stage is
+#                  skipped (pipeline runs verify→write as before). Uses the
+#                  `react.factcheck_worker` budget.
+#   writer       — Stage-4 single pass: turns verified+corrected findings into
+#                  the answer (no new facts). Its output IS the final answer.
 #   fallback_synth — degrade target if the write stage fails.
 # Validated by `_validate_deep_panel_pools` (staged branch). Opt-in only:
 # selecting `audrey_research` is the signal — there is no auto-routing into it.
@@ -179,16 +184,19 @@ deep_panel_research:
   code:
     researchers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud", "qwen3.6:35b"]
     verifier: "deepseek-v4-pro:cloud"
+    factchecker: "deepseek-v4-pro:cloud"
     writer: "qwen3.6:35b"
     fallback_synth: "glm-5.2:cloud"
   reasoning:
     researchers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud", "qwen3.6:35b"]
     verifier: "deepseek-v4-pro:cloud"
+    factchecker: "deepseek-v4-pro:cloud"
     writer: "qwen3.6:35b"
     fallback_synth: "glm-5.2:cloud"
   general:
     researchers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud", "qwen3.6:35b"]
     verifier: "deepseek-v4-pro:cloud"
+    factchecker: "deepseek-v4-pro:cloud"
     writer: "qwen3.6:35b"
     fallback_synth: "glm-5.2:cloud"
   # vl: the research path grounds with text tools; image turns force fast
@@ -197,6 +205,7 @@ deep_panel_research:
   vl:
     researchers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud"]
     verifier: "deepseek-v4-pro:cloud"
+    factchecker: "deepseek-v4-pro:cloud"
     writer: "qwen3.6:35b"
     fallback_synth: "glm-5.2:cloud"
 
@@ -241,6 +250,15 @@ agentic:
     research_worker:
       max_rounds: 5
       compress_after_round: 3
+      max_tool_result_chars: 6000
+      compress_keep_last: 1
+    # `audrey_research` Stage-3 fact-checker: confirms a handful of specific
+    # high-risk/dated/current claims against sources — NOT open-ended research.
+    # Tighter than research_worker (fewer rounds) but keeps the large result
+    # budget so it can read an authoritative page when it finds one.
+    factcheck_worker:
+      max_rounds: 3
+      compress_after_round: 2
       max_tool_result_chars: 6000
       compress_keep_last: 1
   planning:

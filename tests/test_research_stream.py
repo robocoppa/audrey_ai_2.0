@@ -32,7 +32,8 @@ class _FakeOllama:
     def __init__(self, responses: dict[str, str]):
         self.responses = responses
 
-    async def chat(self, *, model, messages, options=None, timeout_s=0):
+    async def chat(self, *, model, messages, options=None, timeout_s=0, tools=None):
+        # `tools=` accepted so the fact-checker's run_react loop can call us.
         return {"message": {"content": self.responses.get(model, "")},
                 "prompt_eval_count": 1, "eval_count": 1}
 
@@ -53,27 +54,42 @@ class _FakeTools:
     by_name: ClassVar[dict[str, Any]] = {}
 
 
-def _fake_app(responses: dict[str, str]):
+def _one_tool_registry():
+    """A real ToolRegistry with one web_search tool, so the fact-check stage's
+    run_react has something to offer (and `_phase_thinking` sees it non-empty)."""
+    from audrey.tools.discovery import ToolRegistry, ToolSpec
+    spec = ToolSpec(name="web_search", description="search",
+                    parameters={"type": "object", "properties": {}},
+                    server_url="http://unused", path="/web_search")
+    return ToolRegistry(by_name={"web_search": spec})
+
+
+def _fake_app(responses: dict[str, str], *, factchecker: str | None = None):
     # Build a FRESH Config from a deep-copied raw so mutating the research
     # pool can't leak into the shared `get_config()` singleton other tests use.
     base = get_config()
     cfg = Config(copy.deepcopy(base.raw), EnvOverrides())
     # Point the research pool at the fake models so the route resolves them.
-    cfg.raw["deep_panel_research"] = {
-        "reasoning": {
-            "researchers": ["r1", "r2"],
-            "verifier": "v",
-            "writer": "w",
-            "fallback_synth": "fb",
-        }
+    body = {
+        "researchers": ["r1", "r2"],
+        "verifier": "v",
+        "writer": "w",
+        "fallback_synth": "fb",
     }
-    cfg.raw.setdefault("model_registry", {})["reasoning"] = [
+    reg_models = [
         {"name": "r1", "priority": 100, "location": "cloud"},
         {"name": "r2", "priority": 90, "location": "cloud"},
         {"name": "v", "priority": 80, "location": "cloud"},
         {"name": "w", "priority": 70, "location": "local"},
         {"name": "fb", "priority": 60, "location": "cloud"},
     ]
+    if factchecker:
+        body["factchecker"] = factchecker
+        reg_models.append({"name": factchecker, "priority": 75, "location": "cloud"})
+        # The fact-checker must be tool-capable for the stage to run.
+        cfg.raw.setdefault("fast_path", {})["tool_capable_models"] = [factchecker]
+    cfg.raw["deep_panel_research"] = {"reasoning": body}
+    cfg.raw.setdefault("model_registry", {})["reasoning"] = reg_models
     registry = ModelRegistry(cfg)
     state = SimpleNamespace(
         cfg=cfg,
@@ -81,7 +97,7 @@ def _fake_app(responses: dict[str, str]):
         registry=registry,
         health=HealthTracker(),
         gate=FairLocalGate(concurrency=1),
-        tools=_FakeTools(),
+        tools=_one_tool_registry() if factchecker else _FakeTools(),
         # archive_client intentionally absent → getattr default None.
     )
     return SimpleNamespace(state=state)
@@ -133,6 +149,26 @@ async def test_research_stream_banner_order_and_answer():
     assert "Euclid was a Greek mathematician." in answer_region
 
     # Terminates with stop + DONE.
+    assert frames[-1] == "data: [DONE]\n\n"
+
+
+async def test_research_stream_factcheck_banner_in_order():
+    # With a factchecker configured + tool-capable, the Fact-checking banner
+    # appears between Verifying and Writing, and the answer still streams.
+    app = _fake_app(
+        {"r1": "fact A", "r2": "fact B", "v": "looks fine",
+         "fc": "CONFIRMED: fact A (source)", "w": "Euclid was a Greek mathematician."},
+        factchecker="fc",
+    )
+    frames = await _collect(app)
+    joined = "".join(_content_frames(frames))
+
+    for banner in ("_Researching_", "_Verifying_", "_Fact-checking_", "_Writing_"):
+        assert banner in joined, f"missing banner {banner}"
+    assert (joined.index("_Verifying_") < joined.index("_Fact-checking_")
+            < joined.index("_Writing_"))
+    answer_region = joined.split("\n\n---\n\n", 1)[1]
+    assert "Euclid was a Greek mathematician." in answer_region
     assert frames[-1] == "data: [DONE]\n\n"
 
 

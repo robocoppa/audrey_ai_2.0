@@ -64,6 +64,7 @@ class PipelineState(TypedDict, total=False):
     # see the grounding); these two carry the Verify/Write stage products.
     research_findings: str           # merged researcher notes fed to verify+write
     research_critique: str           # verifier's flags ("" if verify skipped/empty)
+    research_factcheck: str          # fact-checker's corrections ("" if stage skipped)
 
     # Reflection
     reflect_attempts: int            # 0 = not attempted, 1 = ran once, etc.

@@ -264,6 +264,29 @@ def test_validator_rejects_unknown_research_model_names():
         _validate_deep_panel_pools(cfg)
 
 
+def test_validator_factchecker_is_optional_but_validated_when_present():
+    # `factchecker` is optional — a staged pool without it is valid.
+    ok = {
+        "deep_panel_research": {
+            "reasoning": {"researchers": ["r1"], "verifier": "v", "writer": "w"},
+        },
+    }
+    _validate_deep_panel_pools(ok)  # must not raise (no factchecker)
+
+    # But when present, its model name must resolve to the registry.
+    bad = {
+        "model_registry": {"reasoning": [{"name": "r1"}, {"name": "v"}, {"name": "w"}]},
+        "deep_panel_research": {
+            "reasoning": {
+                "researchers": ["r1"], "verifier": "v", "writer": "w",
+                "factchecker": "ghost-checker:cloud",  # unknown
+            },
+        },
+    }
+    with pytest.raises(ValueError, match=r"factchecker 'ghost-checker:cloud' is not in model_registry"):
+        _validate_deep_panel_pools(bad)
+
+
 # ─── Real config.yaml boots clean ──────────────────────────────────────
 
 def test_committed_config_yaml_passes_boot_validation():

@@ -193,7 +193,9 @@ def _validate_deep_panel_pools(merged: dict[str, Any]) -> None:
                         errors.append(f"{pool_key}/{task}: missing required `{slot}` key")
                 for r in researchers:
                     named.append(("researcher", str(r)))
-                for slot in ("verifier", "writer", "fallback_synth"):
+                # `factchecker` is optional (omit → stage skipped); validated
+                # only when present.
+                for slot in ("verifier", "factchecker", "writer", "fallback_synth"):
                     if body.get(slot):
                         named.append((slot, str(body[slot])))
             else:

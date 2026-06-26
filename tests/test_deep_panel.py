@@ -397,7 +397,9 @@ class _FakeOllama:
         self.chat_models: list[str] = []
         self.stream_models: list[str] = []
 
-    async def chat(self, *, model, messages, options=None, timeout_s=0):
+    async def chat(self, *, model, messages, options=None, timeout_s=0, tools=None):
+        # `tools=` is accepted so the fact-checker's run_react loop can call us;
+        # we never return tool_calls, so run_react treats the content as final.
         self.chat_models.append(model)
         if model in self.fail:
             from audrey.models.ollama import OllamaError
@@ -543,3 +545,101 @@ async def test_research_pipeline_streaming_event_order():
     assert "findings_ready" in types
     assert types.index("verify_done") < types.index("write_delta")
     assert types[-1] == "done"
+
+
+# ─── fact-check stage (Phase 25) ───────────────────────────────────────
+# The optional Stage-3 fact-checker runs via run_react (tool-capable). It only
+# fires when a `factchecker` is configured, healthy, tool-capable, and tools
+# exist. Its corrections thread into the writer's prompt.
+
+from audrey.tools.discovery import ToolRegistry, ToolSpec  # noqa: E402
+
+
+def _one_tool_registry() -> ToolRegistry:
+    """A registry with a single web_search tool so run_react has something to offer."""
+    spec = ToolSpec(
+        name="web_search", description="search", parameters={"type": "object", "properties": {}},
+        server_url="http://unused", path="/web_search",
+    )
+    return ToolRegistry(by_name={"web_search": spec})
+
+
+def _research_cfg_fc(researchers, verifier, factchecker, writer, registry_models):
+    return _Cfg({
+        "model_registry": {
+            "reasoning": [
+                {"name": n, "priority": p, "location": loc} for n, p, loc in registry_models
+            ],
+        },
+        "deep_panel_research": {"reasoning": {
+            "researchers": researchers, "verifier": verifier,
+            "factchecker": factchecker, "writer": writer,
+        }},
+    })
+
+
+async def test_factcheck_stage_runs_and_threads_corrections():
+    models = (("r1", 100, "cloud"), ("v", 80, "cloud"), ("fc", 75, "cloud"), ("w", 70, "local"))
+    reg = _registry(*models)
+    cfg = _research_cfg_fc(["r1"], "v", "fc", "w", models)
+    health = HealthTracker()
+    # Factchecker returns an actionable correction; writer echoes what it's told.
+    ollama = _FakeOllama({
+        "r1": "DeepSeek-R1 released Jan 26 2025.",
+        "v": "looks ok",
+        "fc": "CORRECT: findings say Jan 26, but the official blog shows Jan 20 — use Jan 20 (url)",
+        "w": "DeepSeek-R1 was released on January 20, 2025.",
+    })
+
+    final = {}
+    async for evt in run_research_pipeline_streaming(
+        cfg, ollama, reg, health, FairLocalGate(concurrency=1),
+        task="reasoning", messages=[{"role": "user", "content": "when did R1 release"}],
+        options={}, timeout_s=5.0, max_researchers_cloud=2,
+        tools=_one_tool_registry(), tool_capable_models={"fc"}, user_id=None,
+    ):
+        if evt["type"] == "done":
+            final = evt
+
+    # The factchecker ran (via run_react → chat) and its corrections are surfaced.
+    assert "fc" in ollama.chat_models
+    assert "CORRECT:" in final["corrections"]
+    assert final["content"] == "DeepSeek-R1 was released on January 20, 2025."
+
+
+async def test_factcheck_stage_skipped_when_not_configured():
+    # No `factchecker` in the pool → stage skipped entirely; pipeline unchanged.
+    models = (("r1", 100, "cloud"), ("v", 80, "cloud"), ("w", 70, "local"))
+    reg = _registry(*models)
+    cfg = _research_cfg(["r1"], "v", "w", models)
+    health = HealthTracker()
+    ollama = _FakeOllama({"r1": "fact", "v": "ok", "w": "answer"})
+
+    types = [
+        evt["type"] async for evt in run_research_pipeline_streaming(
+            cfg, ollama, reg, health, FairLocalGate(concurrency=1),
+            task="reasoning", messages=[{"role": "user", "content": "q"}],
+            options={}, timeout_s=5.0, max_researchers_cloud=2,
+            tools=_one_tool_registry(), tool_capable_models={"fc"}, user_id=None,
+        )
+    ]
+    assert "factcheck_done" not in types  # no factchecker configured → no event
+
+
+async def test_factcheck_stage_order_when_present():
+    models = (("r1", 100, "cloud"), ("v", 80, "cloud"), ("fc", 75, "cloud"), ("w", 70, "local"))
+    reg = _registry(*models)
+    cfg = _research_cfg_fc(["r1"], "v", "fc", "w", models)
+    health = HealthTracker()
+    ollama = _FakeOllama({"r1": "fact", "v": "ok", "fc": "CONFIRMED: fact (src)", "w": "answer"})
+
+    types = [
+        evt["type"] async for evt in run_research_pipeline_streaming(
+            cfg, ollama, reg, health, FairLocalGate(concurrency=1),
+            task="reasoning", messages=[{"role": "user", "content": "q"}],
+            options={}, timeout_s=5.0, max_researchers_cloud=2,
+            tools=_one_tool_registry(), tool_capable_models={"fc"}, user_id=None,
+        )
+    ]
+    # research → verify → fact-check → write, in that order.
+    assert types.index("verify_done") < types.index("factcheck_done") < types.index("write_delta")

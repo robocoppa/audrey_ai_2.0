@@ -401,6 +401,7 @@ def build_graph(
             "content": result.get("content", "") or "",
             "research_findings": result.get("research_findings", ""),
             "research_critique": result.get("research_critique", ""),
+            "research_factcheck": result.get("research_factcheck", ""),
             "synthesizer_model": result.get("writer_model", "none"),
             "synth_error": result.get("error", ""),
             "concrete_model": result.get("writer_model", "none"),

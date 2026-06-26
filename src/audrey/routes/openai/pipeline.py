@@ -31,6 +31,7 @@ from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.banners import (
     BANNER_DISPATCHING,
+    BANNER_FACTCHECKING,
     BANNER_PLANNING,
     BANNER_RESEARCHING,
     BANNER_SEPARATOR,
@@ -945,37 +946,65 @@ async def _stream_research_with_banners(
         async for frame in _drain_q_now(banner_q, _delta_frame):
             yield frame
 
-        # ── Stage 2: Verifying → Stage 3: Writing ─────────────────────────
-        # Event order from run_research_pipeline_streaming after findings_ready
-        # is: optionally `verify_done`, then zero+ `write_delta`, then `done`.
-        # We show the Verifying banner until the first non-verify event, then
-        # close it, open Writing, and on the first write_delta close Writing,
-        # emit the separator, and stream the answer live. `first_write` is the
-        # event that ended the Verifying wait (a write_delta or done) so we
-        # never drop it.
+        # ── Stage 2: Verifying → Stage 3: Fact-checking → Stage 4: Writing ─
+        # Event order after findings_ready is: optionally `verify_done`,
+        # optionally `factcheck_done`, then zero+ `write_delta`, then `done`.
+        # Each banner stays open until the next stage's event arrives. A
+        # helper waits through dots until it gets the next "real" event,
+        # returning it so the caller can decide which banner to open next.
+        # `pending` carries the event that ended a wait so we never drop it.
         done_evt: dict[str, Any] = {}
-        first_write: dict[str, Any] | None = None
-        async with PhaseTicker(BANNER_VERIFYING, emit):
+
+        async def _next_event():
+            """Drain banner dots, return the next pipeline event (or None at end)."""
             while True:
                 while not banner_q.empty():
                     item = banner_q.get_nowait()
                     if item is not None:
-                        yield _delta_frame(item)
+                        return ("banner", item)
                 try:
                     evt = await asyncio.wait_for(events_q.get(), timeout=0.05)
                 except TimeoutError:
                     continue
-                if evt is None:
+                return ("event", evt)
+
+        # Verifying: open until we see factcheck_done, the first write_delta,
+        # or done. verify_done just confirms the stage finished (keep waiting).
+        pending: dict[str, Any] | None = None
+        async with PhaseTicker(BANNER_VERIFYING, emit):
+            while True:
+                kind, item = await _next_event()
+                if kind == "banner":
+                    yield _delta_frame(item)
+                    continue
+                if item is None:
                     break
-                etype = evt.get("type")
-                if etype == "verify_done":
-                    continue  # verify finished; banner closes on loop exit
-                # First write_delta or done ends the verify wait. (When research
-                # was empty, verify is skipped and this is the first event.)
-                first_write = evt
+                if item.get("type") == "verify_done":
+                    continue
+                pending = item
                 break
         async for frame in _drain_q_now(banner_q, _delta_frame):
             yield frame
+
+        # Fact-checking: only if the verify wait ended on `factcheck_done`.
+        # Otherwise the stage was skipped (no grounding / no factchecker) and
+        # `pending` is already the first write_delta or done — skip the banner.
+        first_write: dict[str, Any] | None = None
+        if pending is not None and pending.get("type") == "factcheck_done":
+            async with PhaseTicker(BANNER_FACTCHECKING, emit):
+                while True:
+                    kind, item = await _next_event()
+                    if kind == "banner":
+                        yield _delta_frame(item)
+                        continue
+                    if item is None:
+                        break
+                    first_write = item  # first write_delta or done
+                    break
+            async for frame in _drain_q_now(banner_q, _delta_frame):
+                yield frame
+        else:
+            first_write = pending
 
         # Writing banner: it closes as soon as we have the first answer token.
         async with PhaseTicker(BANNER_WRITING, emit):
