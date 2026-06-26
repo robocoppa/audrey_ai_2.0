@@ -766,6 +766,19 @@ async def run_research_pipeline_streaming(
         grounded and factchecker and health.is_healthy(factchecker)
         and tools is not None and tools.by_name and factchecker in capable
     )
+    # Log the decision either way — when the stage silently skips, this is the
+    # only way to see WHICH precondition failed (config vs health vs tools).
+    if not fc_can_run:
+        log.info(
+            "research: fact-check SKIPPED — grounded=%s factchecker=%r healthy=%s "
+            "tools=%s tool_capable=%s",
+            grounded, factchecker,
+            (health.is_healthy(factchecker) if factchecker else None),
+            (bool(tools and tools.by_name)),
+            (factchecker in capable if factchecker else None),
+        )
+    else:
+        log.info("research: fact-check stage running with %s", factchecker)
     if fc_can_run:
         fc_budget = _factcheck_react_budget(cfg)
         dispatch_total.labels(model=factchecker, task_type=str(task), path="research_factcheck").inc()
