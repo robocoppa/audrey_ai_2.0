@@ -8,36 +8,37 @@
 
 - model: `audrey_research`
 - status: PASS
-- banners: Planning → Researching → Verifying → Writing
+- banners: Planning → Researching → Verifying → Fact-checking → Writing
 - checks: reachable:✅  no_error_marker:✅  has_answer:✅  banners:✅  sources:—  url_wellformed:—
 
-You asked for a deep dive into Euclid, and it’s worth starting with a candid admission: almost nothing is known about him with certainty. He is commonly dated to have flourished around 300 BCE in Alexandria, Egypt, during the reign of Ptolemy I Soter. Our biographical knowledge comes almost entirely from later commentators, most notably the 5th-century CE philosopher Proclus. Tradition holds that he may have been educated at Plato’s Academy in Athens before he probably moved to Alexandria, where he is thought to have been associated with the city’s great Museum and Library. His exact birth and death dates remain uncertain, though scholars often estimate a range of c. 325–265 BCE, with his death commonly placed around 270 BCE. Even the famous anecdote that he told Ptolemy “there is no royal road to geometry” cannot be authenticated and may well be a later invention meant to illustrate mathematical truth rather than historical fact.
+You’ve asked for a deep dive into Euclid, but I should start with a fascinating paradox: he is one of the most influential figures in human intellectual history, yet almost nothing about him as a person is verifiable. Let’s walk through what we actually know, what we can reasonably infer, and how his work reshaped mathematics, science, and philosophy.
 
-### The *Elements*: Structure & Content
-What we do know comes from his work, particularly the *Elements*. Rather than being a collection of original discoveries, it is widely recognized as a brilliant synthesis and logical reorganization of Greek mathematics up to his time. The treatise spans 13 books and is traditionally described as containing about 465 propositions derived through a rigorous axiomatic-deductive structure.
+### Life & Context: The Shadowy Figure Behind the System
+Euclid flourished around 300 BCE, during the rule of Ptolemy I Soter (as king, c. 305–282 BC). Alexandria had been founded by Alexander the Great decades before Euclid’s floruit, and it is widely believed that he likely taught mathematics there at the city’s famous Museum and Library. Beyond this, his biography is exceptionally thin. The primary source for his life is Proclus, a Greek philosopher writing over seven centuries removed from Euclid. Proclus notes that Euclid lived between Plato’s circle and figures like Eratosthenes and Archimedes, which aligns with the c. 300 BCE timeframe. 
 
-Books I–VI cover plane geometry, including the Pythagorean theorem and geometric algebra. Books VII–IX tackle number theory, featuring the Euclidean algorithm for greatest common divisors and a proof of the infinitude of primes. Book X classifies irrational magnitudes based on earlier work by Theaetetus. Books XI–XII explore solid geometry and the volumes of pyramids, cones, cylinders, and spheres using the method of exhaustion (which appears in Book XII, not XIII). Finally, Book XIII focuses on the five regular Platonic solids, proving there are exactly five.
+Two famous anecdotes—Euclid telling Ptolemy there is “no royal road to geometry,” and ordering a coin given to a student who asked what he’d gain from learning—are recorded in later sources but are generally treated as legendary rather than historical fact. We simply do not know his exact birth or death dates, his place of birth, or whether he was primarily an original discoverer or a brilliant systematizer. He is often called the Father of Geometry, but that title reflects his structural impact more than any verified biographical record.
 
-The system rests on definitions, five postulates, and common notions. The fifth postulate—the parallel postulate—stood out for its complexity. Its stubborn resistance to proof from the other axioms drove centuries of mathematical inquiry, eventually leading 19th-century mathematicians to develop non-Euclidean geometries by denying it, a breakthrough that later paved the way for Einstein’s general relativity.
+### The *Elements*: Structure & Method
+His legacy rests entirely on the *Elements*, a 13-book treatise that organized ancient Greek and Near Eastern mathematics into a single deductive framework. The work is carefully divided: Books I–VI cover plane geometry, while Books VII–IX shift to number theory. Books X through XIII tackle incommensurable magnitudes and solid geometry, culminating in the construction of the five Platonic solids. 
 
-### Other Works & Transmission
-Euclid also authored several other treatises. His *Optics* is the earliest surviving Greek work on perspective, treating vision as rays emanating from the eye; the number of propositions in it varies by manuscript recension, ranging roughly from 58 to 183 depending on the version. The *Data* complements the *Elements* by exploring what can be deduced when certain geometric elements are known, while the *Phaenomena* applies spherical geometry to astronomy. Several works are lost but credibly attributed to him through later references, including treatises on conics, porisms, surface loci, and fallacies in reasoning.
+Euclid begins with 23 definitions, five geometric postulates, and five common logical notions. From these foundations, he derives approximately 465 propositions across the books, each proven through strict logical deduction. Many scholars believe the *Elements* is largely a compilation rather than a collection of wholly original discoveries; Euclid’s genius lay in formalizing and systematizing prior work from mathematicians like Eudoxus and Theaetetus into a coherent, self-contained system. Before Euclid, Greek mathematical reasoning was less formalized, but his approach established the axiomatic-deductive method as the gold standard for rigorous proof.
 
-The text’s survival relied heavily on careful transmission. A small number of ostraca, perhaps dating from roughly 100 BCE to 100 CE, represent some of the oldest extant evidence. During the Islamic Golden Age, translations were made during or shortly after al-Ma’mun’s reign, with scholars like Thābit ibn Qurra and Ibn al-Haytham studying and extending Euclidean ideas. These Arabic versions were later translated into Latin in the 12th century, reintroducing rigorous geometry to medieval Europe. The first printed edition appeared in Venice in 1482, and since then, it has seen well over a thousand editions across numerous languages. It is often described as one of the most printed and translated books in history, though exact rankings remain difficult to verify.
+### Other Works & Authorship
+Beyond the *Elements*, several other treatises are attributed to him. His *Data* explores geometric conditions, and his *Phaenomena* introduces spherical astronomy. His *Optics* survives as the earliest surviving Greek treatise on the geometry of vision and perspective. Some works have disputed or spurious authorship: *Catoptrica* (on mirrors) is contested by scholars, and the *Introduction to Harmony* is now attributed to Cleonides rather than Euclid. Several other texts, like his work on conics and porisms, are known only by title or reference in later manuscripts.
 
 ### Legacy & Influence
-Euclid is often described as one of the most prominent mathematicians of Greco-Roman antiquity, largely because his *Elements* became one of the most influential textbooks ever written. The axiomatic-deductive method he championed set a standard for logical rigor that persisted for centuries. This framework directly influenced figures like Isaac Newton, who modeled his *Principia* on Euclid’s structure, and philosophers like Spinoza, who attempted to derive moral reasoning in a similar geometrical manner. 
+The structural impact of the *Elements* was immense. It served as the standard geometry textbook for over two millennia and is often described as one of the most published books in history, frequently cited as the second most printed after the Bible (though exact counts vary). Its axiomatic method deeply influenced Western thought: Spinoza structured his *Ethics* in geometric order, Newton modeled the *Principia Mathematica* on Euclidean deduction, and Abraham Lincoln famously studied it to learn how to construct a demonstration. Philosophically, Kant treated Euclidean geometry as synthetic a priori truth before later developments challenged that view. 
 
-While the exact extent of his lost works remains conjectural, and later commentators like Hypatia are said to have written commentaries on his work, the methodological template he established endured. It remained a standard for mathematical education well into the 20th century and continues to shape how we approach logical proof, scientific reasoning, and even computer science today (where the Euclidean algorithm remains foundational).
+The most consequential “flaw” in Euclid’s system was the Fifth Postulate (the parallel postulate), which felt less self-evident than the others. For centuries, mathematicians tried to prove it from the first four postulates. That effort ultimately failed, but the failure proved generative: in the 19th century, Gauss, Bolyai, and Lobachevsky developed hyperbolic geometry, and Riemann developed elliptic geometry. These non-Euclidean systems shattered old assumptions about space and paved the way for modern physics. Einstein reportedly first encountered rigorous mathematical reasoning through Euclid at age 12, and his later theory of general relativity depended heavily on non-Euclidean geometry to describe curved spacetime.
 
 ### In Summary
-Euclid the man remains largely a historical shadow, known primarily through the work he systematized. But that work fundamentally changed how humanity understands certainty. By showing that complex truths can be built step-by-step from clear, agreed-upon premises, he gave us a method of reasoning that transcends mathematics itself. Every time you trace a logical argument back to its foundational axioms, you are walking in the intellectual footsteps he helped pave.
+Euclid the man remains largely invisible in the historical record, but the framework he built is unmistakable. He did not just compile theorems; he invented a way of thinking that prioritized logical coherence over intuition. That organizational insight turned out to be more powerful than any single proof he wrote, shaping mathematics, science, and philosophy for over two thousand years. If you’d like to explore a specific book of the *Elements*, trace how the parallel postulate was debated, or look at how his method influenced a particular thinker, just let me know.
 
 ---
 > _Tools used:_
-> - **qwen3.5:397b-cloud** — `web_search` ×5
-> - **deepseek-v4-pro:cloud** — `web_search` ×13, `kb_search`
-> - **qwen3.6:35b** — `web_search` ×3
+> - **qwen3.5:397b-cloud** — `web_search` ×4
+> - **deepseek-v4-pro:cloud** — `web_search` ×15, `kb_search` ❌
+> - **qwen3.6:35b** — `web_search` ×4
 
 ---
 
@@ -45,57 +46,42 @@ Euclid the man remains largely a historical shadow, known primarily through the 
 
 - model: `audrey_research`
 - status: PASS
-- banners: Planning → Researching → Verifying → Writing
+- banners: Planning → Researching → Verifying → Fact-checking → Writing
 - checks: reachable:✅  no_error_marker:✅  has_answer:✅  banners:✅  sources:—  url_wellformed:—
 
-You asked for a deep dive into Pythagoras that carefully separates the historical man from the later legend. Let’s walk through what we can actually know, what remains uncertain, and how his legacy took shape. I’ll speak directly to you about what the evidence supports, where the lines blur, and why historians approach him with such caution.
+If you’re looking for a clear picture of Pythagoras, the first thing to understand is that we are working through a thick fog of later tradition. He left no writings behind, and the earliest surviving references to him date to the 5th century BCE—roughly 100 to 150 years after his life—rather than the 4th century or later. These early fragments come from near-contemporary figures like Xenophanes and Heraclitus, while detailed biographies did not appear until the 3rd and 4th centuries CE, nearly 800 years after he died. Because of this gap, almost everything we know about him is filtered through layers of memory, reinterpretation, and pious invention. Let’s separate what scholars can reasonably reconstruct from what belongs to legend.
 
-### The Source Problem: Why We Know So Little
-Before we examine Pythagoras himself, you need to understand a fundamental hurdle: **Pythagoras wrote nothing**. This is unanimous in the ancient tradition, meaning everything we know comes from later second- and third-hand accounts. The earliest surviving references come from the late 6th and 5th centuries BCE (Xenophanes, Heraclitus, Herodotus), but they are fragmentary and often critical or hostile. The first detailed biographies were composed roughly 800 to 1,100 years after his death by authors like Diogenes Laertius, Porphyry, and Iamblichus. Scholars widely note that these late sources are saturated with miracle stories, Neoplatonic embellishment, and hagiography. Reconstructing the historical Pythagoras therefore requires extreme caution.
+### Early Life and Migration
+Pythagoras was born around 570 BCE on the Ionian island of Samos. Later biographers claimed he traveled extensively to Egypt, Phoenicia, and Babylon to study with priests and sages, but these accounts lack independent evidence and likely reflect a common ancient literary trope rather than historical fact. Around 530 BCE, he left Samos—possibly to escape local tyranny—and settled in Croton, a Greek colony in southern Italy. There, he founded a community that functioned simultaneously as a philosophical school, a religious brotherhood, and a political association. This core framework is broadly accepted by historians.
 
-### The Historical Core: Dates, Origins, and Community
-**Where and when?** Pythagoras was born on the Greek island of Samos, probably around 570 BCE. He emigrated to Croton in southern Italy (Magna Graecia) around 530 BCE, where he founded a community that functioned simultaneously as a philosophical school, a religious sect, and a political association. He likely died around 490–495 BCE, though the exact circumstances are irrecoverable.
+### Doctrines and Community Life
+The Pythagorean community was notable for including both men and women, which was unusual for the period. Ancient sources also describe an early division within the group between the *Acusmatici* (who focused on memorizing oral sayings and ritual rules) and the *Mathematici* (who pursued mathematical and scientific inquiry). While this split is attested in ancient texts like those of Aristoxenus, its exact timing remains debated.
 
-**The Croton community.** Ancient sources describe a hierarchical, secretive fellowship split into two groups: the *akousmatikoi* (“listeners”), who memorized and obeyed oral maxims (*akousmata*), and the *mathematikoi* (“learners”), who pursued deeper study of mathematics, music theory, and cosmology. Whether this division existed during Pythagoras’s lifetime or emerged later is debated. The community gained significant political influence in Croton, which eventually provoked a backlash. According to later tradition, a revolt led by a certain Cylon occurred, perhaps around the late 6th century BCE. Later accounts claim meeting houses were burned and many members killed, but these vivid details derive from uncorroborated late sources and cannot be treated as historical fact.
+Regarding his teachings, the doctrine most reliably attributed to Pythagoras himself is metempsychosis—the transmigration or rebirth of souls into other bodies, including animals. Near-contemporary figures like Xenophanes directly reference this belief, even mocking it for recognizing a friend’s soul in a yelping dog. The community also observed strict dietary restrictions, most famously a prohibition on eating beans. While Aristotle noted the taboo, the exact reasoning behind it remains unclear and was interpreted in various ways by later writers. 
 
-### Doctrines & Practices: What Can Be Attributed to Him?
-**Metempsychosis (transmigration of souls).** This is the one doctrine we can confidently link to Pythagoras himself. Xenophanes, the earliest surviving source, directly attests that Pythagoras taught the soul’s immortality and its passage into other bodies. The famous fragment where Pythagoras recognizes a deceased friend’s voice in the yelp of a beaten puppy confirms this was already central to his teaching by the early 5th century BCE. Confidence in this attribution is high.
+Other claims about his life are highly disputed or likely legendary. The mathematical relationship he is famous for was already known to Babylonian and Egyptian scholars centuries earlier, and the attribution of its discovery to him personally only emerged in later tradition. Similarly, stories of him performing miracles, inventing the musical scale from scratch, or announcing prophecies appear primarily in much later biographies and have little historical foundation.
 
-**The *akousmata* (oral maxims).** Short, cryptic rules governed daily life: “Do not eat beans,” “Do not stir the fire with a knife,” “Do not look in a mirror beside a lamp.” Aristotle’s testimony confirms these *symbola* existed early, though their original reasons remain unknown. The bean taboo is the most famous, with ancient explanations ranging from anatomical or underworld symbolism to concerns about digestive tranquility.
+### Political Involvement and Downfall
+The Croton community became politically active, aligning with local aristocratic factions. According to ancient tradition, an anti-Pythagorean revolt occurred, possibly sparked by a nobleman named Cylon who had been rejected by the group. During the unrest, meeting houses were reportedly sacked and burned, with many members killed. Pythagoras himself likely fled Croton before or during the attack, and he is traditionally said to have died in Metapontum shortly after, though the exact circumstances of his death remain uncertain and are heavily shrouded in later legend.
 
-**Cosmology and number mysticism.** Philolaus of Croton is the earliest Pythagorean whose writings survive, making him the most important surviving written source for early doctrine. His fragments describe a cosmos where a “central fire” occupies the middle, with Earth and other bodies revolving around it, structured by principles of “limiters” and “unlimiteds.” Later Pythagorean tradition held that the soul could be purified through intellectual and mathematical study, though evidence for this specific formulation in Pythagoras’s own teaching is thin.
+### Legacy and Influence
+Despite the fog surrounding his life, Pythagoras left a profound mark on Western thought. The mathematical and metaphysical ideas developed by later Pythagoreans—particularly Philolaus and Archytas—directly influenced Plato. According to later biographical tradition, Plato is said to have traveled to Italy to engage with these thinkers after Socrates’ death, absorbing concepts that would shape his own cosmology and theory of the soul. The Pythagorean emphasis on numerical harmony, deductive proof, and the idea that the cosmos operates according to mathematical principles laid crucial groundwork for Greek mathematics and later Western science.
 
-### Mathematics & Music: Legend vs. Attainment
-**Musical ratios.** The discovery that musical intervals correspond to simple whole-number ratios (2:1 for the octave, 3:2 for the fifth, 4:3 for the fourth) is reflected in early Pythagorean practice and represents one of the earliest documented mathematical laws describing a physical phenomenon. However, whether Pythagoras personally discovered these ratios or if they emerged from his school remains possible but unprovable. The popular story that he deduced them by hearing hammers of different weights at a blacksmith’s shop is physically impossible and belongs firmly to legend.
+In the 1st century BCE, a revival movement known as Neopythagoreanism blended these teachings with Platonic and Stoic ideas, further cementing Pythagoras’s reputation as a semi-divine sage and the fountainhead of Greek philosophy. While much of this glorification belongs to later hagiography rather than historical record, the intellectual tradition he inspired endured.
 
-**The “Pythagorean theorem.”** You’ve likely heard it attributed to him, but the scholarly consensus widely agrees the relationship (a² + b² = c²) was known in Babylon and Egypt centuries earlier. The Plimpton 322 tablet (c. 1800 BCE) contains tables of Pythagorean triples roughly a millennium before Pythagoras was born. Some researchers argue it displays a sophisticated understanding of these triples, though the interpretation is debated. There is no evidence Pythagoras discovered or proved it; the attribution almost certainly reflects a later retrojection of his school’s mathematical achievements onto its founder.
+### Summary: What We Can and Cannot Know
+- **Well-attested:** He existed, was born on Samos c. 570 BCE, founded a community in Croton c. 530 BCE, taught metempsychosis, observed a bean taboo, and maintained a communal lifestyle that included women.
+- **Plausible but uncertain:** His travels to the East, the exact nature of his mathematical contributions, the timing of the Acusmatici/Mathematici split, and the details of his final days.
+- **Disputed or likely false:** Personal discovery of the Pythagorean theorem, specific mathematical proofs, and claims that 5th-century sources are entirely free of supernatural elements (early texts clearly discuss metempsychosis).
+- **Certainly legendary:** Golden thigh, bilocation, river greetings, divine parentage, and miracle stories—all products of late antiquity’s hagiographical tradition.
 
-**Irrational numbers.** The discovery of irrational numbers (like √2) is traditionally attributed to the Pythagorean Hippasus, though the account may be legendary and its historicity remains debated.
-
-### The Legend: What Later Tradition Invented
-The late biographies are filled with supernatural tales that appear nowhere in early sources: a golden thigh displayed at Olympia, bilocation (being seen in Croton and Metapontum simultaneously), rivers speaking his name, and control over animals. These reflect antiquity’s tendency to divinize great philosophers. Similarly, the widespread tradition that Pythagoras traveled extensively to Egypt, Babylon, and India to study with priests and sages is unattested in 5th-century BCE sources. While travel was plausible given Samos’s trade networks, these narratives likely served a hagiographic purpose: casting him as a sage who synthesized all ancient wisdom.
-
-His death is equally murky. Accounts vary from fleeing persecution to starving himself at a temple in Metapontum, with details almost certainly shaped by competing traditions that accumulated over centuries.
-
-### Legacy: How Pythagoras Shaped Western Thought
-Despite the obscurity of the man himself, the legacy of Pythagoreanism is immense and well-documented:
-- **Plato** absorbed Pythagorean ideas about mathematics, the immortality of the soul, and cosmic harmony. His *Timaeus* is steeped in mathematical cosmology heavily indebted to Pythagorean thought.
-- **Philolaus and Archytas of Tarentum** advanced geometry, mechanics, and music theory. Archytas is credited with an early solution to the problem of doubling the cube.
-- **Neopythagoreanism and Neoplatonism** revived and blended these ideas in the Hellenistic and Roman periods, treating Pythagoras as a divine sage.
-- **The medieval quadrivium** (arithmetic, geometry, music, astronomy) has roots in the Pythagorean curriculum.
-- **Renaissance and early modern figures** like Copernicus cited Philolaus and the Pythagoreans as precursors to heliocentrism, while Kepler’s *Harmonices Mundi* explicitly revived the vision of a mathematically harmonious cosmos.
-- The Pythagorean idea that numbers underlie reality influenced later thinkers who helped shape the scientific method, though tracing the method directly to them is an overstatement given its complex, multi-source development.
-
-### Bottom Line for You
-The historical Pythagoras was a charismatic religious teacher from Samos who founded a secretive community in Croton centered on the transmigration of souls, governed by oral maxims and ritual practices. The mathematical and scientific achievements associated with his name were largely the work of later Pythagoreans. The miracle-working divine sage of the late biographies is a legendary construction that accumulated over centuries. What we can say with confidence is that he was a real figure whose school’s ideas profoundly shaped Plato, early cosmology, and the Western intellectual tradition—but separating his personal teachings from the mythologized legacy requires us to lean heavily on the earliest sources and remain cautious about later claims.
-
-If you’d like to zoom in on any specific doctrine, mathematical claim, or historical source, just let me know where you want to dig deeper.
+The deepest truth about Pythagoras is that he is less important for what he personally said or did than for the tradition that formed around his name. The historical Pythagoras remains shrouded in mystery, but the Pythagorean community he founded permanently shaped how Western philosophy, mathematics, and science approach the structure of reality.
 
 ---
 > _Tools used:_
-> - **deepseek-v4-pro:cloud** — `web_search` ×14
-> - **qwen3.5:397b-cloud** — `web_search` ×7, `kb_search` ❌
-> - **qwen3.6:35b** — `web_search` ×6
+> - **qwen3.5:397b-cloud** — `web_search` ×6
+> - **deepseek-v4-pro:cloud** — `web_search` ×15
+> - **qwen3.6:35b** — `web_search` ×7
 
 ---
 
@@ -103,38 +89,37 @@ If you’d like to zoom in on any specific doctrine, mathematical claim, or hist
 
 - model: `audrey_research`
 - status: PASS
-- banners: Planning → Researching → Verifying → Writing
+- banners: Planning → Researching → Verifying → Fact-checking → Writing
 - checks: reachable:✅  no_error_marker:✅  has_answer:✅  banners:✅  sources:—  url_wellformed:—
 
-Here is a synthesized deep dive into the life and work of Archimedes, carefully aligned with the verified findings and the panel’s corrections.
+You asked for a deep dive into Archimedes, so let’s walk through his life, his groundbreaking work, and the fascinating story of how we know what we do about him today.
 
-**Early Life & Historical Context**
-Archimedes was born around 287 BC in Syracuse, a Greek colony on Sicily. His father, Phidias, is known only as an astronomer. While later ancient accounts suggest Archimedes may have studied in Alexandria, Egypt, and maintained lifelong correspondence with scholars like Eratosthenes of Cyrene and Conon of Samos, these details remain uncertain rather than definitively confirmed. Our biographical framework comes from later historical writers rather than contemporary records, meaning gaps and embellishments are possible. What is clear is that he spent his career in Syracuse as a mathematician and engineer, closely tied to the court of King Hiero II, though the exact nature of their relationship remains vague.
+**Early Life and Context**
+Archimedes is commonly dated to c. 287 BC in Syracuse, Sicily (then part of Magna Graecia). His father was Phidias, an astronomer—a detail Archimedes himself names in *The Sand Reckoner*. It is often described as likely that he studied in Alexandria, Egypt, where he maintained correspondence with scholars like Eratosthenes and Conon. For much of his life, he operated under the patronage of King Hiero II of Syracuse, dedicating several works to him.
 
-**Mathematical & Scientific Contributions**
-Archimedes’ surviving treatises, transmitted through medieval manuscripts, cover geometry, mechanics, and hydrostatics with remarkable rigor. Key works include:
-- *On the Sphere and Cylinder*: He proved that a sphere’s surface area equals four times its greatest circle, and its volume is two-thirds that of its circumscribed cylinder. He valued this result so highly that he requested a sphere inscribed in a cylinder mark his tomb.
-- *Measurement of a Circle*: Using inscribed and circumscribed 96-sided polygons, he bounded π between 3 10/71 and 3 1/7, yielding one of the most accurate approximations for its time.
-- *On Floating Bodies*: This foundational text of hydrostatics introduces what is now called Archimedes’ Principle: a body immersed in fluid experiences a buoyant force equal to the weight of the displaced fluid.
-- *The Method of Mechanical Theorems & Quadrature of the Parabola*: In these works, Archimedes used mechanical analogies and infinitesimal slicing to discover geometric results, later proving them rigorously via the method of exhaustion. This approach anticipated integral calculus by centuries.
-- Other surviving treatises cover the law of the lever (*On the Equilibrium of Planes*), the area under spirals (*On Spirals*), volumes of conoids and spheroids, and *The Sand Reckoner*, which developed a positional system for expressing extremely large numbers. The palimpsest also revealed his full analysis of *Stomachion*, a 14-piece dissection puzzle that anticipates combinatorial mathematics.
+**Mathematical Innovations**
+Archimedes is widely regarded as one of antiquity’s greatest mathematicians. In *On the Sphere and Cylinder*, he proved that a sphere’s volume and surface area are each two-thirds that of its circumscribing cylinder—a result so significant he reportedly requested it mark his tomb. He also established remarkably accurate bounds for π (between 3 10/71 and 3 1/7) using the method of exhaustion, which involved inscribing and circumscribing 96-sided polygons around a circle. In *On Spirals*, he defined the curve that bears his name and calculated areas swept by rotating lines. His work *On the Quadrature of the Parabola* demonstrated how to calculate parabolic segments using geometric series, effectively anticipating infinite summation techniques long before calculus.
 
-**Engineering & Inventions**
-Beyond pure theory, Archimedes applied mathematics to practical engineering. He is traditionally credited with refining the Archimedes screw for moving water and developing compound pulleys. Plutarch recounts that he demonstrated their mechanical advantage by single-handedly hauling a fully loaded ship. During the Roman siege of Syracuse (214–212 BC), ancient historians describe his defensive engines, including improved catapults and crane-like grappling hooks that could lift enemy ships. The story of "burning mirrors" setting Roman vessels ablaze is widely told but remains disputed; modern controlled experiments have shown ignition is theoretically possible under ideal conditions, though historical verification is lacking.
+In *The Sand Reckoner*, Archimedes designed a systematic notation for expressing extremely large numbers. For his calculation, he assumed a finite universe to estimate the grains of sand it would hold, rather than explicitly rejecting an infinite cosmos. He also referenced the heliocentric model of Aristarchus of Samos, providing one of the few surviving ancient mentions of that theory. He also authored *On Touching Circles*, a now-lost work on tangencies that may relate to problems later associated with Apollonius, though its exact content remains uncertain.
 
-**Famous Anecdotes & Death**
-A later account by Vitruvius describes how Archimedes determined the purity of King Hiero’s gold crown by measuring water displacement while bathing, reportedly shouting "Eureka!" upon his realization. The circumstances of his death in 212 BC are also filtered through later sources. Ancient historians describe him as killed during the city's fall while absorbed in a geometric diagram. A famous phrase attributed to him—"Do not disturb my circles"—is reported in Latin by later writers, though Archimedes spoke Greek and his original words are now unknown.
+**Physics and Engineering**
+Beyond pure mathematics, Archimedes laid foundations for physics and engineering. In *On Floating Bodies*, he established the principle of buoyancy: a body immersed in fluid experiences an upward force equal to the weight of the displaced fluid. The famous “Eureka!” anecdote comes from later accounts, though its historicity is often described as uncertain. He also formalized the law of the lever and is credited with designing compound pulley systems capable of moving immense weights. His most well-attested invention, the Archimedean screw, remains in use today for irrigation and drainage.
 
-**The Palimpsest & Legacy**
-Much of what we know comes from a remarkable 10th-century Byzantine manuscript known as the Archimedes Palimpsest. In the 13th century, its parchment was scraped and overwritten with religious texts. It disappeared for centuries before being purchased at Christie’s in 1998 by an anonymous buyer (later deposited at the Walters Art Museum). Modern imaging techniques have since recovered vast amounts of previously illegible text, including unique copies of *The Method* and *Stomachion*.
+During the Roman siege of Syracuse (214–212 BC), he reportedly designed defensive engines like improved catapults and the “Claw of Archimedes,” a crane-like device that could lift and capsize enemy ships. The legendary “heat ray” or burning mirrors, however, is highly disputed; no reliable contemporary sources mention it, and modern historians generally consider it apocryphal.
 
-Archimedes is often ranked among the greatest mathematicians in history. His synthesis of pure geometry with physical mechanics laid foundational work for statics, hydrostatics, and early calculus concepts, leaving a legacy that continues to influence mathematics and engineering today. If you’d like to explore any specific treatise, the manuscript’s recovery process, or his mathematical methods in more detail, just let me know.
+**The Palimpsest and Rediscovery**
+Much of what we know comes from medieval copies, but a critical breakthrough occurred in 1906 when Danish philologist Johan Ludvig Heiberg identified the Archimedes Palimpsest in Constantinople. Medieval monks had originally scraped away his texts to reuse the parchment for a prayer book. After changing hands and resurfacing at auction in 1998, modern multispectral imaging at the Walters Art Museum revealed previously unreadable passages. This included *The Method of Mechanical Theorems*, which showed Archimedes using mechanical analogies and grappled with infinite processes to derive geometric results—techniques that anticipated integral calculus by nearly two millennia.
+
+**Death and Legacy**
+Archimedes died in 212 BC when Syracuse fell to Roman forces under General Marcus Claudius Marcellus. According to Plutarch, who wrote centuries later, Marcellus had ordered Archimedes spared, but a soldier found him absorbed in a mathematical diagram and killed him despite his plea not to disturb his circles. Centuries later, Cicero, serving as quaestor in Sicily in 75 BC, claimed to have located Archimedes’ neglected tomb, identifiable by the carved sphere and cylinder he requested, though its exact location is now lost.
+
+His legacy endures not just in formulas and principles that still govern engineering and physics today, but in the rigorous mathematical standards he set. The rediscovery of his palimpsest has only deepened our appreciation for a mind that bridged pure theory and practical invention. If you’d like to explore any specific treatise or historical account in more detail, just let me know.
 
 ---
 > _Tools used:_
-> - **deepseek-v4-pro:cloud** — `web_search` ×14, `kb_search` ❌
-> - **qwen3.5:397b-cloud** — `web_search` ×9
-> - **qwen3.6:35b** — `web_search` ×4, `kb_search` ×2
+> - **qwen3.5:397b-cloud** — `web_search` ×7
+> - **deepseek-v4-pro:cloud** — `web_search` ×13, `kb_search` ❌
+> - **qwen3.6:35b** — `kb_search`, `web_search` ×6
 
 ---
 
@@ -142,41 +127,50 @@ Archimedes is often ranked among the greatest mathematicians in history. His syn
 
 - model: `audrey_research`
 - status: PASS
-- banners: Planning → Researching → Verifying → Writing
+- banners: Planning → Researching → Verifying → Fact-checking → Writing
 - checks: reachable:✅  no_error_marker:✅  has_answer:✅  banners:✅  sources:—  url_wellformed:—
 
-When you ask what we actually know about the Library of Alexandria, the answer is both clearer and more nuanced than the popular legends suggest. Based on the available historical evidence, here is what scholars can reasonably establish, followed by how historians view the most famous claims about its founding and destruction.
+You asked what we actually know about the Library of Alexandria and which popular claims about its founding and destruction are disputed by historians. Based on the available evidence, here is how scholars separate the institution’s historical reality from its modern mythology.
 
-### What We Can Reasonably Establish
-First, the Library was never a standalone building. It functioned as the core collection of the **Mouseion**—a broader research institute dedicated to the Muses located in Alexandria’s royal quarter. As for its origins, historians commonly date its establishment to the early Ptolemaic dynasty, most likely during the reign of **Ptolemy I Soter** or his successor **Ptolemy II Philadelphus**, with traditional accounts often pointing to around 295 BCE. Ancient sources consistently credit **Demetrius of Phalerum**, an exiled Athenian statesman, with proposing the concept and organizing its early structure. However, some modern scholars note that his timeline under Ptolemy I is complicated by later records of his banishment, leaving open the possibility that the project was conceived under one ruler but realized under the other.
+### What We Actually Know
+**Institutional Context & Funding**  
+The Library was never a standalone building in the modern sense. It functioned as a component of the *Mouseion* (“shrine to the Muses”), a state-funded research institute within Alexandria’s royal palace complex. It is commonly dated to the early Ptolemies (3rd century BC), though the precise founding date and individual responsible remain unconfirmed.
 
-We also know there was a well-attested “daughter library” housed at the **Serapeum** temple, which served a wider public. As for its scale, ancient texts claim anywhere from 200,000 to 700,000 scrolls, but modern scholars treat these figures with skepticism. No inventory survives, and even later references like Seneca’s mention of 40,000 lost scrolls remain uncertain. Archaeologically, no remains of the main Library building have ever been identified, and documentation regarding its status during the Roman Imperial period is notably sparse.
+**Organization & Scale**  
+The institution was highly organized, as demonstrated by Callimachus of Cyrene’s bibliography, which is often considered the earliest known library catalog. While ancient sources give wildly varying figures for its holdings—ranging from 40,000 to 700,000 scrolls—modern scholars generally regard these numbers as logistically implausible and likely exaggerated. 
 
-### The Popular Claims Historians Dispute
-The dramatic narratives you’ve likely encountered are where the evidence thins out considerably. Here’s how historians view the most famous claims:
+**Scholarship & Acquisition Practices**  
+It operated as a living center for original research in mathematics and science, with scholars producing work noted for its remarkable accuracy for the time. Regarding how it gathered materials, ancient sources describe a policy of copying books that passed through the port. According to later tradition, they may have also confiscated scrolls from incoming ships, though this rests on anecdotal accounts rather than confirmed administrative law.
 
-- **“Alexander the Great founded it.”** This is widely treated as legend. There is no ancient evidence linking Alexander to its founding; the institution is consistently tied to the Ptolemies and Demetrius of Phalerum.
-  
-- **“Julius Caesar burned the Library in 48 BCE.”** Ancient writers like Plutarch and Cassius Dio do describe a fire during Caesar’s siege that consumed books, but historians dispute that it destroyed the main institution. The blaze was often described as targeting warehouses of export-bound scrolls at the docks rather than the Mouseion itself. References to scholars using the collection decades later suggest the library either survived or was later rebuilt.
-  
-- **“Christians under Patriarch Theophilus destroyed it in 391 CE.”** This is a misattribution. Theophilus did oversee the destruction of the Serapeum temple and its associated daughter library, but there is no clear evidence that the main Library of the Mouseion was affected at this point.
-  
-- **“Hypatia’s murder in 415 CE marked the Library’s end.”** There is no historical connection between Hypatia’s death and the Library. By the time she was killed, the institution had likely already ceased to function as a major center of scholarship.
-  
-- **“Emperor Aurelian destroyed it in the early 270s CE.”** Some scholars suggest this period, during Aurelian’s campaigns against Palmyran forces in Alexandria, may have caused significant damage to library buildings. However, this remains a debated hypothesis rather than a settled consensus, and it is just one of several competing theories about when physical structures were lost.
-  
-- **“Caliph Omar or Amr ibn al-As burned the Library after the Arab conquest in 642 CE.”** This story is widely regarded by historians as a fabrication. The claim that the conqueror was ordered to burn books because they either contradicted or duplicated the Quran first appears in historical writings from the 12th–13th centuries (such as those by Abd al-Latif al-Baghdadi and Ibn al-Qifti), roughly five to six centuries after the event. It is absent from contemporary sources and aligns more with later polemical narratives than with historical record.
-  
-- **“A single catastrophic fire wiped out all ancient knowledge.”** This is a pervasive myth. The scholarly consensus points instead to a slow, multi-century decline driven by shifting funding, institutional neglect, the natural fragility of papyrus, and the gradual transition to parchment codices.
+### Disputed Claims: Founding
+**The Demetrius of Phalerum Myth**  
+Popular tradition frequently credits the exiled Athenian orator Demetrius with founding the library and advising Ptolemy I. However, his exact role is unclear; while he may have been involved in early collections, the massive scale of the project points to a broader state initiative driven by Ptolemaic cultural ambitions rather than a single founder’s legacy.
+
+### Disputed Claims: Destruction
+The most significant shift in modern scholarship is moving away from the idea of a single catastrophic fire toward a model of slow institutional attrition. Historians now widely agree the library faded over centuries due to neglect, budget cuts, and the natural decay of papyrus in a humid climate. Within this framework, several popular destruction narratives are heavily disputed:
+
+**Julius Caesar’s Fire (48 BCE)**  
+A fire did occur during Caesar’s civil war, but ancient accounts indicate it likely destroyed scrolls stored in warehouses near the docks rather than the library itself. The institution continued to be referenced by later authors, meaning the fire was a significant loss of stock, not the end of the library.
+
+**The Serapeum Destruction (391 CE)**  
+Christian forces did violently demolish the Serapeum and its scroll collection under Patriarch Theophilus. However, this housed a secondary “daughter library,” not the original Mouseion collection, which had likely already ceased functioning as an active institution.
+
+**Aurelian’s Campaign (c. 270s CE)**  
+Some scholars suggest that Emperor Aurelian’s razing of Alexandria’s royal quarter may have severely damaged the main library, but this remains uncertain and is not the scholarly consensus. It does not override the broader agreement that the library’s end was gradual rather than a single decisive blow.
+
+**Caliph Omar’s Edict (7th Century)**  
+The claim that Muslim conquerors burned the library because its contents either contradicted or duplicated the Quran is widely rejected by historians. This story first appears in writings from roughly 600 years after the alleged event and is considered a late medieval fabrication with no contemporary support.
+
+**Hypatia’s Murder & “All Knowledge”**  
+The philosopher Hypatia’s death in 415 CE was a tragic blow to Alexandrian intellectual life, but no ancient source links it to the destruction of any library. Similarly, the idea that the library held “all the knowledge of the ancient world” is romantic hyperbole; its collection focused overwhelmingly on Greek literature and scholarship, with only occasional translations of non-Greek works.
 
 ### The Bottom Line
-You can be confident that the Library of Alexandria was a real and influential institution, but almost everything about its physical architecture, exact collection size, and final days remains uncertain. The popular stories of dramatic, singular destructions are either exaggerations, misattributions to different buildings, or much later literary inventions. In reality, the Library’s end was likely a slow fade rather than a single blaze.
+We have no archaeological remains of the Great Library itself, and everything we reconstruct comes from scattered literary references written long after its peak. The historical record points to a real, highly influential research institute that was systematically mythologized over time. Rather than vanishing in a dramatic blaze, it quietly faded into history—a victim of shifting political priorities and the slow decay of time, not a single catastrophic fire.
 
 ---
 > _Tools used:_
 > - **deepseek-v4-pro:cloud** — `web_search` ×12
-> - **qwen3.5:397b-cloud** — `web_search` ×5
-> - **qwen3.6:35b** — `web_search` ×3, `kb_search`
+> - **qwen3.5:397b-cloud** — `web_search` ×10
 
 ---
 
@@ -184,40 +178,40 @@ You can be confident that the Library of Alexandria was a real and influential i
 
 - model: `audrey_research`
 - status: PASS
-- banners: Planning → Researching → Verifying → Writing
+- banners: Planning → Researching → Verifying → Fact-checking → Writing
 - checks: reachable:✅  no_error_marker:✅  has_answer:✅  banners:✅  sources:—  url_wellformed:—
 
-You asked to trace how a two-millennia quest to prove Euclid’s parallel postulate ultimately birthed non-Euclidean geometry. Let’s walk through that journey together, step by step.
+You asked to trace how centuries of trying to prove Euclid’s fifth postulate eventually birthed non-Euclidean geometry. Let’s walk through that journey together, figure by figure and century by century.
 
-**The Problem and Early Attempts**
-Around 300 BCE, Euclid compiled his *Elements*, laying out five postulates for geometry. The fifth—the parallel postulate—felt far less self-evident than the others. For roughly two thousand years, mathematicians suspected it wasn’t a fundamental assumption at all, but a theorem that could be derived from the other four. 
+**The Starting Point: A Postulate That Didn’t Feel Like One**
+Around 300 BCE, Euclid included his famous fifth postulate in the *Elements*: if a straight line falls on two lines making interior angles on one side less than two right angles, those lines will eventually meet on that side. Unlike his first four axioms, this one felt more like a theorem than a self-evident truth, and that unease sparked over two millennia of mathematical detective work.
 
-Early efforts came from ancient and medieval scholars who worked with geometric figures to test the postulate. Proclus (5th century CE) argued that non-parallel lines must eventually intersect, though his reasoning quietly assumed what he was trying to prove. Omar Khayyam (12th century) and Nasir al-Din al-Tusi (13th century) both explored quadrilaterals with right angles at the base, deriving properties that would later be recognized as part of non-Euclidean systems. While their work was remarkably insightful, historians note there’s no confirmed evidence that their ideas directly influenced later European mathematicians.
+**Antiquity & The Islamic Golden Age (5th century–13th century)**
+The earliest recorded attempts to prove it come from late antiquity. In the 5th century CE, Proclus wrote a commentary on Euclid where he tried to prove the postulate by assuming parallel lines are everywhere equidistant—a move that actually assumes what he was trying to prove. Centuries later, during the Islamic Golden Age, scholars began exploring what would happen if the postulate were simply *denied*. Omar Khayyam (1048–1131) analyzed a quadrilateral with two right angles and derived many results that would later appear in non-Euclidean geometry, though he ultimately stayed within Euclid’s framework. Nasir al-Din al-Tusi (1201–1274) also wrote treatises on the topic; his work traveled to Europe and quietly influenced later attempts.
 
-**The 17th- and 18th-Century Push**
-In the early modern period, the search intensified. John Wallis (1663) attempted a proof relying on the existence of similar triangles of any size—an assumption that turns out to be mathematically equivalent to the parallel postulate itself. 
+**The 17th & 18th Centuries: Circular Logic and *Reductio ad Absurdum***
+By the 1600s, mathematicians were still chasing a proof. John Wallis (1663) argued that similarity of figures could prove the postulate, but his reasoning was circular. The strategy then shifted to assuming the postulate was false and looking for a contradiction.
 
-The most famous near-miss came from Giovanni Girolamo Saccheri. While some sources place his initial work in 1697, his findings were published posthumously in 1733 as *Euclides ab omni naevo vindicatus*. Using what’s now called the Saccheri quadrilateral, he tested three possibilities for the summit angles: right, obtuse, and acute. He correctly showed that the obtuse case leads to contradictions, but when examining the acute case, he derived theorems that would later define hyperbolic geometry. Unwilling to abandon Euclidean intuition, he rejected his own results and concluded the postulate must be true.
+In 1733, Giovanni Girolamo Saccheri published *Euclides ab Omni Naevo Vindicatus*. He examined three possibilities for the summit angles of a special quadrilateral: right, obtuse, or acute. He correctly derived many theorems of what we now call hyperbolic geometry from the acute-angle case, but he ultimately rejected them as “repugnant to the nature of the straight line.” Johann Heinrich Lambert followed in 1766 (published posthumously in 1786), exploring similar quadrilaterals and noting that the acute-angle hypothesis would hold on a “sphere of imaginary radius.” He came closer to accepting a new geometry than Saccheri did, but still stopped short. Around the same time, Adrien-Marie Legendre spent decades (starting with his 1794 *Éléments de géométrie*) trying to prove that triangle angles sum to two right angles without using the postulate, only to repeatedly rely on equivalent assumptions he didn’t realize he was making.
 
-Around the same time, Georg Klügel (1763) surveyed dozens of attempted proofs and openly doubted whether the postulate could ever be proven from other axioms. Johann Heinrich Lambert (1766) extended Saccheri’s work, noting that a triangle’s area might relate to its angle defect, and even speculated that the acute hypothesis could hold on a “sphere of imaginary radius”—a striking foreshadowing of hyperbolic space, though he stopped short of claiming such a geometry actually existed.
+**The Breakthrough: Independence and New Universes (1820s–1830s)**
+By the early 19th century, the tide turned. Gauss is said to have doubted the provability of the postulate from a young age, and by the 1820s he had privately developed a complete geometry where triangle angles sum to less than 180°. He never published it, fearing public controversy, though he is often credited with coining the term “non-Euclidean geometry” (though some historians attribute that credit to Klein).
 
-**The Breakthrough: Gauss, Lobachevsky, and Bolyai**
-By the 1810s, Carl Friedrich Gauss had privately developed a consistent non-Euclidean system. In an 1824 letter to Franz Taurinus, he wrote that assuming triangle angles sum to less than 180° leads to a geometry “quite different from our (Euclidean) geometry, but which is in itself completely consistent.” He is often credited with coining the term “non-Euclidean geometry,” though he never published his work, fearing what he called the “howl from the Boeotians.”
+The first openly printed accounts arrived shortly after. Nikolai Lobachevsky published *On the Principles of Geometry* in 1829 (with a German follow-up in 1840), explicitly building a coherent system where infinitely many parallels pass through a point not on a given line. Independently, János Bolyai appended his own 24-page treatise to his father’s book in 1832, famously declaring he had “created a strange new universe out of nothing.”
 
-The first openly available account came from Nikolai Lobachevsky (1829/1830), who developed a full system of hyperbolic geometry. Independently, János Bolyai arrived at the same conclusions and published his findings in 1832 as a 26-page appendix to his father’s textbook. When Gauss later read it, he remarked that it matched his own meditations from the previous three decades. (Note: while some sources suggest earlier drafts or correspondence around 1831, 1832 is the confirmed publication date for the Appendix.)
+**Consolidation and Legitimacy (1850s–1890s)**
+For non-Euclidean geometry to be accepted, it needed proof that it wasn’t secretly contradictory. Bernhard Riemann delivered his famous habilitation lecture in 1854 (published in 1868), shifting the focus from parallel lines to curvature itself. He explored geometries of constant positive curvature, and his work later led to elliptic geometry. Eugenio Beltrami provided the crucial consistency proof in 1868 by constructing a model of hyperbolic geometry on a surface of constant negative curvature (the pseudosphere), showing that if Euclidean geometry is consistent, so is non-Euclidean geometry.
 
-**Riemann, Models, and Final Validation**
-The picture expanded dramatically in 1854 when Bernhard Riemann delivered his habilitation lecture, *On the Hypotheses Which Lie at the Foundations of Geometry*. He generalized space using curvature and manifolds, describing a geometry where no parallel lines exist (elliptic geometry) and laying groundwork that would later underpin Einstein’s general relativity.
+Felix Klein’s 1872 Erlangen Program then classified geometries by their symmetry groups and provided the Klein disk model, while Henri Poincaré introduced the disk and half-plane models in the 1880s that became standard tools. Finally, David Hilbert’s 1899 *Foundations of Geometry* formalized an axiom system that definitively proved non-Euclidean geometries are as logically consistent as Euclid’s own.
 
-For over a century, critics questioned whether non-Euclidean systems were merely clever fictions or logically sound. Eugenio Beltrami helped resolve this in 1868 by showing the relative consistency of hyperbolic geometry through Euclidean models, including a disk model and a local pseudosphere model. This work helped establish the logical validity of these new geometries rather than instantly silencing all skepticism. Felix Klein (1871) later provided projective frameworks to classify them, and Henri Poincaré (1882) introduced conformal disc and half-plane models that remain standard tools today.
-
-**In short:** What began as a 2,000-year attempt to salvage Euclid’s fifth postulate gradually revealed that relaxing it didn’t break mathematics—it opened an entirely new landscape. Each generation’s “failed” proof quietly mapped out the contours of hyperbolic and elliptic space, until Gauss, Lobachevsky, Bolyai, and Riemann finally stepped back to see the full picture.
+**The Shift in Perspective**
+What began as a two-thousand-year quest to prove a single postulate ended with the realization that the postulate is actually independent of Euclid’s other axioms. The repeated failures to prove it, combined with the strange but internally consistent theorems that emerged when it was denied, forced mathematics to expand beyond flat space. You can now see how each “failed” proof quietly paved the way for a richer, multi-dimensional understanding of geometry itself.
 
 ---
 > _Tools used:_
-> - **deepseek-v4-pro:cloud** — `web_search` ×14
-> - **qwen3.6:35b** — `web_search` ×7
-> - **qwen3.5:397b-cloud** — `web_search` ×5
+> - **deepseek-v4-pro:cloud** — `web_search` ×12
+> - **qwen3.5:397b-cloud** — `web_search` ×13
+> - **qwen3.6:35b** — `web_search` ×8, `kb_search`
 
 ---
 
@@ -225,49 +219,53 @@ For over a century, critics questioned whether non-Euclidean systems were merely
 
 - model: `audrey_research`
 - status: PASS
-- banners: Planning → Researching → Verifying → Writing
+- banners: Planning → Researching → Verifying → Fact-checking → Writing
 - checks: reachable:✅  no_error_marker:✅  has_answer:✅  banners:✅  sources:—  url_wellformed:—
 
-You asked for a clear summary of the current state of async runtimes in Rust and their main tradeoffs. Based on the available research, here is how the landscape looks today.
+When you look at the Rust async landscape today, you’ll notice a clear consolidation around a few key players, each optimized for different priorities. Here’s how the leading runtimes stack up and where the main tradeoffs lie.
 
-### The Current State: Consolidation with Persistent Fragmentation
-The Rust async ecosystem has largely consolidated around a few key players, but it remains fragmented due to Rust’s strong static typing. Because `async` functions return concrete types, selecting a runtime early in a project typically means committing to its specific ecosystem for the lifetime of your crate. While the `futures` crate provides core traits like `AsyncRead` and `AsyncWrite`, many real-world libraries still depend directly on runtime-specific types (such as `tokio::sync::Mutex`). This creates a powerful network effect that makes cross-runtime compatibility difficult to achieve in practice, meaning choosing a runtime is often synonymous with choosing an ecosystem.
+### The Current Landscape
 
-### The Leading Runtimes & Their Tradeoffs
+**Tokio remains the de facto standard.** It offers the broadest ecosystem integration, meaning most major web frameworks, HTTP clients, and database libraries default to it or provide first-class support. Technically, Tokio provides two scheduling modes: a multi-threaded work-stealing scheduler for general-purpose throughput, and a single-threaded mode for simpler deployments. By default, it relies on mature I/O backends like `epoll` (Linux) and `kqueue` (macOS). If you need io_uring support within Tokio, that’s handled through the `tokio-uring` crate. The tradeoff is complexity: the work-stealing scheduler introduces synchronization overhead and has documented edge cases around task fairness and memory usage per future.
 
-**Tokio — The De Facto Standard**
-Tokio remains the dominant choice for server and desktop workloads. It uses a multi-threaded, work-stealing scheduler (with an optional single-threaded mode) and provides a comprehensive stack including I/O drivers, timers, synchronization primitives, and utilities like `tokio::select`. 
-*Tradeoff:* You gain near-universal library support and battle-tested reliability, but at the cost of a larger dependency footprint, longer compile times, and potential binary bloat. Researchers also note that blocking calls within async tasks can stall worker threads, which requires careful design to avoid scheduling delays.
+**smol stands out as a lightweight, modular alternative.** It’s built on the `async-io` crate, which provides a unified interface across `epoll`, `kqueue`, io_uring, and IOCP. Smol defaults to cooperative, single-threaded scheduling but can be multiplexed across multiple reactors for parallelism. Its timer integration relies on the standard `time` crate rather than Tokio’s utilities. The main tradeoff here is ecosystem size: while smol is excellent for constrained environments or when you want to avoid heavy dependencies, mainstream crates like Axum or reqwest don’t default to it, so you’ll often need adapters.
 
-**smol — The Lightweight, Modular Alternative**
-smol is composed of small, independent crates (such as `async-io` and `async-executor`) and appears to be actively maintained as of 2025–2026. It offers both single-threaded and multi-threaded executors but leans toward simplicity and minimalism.
-*Tradeoff:* It delivers smaller binary sizes, faster compilation, and easier-to-understand internals. However, its ecosystem is much smaller, so you will often need to rely on Tokio-compatible libraries anyway, which can introduce friction.
+**async-std’s status is currently disputed.** While some sources point to a 2025 discontinuation, no official announcement has been confirmed, and other reports indicate it has been largely unmaintained since around 2021. It’s generally advised to look toward smol or Tokio for new projects.
 
-**async-std — The Uncertain Alternative**
-async-std was originally designed to mirror the standard library’s API surface in an async context. While it once served as a clear alternative, its current maintenance status and viability for new projects remain uncertain; available evidence does not show an official deprecation or archive notice, but it also lacks the clear momentum of other runtimes. (Note: earlier claims that it serves as the default for frameworks like Tauri or Deno have been corrected—both actually use Tokio.)
+**io_uring-focused runtimes (like glommio and monoio)** are emerging for high-performance I/O workloads on Linux. These typically use a thread-per-core architecture instead of work-stealing. This design eliminates cross-thread synchronization and cache-line bouncing, which can scale very well for I/O-bound tasks on modern Linux kernels (5.6+ or newer). The tradeoff is significant: you must manually shard work across cores, avoid blocking operations, and often rely on the runtime’s own networking primitives rather than standard Tokio libraries. Performance claims in this space vary widely by workload, so benchmarking your specific use case is essential.
 
-**io_uring-Based Runtimes (monoio & glommio) — The Linux-Optimized Niche**
-These runtimes are actively developed but remain niche. They leverage Linux’s `io_uring` subsystem for true asynchronous disk and network I/O and use a thread-per-core model to avoid synchronization overhead.
-*Tradeoff:* They can achieve higher throughput and lower latency on Linux, but they are platform-restricted, have smaller ecosystems, and require careful design to prevent blocking the per-core event loop.
+### Main Tradeoffs to Consider
 
-**Embassy — The Embedded Specialist**
-Embassy is an actively developed runtime designed specifically for `no_std` environments. It uses a single-threaded executor with custom interrupt-driven I/O and supports architectures like ARM Cortex-M and RISC-V.
-*Tradeoff:* It is highly relevant for microcontrollers and embedded systems, but irrelevant for traditional server or desktop deployments.
+**1. Scheduling & Architecture**
+- *Work-stealing (Tokio)* automates load balancing across OS threads, making it easier to write applications with mixed CPU and I/O work. However, it adds complexity, potential fairness edge cases, and task-migration overhead that can hurt performance under extreme I/O concurrency.
+- *Thread-per-core (glommio/monoio)* maximizes scalability for I/O-bound workloads by removing cross-thread synchronization. The tradeoff is architectural complexity: developers must manually manage core sharding and strictly avoid blocking operations.
 
-### Key Tradeoffs Summary
-When weighing your options, the main dimensions to consider are:
-- **Ecosystem compatibility:** Tokio offers near-universal support; alternatives often require interop layers or manual adaptation.
-- **Performance & scheduling model:** Tokio uses a work-stealing thread pool for multi-core scaling. smol and Embassy lean toward simpler, single-threaded event loops by default. io_uring runtimes use thread-per-core models optimized for Linux I/O.
-- **Platform & environment support:** Tokio and smol are cross-platform. io_uring runtimes are Linux-only. Embassy targets `no_std` embedded systems.
-- **Footprint & complexity:** Tokio provides a full-featured but heavier stack. smol offers modularity and smaller binaries. Embedded and io_uring runtimes require more specialized knowledge to use effectively.
+**2. I/O Backends**
+- `epoll`/`kqueue` are universally supported, well-understood, and stable across older kernels. They require a syscall per I/O operation, which can become a bottleneck at very high IOPS.
+- io_uring uses submission/completion queues to batch syscalls, drastically reducing overhead. It’s especially beneficial for disk I/O, though some benchmarks suggest it can significantly outperform standard Tokio for specific random read workloads. The tradeoff is platform lock-in: it requires modern Linux kernels and isn’t yet mainstream outside specialized high-performance use cases.
 
-### A Note on Evidence & Uncertainty
-It is worth noting that the gathered research contains some internal inconsistencies, particularly regarding async-std’s current status and the availability of recent head-to-head performance benchmarks between runtimes like Tokio and smol. Additionally, while one secondary report suggested a specific adoption percentage for Tokio, the primary methodology could not be verified, so broader trends should be treated cautiously rather than as precise metrics. Ultimately, the Rust async landscape today is defined less by a single "best" runtime and more by matching your target environment (server, embedded, Linux I/O, or CLI) to the ecosystem you’re willing to commit to.
+**3. Ecosystem & Integration**
+- Tokio wins on ready-made integrations and community support. If you’re building a web server or using popular crates, the ecosystem advantage is often non-negotiable.
+- smol offers a cleaner, more auditable codebase with fewer dependencies. It’s a credible fit when minimal footprint matters, but you’ll trade off convenience for control.
+
+**4. Avoiding Ecosystem Lock-in**
+If runtime agnosticism is a priority, writing against shared abstractions like `async-io` or `futures-io` is one approach to sidestep vendor lock-in. It requires more initial setup than using a default runtime’s traits, but it keeps your options open as the ecosystem evolves.
+
+### Looking Ahead
+The long-term goal in the Rust community remains stabilizing standardized async traits in the standard library, which would make runtimes more interchangeable. As of now, that work is still discussed at the RFC level and hasn’t reached final acceptance. (Note: `std::task::Context`, often mentioned in these discussions, has actually been stable since Rust 1.36.)
+
+### Where to Start?
+- **Default choice:** Tokio (`multi_threaded`) for most new projects due to ecosystem maturity and battle-tested stability.
+- **Lightweight/constrained:** smol if you want a smaller footprint, modular design, or want to avoid heavy dependency trees.
+- **High-throughput Linux I/O:** io_uring-focused runtimes like glommio or monoio, provided you’re comfortable with manual sharding and narrower compatibility.
+
+The landscape is consolidating, but fragmentation persists at the high-performance edge. Your best path depends on whether you prioritize ecosystem breadth, architectural simplicity, or raw I/O throughput.
 
 ---
 > _Tools used:_
-> - **deepseek-v4-pro:cloud** — `web_search` ×14
-> - **qwen3.5:397b-cloud** — `web_search` ×10
+> - **qwen3.5:397b-cloud** — `web_search` ×12
+> - **deepseek-v4-pro:cloud** — `web_search` ×11
+> - **qwen3.6:35b** — `web_search` ×7
 
 ---
 
@@ -275,31 +273,34 @@ It is worth noting that the gathered research contains some internal inconsisten
 
 - model: `audrey_research`
 - status: PASS
-- banners: Planning → Researching → Verifying → Writing
+- banners: Planning → Researching → Verifying → Fact-checking → Writing
 - checks: reachable:✅  no_error_marker:✅  has_answer:✅  banners:✅  sources:—  url_wellformed:—
 
-You asked about the most significant developments in open-weight large language models during 2025, specifically what happened and when. Based on the verified research gathered, the clearest and most concretely documented timeline centers on Alibaba’s Qwen family. I should note upfront that our search budget left notable gaps for several other major industry releases, so this overview reflects only what could be grounded in the available evidence. Here is what we found:
+You asked about the most significant developments in open-weight large language models during 2025, specifically what happened and when. Based on the verified research data, two major releases stand out with documented details, while several other widely discussed developments remain unverified due to gaps in the captured evidence.
 
-**January 2025:** Alibaba kicked off the year with the Qwen2.5 series. This included visual-language models (Qwen2.5-VL) combining vision transformers with the Qwen LLM, alongside Qwen2.5-Max, a Mixture-of-Experts model positioned as their most capable offering at the time. Technical reports confirm that the Qwen2.5 foundation was pretrained on 18 trillion tokens and later expanded to support a 1-million-token context window variant.
+**April 2025: Meta’s Llama 4 Family**
+The most thoroughly documented open-weight release of the year occurred in April 2025, when Meta launched the Llama 4 family. This suite included three primary variants:
+- **Llama 4 Scout:** Described as a lightweight option featuring roughly 17 billion active parameters across a 16-expert Mixture-of-Experts (MoE) architecture, with a context window reported to reach 10 million tokens.
+- **Llama 4 Maverick:** Positioned as the main workhorse, also utilizing around 17 billion active parameters but scaled to a 128-expert MoE architecture. It is noted as natively multimodal.
+- **Llama 4 Behemoth:** A larger model previewed alongside the others, featuring approximately 2 trillion total parameters and 288 billion active parameters distributed across 16 experts, also described as multimodal.
+The weights were made available in BF16 and FP8 quantized formats to support different deployment needs. Around this time, policy discussions also emerged regarding Meta’s acceptable use terms, with some organizations noting the distinction between “open-weight” and fully open-source classifications.
 
-**March 2025:** A 32-billion-parameter vision-language variant (Qwen2.5-VL-32B) was reportedly released as open-weight around March 24, though this specific date and status rely on community-sourced documentation rather than an official press release.
+**December 2025: Mistral 3 Family**
+Later in the year, on December 2, 2025, Mistral AI released its Mistral 3 family. The flagship model, Mistral Large 3, is described as a 675-billion-parameter Mixture-of-Experts model that supports both multimodal and multilingual tasks. It was released under the Apache 2.0 license alongside nine smaller companion models ranging from 3 billion parameters upward, designed for edge deployment and offline use. At launch, it was reported to rank highly on open-source model leaderboards.
 
-**April 2025:** Alibaba announced the next generation, Qwen 3, with early coverage commonly dated to a late-April rollout (around April 28–29). The family was described in repository notes as operating under an Apache 2.0 license and featuring both dense and Mixture-of-Experts architectures. A key innovation highlighted in initial reports was a hybrid “thinking/non-thinking” mode, designed to let users toggle between fast responses and slower, deliberate reasoning for complex multi-step tasks.
+**Regarding Other Widely Discussed Releases**
+You may have encountered reports pointing to additional major developments earlier in the year, such as potential open-weight releases from OpenAI or updates to Alibaba’s Qwen series. However, the available evidence does not capture verified dates, specific model names, parameter counts, or technical specifications for these claims. Specifically:
+- Claims regarding an **August 5 launch date**, specific model names like **gpt-oss-120b** and **gpt-oss-20b**, and assertions about them being the "first open-weight models in over six years" remain unverified.
+- Highly specific technical details, such as **MXFP4 quantization formats**, **single consumer/workstation GPU deployment requirements**, and **benchmark comparisons** to closed-weight models like o3-mini or o4-mini, cannot be confirmed from the current data and should be treated as reported rather than verified.
+- Similarly, reports of a **July 2025 Qwen3 release** featuring specific variants like `Qwen3-30B-A3B-Instruct` are unverified, as targeted searches returned no captured evidence.
+- While early-year reasoning models like DeepSeek were widely discussed, no concrete details were retrieved to confirm their 2025 open-weight status or exact release timelines.
 
-**July 2025:** Updates continued with what appears to be a major iteration of the flagship model (often referenced as Qwen3-235B-A22B). This version reportedly introduced significant enhancements and extended context support up to 256K tokens, though these specifics are drawn from GitHub repository notes rather than independently confirmed technical reports.
-
-**Late 2025:** The family continued to evolve with mentions of a Qwen3.5 variant featuring a sparse MoE architecture (reportedly around 397 billion total parameters with 17 billion active per forward pass) and a novel Gated Delta Networks attention design aimed at reducing compute costs.
-
-**Beyond the Qwen Family:** The broader open-weight landscape almost certainly saw significant activity in 2025, but our searches for major releases from DeepSeek, Meta’s Llama 4, Mistral Large 3, Google’s Gemma 3, and MiniMax did not return corroborated details within our available tools. 
-
-Additionally, there are unconfirmed reports circulating about Moonshot AI’s Kimi K2 series emerging in July 2025, with later variants detailed as late as November 6. Some accounts suggest it features a massive Mixture-of-Experts architecture (reportedly around 1 trillion total parameters with roughly 32 billion active per inference) and was distributed under a Modified MIT License. However, because these claims lack direct source citations in the verified findings, they should be treated as preliminary reports rather than confirmed milestones. (Note: Any mentions of subsequent iterations like K2.7 falling in April 2026 fall outside your requested timeframe and have been omitted.)
-
-To summarize, 2025’s most verifiable open-weight progress tracks Alibaba’s rapid Qwen iterations—spanning from January’s multimodal and MoE launches through mid-year context expansions and late-year architectural refinements. While other major players likely contributed to the space this year, the exact dates and technical specifics for those releases couldn’t be verified with the evidence gathered. If you’d like to dive deeper into any specific model family or need help tracking down official documentation for these releases, just let me know!
+In summary, the only developments in 2025 that can be substantiated with direct evidence are Meta’s April Llama 4 family launch and Mistral AI’s December 2 release. The broader landscape appears active, but without verified records for other major players, those details remain unconfirmed. If you’d like to explore the technical specifications or licensing terms of the documented releases in more detail, I can break those down further.
 
 ---
 > _Tools used:_
-> - **deepseek-v4-pro:cloud** — `web_search` ×13 ❌
-> - **qwen3.5:397b-cloud** — `web_search` ×13
+> - **deepseek-v4-pro:cloud** — `web_search` ×14 ❌
+> - **qwen3.5:397b-cloud** — `web_search` ×12
 > - **qwen3.6:35b** — `web_search` ×14
 
 ---
@@ -308,37 +309,53 @@ To summarize, 2025’s most verifiable open-weight progress tracks Alibaba’s r
 
 - model: `audrey_research`
 - status: PASS
-- banners: Planning → Researching → Verifying → Writing
+- banners: Planning → Researching → Verifying → Fact-checking → Writing
 - checks: reachable:✅  no_error_marker:✅  has_answer:✅  banners:✅  sources:—  url_wellformed:—
 
-To understand how attention works in a Transformer, let’s start with where the idea came from and how it actually processes information. 
+You can think of attention in transformers as a flexible, learned way for a model to dynamically gather context from anywhere in its input sequence. Let’s walk through how it works, the core intuitions behind it, and where the idea comes from, keeping closely to what the research actually shows.
 
-The concept of attention is widely credited with being introduced in the context of neural machine translation by Bahdanau et al. in 2014. Their work showed that instead of forcing a recurrent neural network (RNN) to compress an entire input sentence into a single fixed vector, a model could dynamically “look back” at all previous steps and assign different weights to them. Shortly after, Luong et al. refined this approach, and in 2017, Vaswani and colleagues published “Attention Is All You Need.” That paper asked a pivotal question: if attention is so effective, do we even need recurrence? The answer was no. They proposed the Transformer architecture, which relies solely on attention mechanisms and has since become the dominant architecture behind most modern large language models. (Note: earlier work like Wu et al.’s 2016 Google NMT system demonstrated the effectiveness of attention within a large-scale RNN-based framework, but it did not replace recurrence itself.)
+### Where the Idea Came From
+The attention mechanism in neural machine translation is widely credited to Bahdanau et al., with the work appearing on arXiv in 2014 and published at ICLR in 2015. Rather than forcing an entire input sentence into a single fixed-length vector, their approach allowed a decoder to weigh different parts of the source sequence as it generated each output word. This alignment-based weighting was later popularized for NMT by Bahdanau et al., though earlier alignment concepts and attention-like mechanisms had been explored in related contexts.
 
-At its core, attention operates like a soft, differentiable dictionary lookup or a content-based addressable memory system. Instead of processing information sequentially from left to right, each element in a sequence can directly pull relevant information from anywhere else in the input. You can think of this mechanism through three learned vector representations for every token:
-- **Query (Q):** “What am I looking for?” Think of this as your search request.
-- **Key (K):** “What do I contain?” Like an index or label in a database.
-- **Value (V):** “What should be retrieved?” The actual content stored at that index.
+There is also a deeper theoretical thread: Jürgen Schmidhuber’s early work on “fast weights” (1991–1993) described how one network could rapidly modify another’s weights through activation patterns. While this isn’t a direct historical precursor to modern transformers, later formal work (Schlag et al., 2021) showed that linearized transformer self-attention is mathematically equivalent to fast weight programming. The direct lineage to today’s architectures runs through Bahdanau et al. and then Vaswani et al.’s 2017 paper, *Attention Is All You Need*.
 
-Here is the step-by-step intuition behind how the mechanism computes its output:
-1. **Compute relevance:** For each token, its query vector is dot-producted against every key vector in the sequence. A high score means that key is highly relevant to the query.
-2. **Scale the scores:** These raw scores are divided by √dₖ (the square root of the key dimension). This scaling step isn’t just cosmetic; without it, large dot products push the next step into regions where gradients become too small for effective learning.
-3. **Normalize with softmax:** The scaled scores are passed through a softmax function, which converts them into a probability distribution that sums to one. These numbers become your attention weights—literally telling the model how much focus to place on each token.
-4. **Aggregate values:** Finally, each value vector is multiplied by its corresponding weight and summed together. The result is a context-aware representation for that token, blending information from across the entire sequence based on relevance.
+While self-attention (sometimes called “intra-attention”) had been explored in earlier contexts like machine reading (e.g., Cheng et al., 2016), the Transformer was the first to build a model entirely on self-attention, making it the central primitive without recurrence or convolution.
 
-In practice, Transformers don’t rely on just one attention calculation. They use **multi-head attention**, which runs several parallel “heads” (eight in the original paper) simultaneously. Each head operates on lower-dimensional projections of Q, K, and V, allowing different heads to automatically specialize in tracking different types of relationships—like syntax, semantics, or positional proximity. These outputs are then concatenated and re-projected.
+### How Attention Works: The Core Mechanism
+At its heart, transformer attention is often described as a content-based retrieval operation. Every token in your sequence is mapped to three distinct vectors through learned linear projections:
+- **Query (Q):** “What am I looking for?” — the current token’s search request.
+- **Key (K):** “What do I contain?” — a label describing each token’s content.
+- **Value (V):** “What do I contribute?” — the actual information to be aggregated.
 
-Because attention treats input as a set rather than a sequence (it’s permutation-equivariant), the model also requires **positional encodings** to understand word order. Originally, the Transformer used sinusoidal functions for this, though many models now use learned positional embeddings or relative position schemes instead. The architecture also typically includes masking in the decoder to prevent tokens from attending to future positions during training, along with residual connections and layer normalization to stabilize deep network training.
+The mechanism follows three straightforward steps:
+1. **Score computation:** The query vector is dotted with every key vector, producing raw compatibility scores that indicate how relevant each token is to the current query.
+2. **Scaling and normalization:** Each score is divided by √dₖ (the square root of the key dimension) before applying a softmax across all keys. The scaling factor is commonly noted as critical: without it, large dot products can push softmax into regions with vanishingly small gradients, which complicates training. Softmax then converts these scores into attention weights that sum to 1.
+3. **Weighted aggregation:** Each value vector is multiplied by its corresponding attention weight and summed. The result is a blended representation where more relevant tokens contribute more strongly.
 
-Why does this design work so well? First, it solves the long-range dependency problem that plagued RNNs by giving every token a direct, constant-time path to every other token. Second, it enables massive parallelization on modern hardware, since all pairwise relationships can be computed simultaneously rather than step-by-step. Finally, while attention weights are often visualized to show what the model is focusing on, it’s worth noting that this interpretability has been debated in later research—attention patterns don’t always perfectly align with a model’s internal reasoning.
+In matrix form, this is typically written as:  
+**Attention(Q, K, V) = softmax(QKᵀ / √dₖ) V**
 
-In short, attention replaced sequential processing with a flexible, parallelizable lookup mechanism. By letting you (and the model) dynamically weigh and combine information from across an entire sequence, it created a universal primitive for sequence processing that continues to underpin modern AI.
+### Key Intuitions
+- **A differentiable dictionary lookup:** Rather than retrieving one discrete match, attention softly blends all available values according to learned similarity scores. Because every step is differentiable, the model learns both what to store in keys/values and how to query them through standard backpropagation.
+- **A fully connected interaction graph:** In a single attention layer, every token can directly influence every other token regardless of distance. This bypasses the sequential bottlenecks that often plagued earlier recurrent models, allowing gradients and context to flow across long ranges in constant depth.
+- **Contextualized representations:** Because attention weights are computed dynamically based on the actual input, the same word can gather different contexts depending on its surroundings. A word like “bank” might attend more strongly to “river” in one sentence and to “money” in another, with the model learning these disambiguations automatically.
+
+### Multi-Head Attention & Architecture Notes
+Instead of relying on a single attention function, the Transformer runs multiple attention heads in parallel. The base model experimented with 8 heads, each operating in its own reduced-dimensional subspace. Their outputs are concatenated and projected back to the full model dimension. The intuition here is that different heads naturally specialize: some may track syntactic dependencies, others positional proximity, and others semantic similarity, giving the model multiple parallel “channels” for reasoning about token relationships.
+
+In practice, transformers distinguish between **self-attention** (used in the encoder, where queries, keys, and values all come from the same sequence) and **cross-attention** (used in the decoder, where queries come from the target side while keys and values come from the encoder’s output). Decoder self-attention is also commonly masked during autoregressive generation to prevent the model from looking ahead at future tokens.
+
+### Practical Implications & Limitations
+This design brings clear advantages: any token can influence any other in a single layer (O(1) path length), all attention scores can be computed simultaneously for strong parallelization, and the resulting attention weights are often interpretable enough to visualize what the model is focusing on. 
+
+The trade-off is computational cost: self-attention scales quadratically with sequence length (O(n²)), which remains a primary bottleneck and has motivated later sparse or linear attention variants. Additionally, because there’s no recurrence to implicitly encode order, positional information must be explicitly added to token embeddings.
+
+If you’d like to dive deeper into any specific component—like how positional encodings interact with attention, or how later architectures address the quadratic complexity—I’m happy to walk through those details next.
 
 ---
 > _Tools used:_
-> - **qwen3.5:397b-cloud** — `web_search` ×4
-> - **deepseek-v4-pro:cloud** — `web_search` ×5, `kb_search` ❌
-> - **qwen3.6:35b** — `kb_search`, `memory_recall` ❌, `web_search` ×3
+> - **deepseek-v4-pro:cloud** — `web_search` ×10
+> - **qwen3.5:397b-cloud** — `web_search` ×5
 
 ---
 
@@ -346,16 +363,15 @@ In short, attention replaced sequential processing with a flexible, parallelizab
 
 - model: `audrey_research`
 - status: PASS
-- banners: Planning → Researching → Verifying → Writing
+- banners: Planning → Researching → Verifying → Fact-checking → Writing
 - checks: reachable:✅  no_error_marker:✅  has_answer:✅  banners:✅  sources:—  url_wellformed:—
 
-Here is a short, warm birthday toast you can share with your hiking-loving friend:
+Here’s a warm, trail-themed birthday toast you can share with your hiking-loving friend, woven together from the drafts provided:
 
-"To my favorite trailblazer, thank you for showing me that the best views come after the hardest climbs, and that good company makes any path feel shorter. May your year ahead be filled with clear trails, breathtaking summits, and peaceful moments in the wild places that make you feel most alive. May your pack stay light, your boots stay sturdy, and your heart always find its way to new horizons. Here’s to more miles, more adventures, and many more memories together. Happy birthday!"
+**A Trailside Toast**  
+Here’s to you on your birthday! May your path ahead be lined with wildflowers, your climbs rewarded with breathtaking views, and your pack always light enough for an extra summit snack. You’ve shown me that the best vistas come after the hardest climbs, and that a true friend is the one who waits at the switchbacks. Thank you for sharing the trail with me. May your year ahead bring clear skies, sturdy boots, and new ridges that reveal something worth every step. Here’s to more miles, more mountains, and even better years together. Happy birthday, trail friend! 🥂⛰️
 
-Cheers! 🥂🏔️
-
-Feel free to personalize it with their name or a specific trail you’ve hiked together. Let me know if you'd like it adjusted for a particular setting or tone!
+Feel free to slip in their name or a favorite shared trail before you raise your glass. I hope it brings a smile to their face and sets the perfect tone for their celebration!
 
 ---
 
@@ -363,42 +379,32 @@ Feel free to personalize it with their name or a specific trail you’ve hiked t
 
 - model: `audrey_research`
 - status: PASS
-- banners: Planning → Researching → Verifying → Writing
+- banners: Planning → Researching → Verifying → Fact-checking → Writing
 - checks: reachable:✅  no_error_marker:✅  has_answer:✅  banners:✅  sources:—  url_wellformed:—
 
-Recursion is a programming technique where a function solves a problem by calling itself to handle a smaller version of that same problem. Rather than relying on traditional loops, the function breaks the task down into simpler copies of itself until it reaches a point where the answer is straightforward and no further calls are needed.
+Recursion is simply when a function solves a problem by calling itself to handle a smaller version of that same problem. Think of it like Russian nesting dolls: you open one doll, find a smaller one inside, open that one, and keep going until you reach the tiniest doll that can’t be opened any further. That smallest doll is your stopping point.
 
-Every recursive function relies on two essential ingredients:
-1. **A base case** – The simplest version of the problem that stops the function from calling itself again. Without this, the function would run indefinitely.
-2. **A recursive step** – The part where the function calls itself with a slightly smaller or simpler input, steadily moving toward the base case.
+For recursion to work safely, every recursive function needs two things:
+1. **A base case** – the stopping condition that prevents the function from calling itself forever.
+2. **A recursive case** – where the function calls itself with a simpler or smaller input, steadily moving toward that base case.
 
-Let’s walk through a straightforward example: calculating a factorial. The factorial of a number `n` (written as `n!`) is often described as the product of all positive integers from 1 up to `n`. For instance, 5! = 5 × 4 × 3 × 2 × 1 = 120.
+Here’s one simple example to see it in action: a countdown function.
 
-Here’s how that looks in Python:
 ```python
-def factorial(n):
-    if n == 1:          # base case (note: this example assumes n >= 1)
-        return 1
-    else:               # recursive step
-        return n * factorial(n - 1)
+def countdown(n):
+    if n <= 0:              # Base case
+        print("Done!")
+    else:                   # Recursive case
+        print(n)
+        countdown(n - 1)    # Function calls itself
 ```
 
-If you call `factorial(4)`, here’s what happens behind the scenes:
-```
-factorial(4)
-  → 4 * factorial(3)
-         → 3 * factorial(2)
-                → 2 * factorial(1)
-                       → 1    ← base case reached! stops calling itself
-                → 2 * 1 = 2
-         → 3 * 2 = 6
-  → 4 * 6 = 24
-```
+When you call `countdown(3)`, here’s what happens step by step:
+- The function prints `3` and calls itself with `2`.
+- It prints `2` and calls itself with `1`.
+- It prints `1` and calls itself with `0`.
+- At `0`, the base case triggers, prints `"Done!"`, and stops.
 
-The function keeps "unwrapping" the problem into smaller copies of itself until it hits that stopping point. Once the base case is reached, the results "wrap back up," multiplying as each previous call finishes.
+Under the hood, each call doesn’t finish right away. Instead, it pauses and waits for the next version to return a result. These paused calls stack up like a pile of plates until the base case is hit. Then, they unwind one by one, completing their tasks as they go back up.
 
-To build intuition, think of recursion like a stack of sticky notes. You write down "figure out factorial(4)," but realize you need factorial(3) first, so you place that on a new note on top. You keep stacking smaller versions until you reach one you can answer immediately: "factorial(1) is just 1." Then you work back down the stack, using each answer to solve the note below it.
-
-The most common pitfall for beginners is forgetting the base case. Without a clear stopping condition, the function will call itself indefinitely, which typically results in a crash (often referred to as a stack overflow). When writing recursive functions, it’s helpful to constantly ask yourself: *"What exact condition stops this from calling itself forever?"*
-
-In short, recursion works by breaking a problem into a smaller version of itself, solving the smallest piece directly, and combining the results on the way back up. It’s a widely used approach for handling repetitive or nested tasks once you get comfortable with how the calls stack and unwind.
+The golden rule to remember is that every recursive call must shrink the problem toward the base case. If it doesn’t, the function will run forever and crash your program. That’s really all recursion is: breaking a task into smaller pieces of itself, with a firm floor to land on.
