@@ -525,7 +525,7 @@ ingest pipeline (covered in the KB-ingest lesson).
 request, before the model sees the prompt. The chat archive does not.
 The model decides when to search it via the `chat_history_search`
 tool. The reasoning is in
-[`prompts.py:182`](../../src/audrey/pipeline/prompts.py#L182):
+[`prompts.py:187`](../../src/audrey/pipeline/prompts.py#L187):
 
 ```python
 "Use `chat_history_search` only when the user references something "
