@@ -315,6 +315,38 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
     print("=" * 70)
 
 
+def save_results(results: list[CaseResult], save_file: Path) -> None:
+    """Write ALL case answers from one run into a single markdown file.
+
+    One file per run (not per case): a short run header, then each case as an
+    `## <name>` section (its structural checks + the reassembled answer body),
+    so the whole run reads and diffs as a unit against a prior run's file.
+    Pair it with a separate quality-evaluation report under the same name stem
+    (e.g. `<date>-<desc>-answers.md` + `<date>-<desc>-report.md`).
+    """
+    passed = sum(1 for r in results if r.ok)
+    parts: list[str] = [
+        f"# eval run — {save_file.stem}\n",
+        f"{len(results)} cases, {passed} passed all applicable checks. "
+        "Each section is one case (structural header + answer body).\n",
+    ]
+    for r in results:
+        checks = "  ".join(f"{k}:{_fmt_check(v)}" for k, v in r.checks.items())
+        section = (
+            f"---\n\n## {r.name}\n\n"
+            f"- model: `{r.model}`\n"
+            f"- status: {'PASS' if r.ok else 'FAIL'}\n"
+            f"- banners: {' → '.join(r.banners_seen) or '(none)'}\n"
+            f"- checks: {checks}\n"
+        )
+        if r.error:
+            section += f"- error: {r.error}\n"
+        section += f"\n{r.answer or '(no answer body)'}\n"
+        parts.append(section)
+    save_file.parent.mkdir(parents=True, exist_ok=True)
+    save_file.write_text("\n".join(parts))
+
+
 def main() -> int:
     # Load the gitignored .env.test.local first, so the env-var defaults below
     # see AUDREY_EVAL_*. A real export or an explicit --flag still overrides it.
@@ -337,6 +369,10 @@ def main() -> int:
     p.add_argument("--verbose", action="store_true", help="extra detail on failures")
     p.add_argument("--only", default="",
                    help="run only cases whose name contains this substring")
+    p.add_argument("--save-file", type=Path, default=None,
+                   help="write ALL answers from this run into one markdown file "
+                        "(one section per case). Name it with a date + test "
+                        "description, e.g. docs/testing/2026-06-26-accuracy-stress-answers.md")
     args = p.parse_args()
 
     if not args.base_url or not args.api_key:
@@ -362,6 +398,9 @@ def main() -> int:
         results.append(run_case(args.base_url, args.api_key, case, args.model, args.timeout))
 
     render(results, show_answers=not args.no_answers, verbose=args.verbose)
+    if args.save_file is not None:
+        save_results(results, args.save_file)
+        print(f"saved {len(results)} answers to {args.save_file}", file=sys.stderr)
     return 0 if all(r.ok for r in results) else 1
 
 

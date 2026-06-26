@@ -1,0 +1,63 @@
+[
+  {
+    "name": "bio-euclid",
+    "prompt": "Give me a deep dive into the life and legacy of Euclid.",
+    "model": "audrey_research",
+    "expect_sources": false
+  },
+  {
+    "name": "bio-pythagoras",
+    "prompt": "Give me a deep dive into the life and legacy of Pythagoras. Be careful to distinguish what is historically attested from later legend.",
+    "model": "audrey_research",
+    "expect_sources": false
+  },
+  {
+    "name": "bio-archimedes",
+    "prompt": "Give me a deep dive into the life and work of Archimedes.",
+    "model": "audrey_research",
+    "expect_sources": false
+  },
+  {
+    "name": "hist-library-alexandria",
+    "prompt": "What do we actually know about the Library of Alexandria, and which popular claims about its founding and destruction are disputed by historians?",
+    "model": "audrey_research",
+    "expect_sources": false
+  },
+  {
+    "name": "hist-parallel-postulate",
+    "prompt": "Trace the history of attempts to prove Euclid's parallel postulate and how that led to non-Euclidean geometry. Who did what, and when?",
+    "model": "audrey_research",
+    "expect_sources": false
+  },
+  {
+    "name": "current-rust-async",
+    "prompt": "Summarize the current state of async runtimes in Rust and the main tradeoffs between the leading ones.",
+    "model": "audrey_research",
+    "expect_sources": false
+  },
+  {
+    "name": "current-2025-recent",
+    "prompt": "What were the most significant developments in open-weight large language models during 2025? Be specific about what happened and when.",
+    "model": "audrey_research",
+    "expect_sources": false
+  },
+  {
+    "name": "tech-transformer-attention",
+    "prompt": "Explain how attention works in a transformer, with the key intuitions and where the original idea came from.",
+    "model": "audrey_research",
+    "expect_sources": false
+  },
+  {
+    "name": "ctrl-birthday-toast",
+    "prompt": "Write a short, warm birthday toast for a friend who loves hiking.",
+    "model": "audrey_research",
+    "expect_banners": true,
+    "expect_sources": false
+  },
+  {
+    "name": "ctrl-explain-recursion",
+    "prompt": "Explain recursion to someone new to programming, with one simple example.",
+    "model": "audrey_research",
+    "expect_sources": false
+  }
+]
