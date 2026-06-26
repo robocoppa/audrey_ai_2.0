@@ -136,7 +136,11 @@ def load_dotenv(path: Path = REPO_ROOT / ".env.test.local") -> None:
 # Banners each mode emits, in order. Substrings (the live text is markdown
 # blockquote, e.g. '> _Researching_'); we match the inner word.
 _DEEP_BANNERS = ["Planning", "Dispatching panel", "Synthesizing"]
+# "Fact-checking" is optional — the stage only runs when a factchecker is
+# configured + tool-capable, and is skipped silently otherwise. Detected when
+# present, but not required for the ordered-banner check (see _BANNER_SETS).
 _RESEARCH_BANNERS = ["Planning", "Researching", "Verifying", "Writing"]
+_FACTCHECK_BANNER = "Fact-checking"
 _BANNER_SETS = {
     "audrey_research": _RESEARCH_BANNERS,
     "audrey_deep": _DEEP_BANNERS,
@@ -176,7 +180,7 @@ def _post_stream(base_url: str, api_key: str, model: str, prompt: str,
     }
     content_parts: list[str] = []
     banners: list[str] = []
-    seen_banner_phrases = (_RESEARCH_BANNERS + _DEEP_BANNERS)
+    seen_banner_phrases = (_RESEARCH_BANNERS + [_FACTCHECK_BANNER] + _DEEP_BANNERS)
     try:
         with httpx.Client(timeout=timeout_s) as client, \
              client.stream("POST", url, headers=headers, json=body) as resp:
