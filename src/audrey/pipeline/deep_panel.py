@@ -43,12 +43,15 @@ from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.ledger import (
     Claim,
+    FactCheckResult,
     ResearchResult,
     Source,
+    parse_factcheck_result,
     parse_research_result,
 )
 from audrey.pipeline.messages import last_user_text
 from audrey.pipeline.prompts import (
+    FACTCHECK_STRUCTURE_SYSTEM,
     FACTCHECK_SYSTEM,
     RESEARCH_STRUCTURE_SYSTEM,
     RESEARCHER_SYSTEM,
@@ -719,6 +722,109 @@ def _factcheck_user_block(user_text: str, findings: str, critique: str) -> str:
     return "\n".join(parts)
 
 
+def _render_claims_for_factcheck(ledger: ResearchResult) -> str:
+    """A compact claim list (id, risk, text) for the fact-check structuring
+    prompt to reference by claim_id. Sources appended so the checker can judge
+    support without re-fetching."""
+    lines = ["CLAIMS:"]
+    for c in ledger.claims:
+        src = f" [sources: {', '.join(c.source_ids)}]" if c.source_ids else " [no source]"
+        lines.append(f"- {c.id} (risk={c.risk}): {c.text}{src}")
+    if ledger.sources:
+        lines.append("\nSOURCES:")
+        for s in ledger.sources:
+            lines.append(f"- {s.id} ({s.source_type}): {s.title} — {s.url}")
+    return "\n".join(lines)
+
+
+async def _structure_factcheck(
+    ollama: OllamaClient,
+    health: HealthTracker,
+    gate: FairLocalGate,
+    cfg: Config,
+    *,
+    model: str,
+    location: str,
+    ledger: ResearchResult,
+    fc_notes: str,
+    timeout_s: float,
+    user_id: str | None,
+) -> FactCheckResult | None:
+    """Convert the fact-checker's prose notes into a FactCheckResult keyed to
+    the claim ledger. Second mechanical pass (no tools), pinned to the
+    FactCheckResult schema. Fail-soft: any error returns None and the caller
+    keeps the prose corrections path."""
+    if not ledger.claims:
+        return None
+    block = (
+        f"{_render_claims_for_factcheck(ledger)}\n\n"
+        f"FACT-CHECKER NOTES:\n{fc_notes.strip()}\n\n"
+        "Return the per-claim verdict list as JSON."
+    )
+    msgs = [
+        {"role": "system", "content": prompt_from_config(cfg, "factcheck_structure", FACTCHECK_STRUCTURE_SYSTEM)},
+        {"role": "user", "content": block},
+    ]
+    try:
+        async with gate.acquire(model, location=location, user_id=user_id):
+            resp = await ollama.chat(
+                model=model,
+                messages=msgs,
+                options={"temperature": 0.0},
+                timeout_s=timeout_s,
+                format=FactCheckResult.model_json_schema(),
+            )
+        health.record_success(model)
+    except OllamaError as e:
+        health.record_failure(model, str(e))
+        log.warning("research: factcheck structuring for %s failed: %s", model, e)
+        return None
+    raw = (resp.get("message", {}) or {}).get("content", "") or ""
+    result = parse_factcheck_result(raw)
+    if result is None:
+        log.info("research: factcheck structuring produced unusable JSON")
+    return result
+
+
+def _factcheck_result_to_corrections(fc: FactCheckResult, ledger: ResearchResult) -> str:
+    """Render structured per-claim verdicts into the prose corrections string the
+    writer already applies — so Stage 2's verdicts reach the writer through the
+    existing channel (no writer change until Stage 3). Lines mirror the prose
+    fact-checker's vocabulary so `_has_corrections` and the writer prompt work
+    unchanged:
+      - unsupported  → DROP (writer omits)
+      - conflicting  → UNVERIFIED (writer hedges)
+      - needs_hedge  → CORRECT to corrected_text, or UNVERIFIED if none
+      - supported    → CONFIRMED (no action; kept for transparency)
+    `irrelevant` claims are skipped. Returns _NO_CORRECTIONS when nothing
+    actionable came back.
+    """
+    by_id = {c.id: c.text for c in ledger.claims}
+    lines: list[str] = []
+    for chk in fc.checks:
+        claim_text = by_id.get(chk.claim_id, chk.claim_id)
+        if chk.verdict == "unsupported":
+            lines.append(f"DROP: {claim_text} — unsupported by sources ({chk.notes})".rstrip())
+        elif chk.verdict == "conflicting":
+            lines.append(f"UNVERIFIED: {claim_text} — sources conflict; HEDGE it ({chk.notes})".rstrip())
+        elif chk.verdict == "needs_hedge":
+            if chk.corrected_text:
+                lines.append(f"CORRECT: use \"{chk.corrected_text}\" for: {claim_text}")
+            else:
+                lines.append(f"UNVERIFIED: {claim_text} — HEDGE it ({chk.notes})".rstrip())
+        elif chk.verdict == "supported":
+            lines.append(f"CONFIRMED: {claim_text}")
+        # irrelevant → skip
+    if fc.fatal_errors:
+        for fe in fc.fatal_errors:
+            lines.append(f"UNVERIFIED: contradiction — {fe}; HEDGE the affected claims")
+    body = "\n".join(lines).strip()
+    # Actionable only if there's a DROP/CORRECT/UNVERIFIED (CONFIRMED-only is no-op).
+    if not body or not any(k in body for k in ("DROP:", "CORRECT:", "UNVERIFIED:")):
+        return _NO_CORRECTIONS
+    return body
+
+
 # A corrections payload that carries no real corrections — used to detect when
 # the fact-check stage found nothing to fix (or could not run) so the writer
 # block can omit the block entirely.
@@ -731,10 +837,11 @@ def _has_corrections(corrections: str) -> bool:
     if not c:
         return False
     # The prompt's explicit "nothing to fix" sentinel, plus the case where every
-    # line merely CONFIRMED a claim (no CORRECT/UNVERIFIED → nothing to apply).
+    # line merely CONFIRMED a claim (no actionable verdict → nothing to apply).
+    # DROP: comes from the Stage-2 claim-ledger checker (unsupported claim).
     if c == _NO_CORRECTIONS:
         return False
-    return ("CORRECT:" in c) or ("UNVERIFIED:" in c)
+    return ("CORRECT:" in c) or ("UNVERIFIED:" in c) or ("DROP:" in c)
 
 
 def _write_user_block(
@@ -973,6 +1080,28 @@ async def run_research_pipeline_streaming(
                     cfg=cfg,
                 )
             corrections = (fc.content or "").strip()
+            # ── Stage 2: structure the fact-check against the claim ledger ──
+            # When a ledger exists, convert the prose notes into per-claim
+            # verdicts and render them back into the corrections string the
+            # writer already applies. Catches the "unsupported claim" class
+            # (a source that doesn't actually back the claim). Fail-soft: on any
+            # problem, keep the prose corrections unchanged.
+            if ledger is not None and ledger.claims:
+                fc_struct = await _structure_factcheck(
+                    ollama, health, gate, cfg,
+                    model=factchecker, location=registry.location_of(factchecker),
+                    ledger=ledger, fc_notes=corrections,
+                    timeout_s=timeout_s, user_id=user_id,
+                )
+                if fc_struct is not None:
+                    rendered = _factcheck_result_to_corrections(fc_struct, ledger)
+                    n_drop = sum(1 for c in fc_struct.checks if c.verdict == "unsupported")
+                    n_hedge = sum(1 for c in fc_struct.checks if c.verdict in ("needs_hedge", "conflicting"))
+                    log.info(
+                        "research: factcheck ledger — %d checks (%d drop, %d hedge), %d fatal",
+                        len(fc_struct.checks), n_drop, n_hedge, len(fc_struct.fatal_errors),
+                    )
+                    corrections = rendered
         except OllamaError as e:
             health.record_failure(factchecker, str(e))
             log.warning("research: fact-check stage failed: %s", e)

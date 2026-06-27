@@ -210,6 +210,37 @@ FACTCHECK_SYSTEM = (
     "so plainly. If you could not run tools, output exactly: NO CORRECTIONS."
 )
 
+# Phase 26 Stage 2: converts the fact-checker's findings into a structured
+# FactCheckResult keyed to the claim ledger. Run after the fact-checker's
+# web_search ReAct loop (the loop can't also be schema-pinned), with the claim
+# list in the prompt so every verdict references a real claim_id. Pinned to the
+# FactCheckResult JSON schema (Ollama `format`). Overridable via
+# `agentic.prompts.factcheck_structure`.
+FACTCHECK_STRUCTURE_SYSTEM = (
+    "You convert a fact-checker's findings into a structured per-claim verdict "
+    "list. You are given the CLAIMS (each with an id) and the fact-checker's "
+    "notes. For each claim the notes actually address, emit a `ClaimCheck` with "
+    "its `claim_id` and a `verdict`:\n"
+    "  - \"supported\": the sources back the claim as stated.\n"
+    "  - \"unsupported\": no source actually supports it (e.g. a work called "
+    "\"surviving\" that is in fact lost) — the writer will OMIT it.\n"
+    "  - \"conflicting\": sources or other claims contradict it.\n"
+    "  - \"needs_hedge\": plausible but the exact form isn't earned — soften it; "
+    "set `corrected_text` to the hedged wording.\n"
+    "  - \"irrelevant\": not load-bearing; ignore.\n"
+    "When a claim should change wording (a corrected value, a hedge, or "
+    "attributing a vendor benchmark to the company), put the new wording in "
+    "`corrected_text`. Apply these rules: official release dates/model "
+    "names/licenses from official docs are NOT hedged unless sources conflict; "
+    "company benchmark/performance claims must be phrased as company claims, not "
+    "independent findings; ancient biography is hedged unless directly attested; "
+    "disputed authorship uses \"attributed to\", not \"authored\"; claims using "
+    "\"first\"/\"only\"/\"proved\"/\"invented\"/\"founded\"/\"definitively\"/"
+    "\"worldwide\"/\"complete\"/\"all\" require strong support or get a softer "
+    "`corrected_text`. Put any claim that contradicts another claim in "
+    "`fatal_errors`. Do not invent claim_ids — only reference ids from the list."
+)
+
 WRITER_SYSTEM = (
     "You are the writer on a research panel. You receive the original "
     "request, the researchers' verified findings, and the verifier's "
@@ -220,11 +251,13 @@ WRITER_SYSTEM = (
     "precise. Prefer cautious phrasing ('often described as', 'commonly "
     "dated to') for anything the evidence hedges on.\n"
     "If a FACT-CHECK CORRECTIONS block is present, it overrides the findings on "
-    "any claim it touches: use the corrected value for a CORRECT line, and for "
-    "an UNVERIFIED line HEDGE the claim — keep it but mark it uncertain "
+    "any claim it touches: use the corrected value for a CORRECT line; for an "
+    "UNVERIFIED line HEDGE the claim — keep it but mark it uncertain "
     "('reportedly', 'though the exact date is unconfirmed') rather than deleting "
-    "it. Only drop a claim the fact-check actively contradicts. A hedged real "
-    "fact serves the reader better than an omission.\n"
+    "it; and for a DROP line, OMIT that claim entirely (it could not be "
+    "supported by any source). Otherwise only drop a claim the fact-check "
+    "actively contradicts. A hedged real fact serves the reader better than an "
+    "omission.\n"
     "If the findings note that little or no grounding could be retrieved, "
     "write from general knowledge BUT open with a brief, honest caveat that "
     "the answer could not be verified against sources and may be incomplete, "
@@ -272,6 +305,7 @@ _PROMPT_KEYS = frozenset({
     "research_structure",
     "verifier",
     "factchecker",
+    "factcheck_structure",
     "writer",
     "react_final_answer",
     "memory_store_hint",

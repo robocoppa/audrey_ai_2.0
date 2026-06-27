@@ -182,19 +182,19 @@ deep_panel_local:
 # selecting `audrey_research` is the signal — there is no auto-routing into it.
 deep_panel_research:
   code:
-    researchers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud", "qwen3.6:35b"]
+    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.6:35b"]
     verifier: "deepseek-v4-pro:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     writer: "qwen3.6:35b"
     fallback_synth: "glm-5.2:cloud"
   reasoning:
-    researchers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud", "qwen3.6:35b"]
+    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.6:35b"]
     verifier: "deepseek-v4-pro:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     writer: "qwen3.6:35b"
     fallback_synth: "glm-5.2:cloud"
   general:
-    researchers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud", "qwen3.6:35b"]
+    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.6:35b"]
     verifier: "deepseek-v4-pro:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     writer: "qwen3.6:35b"
@@ -203,7 +203,7 @@ deep_panel_research:
   # anyway. Kept here so the pool resolves for every task type, with a
   # text-only researcher set (the deep path rebuilds prompts text-only).
   vl:
-    researchers: ["deepseek-v4-pro:cloud", "qwen3.5:397b-cloud"]
+    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud"]
     verifier: "deepseek-v4-pro:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     writer: "qwen3.6:35b"

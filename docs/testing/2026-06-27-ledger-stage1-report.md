@@ -55,13 +55,34 @@ NOT leak into the answer. That's correct for Stage 1; the end-of-answer "Sources
 used" list is Stage 3. The "ledger is scaffolding, not bookkeeping" contract is
 holding at the output boundary.
 
-## What this does NOT yet tell us
+## Box-log confirmation — ledger builds end-to-end ✅ (resolved)
 
-- **Whether the structuring call produces *good* ledgers** — that's only visible
-  in the box logs (`research: ledger built — N claims, M sources from X/Y
-  workers`). The eval can't see the ledger (it's internal). **User's box-side log
-  check is the other half of this checkpoint.** If the log shows ledgers built
-  with sane claim/source counts, Stage 1 is fully validated.
+The box-side log check ran (the other half of this checkpoint), and it caught a
+real bug the eval couldn't see, now fixed:
+
+- **First probe:** `ledger built — 70 claims, 0 sources from 2/3 workers`.
+  Zero sources — the structuring prompt was told to capture sources "the notes
+  cite," but `RESEARCHER_SYSTEM` never told researchers to write the URLs down.
+  Fail-soft hid this from the eval (prose was clean precisely *because* the
+  ledger was empty of sources). Fixed by adding a `SOURCES:` section to the
+  researcher prompt (end-of-notes, no inline clutter — the anti-+21 form).
+- **Also caught earlier:** the flag wasn't live in the running config
+  (`enabled: false` in the bind-mounted `config.yaml`) — the gate skipped
+  silently with no log. Flipped to `true`.
+- **After the fix:** `ledger built — 70 claims, 4 sources from 2/3 workers`.
+  Sources now flow end-to-end (researcher SOURCES → Source objects → merge).
+  Stage 1 is validated: the ledger carries both halves.
+
+**Known issue (non-blocking, fail-soft):** `qwen3.5:397b-cloud` reproducibly
+returns unusable JSON for the structuring call — consistent across 3 probes, so
+1 of 3 workers' structured output is lost each time. The schema is small/clean
+(1547 chars), so it's the model not honoring `format`, not schema complexity.
+Tolerable for now (2/3 workers give a usable ledger); revisit if it matters.
+
+**Thin sourcing is expected, not a bug:** 4 sources for 70 claims means most
+claims are parametric (ungrounded). That's exactly the signal Stage 2
+(fact-check) and Stage 4 (hedge policy) are built to act on — an unsourced claim
+gets hedged or attributed, not stated plainly.
 - **Cost** — the structuring call adds one cloud round per worker. Not separately
   timed here; wall-clock for the run felt comparable. Watch it as later stages add load.
 

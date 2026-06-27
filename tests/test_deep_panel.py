@@ -685,3 +685,73 @@ def test_merge_ledgers_empty_is_safe():
     m = _merge_ledgers([])
     assert m.claims == []
     assert m.sources == []
+
+
+# ── Phase 26 Stage 2: factcheck-result → corrections rendering ──────────
+
+def _ledger_with(*claims):
+    from audrey.pipeline.ledger import ResearchResult
+    return ResearchResult(claims=list(claims))
+
+
+def test_factcheck_corrections_unsupported_becomes_drop():
+    from audrey.pipeline.deep_panel import _factcheck_result_to_corrections
+    from audrey.pipeline.ledger import Claim, ClaimCheck, FactCheckResult
+    led = _ledger_with(Claim(id="c1", text="The Conics survives intact"))
+    fc = FactCheckResult(checks=[ClaimCheck(claim_id="c1", verdict="unsupported",
+                                            notes="Conics is lost")])
+    out = _factcheck_result_to_corrections(fc, led)
+    assert "DROP:" in out
+    assert "Conics" in out
+
+
+def test_factcheck_corrections_needs_hedge_uses_corrected_text():
+    from audrey.pipeline.deep_panel import _factcheck_result_to_corrections
+    from audrey.pipeline.ledger import Claim, ClaimCheck, FactCheckResult
+    led = _ledger_with(Claim(id="c1", text="released Jan 26"))
+    fc = FactCheckResult(checks=[ClaimCheck(claim_id="c1", verdict="needs_hedge",
+                                            corrected_text="reportedly released in late January")])
+    out = _factcheck_result_to_corrections(fc, led)
+    assert "CORRECT:" in out
+    assert "reportedly released in late January" in out
+
+
+def test_factcheck_corrections_conflicting_becomes_unverified():
+    from audrey.pipeline.deep_panel import _factcheck_result_to_corrections
+    from audrey.pipeline.ledger import Claim, ClaimCheck, FactCheckResult
+    led = _ledger_with(Claim(id="c1", text="X beats Y"))
+    fc = FactCheckResult(checks=[ClaimCheck(claim_id="c1", verdict="conflicting",
+                                            notes="sources disagree")])
+    out = _factcheck_result_to_corrections(fc, led)
+    assert "UNVERIFIED:" in out
+
+
+def test_factcheck_corrections_all_supported_is_no_corrections():
+    from audrey.pipeline.deep_panel import (
+        _NO_CORRECTIONS,
+        _factcheck_result_to_corrections,
+        _has_corrections,
+    )
+    from audrey.pipeline.ledger import Claim, ClaimCheck, FactCheckResult
+    led = _ledger_with(Claim(id="c1", text="well-known fact"))
+    fc = FactCheckResult(checks=[ClaimCheck(claim_id="c1", verdict="supported")])
+    out = _factcheck_result_to_corrections(fc, led)
+    assert out == _NO_CORRECTIONS
+    assert _has_corrections(out) is False
+
+
+def test_has_corrections_recognizes_drop():
+    from audrey.pipeline.deep_panel import _has_corrections
+    assert _has_corrections("DROP: some claim — unsupported") is True
+
+
+def test_render_claims_includes_ids_and_no_source_marker():
+    from audrey.pipeline.deep_panel import _render_claims_for_factcheck
+    from audrey.pipeline.ledger import Claim, Source
+    led = _ledger_with(Claim(id="c1", text="grounded", source_ids=["s1"], risk="high"),
+                       Claim(id="c2", text="ungrounded"))
+    led.sources = [Source(id="s1", title="T", url="https://e.com", source_type="official")]
+    out = _render_claims_for_factcheck(led)
+    assert "c1" in out and "c2" in out
+    assert "[no source]" in out  # c2 has none
+    assert "https://e.com" in out
