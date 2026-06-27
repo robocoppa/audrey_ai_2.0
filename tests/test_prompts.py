@@ -122,7 +122,13 @@ def test_researcher_system_unchanged():
         "named entities, and direct attributions, and mark anything uncertain, "
         "disputed, or that you could not verify. Do NOT speculate to fill gaps — "
         "if the evidence is thin, say so. A short, well-sourced set of notes is "
-        "worth more than a long, confident-sounding one."
+        "worth more than a long, confident-sounding one.\n"
+        "End your notes with a `SOURCES:` section listing the sources you actually "
+        "used — for each, its title and full URL (for web results) or document name "
+        "(for knowledge-base hits). List only sources you genuinely drew on; do not "
+        "pad the list, and do not invent a URL for something you already knew. Keep "
+        "this to the end — do NOT clutter the notes themselves with inline "
+        "citations. If you used no tools, omit the section."
     )
     assert RESEARCHER_SYSTEM == expected
 
