@@ -113,29 +113,38 @@ def inlined_schema(model: type[BaseModel]) -> dict[str, Any]:
     return _inline_refs(schema, defs)
 
 
-def _extract_json_object(raw: str) -> str | None:
-    """Best-effort: pull the JSON object out of a model reply.
+def _strip_fence(s: str) -> str:
+    """Strip a leading ```/```json fence and any trailing ``` from a reply."""
+    s = s.strip()
+    if s.startswith("```"):
+        # Drop the opening fence line (``` or ```json) and the closing fence.
+        first_nl = s.find("\n")
+        if first_nl != -1:
+            s = s[first_nl + 1:]
+        if s.rstrip().endswith("```"):
+            s = s.rstrip()[:-3]
+    return s.strip()
 
-    Models pinned to a JSON schema usually return clean JSON, but not always —
-    they may wrap it in ```json fences or add a sentence. We try the whole
-    string first, then the outermost {...} span. Returns the candidate string or
-    None.
+
+def _extract_json(raw: str) -> str | None:
+    """Best-effort: pull a JSON value (object OR array) out of a model reply.
+
+    Models pinned to a JSON schema usually return clean JSON, but observed
+    failures show two real cases: the reply is wrapped in a ```json fence, and
+    (for list-shaped results) the model returns a bare top-level array instead
+    of the wrapping object. We strip the fence, then take the outermost {...} or
+    [...] span — whichever starts first. The caller normalizes a bare array.
     """
-    s = raw.strip()
+    s = _strip_fence(raw)
     if not s:
         return None
-    # Strip a leading/trailing code fence if present.
-    if s.startswith("```"):
-        s = s.split("```", 2)[1] if s.count("```") >= 2 else s.lstrip("`")
-        if s.startswith("json"):
-            s = s[4:]
-        s = s.strip()
-    if s.startswith("{") and s.endswith("}"):
-        return s
-    # Fall back to the outermost brace span.
-    start = s.find("{")
-    end = s.rfind("}")
-    if start != -1 and end != -1 and end > start:
+    obj_start, arr_start = s.find("{"), s.find("[")
+    candidates = [(i, c) for i, c in ((obj_start, "}"), (arr_start, "]")) if i != -1]
+    if not candidates:
+        return None
+    start, close = min(candidates)  # whichever bracket opens first
+    end = s.rfind(close)
+    if end > start:
         return s[start:end + 1]
     return None
 
@@ -144,13 +153,17 @@ def parse_research_result(raw: str) -> ResearchResult | None:
     """Parse a researcher reply into a ResearchResult, or None if unusable.
 
     Never raises — a None return tells the caller to fall back to prose handling
-    for this worker. Tolerates code fences and surrounding prose.
+    for this worker. Tolerates code fences, surrounding prose, and a bare
+    top-level array (some models return just the claims list).
     """
-    candidate = _extract_json_object(raw)
+    candidate = _extract_json(raw)
     if candidate is None:
         return None
     try:
         data = json.loads(candidate)
+        # A bare array → assume it's the claims list and wrap it.
+        if isinstance(data, list):
+            data = {"claims": data}
         return ResearchResult.model_validate(data)
     except (json.JSONDecodeError, ValidationError, TypeError) as e:
         log.info("ledger.parse_research_result: unusable model output (%s)", type(e).__name__)
@@ -160,13 +173,17 @@ def parse_research_result(raw: str) -> ResearchResult | None:
 def parse_factcheck_result(raw: str) -> FactCheckResult | None:
     """Parse a fact-checker reply into a FactCheckResult, or None if unusable.
 
-    Never raises (see `parse_research_result`).
+    Never raises (see `parse_research_result`). Tolerates a bare top-level array
+    of checks — observed on the box, the model returns `[{...}, ...]` rather than
+    `{"checks": [...]}`.
     """
-    candidate = _extract_json_object(raw)
+    candidate = _extract_json(raw)
     if candidate is None:
         return None
     try:
         data = json.loads(candidate)
+        if isinstance(data, list):
+            data = {"checks": data}
         return FactCheckResult.model_validate(data)
     except (json.JSONDecodeError, ValidationError, TypeError) as e:
         log.info("ledger.parse_factcheck_result: unusable model output (%s)", type(e).__name__)

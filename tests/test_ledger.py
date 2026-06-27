@@ -157,6 +157,25 @@ class TestParseFactCheckResult:
     def test_garbage_returns_none(self):
         assert parse_factcheck_result("¯\\_(ツ)_/¯") is None
 
+    def test_bare_top_level_array_wrapped(self):
+        # Observed on the box: the model returns a bare array of checks, not the
+        # {"checks": [...]} object. We wrap it.
+        raw = json.dumps([
+            {"claim_id": "w0_c9", "verdict": "needs_hedge",
+             "corrected_text": "reportedly released around late 2024"},
+            {"claim_id": "w0_c3", "verdict": "supported"},
+        ])
+        r = parse_factcheck_result(raw)
+        assert isinstance(r, FactCheckResult)
+        assert len(r.checks) == 2
+        assert r.checks[0].verdict == "needs_hedge"
+
+    def test_fenced_array(self):
+        raw = "```json\n[{\"claim_id\": \"c1\", \"verdict\": \"supported\"}]\n```"
+        r = parse_factcheck_result(raw)
+        assert isinstance(r, FactCheckResult)
+        assert r.checks[0].claim_id == "c1"
+
 
 def test_models_construct_directly():
     # Sanity: the models are usable as plain Python objects too.
