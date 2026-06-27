@@ -229,7 +229,7 @@ agentic:
   # ledger); it's carried but only progressively consumed as later stages ship.
   # Toggle live (no rebuild) to A/B against the prose baseline. Off by default.
   research_ledger:
-    enabled: false
+    enabled: true
   react:
     max_rounds: 3
     compress_after_round: 2
