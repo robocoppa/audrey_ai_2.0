@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ValidationError
 
@@ -83,6 +83,34 @@ class ClaimCheck(BaseModel):
 class FactCheckResult(BaseModel):
     checks: list[ClaimCheck] = []
     fatal_errors: list[str] = []
+
+
+def _inline_refs(node: Any, defs: dict[str, Any]) -> Any:
+    """Recursively replace every {"$ref": "#/$defs/X"} with a copy of defs[X].
+
+    Ollama's `format` field feeds the schema to the model's constrained decoder,
+    and `$ref`/`$defs` resolution is inconsistently supported across models —
+    the big cloud models (qwen3.5, glm-5.2) returned unusable JSON for our
+    nested schemas while deepseek and the local qwen3.6 handled them. Inlining
+    the refs into a self-contained schema makes structured output work uniformly.
+    """
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/$defs/"):
+            name = ref.split("/")[-1]
+            target = defs.get(name, {})
+            return _inline_refs(dict(target), defs)
+        return {k: _inline_refs(v, defs) for k, v in node.items() if k != "$defs"}
+    if isinstance(node, list):
+        return [_inline_refs(v, defs) for v in node]
+    return node
+
+
+def inlined_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """A `$ref`-free JSON schema for `model`, safe to pass to Ollama `format`."""
+    schema = model.model_json_schema()
+    defs = schema.get("$defs", {})
+    return _inline_refs(schema, defs)
 
 
 def _extract_json_object(raw: str) -> str | None:
@@ -154,6 +182,7 @@ __all__ = [
     "SourceType",
     "Risk",
     "Verdict",
+    "inlined_schema",
     "parse_research_result",
     "parse_factcheck_result",
 ]

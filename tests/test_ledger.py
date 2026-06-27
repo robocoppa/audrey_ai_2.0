@@ -18,9 +18,41 @@ from audrey.pipeline.ledger import (
     FactCheckResult,
     ResearchResult,
     Source,
+    inlined_schema,
     parse_factcheck_result,
     parse_research_result,
 )
+
+
+class TestInlinedSchema:
+    """Ollama `format` constrained-decoding chokes on $ref/$defs across some
+    cloud models; the inlined schema must be self-contained."""
+
+    def test_research_result_schema_is_ref_free(self):
+        s = inlined_schema(ResearchResult)
+        txt = json.dumps(s)
+        assert "$ref" not in txt
+        assert "$defs" not in txt
+
+    def test_factcheck_result_schema_is_ref_free(self):
+        s = inlined_schema(FactCheckResult)
+        txt = json.dumps(s)
+        assert "$ref" not in txt
+        assert "$defs" not in txt
+
+    def test_nested_claim_object_is_inlined(self):
+        # The Claim sub-object must appear expanded inline under claims.items,
+        # not as a reference.
+        s = inlined_schema(ResearchResult)
+        claim_props = s["properties"]["claims"]["items"]["properties"]
+        assert {"id", "text", "source_ids", "risk", "needs_hedge"} <= set(claim_props)
+
+    def test_inlined_schema_still_validates_real_data(self):
+        # A round-trip sanity check: data valid against the model parses fine
+        # (inlining is for the wire format, not validation).
+        raw = json.dumps({"summary_notes": "n", "claims": [
+            {"id": "c1", "text": "x", "risk": "low"}], "sources": []})
+        assert parse_research_result(raw) is not None
 
 
 def _client_capturing(captured: dict) -> OllamaClient:

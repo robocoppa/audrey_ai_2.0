@@ -46,6 +46,7 @@ from audrey.pipeline.ledger import (
     FactCheckResult,
     ResearchResult,
     Source,
+    inlined_schema,
     parse_factcheck_result,
     parse_research_result,
 )
@@ -589,7 +590,7 @@ async def _structure_one_draft(
                 messages=msgs,
                 options={"temperature": 0.0},
                 timeout_s=timeout_s,
-                format=ResearchResult.model_json_schema(),
+                format=inlined_schema(ResearchResult),
             )
         health.record_success(model)
     except OllamaError as e:
@@ -772,7 +773,7 @@ async def _structure_factcheck(
                 messages=msgs,
                 options={"temperature": 0.0},
                 timeout_s=timeout_s,
-                format=FactCheckResult.model_json_schema(),
+                format=inlined_schema(FactCheckResult),
             )
         health.record_success(model)
     except OllamaError as e:
