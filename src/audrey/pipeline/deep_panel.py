@@ -608,6 +608,15 @@ async def _structure_one_draft(
             model, len(raw), raw[:200], raw[-120:],
         )
         return None
+    if not result.claims:
+        # Parsed fine but EMPTY — the model returned a valid but contentless
+        # ledger. Show the raw so we can tell a literal {"claims":[]} reply
+        # (prompt/schema issue) from anything else.
+        log.info(
+            "research: structuring call for %s parsed but empty "
+            "(claims=0, len=%d, head=%r)",
+            model, len(raw), raw[:300],
+        )
     # Namespace ids per worker so cross-worker merge can't collide.
     prefix = f"w{worker_idx}_"
     return _prefix_ledger_ids(result, prefix)
