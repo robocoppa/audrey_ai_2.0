@@ -128,6 +128,15 @@ class TestParseResearchResult:
         assert r.claims == []
         assert r.unresolved_questions == []
 
+    def test_unescaped_newline_in_string_value(self):
+        # The real box failure: a model puts multi-line prose in a string value
+        # with a RAW newline (not \n). strict json.loads rejects it; we parse
+        # with strict=False.
+        raw = '{"summary_notes": "line one\nline two", "claims": [], "sources": []}'
+        r = parse_research_result(raw)
+        assert isinstance(r, ResearchResult)
+        assert "line one" in r.summary_notes
+
     def test_garbage_returns_none(self):
         assert parse_research_result("not json at all") is None
 

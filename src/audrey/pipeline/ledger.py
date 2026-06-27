@@ -160,13 +160,16 @@ def parse_research_result(raw: str) -> ResearchResult | None:
     if candidate is None:
         return None
     try:
-        data = json.loads(candidate)
+        # strict=False: models put multi-line prose in string values with raw
+        # (unescaped) newlines, which strict json.loads rejects as a control
+        # character mid-body — the real cause of "valid-looking but unusable".
+        data = json.loads(candidate, strict=False)
         # A bare array → assume it's the claims list and wrap it.
         if isinstance(data, list):
             data = {"claims": data}
         return ResearchResult.model_validate(data)
     except (json.JSONDecodeError, ValidationError, TypeError) as e:
-        log.info("ledger.parse_research_result: unusable model output (%s)", type(e).__name__)
+        log.info("ledger.parse_research_result: unusable model output — %s: %s", type(e).__name__, e)
         return None
 
 
@@ -181,12 +184,12 @@ def parse_factcheck_result(raw: str) -> FactCheckResult | None:
     if candidate is None:
         return None
     try:
-        data = json.loads(candidate)
+        data = json.loads(candidate, strict=False)  # see parse_research_result
         if isinstance(data, list):
             data = {"checks": data}
         return FactCheckResult.model_validate(data)
     except (json.JSONDecodeError, ValidationError, TypeError) as e:
-        log.info("ledger.parse_factcheck_result: unusable model output (%s)", type(e).__name__)
+        log.info("ledger.parse_factcheck_result: unusable model output — %s: %s", type(e).__name__, e)
         return None
 
 
