@@ -600,7 +600,13 @@ async def _structure_one_draft(
     raw = (resp.get("message", {}) or {}).get("content", "") or ""
     result = parse_research_result(raw)
     if result is None:
-        log.info("research: structuring call for %s produced unusable JSON", model)
+        # Log a sample of what actually came back — empty / truncated / prose /
+        # refusal each need a different fix, and we can't tell without seeing it.
+        log.info(
+            "research: structuring call for %s produced unusable JSON "
+            "(len=%d, head=%r, tail=%r)",
+            model, len(raw), raw[:200], raw[-120:],
+        )
         return None
     # Namespace ids per worker so cross-worker merge can't collide.
     prefix = f"w{worker_idx}_"
@@ -783,7 +789,11 @@ async def _structure_factcheck(
     raw = (resp.get("message", {}) or {}).get("content", "") or ""
     result = parse_factcheck_result(raw)
     if result is None:
-        log.info("research: factcheck structuring produced unusable JSON")
+        log.info(
+            "research: factcheck structuring produced unusable JSON "
+            "(len=%d, head=%r, tail=%r)",
+            len(raw), raw[:200], raw[-120:],
+        )
     return result
 
 
