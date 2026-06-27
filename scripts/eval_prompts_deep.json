@@ -1,0 +1,74 @@
+[
+  {
+    "name": "deep-crispr",
+    "prompt": "Explain how CRISPR-Cas9 edits a gene, from guide RNA to the actual cut and repair.",
+    "model": "audrey_deep",
+    "expect_sources": false
+  },
+  {
+    "name": "deep-library-alexandria",
+    "prompt": "What do we actually know about the Library of Alexandria, and which popular claims about its founding and destruction are disputed by historians?",
+    "model": "audrey_deep",
+    "expect_sources": false
+  },
+  {
+    "name": "deep-compare-crises",
+    "prompt": "Compare the causes of the 1929 and 2008 financial crises. What was genuinely similar, and what was different?",
+    "model": "audrey_deep",
+    "expect_sources": false
+  },
+  {
+    "name": "deep-pythagoras",
+    "prompt": "Give me a deep dive into the life and legacy of Pythagoras. Be careful to distinguish what is historically attested from later legend.",
+    "model": "audrey_deep",
+    "expect_sources": false
+  },
+  {
+    "name": "deep-rust-async",
+    "prompt": "Summarize the current state of async runtimes in Rust and the main tradeoffs between the leading ones.",
+    "model": "audrey_deep",
+    "expect_sources": false
+  },
+  {
+    "name": "deep-2025-recent",
+    "prompt": "What were the most significant developments in open-weight large language models during 2025? Be specific about what happened and when.",
+    "model": "audrey_deep",
+    "expect_sources": false
+  },
+  {
+    "name": "deep-correlation-causation",
+    "prompt": "What is the difference between correlation and causation, and why does it matter in practice? Give a concrete example of each mistake.",
+    "model": "audrey_deep",
+    "expect_sources": false
+  },
+  {
+    "name": "deep-sql-vs-nosql",
+    "prompt": "I'm starting a new web app. How should I decide between a SQL and a NoSQL database? Walk me through the real tradeoffs.",
+    "model": "audrey_deep",
+    "expect_sources": false
+  },
+  {
+    "name": "deep-ssh-keys",
+    "prompt": "Walk me through setting up SSH key authentication to a remote server, step by step, and explain why each step matters.",
+    "model": "audrey_deep",
+    "expect_sources": false
+  },
+  {
+    "name": "deep-infinite-primes",
+    "prompt": "Explain why there are infinitely many prime numbers, with the reasoning laid out clearly.",
+    "model": "audrey_deep",
+    "expect_sources": false
+  },
+  {
+    "name": "deep-ambiguous-mercury",
+    "prompt": "Tell me about Mercury.",
+    "model": "audrey_deep",
+    "expect_sources": false
+  },
+  {
+    "name": "deep-ctrl-birthday-toast",
+    "prompt": "Write a short, warm birthday toast for a friend who loves hiking.",
+    "model": "audrey_deep",
+    "expect_sources": false
+  }
+]

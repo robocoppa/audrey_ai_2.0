@@ -1,0 +1,91 @@
+[
+  {
+    "name": "fast-capital",
+    "prompt": "What's the capital of Australia?",
+    "model": "audrey_fast",
+    "expect_banners": false,
+    "expect_sources": false
+  },
+  {
+    "name": "fast-idempotent",
+    "prompt": "What does idempotent mean in the context of HTTP methods?",
+    "model": "audrey_fast",
+    "expect_banners": false,
+    "expect_sources": false
+  },
+  {
+    "name": "fast-git-undo",
+    "prompt": "How do I undo the last git commit but keep the changes staged?",
+    "model": "audrey_fast",
+    "expect_banners": false,
+    "expect_sources": false
+  },
+  {
+    "name": "fast-ctrl-birthday-toast",
+    "prompt": "Write a short, warm birthday toast for a friend who loves hiking.",
+    "model": "audrey_fast",
+    "expect_banners": false,
+    "expect_sources": false
+  },
+  {
+    "name": "fast-ctrl-recursion",
+    "prompt": "Explain recursion to someone new to programming, with one simple example.",
+    "model": "audrey_fast",
+    "expect_banners": false,
+    "expect_sources": false
+  },
+  {
+    "name": "auto-short-fast",
+    "prompt": "What time zone is Tokyo in?",
+    "model": "audrey_auto",
+    "expect_route": "fast",
+    "expect_banners": false,
+    "expect_sources": false
+  },
+  {
+    "name": "auto-long-paste-deep",
+    "prompt": "Summarize the key points of the following text in a few sentences.\n\nThe history of computing is often told as a sequence of machines, but it is better understood as a sequence of ideas about what a machine could be. In the seventeenth century, Blaise Pascal and Gottfried Leibniz built mechanical calculators that could add and, in Leibniz's case, multiply, and Leibniz dreamed of a calculus of reasoning in which disputes could be settled by computation rather than argument. In the nineteenth century, Charles Babbage designed the Difference Engine and then the far more ambitious Analytical Engine, a general-purpose mechanical computer with a mill, a store, and a system of punched cards borrowed from the Jacquard loom. Ada Lovelace, writing notes on a translation of an Italian account of the Analytical Engine, saw further than Babbage himself: she understood that the machine could manipulate symbols of any kind, not merely numbers, and she sketched what is often called the first algorithm intended for a machine, along with reflections on what such a machine could and could not do. The thread was picked up again in the twentieth century by Alan Turing, whose 1936 paper on computable numbers introduced an abstract machine that could, given the right description, imitate any other such machine, and by John von Neumann, whose report on the EDVAC described the stored-program architecture that nearly every computer since has followed. In parallel, Claude Shannon showed that the algebra of logic could be realized in electrical switching circuits, giving engineers a rigorous bridge from Boolean reasoning to physical hardware, and Grace Hopper later argued that programmers should be able to write in something closer to human language, an idea that led through early compilers toward the high-level languages we use today. The Second World War accelerated everything: codebreaking at Bletchley Park, ballistics tables at the Moore School, and the sheer industrial demand for calculation turned theoretical machines into funded, staffed, electrified reality. After the war the transistor and then the integrated circuit collapsed the size and cost of computation by orders of magnitude per decade, a trend Gordon Moore famously observed and that held for half a century. What unites these figures across three centuries is not the hardware, which changed beyond recognition, but a steadily sharpening idea: that a single, suitably general mechanism, fed the right instructions, could carry out any computation we could describe precisely. The machines were the footnotes; the idea was the text. Given all of that, produce a concise summary that a busy reader could absorb in under a minute.",
+    "model": "audrey_auto",
+    "expect_route": "deep",
+    "expect_banners": false,
+    "expect_sources": false
+  },
+  {
+    "name": "auto-deepintent-deep",
+    "prompt": "Give me a comprehensive deep dive and think hard about the tradeoffs involved.",
+    "model": "audrey_auto",
+    "expect_route": "deep",
+    "expect_banners": false,
+    "expect_sources": false
+  },
+  {
+    "name": "auto-borderline-fast",
+    "prompt": "In a few sentences, what are the main differences between TCP and UDP, and when would I pick one over the other for a networked application?",
+    "model": "audrey_auto",
+    "expect_route": "fast",
+    "expect_banners": false,
+    "expect_sources": false
+  },
+  {
+    "name": "auto-casual-deepintent-deep",
+    "prompt": "Can you really dig deep on this and think hard: why is the sky blue?",
+    "model": "audrey_auto",
+    "expect_route": "deep",
+    "expect_banners": false,
+    "expect_sources": false
+  },
+  {
+    "name": "fast-edge-greeting",
+    "prompt": "Hi",
+    "model": "audrey_fast",
+    "expect_banners": false,
+    "expect_sources": false
+  },
+  {
+    "name": "fast-edge-ambiguous-mercury",
+    "prompt": "Mercury?",
+    "model": "audrey_fast",
+    "expect_banners": false,
+    "expect_sources": false
+  }
+]

@@ -55,6 +55,15 @@ Per case, against the reassembled streamed answer:
                      '## Sources' section is present with at least one URL
                      (skipped when the case sets "expect_sources": false)
   - url_wellformed : every URL in the Sources block parses as http(s)://…
+  - route          : for adaptive (audrey_auto) cases, the inferred path
+                     (fast | deep | research, from the banner family) matches
+                     the case's "expect_route" — this is how we test the
+                     fast/deep gate. Opt-in; skipped when no expect_route set.
+
+Plus, for every case, latency is recorded: TTFT (first content delta) and
+total wall-clock. The fast path's reason to exist is speed, so these make
+"fast" falsifiable run-to-run. They print under each case and land in the
+saved answers file; they are measurements, not pass/fail checks.
 
 Each case can pin `"model"`, the `"prompt"`, and optional expectations
 (`expect_banners`, `expect_sources`). Cases live in a JSON file (default
@@ -91,6 +100,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
@@ -141,6 +151,12 @@ _DEEP_BANNERS = ["Planning", "Dispatching panel", "Synthesizing"]
 # present, but not required for the ordered-banner check (see _BANNER_SETS).
 _RESEARCH_BANNERS = ["Planning", "Researching", "Verifying", "Writing"]
 _FACTCHECK_BANNER = "Fact-checking"
+# The fast path emits a single distinct banner ('> _Thinking_'); see
+# routes/openai/pipeline.py. Its presence is how we tell a fast turn from a
+# deep/research one — route inference (infer_route) keys off the banner FAMILY,
+# not banner presence, so a fast turn (which does emit a banner) reads as
+# "fast", not a false "deep".
+_FAST_BANNER = "Thinking"
 _BANNER_SETS = {
     "audrey_research": _RESEARCH_BANNERS,
     "audrey_deep": _DEEP_BANNERS,
@@ -161,15 +177,29 @@ class CaseResult:
     answer: str
     banners_seen: list[str] = field(default_factory=list)
     error: str = ""
+    route: str = "unknown"            # inferred path: fast | deep | research
+    ttft_s: float | None = None
+    total_s: float | None = None
+
+
+@dataclass
+class StreamTiming:
+    """Wall-clock measurements for one streamed turn (seconds; None if N/A)."""
+    ttft_s: float | None = None   # time to first content delta (banner or token)
+    total_s: float | None = None  # request start → stream end
 
 
 def _post_stream(base_url: str, api_key: str, model: str, prompt: str,
-                 timeout_s: float) -> tuple[str, list[str], str]:
-    """Stream a chat completion. Returns (full_content, banner_words, error).
+                 timeout_s: float) -> tuple[str, list[str], str, StreamTiming]:
+    """Stream a chat completion. Returns (full_content, banner_words, error, timing).
 
     `full_content` is every delta concatenated (banners + answer, as the user
     would see). `banner_words` is the ordered list of banner phrases detected.
     `error` is non-empty on a transport/HTTP failure (then content is "").
+    `timing` carries TTFT (first content delta) and total wall-clock — the fast
+    path's whole reason to exist, so we make them falsifiable run-to-run. TTFT
+    counts the first content delta, which for Audrey is the banner ack (the
+    deliberate latency fix), so it reflects time-to-first-visible-output.
     """
     url = base_url.rstrip("/") + "/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -180,13 +210,17 @@ def _post_stream(base_url: str, api_key: str, model: str, prompt: str,
     }
     content_parts: list[str] = []
     banners: list[str] = []
-    seen_banner_phrases = (_RESEARCH_BANNERS + [_FACTCHECK_BANNER] + _DEEP_BANNERS)
+    # Fast emits 'Thinking'; include it so a fast turn's banner is captured and
+    # route inference can classify it (see infer_route).
+    seen_banner_phrases = [*_RESEARCH_BANNERS, _FACTCHECK_BANNER, _FAST_BANNER, *_DEEP_BANNERS]
+    timing = StreamTiming()
+    t0 = time.monotonic()
     try:
         with httpx.Client(timeout=timeout_s) as client, \
              client.stream("POST", url, headers=headers, json=body) as resp:
             if resp.status_code >= 300:
                 resp.read()
-                return "", [], f"HTTP {resp.status_code}: {resp.text[:300]}"
+                return "", [], f"HTTP {resp.status_code}: {resp.text[:300]}", timing
             for line in resp.iter_lines():
                 if not line or not line.startswith("data: "):
                     continue
@@ -204,13 +238,17 @@ def _post_stream(base_url: str, api_key: str, model: str, prompt: str,
                 text = delta.get("content") or ""
                 if not text:
                     continue
+                if timing.ttft_s is None:
+                    timing.ttft_s = time.monotonic() - t0
                 content_parts.append(text)
                 for phrase in seen_banner_phrases:
                     if phrase in text and phrase not in banners:
                         banners.append(phrase)
     except httpx.HTTPError as e:
-        return "", [], f"{type(e).__name__}: {e}"
-    return "".join(content_parts), banners, ""
+        timing.total_s = time.monotonic() - t0
+        return "", [], f"{type(e).__name__}: {e}", timing
+    timing.total_s = time.monotonic() - t0
+    return "".join(content_parts), banners, "", timing
 
 
 def _answer_body(full_content: str) -> str:
@@ -242,16 +280,41 @@ def _ordered_subsequence(found: list[str], expected: list[str]) -> bool:
     return all(any(f == e for f in it) for e in expected)
 
 
+def infer_route(banners: list[str]) -> str:
+    """Infer which Audrey path served the turn, from the banner FAMILY seen.
+
+    Audrey emits a different banner set per path (see routes/openai/pipeline.py):
+      - fast     → '> _Thinking_'                       (single banner)
+      - deep     → '> _Planning_ → _Dispatching panel_ → _Synthesizing_'
+      - research → '> _Planning_ → _Researching_ → _Verifying_ → _Writing_'
+    So route is observable, not just inferred-from-absence: a fast turn DOES emit
+    a banner, it's just a different one. We classify by the most specific family
+    present. Research and deep share 'Planning', so research's unique banners
+    (Researching/Verifying/Writing) are checked first. Returns
+    'fast' | 'deep' | 'research' | 'unknown' (no recognised banner — e.g. an
+    error turn before any banner, or an OWUI-utility-task turn).
+    """
+    if any(b in banners for b in ("Researching", "Verifying", "Writing")):
+        return "research"
+    if any(b in banners for b in ("Dispatching panel", "Synthesizing", "Planning")):
+        return "deep"
+    if _FAST_BANNER in banners:
+        return "fast"
+    return "unknown"
+
+
 def run_case(base_url: str, api_key: str, case: dict, default_model: str,
              timeout_s: float) -> CaseResult:
     model = case.get("model") or default_model
     name = case.get("name") or case["prompt"][:48]
-    content, banners, err = _post_stream(base_url, api_key, model, case["prompt"], timeout_s)
+    content, banners, err, timing = _post_stream(base_url, api_key, model, case["prompt"], timeout_s)
+    route = infer_route(banners)
 
     checks: dict[str, bool | None] = {}
     if err:
         return CaseResult(name=name, model=model, ok=False, checks={"reachable": False},
-                          answer="", banners_seen=banners, error=err)
+                          answer="", banners_seen=banners, error=err, route=route,
+                          ttft_s=timing.ttft_s, total_s=timing.total_s)
 
     checks["reachable"] = True
     answer = _answer_body(content)
@@ -285,21 +348,42 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
         checks["sources"] = None
         checks["url_wellformed"] = None
 
+    # Route expectation (opt-in): for audrey_auto cases, assert the inferred
+    # path matches the intended one — this is how we test the fast/deep gate
+    # (token_threshold + deep_intent_phrases). Inferred from the banner family
+    # (see infer_route); honest about being inference, not a server-truth signal.
+    expect_route = case.get("expect_route")
+    if expect_route:
+        checks["route"] = route == expect_route
+    else:
+        checks["route"] = None
+
     ok = all(v for v in checks.values() if v is not None)
     return CaseResult(name=name, model=model, ok=ok, checks=checks,
-                      answer=answer, banners_seen=banners)
+                      answer=answer, banners_seen=banners, route=route,
+                      ttft_s=timing.ttft_s, total_s=timing.total_s)
 
 
 def _fmt_check(v: bool | None) -> str:
     return "—" if v is None else ("✅" if v else "❌")
 
 
+def _fmt_latency(r: CaseResult) -> str:
+    """One-line latency summary: route + TTFT + total, when measured."""
+    bits = [f"route:{r.route}"]
+    if r.ttft_s is not None:
+        bits.append(f"ttft:{r.ttft_s:.1f}s")
+    if r.total_s is not None:
+        bits.append(f"total:{r.total_s:.1f}s")
+    return "  ".join(bits)
+
+
 def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> None:
     print("=" * 70)
-    print("audrey research/deep live eval")
+    print("audrey research/deep/fast live eval")
     print("=" * 70)
     cols = ["reachable", "no_error_marker", "has_answer", "banners",
-            "sources", "url_wellformed"]
+            "sources", "url_wellformed", "route"]
     for r in results:
         status = "PASS" if r.ok else "FAIL"
         print(f"\n[{status}] {r.name}   (model={r.model})")
@@ -307,6 +391,7 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
             print(f"   error: {r.error}")
         line = "   " + "  ".join(f"{c}:{_fmt_check(r.checks.get(c))}" for c in cols)
         print(line)
+        print(f"   {_fmt_latency(r)}")
         if r.banners_seen:
             print(f"   banners: {' → '.join(r.banners_seen)}")
         if show_answers and r.answer:
@@ -340,6 +425,8 @@ def save_results(results: list[CaseResult], save_file: Path) -> None:
             f"---\n\n## {r.name}\n\n"
             f"- model: `{r.model}`\n"
             f"- status: {'PASS' if r.ok else 'FAIL'}\n"
+            f"- route: {r.route}\n"
+            f"- latency: {_fmt_latency(r)}\n"
             f"- banners: {' → '.join(r.banners_seen) or '(none)'}\n"
             f"- checks: {checks}\n"
         )
