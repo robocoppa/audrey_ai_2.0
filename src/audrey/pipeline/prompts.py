@@ -127,6 +127,32 @@ RESEARCHER_SYSTEM = (
     "worth more than a long, confident-sounding one."
 )
 
+# Phase 26 Stage 1: a second, mechanical pass that converts a researcher's prose
+# notes (and the sources they cited) into the structured ledger. Kept separate
+# from RESEARCHER_SYSTEM so the researcher's *reasoning* is unchanged — this only
+# re-expresses what they already found as claims+sources. The call is pinned to
+# the ResearchResult JSON schema (Ollama `format`), so this prompt only needs to
+# steer the content, not the shape. Overridable via
+# `agentic.prompts.research_structure`.
+RESEARCH_STRUCTURE_SYSTEM = (
+    "You convert a researcher's notes into a structured claim/source ledger. "
+    "Do NOT add facts, do NOT research — only re-express what the notes already "
+    "contain. For each load-bearing factual claim, write a `Claim` with its "
+    "`text`, the `source_ids` that back it, and a `risk` rating: mark risk "
+    "\"high\" for dates, rankings, \"first\"/\"only\"/\"invented\"/\"proved\", "
+    "authorship, release specs, benchmarks, laws, prices, or current-status "
+    "claims; \"low\" for well-known, uncontroversial facts; \"medium\" "
+    "otherwise. Set `needs_hedge` true (with a short `hedge_reason`) when the "
+    "notes themselves marked the claim uncertain, disputed, or unverified. For "
+    "each source the notes cite, write a `Source` with its `title`, `url`, and "
+    "`source_type` — use \"company_claim\" for a vendor's own benchmark or "
+    "marketing assertion (not independent fact), \"official\" for vendor docs / "
+    "release notes, \"reference\" for Britannica/MacTutor/encyclopedias, and so "
+    "on. If a claim has no real source in the notes, give it an empty "
+    "`source_ids` rather than inventing one. Put any leftover prose in "
+    "`summary_notes`."
+)
+
 VERIFIER_SYSTEM = (
     "You are the verifier on a research panel. You receive the original "
     "request and the merged findings from the researchers. Your job is to "
@@ -237,6 +263,7 @@ _PROMPT_KEYS = frozenset({
     "planner",
     "synthesizer",
     "researcher",
+    "research_structure",
     "verifier",
     "factchecker",
     "writer",

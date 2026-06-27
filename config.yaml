@@ -222,6 +222,14 @@ agentic:
   # two cloud researchers + one local fits the proven pool and leaves cloud
   # headroom for a concurrent normal-deep request.
   max_research_workers_cloud: 2
+  # Phase 26 — research claim/source ledger (audrey_research only). When on, a
+  # second mechanical pass structures each researcher's prose into a
+  # claims+sources ledger that later stages (fact-check, writer, hedge policy)
+  # reason over. Opt-in + staged: enabled here turns on Stage 1 (build the
+  # ledger); it's carried but only progressively consumed as later stages ship.
+  # Toggle live (no rebuild) to A/B against the prose baseline. Off by default.
+  research_ledger:
+    enabled: false
   react:
     max_rounds: 3
     compress_after_round: 2

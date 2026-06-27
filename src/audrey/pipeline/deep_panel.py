@@ -41,9 +41,16 @@ from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.pipeline.ledger import (
+    Claim,
+    ResearchResult,
+    Source,
+    parse_research_result,
+)
 from audrey.pipeline.messages import last_user_text
 from audrey.pipeline.prompts import (
     FACTCHECK_SYSTEM,
+    RESEARCH_STRUCTURE_SYSTEM,
     RESEARCHER_SYSTEM,
     VERIFIER_SYSTEM,
     WRITER_SYSTEM,
@@ -534,6 +541,130 @@ def _format_findings(drafts: list[WorkerDraft]) -> str:
     return "\n\n".join(parts)
 
 
+def _ledger_enabled(cfg: Config) -> bool:
+    """Whether the Phase 26 research ledger (Stage 1+) is on.
+
+    Off by default — the ledger is opt-in via `agentic.research_ledger.enabled`
+    so it can be toggled live (no rebuild) while we measure each stage against
+    the prose baseline.
+    """
+    agentic = cfg.raw.get("agentic", {}) or {}
+    rl = agentic.get("research_ledger", {}) or {}
+    return bool(rl.get("enabled", False))
+
+
+async def _structure_one_draft(
+    ollama: OllamaClient,
+    health: HealthTracker,
+    gate: FairLocalGate,
+    cfg: Config,
+    *,
+    model: str,
+    location: str,
+    prose: str,
+    timeout_s: float,
+    user_id: str | None,
+    worker_idx: int,
+) -> ResearchResult | None:
+    """Convert one researcher's prose notes into a ResearchResult ledger.
+
+    A second, mechanical pass (no tools) pinned to the ResearchResult JSON
+    schema via Ollama `format`. Fail-soft: any tool/parse error returns None,
+    and the caller keeps the prose findings unchanged. Claim/source ids are
+    prefixed with the worker index so a later merge across workers can't collide.
+    """
+    if not prose.strip():
+        return None
+    msgs = [
+        {"role": "system", "content": prompt_from_config(cfg, "research_structure", RESEARCH_STRUCTURE_SYSTEM)},
+        {"role": "user", "content": f"RESEARCHER NOTES:\n{prose.strip()}\n\nReturn the ledger as JSON."},
+    ]
+    try:
+        async with gate.acquire(model, location=location, user_id=user_id):
+            resp = await ollama.chat(
+                model=model,
+                messages=msgs,
+                options={"temperature": 0.0},
+                timeout_s=timeout_s,
+                format=ResearchResult.model_json_schema(),
+            )
+        health.record_success(model)
+    except OllamaError as e:
+        health.record_failure(model, str(e))
+        log.warning("research: structuring call for %s failed: %s", model, e)
+        return None
+    raw = (resp.get("message", {}) or {}).get("content", "") or ""
+    result = parse_research_result(raw)
+    if result is None:
+        log.info("research: structuring call for %s produced unusable JSON", model)
+        return None
+    # Namespace ids per worker so cross-worker merge can't collide.
+    prefix = f"w{worker_idx}_"
+    return _prefix_ledger_ids(result, prefix)
+
+
+def _prefix_ledger_ids(r: ResearchResult, prefix: str) -> ResearchResult:
+    """Return a copy of `r` with claim/source ids (and cross-refs) prefixed."""
+    claims = [
+        Claim(
+            id=prefix + c.id,
+            text=c.text,
+            source_ids=[prefix + s for s in c.source_ids],
+            risk=c.risk,
+            needs_hedge=c.needs_hedge,
+            hedge_reason=c.hedge_reason,
+        )
+        for c in r.claims
+    ]
+    sources = [
+        Source(
+            id=prefix + s.id,
+            title=s.title,
+            url=s.url,
+            source_type=s.source_type,
+            supports=[prefix + c for c in s.supports],
+        )
+        for s in r.sources
+    ]
+    return ResearchResult(
+        summary_notes=r.summary_notes,
+        claims=claims,
+        sources=sources,
+        unresolved_questions=r.unresolved_questions,
+    )
+
+
+def _merge_ledgers(ledgers: list[ResearchResult]) -> ResearchResult:
+    """Merge per-worker ledgers into one. Sources deduped by URL; claims
+    concatenated (ids already worker-prefixed). Conflicting claims across
+    workers are NOT reconciled here — they're surfaced as-is for the
+    fact-checker to flag (Stage 2)."""
+    seen_urls: dict[str, str] = {}  # url → canonical source id
+    merged_sources: list[Source] = []
+    for led in ledgers:
+        for s in led.sources:
+            key = s.url.strip().rstrip("/").lower()
+            if key and key in seen_urls:
+                continue
+            if key:
+                seen_urls[key] = s.id
+            merged_sources.append(s)
+    merged_claims: list[Claim] = []
+    summaries: list[str] = []
+    unresolved: list[str] = []
+    for led in ledgers:
+        merged_claims.extend(led.claims)
+        if led.summary_notes.strip():
+            summaries.append(led.summary_notes.strip())
+        unresolved.extend(led.unresolved_questions)
+    return ResearchResult(
+        summary_notes="\n\n".join(summaries),
+        claims=merged_claims,
+        sources=merged_sources,
+        unresolved_questions=unresolved,
+    )
+
+
 async def _single_chat_stage(
     ollama: OllamaClient,
     health: HealthTracker,
@@ -735,6 +866,43 @@ async def run_research_pipeline_streaming(
 
     findings = _format_findings(drafts)
     grounded = bool(findings)
+
+    # ── Stage 1b: structure the findings into a claim/source ledger ────
+    # Opt-in (agentic.research_ledger.enabled). A second mechanical pass per
+    # worker converts prose → ResearchResult; fail-soft, and the prose
+    # `findings` is unchanged either way (the ledger is carried alongside it for
+    # the later stages to consume). This stage's only measurable effect on the
+    # ANSWER is none yet — it just produces the ledger; we eval that the prose
+    # path is undisturbed before wiring the ledger into verify/write/hedge.
+    ledger: ResearchResult | None = None
+    if grounded and _ledger_enabled(cfg):
+        structure_coros = [
+            _structure_one_draft(
+                ollama, health, gate, cfg,
+                model=d.get("model", "?"),
+                location=registry.location_of(d.get("model", "")),
+                prose=(d.get("content") or ""),
+                timeout_s=timeout_s,
+                user_id=user_id,
+                worker_idx=i,
+            )
+            for i, d in enumerate(drafts)
+            if (d.get("content") or "").strip()
+        ]
+        try:
+            structured = await asyncio.gather(*structure_coros)
+            usable = [s for s in structured if s is not None]
+            if usable:
+                ledger = _merge_ledgers(usable)
+                log.info(
+                    "research: ledger built — %d claims, %d sources from %d/%d workers",
+                    len(ledger.claims), len(ledger.sources), len(usable), len(structure_coros),
+                )
+        except Exception:
+            # Structuring is additive and optional — never break the answer.
+            log.exception("research: ledger structuring errored; continuing prose-only")
+            ledger = None
+
     yield {"type": "findings_ready", "grounded": grounded}
 
     # ── Stage 2: verify (skipped when no grounding) ────────────────────
@@ -873,6 +1041,7 @@ async def run_research_pipeline_streaming(
         "findings": findings,
         "critique": critique,
         "corrections": corrections,
+        "ledger": ledger.model_dump() if ledger is not None else None,
         "error": write_error,
     }
 
@@ -915,6 +1084,7 @@ async def run_research_pipeline(
         "research_findings": final.get("findings", ""),
         "research_critique": final.get("critique", ""),
         "research_factcheck": final.get("corrections", ""),
+        "research_ledger": final.get("ledger"),
         "error": final.get("error", ""),
     }
 

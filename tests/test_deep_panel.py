@@ -24,6 +24,8 @@ from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline import graph as gmod
 from audrey.pipeline.deep_panel import (
+    _merge_ledgers,
+    _prefix_ledger_ids,
     _prepare_panel,
     pick_panel_timeout,
     pool_key_for,
@@ -31,6 +33,7 @@ from audrey.pipeline.deep_panel import (
     run_panel_streaming,
 )
 from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.pipeline.ledger import Claim, ResearchResult, Source
 
 
 class _Cfg:
@@ -643,3 +646,42 @@ async def test_factcheck_stage_order_when_present():
     ]
     # research → verify → fact-check → write, in that order.
     assert types.index("verify_done") < types.index("factcheck_done") < types.index("write_delta")
+
+
+# ── Phase 26 Stage 1: ledger merge/prefix helpers ──────────────────────
+
+def test_prefix_ledger_ids_namespaces_claims_and_sources():
+    r = ResearchResult(
+        claims=[Claim(id="c1", text="x", source_ids=["s1"])],
+        sources=[Source(id="s1", title="T", url="https://e.com",
+                        source_type="official", supports=["c1"])],
+    )
+    out = _prefix_ledger_ids(r, "w0_")
+    assert out.claims[0].id == "w0_c1"
+    assert out.claims[0].source_ids == ["w0_s1"]
+    assert out.sources[0].id == "w0_s1"
+    assert out.sources[0].supports == ["w0_c1"]
+
+
+def test_merge_ledgers_keeps_all_claims_dedups_sources_by_url():
+    r1 = _prefix_ledger_ids(ResearchResult(
+        claims=[Claim(id="c1", text="a")],
+        sources=[Source(id="s1", title="T", url="https://e.com/",
+                        source_type="official")],
+    ), "w0_")
+    r2 = _prefix_ledger_ids(ResearchResult(
+        claims=[Claim(id="c1", text="b")],  # same local id, different worker
+        sources=[Source(id="s1", title="T2", url="https://e.com",  # dup URL
+                        source_type="news")],
+    ), "w1_")
+    m = _merge_ledgers([r1, r2])
+    # Both workers' claims survive (conflicting claims surface for the checker).
+    assert {c.id for c in m.claims} == {"w0_c1", "w1_c1"}
+    # Source deduped by normalized URL → only the first kept.
+    assert [s.id for s in m.sources] == ["w0_s1"]
+
+
+def test_merge_ledgers_empty_is_safe():
+    m = _merge_ledgers([])
+    assert m.claims == []
+    assert m.sources == []

@@ -130,6 +130,7 @@ class OllamaClient:
         options: dict[str, Any] | None = None,
         tools: list[dict[str, Any]] | None = None,
         timeout_s: float | None = None,
+        format: dict[str, Any] | str | None = None,
     ) -> dict[str, Any]:
         """Non-streaming chat completion. Returns the full Ollama response dict.
 
@@ -137,6 +138,13 @@ class OllamaClient:
         `message.tool_calls` will list any tool invocations the model wants to
         make. Caller (the ReAct loop) is responsible for executing them and
         feeding results back as `role=tool` messages.
+
+        `format` forwards Ollama's structured-output field: a JSON schema dict
+        (constrains the reply to that shape) or the string `"json"`. Used by the
+        research-ledger stages to get a parseable `ResearchResult`/`FactCheckResult`
+        instead of prose. Note: Ollama applies `format` to the model's *reply*,
+        so a `format`-pinned call should not also pass `tools` — run the tool
+        loop first, then a separate `format` call to structure the result.
         """
         payload: dict[str, Any] = {
             "model": model,
@@ -147,6 +155,8 @@ class OllamaClient:
             payload["options"] = options
         if tools:
             payload["tools"] = tools
+        if format is not None:
+            payload["format"] = format
         t0 = time.perf_counter()
         try:
             r = await self._client.post(
