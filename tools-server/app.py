@@ -39,9 +39,9 @@ from brave import (
 )
 from chat_archive import ChatArchiveStore
 from db import MemoryEntry, MemoryStore
-from duckduckgo import DuckDuckGoClient, DuckDuckGoError
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
+from searxng import SearxngClient, SearxngError
 from settings import settings
 
 log = logging.getLogger("custom-tools")
@@ -57,7 +57,8 @@ async def lifespan(app: FastAPI):
         cache_ttl_seconds=settings.brave_cache_ttl_hours * 3600,
     )
     # Keyless fallback used when Brave is quota-exhausted (402) or rate-limited.
-    duckduckgo = DuckDuckGoClient()
+    # Optional: only built when SEARXNG_URL is set (else no fallback → 503).
+    searxng = SearxngClient(settings.searxng_url) if settings.searxng_url else None
     memory = MemoryStore(
         qdrant_url=settings.qdrant_url,
         ollama_url=settings.ollama_url,
@@ -90,13 +91,14 @@ async def lifespan(app: FastAPI):
     await chat_archive.init()
 
     app.state.brave = brave
-    app.state.duckduckgo = duckduckgo
+    app.state.searxng = searxng
     app.state.memory = memory
     app.state.audrey = audrey
     app.state.chat_archive = chat_archive
     log.info(
-        "custom-tools ready. brave=%s audrey=%s qdrant=%s memory=%s archive=%s",
+        "custom-tools ready. brave=%s searxng=%s audrey=%s qdrant=%s memory=%s archive=%s",
         "configured" if settings.brave_api_key else "UNSET",
+        settings.searxng_url or "UNSET",
         settings.audrey_url,
         settings.qdrant_url,
         settings.memory_collection,
@@ -106,7 +108,8 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         await brave.aclose()
-        await duckduckgo.aclose()
+        if searxng is not None:
+            await searxng.aclose()
         await audrey.aclose()
         await memory.aclose()
         await chat_archive.aclose()
@@ -247,20 +250,30 @@ async def health() -> dict[str, str]:
 )
 async def web_search(req: WebSearchRequest) -> WebSearchResponse:
     brave: BraveClient = app.state.brave
-    duckduckgo: DuckDuckGoClient = app.state.duckduckgo
+    searxng: SearxngClient | None = app.state.searxng
     try:
         hits: list[SearchResult] = await brave.search(query=req.query, count=req.count)
     except (BraveQuotaError, BraveRateLimitError) as e:
-        # Quota (402) or rate-limit (429): fall back to the keyless DDG provider
-        # so research grounding survives a Brave outage. Same response shape.
-        log.warning("web_search: Brave unavailable (%s); falling back to DuckDuckGo", e)
-        try:
-            hits = await duckduckgo.search(query=req.query, count=req.count)
-        except DuckDuckGoError as de:
+        # Quota (402) or rate-limit (429): fall back to the self-hosted SearXNG
+        # provider so research grounding survives a Brave outage. Same response
+        # shape. If SEARXNG_URL isn't configured, there's no fallback → 503.
+        if searxng is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Search unavailable (Brave: {e}; DuckDuckGo: {de})",
-            ) from de
+                detail=f"Brave unavailable ({e}) and no SEARXNG_URL fallback configured.",
+            ) from e
+        log.warning("web_search: Brave unavailable (%s); falling back to SearXNG", e)
+        try:
+            hits = await searxng.search(query=req.query, count=req.count)
+            log.warning(
+                "web_search: SearXNG returned %d results (first url=%r)",
+                len(hits), (hits[0].url if hits else ""),
+            )
+        except SearxngError as se:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Search unavailable (Brave: {e}; SearXNG: {se})",
+            ) from se
     except BraveUpstreamError as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

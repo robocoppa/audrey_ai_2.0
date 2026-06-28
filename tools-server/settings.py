@@ -15,9 +15,14 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Brave Search
+    # Brave Search (primary web_search provider)
     brave_api_key: str = Field(default="", alias="BRAVE_API_KEY")
     brave_cache_ttl_hours: int = Field(default=24, alias="BRAVE_CACHE_TTL_HOURS")
+
+    # SearXNG (self-hosted meta-search; web_search fallback when Brave is
+    # quota-exhausted/rate-limited). Empty → no fallback. Point at the JSON API
+    # of a SearXNG instance on the LAN, e.g. http://192.168.1.11:8088
+    searxng_url: str = Field(default="", alias="SEARXNG_URL")
 
     # Audrey (for kb_search / kb_image_search proxying)
     audrey_url: str = Field(default="http://audrey-ai:8000", alias="AUDREY_URL")

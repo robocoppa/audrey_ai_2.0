@@ -39,7 +39,7 @@ class BraveRateLimitError(Exception):
 class BraveQuotaError(Exception):
     """Raised when Brave returns 402 Payment Required (the monthly quota is
     exhausted). Distinct from a transient 429: retrying won't help, so the
-    handler falls straight back to the keyless DuckDuckGo provider."""
+    handler falls straight back to the SearXNG fallback provider."""
 
 
 class BraveUpstreamError(Exception):
