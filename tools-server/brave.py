@@ -36,6 +36,12 @@ class BraveRateLimitError(Exception):
     """Raised when Brave returns 429 after retries are exhausted."""
 
 
+class BraveQuotaError(Exception):
+    """Raised when Brave returns 402 Payment Required (the monthly quota is
+    exhausted). Distinct from a transient 429: retrying won't help, so the
+    handler falls straight back to the keyless DuckDuckGo provider."""
+
+
 class BraveUpstreamError(Exception):
     """Raised when a non-429 Brave HTTP error survives the retry budget.
 
@@ -97,6 +103,9 @@ class BraveClient:
                 BRAVE_ENDPOINT,
                 params={"q": query, "count": count, "safesearch": "moderate"},
             )
+            if r.status_code == 402:
+                # Quota exhausted — not transient, don't retry; signal fallback.
+                raise BraveQuotaError("Brave returned 402 Payment Required (quota exhausted)")
             if r.status_code == 429:
                 raise BraveRateLimitError("Brave returned 429 rate-limit")
             r.raise_for_status()

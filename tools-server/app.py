@@ -30,9 +30,16 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 import httpx
-from brave import BraveClient, BraveRateLimitError, BraveUpstreamError, SearchResult
+from brave import (
+    BraveClient,
+    BraveQuotaError,
+    BraveRateLimitError,
+    BraveUpstreamError,
+    SearchResult,
+)
 from chat_archive import ChatArchiveStore
 from db import MemoryEntry, MemoryStore
+from duckduckgo import DuckDuckGoClient, DuckDuckGoError
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 from settings import settings
@@ -49,6 +56,8 @@ async def lifespan(app: FastAPI):
         api_key=settings.brave_api_key,
         cache_ttl_seconds=settings.brave_cache_ttl_hours * 3600,
     )
+    # Keyless fallback used when Brave is quota-exhausted (402) or rate-limited.
+    duckduckgo = DuckDuckGoClient()
     memory = MemoryStore(
         qdrant_url=settings.qdrant_url,
         ollama_url=settings.ollama_url,
@@ -81,6 +90,7 @@ async def lifespan(app: FastAPI):
     await chat_archive.init()
 
     app.state.brave = brave
+    app.state.duckduckgo = duckduckgo
     app.state.memory = memory
     app.state.audrey = audrey
     app.state.chat_archive = chat_archive
@@ -96,6 +106,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         await brave.aclose()
+        await duckduckgo.aclose()
         await audrey.aclose()
         await memory.aclose()
         await chat_archive.aclose()
@@ -236,13 +247,20 @@ async def health() -> dict[str, str]:
 )
 async def web_search(req: WebSearchRequest) -> WebSearchResponse:
     brave: BraveClient = app.state.brave
+    duckduckgo: DuckDuckGoClient = app.state.duckduckgo
     try:
         hits: list[SearchResult] = await brave.search(query=req.query, count=req.count)
-    except BraveRateLimitError as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Brave Search rate-limited: {e}",
-        ) from e
+    except (BraveQuotaError, BraveRateLimitError) as e:
+        # Quota (402) or rate-limit (429): fall back to the keyless DDG provider
+        # so research grounding survives a Brave outage. Same response shape.
+        log.warning("web_search: Brave unavailable (%s); falling back to DuckDuckGo", e)
+        try:
+            hits = await duckduckgo.search(query=req.query, count=req.count)
+        except DuckDuckGoError as de:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Search unavailable (Brave: {e}; DuckDuckGo: {de})",
+            ) from de
     except BraveUpstreamError as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
