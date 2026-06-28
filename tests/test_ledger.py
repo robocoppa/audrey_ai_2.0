@@ -137,6 +137,33 @@ class TestParseResearchResult:
         assert isinstance(r, ResearchResult)
         assert "line one" in r.summary_notes
 
+    def test_claim_without_id_is_backfilled(self):
+        # The 2/3-worker-drop bug: models omit `id`. It must default + backfill,
+        # not ValidationError-discard the whole ledger.
+        raw = '{"claims": [{"text": "Euclid lived ~300 BCE", "risk": "high"}], "sources": []}'
+        r = parse_research_result(raw)
+        assert isinstance(r, ResearchResult)
+        assert r.claims[0].id == "c1"
+
+    def test_integer_source_ids_coerced(self):
+        # Models emit source_ids as ints; coerce to str rather than reject.
+        raw = '{"claims": [{"id": "c1", "text": "x", "source_ids": [1, 2], "risk": "low"}]}'
+        r = parse_research_result(raw)
+        assert r.claims[0].source_ids == ["1", "2"]
+
+    def test_source_without_id_backfilled_and_unknown_type(self):
+        raw = ('{"claims": [], "sources": [{"title": "T", "url": "https://e.com", '
+               '"source_type": "wikipedia"}]}')  # unknown type + no id
+        r = parse_research_result(raw)
+        assert r.sources[0].id == "s1"
+        assert r.sources[0].source_type == "unknown"
+
+    def test_empty_text_claims_dropped(self):
+        raw = '{"claims": [{"text": "", "risk": "low"}, {"text": "real", "risk": "low"}]}'
+        r = parse_research_result(raw)
+        assert len(r.claims) == 1
+        assert r.claims[0].text == "real"
+
     def test_garbage_returns_none(self):
         assert parse_research_result("not json at all") is None
 

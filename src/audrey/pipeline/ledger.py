@@ -17,9 +17,32 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, BeforeValidator, ValidationError
+
+
+def _to_str(v: Any) -> Any:
+    """Coerce a scalar id to str. Models emit `source_ids` and ids as INTEGERS
+    (`[1]`, `2`) about a third of the time — the schema wants strings, and
+    without this Pydantic raises ValidationError and the whole worker ledger is
+    discarded (the observed 2/3-workers-drop bug). Leave non-scalars alone so a
+    genuinely wrong shape still fails."""
+    if isinstance(v, (int, float)):
+        return str(v)
+    return v
+
+
+def _to_str_list(v: Any) -> Any:
+    """Coerce each element of an id list to str (see `_to_str`)."""
+    if isinstance(v, list):
+        return [str(x) if isinstance(x, (int, float)) else x for x in v]
+    return v
+
+
+# Reusable id types that tolerate int-or-str from the model.
+StrId = Annotated[str, BeforeValidator(_to_str)]
+StrIdList = Annotated[list[str], BeforeValidator(_to_str_list)]
 
 log = logging.getLogger("audrey.ledger")
 
@@ -35,6 +58,12 @@ SourceType = Literal[
     "unknown",
 ]
 
+# The set form, for tolerant validation (see _norm_source_type).
+_SOURCE_TYPES = frozenset(
+    ["official", "primary_paper", "scholarly", "reference",
+     "news", "company_claim", "blog", "unknown"]
+)
+
 Risk = Literal["low", "medium", "high"]
 
 Verdict = Literal[
@@ -47,20 +76,32 @@ Verdict = Literal[
 ]
 
 
+def _norm_source_type(v: Any) -> Any:
+    """Map an unrecognized source_type to 'unknown' instead of failing the whole
+    ledger. Models occasionally emit values outside the enum (e.g. 'wikipedia',
+    'web'); a single bad type shouldn't discard every source the worker found."""
+    if isinstance(v, str) and v not in _SOURCE_TYPES:
+        return "unknown"
+    return v
+
+
 class Source(BaseModel):
-    id: str
-    title: str
-    url: str  # not HttpUrl: models emit imperfect URLs and a hard validator
-              # would reject an otherwise-usable source. We sanity-check shape
-              # downstream when rendering "Sources used", not here.
-    source_type: SourceType
-    supports: list[str] = []  # claim ids this source backs
+    # id optional: models routinely omit it (writing title/url first). A
+    # required id with no default discarded the whole worker ledger (the
+    # 2/3-drop bug). Missing ids are backfilled positionally in the parser.
+    id: StrId = ""
+    title: str = ""
+    url: str = ""  # not HttpUrl: models emit imperfect URLs and a hard validator
+                   # would reject an otherwise-usable source. We sanity-check
+                   # shape downstream when rendering "Sources used", not here.
+    source_type: Annotated[SourceType, BeforeValidator(_norm_source_type)] = "unknown"
+    supports: StrIdList = []  # claim ids this source backs
 
 
 class Claim(BaseModel):
-    id: str
-    text: str
-    source_ids: list[str] = []
+    id: StrId = ""          # optional + backfilled — see Source.id
+    text: str = ""
+    source_ids: StrIdList = []
     risk: Risk = "medium"
     needs_hedge: bool = False
     hedge_reason: str | None = None
@@ -74,7 +115,7 @@ class ResearchResult(BaseModel):
 
 
 class ClaimCheck(BaseModel):
-    claim_id: str
+    claim_id: StrId
     verdict: Verdict
     corrected_text: str | None = None
     notes: str = ""
@@ -126,6 +167,22 @@ def _strip_fence(s: str) -> str:
     return s.strip()
 
 
+def _backfill_ids(r: ResearchResult) -> ResearchResult:
+    """Give every claim/source a stable id when the model omitted one, and drop
+    claims with no text. Models often write the content but skip `id`; we assign
+    positional ids (`c1`, `c2`, `s1`, …) so downstream id-linkage (source_ids,
+    claim_id verdicts) still has something to reference. Pure (returns r mutated;
+    r is freshly parsed, not shared)."""
+    r.claims = [c for c in r.claims if c.text.strip()]
+    for i, c in enumerate(r.claims, 1):
+        if not c.id:
+            c.id = f"c{i}"
+    for i, s in enumerate(r.sources, 1):
+        if not s.id:
+            s.id = f"s{i}"
+    return r
+
+
 def _extract_json(raw: str) -> str | None:
     """Best-effort: pull a JSON value (object OR array) out of a model reply.
 
@@ -167,7 +224,8 @@ def parse_research_result(raw: str) -> ResearchResult | None:
         # A bare array → assume it's the claims list and wrap it.
         if isinstance(data, list):
             data = {"claims": data}
-        return ResearchResult.model_validate(data)
+        result = ResearchResult.model_validate(data)
+        return _backfill_ids(result)
     except (json.JSONDecodeError, ValidationError, TypeError) as e:
         log.info("ledger.parse_research_result: unusable model output — %s: %s", type(e).__name__, e)
         return None
