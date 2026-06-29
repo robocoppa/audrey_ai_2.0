@@ -270,6 +270,7 @@ async def web_search(req: WebSearchRequest) -> WebSearchResponse:
                 len(hits), (hits[0].url if hits else ""),
             )
         except SearxngError as se:
+            log.warning("web_search: SearXNG fallback failed: %s", se)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"Search unavailable (Brave: {e}; SearXNG: {se})",
