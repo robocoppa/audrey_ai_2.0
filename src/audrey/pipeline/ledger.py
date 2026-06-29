@@ -40,6 +40,20 @@ def _to_str_list(v: Any) -> Any:
     return v
 
 
+def _to_str_or_empty(v: Any) -> Any:
+    """Coerce a missing/None/non-string text field to "". Models emit `url: null`
+    for a source they couldn't link (and occasionally an int) — Pydantic rejects
+    None for a `str` field, which discarded the whole worker ledger (observed:
+    `ValidationError on fields ['sources.0.url', 'sources.4.url']`, dropping a
+    worker to 2/3). A blank url is harmless: we sanity-check url shape when
+    rendering "Sources used", not here. Leave real strings untouched."""
+    if v is None:
+        return ""
+    if isinstance(v, (int, float)):
+        return str(v)
+    return v
+
+
 # Reusable id types that tolerate int-or-str from the model.
 StrId = Annotated[str, BeforeValidator(_to_str)]
 StrIdList = Annotated[list[str], BeforeValidator(_to_str_list)]
@@ -107,10 +121,12 @@ class Source(BaseModel):
     # required id with no default discarded the whole worker ledger (the
     # 2/3-drop bug). Missing ids are backfilled positionally in the parser.
     id: StrId = ""
-    title: str = ""
-    url: str = ""  # not HttpUrl: models emit imperfect URLs and a hard validator
-                   # would reject an otherwise-usable source. We sanity-check
-                   # shape downstream when rendering "Sources used", not here.
+    title: Annotated[str, BeforeValidator(_to_str_or_empty)] = ""  # tolerate null
+    # not HttpUrl: models emit imperfect URLs and a hard validator would reject
+    # an otherwise-usable source. _to_str_or_empty also tolerates `url: null`
+    # (model couldn't link the source) — without it, one null url discarded the
+    # whole worker ledger. We sanity-check shape when rendering "Sources used".
+    url: Annotated[str, BeforeValidator(_to_str_or_empty)] = ""
     source_type: Annotated[SourceType, BeforeValidator(_norm_source_type)] = "unknown"
     supports: StrIdList = []  # claim ids this source backs
 

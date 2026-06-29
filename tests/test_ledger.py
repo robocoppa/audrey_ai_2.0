@@ -178,6 +178,35 @@ class TestParseResearchResult:
         r = parse_research_result(raw)
         assert r.sources[0].source_type == "reference"
 
+    def test_null_url_coerced_not_discarded(self):
+        # The 2/3-worker-drop bug after the off-enum fix: a model emits `url: null`
+        # for a source it couldn't link, and `str` rejected None — discarding the
+        # whole worker ledger (`ValidationError on fields ['sources.0.url', ...]`).
+        raw = '{"sources": [{"id": "s1", "title": "T", "url": null, "source_type": "news"}]}'
+        r = parse_research_result(raw)
+        assert r is not None
+        assert r.sources[0].url == ""
+
+    def test_null_title_coerced(self):
+        raw = '{"sources": [{"id": "s1", "title": null, "url": "https://e.com"}]}'
+        r = parse_research_result(raw)
+        assert r is not None and r.sources[0].title == ""
+
+    def test_int_url_coerced_to_str(self):
+        raw = '{"sources": [{"id": "s1", "title": "T", "url": 123}]}'
+        r = parse_research_result(raw)
+        assert r is not None and r.sources[0].url == "123"
+
+    def test_one_null_url_does_not_drop_sibling_sources(self):
+        # The exact box shape: source 0 is fine, source 4 has url null. The good
+        # sources must survive (previously the whole worker was discarded).
+        raw = json.dumps({"sources": [
+            {"id": "s0", "title": "A", "url": "https://a.com", "source_type": "news"},
+            {"id": "s4", "title": "B", "url": None, "source_type": "blog"},
+        ]})
+        r = parse_research_result(raw)
+        assert r is not None and len(r.sources) == 2
+
     def test_garbage_returns_none(self):
         assert parse_research_result("not json at all") is None
 
