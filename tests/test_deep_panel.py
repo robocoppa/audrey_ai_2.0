@@ -952,7 +952,9 @@ async def test_sources_block_reaches_stream_when_ledger_present():
 
 
 # ── Stage 4: deterministic hedging dispositions ────────────────────────
-def test_dispositions_block_renders_per_surviving_claim():
+def test_dispositions_block_lists_only_action_claims_with_framing():
+    # Plain claims are NOT enumerated — the framing line covers them; only the
+    # action-bearing (attribute/hedge) claims get a line.
     from audrey.pipeline.deep_panel import _render_dispositions_block
     from audrey.pipeline.ledger import Claim, ResearchResult, Source
     led = ResearchResult(
@@ -964,8 +966,10 @@ def test_dispositions_block_renders_per_surviving_claim():
                         source_type="company_claim")],
     )
     out = _render_dispositions_block(led, None)
-    assert "STATE PLAINLY: R1 released 2025-01-20" in out
+    assert out.startswith("State every claim plainly EXCEPT")
     assert "ATTRIBUTE TO SOURCE: Maverick beats GPT-4o" in out
+    # the plain claim is folded into the framing line, not enumerated
+    assert "R1 released 2025-01-20" not in out
 
 
 def test_dispositions_block_skips_dropped_claims():
@@ -977,15 +981,18 @@ def test_dispositions_block_skips_dropped_claims():
         ResearchResult,
         Source,
     )
+    # c1 plain (kept), c2 a company_claim that would attribute — but it's dropped,
+    # so the only action line is gone → all-plain → suppressed.
     led = ResearchResult(
         claims=[Claim(id="c1", text="kept", source_ids=["s1"], risk="low"),
-                Claim(id="c2", text="dropped", source_ids=["s1"], risk="low")],
-        sources=[Source(id="s1", title="T", url="https://e.com", source_type="official")],
+                Claim(id="c2", text="dropped vendor claim", source_ids=["s2"], risk="low")],
+        sources=[Source(id="s1", title="T", url="https://e.com", source_type="official"),
+                 Source(id="s2", title="M", url="https://m.com", source_type="company_claim")],
     )
     fc = FactCheckResult(checks=[ClaimCheck(claim_id="c2", verdict="unsupported")])
     out = _render_dispositions_block(led, fc)
-    assert "kept" in out
-    assert "dropped" not in out
+    assert "dropped vendor claim" not in out  # dropped claim never appears
+    assert out == ""  # its attribution was the only action line → all-plain → omit
 
 
 def test_dispositions_block_suppressed_when_all_hedge():
@@ -1002,19 +1009,34 @@ def test_dispositions_block_suppressed_when_all_hedge():
     assert _render_dispositions_block(led, None) == ""
 
 
-def test_dispositions_block_kept_when_one_non_hedge():
-    # Mixed: one plain-statement among hedges → the block is worth rendering.
+def test_dispositions_block_renders_selective_hedge_against_plain():
+    # Mix: some plain (folded into framing), a few specific hedges → renders the
+    # framing + only the hedge lines. This is the selective-handling the stage is for.
     from audrey.pipeline.deep_panel import _render_dispositions_block
     from audrey.pipeline.ledger import Claim, ResearchResult, Source
     led = ResearchResult(
         claims=[Claim(id="c1", text="grounded fact", source_ids=["s1"], risk="low"),
-                Claim(id="c2", text="shaky claim", source_ids=["s2"], risk="low")],
+                Claim(id="c2", text="grounded fact two", source_ids=["s1"], risk="low"),
+                Claim(id="c3", text="shaky claim", source_ids=["s2"], risk="low")],
         sources=[Source(id="s1", title="ref", url="https://e.com", source_type="reference"),
                  Source(id="s2", title="blog", url="https://b.com", source_type="blog")],
     )
     out = _render_dispositions_block(led, None)
-    assert "STATE PLAINLY: grounded fact" in out
+    assert out.startswith("State every claim plainly EXCEPT")
     assert "HEDGE: shaky claim" in out
+    assert "grounded fact" not in out  # plain claims folded into framing
+
+
+def test_dispositions_block_empty_when_all_plain():
+    # Everything authoritative + low-risk → all state_plainly → nothing to instruct.
+    from audrey.pipeline.deep_panel import _render_dispositions_block
+    from audrey.pipeline.ledger import Claim, ResearchResult, Source
+    led = ResearchResult(
+        claims=[Claim(id="c1", text="fact one", source_ids=["s1"], risk="low"),
+                Claim(id="c2", text="fact two", source_ids=["s1"], risk="low")],
+        sources=[Source(id="s1", title="ref", url="https://e.com", source_type="reference")],
+    )
+    assert _render_dispositions_block(led, None) == ""
 
 
 def test_dispositions_block_empty_when_no_ledger():
@@ -1030,9 +1052,9 @@ def test_dispositions_block_empty_when_no_claims():
 
 def test_write_user_block_includes_dispositions_when_present():
     from audrey.pipeline.deep_panel import _write_user_block
-    out = _write_user_block("q", "findings", "", dispositions="- STATE PLAINLY: x")
+    out = _write_user_block("q", "findings", "", dispositions="- HEDGE: x")
     assert "CLAIM DISPOSITIONS (apply these):" in out
-    assert "- STATE PLAINLY: x" in out
+    assert "- HEDGE: x" in out
 
 
 def test_write_user_block_omits_dispositions_when_empty():
@@ -1079,17 +1101,25 @@ async def test_dispositions_reach_writer_when_flag_on():
     cfg = _research_cfg_fc(["r1"], "v", "fc", "w", models)
     cfg.raw["agentic"] = {"research_ledger": {"enabled": True, "hedge_policy": True}}
     health = HealthTracker()
+    # One plain (reference) claim + one vendor claim → the vendor claim produces an
+    # ATTRIBUTE action line, so the block renders (a single plain claim alone would
+    # be all-plain → suppressed).
     research_json = _json.dumps({
         "summary_notes": "n",
-        "claims": [{"id": "c1", "text": "Euclid ~300 BCE", "source_ids": ["s1"], "risk": "low"}],
+        "claims": [{"id": "c1", "text": "Euclid ~300 BCE", "source_ids": ["s1"], "risk": "low"},
+                   {"id": "c2", "text": "AcmeAI beats everyone", "source_ids": ["s2"], "risk": "low"}],
         "sources": [{"id": "s1", "title": "MacTutor",
                      "url": "https://mathshistory.st-andrews.ac.uk/Euclid/",
-                     "source_type": "reference", "supports": ["c1"]}],
+                     "source_type": "reference", "supports": ["c1"]},
+                    {"id": "s2", "title": "AcmeAI blog",
+                     "url": "https://acme.example/blog",
+                     "source_type": "company_claim", "supports": ["c2"]}],
     })
-    factcheck_json = _json.dumps({"checks": [{"claim_id": "c1", "verdict": "supported"}]})
+    factcheck_json = _json.dumps({"checks": [{"claim_id": "c1", "verdict": "supported"},
+                                            {"claim_id": "c2", "verdict": "supported"}]})
     ollama = _DispoCapturingOllama(
         {"r1": "Euclid lived around 300 BCE.", "v": "ok",
-         "fc": "CONFIRMED: Euclid ~300 BCE", "w": "Euclid lived around 300 BCE."},
+         "fc": "CONFIRMED", "w": "Euclid lived around 300 BCE."},
         research_json=research_json, factcheck_json=factcheck_json,
     )
 
@@ -1102,8 +1132,9 @@ async def test_dispositions_reach_writer_when_flag_on():
         pass
 
     assert "CLAIM DISPOSITIONS" in ollama.writer_user_msg
-    # reference source + low risk → stated plainly
-    assert "STATE PLAINLY: Euclid ~300 BCE" in ollama.writer_user_msg
+    # the vendor claim is attributed; the plain claim is folded into the framing line
+    assert "ATTRIBUTE TO SOURCE: AcmeAI beats everyone" in ollama.writer_user_msg
+    assert "State every claim plainly EXCEPT" in ollama.writer_user_msg
 
 
 async def test_dispositions_absent_when_flag_off():

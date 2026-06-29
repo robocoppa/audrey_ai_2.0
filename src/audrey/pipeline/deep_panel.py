@@ -991,19 +991,23 @@ def _render_dispositions_block(
 ) -> str:
     """Per-claim hedging guidance for the writer, or "" to render nothing.
 
-    Runs `hedge_policy` over each SURVIVING claim (those the fact-checker didn't
-    drop) and renders one labelled line each. `state_plainly` lines are
-    intentionally included — telling the writer NOT to hedge a well-grounded fact
-    is the point (it's what keeps plain-statement from regressing into blanket
-    caution).
+    Renders ONLY the action-bearing dispositions — `attribute_to_company`,
+    `hedge`, `hedge_or_cite_strongly` — plus a single framing line that says
+    everything else may be stated plainly. `state_plainly` claims are NOT
+    enumerated: a dense 3-worker ledger produces dozens of claims, and listing a
+    "STATE PLAINLY: <full sentence>" line for each one buried the few that
+    actually constrain the writer and nudged it to restate the whole ledger
+    verbatim (the bloated, near-duplicate Pythagoras answer). The one
+    "state everything else plainly" line preserves the anti-over-hedge intent —
+    plain IS the default — without the wall of redundant lines.
 
-    Returns "" (omit the block) when there's no ledger, no surviving claim, OR
-    when EVERY disposition is `hedge`. An all-hedge block carries no signal beyond
-    "be cautious about everything" — and that's exactly what turned a plain
-    "explain recursion" into hedged mush on the ungrounded controls. The block
-    earns its place only when it has at least one plain-statement or attribution
-    to make (i.e. there's grounding worth being confident about); otherwise the
-    writer's own caution rules already cover it."""
+    Returns "" (omit the block) when there's no ledger, no surviving claim, no
+    ACTION-bearing line (everything is `state_plainly` → the writer's default is
+    already plain, nothing to instruct), OR when EVERY surviving claim is `hedge`
+    (pure blanket caution — the over-hedge trap that turned a plain "explain
+    recursion" into mush). A MIX — some plain, a few hedges/attributions — DOES
+    render: that selective handling against a plain-by-default backdrop is exactly
+    the point of the stage."""
     if ledger is None or not ledger.claims:
         return ""
     dropped = {
@@ -1011,18 +1015,26 @@ def _render_dispositions_block(
         if chk.verdict == "unsupported"
     }
     lines: list[str] = []
-    any_non_hedge = False
+    n_surviving = 0
+    n_hedge = 0
     for c in ledger.claims:
         if c.id in dropped or not (c.text or "").strip():
             continue
+        n_surviving += 1
         disposition = hedge_policy(c, _source_types_for_claim(c, ledger))
-        if disposition != "hedge":
-            any_non_hedge = True
-        label = _DISPOSITION_LABEL[disposition]
-        lines.append(f"- {label}: {c.text.strip()}")
-    if not lines or not any_non_hedge:
+        if disposition == "state_plainly":
+            continue  # plain is the default; the framing line covers these
+        if disposition == "hedge":
+            n_hedge += 1
+        lines.append(f"- {_DISPOSITION_LABEL[disposition]}: {c.text.strip()}")
+    # No action lines → all-plain, nothing to instruct. Every claim a plain `hedge`
+    # → blanket caution (the over-hedge trap). Both: the writer's defaults cover it.
+    if not lines or n_hedge == n_surviving:
         return ""
-    return "\n".join(lines)
+    return (
+        "State every claim plainly EXCEPT these, which need specific handling:\n"
+        + "\n".join(lines)
+    )
 
 
 def _has_corrections(corrections: str) -> bool:
