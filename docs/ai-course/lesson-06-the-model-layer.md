@@ -540,7 +540,7 @@ _POOL_KEYS = {
 ```
 
 Then `select_workers(...)` reads the pool for the current task at
-[`deep_panel.py:103`](../../src/audrey/pipeline/deep_panel.py#L103):
+[`deep_panel.py:125`](../../src/audrey/pipeline/deep_panel.py#L125):
 
 ```python
 pool = cfg.raw.get(pool_key, {}).get(task, {})
@@ -565,7 +565,7 @@ it cannot find the model, it defaults to `local`. That default is conservative
 for scheduling: an unknown model should not bypass the local gate by accident.
 
 `select_workers(...)` also filters by health at
-[`deep_panel.py:109`](../../src/audrey/pipeline/deep_panel.py#L109):
+[`deep_panel.py:131`](../../src/audrey/pipeline/deep_panel.py#L131):
 
 ```python
 if not health.is_healthy(name):
@@ -574,7 +574,7 @@ if not health.is_healthy(name):
 ```
 
 And it caps cloud workers at
-[`deep_panel.py:114`](../../src/audrey/pipeline/deep_panel.py#L114):
+[`deep_panel.py:135`](../../src/audrey/pipeline/deep_panel.py#L135):
 
 ```python
 if loc == "cloud":
@@ -604,14 +604,14 @@ deep mode from becoming brittle when a pool entry is temporarily unavailable.
 Each worker runs through `_run_one_worker(...)` (defined at
 [`deep_panel.py:121`](../../src/audrey/pipeline/deep_panel.py#L121)). The most
 important behavior is in its docstring at
-[`deep_panel.py:141`](../../src/audrey/pipeline/deep_panel.py#L141):
+[`deep_panel.py:163`](../../src/audrey/pipeline/deep_panel.py#L163):
 
 ```python
 """Execute one worker. Always returns a WorkerDraft — never raises."""
 ```
 
 A deep worker failure becomes a draft with an `error` field at
-[`deep_panel.py:207`](../../src/audrey/pipeline/deep_panel.py#L207):
+[`deep_panel.py:229`](../../src/audrey/pipeline/deep_panel.py#L229):
 
 ```python
 except OllamaError as e:

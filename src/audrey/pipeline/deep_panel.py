@@ -46,6 +46,8 @@ from audrey.pipeline.ledger import (
     FactCheckResult,
     ResearchResult,
     Source,
+    SourceType,
+    hedge_policy,
     inlined_schema,
     parse_factcheck_result,
     parse_research_result,
@@ -557,6 +559,19 @@ def _ledger_enabled(cfg: Config) -> bool:
     return bool(rl.get("enabled", False))
 
 
+def _hedge_policy_enabled(cfg: Config) -> bool:
+    """Whether Stage 4 deterministic hedging is on.
+
+    Separate from `research_ledger.enabled` so the per-claim disposition guidance
+    can be evaluated on/off against a ledger-on baseline (it changes writer
+    wording — plain statement becomes explicitly allowed). Off by default; toggled
+    live via `agentic.research_ledger.hedge_policy`.
+    """
+    agentic = cfg.raw.get("agentic", {}) or {}
+    rl = agentic.get("research_ledger", {}) or {}
+    return bool(rl.get("hedge_policy", False))
+
+
 async def _structure_one_draft(
     ollama: OllamaClient,
     health: HealthTracker,
@@ -920,6 +935,58 @@ def _render_sources_block(ledger: ResearchResult | None, fc: FactCheckResult | N
     return "\n\n## Sources\n" + "\n".join(rendered) + "\n"
 
 
+# How each disposition reads as one line of writer guidance. The writer prompt
+# learns to apply these; the mapping is deterministic so the wording is stable.
+_DISPOSITION_LABEL: dict[str, str] = {
+    "state_plainly": "STATE PLAINLY",
+    "attribute_to_company": "ATTRIBUTE TO SOURCE",
+    "hedge": "HEDGE",
+    "hedge_or_cite_strongly": "HEDGE (unless a strong source backs it)",
+}
+
+
+def _source_types_for_claim(claim: Claim, ledger: ResearchResult) -> set[SourceType]:
+    """The source types backing `claim`, via either link direction.
+
+    Models populate `claim.source_ids` or `source.supports` inconsistently, so we
+    gather both — same dual-direction logic as `_surviving_source_ids`."""
+    backing = {sid for sid in claim.source_ids}
+    types: set[SourceType] = set()
+    for s in ledger.sources:
+        if s.id in backing or claim.id in s.supports:
+            types.add(s.source_type)
+    return types
+
+
+def _render_dispositions_block(
+    ledger: ResearchResult | None, fc: FactCheckResult | None
+) -> str:
+    """Per-claim hedging guidance for the writer, or "" to render nothing.
+
+    Runs `hedge_policy` over each SURVIVING claim (those the fact-checker didn't
+    drop) and renders one labelled line each. Returns "" when there's no ledger or
+    no surviving claim, so a disabled/ungrounded run leaves the writer block
+    unchanged. `state_plainly` lines are intentionally included — telling the
+    writer NOT to hedge a well-grounded fact is the point (it's what keeps
+    plain-statement from regressing into blanket caution)."""
+    if ledger is None or not ledger.claims:
+        return ""
+    dropped = {
+        chk.claim_id for chk in (fc.checks if fc else [])
+        if chk.verdict == "unsupported"
+    }
+    lines: list[str] = []
+    for c in ledger.claims:
+        if c.id in dropped or not (c.text or "").strip():
+            continue
+        disposition = hedge_policy(c, _source_types_for_claim(c, ledger))
+        label = _DISPOSITION_LABEL[disposition]
+        lines.append(f"- {label}: {c.text.strip()}")
+    if not lines:
+        return ""
+    return "\n".join(lines)
+
+
 def _has_corrections(corrections: str) -> bool:
     """True when the fact-checker returned actionable corrections."""
     c = (corrections or "").strip()
@@ -935,6 +1002,7 @@ def _has_corrections(corrections: str) -> bool:
 
 def _write_user_block(
     user_text: str, findings: str, critique: str, corrections: str = "",
+    dispositions: str = "",
 ) -> str:
     parts = [f"ORIGINAL REQUEST:\n{user_text.strip()}\n"]
     if findings:
@@ -948,6 +1016,8 @@ def _write_user_block(
         parts.append(f"VERIFIER FLAGS (apply these):\n{critique}\n")
     if _has_corrections(corrections):
         parts.append(f"FACT-CHECK CORRECTIONS (apply these):\n{corrections}\n")
+    if dispositions.strip():
+        parts.append(f"CLAIM DISPOSITIONS (apply these):\n{dispositions}\n")
     parts.append("Write the final answer for the user now.")
     return "\n".join(parts)
 
@@ -1208,7 +1278,7 @@ async def run_research_pipeline_streaming(
     if fc_can_run:
         yield {"type": "factcheck_done", "ok": _has_corrections(corrections)}
 
-    # ── Stage 4: write (always runs) ───────────────────────────────────
+    # ── Write stage (always runs) ──────────────────────────────────────
     writer = pool.get("writer")
     fallback = pool.get("fallback_synth")
     candidates = [m for m in (writer, fallback) if m]
@@ -1216,9 +1286,21 @@ async def run_research_pipeline_streaming(
     writer_model = ""
     write_error = "no_writer" if not candidates else "write_failed"
 
+    # Stage 4: deterministic per-claim hedging guidance (opt-in, separate flag).
+    # Computed from the ledger's surviving claims + their source types — empty
+    # (and so omitted from the writer block) when the ledger or the flag is off.
+    dispositions = ""
+    if _hedge_policy_enabled(cfg):
+        dispositions = _render_dispositions_block(ledger, fc_result)
+
     w_msgs = [
         {"role": "system", "content": prompt_from_config(cfg, "writer", WRITER_SYSTEM)},
-        {"role": "user", "content": _write_user_block(user_text, findings, critique, corrections)},
+        {
+            "role": "user",
+            "content": _write_user_block(
+                user_text, findings, critique, corrections, dispositions
+            ),
+        },
     ]
     for model in candidates:
         if not health.is_healthy(model):

@@ -908,3 +908,163 @@ async def test_sources_block_reaches_stream_when_ledger_present():
     assert "## Sources" in final["content"]
     assert "MacTutor" in final["content"]
     assert any("## Sources" in d for d in deltas)  # streamed, not just in final
+
+
+# ── Stage 4: deterministic hedging dispositions ────────────────────────
+def test_dispositions_block_renders_per_surviving_claim():
+    from audrey.pipeline.deep_panel import _render_dispositions_block
+    from audrey.pipeline.ledger import Claim, ResearchResult, Source
+    led = ResearchResult(
+        claims=[Claim(id="c1", text="R1 released 2025-01-20", source_ids=["s1"], risk="low"),
+                Claim(id="c2", text="Maverick beats GPT-4o", source_ids=["s2"], risk="medium")],
+        sources=[Source(id="s1", title="DeepSeek docs", url="https://e.com",
+                        source_type="official"),
+                 Source(id="s2", title="Meta blog", url="https://m.com",
+                        source_type="company_claim")],
+    )
+    out = _render_dispositions_block(led, None)
+    assert "STATE PLAINLY: R1 released 2025-01-20" in out
+    assert "ATTRIBUTE TO SOURCE: Maverick beats GPT-4o" in out
+
+
+def test_dispositions_block_skips_dropped_claims():
+    from audrey.pipeline.deep_panel import _render_dispositions_block
+    from audrey.pipeline.ledger import (
+        Claim,
+        ClaimCheck,
+        FactCheckResult,
+        ResearchResult,
+        Source,
+    )
+    led = ResearchResult(
+        claims=[Claim(id="c1", text="kept", source_ids=["s1"], risk="low"),
+                Claim(id="c2", text="dropped", source_ids=["s1"], risk="low")],
+        sources=[Source(id="s1", title="T", url="https://e.com", source_type="official")],
+    )
+    fc = FactCheckResult(checks=[ClaimCheck(claim_id="c2", verdict="unsupported")])
+    out = _render_dispositions_block(led, fc)
+    assert "kept" in out
+    assert "dropped" not in out
+
+
+def test_dispositions_block_empty_when_no_ledger():
+    from audrey.pipeline.deep_panel import _render_dispositions_block
+    assert _render_dispositions_block(None, None) == ""
+
+
+def test_dispositions_block_empty_when_no_claims():
+    from audrey.pipeline.deep_panel import _render_dispositions_block
+    from audrey.pipeline.ledger import ResearchResult
+    assert _render_dispositions_block(ResearchResult(), None) == ""
+
+
+def test_write_user_block_includes_dispositions_when_present():
+    from audrey.pipeline.deep_panel import _write_user_block
+    out = _write_user_block("q", "findings", "", dispositions="- STATE PLAINLY: x")
+    assert "CLAIM DISPOSITIONS (apply these):" in out
+    assert "- STATE PLAINLY: x" in out
+
+
+def test_write_user_block_omits_dispositions_when_empty():
+    from audrey.pipeline.deep_panel import _write_user_block
+    out = _write_user_block("q", "findings", "")
+    assert "CLAIM DISPOSITIONS" not in out
+
+
+def test_hedge_policy_enabled_reads_flag():
+    from audrey.pipeline.deep_panel import _hedge_policy_enabled
+    cfg = _research_cfg_fc(["r1"], "v", "fc", "w",
+                           (("r1", 100, "cloud"), ("v", 80, "cloud"),
+                            ("fc", 75, "cloud"), ("w", 70, "local")))
+    cfg.raw["agentic"] = {"research_ledger": {"enabled": True, "hedge_policy": True}}
+    assert _hedge_policy_enabled(cfg) is True
+    cfg.raw["agentic"] = {"research_ledger": {"enabled": True}}
+    assert _hedge_policy_enabled(cfg) is False
+
+
+class _DispoCapturingOllama(_LedgerOllama):
+    """Records the writer's user-message content so a test can assert the
+    dispositions block reached the writer prompt."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.writer_user_msg = ""
+
+    async def chat_stream(self, *, model, messages, options=None, timeout_s=0):
+        # The writer is the only chat_stream caller in the research pipeline.
+        self.writer_user_msg = messages[-1].get("content", "") if messages else ""
+        async for chunk in super().chat_stream(
+            model=model, messages=messages, options=options, timeout_s=timeout_s
+        ):
+            yield chunk
+
+
+async def test_dispositions_reach_writer_when_flag_on():
+    # End-to-end: hedge_policy on → the writer's user block carries a
+    # CLAIM DISPOSITIONS section computed from the surviving ledger claim.
+    import json as _json
+
+    models = (("r1", 100, "cloud"), ("v", 80, "cloud"), ("fc", 75, "cloud"), ("w", 70, "local"))
+    reg = _registry(*models)
+    cfg = _research_cfg_fc(["r1"], "v", "fc", "w", models)
+    cfg.raw["agentic"] = {"research_ledger": {"enabled": True, "hedge_policy": True}}
+    health = HealthTracker()
+    research_json = _json.dumps({
+        "summary_notes": "n",
+        "claims": [{"id": "c1", "text": "Euclid ~300 BCE", "source_ids": ["s1"], "risk": "low"}],
+        "sources": [{"id": "s1", "title": "MacTutor",
+                     "url": "https://mathshistory.st-andrews.ac.uk/Euclid/",
+                     "source_type": "reference", "supports": ["c1"]}],
+    })
+    factcheck_json = _json.dumps({"checks": [{"claim_id": "c1", "verdict": "supported"}]})
+    ollama = _DispoCapturingOllama(
+        {"r1": "Euclid lived around 300 BCE.", "v": "ok",
+         "fc": "CONFIRMED: Euclid ~300 BCE", "w": "Euclid lived around 300 BCE."},
+        research_json=research_json, factcheck_json=factcheck_json,
+    )
+
+    async for _ in run_research_pipeline_streaming(
+        cfg, ollama, reg, health, FairLocalGate(concurrency=1),
+        task="reasoning", messages=[{"role": "user", "content": "who was Euclid"}],
+        options={}, timeout_s=5.0, max_researchers_cloud=2,
+        tools=_one_tool_registry(), tool_capable_models={"fc"}, user_id=None,
+    ):
+        pass
+
+    assert "CLAIM DISPOSITIONS" in ollama.writer_user_msg
+    # reference source + low risk → stated plainly
+    assert "STATE PLAINLY: Euclid ~300 BCE" in ollama.writer_user_msg
+
+
+async def test_dispositions_absent_when_flag_off():
+    # Same ledger, hedge_policy off → no dispositions in the writer block
+    # (write stage byte-identical to pre-Stage-4).
+    import json as _json
+
+    models = (("r1", 100, "cloud"), ("v", 80, "cloud"), ("fc", 75, "cloud"), ("w", 70, "local"))
+    reg = _registry(*models)
+    cfg = _research_cfg_fc_ledger(["r1"], "v", "fc", "w", models)  # enabled, no hedge_policy
+    health = HealthTracker()
+    research_json = _json.dumps({
+        "summary_notes": "n",
+        "claims": [{"id": "c1", "text": "Euclid ~300 BCE", "source_ids": ["s1"], "risk": "low"}],
+        "sources": [{"id": "s1", "title": "MacTutor",
+                     "url": "https://mathshistory.st-andrews.ac.uk/Euclid/",
+                     "source_type": "reference", "supports": ["c1"]}],
+    })
+    factcheck_json = _json.dumps({"checks": [{"claim_id": "c1", "verdict": "supported"}]})
+    ollama = _DispoCapturingOllama(
+        {"r1": "Euclid lived around 300 BCE.", "v": "ok",
+         "fc": "CONFIRMED: Euclid ~300 BCE", "w": "Euclid lived around 300 BCE."},
+        research_json=research_json, factcheck_json=factcheck_json,
+    )
+
+    async for _ in run_research_pipeline_streaming(
+        cfg, ollama, reg, health, FairLocalGate(concurrency=1),
+        task="reasoning", messages=[{"role": "user", "content": "who was Euclid"}],
+        options={}, timeout_s=5.0, max_researchers_cloud=2,
+        tools=_one_tool_registry(), tool_capable_models={"fc"}, user_id=None,
+    ):
+        pass
+
+    assert "CLAIM DISPOSITIONS" not in ollama.writer_user_msg

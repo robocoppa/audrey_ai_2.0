@@ -300,6 +300,50 @@ def parse_factcheck_result(raw: str) -> FactCheckResult | None:
         return None
 
 
+# Stage 4: deterministic selective hedging. A pure function (no model, no I/O)
+# that maps a claim + the source types backing it to a hedging *disposition* the
+# writer applies verbatim — so "DeepSeek released R1 on 2025-01-20" (official,
+# low risk → stated plainly) and "Meta claims Maverick beats GPT-4o"
+# (company_claim → attributed to the vendor) are deterministic instead of
+# left to the writer's confidence.
+HedgeDisposition = Literal[
+    "state_plainly",          # authoritative + not high-risk: assert directly
+    "attribute_to_company",   # a vendor's own claim: name the source, don't endorse
+    "hedge",                  # soften — needs_hedge, or no authoritative grounding
+    "hedge_or_cite_strongly", # high-risk: soften unless a strong source backs it
+]
+
+# Source types that, on their own, earn a plain statement (independent of the
+# claimant). `news`/`blog`/`unknown` do not — they fall through to hedging.
+_AUTHORITATIVE_SOURCES = frozenset(
+    ["official", "primary_paper", "scholarly", "reference"]
+)
+
+
+def hedge_policy(claim: Claim, source_types: set[SourceType]) -> HedgeDisposition:
+    """Compute how confidently the writer should state `claim`.
+
+    Order matters — the first matching rule wins:
+    1. A vendor's own assertion (`company_claim`) is attributed, never endorsed,
+       even if the same fact also has an independent source (the attribution is
+       the honest framing).
+    2. The fact-checker (or researcher) flagged it `needs_hedge` → soften.
+    3. High-risk claims hedge unless a strong source carries them.
+    4. An authoritative, non-high-risk claim is stated plainly.
+    5. Otherwise hedge — the conservative default, which also covers a surviving
+       claim whose sources the model never linked (`source_types` empty).
+    """
+    if "company_claim" in source_types:
+        return "attribute_to_company"
+    if claim.needs_hedge:
+        return "hedge"
+    if claim.risk == "high":
+        return "hedge_or_cite_strongly"
+    if source_types & _AUTHORITATIVE_SOURCES:
+        return "state_plainly"
+    return "hedge"
+
+
 __all__ = [
     "Source",
     "Claim",
@@ -309,6 +353,8 @@ __all__ = [
     "SourceType",
     "Risk",
     "Verdict",
+    "HedgeDisposition",
+    "hedge_policy",
     "inlined_schema",
     "parse_research_result",
     "parse_factcheck_result",

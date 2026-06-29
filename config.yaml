@@ -230,6 +230,13 @@ agentic:
   # Toggle live (no rebuild) to A/B against the prose baseline. Off by default.
   research_ledger:
     enabled: true
+    # Stage 4 — deterministic selective hedging. When on, each surviving claim
+    # gets a hedging disposition (state plainly / attribute to source / hedge)
+    # computed from its source types + risk, handed to the writer as per-claim
+    # guidance. Separate flag so it can be A/B'd against a ledger-on baseline
+    # (it changes writer wording — plain statement becomes explicitly allowed).
+    # Requires `enabled: true` to have any effect. Off by default.
+    hedge_policy: false
   react:
     max_rounds: 3
     compress_after_round: 2

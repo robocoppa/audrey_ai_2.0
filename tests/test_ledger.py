@@ -18,6 +18,7 @@ from audrey.pipeline.ledger import (
     FactCheckResult,
     ResearchResult,
     Source,
+    hedge_policy,
     inlined_schema,
     parse_factcheck_result,
     parse_research_result,
@@ -267,3 +268,53 @@ def test_models_construct_directly():
     c = Claim(id="c1", text="beats GPT-4o", source_ids=["s1"], risk="high")
     assert s.source_type == "company_claim"
     assert c.needs_hedge is False
+
+
+class TestHedgePolicy:
+    """Stage 4: the pure disposition table. The plan's three worked examples
+    become the first three cases; the rest pin the rule ordering and the
+    conservative empty-source default."""
+
+    def test_official_low_risk_states_plainly(self):
+        # "DeepSeek released R1 on 2025-01-20" — official, low risk → plain.
+        c = Claim(id="c1", text="DeepSeek released R1 on 2025-01-20", risk="low")
+        assert hedge_policy(c, {"official"}) == "state_plainly"
+
+    def test_company_claim_is_attributed(self):
+        # "Meta claims Maverick beats GPT-4o" — vendor's own benchmark → attribute.
+        c = Claim(id="c1", text="Maverick beats GPT-4o", risk="medium")
+        assert hedge_policy(c, {"company_claim"}) == "attribute_to_company"
+
+    def test_needs_hedge_claim_hedges(self):
+        # An ancient anecdote the checker flagged → hedge.
+        c = Claim(id="c1", text="Euclid said 'no royal road'", needs_hedge=True)
+        assert hedge_policy(c, {"reference"}) == "hedge"
+
+    def test_company_claim_wins_over_other_signals(self):
+        # company_claim is evaluated first: even high-risk + also-official, the
+        # honest framing is to attribute the vendor's assertion.
+        c = Claim(id="c1", text="our model is SOTA", risk="high")
+        assert hedge_policy(c, {"company_claim", "official"}) == "attribute_to_company"
+
+    def test_needs_hedge_beats_high_risk(self):
+        c = Claim(id="c1", text="x", risk="high", needs_hedge=True)
+        assert hedge_policy(c, {"reference"}) == "hedge"
+
+    def test_high_risk_authoritative_hedges_or_cites(self):
+        c = Claim(id="c1", text="x", risk="high")
+        assert hedge_policy(c, {"official"}) == "hedge_or_cite_strongly"
+
+    def test_non_authoritative_source_hedges(self):
+        # news/blog/unknown on their own don't earn a plain statement.
+        c = Claim(id="c1", text="x", risk="low")
+        assert hedge_policy(c, {"news", "blog"}) == "hedge"
+
+    def test_empty_sources_defaults_to_hedge(self):
+        # A surviving claim the model never linked to a source → conservative hedge.
+        c = Claim(id="c1", text="x", risk="low")
+        assert hedge_policy(c, set()) == "hedge"
+
+    def test_any_authoritative_type_states_plainly(self):
+        for st in ("official", "primary_paper", "scholarly", "reference"):
+            c = Claim(id="c1", text="x", risk="medium")
+            assert hedge_policy(c, {st}) == "state_plainly"
