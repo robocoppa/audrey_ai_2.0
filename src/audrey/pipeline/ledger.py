@@ -75,14 +75,31 @@ Verdict = Literal[
     "irrelevant",      # not load-bearing; ignore
 ]
 
+_VERDICTS = frozenset(
+    ["supported", "unsupported", "conflicting", "needs_hedge", "irrelevant"]
+)
+
 
 def _norm_source_type(v: Any) -> Any:
     """Map an unrecognized source_type to 'unknown' instead of failing the whole
     ledger. Models occasionally emit values outside the enum (e.g. 'wikipedia',
     'web'); a single bad type shouldn't discard every source the worker found."""
-    if isinstance(v, str) and v not in _SOURCE_TYPES:
+    if isinstance(v, str) and v.lower() not in _SOURCE_TYPES:
         return "unknown"
-    return v
+    return v.lower() if isinstance(v, str) else v
+
+
+def _norm_risk(v: Any) -> Any:
+    """Map any risk value outside low/medium/high to 'medium'. Models emit
+    'High', ints, or descriptive strings ('high - speculative'); one off-enum
+    risk per claim was discarding whole ledgers (errors scaled with claim count
+    — the 97-validation-error case). Match leniently, default to medium."""
+    if isinstance(v, str):
+        lv = v.strip().lower()
+        for level in ("low", "medium", "high"):
+            if lv.startswith(level):
+                return level
+    return "medium"
 
 
 class Source(BaseModel):
@@ -102,7 +119,7 @@ class Claim(BaseModel):
     id: StrId = ""          # optional + backfilled — see Source.id
     text: str = ""
     source_ids: StrIdList = []
-    risk: Risk = "medium"
+    risk: Annotated[Risk, BeforeValidator(_norm_risk)] = "medium"
     needs_hedge: bool = False
     hedge_reason: str | None = None
 
@@ -114,9 +131,19 @@ class ResearchResult(BaseModel):
     unresolved_questions: list[str] = []
 
 
+def _norm_verdict(v: Any) -> Any:
+    """Normalize a verdict to the enum; unknown → 'irrelevant' (ignored
+    downstream) rather than discarding the whole fact-check result."""
+    if isinstance(v, str):
+        lv = v.strip().lower()
+        if lv in _VERDICTS:
+            return lv
+    return "irrelevant"
+
+
 class ClaimCheck(BaseModel):
-    claim_id: StrId
-    verdict: Verdict
+    claim_id: StrId = ""
+    verdict: Annotated[Verdict, BeforeValidator(_norm_verdict)] = "irrelevant"
     corrected_text: str | None = None
     notes: str = ""
 
@@ -226,7 +253,13 @@ def parse_research_result(raw: str) -> ResearchResult | None:
             data = {"claims": data}
         result = ResearchResult.model_validate(data)
         return _backfill_ids(result)
-    except (json.JSONDecodeError, ValidationError, TypeError) as e:
+    except ValidationError as e:
+        # Log the distinct failing fields (not the full multi-error dump) so a
+        # recurring strict-field problem is visible at a glance.
+        fields = sorted({".".join(str(p) for p in err["loc"]) for err in e.errors()})
+        log.info("ledger.parse_research_result: ValidationError on fields %s", fields[:8])
+        return None
+    except (json.JSONDecodeError, TypeError) as e:
         log.info("ledger.parse_research_result: unusable model output — %s: %s", type(e).__name__, e)
         return None
 

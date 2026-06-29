@@ -164,6 +164,20 @@ class TestParseResearchResult:
         assert len(r.claims) == 1
         assert r.claims[0].text == "real"
 
+    def test_off_enum_risk_normalized(self):
+        # Models emit 'High', ints, descriptive risk — one off-enum value per
+        # claim was discarding whole ledgers (errors scaled with claim count).
+        for bad, want in [("High", "high"), ("high - speculative", "high"),
+                          (2, "medium"), ("LOW", "low")]:
+            raw = json.dumps({"claims": [{"id": "c1", "text": "x", "risk": bad}]})
+            r = parse_research_result(raw)
+            assert r is not None and r.claims[0].risk == want, f"{bad!r} → {want}"
+
+    def test_capitalized_source_type_normalized(self):
+        raw = '{"sources": [{"id": "s1", "title": "t", "url": "u", "source_type": "Reference"}]}'
+        r = parse_research_result(raw)
+        assert r.sources[0].source_type == "reference"
+
     def test_garbage_returns_none(self):
         assert parse_research_result("not json at all") is None
 
@@ -186,9 +200,14 @@ class TestParseFactCheckResult:
         assert isinstance(r, FactCheckResult)
         assert r.checks[0].verdict == "unsupported"
 
-    def test_bad_verdict_returns_none(self):
+    def test_bad_verdict_normalized_to_irrelevant(self):
+        # An off-enum verdict must NOT discard the whole result (that was the
+        # over-strict behaviour that dropped worker ledgers); normalize to
+        # 'irrelevant' (ignored downstream) and keep the rest.
         raw = json.dumps({"checks": [{"claim_id": "c1", "verdict": "made-up"}]})
-        assert parse_factcheck_result(raw) is None
+        r = parse_factcheck_result(raw)
+        assert isinstance(r, FactCheckResult)
+        assert r.checks[0].verdict == "irrelevant"
 
     def test_garbage_returns_none(self):
         assert parse_factcheck_result("¯\\_(ツ)_/¯") is None
