@@ -870,6 +870,29 @@ _NO_CORRECTIONS = "NO CORRECTIONS"
 _MAX_SOURCES_RENDERED = 8
 
 
+# Source-type authority tiers for ranking the user-facing Sources list. When more
+# sources survive than the cap, we keep the most authoritative — so a Wikipedia /
+# Stanford / arXiv link isn't crowded out by a facebook-groups or scribd URL that
+# SearXNG happened to surface (the +36 eval's "weak domains in Sources" finding).
+# Mirrors the hedge_policy authoritative set. Ties keep ledger order (stable sort).
+_SOURCE_RANK: dict[str, int] = {
+    "official": 3,
+    "primary_paper": 3,
+    "scholarly": 3,
+    "reference": 3,
+    "news": 2,
+    "company_claim": 1,
+    "blog": 1,
+    "unknown": 0,
+}
+
+
+def _source_rank(source_type: str) -> int:
+    """Authority tier for sorting the Sources list (higher = preferred). Unknown
+    or off-enum types sort to the bottom."""
+    return _SOURCE_RANK.get(source_type, 0)
+
+
 def _usable_url(url: str) -> bool:
     """A URL we're willing to show the user: http(s) and has a host. Models emit
     bare titles, fragments, and "" for sources they couldn't link — those get a
@@ -909,7 +932,8 @@ def _render_sources_block(ledger: ResearchResult | None, fc: FactCheckResult | N
 
     Returns "" (omit the block) when there's no ledger, or no surviving source
     has a usable URL — an ungrounded/creative answer must not sprout an empty
-    Sources header. Sources are deduped by URL and capped.
+    Sources header. Sources are ranked by authority (see `_source_rank`), deduped
+    by URL, and capped — so the most authoritative ones win the limited slots.
     """
     if ledger is None or not ledger.sources:
         return ""
@@ -917,6 +941,10 @@ def _render_sources_block(ledger: ResearchResult | None, fc: FactCheckResult | N
     # If linkage is empty across the board (models didn't fill source_ids/supports),
     # fall back to every source — better to show what was consulted than nothing.
     candidates = [s for s in ledger.sources if not keep or s.id in keep]
+    # Most-authoritative first so the cap keeps the best sources, not whichever
+    # the panel happened to list first. Stable sort → same-tier sources retain
+    # ledger order; dedup below then keeps the higher-ranked of a shared URL.
+    candidates.sort(key=lambda s: _source_rank(s.source_type), reverse=True)
     seen: set[str] = set()
     rendered: list[str] = []
     for s in candidates:
@@ -964,11 +992,18 @@ def _render_dispositions_block(
     """Per-claim hedging guidance for the writer, or "" to render nothing.
 
     Runs `hedge_policy` over each SURVIVING claim (those the fact-checker didn't
-    drop) and renders one labelled line each. Returns "" when there's no ledger or
-    no surviving claim, so a disabled/ungrounded run leaves the writer block
-    unchanged. `state_plainly` lines are intentionally included — telling the
-    writer NOT to hedge a well-grounded fact is the point (it's what keeps
-    plain-statement from regressing into blanket caution)."""
+    drop) and renders one labelled line each. `state_plainly` lines are
+    intentionally included — telling the writer NOT to hedge a well-grounded fact
+    is the point (it's what keeps plain-statement from regressing into blanket
+    caution).
+
+    Returns "" (omit the block) when there's no ledger, no surviving claim, OR
+    when EVERY disposition is `hedge`. An all-hedge block carries no signal beyond
+    "be cautious about everything" — and that's exactly what turned a plain
+    "explain recursion" into hedged mush on the ungrounded controls. The block
+    earns its place only when it has at least one plain-statement or attribution
+    to make (i.e. there's grounding worth being confident about); otherwise the
+    writer's own caution rules already cover it."""
     if ledger is None or not ledger.claims:
         return ""
     dropped = {
@@ -976,13 +1011,16 @@ def _render_dispositions_block(
         if chk.verdict == "unsupported"
     }
     lines: list[str] = []
+    any_non_hedge = False
     for c in ledger.claims:
         if c.id in dropped or not (c.text or "").strip():
             continue
         disposition = hedge_policy(c, _source_types_for_claim(c, ledger))
+        if disposition != "hedge":
+            any_non_hedge = True
         label = _DISPOSITION_LABEL[disposition]
         lines.append(f"- {label}: {c.text.strip()}")
-    if not lines:
+    if not lines or not any_non_hedge:
         return ""
     return "\n".join(lines)
 
@@ -1288,7 +1326,8 @@ async def run_research_pipeline_streaming(
 
     # Stage 4: deterministic per-claim hedging guidance (opt-in, separate flag).
     # Computed from the ledger's surviving claims + their source types — empty
-    # (and so omitted from the writer block) when the ledger or the flag is off.
+    # (and so omitted from the writer block) when the ledger/flag is off, or when
+    # the block would be all-hedge (see _render_dispositions_block).
     dispositions = ""
     if _hedge_policy_enabled(cfg):
         dispositions = _render_dispositions_block(ledger, fc_result)

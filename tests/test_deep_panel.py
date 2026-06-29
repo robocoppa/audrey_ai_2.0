@@ -831,6 +831,47 @@ def test_sources_block_dedups_by_url_and_caps():
     assert out.count("https://e0.com") == 1  # the trailing-slash dup folded in
 
 
+def test_sources_block_ranks_authoritative_over_weak_at_cap():
+    from audrey.pipeline.deep_panel import _MAX_SOURCES_RENDERED, _render_sources_block
+    from audrey.pipeline.ledger import Claim, ResearchResult, Source
+    # 8 weak sources listed FIRST, then 1 authoritative one last. Without ranking
+    # the cap would drop the authoritative source; with ranking it must survive.
+    weak = [Source(id=f"w{i}", title=f"Blog {i}", url=f"https://blog{i}.com",
+                   source_type="blog")
+            for i in range(_MAX_SOURCES_RENDERED)]
+    auth = Source(id="auth", title="Stanford", url="https://plato.stanford.edu/x",
+                  source_type="reference")
+    led = ResearchResult(claims=[Claim(id="c1", text="x")], sources=[*weak, auth])
+    out = _render_sources_block(led, None)
+    assert out.count("\n- ") == _MAX_SOURCES_RENDERED
+    assert "Stanford" in out  # authoritative source kept despite being listed last
+    assert "Blog 7" not in out  # the lowest-priority weak one got dropped instead
+
+
+def test_sources_block_stable_within_same_tier():
+    from audrey.pipeline.deep_panel import _render_sources_block
+    from audrey.pipeline.ledger import Claim, ResearchResult, Source
+    # Same source_type → ledger order preserved (stable sort, no reshuffle).
+    led = ResearchResult(
+        claims=[Claim(id="c1", text="x")],
+        sources=[Source(id="s1", title="First", url="https://a.com", source_type="reference"),
+                 Source(id="s2", title="Second", url="https://b.com", source_type="reference")],
+    )
+    out = _render_sources_block(led, None)
+    assert out.index("First") < out.index("Second")
+
+
+def test_source_rank_tiers():
+    from audrey.pipeline.deep_panel import _source_rank
+    # authoritative tier
+    for st in ("official", "primary_paper", "scholarly", "reference"):
+        assert _source_rank(st) == 3
+    assert _source_rank("news") == 2
+    assert _source_rank("blog") == _source_rank("company_claim") == 1
+    assert _source_rank("unknown") == 0
+    assert _source_rank("garbage_offenum") == 0  # off-enum sorts to bottom
+
+
 def test_usable_url_rejects_non_http():
     from audrey.pipeline.deep_panel import _usable_url
     assert _usable_url("https://e.com") is True
@@ -945,6 +986,35 @@ def test_dispositions_block_skips_dropped_claims():
     out = _render_dispositions_block(led, fc)
     assert "kept" in out
     assert "dropped" not in out
+
+
+def test_dispositions_block_suppressed_when_all_hedge():
+    # An ungrounded answer: every claim hedges (no authoritative source) → the
+    # block carries no signal beyond blanket caution, so it's omitted (this is
+    # the recursion-control over-hedging fix).
+    from audrey.pipeline.deep_panel import _render_dispositions_block
+    from audrey.pipeline.ledger import Claim, ResearchResult, Source
+    led = ResearchResult(
+        claims=[Claim(id="c1", text="recursion calls itself", source_ids=["s1"], risk="low"),
+                Claim(id="c2", text="needs a base case", source_ids=["s1"], risk="low")],
+        sources=[Source(id="s1", title="a blog", url="https://b.com", source_type="blog")],
+    )
+    assert _render_dispositions_block(led, None) == ""
+
+
+def test_dispositions_block_kept_when_one_non_hedge():
+    # Mixed: one plain-statement among hedges → the block is worth rendering.
+    from audrey.pipeline.deep_panel import _render_dispositions_block
+    from audrey.pipeline.ledger import Claim, ResearchResult, Source
+    led = ResearchResult(
+        claims=[Claim(id="c1", text="grounded fact", source_ids=["s1"], risk="low"),
+                Claim(id="c2", text="shaky claim", source_ids=["s2"], risk="low")],
+        sources=[Source(id="s1", title="ref", url="https://e.com", source_type="reference"),
+                 Source(id="s2", title="blog", url="https://b.com", source_type="blog")],
+    )
+    out = _render_dispositions_block(led, None)
+    assert "STATE PLAINLY: grounded fact" in out
+    assert "HEDGE: shaky claim" in out
 
 
 def test_dispositions_block_empty_when_no_ledger():
