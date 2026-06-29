@@ -850,6 +850,75 @@ def _factcheck_result_to_corrections(fc: FactCheckResult, ledger: ResearchResult
 # block can omit the block entirely.
 _NO_CORRECTIONS = "NO CORRECTIONS"
 
+# Cap the user-facing Sources list — a research answer that drew on a dozen
+# pages doesn't need to dump all of them; the most-cited ones are enough.
+_MAX_SOURCES_RENDERED = 8
+
+
+def _usable_url(url: str) -> bool:
+    """A URL we're willing to show the user: http(s) and has a host. Models emit
+    bare titles, fragments, and "" for sources they couldn't link — those get a
+    backfilled id but no usable URL, and we don't list them."""
+    u = (url or "").strip()
+    return u.startswith(("http://", "https://")) and len(u) > len("https://")
+
+
+def _surviving_source_ids(ledger: ResearchResult, fc: FactCheckResult | None) -> set[str]:
+    """Source ids that back at least one claim the fact-checker did NOT drop.
+
+    A claim is "dropped" iff the fact-check verdict is `unsupported`. With no
+    fact-check result every claim survives. A source backs a claim through either
+    direction of the link (`claim.source_ids` or `source.supports`) since models
+    populate one or the other inconsistently."""
+    dropped = {
+        chk.claim_id for chk in (fc.checks if fc else [])
+        if chk.verdict == "unsupported"
+    }
+    surviving_claims = {c.id for c in ledger.claims if c.id not in dropped}
+    keep: set[str] = set()
+    for c in ledger.claims:
+        if c.id in surviving_claims:
+            keep.update(c.source_ids)
+    for s in ledger.sources:
+        if any(cid in surviving_claims for cid in s.supports):
+            keep.add(s.id)
+    return keep
+
+
+def _render_sources_block(ledger: ResearchResult | None, fc: FactCheckResult | None) -> str:
+    """The user-facing `## Sources` markdown, or "" to render nothing.
+
+    Deterministic — built by us from the ledger, NOT asked of the writer. The
+    +21 lesson: making the model emit citations degrades prose; the structure is
+    internal, and we render the clean list ourselves after the prose is written.
+
+    Returns "" (omit the block) when there's no ledger, or no surviving source
+    has a usable URL — an ungrounded/creative answer must not sprout an empty
+    Sources header. Sources are deduped by URL and capped.
+    """
+    if ledger is None or not ledger.sources:
+        return ""
+    keep = _surviving_source_ids(ledger, fc)
+    # If linkage is empty across the board (models didn't fill source_ids/supports),
+    # fall back to every source — better to show what was consulted than nothing.
+    candidates = [s for s in ledger.sources if not keep or s.id in keep]
+    seen: set[str] = set()
+    rendered: list[str] = []
+    for s in candidates:
+        if not _usable_url(s.url):
+            continue
+        key = s.url.strip().rstrip("/").lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        title = s.title.strip() or s.url.strip()
+        rendered.append(f"- [{title}]({s.url.strip()})")
+        if len(rendered) >= _MAX_SOURCES_RENDERED:
+            break
+    if not rendered:
+        return ""
+    return "\n\n## Sources\n" + "\n".join(rendered) + "\n"
+
 
 def _has_corrections(corrections: str) -> bool:
     """True when the fact-checker returned actionable corrections."""
@@ -1056,6 +1125,7 @@ async def run_research_pipeline_streaming(
     # Bounded + fail-soft like every stage — any problem returns "" and the
     # pipeline proceeds exactly as the verify→write flow did before.
     corrections = ""
+    fc_result: FactCheckResult | None = None  # structured verdicts, for Stage-3 Sources
     factchecker = pool.get("factchecker")
     fc_can_run = bool(
         grounded and factchecker and health.is_healthy(factchecker)
@@ -1114,6 +1184,7 @@ async def run_research_pipeline_streaming(
                     timeout_s=timeout_s, user_id=user_id,
                 )
                 if fc_struct is not None:
+                    fc_result = fc_struct  # carried to the Sources renderer below
                     rendered = _factcheck_result_to_corrections(fc_struct, ledger)
                     n_drop = sum(1 for c in fc_struct.checks if c.verdict == "unsupported")
                     n_hedge = sum(1 for c in fc_struct.checks if c.verdict in ("needs_hedge", "conflicting"))
@@ -1181,6 +1252,21 @@ async def run_research_pipeline_streaming(
                 write_error = "write_truncated"
                 writer_model = model
                 break
+
+    # ── Stage 3: append the deterministic Sources list ─────────────────
+    # Built by us from the ledger (NOT asked of the writer — that pressure
+    # degrades prose; see +21). Only on a clean answer, and only when a
+    # grounded ledger yields surviving sources with usable URLs; an
+    # ungrounded/creative answer renders nothing.
+    if write_error == "" and accumulated.strip():
+        sources_block = _render_sources_block(ledger, fc_result)
+        if sources_block:
+            accumulated += sources_block
+            yield {"type": "write_delta", "text": sources_block}
+            log.info(
+                "research: Sources block appended (%d entries)",
+                sources_block.count("\n- "),
+            )
 
     yield {
         "type": "done",

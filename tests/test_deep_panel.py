@@ -400,9 +400,10 @@ class _FakeOllama:
         self.chat_models: list[str] = []
         self.stream_models: list[str] = []
 
-    async def chat(self, *, model, messages, options=None, timeout_s=0, tools=None):
+    async def chat(self, *, model, messages, options=None, timeout_s=0, tools=None, format=None):
         # `tools=` is accepted so the fact-checker's run_react loop can call us;
         # we never return tool_calls, so run_react treats the content as final.
+        # `format=` is accepted because the ledger structuring passes pin a schema.
         self.chat_models.append(model)
         if model in self.fail:
             from audrey.models.ollama import OllamaError
@@ -754,4 +755,156 @@ def test_render_claims_includes_ids_and_no_source_marker():
     out = _render_claims_for_factcheck(led)
     assert "c1" in out and "c2" in out
     assert "[no source]" in out  # c2 has none
-    assert "https://e.com" in out
+
+
+# ── Stage 3: deterministic Sources block ───────────────────────────────
+def _grounded_ledger():
+    """A ledger with two claims each linked to a distinct usable-URL source."""
+    from audrey.pipeline.ledger import Claim, ResearchResult, Source
+    return ResearchResult(
+        claims=[Claim(id="c1", text="Euclid ~300 BCE", source_ids=["s1"]),
+                Claim(id="c2", text="Elements has 13 books", source_ids=["s2"])],
+        sources=[Source(id="s1", title="MacTutor",
+                        url="https://mathshistory.st-andrews.ac.uk/Euclid/", source_type="reference"),
+                 Source(id="s2", title="Britannica",
+                        url="https://www.britannica.com/biography/Euclid", source_type="reference")],
+    )
+
+
+def test_sources_block_lists_surviving_sources():
+    from audrey.pipeline.deep_panel import _render_sources_block
+    out = _render_sources_block(_grounded_ledger(), None)
+    assert out.startswith("\n\n## Sources\n")
+    assert "[MacTutor](https://mathshistory.st-andrews.ac.uk/Euclid/)" in out
+    assert "Britannica" in out
+
+
+def test_sources_block_drops_unsupported_claim_source():
+    from audrey.pipeline.deep_panel import _render_sources_block
+    from audrey.pipeline.ledger import ClaimCheck, FactCheckResult
+    fc = FactCheckResult(checks=[ClaimCheck(claim_id="c1", verdict="unsupported"),
+                                 ClaimCheck(claim_id="c2", verdict="supported")])
+    out = _render_sources_block(_grounded_ledger(), fc)
+    # s1 backed only the dropped c1 → gone; s2 (Britannica) survives.
+    assert "MacTutor" not in out
+    assert "Britannica" in out
+
+
+def test_sources_block_omitted_when_no_ledger():
+    from audrey.pipeline.deep_panel import _render_sources_block
+    assert _render_sources_block(None, None) == ""
+
+
+def test_sources_block_omitted_when_no_usable_url():
+    # A source with a bare title / empty URL must not produce an empty header.
+    from audrey.pipeline.deep_panel import _render_sources_block
+    from audrey.pipeline.ledger import Claim, ResearchResult, Source
+    led = ResearchResult(
+        claims=[Claim(id="c1", text="x", source_ids=["s1"])],
+        sources=[Source(id="s1", title="Some Book", url="", source_type="unknown")])
+    assert _render_sources_block(led, None) == ""
+
+
+def test_sources_block_falls_back_to_all_when_no_linkage():
+    # Models often skip source_ids/supports; rather than render nothing, list
+    # the sources that were consulted.
+    from audrey.pipeline.deep_panel import _render_sources_block
+    from audrey.pipeline.ledger import Claim, ResearchResult, Source
+    led = ResearchResult(
+        claims=[Claim(id="c1", text="x")],  # no source_ids
+        sources=[Source(id="s1", title="T", url="https://e.com", source_type="news")])
+    out = _render_sources_block(led, None)
+    assert "[T](https://e.com)" in out
+
+
+def test_sources_block_dedups_by_url_and_caps():
+    from audrey.pipeline.deep_panel import _MAX_SOURCES_RENDERED, _render_sources_block
+    from audrey.pipeline.ledger import Claim, ResearchResult, Source
+    # 12 sources, two of them the same URL with a trailing slash → 11 unique,
+    # capped to _MAX_SOURCES_RENDERED.
+    sources = [Source(id=f"s{i}", title=f"T{i}", url=f"https://e{i}.com", source_type="news")
+               for i in range(12)]
+    sources.append(Source(id="dup", title="Dup", url="https://e0.com/", source_type="news"))
+    led = ResearchResult(claims=[Claim(id="c1", text="x")], sources=sources)
+    out = _render_sources_block(led, None)
+    assert out.count("\n- ") == _MAX_SOURCES_RENDERED
+    assert out.count("https://e0.com") == 1  # the trailing-slash dup folded in
+
+
+def test_usable_url_rejects_non_http():
+    from audrey.pipeline.deep_panel import _usable_url
+    assert _usable_url("https://e.com") is True
+    assert _usable_url("http://e.com") is True
+    assert _usable_url("") is False
+    assert _usable_url("ftp://e.com") is False
+    assert _usable_url("just a title") is False
+    assert _usable_url("https://") is False
+
+
+class _LedgerOllama(_FakeOllama):
+    """A _FakeOllama that returns ledger JSON for the two structuring passes
+    (identified by their system prompt) so the Stage-3 Sources block has a real
+    ledger to render. Everything else behaves like the base fake."""
+
+    def __init__(self, responses, research_json: str, factcheck_json: str):
+        super().__init__(responses)
+        self._research_json = research_json
+        self._factcheck_json = factcheck_json
+
+    async def chat(self, *, model, messages, options=None, timeout_s=0, tools=None, format=None):
+        sys = (messages[0].get("content", "") if messages else "").lower()
+        if "claim/source ledger" in sys:  # RESEARCH_STRUCTURE_SYSTEM
+            self.chat_models.append(model)
+            return {"message": {"content": self._research_json}, "prompt_eval_count": 1, "eval_count": 1}
+        if "per-claim verdict" in sys:  # FACTCHECK_STRUCTURE_SYSTEM
+            self.chat_models.append(model)
+            return {"message": {"content": self._factcheck_json}, "prompt_eval_count": 1, "eval_count": 1}
+        return await super().chat(model=model, messages=messages, options=options,
+                                  timeout_s=timeout_s, tools=tools, format=format)
+
+
+def _research_cfg_fc_ledger(researchers, verifier, factchecker, writer, registry_models):
+    cfg = _research_cfg_fc(researchers, verifier, factchecker, writer, registry_models)
+    cfg.raw["agentic"] = {"research_ledger": {"enabled": True}}
+    return cfg
+
+
+async def test_sources_block_reaches_stream_when_ledger_present():
+    # End-to-end: a grounded ledger with usable URLs → the writer answer is
+    # followed by a `## Sources` block in the final content + a write_delta.
+    import json as _json
+
+    models = (("r1", 100, "cloud"), ("v", 80, "cloud"), ("fc", 75, "cloud"), ("w", 70, "local"))
+    reg = _registry(*models)
+    cfg = _research_cfg_fc_ledger(["r1"], "v", "fc", "w", models)
+    health = HealthTracker()
+    research_json = _json.dumps({
+        "summary_notes": "n",
+        "claims": [{"id": "c1", "text": "Euclid ~300 BCE", "source_ids": ["s1"], "risk": "low"}],
+        "sources": [{"id": "s1", "title": "MacTutor",
+                     "url": "https://mathshistory.st-andrews.ac.uk/Euclid/",
+                     "source_type": "reference", "supports": ["c1"]}],
+    })
+    factcheck_json = _json.dumps({"checks": [{"claim_id": "c1", "verdict": "supported"}]})
+    ollama = _LedgerOllama(
+        {"r1": "Euclid lived around 300 BCE.", "v": "ok",
+         "fc": "CONFIRMED: Euclid ~300 BCE", "w": "Euclid lived around 300 BCE."},
+        research_json=research_json, factcheck_json=factcheck_json,
+    )
+
+    final = {}
+    deltas = []
+    async for evt in run_research_pipeline_streaming(
+        cfg, ollama, reg, health, FairLocalGate(concurrency=1),
+        task="reasoning", messages=[{"role": "user", "content": "who was Euclid"}],
+        options={}, timeout_s=5.0, max_researchers_cloud=2,
+        tools=_one_tool_registry(), tool_capable_models={"fc"}, user_id=None,
+    ):
+        if evt["type"] == "write_delta":
+            deltas.append(evt["text"])
+        elif evt["type"] == "done":
+            final = evt
+
+    assert "## Sources" in final["content"]
+    assert "MacTutor" in final["content"]
+    assert any("## Sources" in d for d in deltas)  # streamed, not just in final
