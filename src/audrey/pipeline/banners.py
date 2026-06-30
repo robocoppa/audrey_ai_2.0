@@ -80,31 +80,35 @@ def worker_fail(model: str) -> str:
 # ─── Tool-usage footer ────────────────────────────────────────────────
 
 def _format_calls(calls: list[dict]) -> str:
-    """`[{name, is_error}, ...]` → `kb_search ×2, web_search ×1 ❌`.
+    """`[{name, is_error}, ...]` → `kb_search ✅2, web_search ✅2 ❌1`.
 
-    Counts duplicate names; appends ❌ to a tool that had any error in this
-    worker's run. Order is first-seen so the footer stays stable across runs.
+    Counts duplicate names and splits them into successes and failures:
+      - ✅ always shows the number that succeeded;
+      - ❌ shows the number that failed, and appears only when at least one did.
+    So a row reads as plain counts — `✅10 ❌3` is "10 ok, 3 failed", `✅13` is
+    "all 13 ok", `✅0 ❌13` is "all 13 failed". Nothing is inferred from the
+    presence or absence of a number. An empty-but-OK result (e.g. a search
+    returning 0 hits) is a success, not a failure, so it counts under ✅. Order
+    is first-seen so the footer stays stable across runs.
     """
     seen: list[str] = []
     counts: dict[str, int] = {}
-    errors: dict[str, bool] = {}
+    errs: dict[str, int] = {}
     for c in calls:
         name = str(c.get("name") or "?")
         if name not in counts:
             seen.append(name)
             counts[name] = 0
-            errors[name] = False
+            errs[name] = 0
         counts[name] += 1
         if c.get("is_error"):
-            errors[name] = True
+            errs[name] += 1
     parts = []
     for name in seen:
-        n = counts[name]
-        suffix = " ❌" if errors[name] else ""
-        if n == 1:
-            parts.append(f"`{name}`{suffix}")
-        else:
-            parts.append(f"`{name}` ×{n}{suffix}")
+        n_err = errs[name]
+        n_ok = counts[name] - n_err
+        mark = f" ✅{n_ok}" + (f" ❌{n_err}" if n_err else "")
+        parts.append(f"`{name}`{mark}")
     return ", ".join(parts)
 
 
@@ -120,6 +124,13 @@ def tool_summary_block(
 
         \\n\\n---\\n> _Tools used:_\\n> - **qwen3.6:35b** — `kb_search` ×2\\n> - …
 
+    Notation in each row (see `_format_calls`): `✅N` = N calls succeeded;
+    `❌k` = k calls failed, shown only when k > 0. So `web_search ✅10 ❌3` is
+    "10 succeeded, 3 failed". When any failure appears anywhere in the footer,
+    the header gains a one-line legend so a reader who has never seen this
+    convention (or has forgotten it) can decode it from the artifact alone. The
+    all-green common case stays uncluttered: no failures, no legend.
+
     The two leading newlines + horizontal rule give the markdown renderer a
     clean break from the answer body. Skipped silently when nothing to show.
     """
@@ -130,9 +141,17 @@ def tool_summary_block(
     ]
     if not rows:
         return ""
-    lines = ["", "", "---", "> _Tools used:_"]
-    for model, calls in rows:
-        formatted = _format_calls(calls)
+    formatted_rows = [(model, _format_calls(calls)) for model, calls in rows]
+    # Only explain the failure notation if a failure actually shows. "❌" with
+    # no following digit = total failure; "❌" + digits = partial (that many of
+    # the call count failed). Detecting it from the rendered text keeps the
+    # legend in lockstep with whatever _format_calls emits.
+    any_failure = any("❌" in formatted for _, formatted in formatted_rows)
+    header = "> _Tools used:_"
+    if any_failure:
+        header += "  _(✅ = calls succeeded, ❌ = calls failed)_"
+    lines = ["", "", "---", header]
+    for model, formatted in formatted_rows:
         lines.append(f"> - **{model}** — {formatted}")
     return "\n".join(lines) + "\n"
 

@@ -36,7 +36,8 @@ def test_format_calls_empty_returns_empty_string():
 
 
 def test_format_calls_single_call():
-    assert _format_calls([{"name": "kb_search", "is_error": False}]) == "`kb_search`"
+    # ✅ always carries the success count, even for one call.
+    assert _format_calls([{"name": "kb_search", "is_error": False}]) == "`kb_search` ✅1"
 
 
 def test_format_calls_collapses_repeats():
@@ -44,16 +45,41 @@ def test_format_calls_collapses_repeats():
         {"name": "kb_search", "is_error": False},
         {"name": "kb_search", "is_error": False},
     ]
-    assert _format_calls(calls) == "`kb_search` ×2"
+    assert _format_calls(calls) == "`kb_search` ✅2"
 
 
-def test_format_calls_marks_error_on_any_failure():
-    # One success and one error in the same name → marked ❌ (the OR).
+def test_format_calls_partial_failure_shows_both_counts():
+    # One success and one error → `✅1 ❌1`. Each count is plain — no inferring
+    # meaning from the presence or absence of a number.
     calls = [
         {"name": "kb_search", "is_error": False},
         {"name": "kb_search", "is_error": True},
     ]
-    assert _format_calls(calls) == "`kb_search` ×2 ❌"
+    assert _format_calls(calls) == "`kb_search` ✅1 ❌1"
+
+
+def test_format_calls_total_failure_shows_zero_successes():
+    # Every call errored → `✅0 ❌3`. Total failure reads as plainly as partial;
+    # there is no special bare-mark case to misread.
+    calls = [
+        {"name": "web_search", "is_error": True},
+        {"name": "web_search", "is_error": True},
+        {"name": "web_search", "is_error": True},
+    ]
+    assert _format_calls(calls) == "`web_search` ✅0 ❌3"
+
+
+def test_format_calls_single_call_failure():
+    # 1 failed call → `✅0 ❌1`, consistent with every other row.
+    assert _format_calls([{"name": "kb_search", "is_error": True}]) == "`kb_search` ✅0 ❌1"
+
+
+def test_format_calls_partial_failure_among_many():
+    # The case that motivated this: many calls, a few errored. `✅10 ❌3`
+    # surfaces "10 ok, 3 failed" — unambiguous where the old sticky boolean
+    # was not.
+    calls = [{"name": "web_search", "is_error": i < 3} for i in range(13)]
+    assert _format_calls(calls) == "`web_search` ✅10 ❌3"
 
 
 def test_format_calls_preserves_first_seen_order():
@@ -63,18 +89,18 @@ def test_format_calls_preserves_first_seen_order():
         {"name": "kb_search", "is_error": False},
         {"name": "web_search", "is_error": False},
     ]
-    assert _format_calls(calls) == "`web_search` ×2, `kb_search`"
+    assert _format_calls(calls) == "`web_search` ✅2, `kb_search` ✅1"
 
 
 def test_format_calls_handles_missing_name_field():
     # Defensive: ReAct dispatch records always have `name`, but if a future
     # bug drops it we render `?` instead of crashing. Regression guard.
-    assert _format_calls([{"is_error": False}]) == "`?`"
+    assert _format_calls([{"is_error": False}]) == "`?` ✅1"
 
 
 def test_format_calls_handles_missing_is_error_field():
     # Same defensive shape — missing key is treated as "not an error".
-    assert _format_calls([{"name": "kb_search"}]) == "`kb_search`"
+    assert _format_calls([{"name": "kb_search"}]) == "`kb_search` ✅1"
 
 
 # ─── tool_summary_block ────────────────────────────────────────────────
@@ -102,7 +128,7 @@ def test_tool_summary_block_single_worker_single_call():
         "\n"
         "---\n"
         "> _Tools used:_\n"
-        "> - **qwen3.6:35b** — `kb_search`\n"
+        "> - **qwen3.6:35b** — `kb_search` ✅1\n"
     )
     assert out == expected
 
@@ -120,15 +146,38 @@ def test_tool_summary_block_multi_worker_drops_empty_rows():
             {"name": "kb_search", "is_error": True},
         ]),
     ])
+    # A failing row is present, so the header carries the decode legend.
     expected = (
         "\n"
         "\n"
         "---\n"
-        "> _Tools used:_\n"
-        "> - **qwen3.6:35b** — `kb_search` ×2\n"
-        "> - **deepseek-v4-pro:cloud** — `web_search`, `kb_search` ❌\n"
+        "> _Tools used:_"
+        "  _(✅ = calls succeeded, ❌ = calls failed)_\n"
+        "> - **qwen3.6:35b** — `kb_search` ✅2\n"
+        "> - **deepseek-v4-pro:cloud** — `web_search` ✅1, `kb_search` ✅0 ❌1\n"
     )
     assert out == expected
+
+
+def test_tool_summary_block_no_legend_when_all_calls_succeed():
+    # The all-green common case stays uncluttered: no failure mark anywhere
+    # → no legend on the header.
+    out = tool_summary_block([
+        ("qwen3.6:35b", [{"name": "kb_search", "is_error": False}]),
+    ])
+    assert "> _Tools used:_\n" in out
+    assert "❌" not in out
+    assert "calls failed" not in out
+
+
+def test_tool_summary_block_legend_appears_only_with_a_failure():
+    # The legend is what makes the ✅/❌ counts decodable by a reader who has
+    # never seen the convention — it must appear exactly when a failure does.
+    out = tool_summary_block([
+        ("m", [{"name": "web_search", "is_error": i < 3} for i in range(13)]),
+    ])
+    assert "_(✅ = calls succeeded, ❌ = calls failed)_" in out
+    assert "`web_search` ✅10 ❌3" in out
 
 
 def test_tool_summary_block_preserves_worker_order():
