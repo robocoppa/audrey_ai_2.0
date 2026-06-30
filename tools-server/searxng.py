@@ -16,11 +16,20 @@ several ReAct rounds each) at the single instance. Without retry/cache, a
 transient timeout or 429 under that burst just errors → the worker loses that
 evidence → a thin ledger → an over-timid degraded answer. So this client:
 - **retries** transient failures (timeout / 429 / 5xx) with bounded backoff —
-  NOT a clean 0-results response (that's a real answer, not a failure), and NOT a
-  JSON-decode error (retrying won't help).
+  NOT a JSON-decode error (retrying won't help).
+- **retries an empty result ONCE** with a gentle backoff. A SearXNG `200` with
+  zero results is usually NOT "nothing exists" — it's the instance's upstream
+  engines (Google/Bing/DDG) momentarily rate-limiting it, which clears in a
+  second or two. An HTTP-200 empty is not an error, so the transport retry above
+  never sees it; left alone it silently starves grounding (the worker concludes
+  "no sources" from a transient throttle). One extra attempt recovers most of
+  these. Deliberately just ONE, with a longer wait than the transport backoff:
+  hammering a throttled instance makes the throttle worse.
 - **caches** by (query, count) so identical queries across workers in the same
   run don't each re-hit SearXNG. Short TTL — web results for current topics go
-  stale, but the win is intra-run dedup, not long-term caching.
+  stale, but the win is intra-run dedup, not long-term caching. **Empty results
+  are never cached** — caching a transient-throttle empty would poison every
+  other worker's identical query for the whole TTL.
 
 Note: the SearXNG instance must have the JSON format enabled in its
 `settings.yml` (`search.formats: [html, json]`) — it's off by default.
@@ -40,6 +49,11 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
 )
+
+# One soft retry when a 200 comes back with zero results — see module docstring.
+# Longer than the transport backoff: give the throttled upstream engines a beat
+# to recover rather than re-hitting instantly.
+_EMPTY_RETRY_WAIT_SECONDS = 1.5
 
 
 class SearxngError(Exception):
@@ -79,7 +93,12 @@ class SearxngClient:
         if cached is not None:
             return cached
         results = await self._fetch(query=key[0], count=key[1])
-        await self._cache_put(key, results)
+        # Never cache an empty result: a 200+0-results is usually a transient
+        # upstream throttle, and caching it would starve every identical query
+        # in this run for the whole TTL. Let the next caller re-fetch (and get
+        # its own empty-retry shot).
+        if results:
+            await self._cache_put(key, results)
         return results
 
     async def _fetch(self, query: str, count: int) -> list[SearchResult]:
@@ -95,22 +114,33 @@ class SearxngClient:
         # Retry transient transport/HTTP errors (timeout, 429, 5xx). A JSON-decode
         # failure (ValueError) is NOT retried — a malformed body won't fix itself.
         # `reraise=True` → the last attempt's exception escapes for the except below.
-        try:
-            async for attempt in AsyncRetrying(
-                retry=retry_if_exception_type(
-                    (httpx.TimeoutException, httpx.HTTPStatusError, httpx.TransportError)
-                ),
-                stop=stop_after_attempt(3),
-                wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
-                reraise=True,
-            ):
-                with attempt:
-                    data = await _do()
-        except httpx.HTTPError as e:
-            raise SearxngError(f"SearXNG fallback failed: {e}") from e
-        except ValueError as e:  # JSON decode
-            raise SearxngError(f"SearXNG returned non-JSON: {e}") from e
-        return _parse_results(data, count)
+        async def _fetch_once() -> list[SearchResult]:
+            try:
+                async for attempt in AsyncRetrying(
+                    retry=retry_if_exception_type(
+                        (httpx.TimeoutException, httpx.HTTPStatusError, httpx.TransportError)
+                    ),
+                    stop=stop_after_attempt(3),
+                    wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
+                    reraise=True,
+                ):
+                    with attempt:
+                        data = await _do()
+            except httpx.HTTPError as e:
+                raise SearxngError(f"SearXNG fallback failed: {e}") from e
+            except ValueError as e:  # JSON decode
+                raise SearxngError(f"SearXNG returned non-JSON: {e}") from e
+            return _parse_results(data, count)
+
+        results = await _fetch_once()
+        # A clean 200 with zero results is usually a transient upstream throttle,
+        # not "nothing exists" — give it exactly one more shot after a short wait.
+        # (The transport retry above can't catch this: an empty 200 isn't an
+        # error.) One retry only; re-hammering a throttled instance worsens it.
+        if not results:
+            await asyncio.sleep(_EMPTY_RETRY_WAIT_SECONDS)
+            results = await _fetch_once()
+        return results
 
     async def _cache_get(self, key: tuple[str, int]) -> list[SearchResult] | None:
         async with self._cache_lock:
