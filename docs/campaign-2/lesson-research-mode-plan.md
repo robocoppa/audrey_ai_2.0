@@ -149,11 +149,29 @@ Draft outline:
      a hermetic test suite can't judge this — it proves plumbing, not answer quality;
      a live eval over saved answers, diffed against a prior baseline, is the only way
      to see a prompt regression. Tie to the eval-vs-pytest distinction.)
+  5. **An empty result is not an error — and not proof that nothing exists.** A
+     tool call can succeed (no exception, a clean response) and still come back
+     with nothing. Three states the pipeline must keep distinct: *failed* (the
+     call errored), *empty* (the call succeeded but returned no usable content),
+     and *grounded* (returned content). Collapsing "empty" into "success" lets a
+     worker silently conclude "there are no sources" when the truth is "the lookup
+     came back thin this time" — and the answer degrades without anything looking
+     wrong. The discipline: a success that returns nothing is worth one careful
+     retry before it's believed, and an empty answer must never be cached as if it
+     were the real one (it would starve every later lookup of the same thing). The
+     transferable point — *distinguish "it failed" from "it found nothing" from "it
+     found something," and don't let the middle state masquerade as either
+     neighbour* — is exactly the tolerant-handling instinct behind the ledger's
+     `BeforeValidator`s and the fail-soft degrade paths, applied to retrieval
+     instead of parsing. (Teach the principle only; the specific search backend is
+     out of scope — see "out of scope" above.)
   Keep this section principle-first and short — it's the transferable payoff, but it
   must read as "here's why prompts are designed this way," never as a changelog.
 - **Concept spotlights** (pause before relying on the terms): structured/constrained
   output; tolerant validation (`BeforeValidator`); pure-function policy
-  (`hedge_policy`) as the testable core.
+  (`hedge_policy`) as the testable core; the three-state view of a lookup
+  (failed / empty-but-succeeded / grounded) and why "empty" must not collapse into
+  either "failed" or "nothing exists."
 - **Comprehension questions** — operational/scenario: "a worker's structured JSON
   has one off-enum field — what happens to that worker's claims, and why isn't the
   whole worker dropped?"; "the answer is creative/ungrounded — why is there no
@@ -164,7 +182,10 @@ Draft outline:
   prompt — why are they computed by code instead?" (reinforces the
   compute-don't-ask principle); "a prompt tweak makes one test answer read better
   but you're not sure overall — what do you do before keeping it?" (reinforces
-  baseline/revert + the eval-vs-pytest distinction).
+  baseline/revert + the eval-vs-pytest distinction); "a lookup succeeds but comes
+  back empty and the answer quietly turns vague — why is treating that empty as a
+  plain success a trap, and what are the three states it must be told apart from?"
+  (reinforces empty ≠ error ≠ nothing-exists).
 - **Footer** — the moved whole-course recap (now ending on research mode as the
   capstone) + the "from here it's maintenance" close.
 

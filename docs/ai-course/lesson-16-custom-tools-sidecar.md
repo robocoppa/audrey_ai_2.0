@@ -515,17 +515,11 @@ archive write large enough to trigger a hard split, where the chunk step
 cause. This is fail-fast at boot turning a lurking runtime bug into an obvious
 config error (the §2.5 pattern).
 
-## That's it for the course
+## One more subsystem: research mode
 
-That was the last subsystem — nice work seeing the course through to the
-end. The course now traces a request from the
-public route (Lesson 15), through classification and routing (Lesson 7),
-deep mode and the tool/ReAct loop (Lessons 8–9), the model and KB layers
-(Lessons 6, 11–12), per-user context (Lesson 13), and fair scheduling
-(Lesson 14) —
-and out to the tools that live on the other side of the wire, here. You
-have seen every load-bearing file in Audrey and the sidecar that serves it.
-
-The remaining way to deepen this knowledge isn't another lesson — it's
-maintenance: when a bug surfaces or a feature is needed, you now have the
-map to find the right file and the *why* behind its shape.
+The sidecar is the last *infrastructure* piece — but there's one subsystem left
+that composes everything you've seen into a single pipeline. When a user picks
+`audrey_research`, the request fans out to a panel, grounds its claims with the
+tools you just read, checks them, and lets code shape a trustworthy answer with
+a Sources list. [Lesson 17](lesson-17-research-mode.md) walks that pipeline end
+to end — and wraps up the course.

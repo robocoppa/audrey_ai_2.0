@@ -61,9 +61,15 @@ class ReactResult:
 
 
 def _summarize_tool_message(msg: dict[str, Any]) -> str:
+    # Replaces an older tool result during history compaction (see
+    # _compress_history). Wording is deliberate: a model that quotes its own
+    # compacted scratchpad must NOT make this read as a *failed* or *empty*
+    # search. The old text ("earlier tool call: … N chars elided") leaked into
+    # research answers as "searches returned sparse or elided results" — the
+    # model narrating its own compaction as a grounding failure. This phrasing
+    # makes the omission unambiguous and carries no count to misread as "thin".
     name = msg.get("name", "?")
-    content = msg.get("content", "") or ""
-    return f"[earlier tool call: {name} -> {len(content)} chars elided]"
+    return f"[history compacted: an earlier `{name}` result is omitted here to save context]"
 
 
 def _compress_history(messages: list[dict[str, Any]], *, keep_last_round: int) -> list[dict[str, Any]]:

@@ -1187,6 +1187,24 @@ async def run_research_pipeline_streaming(
     else:
         log.warning("research: no healthy researchers for task %s", task)
 
+    # Surface worker drops. A researcher that returns empty content (an
+    # OllamaError, a timeout, or a genuinely empty reply) contributes nothing
+    # to grounding and is silently filtered out of the ledger downstream. When
+    # that thins a 3-worker fan-out to 1, the answer loses sources without any
+    # error — the bio-archimedes case (2026-06-30) lost 2/3 workers this way and
+    # produced a sourceless answer. Log it loudly so the next drop is a one-line
+    # find, not a forensic reconstruction.
+    n_ok = sum(1 for d in drafts if (d.get("content") or "").strip())
+    if researchers and n_ok < len(drafts):
+        dropped = [
+            f"{d.get('model', '?')} (err={d.get('error') or 'empty'}, {d.get('elapsed_s', 0)}s)"
+            for d in drafts if not (d.get("content") or "").strip()
+        ]
+        log.warning(
+            "research: %d/%d researchers produced content; dropped: %s",
+            n_ok, len(drafts), ", ".join(dropped),
+        )
+
     findings = _format_findings(drafts)
     grounded = bool(findings)
 

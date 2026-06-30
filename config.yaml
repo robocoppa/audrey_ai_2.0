@@ -266,7 +266,13 @@ agentic:
       max_rounds: 5
       compress_after_round: 3
       max_tool_result_chars: 6000
-      compress_keep_last: 1
+      # Keep the *two* most recent search rounds verbatim (not just one). A
+      # researcher runs up to 5 rounds; at keep_last=1 a heavy-search worker had
+      # all but its final round compacted before it wrote its findings, then
+      # narrated the compaction stub as "searches returned elided results"
+      # (the current-2025-recent regression, 2026-06-30). Research mode is
+      # thoroughness-first, so the extra context budget is worth it.
+      compress_keep_last: 2
     # `audrey_research` Stage-3 fact-checker: confirms a handful of specific
     # high-risk/dated/current claims against sources — NOT open-ended research.
     # Tighter than research_worker (fewer rounds) but keeps the large result

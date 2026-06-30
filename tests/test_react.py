@@ -9,7 +9,8 @@ What this file covers:
     messages verbatim and stubs older ones. Pins behavior across
     multiple values of N so a future tuning change to the
     `agentic.react.compress_keep_last` knob is testable in code.
-  - The stub format is informative (tool name + result length).
+  - The stub names the tool and reads as a *compaction*, not a failed or
+    empty search (a model that quotes it must not narrate a grounding failure).
   - Non-tool messages (user, assistant, system) are preserved as-is.
 """
 
@@ -101,21 +102,32 @@ def test_compress_history_preserves_message_order():
     out = _compress_history(convo, keep_last_round=1)
     # Order preserved; only the old tool message is stubbed.
     assert [m["role"] for m in out] == ["system", "system", "assistant", "tool"]
-    assert out[1]["content"].startswith("[earlier tool call:")
+    assert out[1]["content"].startswith("[history compacted:")
 
 
 # ─── _summarize_tool_message ──────────────────────────────────────────
 
 
-def test_summarize_tool_message_includes_name_and_length():
+def test_summarize_tool_message_names_the_tool():
     msg = _tool_msg("kb_search", "x" * 7500)
     out = _summarize_tool_message(msg)
     assert "kb_search" in out
-    assert "7500" in out
+
+
+def test_summarize_tool_message_reads_as_compaction_not_failure():
+    """The stub must not look like a failed/empty/elided search. A research
+    worker that quotes its own compacted history narrated the old stub as
+    "searches returned elided results" (the current-2025-recent regression).
+    Pin the wording so that can't recur: it says "compacted", carries no
+    misleading char count, and uses none of the failure-flavored words."""
+    out = _summarize_tool_message(_tool_msg("web_search", "x" * 7500)).lower()
+    assert "compact" in out
+    assert "7500" not in out  # no count to misread as "thin results"
+    for bad in ("elided", "error", "failed", "empty", "sparse"):
+        assert bad not in out
 
 
 def test_summarize_tool_message_handles_missing_fields():
     """Defensive against malformed history. Should not raise."""
     out = _summarize_tool_message({"role": "tool"})
     assert "?" in out  # falls back to "?" for missing name
-    assert "0 chars" in out
