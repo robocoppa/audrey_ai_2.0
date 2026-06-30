@@ -322,10 +322,30 @@ the answer is good. Keep both, and diff each run against the prior baseline.
 
 ## Known issues / notes
 
-- **Brave key is quota-exhausted (402).** SearXNG fallback keeps grounding alive;
-  renewing Brave restores the primary provider (SearXNG then idles as fallback).
+- **Brave key is quota-exhausted (402) — this is the ROOT operational issue.**
+  With Brave 402'd, 100% of search load funnels through the single self-hosted
+  SearXNG, which hammers its upstream engines (Google/Bing/DuckDuckGo) until they
+  rate-limit/CAPTCHA the instance. **Renewing Brave is the durable fix** — it puts
+  SearXNG back to being the rare fallback it was designed to be, and the throttling
+  pressure disappears.
+- **SearXNG upstream-throttle (confirmed 2026-06-30).** Symptom: `audrey_research`
+  slow + thin grounding; `web_search` logs `SearXNG returned 0 results`
+  intermittently for queries that otherwise return N. NOT Audrey code and NOT the
+  retry (a `200 + 0 results` isn't an error, so the retry never fires). Root cause
+  in the instance's own logs (`docker logs SearXNG` — note capitalization):
+  `SearxEngineTooManyRequestsException (suspended_time=180)` + DuckDuckGo
+  `SearxEngineCaptchaException`. Workers re-search the empties → latency balloons
+  (one case 216s→1436s) and grounding varies run-to-run. **Mitigations applied
+  2026-06-30:** disabled DuckDuckGo in `settings.yml` (the CAPTCHA offender — same
+  DDG bot-block that killed the earlier direct-scrape attempt, back via the engine
+  aggregate); rotated `secret_key`. **Real fix remains renewing Brave** (above).
+- **SearXNG container is named `SearXNG`** (capitalized), not `searxng`. The
+  lowercase hostname resolves *inside* `ollama-net` (so `SEARXNG_URL=http://searxng:8080`
+  and `docker exec custom-tools ...searxng:8080...` work), but host-shell
+  `docker logs/stats SearXNG` need the literal capitalized name.
 - **SearXNG must have the JSON API enabled** (`search.formats: [html, json]` in
-  `settings.yml`) or every fallback returns 403. See
+  `settings.yml`) or every fallback returns 403, and **Autostart ON** (it's a
+  grounding dependency — if stopped, grounding silently dies). See
   `searxng-unraid-setup.md`.
 - **Research totals are long** (~300–600s; `bio-euclid` ~300s, `bio-pythagoras`
   ran 624s on the Stage-4 eval). Not a blocker, but watch for near-timeout runs on
