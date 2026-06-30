@@ -97,6 +97,78 @@ findings, so they're hand-verified.)
 
 - **`optimization` — the synth event-loop polls with 50ms timeouts instead of `wait` with FIRST_COMPLETED -> `open` (validated still-live 2026-06-25).** [`routes/openai/pipeline.py:649`](../../src/audrey/routes/openai/pipeline.py#L649) loops on `await asyncio.wait_for(events_q.get(), timeout=0.05)` while draining the banner queue; same pattern in [`_drain_q_until_task` at routes/openai/pipeline.py:794](../../src/audrey/routes/openai/pipeline.py#L794). Functionally correct (50ms is small enough that banners don't visibly lag), but it's a spin-poll at ~20 wakeups/sec per active deep stream; the cleaner shape is `asyncio.wait({task_get, banner_q_get}, return_when=FIRST_COMPLETED)`. Cost is near-zero, so this is principle-driven, not performance-driven. **Deferral trigger:** revisit when Grafana's asyncio task-wakeup count climbs under streaming load correlated with concurrent deep streams — the rewrite has real complexity risk (interleaving two queues with explicit drain semantics), so pay it only when measurement justifies it.
 
+#### Lesson (research mode / `audrey_research`) — audit 2026-06-30
+
+Audit of the in-scope files for the planned research-mode lesson:
+`run_research_pipeline_streaming` + helpers in `pipeline/deep_panel.py`,
+`pipeline/ledger.py`, the research role prompts in `prompts.py`, the research pool
+in `config.yaml`. Much of this code was written/edited this same session, so these
+are deliberately fresh-eyes-on-my-own-work — weighted toward readability traps a
+lesson reader would hit, not just bugs.
+
+**DRAINED 2026-06-30:** #1 and #2 fixed (comment-only — unified deep_panel.py to one
+4-stage scheme [research / verify / fact-check / write], rewrote the stale ledger
+comment to describe current behavior, dropped a bare phase-number ref); 628 pytests
+pass, ruff clean. #3/#4/#5 accepted as lesson teaching-points (timeout-is-per-stage
+sidebar; why claims aren't deduped but sources are; the message-build inconsistency
+noted in passing). Lesson write is now gated only on outline approval.
+
+- **`resolved` — TWO conflicting "Stage N" numbering schemes in deep_panel.py.** Fixed 2026-06-30.
+  The module-level pipeline overview comment numbers it research / **Stage 2=VERIFY**
+  / **Stage 3=WRITE** ([`deep_panel.py:483-485`](../../src/audrey/pipeline/deep_panel.py#L483)),
+  a 3-stage view. But the inline section comments in `run_research_pipeline_streaming`
+  use the 4-stage deploy-doc view — **Stage 2=verify** ([`:1224`](../../src/audrey/pipeline/deep_panel.py#L1224)),
+  **Stage 3=fact-check** ([`:1241`](../../src/audrey/pipeline/deep_panel.py#L1241)) —
+  AND a comment *inside* the fact-check block says "**Stage 2:** structure the
+  fact-check" ([`:1293`](../../src/audrey/pipeline/deep_panel.py#L1293)). So "Stage 2"
+  means three different things across one function (verify / write / fact-check-
+  structuring), and "Stage 1b" ([`:1186`](../../src/audrey/pipeline/deep_panel.py#L1186))
+  is a fourth scheme. This is a real comment-that-lies trap — the lesson must NOT
+  inherit phase/stage numbers (course rule), but the code itself is internally
+  contradictory. Suggested drain: pick ONE scheme (the deploy-doc 4-stage one is the
+  user-facing truth) and make every comment in the function match it; renumber/strip
+  the stray "Stage 1b" and the in-block "Stage 2."
+
+- **`resolved` — stale "no effect on the ANSWER yet" comment lies now.** Fixed 2026-06-30.
+  [`deep_panel.py:1190-1192`](../../src/audrey/pipeline/deep_panel.py#L1190) still
+  says the ledger-build stage's "only measurable effect on the ANSWER is none yet —
+  it just produces the ledger; we eval that the prose path is undisturbed before
+  wiring the ledger into verify/write/hedge." That was true when Stage 1 shipped dark,
+  but the ledger now drives fact-check verdicts, the Sources list, AND the hedge
+  dispositions — it has a large effect on the answer. The comment actively
+  misdescribes current behavior. Suggested drain: rewrite to "the ledger is built
+  here and consumed by the fact-check, Sources, and hedging stages below."
+
+- **`consider` — `timeout_s` is reused unscaled across all four stages -> `open`.**
+  Every stage call (`_run_one_worker`, `_structure_one_draft`, verify, fact-check
+  ReAct, `_structure_factcheck`, the writer stream) is passed the same `timeout_s`.
+  A research request can therefore run research(≤timeout) + structure(≤timeout) +
+  verify(≤timeout) + factcheck-ReAct(≤timeout × rounds) + write(≤timeout) serially —
+  the wall-clock blowups seen this session (one case 1436s) are partly this:
+  no single stage exceeds its timeout, but the *sum* is unbounded. Not a bug (each
+  stage is correctly bounded), but worth a lesson sidebar and possibly a per-stage
+  budget. Suggested drain: discuss whether the pipeline wants an overall deadline,
+  or document that `timeout_s` is per-stage by design.
+
+- **`nit` — `_merge_ledgers` concatenates claims with no dedup or cap -> `open`.**
+  [`deep_panel.py` `_merge_ledgers`](../../src/audrey/pipeline/deep_panel.py) keeps
+  every claim from every worker (sources are URL-deduped; claims are not). On a dense
+  topic 3 workers × ~15 claims = ~45 near-duplicate claims downstream — this was the
+  root of the Stage-4 disposition verbosity already addressed at the render layer
+  (only action-bearing lines rendered). The merge itself is intentional (conflicting
+  claims surface for the fact-checker) so this is a `nit`/teaching-point, not a fix:
+  worth explaining in the lesson WHY claims aren't deduped (the fact-checker wants to
+  see disagreement) while sources are.
+
+- **`nit` — `_with_role_system` vs inline `{"role":"system",...}` inconsistency -> `open`.**
+  Stage 1 builds researcher messages via `_with_role_system(...)`
+  ([`:1148`](../../src/audrey/pipeline/deep_panel.py#L1148)), but the verify, fact-check,
+  and write stages build their system message inline as a literal dict. Two ways of
+  doing the same thing in one function. Minor, but the lesson walks all four stages
+  back-to-back so the reader will see both forms. Suggested drain: either route all
+  four through the helper or note why Stage 1 differs (it prepends to the full
+  message history; the others build a fresh 2-message list).
+
 #### Pointers to completed work (kept brief; detail under Resolved / Accepted)
 
 - **3 quick-win CODEBASE fixes shipped 2026-06-25** (admin reconcile collection

@@ -475,14 +475,21 @@ async def run_panel_streaming(
 
 
 # ─── Research mode (audrey_research) — staged pipeline ─────────────────
-# A three-stage pipeline behind the `audrey_research` virtual model:
-#   Stage 1  RESEARCH  — parallel fan-out of tool-capable researchers that
-#                        ground with web_search/kb_search. Cloud researchers
-#                        run concurrently (capped at max_research_workers_cloud);
-#                        a local researcher serializes through the GPU gate.
-#   Stage 2  VERIFY    — one pass auditing the merged findings for unsupported
-#                        / overconfident / anachronistic claims.
-#   Stage 3  WRITE     — one pass turning verified findings into the answer.
+# A staged pipeline behind the `audrey_research` virtual model:
+#   1  RESEARCH    — parallel fan-out of tool-capable researchers that ground
+#                    with web_search/kb_search. Cloud researchers run concurrently
+#                    (capped at max_research_workers_cloud); a local researcher
+#                    serializes through the GPU gate. A second mechanical pass
+#                    structures each draft's prose into the claim/source ledger
+#                    (opt-in; see _ledger_enabled).
+#   2  VERIFY      — one pass auditing the merged findings for unsupported /
+#                    overconfident / anachronistic claims.
+#   3  FACT-CHECK  — optional tool-using pass that web-confirms high-risk/dated
+#                    claims; with a ledger, its prose becomes per-claim verdicts
+#                    (drop/hedge/correct) the writer applies.
+#   4  WRITE       — one pass turning verified, fact-checked findings into the
+#                    answer. The pipeline then deterministically appends the
+#                    Sources list and (opt-in) per-claim hedge dispositions.
 # The Write stage output IS the final answer (no separate synthesizer). Each
 # stage degrades gracefully; the pipeline never raises — like `run_panel`.
 
@@ -672,7 +679,7 @@ def _merge_ledgers(ledgers: list[ResearchResult]) -> ResearchResult:
     """Merge per-worker ledgers into one. Sources deduped by URL; claims
     concatenated (ids already worker-prefixed). Conflicting claims across
     workers are NOT reconciled here — they're surfaced as-is for the
-    fact-checker to flag (Stage 2)."""
+    fact-check stage to flag."""
     seen_urls: dict[str, str] = {}  # url → canonical source id
     merged_sources: list[Source] = []
     for led in ledgers:
@@ -823,10 +830,10 @@ async def _structure_factcheck(
 
 def _factcheck_result_to_corrections(fc: FactCheckResult, ledger: ResearchResult) -> str:
     """Render structured per-claim verdicts into the prose corrections string the
-    writer already applies — so Stage 2's verdicts reach the writer through the
-    existing channel (no writer change until Stage 3). Lines mirror the prose
-    fact-checker's vocabulary so `_has_corrections` and the writer prompt work
-    unchanged:
+    writer already applies — so the ledger's verdicts reach the writer through the
+    same channel the prose fact-checker used (no separate writer path). Lines mirror
+    the prose fact-checker's vocabulary so `_has_corrections` and the writer prompt
+    work unchanged:
       - unsupported  → DROP (writer omits)
       - conflicting  → UNVERIFIED (writer hedges)
       - needs_hedge  → CORRECT to corrected_text, or UNVERIFIED if none
@@ -1183,13 +1190,14 @@ async def run_research_pipeline_streaming(
     findings = _format_findings(drafts)
     grounded = bool(findings)
 
-    # ── Stage 1b: structure the findings into a claim/source ledger ────
+    # ── Stage 1 (cont.): structure the findings into a claim/source ledger ──
     # Opt-in (agentic.research_ledger.enabled). A second mechanical pass per
-    # worker converts prose → ResearchResult; fail-soft, and the prose
-    # `findings` is unchanged either way (the ledger is carried alongside it for
-    # the later stages to consume). This stage's only measurable effect on the
-    # ANSWER is none yet — it just produces the ledger; we eval that the prose
-    # path is undisturbed before wiring the ledger into verify/write/hedge.
+    # worker converts prose → ResearchResult; fail-soft, and the prose `findings`
+    # is unchanged either way (the ledger is carried alongside it). The ledger is
+    # then consumed downstream: the fact-check stage turns it into per-claim
+    # verdicts, and the write stage uses it to render the Sources list and the
+    # hedge dispositions. If structuring fails, those stages fall back to the
+    # prose path.
     ledger: ResearchResult | None = None
     if grounded and _ledger_enabled(cfg):
         structure_coros = [
@@ -1290,7 +1298,7 @@ async def run_research_pipeline_streaming(
                     cfg=cfg,
                 )
             corrections = (fc.content or "").strip()
-            # ── Stage 2: structure the fact-check against the claim ledger ──
+            # Structure the fact-check against the claim ledger.
             # When a ledger exists, convert the prose notes into per-claim
             # verdicts and render them back into the corrections string the
             # writer already applies. Catches the "unsupported claim" class
@@ -1386,9 +1394,9 @@ async def run_research_pipeline_streaming(
                 writer_model = model
                 break
 
-    # ── Stage 3: append the deterministic Sources list ─────────────────
+    # ── Stage 4 (cont.): append the deterministic Sources list ─────────
     # Built by us from the ledger (NOT asked of the writer — that pressure
-    # degrades prose; see +21). Only on a clean answer, and only when a
+    # degrades prose). Only on a clean answer, and only when a
     # grounded ledger yields surviving sources with usable URLs; an
     # ungrounded/creative answer renders nothing.
     if write_error == "" and accumulated.strip():

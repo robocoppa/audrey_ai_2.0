@@ -84,6 +84,12 @@ pool config in `config.yaml`):
 6. **Fail-soft everywhere** — every stage degrades to the prior prose behaviour on
    any error; the mode never dead-ends. Tie back to the deep-mode "always answer
    something" posture from L8.
+7. **The prompting principles** (what worked / what didn't, as design rationale) —
+   the four durable lessons the role-prompt tuning produced: compute-don't-ask,
+   one-job-per-prompt, hedge-selectively-not-everything, and tune-against-a-baseline
+   /revert-don't-stack. The single most transferable section; see the outline's
+   "Why the prompts are shaped this way" block. Teach the principle, NOT the phase
+   history (the war stories live in the deploy doc + AGENTS.md).
 
 Out of scope (mention, don't dwell): the SearXNG fallback infra (that's a sidecar/
 ops detail — L16 territory at most, and infra is out of course scope per the
@@ -110,6 +116,41 @@ Draft outline:
   5. Write — the source-bound writer; then the two **deterministic** post-steps
      (Sources list ranking; hedge dispositions). Concept spotlight on "the pipeline
      shapes the answer after the model, not by asking the model."
+- **Why the prompts are shaped this way** (the prompting principles section — the
+  most transferable thing in the lesson; teach the PRINCIPLE, never the phase
+  history). Four durable lessons the research-mode tuning produced, each stated as
+  design rationale with the *why*, not as "we tried X and reverted":
+  1. **Compute what you can; don't ask the model to do bookkeeping.** The Sources
+     list and the hedge dispositions are rendered by *code* from the ledger, not
+     requested in the prompt. Asking a model to track and emit citations inline
+     degrades its actual reasoning — it spends effort on bookkeeping and pads with
+     weak sources to satisfy the instruction. Anything deterministic (which sources
+     survived, how to hedge a claim given its source types) belongs in a pure
+     function, not a prompt. This is *why* `_render_sources_block` and `hedge_policy`
+     exist as code instead of writer instructions.
+  2. **One job per role prompt.** Researcher finds and grounds; verifier audits for
+     overclaiming; fact-checker confirms high-risk claims against sources; writer
+     turns verified findings into prose. Each prompt stays focused because a prompt
+     asked to do two things (research *and* self-censor, or write *and* track
+     citations) does both worse. The staged pipeline exists so each prompt can be
+     single-purpose.
+  3. **Hedge the uncertain, not everything.** A blanket "be careful, hedge claims"
+     instruction produces timid mush — every sentence wrapped in "reportedly /
+     often described as." The fix is *selective*: state well-grounded facts plainly,
+     hedge only the specific claims the evidence doesn't earn. This is why the hedge
+     dispositions are per-claim and why an all-hedge block is suppressed entirely
+     (it carries no signal beyond blanket caution). Teach the failure mode: an
+     instruction that applies to *everything* effectively applies to nothing.
+  4. **Tune prompts against a measured baseline, and revert when a direction
+     trends down — don't stack.** Prompt edits are easy to make and easy to fool
+     yourself about on a single eyeball read. When quality declines across several
+     edits, the *direction* is usually wrong; revert to the known-good version and
+     re-derive, rather than piling on more rules to patch the symptoms. (This is why
+     a hermetic test suite can't judge this — it proves plumbing, not answer quality;
+     a live eval over saved answers, diffed against a prior baseline, is the only way
+     to see a prompt regression. Tie to the eval-vs-pytest distinction.)
+  Keep this section principle-first and short — it's the transferable payoff, but it
+  must read as "here's why prompts are designed this way," never as a changelog.
 - **Concept spotlights** (pause before relying on the terms): structured/constrained
   output; tolerant validation (`BeforeValidator`); pure-function policy
   (`hedge_policy`) as the testable core.
@@ -118,7 +159,12 @@ Draft outline:
   whole worker dropped?"; "the answer is creative/ungrounded — why is there no
   Sources list and no hedging block?"; "you want to A/B the hedging behaviour
   without a rebuild — what's the lever?"; "research mode and deep mode both fan out
-  to a panel — what's the difference in how the final answer is produced?"
+  to a panel — what's the difference in how the final answer is produced?"; "the
+  Sources list and the hedging could both have been asked of the writer in its
+  prompt — why are they computed by code instead?" (reinforces the
+  compute-don't-ask principle); "a prompt tweak makes one test answer read better
+  but you're not sure overall — what do you do before keeping it?" (reinforces
+  baseline/revert + the eval-vs-pytest distinction).
 - **Footer** — the moved whole-course recap (now ending on research mode as the
   capstone) + the "from here it's maintenance" close.
 
