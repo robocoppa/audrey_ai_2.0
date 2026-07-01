@@ -67,17 +67,34 @@ echo ">> waiting for ${CONTAINER} to finish…"
 rc="$(docker wait "${CONTAINER}")"
 echo ">> ${CONTAINER} exited: ${rc}"
 
-# Telegram push via the fleet-watchdog watcher bot. Non-fatal if it can't send —
-# the eval already ran; a failed ping shouldn't mask the result.
+# Telegram push via the fleet-watchdog watcher bot. Non-fatal throughout — the
+# eval already ran and its answers are saved; a failed send shouldn't mask that.
+#   1. a SUMMARY message (verdict + the harness's "N/N cases passed" line), and
+#   2. the ANSWERS FILE as a document (the full output — text messages cap at
+#      4096 chars, but the answers file is ~68 KB, so it must go as sendDocument,
+#      which allows up to 50 MB).
 if [[ -f "${WATCHDOG_ENV}" ]]; then
   # shellcheck disable=SC1090
   set -a; . "${WATCHDOG_ENV}"; set +a
   if [[ -n "${WATCHDOG_TOKEN:-}" && -n "${WATCHDOG_CHAT_ID:-}" ]]; then
     verdict="✅"; [[ "${rc}" != "0" ]] && verdict="⚠️"
-    curl -s "https://api.telegram.org/bot${WATCHDOG_TOKEN}/sendMessage" \
+    # Pull the harness's own pass/fail summary line from the container logs.
+    summary="$(docker logs "${CONTAINER}" 2>&1 | grep -E 'cases passed' | tail -1)"
+    api="https://api.telegram.org/bot${WATCHDOG_TOKEN}"
+
+    curl -s "${api}/sendMessage" \
       -d chat_id="${WATCHDOG_CHAT_ID}" \
-      -d "text=${verdict} Audrey eval ${MODEL} finished (exit ${rc}) → ${SAVE_FILE}" \
-      >/dev/null || echo "WARN: Telegram notify failed (eval result is still saved)." >&2
+      -d "text=${verdict} Audrey eval ${MODEL} finished (exit ${rc}) → ${SAVE_FILE}
+${summary:-（summary unavailable）}" \
+      >/dev/null || echo "WARN: Telegram summary send failed." >&2
+
+    # Attach the full answers file as a document.
+    if [[ -f "${OUT_DIR}/${SAVE_FILE}" ]]; then
+      curl -s "${api}/sendDocument" \
+        -F chat_id="${WATCHDOG_CHAT_ID}" \
+        -F document=@"${OUT_DIR}/${SAVE_FILE}" \
+        >/dev/null || echo "WARN: Telegram document send failed (file still on box)." >&2
+    fi
   else
     echo "WARN: WATCHDOG_TOKEN/CHAT_ID not in ${WATCHDOG_ENV}; skipped notify." >&2
   fi
