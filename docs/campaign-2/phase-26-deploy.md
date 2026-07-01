@@ -23,9 +23,23 @@ See "What we learned" below for the full deploy history, including the two
 operational failures that cost the most time (a stopped SearXNG container, a silent
 fallback 503).
 
-See `phase-26-research-ledger-plan.md` for the full staged design and the
-controlling principle (the ledger is INTERNAL scaffolding, not user-facing
-bookkeeping — never the +21 citation-mandate that was reverted).
+The controlling principle (from the staged design): the ledger is **internal
+scaffolding the models reason over** — it does NOT become user-facing
+bookkeeping. The answer stays clean prose + a short "Sources used" list; the
+structure serves verification and hedging only. This is deliberately *not* the
++21 citation-mandate that was reverted (+26) for making models do source
+bookkeeping over reasoning.
+
+**Why `audrey_research` is a dedicated mode with a role pipeline** (design
+rationale, originally Phase 24): it's a *dedicated virtual model*, not a gate —
+picking `audrey_research` IS the "force grounded research" signal, so there's no
+factual-prompt classifier to mis-fire on "write a birthday toast," and the
+default panel's "offer tools, let each model decide" diversity is never touched.
+The role pipeline (Researcher → Verifier → Fact-check → Writer) is **sequential**
+(each stage needs the prior stage's output), unlike `deep_panel` which is
+parallel by design. That sequential ~2–3× wall-clock on a single GPU is
+unacceptable as a default but fine in an **opt-in mode** the user chose precisely
+for thoroughness over speed.
 
 ## What it does
 
@@ -193,11 +207,15 @@ docker exec audrey-ai grep -c "_source_rank"          /app/src/audrey/pipeline/d
 
 `≥1` = new code is live; `0` = the image predates the commit, rebuild.
 
-And confirm the Stage-4 flag is actually ON (it ships `false` — Stage 4 is a
-no-op until enabled in the bind-mounted config + a `docker compose restart`):
+The Stage-4 flag ships `false` (the deliberate shipped default — the box eval
+found deterministic hedging over-corrects ungrounded answers; see finding #4).
+Stage 4 is a no-op until you opt in by flipping it in the bind-mounted config +
+a `docker compose restart`. To check the live value:
 
 ```bash
-docker exec audrey-ai grep "hedge_policy:" /app/config.yaml   # want: hedge_policy: true
+docker exec audrey-ai grep "hedge_policy:" /app/config.yaml
+# shipped default is `hedge_policy: false`; flip to `true` only to A/B the
+# deterministic per-claim hedging on grounded answers.
 ```
 
 ## Box smoke test (the real verification)

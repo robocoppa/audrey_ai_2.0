@@ -5,10 +5,10 @@ the **panel** already uses. Before this, both deep paths handed the synthesizer
 the raw `deep_worker` budget (360s) even on the cloud-only pool, while that
 pool's panel ran on `timeouts.cloud` (240s).
 
-> Phase 23a is the code item of the Phase 23 audit-finding drain
-> (`phase-23-plan.md`). 23b–d are lesson-doc drains with no runtime impact and
-> are not part of this deploy. (Note: the number 23 was previously used for the
-> reverted `web_search` grounding nudge — now deprecated; see PROJECT_STATE.)
+> Phase 23a is the code item of the Phase 23 audit-finding drain. 23b–d are
+> lesson-doc drains with no runtime impact and are not part of this deploy.
+> (Note: the number 23 was previously used for the reverted `web_search`
+> grounding nudge — now deprecated; see PROJECT_STATE.)
 
 ## What it does
 

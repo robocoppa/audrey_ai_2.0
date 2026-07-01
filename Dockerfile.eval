@@ -1,0 +1,46 @@
+# Dockerfile.eval — run the live eval harness ON THE BOX, not the laptop.
+#
+# See docs/campaign-2/phase-27-eval-on-box.md. The harness
+# (scripts/eval_research.py) is network-config-driven; running it from a
+# container on `ollama-net` makes a long protocol run immune to the laptop's
+# internet (three runs died to laptop connectivity, 2026-07-01).
+#
+# The harness's ONLY third-party dependency is httpx; everything else is stdlib
+# (its .env loader is hand-rolled — no python-dotenv). So this image is tiny.
+#
+# NO SECRET IS BAKED IN. The OWUI `sk-…` key is passed at run time via a
+# locked-down --env-file (never -e, never COPY'd). Build + run recipe and the
+# full security rationale ("only I can use it") live in the phase-27 doc.
+#
+# Build (on the box):
+#   docker build -f Dockerfile.eval -t audrey-eval:latest .
+#
+# Run (detached, secret-safe — see phase-27 for the env-file setup):
+#   docker run -d --name audrey-eval --network ollama-net \
+#     --env-file /mnt/user/appdata/audrey/eval.env \
+#     -v /mnt/user/appdata/audrey/testing-out:/out \
+#     audrey-eval:latest \
+#       --model audrey_research \
+#       --cases /eval/eval_prompts_protocol.json \
+#       --save-file /out/<date>-research-onbox-answers.md
+
+FROM python:3.12-slim
+
+# Pin httpx (the sole runtime dep). --no-cache-dir keeps the layer lean.
+RUN pip install --no-cache-dir httpx
+
+WORKDIR /eval
+
+# The harness + all case files. eval_research.py resolves --cases by the path
+# you pass at run time, so reference them as /eval/eval_prompts_*.json.
+COPY scripts/eval_research.py /eval/eval_research.py
+COPY scripts/eval_prompts.json \
+     scripts/eval_prompts_protocol.json \
+     scripts/eval_prompts_deep.json \
+     scripts/eval_prompts_fast.json \
+     /eval/
+
+# The script IS the entrypoint; append harness flags after the image name at
+# `docker run` (--model / --cases / --save-file / --only …). Base-url + key
+# come from the mounted --env-file (AUDREY_EVAL_BASE_URL / AUDREY_EVAL_API_KEY).
+ENTRYPOINT ["python", "/eval/eval_research.py"]

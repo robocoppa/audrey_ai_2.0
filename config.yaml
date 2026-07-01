@@ -236,7 +236,7 @@ agentic:
     # guidance. Separate flag so it can be A/B'd against a ledger-on baseline
     # (it changes writer wording — plain statement becomes explicitly allowed).
     # Requires `enabled: true` to have any effect. Off by default.
-    hedge_policy: false
+    hedge_policy: true
   react:
     max_rounds: 3
     compress_after_round: 2
