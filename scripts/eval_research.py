@@ -65,6 +65,13 @@ total wall-clock. The fast path's reason to exist is speed, so these make
 "fast" falsifiable run-to-run. They print under each case and land in the
 saved answers file; they are measurements, not pass/fail checks.
 
+For research cases, a domain-based source breakdown is also reported —
+`sources:N (official:.. academic:.. low_quality:.. other:..) quality:..` —
+so a thin-grounding or junk-heavy run is visible at a glance. It re-classifies
+the rendered URLs by host (the ledger's own source_type labels don't reach the
+prose), so it's a coarse heuristic. Like latency, it is INFORMATIONAL, never a
+pass/fail check — the harness proves liveness/structure, not answer quality.
+
 Each case can pin `"model"`, the `"prompt"`, and optional expectations
 (`expect_banners`, `expect_sources`). Cases live in a JSON file (default
 `scripts/eval_prompts.json`) so you can add/edit prompts without touching
@@ -180,6 +187,8 @@ class CaseResult:
     route: str = "unknown"            # inferred path: fast | deep | research
     ttft_s: float | None = None
     total_s: float | None = None
+    # Informational domain-based source breakdown (never a pass/fail check).
+    source_stats: SourceStats | None = None
 
 
 @dataclass
@@ -280,6 +289,110 @@ def _ordered_subsequence(found: list[str], expected: list[str]) -> bool:
     return all(any(f == e for f in it) for e in expected)
 
 
+# --- Source-quality reporting (informational, NOT a pass/fail check) ---------
+#
+# The eval reads the RENDERED answer, which is just `- [title](url)` lines — the
+# ledger's own `source_type` labels never reach the prose. So we can only
+# re-classify by DOMAIN here, and this is a coarse heuristic that will disagree
+# with the pipeline's internal labels at the margins. These counts are printed
+# for a human read (spot a thin-grounding or junk-heavy run at a glance); they
+# are never gate checks — the harness proves liveness/structure, not quality.
+
+# Host substrings that mark a URL as low-quality grounding. Matches the recurring
+# SearXNG-surfaced junk (facebook groups / scribd / slideshare / content farms).
+_LOW_QUALITY_HOST_MARKERS = (
+    "facebook.com", "scribd.com", "slideshare.net", "quora.com", "pinterest.",
+    "reddit.com", "medium.com", "blogspot.", "wordpress.com",
+)
+# Host substrings that mark academic / scholarly grounding.
+_ACADEMIC_HOST_MARKERS = (
+    "arxiv.org", ".edu", "scholar.google", "jstor.org", "springer.com",
+    "sciencedirect.com", "nature.com", "ieee.org", "acm.org", "ncbi.nlm.nih.gov",
+    "researchgate.net", "semanticscholar.org", "plato.stanford.edu",
+)
+# Host substrings that mark a recognized authoritative / reference domain. This
+# is deliberately conservative — an unlisted host is "other", not "official".
+_OFFICIAL_HOST_MARKERS = (
+    ".gov", "wikipedia.org", "britannica.com", "mathworld.wolfram.com",
+    "mactutor", "who.int", "nist.gov", "python.org", "rust-lang.org",
+    "docs.", "developer.", "openai.com", "anthropic.com", "deepmind.com",
+    "ai.meta.com", "mistral.ai", "deepseek.com",
+)
+
+
+def _classify_host(url: str) -> str:
+    """Bucket a URL by host into official | academic | low_quality | other.
+
+    Order matters: academic and low-quality markers are checked before the broad
+    'official' set so, e.g., a university `.edu` lands academic and a wordpress
+    blog lands low_quality even though neither is on the official list."""
+    host = (urlparse(url).netloc or "").lower()
+    if not host:
+        return "other"
+    if any(m in host for m in _ACADEMIC_HOST_MARKERS):
+        return "academic"
+    if any(m in host for m in _LOW_QUALITY_HOST_MARKERS):
+        return "low_quality"
+    if any(m in host for m in _OFFICIAL_HOST_MARKERS):
+        return "official"
+    return "other"
+
+
+@dataclass
+class SourceStats:
+    """Informational domain-based breakdown of a case's `## Sources` list.
+
+    None of these are pass/fail — they're reported numbers for a human read.
+    `quality` is a one-word summary: GOOD (no low-quality hosts and at least one
+    official/academic), PARTIAL (a mix), THIN (fewer than 2 usable URLs), or
+    N/A (no Sources block at all)."""
+    total: int = 0
+    official: int = 0
+    academic: int = 0
+    low_quality: int = 0
+    other: int = 0
+    quality: str = "N/A"
+
+    def line(self) -> str:
+        """One compact reporting line."""
+        return (
+            f"sources:{self.total} "
+            f"(official:{self.official} academic:{self.academic} "
+            f"low_quality:{self.low_quality} other:{self.other}) "
+            f"quality:{self.quality}"
+        )
+
+
+def source_stats(answer: str, *, expected: bool) -> SourceStats:
+    """Compute the informational source breakdown from a case's answer.
+
+    `expected` is whether a Sources block was expected for this case (creative
+    controls opt out); when False and no block is present we report N/A rather
+    than a spurious THIN."""
+    block = _sources_block(answer)
+    urls = _extract_urls(block)
+    if not urls:
+        return SourceStats(quality="N/A" if not expected else "THIN")
+    buckets = {"official": 0, "academic": 0, "low_quality": 0, "other": 0}
+    for u in urls:
+        buckets[_classify_host(u)] += 1
+    total = len(urls)
+    if total < 2:
+        quality = "THIN"
+    elif buckets["low_quality"] == 0 and (buckets["official"] or buckets["academic"]):
+        quality = "GOOD"
+    else:
+        quality = "PARTIAL"
+    return SourceStats(
+        total=total,
+        official=buckets["official"],
+        academic=buckets["academic"],
+        low_quality=buckets["low_quality"],
+        other=buckets["other"],
+        quality=quality,
+    )
+
+
 def infer_route(banners: list[str]) -> str:
     """Infer which Audrey path served the turn, from the banner FAMILY seen.
 
@@ -348,6 +461,12 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
         checks["sources"] = None
         checks["url_wellformed"] = None
 
+    # Informational source breakdown — reported, never gated. Computed whenever a
+    # Sources block was expected (or for any audrey_research case), so a run of
+    # research answers carries its grounding-quality numbers for a human read.
+    stats = (source_stats(answer, expected=expect_sources)
+             if (expect_sources or model == "audrey_research") else None)
+
     # Route expectation (opt-in): for audrey_auto cases, assert the inferred
     # path matches the intended one — this is how we test the fast/deep gate
     # (token_threshold + deep_intent_phrases). Inferred from the banner family
@@ -361,7 +480,8 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     ok = all(v for v in checks.values() if v is not None)
     return CaseResult(name=name, model=model, ok=ok, checks=checks,
                       answer=answer, banners_seen=banners, route=route,
-                      ttft_s=timing.ttft_s, total_s=timing.total_s)
+                      ttft_s=timing.ttft_s, total_s=timing.total_s,
+                      source_stats=stats)
 
 
 def _fmt_check(v: bool | None) -> str:
@@ -392,6 +512,8 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
         line = "   " + "  ".join(f"{c}:{_fmt_check(r.checks.get(c))}" for c in cols)
         print(line)
         print(f"   {_fmt_latency(r)}")
+        if r.source_stats is not None:
+            print(f"   {r.source_stats.line()}")
         if r.banners_seen:
             print(f"   banners: {' → '.join(r.banners_seen)}")
         if show_answers and r.answer:
@@ -430,6 +552,8 @@ def save_results(results: list[CaseResult], save_file: Path) -> None:
             f"- banners: {' → '.join(r.banners_seen) or '(none)'}\n"
             f"- checks: {checks}\n"
         )
+        if r.source_stats is not None:
+            section += f"- {r.source_stats.line()}\n"
         if r.error:
             section += f"- error: {r.error}\n"
         section += f"\n{r.answer or '(no answer body)'}\n"
