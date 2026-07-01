@@ -70,5 +70,29 @@
     "prompt": "Write a short, warm birthday toast for a friend who loves hiking.",
     "model": "audrey_deep",
     "expect_sources": false
+  },
+  {
+    "name": "deep-false-premise-einstein",
+    "prompt": "Since Einstein failed math as a schoolboy, how did he manage to develop relativity later in life?",
+    "model": "audrey_deep",
+    "expect_sources": false
+  },
+  {
+    "name": "deep-synthesis-tradeoff",
+    "prompt": "A 4-person startup must choose between shipping fast with a monolith or investing early in microservices. Weigh the real tradeoffs for a team that size and give a concrete recommendation, not a both-sides summary.",
+    "model": "audrey_deep",
+    "expect_sources": false
+  },
+  {
+    "name": "deep-multistep-reasoning",
+    "prompt": "A store raises a $40 item by 25%, then runs a 25%-off sale on the new price. Is the final price higher, lower, or equal to $40? Show the arithmetic and explain why the intuition of 'they cancel out' is wrong.",
+    "model": "audrey_deep",
+    "expect_sources": false
+  },
+  {
+    "name": "deep-contested-recommendation",
+    "prompt": "Is it better to rent or buy a home? Give me an actual framework for deciding, including the factors people most often get wrong, not just 'it depends'.",
+    "model": "audrey_deep",
+    "expect_sources": false
   }
 ]
