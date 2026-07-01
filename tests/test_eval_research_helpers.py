@@ -122,5 +122,110 @@ class TestExpectRouteCheck:
         assert r.ok
 
 
+class TestClassifyHost:
+    """Domain buckets for the informational source breakdown."""
+
+    def test_academic_domains(self):
+        assert eval_research._classify_host("https://arxiv.org/abs/1706.03762") == "academic"
+        assert eval_research._classify_host("https://stanford.edu/~x") == "academic"
+
+    def test_low_quality_domains(self):
+        assert eval_research._classify_host("https://www.facebook.com/groups/1") == "low_quality"
+        assert eval_research._classify_host("https://x.wordpress.com/p") == "low_quality"
+
+    def test_official_domains(self):
+        assert eval_research._classify_host("https://en.wikipedia.org/wiki/X") == "official"
+        assert eval_research._classify_host("https://deepseek.com/news") == "official"
+
+    def test_academic_beats_official_ordering(self):
+        # A .edu also matches nothing on the official list; ordering keeps it academic.
+        assert eval_research._classify_host("https://cs.washington.edu/x") == "academic"
+
+    def test_unlisted_is_other_not_official(self):
+        assert eval_research._classify_host("https://random-startup.io/blog") == "other"
+
+    def test_no_host_is_other(self):
+        assert eval_research._classify_host("not-a-url") == "other"
+
+
+class TestSourceStats:
+    """The reported breakdown + one-word quality summary. Informational only."""
+
+    def _answer(self, *urls):
+        lines = "\n".join(f"- [t]({u})" for u in urls)
+        return f"Answer body.\n\n## Sources\n{lines}\n"
+
+    def test_good_when_authoritative_and_no_junk(self):
+        s = eval_research.source_stats(
+            self._answer("https://arxiv.org/abs/1", "https://en.wikipedia.org/wiki/X"),
+            expected=True)
+        assert (s.total, s.quality) == (2, "GOOD")
+        assert s.academic == 1 and s.official == 1 and s.low_quality == 0
+
+    def test_partial_when_junk_present(self):
+        s = eval_research.source_stats(
+            self._answer("https://arxiv.org/abs/1", "https://www.facebook.com/groups/9"),
+            expected=True)
+        assert (s.total, s.quality) == (2, "PARTIAL")
+        assert s.low_quality == 1
+
+    def test_thin_when_single_url(self):
+        s = eval_research.source_stats(self._answer("https://arxiv.org/abs/1"), expected=True)
+        assert (s.total, s.quality) == (1, "THIN")
+
+    def test_na_when_no_block_and_not_expected(self):
+        # A creative control has no Sources block and none expected → N/A, not THIN.
+        s = eval_research.source_stats("A birthday toast, no sources.", expected=False)
+        assert (s.total, s.quality) == (0, "N/A")
+
+    def test_thin_when_block_expected_but_absent(self):
+        s = eval_research.source_stats("No sources rendered.", expected=True)
+        assert (s.total, s.quality) == (0, "THIN")
+
+
+class TestSourceStatsNeverGates:
+    """source_stats is reported on run_case results but must never affect `ok`."""
+
+    def _patch_stream(self, monkeypatch, content, banners=None):
+        # Full research banner set so the (unrelated) banners check passes and
+        # can't mask what we're actually asserting about source_stats.
+        banners = banners or ["Planning", "Researching", "Verifying", "Writing"]
+        timing = eval_research.StreamTiming(ttft_s=0.1, total_s=0.2)
+        monkeypatch.setattr(
+            eval_research, "_post_stream",
+            lambda *a, **k: (content, banners, "", timing),
+        )
+
+    def test_research_case_gets_stats(self, monkeypatch):
+        answer = "Grounded answer body.\n\n## Sources\n- [a](https://arxiv.org/abs/1)\n"
+        self._patch_stream(monkeypatch, answer)
+        case = {"name": "bio", "prompt": "tell me about Euclid at length",
+                "model": "audrey_research"}
+        r = eval_research.run_case("http://x", "k", case, "audrey_research", 1.0)
+        assert r.source_stats is not None
+        assert r.source_stats.total == 1
+
+    def test_junk_sources_do_not_fail_the_case(self, monkeypatch):
+        # All-junk Sources → quality PARTIAL, but the case still passes its gates
+        # (a well-formed URL is present); quality is informational, not a check.
+        answer = ("Answer.\n\n## Sources\n- [a](https://www.facebook.com/groups/1)\n"
+                  "- [b](https://www.scribd.com/doc/2)\n")
+        self._patch_stream(monkeypatch, answer)
+        case = {"name": "junk", "prompt": "some grounding prompt here",
+                "model": "audrey_research"}
+        r = eval_research.run_case("http://x", "k", case, "audrey_research", 1.0)
+        assert r.source_stats.quality == "PARTIAL"
+        assert r.source_stats.low_quality == 2
+        assert r.checks["sources"] is True and r.checks["url_wellformed"] is True
+        assert r.ok  # quality never gates
+
+    def test_non_research_case_has_no_stats(self, monkeypatch):
+        self._patch_stream(monkeypatch, "plain fast answer, long enough to pass")
+        case = {"name": "fast", "prompt": "what is 2+2", "model": "audrey_fast",
+                "expect_banners": False, "expect_sources": False}
+        r = eval_research.run_case("http://x", "k", case, "audrey_fast", 1.0)
+        assert r.source_stats is None
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
