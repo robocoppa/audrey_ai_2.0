@@ -9,7 +9,7 @@ go-ahead on this outline and (b) draining the in-scope audit findings first.
 
 Research mode is the single most sophisticated thing in the codebase and the course
 **does not mention it at all** (`grep` for `audrey_research` across
-`docs/ai-course/` returns nothing). It composes nearly every subsystem the course
+`docs/lesson-ai/` returns nothing). It composes nearly every subsystem the course
 already taught — the deep panel, the ReAct/tool loop, KB + web search, streaming
 banners, fail-soft degradation — into one pipeline, and it adds genuinely new ideas
 the course has never covered: **structured model output** (Ollama `format=` +
@@ -213,7 +213,7 @@ Draft outline:
 Per the lesson workflow:
 1. **Audit the in-scope files first** (`run_research_pipeline_streaming` +
    `ledger.py` + the research prompts + the research pool config), filing findings
-   in `docs/ai-course/AUDIT.md` under a new heading.
+   in `docs/lesson-ai/AUDIT.md` under a new heading.
 2. **Drain those findings WITH THE USER** (fix-with-approval / accept / defer)
    before writing prose — the lesson should describe already-clean code.
 3. **User approves this outline** before any drafting.

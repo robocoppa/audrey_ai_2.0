@@ -33,7 +33,7 @@ Read `AGENTS.md` "How to work" first (verify-before-claiming, edit-before-
 write, no git writes). Run `.venv/bin/pytest tests/ -q` and
 `.venv/bin/ruff check .` before reporting any item done. After any source
 edit under `src/audrey/`, run `scripts/check-lesson-links.py <changed file>`
-— the maintainer course (`docs/ai-course/`) cites these files by line.
+— the maintainer course (`docs/lesson-ai/`) cites these files by line.
 
 ---
 
@@ -268,7 +268,7 @@ routes/openai/
    `test_inline_image.py` must pass untouched. If they don't, the public
    surface in `__init__.py` is incomplete — fix the re-export, not the test.
 5. **Re-anchor the 82 lesson cites.** Run
-   `scripts/check-lesson-links.py docs/ai-course/lesson-15-openai-routes.md`
+   `scripts/check-lesson-links.py docs/lesson-ai/lesson-15-openai-routes.md`
    (and lessons 02/04/07/13/14). The checker prints the corrected line for
    identifier-labelled cites — apply those mechanically. For bare
    `file.py:NN` cites it can only flag shape, so eyeball those. **The cite
@@ -327,7 +327,7 @@ All four ship this pass. Suggested commit slicing:
    `perf(discovery): fetch tool servers concurrently`
 4. **Item 4** (openai split) — last, two commits:
    `refactor(routes): split routes/openai.py into a package` (mechanical move),
-   then `docs(ai-course): re-anchor cites after openai.py split`.
+   then `docs(lesson-ai): re-anchor cites after openai.py split`.
 
 Items 1–3 are order-independent (no shared files). Item 4 goes last so its
 large mechanical diff doesn't collide with the smaller logic changes, and so

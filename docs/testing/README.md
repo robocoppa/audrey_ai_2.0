@@ -6,7 +6,7 @@ other end and let you read the actual answers. One harness
 (`scripts/eval_research.py`) drives all of them — the cases differ, the script
 doesn't.
 
-See `PLAN-mode-test-suite.md` for the design rationale and case taxonomy.
+See `../plans/PLAN-mode-test-suite.md` for the design rationale and case taxonomy.
 
 ## The three protocols
 
@@ -163,9 +163,10 @@ scripts/
   eval_prompts_fast.json        # fast + auto protocol (~12 cases)
 docs/testing/
   README.md                     # this file — how to use the suite
-  PLAN-mode-test-suite.md       # design rationale + case taxonomy
   <date>-<protocol>-answers.md  # machine-written: every answer from one run
   <date>-<protocol>-report.md   # hand-written: the quality read for that run
+docs/plans/
+  PLAN-mode-test-suite.md       # design rationale + case taxonomy
 ```
 
 The hermetic unit suite is separate — `tests/` + `.venv/bin/pytest tests/ -q`.

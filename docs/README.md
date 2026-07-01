@@ -10,7 +10,7 @@
   laptop-only) is the authoritative running state of the build campaign.
 - [`campaign-2/`](campaign-2/) — next build campaign. Phase 1 starts with a
   searchable per-user chat archive integrated with Audrey's memory/tool path.
-- [`unraid-ollama.md`](unraid-ollama.md) — canonical Ollama container config
+- [`unraid-ollama.md`](guides/unraid-ollama.md) — canonical Ollama container config
   (referenced by Phase 1).
 - [`owui-prompt-suggestions.json`](owui-prompt-suggestions.json) — OWUI
   preset prompt suggestions.

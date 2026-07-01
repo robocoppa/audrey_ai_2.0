@@ -105,6 +105,6 @@ signal to raise `timeouts.cloud`, not to special-case the synthesizer.
 ## What this unblocks
 
 Closes the `consider` CODEBASE finding from the 2026-06-24 full-corpus audit
-(`docs/ai-course/AUDIT.md`). The synthesizer and panel now share one timeout
+(`docs/lesson-ai/AUDIT.md`). The synthesizer and panel now share one timeout
 source, so the cloud pool's budget can be tuned in one place without the
 synthesizer silently keeping the old value.

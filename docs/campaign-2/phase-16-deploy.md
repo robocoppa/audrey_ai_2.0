@@ -62,7 +62,7 @@ mid-request, a third is unlikely to help and the added latency is real.
   tests: happy-path single attempt (byte-identical to before), fallback to the
   next healthy model, exhaustion → raise, the cap stops at two, no-healthy →
   raise, and the tools branch staying single-shot.
-- **[`docs/ai-course/lesson-06-the-model-layer.md`](../../docs/ai-course/lesson-06-the-model-layer.md)** —
+- **[`docs/lesson-ai/lesson-06-the-model-layer.md`](../../docs/lesson-ai/lesson-06-the-model-layer.md)** —
   re-anchored the four `fast_path.py` cites that shifted, and updated the
   now-stale prose (the "single Ollama chat call" passage) to describe the
   bounded fallback. The model-layer contract (`success → record_success`,
@@ -155,7 +155,7 @@ signal (e.g. `code_weak`) is still honored over the bare `general` default.
 - **[`config.yaml`](../../config.yaml)** — new `router.skip_llm_under_tokens: 8`
   (conservative default; **0 disables** and restores the always-call-router
   behavior).
-- **[`docs/ai-course/lesson-07-classification-and-routing.md`](../../docs/ai-course/lesson-07-classification-and-routing.md)** —
+- **[`docs/lesson-ai/lesson-07-classification-and-routing.md`](../../docs/lesson-ai/lesson-07-classification-and-routing.md)** —
   re-anchored the two `classify.py` cites that shifted.
 
 ## Tuning the skip gate

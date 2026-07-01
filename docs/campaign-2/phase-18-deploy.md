@@ -39,7 +39,7 @@ failure handling is unchanged.
   (monkeypatching `discover_one`): the later-listed server still wins a name
   collision after the reorder (the one behavior the change could threaten), and
   distinct tools from each server all register regardless of completion order.
-- **`docs/ai-course/lesson-09` + `lesson-10`** — bumped the `discovery.py` cites
+- **`docs/lesson-ai/lesson-09` + `lesson-10`** — bumped the `discovery.py` cites
   by +1 (the new `import asyncio` line shifted every symbol below it by one).
 
 ## Behavior invariant

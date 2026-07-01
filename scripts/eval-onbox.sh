@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+#
+# eval-onbox.sh — run the live eval ON THE BOX and Telegram-notify on completion,
+# in one command. See docs/campaign-2/phase-27-eval-on-box.md.
+#
+# Why this exists: the bare `docker run -d …` + a separately-pasted notify command
+# is easy to half-forget (you get the run but no ping). This wraps both so the
+# notification fires EVERY time, automatically — you only ever call this script.
+#
+# It:
+#   - runs the audrey-eval image detached on ollama-net (immune to laptop net),
+#   - waits for it to finish,
+#   - pushes a Telegram message via the fleet-watchdog watcher bot,
+#   - leaves the answers file in the mounted testing-out dir.
+#
+# Secrets are SOURCED at runtime, never baked in:
+#   - the OWUI key from the eval env-file (EVAL_ENV below),
+#   - the Telegram token/chat-id from the fleet-watchdog hub .env (WATCHDOG_ENV).
+#
+# USAGE (on the box):
+#   scripts/eval-onbox.sh                                   # research protocol (default)
+#   scripts/eval-onbox.sh audrey_deep eval_prompts_deep.json
+#   MODEL=audrey_fast CASES=eval_prompts_fast.json scripts/eval-onbox.sh
+#
+# Run it detached so it survives a disconnect and still notifies:
+#   nohup scripts/eval-onbox.sh >/mnt/user/appdata/audrey_ai_2.0/testing-out/last-run.log 2>&1 &
+#
+set -uo pipefail
+
+# ── config (override via env) ───────────────────────────────────────────────
+APPDATA="${APPDATA:-/mnt/user/appdata/audrey_ai_2.0}"
+IMAGE="${IMAGE:-audrey-eval:latest}"
+NETWORK="${NETWORK:-ollama-net}"
+EVAL_ENV="${EVAL_ENV:-${APPDATA}/eval.env}"                 # OWUI base-url + sk- key
+WATCHDOG_ENV="${WATCHDOG_ENV:-/mnt/user/appdata/fleet-watchdog/.env}"  # Telegram creds
+OUT_DIR="${OUT_DIR:-${APPDATA}/testing-out}"
+CONTAINER="${CONTAINER:-audrey-eval}"
+
+# model + cases: first two positional args, or env, or the research defaults
+MODEL="${MODEL:-${1:-audrey_research}}"
+CASES="${CASES:-${2:-eval_prompts_protocol.json}}"
+DATE="$(date +%F)"
+SAVE_FILE="${DATE}-${MODEL}-onbox-answers.md"
+
+# ── preflight ───────────────────────────────────────────────────────────────
+die() { echo "ERROR: $*" >&2; exit 2; }
+command -v docker >/dev/null || die "docker not found — run this on the box, not the laptop."
+[[ -f "${EVAL_ENV}" ]] || die "eval env-file missing: ${EVAL_ENV} (see phase-27 step 2)."
+docker image inspect "${IMAGE}" >/dev/null 2>&1 || die "image ${IMAGE} not built (see phase-27 step 1)."
+mkdir -p "${OUT_DIR}"; chmod 700 "${OUT_DIR}"
+
+# Fixed container name → remove any stopped prior one so re-runs don't collide.
+docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
+
+echo ">> running ${MODEL} (${CASES}) on the box → ${OUT_DIR}/${SAVE_FILE}"
+docker run -d --name "${CONTAINER}" --network "${NETWORK}" \
+  --env-file "${EVAL_ENV}" \
+  -v "${OUT_DIR}:/out" \
+  "${IMAGE}" \
+    --model "${MODEL}" \
+    --cases "/eval/${CASES}" \
+    --save-file "/out/${SAVE_FILE}" \
+  || die "docker run failed."
+
+# ── wait, then notify (always) ──────────────────────────────────────────────
+echo ">> waiting for ${CONTAINER} to finish…"
+rc="$(docker wait "${CONTAINER}")"
+echo ">> ${CONTAINER} exited: ${rc}"
+
+# Telegram push via the fleet-watchdog watcher bot. Non-fatal if it can't send —
+# the eval already ran; a failed ping shouldn't mask the result.
+if [[ -f "${WATCHDOG_ENV}" ]]; then
+  # shellcheck disable=SC1090
+  set -a; . "${WATCHDOG_ENV}"; set +a
+  if [[ -n "${WATCHDOG_TOKEN:-}" && -n "${WATCHDOG_CHAT_ID:-}" ]]; then
+    verdict="✅"; [[ "${rc}" != "0" ]] && verdict="⚠️"
+    curl -s "https://api.telegram.org/bot${WATCHDOG_TOKEN}/sendMessage" \
+      -d chat_id="${WATCHDOG_CHAT_ID}" \
+      -d "text=${verdict} Audrey eval ${MODEL} finished (exit ${rc}) → ${SAVE_FILE}" \
+      >/dev/null || echo "WARN: Telegram notify failed (eval result is still saved)." >&2
+  else
+    echo "WARN: WATCHDOG_TOKEN/CHAT_ID not in ${WATCHDOG_ENV}; skipped notify." >&2
+  fi
+else
+  echo "WARN: ${WATCHDOG_ENV} not found; skipped Telegram notify." >&2
+fi
+
+echo ">> answers: ${OUT_DIR}/${SAVE_FILE}"
+exit "${rc}"

@@ -93,7 +93,7 @@ Every cite's **path** changes (e.g. `routes/openai.py#L920` →
 rewrite. Run, in commit 2:
 
 ```
-DOCS_GLOB="docs/ai-course/lesson-*.md" \
+DOCS_GLOB="docs/lesson-ai/lesson-*.md" \
   .venv/bin/python scripts/check-lesson-links.py
 ```
 
@@ -101,7 +101,7 @@ Apply the corrected lines for identifier-labelled cites (the checker prints
 them); eyeball the bare `file.py:NN` cites. Then reframe Lesson 15's prose to
 the package layout (a lesson edit — match the course style per `AGENTS.md`).
 
-> Note: the lessons live in `docs/ai-course/`, and the cite checker defaults
+> Note: the lessons live in `docs/lesson-ai/`, and the cite checker defaults
 > to `docs/lessons/`. Always pass the `DOCS_GLOB` override above, or it
 > reports "no docs found."
 

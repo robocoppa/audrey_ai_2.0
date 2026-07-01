@@ -371,7 +371,7 @@ above; revert only if the underlying Phase 6 fix turns out wrong
 - Lesson 10 (KB ingest and search). Sits in the queue separately;
   unrelated to this cleanup.
 - Specialist virtual model prototype. Planned at
-  [specialist-prototype-plan.md](specialist-prototype-plan.md);
+  [specialist-prototype-plan.md](../plans/specialist-prototype-plan.md);
   unrelated.
 - Grafana per-tool dispatch panel. Separate followup.
 - Chunk-tail measurement script. Separate followup.

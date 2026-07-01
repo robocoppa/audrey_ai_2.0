@@ -10,16 +10,16 @@ CLAUDE.md
 # AUDIT.md collects code-review findings raised during lesson writing —
 # it's an internal queue, not teaching material. One per course.
 docs/lessons/AUDIT.md
-docs/python-course/AUDIT.md
-docs/python-course/_LESSON-*-HANDOFF.md
+docs/lesson-python/AUDIT.md
+docs/lesson-python/_LESSON-*-HANDOFF.md
 
 # OpenClaw builder's guide — laptop-local; references Unraid LAN IP
 # and personal channel tokens. Reference doc for building agents.
-docs/campaign-2/openclaw-builders-guide.md
+docs/guides/openclaw-builders-guide.md
 
 # Hermes reference — laptop-local working notes on the NousResearch
 # Hermes Agent integration via passthrough; references LAN IP + OWUI.
-docs/campaign-2/hermes-reference.md
+docs/guides/hermes-reference.md
 
 # Python
 __pycache__/

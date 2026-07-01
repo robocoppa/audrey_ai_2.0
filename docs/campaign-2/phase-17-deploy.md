@@ -47,8 +47,8 @@ silently diverge. One source of truth removes that risk.
   nothing to break. These pin `_prepare_panel`'s selection, the registry
   fallback (cap 2, priority order), subtask round-robin, and both entry points'
   no-worker short-circuit (`run_panel` → `([], [])`; streaming → single `final`).
-- **[`docs/ai-course/lesson-06-the-model-layer.md`](../../docs/ai-course/lesson-06-the-model-layer.md)**
-  + **[`lesson-08-deep-mode.md`](../../docs/ai-course/lesson-08-deep-mode.md)** —
+- **[`docs/lesson-ai/lesson-06-the-model-layer.md`](../../docs/lesson-ai/lesson-06-the-model-layer.md)**
+  + **[`lesson-08-deep-mode.md`](../../docs/lesson-ai/lesson-08-deep-mode.md)** —
   re-anchored the `deep_panel.py` cites whose lines moved into `_prepare_panel`,
   and corrected the lesson-06 prose that described separate non-streaming /
   streaming fallback paths (now one shared helper).

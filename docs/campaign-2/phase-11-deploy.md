@@ -67,7 +67,7 @@ Stale items found and fixed:
    - `AGENTS.md` first (the canonical agent guide)
    - `docs/lessons/` (codebase walk-through, with Lesson 4 highlighted)
    - Both campaign histories
-   - `docs/unraid-ollama.md`
+   - `docs/guides/unraid-ollama.md`
    - `monitoring/README.md`
 6. **Test-count statement** — said "(110 tests, ~1s)". Removed the count
    entirely; it was stale by a factor of 3 and the README isn't the right

@@ -334,7 +334,7 @@ fired on the way through.
 ## What this unblocks
 
 The checkpoint-testing phase queued in
-`docs/campaign-2/checkpoint-testing-plan.md` was always written
+`docs/plans/checkpoint-testing-plan.md` was always written
 assuming Audrey-mediated traffic; with passthrough in place, the
 fairness story actually covers everyone on the LAN. Streaming
 cancel cleanup and the parallel context-injection drift items
