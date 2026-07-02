@@ -122,6 +122,45 @@ class TestExpectRouteCheck:
         assert r.ok
 
 
+class TestAnswerBody:
+    """`_answer_body` splits on the FIRST banner separator, so an in-prose
+    `---` rule can't swallow the answer (the deep-ssh-keys / missing-drafts bug)."""
+
+    SEP = "\n\n---\n\n"
+
+    def test_plain_answer_after_banners(self):
+        content = f"> _Planning_ ✅{self.SEP}The real answer."
+        assert eval_research._answer_body(content) == "The real answer."
+
+    def test_in_prose_rule_does_not_truncate(self):
+        # The synth wrote a section-break `---` inside the answer. Splitting on
+        # the LAST separator would keep only "Part two"; the FIRST keeps both.
+        content = (
+            f"> _Planning_ ✅{self.SEP}"
+            f"Part one of the answer.{self.SEP}Part two of the answer."
+        )
+        body = eval_research._answer_body(content)
+        assert body.startswith("Part one")
+        assert "Part two of the answer." in body
+
+    def test_footer_and_drafts_blocks_are_retained(self):
+        # Footer (`\n\n---\n>`) and drafts (`\n\n---\n#`) are NOT separators,
+        # so they stay in the body even after an in-prose rule.
+        content = (
+            f"> _Synthesizing_ ✅{self.SEP}"
+            f"Answer with a rule.{self.SEP}More answer."
+            "\n\n---\n> _Tools used:_\n> - **m** — `web_search` ✅1"
+            "\n\n---\n## Panel drafts (debug)\n\n### m\n\ndraft text"
+        )
+        body = eval_research._answer_body(content)
+        assert "Answer with a rule." in body
+        assert "## Panel drafts (debug)" in body
+        assert "_Tools used:_" in body
+
+    def test_no_separator_returns_stripped_whole(self):
+        assert eval_research._answer_body("  just text  ") == "just text"
+
+
 class TestClassifyHost:
     """Domain buckets for the informational source breakdown."""
 

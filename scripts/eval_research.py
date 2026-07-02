@@ -261,9 +261,21 @@ def _post_stream(base_url: str, api_key: str, model: str, prompt: str,
 
 
 def _answer_body(full_content: str) -> str:
-    """The text after the last banner separator — the actual answer prose."""
+    """The text after the FIRST banner separator — the actual answer prose.
+
+    The server emits the banner separator (`\\n\\n---\\n\\n`) exactly once,
+    between the progress banners and the answer. Split on the FIRST occurrence,
+    not the last: the synth/writer often puts its own `---` horizontal rules
+    inside the prose (a section break), which reassemble as the identical
+    `\\n\\n---\\n\\n`. Splitting on the last one there would discard the whole
+    answer up to the final in-prose rule — the bug that made `deep-ssh-keys`
+    look truncated and swallowed the panel-drafts debug block. The footer and
+    drafts blocks deliberately open with `\\n\\n---\\n>` / `\\n\\n---\\n#` (no
+    trailing blank line) so they never form this separator; only in-prose rules
+    do, and the first-split is immune to them.
+    """
     if _SEPARATOR in full_content:
-        return full_content.rsplit(_SEPARATOR, 1)[1].strip()
+        return full_content.split(_SEPARATOR, 1)[1].strip()
     return full_content.strip()
 
 
