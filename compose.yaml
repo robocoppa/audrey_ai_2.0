@@ -7,9 +7,17 @@
 # Usage (on Unraid, from /mnt/user/appdata/audrey_ai_2.0):
 #   docker compose up -d --build audrey-ai      # rebuild + restart audrey
 #   docker compose up -d --build custom-tools   # rebuild + restart tools
-#   docker compose up -d --build                # both
+#   docker compose up -d --build                # both (audrey-eval excluded)
 #   docker compose logs -f audrey-ai            # tail logs
 #   docker compose down audrey-ai               # stop + remove
+#
+# The `audrey-eval` service below is BUILD-ONLY (profile `eval`), so a bare
+# `up`/`up --build` never starts it — it's a throwaway container run on demand
+# by scripts/eval-onbox.sh (`docker run` with runtime args + a locked-down
+# secret mount), not a long-running service. Build it via the profile:
+#   docker compose --profile eval build audrey-eval
+# One-shot "rebuild everything" (services + eval image, then dangling prune):
+#   docker compose up -d --build && docker compose --profile eval build audrey-eval && docker image prune -f
 #
 # The `ollama-net` network is declared `external: true` because it was
 # created out-of-band by the Unraid-managed `ollama` container. Don't let
@@ -98,6 +106,22 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
+
+  # Build-only: the live-eval harness image (see Dockerfile.eval + Phase 27).
+  # `profiles: [eval]` keeps it OUT of the default `up`/`up --build` run graph,
+  # so it never runs as a phantom service — but `docker compose --profile eval
+  # build audrey-eval` builds it in-graph, replacing the standalone
+  # `docker build -f Dockerfile.eval ...`. It is deliberately run, not up'd:
+  # scripts/eval-onbox.sh does the `docker run` with per-run --model/--cases/
+  # --save-file args and mounts the OWUI sk- key via a restricted --env-file at
+  # run time (never baked into the image, never committed here). No command,
+  # env_file, ports, or restart here — this stanza exists purely to build.
+  audrey-eval:
+    profiles: ["eval"]
+    build:
+      context: .
+      dockerfile: Dockerfile.eval
+    image: audrey-eval:latest
 
 networks:
   ollama-net:

@@ -115,13 +115,26 @@ ls -l Dockerfile.eval          # want: a real ~2 KB file, not "No such file"
 > doesn't have the file yet — the `git pull` in 1b hasn't landed it. Re-check
 > 1a (right directory) and 1b (pull succeeded).
 
-**1d. Build:**
+**1d. Build.** The eval image is a **build-only compose service** on the `eval`
+profile (`audrey-eval` in `compose.yaml`), so build it through compose:
 ```bash
-docker build -f Dockerfile.eval -t audrey-eval:latest .
+docker compose --profile eval build audrey-eval
 ```
-- `-f Dockerfile.eval` — which Dockerfile to use.
-- `-t audrey-eval:latest` — the image name/tag you'll `docker run` in step 4.
-- `.` — the build context (the repo root you're standing in).
+- `--profile eval` — activates the profile the service is gated on. WITHOUT it,
+  compose doesn't know about `audrey-eval` at all (that's the point — a bare
+  `docker compose up -d --build` never touches it, so the eval image never runs
+  as a phantom service or gets deleted by a service-oriented prune).
+- It builds from `Dockerfile.eval` with context `.` (both set in the compose
+  stanza) and tags the result `audrey-eval:latest` — the name step 4 runs.
+
+The old standalone form still works if you prefer it
+(`docker build -f Dockerfile.eval -t audrey-eval:latest .`) — the compose stanza
+just wraps the same build so "rebuild everything" is one flow:
+```bash
+docker compose up -d --build \
+  && docker compose --profile eval build audrey-eval \
+  && docker image prune -f
+```
 
 Expect a short build (base pull + one `pip install httpx` + a few `COPY`s). It
 bakes in no secret, so the resulting image is inert until you pass the key at run

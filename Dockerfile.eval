@@ -12,8 +12,9 @@
 # locked-down --env-file (never -e, never COPY'd). Build + run recipe and the
 # full security rationale ("only I can use it") live in the phase-27 doc.
 #
-# Build (on the box):
-#   docker build -f Dockerfile.eval -t audrey-eval:latest .
+# Build (on the box) — via the build-only compose service on the `eval` profile:
+#   docker compose --profile eval build audrey-eval
+# (equivalently, standalone: docker build -f Dockerfile.eval -t audrey-eval:latest .)
 #
 # Run (detached, secret-safe — see phase-27 for the env-file setup):
 #   docker run -d --name audrey-eval --network ollama-net \
