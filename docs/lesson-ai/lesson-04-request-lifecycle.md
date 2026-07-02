@@ -239,7 +239,7 @@ follow along in `openai.py`.
    format at the end of this section).
 
 5. **`_stream_via_pipeline()`** at
-   [`pipeline.py:172`](../../src/audrey/routes/openai/pipeline.py#L172)
+   [`pipeline.py:205`](../../src/audrey/routes/openai/pipeline.py#L205)
    does the routing: `audrey_deep` / `audrey_cloud` / `audrey_local`
    always go through the deep panel; `audrey_fast` always uses the fast
    path; `audrey_auto` goes deep for long prompts or explicit depth cues.
@@ -263,7 +263,7 @@ follow along in `openai.py`.
      it knows what BTRFS is.
 
 7. **The model's tokens stream back** through `_stream_openai` at
-   [`pipeline.py:1245`](../../src/audrey/routes/openai/pipeline.py#L1245),
+   [`pipeline.py:1275`](../../src/audrey/routes/openai/pipeline.py#L1275),
    which converts Ollama's chunks into OpenAI-format SSE frames and
    yields them. FastAPI passes each frame through to OWUI as it's
    produced. The user sees the answer typing itself out.
@@ -296,7 +296,7 @@ something deeply, here's where to look first.
 | "How does the pipeline decide what to do?" | [`pipeline/graph.py:437`](../../src/audrey/pipeline/graph.py#L437) (the graph topology) |
 | "Why did it pick model X?" | [`pipeline/classify.py`](../../src/audrey/pipeline/classify.py) + [`models/registry.py`](../../src/audrey/models/registry.py) |
 | "Why did the request hang?" | [`pipeline/fair_gate.py`](../../src/audrey/pipeline/fair_gate.py) (GPU queue) + Ollama logs |
-| "How did the answer get streamed?" | [`routes/openai/pipeline.py:492`](../../src/audrey/routes/openai/pipeline.py#L492) (`_stream_deep_with_banners`) |
+| "How did the answer get streamed?" | [`routes/openai/pipeline.py:505`](../../src/audrey/routes/openai/pipeline.py#L505) (`_stream_deep_with_banners`) |
 | "Where do tools get called?" | [`pipeline/react.py`](../../src/audrey/pipeline/react.py) |
 
 Bookmark this. You'll come back.

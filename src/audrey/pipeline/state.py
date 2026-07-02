@@ -61,10 +61,14 @@ class PipelineState(TypedDict, total=False):
 
     # Research mode (audrey_research) — staged pipeline intermediate outputs.
     # `drafts` above holds the Stage-1 researcher drafts (so reflect/archive
-    # see the grounding); these two carry the Verify/Write stage products.
+    # see the grounding); the rest carry the later stage products. The last
+    # three exist for the opt-in research trace (agentic.debug_research_trace).
     research_findings: str           # merged researcher notes fed to verify+write
     research_critique: str           # verifier's flags ("" if verify skipped/empty)
     research_factcheck: str          # fact-checker's corrections ("" if stage skipped)
+    research_ledger: dict | None     # merged ResearchResult dump (None if no ledger)
+    research_factcheck_ledger: dict | None  # FactCheckResult dump (None if unstructured)
+    research_dispositions: str       # hedge-guidance block as handed to the writer
 
     # Reflection
     reflect_attempts: int            # 0 = not attempted, 1 = ran once, etc.

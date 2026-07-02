@@ -1134,9 +1134,16 @@ async def run_research_pipeline_streaming(
       {"type": "write_delta", "text": str}
           A chunk of the Writer's answer (streamed live).
       {"type": "done", "content": str, "writer_model": str, "drafts": list,
-       "findings": str, "critique": str, "corrections": str, "error": str}
+       "findings": str, "critique": str, "corrections": str,
+       "ledger": dict | None, "factcheck": dict | None, "dispositions": str,
+       "error": str}
           Always emitted last. `error` is "" on success, or "no_writer" /
           "write_failed" when the write stage could not produce an answer.
+          `ledger`/`factcheck` are the structured intermediates as plain
+          dicts (`.model_dump()`), None when the stage didn't run/parse;
+          `dispositions` is the hedge-guidance block exactly as handed to
+          the writer ("" when the flag is off or the block was suppressed).
+          Carried so the route can render the opt-in research trace.
 
     Never raises — each stage degrades. The Write stage always runs (even
     with no findings) so the user gets a flagged answer rather than nothing.
@@ -1436,6 +1443,8 @@ async def run_research_pipeline_streaming(
         "critique": critique,
         "corrections": corrections,
         "ledger": ledger.model_dump() if ledger is not None else None,
+        "factcheck": fc_result.model_dump() if fc_result is not None else None,
+        "dispositions": dispositions,
         "error": write_error,
     }
 
@@ -1459,8 +1468,9 @@ async def run_research_pipeline(
     """Non-streaming staged research pipeline. Returns a dict to merge into state.
 
     Keys: content, writer_model, drafts, research_findings, research_critique,
-    research_factcheck, error. Drains the streaming variant so the two paths
-    share one implementation and can't drift.
+    research_factcheck, research_ledger, research_factcheck_ledger,
+    research_dispositions, error. Drains the streaming variant so the two
+    paths share one implementation and can't drift.
     """
     final: dict[str, Any] = {}
     async for evt in run_research_pipeline_streaming(
@@ -1479,6 +1489,8 @@ async def run_research_pipeline(
         "research_critique": final.get("critique", ""),
         "research_factcheck": final.get("corrections", ""),
         "research_ledger": final.get("ledger"),
+        "research_factcheck_ledger": final.get("factcheck"),
+        "research_dispositions": final.get("dispositions", ""),
         "error": final.get("error", ""),
     }
 

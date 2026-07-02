@@ -432,7 +432,7 @@ called **once per request, after the assistant content is known.**
 non-streaming request, the full reply is built inside the pipeline
 and returned as one chunk — the archive call fires after the graph
 finishes, just before the route hands the JSON response back to the
-client (see [`routes/openai/pipeline.py:123`](../../src/audrey/routes/openai/pipeline.py#L123)).
+client (see [`routes/openai/pipeline.py:134`](../../src/audrey/routes/openai/pipeline.py#L134)).
 For a streaming-deep request, the reply is *only* fully known once
 the SSE stream has been fully emitted — so the archive call lives at
 the very end of `_stream_deep_with_banners` (see

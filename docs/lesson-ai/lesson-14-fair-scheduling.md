@@ -88,8 +88,8 @@ passthrough. So you will see the gate threaded through
 current exception: if configured to use a local model, it calls Ollama directly
 without the fair gate. The in-flight cap, by contrast, is acquired exactly
 *once per request*, right at the route boundary in
-[`routes/openai/pipeline.py:122`](../../src/audrey/routes/openai/pipeline.py#L122) and
-[`routes/openai/pipeline.py:228`](../../src/audrey/routes/openai/pipeline.py#L228).
+[`routes/openai/pipeline.py:123`](../../src/audrey/routes/openai/pipeline.py#L123) and
+[`routes/openai/pipeline.py:241`](../../src/audrey/routes/openai/pipeline.py#L241).
 The whole pipeline executes inside that single `async with` block.
 
 ### 2.2 The fair gate

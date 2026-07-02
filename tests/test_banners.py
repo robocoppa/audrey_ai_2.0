@@ -26,6 +26,7 @@ from audrey.pipeline.banners import (
     PhaseTicker,
     _format_calls,
     panel_drafts_block,
+    research_trace_block,
     tool_summary_block,
     worker_ok,
 )
@@ -286,6 +287,127 @@ def test_panel_drafts_block_preserves_table_rows():
         {"model": "m", "content": "| a | b |\n|---|---|\n| 1 | 2 |"},
     ])
     assert "|---|---|" in out
+
+
+# ─── research_trace_block (debug/eval staged-pipeline trace) ───────────
+
+def _trace_ledger() -> dict:
+    """A merged-ledger dump in the shape the pipeline's done event carries."""
+    return {
+        "summary_notes": "",
+        "claims": [
+            {"id": "w0_c1", "text": "Euclid wrote the Elements.",
+             "source_ids": ["w0_s1"], "risk": "low", "needs_hedge": False,
+             "hedge_reason": None},
+            {"id": "w1_c1", "text": "The bath anecdote\nis a late addition.",
+             "source_ids": [], "risk": "high", "needs_hedge": True,
+             "hedge_reason": "anecdote"},
+        ],
+        "sources": [
+            {"id": "w0_s1", "title": "Euclid — Britannica",
+             "url": "https://britannica.com/euclid",
+             "source_type": "reference", "supports": ["w0_c1"]},
+        ],
+        "unresolved_questions": ["Exact dates are unknown"],
+    }
+
+
+def test_research_trace_block_empty_returns_empty_string():
+    assert research_trace_block(drafts=[]) == ""
+
+
+def test_research_trace_block_renders_all_stages_in_order():
+    out = research_trace_block(
+        drafts=[{"model": "r1", "content": "notes A",
+                 "elapsed_s": 12.34, "tool_rounds": 4}],
+        ledger=_trace_ledger(),
+        factcheck={"checks": [
+            {"claim_id": "w0_c1", "verdict": "supported",
+             "corrected_text": None, "notes": ""},
+            {"claim_id": "w1_c1", "verdict": "unsupported",
+             "corrected_text": None, "notes": "no source confirms it"},
+        ], "fatal_errors": []},
+        critique="The anecdote needs a caveat.",
+        corrections="DROP: the bath anecdote",
+        dispositions="STATE PLAINLY: w0_c1",
+    )
+    assert out.startswith("\n\n## Research trace (debug)")
+    assert "### Researcher notes" in out
+    assert "#### r1 — 12.3s · 4 tool rounds" in out
+    assert "notes A" in out
+    assert "### Ledger — 2 claims, 1 sources" in out
+    assert ("- **w0_c1** (risk: low) — Euclid wrote the Elements. "
+            "_(sources: w0_s1)_") in out
+    assert "needs hedge — anecdote" in out
+    assert "https://britannica.com/euclid" in out
+    assert "**Unresolved questions:**" in out
+    assert "### Verifier critique" in out
+    assert "The anecdote needs a caveat." in out
+    assert "### Fact-check verdicts — 2 checks (1 drop, 0 hedge)" in out
+    assert "- **w1_c1** — unsupported — no source confirms it" in out
+    assert "### Corrections handed to the writer" in out
+    assert "### Hedge dispositions handed to the writer" in out
+    # Stage order is the pipeline order.
+    assert (out.index("Researcher notes") < out.index("### Ledger")
+            < out.index("Verifier critique") < out.index("Fact-check verdicts")
+            < out.index("Corrections handed") < out.index("Hedge dispositions"))
+    assert out.endswith("\n")
+
+
+def test_research_trace_block_one_lines_claim_text():
+    # Claim text is model output — a newline inside it would break the
+    # markdown list item in two. Collapsed to one line.
+    out = research_trace_block(drafts=[], ledger=_trace_ledger())
+    assert "The bath anecdote is a late addition." in out
+
+
+def test_research_trace_block_omits_empty_stages():
+    # Only researcher notes available (ledger off / stages skipped) — the
+    # other sections must not render as empty headings.
+    out = research_trace_block(drafts=[{"model": "r1", "content": "notes"}])
+    assert "### Researcher notes" in out
+    assert "Ledger" not in out
+    assert "Verifier critique" not in out
+    assert "Fact-check" not in out
+    assert "handed to the writer" not in out
+
+
+def test_research_trace_block_never_contains_banner_separator():
+    # Same structural invariant as the drafts block: heading-only opener and
+    # no standalone hr line anywhere, whatever the model prose contained.
+    out = research_trace_block(
+        drafts=[{"model": "a", "content": "one\n\n---\n\ntwo"},
+                {"model": "b", "content": "", "error": "[ollama error: boom]"}],
+        ledger=_trace_ledger(),
+        critique="before\n\n----\n\nafter",
+        corrections="c\n\t---\t\nd",
+        dispositions="e\n---\nf",
+    )
+    assert BANNER_SEPARATOR not in out
+    assert not any(set(ln.strip()) == {"-"} for ln in out.splitlines() if ln.strip())
+    # Failed-researcher error text can't fake the eval's error markers.
+    assert "[ollama error" not in out
+    assert "_no usable draft — ollama error: boom_" in out
+
+
+def test_research_trace_block_contains_no_sources_heading():
+    # The eval locates the real `## Sources` section by the substring
+    # "## sources" — a heading like "### Sources" would contain it and hijack
+    # the source-quality read. Source lists render as a bold label instead.
+    out = research_trace_block(drafts=[{"model": "m", "content": "x"}],
+                               ledger=_trace_ledger())
+    assert "## sources" not in out.lower()
+    assert "**Sources:**" in out
+
+
+def test_research_trace_block_renders_factcheck_fatal_errors():
+    out = research_trace_block(
+        drafts=[],
+        factcheck={"checks": [], "fatal_errors": ["[schema] parse failed"]},
+    )
+    assert "**Fatal errors:**" in out
+    assert "schema parse failed" in out
+    assert "[schema]" not in out
 
 
 # ─── Banner header constants ──────────────────────────────────────────

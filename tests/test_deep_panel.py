@@ -551,6 +551,32 @@ async def test_research_pipeline_streaming_event_order():
     assert types[-1] == "done"
 
 
+async def test_research_done_event_carries_trace_intermediates():
+    # The routes render the opt-in research trace (agentic.debug_research_trace)
+    # from the done event — pin that the intermediate keys are present even when
+    # the ledger/fact-check stages didn't run (None/"" then, never missing).
+    reg = _registry(("r1", 100, "cloud"), ("v", 80, "cloud"), ("w", 70, "local"))
+    cfg = _research_cfg(["r1"], "v", "w",
+                        (("r1", 100, "cloud"), ("v", 80, "cloud"), ("w", 70, "local")))
+    health = HealthTracker()
+    ollama = _FakeOllama({"r1": "fact", "v": "ok", "w": "answer text"})
+
+    final = {}
+    async for evt in run_research_pipeline_streaming(
+        cfg, ollama, reg, health, FairLocalGate(concurrency=1),
+        task="reasoning", messages=[{"role": "user", "content": "q"}],
+        options={}, timeout_s=5.0, max_researchers_cloud=2,
+        tools=None, tool_capable_models=None, user_id=None,
+    ):
+        if evt["type"] == "done":
+            final = evt
+
+    assert final["ledger"] is None          # ledger flag off in this cfg
+    assert final["factcheck"] is None       # fact-check stage didn't run
+    assert final["dispositions"] == ""      # hedge policy off in this cfg
+    assert final["critique"] == "ok"
+
+
 # ─── fact-check stage (Phase 25) ───────────────────────────────────────
 # The optional Stage-3 fact-checker runs via run_react (tool-capable). It only
 # fires when a `factchecker` is configured, healthy, tool-capable, and tools

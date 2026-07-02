@@ -225,7 +225,7 @@ OpenAI's chat-completion streaming spec is more structured: each
 frame is a JSON object describing a *delta* (a piece of the response
 being built), with a final `data: [DONE]\n\n` marker. Audrey emits
 that shape directly. You can see the helpers at
-[`routes/openai/pipeline.py:528`](../../src/audrey/routes/openai/pipeline.py#L528)
+[`routes/openai/pipeline.py:541`](../../src/audrey/routes/openai/pipeline.py#L541)
 inside `_stream_deep_with_banners`:
 
 ```python
@@ -256,7 +256,7 @@ streams — and why the next subsection's architecture matters.
 ### 2.4 The non-streaming path
 
 `_generate_via_pipeline` at
-[`routes/openai/pipeline.py:107`](../../src/audrey/routes/openai/pipeline.py#L107)
+[`routes/openai/pipeline.py:108`](../../src/audrey/routes/openai/pipeline.py#L108)
 is the simpler half. The shape:
 
 ```
@@ -296,7 +296,7 @@ forces fast mode for these, it isn't overriding a choice the user made
 — it's declining to act on a choice nobody made, refusing to burn a
 full deep-panel run on a string OWUI will truncate to one line. The
 streaming path runs the *same* check inline at
-[`routes/openai/pipeline.py:227`](../../src/audrey/routes/openai/pipeline.py#L227)
+[`routes/openai/pipeline.py:254`](../../src/audrey/routes/openai/pipeline.py#L254)
 (because it bypasses the graph — §2.5); this is a deliberate two-gate
 behavior, not a streaming-path one-off.
 
@@ -404,7 +404,7 @@ the lifecycle of a single phase's progress line.
 **It's an async context manager.** You met those in Lesson 1; here's one
 doing real work. The route uses it like this (the actual call site for the
 panel phase is
-[routes/openai/pipeline.py:616](../../src/audrey/routes/openai/pipeline.py#L616)):
+[routes/openai/pipeline.py:629](../../src/audrey/routes/openai/pipeline.py#L629)):
 
 ```python
 async with PhaseTicker(BANNER_DISPATCHING, emit) as ticker:
@@ -479,11 +479,11 @@ Trace the cancel through:
      `asyncio.CancelledError` into the generator that's producing
      SSE frames.
   2. **The generator's `try` block catches it** at
-     [`routes/openai/pipeline.py:786`](../../src/audrey/routes/openai/pipeline.py#L786).
+     [`routes/openai/pipeline.py:799`](../../src/audrey/routes/openai/pipeline.py#L799).
      The route records `pipeline_outcome = "cancelled"` (so the
      metric reflects "user left," not "ok") and re-raises.
   3. **The inner `try/finally` at
-     [`routes/openai/pipeline.py:778`](../../src/audrey/routes/openai/pipeline.py#L778)**
+     [`routes/openai/pipeline.py:791`](../../src/audrey/routes/openai/pipeline.py#L791)**
      cancels the synth producer task explicitly:
 
      ```python
@@ -619,7 +619,7 @@ prompt. What runs?**
 
 Fast path, unconditionally. The `audrey_fast` virtual model is the
 "always fast" override: at
-[`routes/openai/pipeline.py:220`](../../src/audrey/routes/openai/pipeline.py#L220)
+[`routes/openai/pipeline.py:253`](../../src/audrey/routes/openai/pipeline.py#L253)
 the route sets `forced_fast = payload.model == "audrey_fast"`, and
 the subsequent branch picks fast regardless of `is_complex()`'s
 verdict. The complexity gate that normally escalates long prompts
@@ -638,7 +638,7 @@ disagree.
 does the client see? What does the archive write look like?**
 
 The `_stream_deep_with_banners` exception handler at
-[`routes/openai/pipeline.py:778`](../../src/audrey/routes/openai/pipeline.py#L778)
+[`routes/openai/pipeline.py:791`](../../src/audrey/routes/openai/pipeline.py#L791)
 catches the failure, sets `pipeline_outcome = "error"`, and yields
 two final frames: a delta containing `"\n\n[ollama error: ...]"`
 (or `"\n\n[internal error]"` for non-Ollama exceptions) and a stop
@@ -689,9 +689,9 @@ Five things have to land cleanly:
 
 - **The route generator** receives `asyncio.CancelledError` from
   Starlette. It catches at
-  [`routes/openai/pipeline.py:786`](../../src/audrey/routes/openai/pipeline.py#L786),
+  [`routes/openai/pipeline.py:799`](../../src/audrey/routes/openai/pipeline.py#L799),
   records `outcome="cancelled"`, and re-raises.
-- **The inner `try/finally` at [`routes/openai/pipeline.py:778`](../../src/audrey/routes/openai/pipeline.py#L778)** cancels
+- **The inner `try/finally` at [`routes/openai/pipeline.py:791`](../../src/audrey/routes/openai/pipeline.py#L791)** cancels
   `synth_task` and awaits it — making sure the synth producer
   doesn't keep streaming into a queue nobody reads.
 - **The panel phase task** is the current weak point. In the normal path,
@@ -723,7 +723,7 @@ have selected `audrey_deep`. What runs and why?**
 
 Fast mode runs, not deep. The `is_owui_task_request(messages)`
 check at
-[`routes/openai/pipeline.py:227`](../../src/audrey/routes/openai/pipeline.py#L227)
+[`routes/openai/pipeline.py:254`](../../src/audrey/routes/openai/pipeline.py#L254)
 detects OWUI's utility prompts by a single tell: the latest user
 message opens with the `### Task:` header OWUI stamps on its
 internal prompts (the conversation is bundled into the body, but

@@ -47,7 +47,7 @@ sources.** Everything below is that sentence in detail.
 | **Write** | Turn verified findings into one answer. | The user's prose, then a code-built Sources list. |
 
 > **Every stage degrades; the mode never dead-ends.** The pipeline
-> [never raises](../../src/audrey/pipeline/deep_panel.py#L1141) — each stage
+> [never raises](../../src/audrey/pipeline/deep_panel.py#L1148) — each stage
 > catches its own failures and falls back to the prior prose behaviour, and the
 > write stage runs *even with no findings at all*, so the user gets a flagged,
 > honest answer rather than an error. This is the same "always answer
@@ -71,7 +71,7 @@ the code does *after* the writer finishes.
 ### 2.1 Research fan-out
 
 Stage 1 selects a panel of researchers and runs each as its own worker
-([`deep_panel.py:1149`](../../src/audrey/pipeline/deep_panel.py#L1149)). Every
+([`deep_panel.py:1156`](../../src/audrey/pipeline/deep_panel.py#L1156)). Every
 worker is a full ReAct loop — the same search-and-reason machinery from
 [Lesson 9](lesson-09-tool-use-and-react.md) — and they run concurrently, collected
 as each finishes. Each returns prose notes ending in a `SOURCES:` section.
@@ -92,7 +92,7 @@ The prose findings are the answer's raw material, but prose is hard for the
 *next* stages to reason over precisely. So — when the ledger feature is on
 ([`config.yaml:231`](../../config.yaml#L231)) — a second, mechanical pass runs
 per worker, converting each one's prose into a structured `ResearchResult`
-([`deep_panel.py:1201`](../../src/audrey/pipeline/deep_panel.py#L1201)). This is
+([`deep_panel.py:1208`](../../src/audrey/pipeline/deep_panel.py#L1208)). This is
 a *separate* model call with a separate prompt
 ([`prompts.py:148`](../../src/audrey/pipeline/prompts.py#L148)) that adds no new
 facts — it only re-expresses what the researcher already found as claims and
@@ -133,7 +133,7 @@ writer makes it read well.
 > sanity-check URL shape later, when we decide what to show the user, not here.
 
 The structured ledgers from all workers are then merged
-([`deep_panel.py:1220`](../../src/audrey/pipeline/deep_panel.py#L1220)): sources
+([`deep_panel.py:1227`](../../src/audrey/pipeline/deep_panel.py#L1227)): sources
 are deduplicated by URL, but claims are **not** deduplicated. That's deliberate
 — if two workers disagree, the pipeline *wants* both claims to survive into the
 fact-check stage, where the disagreement can be resolved against sources. Merging
@@ -142,7 +142,7 @@ away the conflict would hide exactly what the next stage exists to catch.
 ### 2.3 Verify
 
 With a grounded ledger in hand, the verifier
-([`deep_panel.py:1233`](../../src/audrey/pipeline/deep_panel.py#L1233)) audits
+([`deep_panel.py:1240`](../../src/audrey/pipeline/deep_panel.py#L1240)) audits
 the merged findings for overclaiming. Its prompt
 ([`prompts.py:174`](../../src/audrey/pipeline/prompts.py#L174)) is narrow and
 specific: flag claims stated more precisely than the evidence supports — an
@@ -155,15 +155,15 @@ self-censor does neither well.
 ### 2.4 Fact-check
 
 The fact-check stage
-([`deep_panel.py:1255`](../../src/audrey/pipeline/deep_panel.py#L1255)) is itself
+([`deep_panel.py:1262`](../../src/audrey/pipeline/deep_panel.py#L1262)) is itself
 a tool-using ReAct loop: it `web_search`-confirms the high-risk and dated claims
 and returns corrections the writer applies. It only runs when a fact-checker is
 configured, healthy, and tool-capable — and when it can't run, the pipeline
-[logs *which* precondition failed](../../src/audrey/pipeline/deep_panel.py#L1258)
+[logs *which* precondition failed](../../src/audrey/pipeline/deep_panel.py#L1265)
 and proceeds, exactly as the verify → write flow did before.
 
 When a ledger exists, the prose corrections are structured back against it
-([`deep_panel.py:1308`](../../src/audrey/pipeline/deep_panel.py#L1308)) into a
+([`deep_panel.py:1315`](../../src/audrey/pipeline/deep_panel.py#L1315)) into a
 [`FactCheckResult`](../../src/audrey/pipeline/ledger.py#L167) — per-claim
 verdicts like `supported`, `unsupported`, `needs_hedge`. Those verdicts are what
 let the next steps drop an unsupported claim from the Sources list and soften a
@@ -172,7 +172,7 @@ corrections and moves on.
 
 ### 2.5 Write — and the two things code does after it
 
-The writer ([`deep_panel.py:1340`](../../src/audrey/pipeline/deep_panel.py#L1340))
+The writer ([`deep_panel.py:1347`](../../src/audrey/pipeline/deep_panel.py#L1347))
 turns the verified findings, the critique, and the corrections into one answer,
 streamed live to the user. Its prompt
 ([`prompts.py:249`](../../src/audrey/pipeline/prompts.py#L249)) binds it to two
@@ -313,7 +313,7 @@ Deep mode *merges* the panel's drafts: a synthesizer reads all the workers'
 drafts and composes the answer from them. Research mode does **not** merge — the
 panel produces checked *findings* (research → verify → fact-check), and a single
 **writer** turns those findings into the answer
-([`deep_panel.py:1340`](../../src/audrey/pipeline/deep_panel.py#L1340)). The
+([`deep_panel.py:1347`](../../src/audrey/pipeline/deep_panel.py#L1347)). The
 answer is one model's prose constrained by what the earlier stages verified, not
 a blend of several drafts. That's why research mode can bind the writer to "apply
 every verifier flag" and "introduce no new facts" — there's a single authoring

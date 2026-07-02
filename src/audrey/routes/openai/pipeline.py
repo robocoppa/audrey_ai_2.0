@@ -41,6 +41,7 @@ from audrey.pipeline.banners import (
     BANNER_WRITING,
     PhaseTicker,
     panel_drafts_block,
+    research_trace_block,
     tool_summary_block,
     worker_fail,
     worker_ok,
@@ -170,14 +171,26 @@ async def _generate_via_pipeline(
         extra,
     )
     content = final.get("content", "") or ""
-    # Debug/eval parity with the streaming path: append the panel drafts when
-    # `agentic.debug_panel_drafts` is on. After the archive write above, so
-    # chat history never carries the block. Deep panel only — research-mode
-    # drafts are researcher notes, not competing answers (same scoping as the
-    # streaming path, where research streams through a different function).
-    if final.get("mode") == "deep" and final.get("panel_pool") != "deep_panel_research":
+    # Debug/eval parity with the streaming path: append the debug block when
+    # its flag is on. After the archive write above, so chat history never
+    # carries either block. Two mode-specific views: deep panel gets the
+    # drafts block (workers write competing answers — draft-vs-synth is the
+    # comparison); research gets the staged trace (notes → ledger →
+    # fact-check → writer guidance), since its drafts are researcher notes,
+    # not candidate answers.
+    if final.get("mode") == "deep":
         agentic_cfg = app.state.cfg.raw.get("agentic", {}) or {}
-        if bool(agentic_cfg.get("debug_panel_drafts", False)):
+        if final.get("panel_pool") == "deep_panel_research":
+            if bool(agentic_cfg.get("debug_research_trace", False)):
+                content += research_trace_block(
+                    drafts=list(final.get("drafts") or []),
+                    ledger=final.get("research_ledger"),
+                    factcheck=final.get("research_factcheck_ledger"),
+                    critique=str(final.get("research_critique") or ""),
+                    corrections=str(final.get("research_factcheck") or ""),
+                    dispositions=str(final.get("research_dispositions") or ""),
+                )
+        elif bool(agentic_cfg.get("debug_panel_drafts", False)):
             content += panel_drafts_block(list(final.get("drafts") or []))
     return _to_openai_response(
         virtual=payload.model,
@@ -1078,6 +1091,23 @@ async def _stream_research_with_banners(
         ])
         if footer:
             yield _delta_frame(footer)
+
+        # Debug/eval: append the staged-pipeline trace (researcher notes,
+        # ledger, verifier critique, fact-check verdicts, writer guidance) —
+        # opt-in via `agentic.debug_research_trace`, the research counterpart
+        # of the deep panel-drafts block. Yielded but NOT folded into
+        # `final_content` — the chat archive never carries it.
+        if bool(agentic.get("debug_research_trace", False)):
+            trace = research_trace_block(
+                drafts=drafts,
+                ledger=done_evt.get("ledger"),
+                factcheck=done_evt.get("factcheck"),
+                critique=str(done_evt.get("critique") or ""),
+                corrections=str(done_evt.get("corrections") or ""),
+                dispositions=str(done_evt.get("dispositions") or ""),
+            )
+            if trace:
+                yield _delta_frame(trace)
 
         yield _stop_frame()
         yield "data: [DONE]\n\n"

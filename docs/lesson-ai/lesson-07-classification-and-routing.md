@@ -99,7 +99,7 @@ the short local spur or the longer panel route.
 
 These are the files we'll reference in this lesson:
 
-- [`src/audrey/routes/openai/pipeline.py:112`](../../src/audrey/routes/openai/pipeline.py#L112)
+- [`src/audrey/routes/openai/pipeline.py:115`](../../src/audrey/routes/openai/pipeline.py#L115)
   - where the non-streaming route builds the initial graph state.
 - [`src/audrey/pipeline/state.py:27`](../../src/audrey/pipeline/state.py#L27)
   - the shared request state that graph nodes read and update.
@@ -110,7 +110,7 @@ These are the files we'll reference in this lesson:
 - [`src/audrey/pipeline/complexity.py:72`](../../src/audrey/pipeline/complexity.py#L72)
   - token counting and depth-intent helpers for the fast/deep gate.
 - [`config.yaml:7`](../../config.yaml#L7) - router-model config.
-- [`config.yaml:396`](../../config.yaml#L396) - complexity threshold and depth-intent config.
+- [`config.yaml:414`](../../config.yaml#L414) - complexity threshold and depth-intent config.
 
 Open them as we go, but do not try to memorize all the code at once. The useful
 shape is the sequence of decisions.
@@ -426,7 +426,7 @@ def is_complex(messages: list[dict], *, threshold: int) -> tuple[bool, int]:
 That function starts at
 [`complexity.py:122`](../../src/audrey/pipeline/complexity.py#L122). The
 threshold and explicit depth cues come from
-[`config.yaml:396`](../../config.yaml#L396):
+[`config.yaml:414`](../../config.yaml#L414):
 
 ```yaml
 complexity:
@@ -585,16 +585,16 @@ audrey_auto fast answer
 ### 2.10 Streaming uses a separate driver
 
 Non-streaming requests run the compiled graph through
-[`_generate_via_pipeline` at routes/openai/pipeline.py:112](../../src/audrey/routes/openai/pipeline.py#L112).
+[`_generate_via_pipeline` at routes/openai/pipeline.py:108](../../src/audrey/routes/openai/pipeline.py#L108).
 
 Streaming has to interleave progress banners and token chunks, so it has a
 separate route driver beginning at
-[`_stream_via_pipeline` at routes/openai/pipeline.py:172](../../src/audrey/routes/openai/pipeline.py#L172).
+[`_stream_via_pipeline` at routes/openai/pipeline.py:205](../../src/audrey/routes/openai/pipeline.py#L205).
 
 The streaming route still performs the same major decisions:
 
-- count complexity and depth intent at [`routes/openai/pipeline.py:237`](../../src/audrey/routes/openai/pipeline.py#L237)
-- force image, OWUI utility, or virtual-model decisions at [`routes/openai/pipeline.py:223`](../../src/audrey/routes/openai/pipeline.py#L223)
+- count complexity and depth intent at [`routes/openai/pipeline.py:250`](../../src/audrey/routes/openai/pipeline.py#L250)
+- force image, OWUI utility, or virtual-model decisions at [`routes/openai/pipeline.py:253`](../../src/audrey/routes/openai/pipeline.py#L253)
 - choose deep banners or fast streaming at [`routes/openai/pipeline.py:240`](../../src/audrey/routes/openai/pipeline.py#L240)
 - classify (to pick the concrete model) at [`routes/openai/pipeline.py:242`](../../src/audrey/routes/openai/pipeline.py#L242) for deep, [`pipeline.py:334`](../../src/audrey/routes/openai/pipeline.py#L334) for fast
 

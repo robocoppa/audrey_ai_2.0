@@ -175,6 +175,38 @@ def _sanitize_draft_text(text: str) -> str:
     return _HR_LINE.sub("– – –", text).strip()
 
 
+def _draft_section_lines(drafts: list[dict], *, heading: str) -> list[str]:
+    """One `<heading> <model> — meta` subsection per worker draft.
+
+    Shared by `panel_drafts_block` (### level) and `research_trace_block`
+    (#### level). Failed workers still get a subsection — naming who dropped
+    is the point — with the error text stripped of square brackets so it can
+    never collide with the eval's error markers ("[internal error]" /
+    "[ollama error").
+    """
+    lines: list[str] = []
+    for d in drafts:
+        model = str(d.get("model") or "?")
+        content = (d.get("content") or "").strip()
+        meta: list[str] = []
+        elapsed = d.get("elapsed_s")
+        if elapsed is not None:
+            meta.append(f"{float(elapsed):.1f}s")
+        rounds = int(d.get("tool_rounds") or 0)
+        if rounds:
+            meta.append(f"{rounds} tool round{'s' if rounds != 1 else ''}")
+        head = f"{heading} {model}" + (" — " + " · ".join(meta) if meta else "")
+        lines.append(head)
+        lines.append("")
+        if content:
+            lines.append(_sanitize_draft_text(content))
+        else:
+            err = str(d.get("error") or "").replace("[", "").replace("]", "")[:200]
+            lines.append(f"_no usable draft{' — ' + err if err else ''}_")
+        lines.append("")
+    return lines
+
+
 def panel_drafts_block(drafts: list[dict]) -> str:
     """Render every worker's full draft after the deep answer — debug/eval only.
 
@@ -199,29 +231,147 @@ def panel_drafts_block(drafts: list[dict]) -> str:
     if not drafts:
         return ""
     lines = ["", "", "## Panel drafts (debug)", ""]
-    for d in drafts:
-        model = str(d.get("model") or "?")
-        content = (d.get("content") or "").strip()
-        meta: list[str] = []
-        elapsed = d.get("elapsed_s")
-        if elapsed is not None:
-            meta.append(f"{float(elapsed):.1f}s")
-        rounds = int(d.get("tool_rounds") or 0)
-        if rounds:
-            meta.append(f"{rounds} tool round{'s' if rounds != 1 else ''}")
-        head = f"### {model}" + (" — " + " · ".join(meta) if meta else "")
-        lines.append(head)
-        lines.append("")
-        if content:
-            lines.append(_sanitize_draft_text(content))
-        else:
-            err = str(d.get("error") or "").replace("[", "").replace("]", "")[:200]
-            lines.append(f"_no usable draft{' — ' + err if err else ''}_")
-        lines.append("")
+    lines += _draft_section_lines(drafts, heading="###")
     return "\n".join(lines).rstrip() + "\n"
 
 
-# Type alias — async function that takes a string and yields it as an
+# ─── Research trace block (opt-in via agentic.debug_research_trace) ───
+
+def _one_line(text: object) -> str:
+    """Collapse all whitespace so ledger/verdict list items stay on one line."""
+    return " ".join(str(text or "").split())
+
+
+def research_trace_block(
+    *,
+    drafts: list[dict],
+    ledger: dict | None = None,
+    factcheck: dict | None = None,
+    critique: str = "",
+    corrections: str = "",
+    dispositions: str = "",
+) -> str:
+    """Render the research pipeline's intermediates — debug/eval only.
+
+    The research-mode counterpart of `panel_drafts_block`, but staged: where
+    deep workers write competing answers (draft-vs-synth is the comparison),
+    research workers feed a structuring → ledger → fact-check → writer chain,
+    so the interesting artifact is the whole chain. Sections, in stage order,
+    each omitted when empty:
+
+      Researcher notes   — every worker's raw notes (model, latency, rounds)
+      Ledger             — structured claims + sources (`ResearchResult` dump)
+      Verifier critique  — the verifier's prose flags
+      Fact-check verdicts — per-claim verdicts (`FactCheckResult` dump)
+      Corrections / Hedge dispositions — the blocks exactly as handed to the
+                           writer, so writer behaviour can be judged against
+                           its actual instructions
+
+    `ledger`/`factcheck` are the plain-dict `.model_dump()` shapes carried on
+    the pipeline's `done` event. Returns "" when every section is empty.
+
+    Separator-proof like the drafts block: heading-only opener (no hr), and
+    the assembled body has every standalone `---` line neutralized, so the
+    block can never reproduce the banner/answer separator (`\\n\\n---\\n\\n`).
+    One extra constraint: NO heading in here may start with "Sources" — the
+    eval locates the real `## Sources` section by the substring `## sources`,
+    and `### Sources…` would contain it. Source lists render under a bold
+    `**Sources:**` label instead.
+    """
+    sections: list[str] = []
+
+    if drafts:
+        sections.append("### Researcher notes")
+        sections.append("")
+        sections.extend(_draft_section_lines(drafts, heading="####"))
+
+    claims = list((ledger or {}).get("claims") or [])
+    sources = list((ledger or {}).get("sources") or [])
+    if claims or sources:
+        sections.append(f"### Ledger — {len(claims)} claims, {len(sources)} sources")
+        sections.append("")
+        if claims:
+            sections.append("**Claims:**")
+            for c in claims:
+                risk = _one_line(c.get("risk")) or "?"
+                qual = f"risk: {risk}"
+                if c.get("needs_hedge"):
+                    reason = _one_line(c.get("hedge_reason"))
+                    qual += ", needs hedge" + (f" — {reason}" if reason else "")
+                ids = ", ".join(str(s) for s in (c.get("source_ids") or [])) or "none"
+                sections.append(
+                    f"- **{_one_line(c.get('id')) or '?'}** ({qual}) — "
+                    f"{_one_line(c.get('text'))} _(sources: {ids})_"
+                )
+            sections.append("")
+        if sources:
+            sections.append("**Sources:**")
+            for s in sources:
+                stype = _one_line(s.get("source_type")) or "unknown"
+                title = _one_line(s.get("title")) or "untitled"
+                url = _one_line(s.get("url")) or "no url"
+                backs = ", ".join(str(c) for c in (s.get("supports") or [])) or "none"
+                sections.append(
+                    f"- **{_one_line(s.get('id')) or '?'}** ({stype}) {title} — "
+                    f"{url} _(supports: {backs})_"
+                )
+            sections.append("")
+        unresolved = [q for q in ((ledger or {}).get("unresolved_questions") or []) if _one_line(q)]
+        if unresolved:
+            sections.append("**Unresolved questions:**")
+            sections.extend(f"- {_one_line(q)}" for q in unresolved)
+            sections.append("")
+
+    if critique.strip():
+        sections.append("### Verifier critique")
+        sections.append("")
+        sections.append(_sanitize_draft_text(critique))
+        sections.append("")
+
+    checks = list((factcheck or {}).get("checks") or [])
+    fatal = [e for e in ((factcheck or {}).get("fatal_errors") or []) if _one_line(e)]
+    if checks or fatal:
+        n_drop = sum(1 for c in checks if c.get("verdict") == "unsupported")
+        n_hedge = sum(1 for c in checks if c.get("verdict") in ("needs_hedge", "conflicting"))
+        sections.append(
+            f"### Fact-check verdicts — {len(checks)} checks "
+            f"({n_drop} drop, {n_hedge} hedge)"
+        )
+        sections.append("")
+        for c in checks:
+            line = f"- **{_one_line(c.get('claim_id')) or '?'}** — {_one_line(c.get('verdict')) or '?'}"
+            corrected = _one_line(c.get("corrected_text"))
+            if corrected:
+                line += f" — corrected: {corrected}"
+            notes = _one_line(c.get("notes"))
+            if notes:
+                line += f" — {notes}"
+            sections.append(line)
+        if fatal:
+            sections.append("")
+            sections.append("**Fatal errors:**")
+            sections.extend(
+                f"- {_one_line(e).replace('[', '').replace(']', '')}" for e in fatal
+            )
+        sections.append("")
+
+    if corrections.strip():
+        sections.append("### Corrections handed to the writer")
+        sections.append("")
+        sections.append(_sanitize_draft_text(corrections))
+        sections.append("")
+
+    if dispositions.strip():
+        sections.append("### Hedge dispositions handed to the writer")
+        sections.append("")
+        sections.append(_sanitize_draft_text(dispositions))
+        sections.append("")
+
+    if not sections:
+        return ""
+    body = "\n".join(["", "", "## Research trace (debug)", "", *sections])
+    # Belt-and-braces: neutralize any hr line the assembly produced anyway.
+    return _HR_LINE.sub("– – –", body).rstrip() + "\n"
 # SSE frame. The route handler supplies this; the ticker doesn't know
 # (or care) what the frame format is.
 Emitter = Callable[[str], Awaitable[None]]
@@ -342,6 +492,8 @@ __all__ = [
     "Emitter",
     "PhaseTicker",
     "TICK_INTERVAL_S",
+    "panel_drafts_block",
+    "research_trace_block",
     "tool_summary_block",
     "worker_fail",
     "worker_ok",

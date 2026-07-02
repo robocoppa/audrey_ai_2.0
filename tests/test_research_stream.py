@@ -187,3 +187,68 @@ async def test_research_stream_empty_research_skips_verify_banner():
     answer_region = joined.split("\n\n---\n\n", 1)[1]
     assert "Caveat: unverified." in answer_region
     assert frames[-1] == "data: [DONE]\n\n"
+
+
+# ─── Research trace block (opt-in via agentic.debug_research_trace) ────
+
+_LEDGER_JSON = json.dumps({
+    "summary_notes": "",
+    "claims": [{"id": "c1", "text": "Euclid wrote the Elements.",
+                "source_ids": ["s1"], "risk": "low", "needs_hedge": False}],
+    "sources": [{"id": "s1", "title": "Euclid — Britannica",
+                 "url": "https://britannica.com/euclid",
+                 "source_type": "reference", "supports": ["c1"]}],
+    "unresolved_questions": [],
+})
+
+
+class _StructuringFakeOllama(_FakeOllama):
+    """Also answers the ledger-structuring calls: a `format=`-pinned chat
+    returns canned ResearchResult JSON instead of the researcher prose, so
+    the pipeline builds a real merged ledger from the fake stack."""
+
+    async def chat(self, *, model, messages, options=None, timeout_s=0,
+                   tools=None, format=None):  # `format` mirrors OllamaClient.chat
+        if format is not None:
+            return {"message": {"content": _LEDGER_JSON},
+                    "prompt_eval_count": 1, "eval_count": 1}
+        return await super().chat(model=model, messages=messages,
+                                  options=options, timeout_s=timeout_s,
+                                  tools=tools)
+
+
+async def test_research_stream_trace_block_when_flag_on():
+    # Flag on → the staged-pipeline trace renders after the answer: researcher
+    # notes, the merged ledger (2 workers × same source URL → 2 claims,
+    # 1 deduped source), and the verifier critique.
+    responses = {"r1": "fact A", "r2": "fact B", "v": "looks fine",
+                 "w": "Euclid was a Greek mathematician."}
+    app = _fake_app(responses)
+    app.state.ollama = _StructuringFakeOllama(responses)
+    app.state.cfg.raw.setdefault("agentic", {})["debug_research_trace"] = True
+    frames = await _collect(app)
+    joined = "".join(_content_frames(frames))
+
+    answer_region = joined.split("\n\n---\n\n", 1)[1]
+    assert "## Research trace (debug)" in answer_region
+    assert "### Researcher notes" in answer_region
+    assert "#### r1" in answer_region and "#### r2" in answer_region
+    assert "fact A" in answer_region and "fact B" in answer_region
+    assert "### Ledger — 2 claims, 1 sources" in answer_region
+    assert "https://britannica.com/euclid" in answer_region
+    assert "### Verifier critique" in answer_region
+    # The trace lands after the answer prose, and the stream still terminates.
+    assert (answer_region.index("Euclid was a Greek mathematician.")
+            < answer_region.index("## Research trace (debug)"))
+    assert frames[-1] == "data: [DONE]\n\n"
+
+
+async def test_research_stream_no_trace_block_by_default():
+    # Ships dark: the default config leaves the flag off and the trace absent.
+    app = _fake_app({"r1": "fact A", "r2": "fact B", "v": "looks fine",
+                     "w": "Euclid was a Greek mathematician."})
+    frames = await _collect(app)
+    joined = "".join(_content_frames(frames))
+
+    assert "## Research trace (debug)" not in joined
+    assert frames[-1] == "data: [DONE]\n\n"

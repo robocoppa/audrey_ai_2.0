@@ -310,10 +310,22 @@ def _answer_body(full_content: str) -> str:
 
 
 def _sources_block(answer: str) -> str:
-    """Return the '## Sources' section text, or '' if absent."""
+    """Return the '## Sources' section text, or '' if absent.
+
+    Bounded at the next `## ` heading: the opt-in debug blocks are appended
+    AFTER the Sources list, and the research trace ("## Research trace
+    (debug)") carries the full ledger — every candidate URL, including the
+    junk the ranking excluded — which would otherwise pollute the
+    source-quality read. (The trace renderer guarantees none of its headings
+    start with "Sources", so the rfind can't land inside it.)
+    """
     low = answer.lower()
     idx = low.rfind("## sources")
-    return answer[idx:] if idx != -1 else ""
+    if idx == -1:
+        return ""
+    block = answer[idx:]
+    nxt = block.find("\n## ", 1)
+    return block[:nxt] if nxt != -1 else block
 
 
 def _extract_urls(text: str) -> list[str]:

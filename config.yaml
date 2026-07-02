@@ -241,9 +241,20 @@ agentic:
   # (debug)" section carrying every worker's full draft (model, latency, tool
   # rounds) so draft-vs-synth quality can be compared from the answer artifact
   # alone — the eval's saved answers file then holds both. Client-visible
-  # only, never written to the chat archive. Deep panel only (not research).
+  # only, never written to the chat archive. Deep panel only — research mode
+  # has its own view (`debug_research_trace` below).
   # Off by default; flip for an eval window (restart, no rebuild), flip back.
   debug_panel_drafts: false
+  # Debug/eval: research-mode counterpart. When true, audrey_research answers
+  # end with a "## Research trace (debug)" section carrying the staged
+  # pipeline's intermediates — every researcher's notes, the structured
+  # claims+sources ledger, the verifier critique, per-claim fact-check
+  # verdicts, and the corrections/hedge-disposition blocks exactly as handed
+  # to the writer — so a soft answer can be traced to its stage (thin notes
+  # vs aggressive claim drops vs writer timidity) from the answer artifact
+  # alone. Client-visible only, never written to the chat archive.
+  # Off by default; flip for an eval window (restart, no rebuild), flip back.
+  debug_research_trace: false
   react:
     max_rounds: 3
     compress_after_round: 2

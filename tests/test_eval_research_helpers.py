@@ -317,5 +317,53 @@ class TestSourceStatsNeverGates:
         assert r.source_stats is None
 
 
+class TestSourcesBlock:
+    """`_sources_block` is bounded at the next `## ` heading so debug blocks
+    appended after the Sources list (the research trace carries the FULL
+    ledger, junk candidates included) can't leak URLs into the quality read."""
+
+    def test_plain_sources_runs_to_end(self):
+        answer = "Body.\n\n## Sources\n- [t](https://arxiv.org/abs/1)\n"
+        block = eval_research._sources_block(answer)
+        assert "arxiv.org" in block
+
+    def test_trace_block_urls_excluded(self):
+        answer = (
+            "Body.\n\n## Sources\n- [t](https://arxiv.org/abs/1)\n"
+            "\n\n## Research trace (debug)\n\n### Researcher notes\n\n"
+            "**Sources:**\n- **s1** (unknown) junk — "
+            "https://www.facebook.com/groups/1 _(supports: c1)_\n"
+        )
+        block = eval_research._sources_block(answer)
+        assert "arxiv.org" in block
+        assert "facebook.com" not in block
+
+    def test_footer_between_sources_and_trace_retained(self):
+        # The tool footer is blockquote lines, not a `## ` heading — it stays
+        # inside the block (same as before the bound existed); only the trace
+        # is cut off.
+        answer = (
+            "Body.\n\n## Sources\n- [t](https://arxiv.org/abs/1)\n"
+            "\n\n---\n> _Tools used:_\n> - **m** — `web_search` ✅1\n"
+            "\n\n## Research trace (debug)\n\ntrace body"
+        )
+        block = eval_research._sources_block(answer)
+        assert "_Tools used:_" in block
+        assert "Research trace" not in block
+
+    def test_trace_junk_does_not_pollute_quality(self):
+        # End-to-end through source_stats: junk URL in the trace only →
+        # the breakdown stays GOOD and the junk isn't counted at all.
+        answer = (
+            "Body.\n\n## Sources\n- [t](https://arxiv.org/abs/1)\n"
+            "- [u](https://en.wikipedia.org/wiki/X)\n"
+            "\n\n## Research trace (debug)\n\n**Sources:**\n"
+            "- **s1** (unknown) x — https://www.facebook.com/groups/9\n"
+        )
+        s = eval_research.source_stats(answer, expected=True)
+        assert (s.total, s.quality) == (2, "GOOD")
+        assert s.low_quality == 0
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
