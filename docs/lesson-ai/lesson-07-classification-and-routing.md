@@ -110,7 +110,7 @@ These are the files we'll reference in this lesson:
 - [`src/audrey/pipeline/complexity.py:72`](../../src/audrey/pipeline/complexity.py#L72)
   - token counting and depth-intent helpers for the fast/deep gate.
 - [`config.yaml:7`](../../config.yaml#L7) - router-model config.
-- [`config.yaml:350`](../../config.yaml#L350) - complexity threshold and depth-intent config.
+- [`config.yaml:396`](../../config.yaml#L396) - complexity threshold and depth-intent config.
 
 Open them as we go, but do not try to memorize all the code at once. The useful
 shape is the sequence of decisions.
@@ -134,7 +134,7 @@ state = {
 ```
 
 That dictionary is built at
-[`routes/openai/pipeline.py:103`](../../src/audrey/routes/openai/pipeline.py#L103).
+[`routes/openai/pipeline.py:114`](../../src/audrey/routes/openai/pipeline.py#L114).
 This dictionary is the graph's starting memory for one request. The user asked
 for a virtual model, sent messages, maybe set generation options, and was
 authenticated as a particular user.
@@ -426,7 +426,7 @@ def is_complex(messages: list[dict], *, threshold: int) -> tuple[bool, int]:
 That function starts at
 [`complexity.py:122`](../../src/audrey/pipeline/complexity.py#L122). The
 threshold and explicit depth cues come from
-[`config.yaml:383`](../../config.yaml#L383):
+[`config.yaml:396`](../../config.yaml#L396):
 
 ```yaml
 complexity:
@@ -593,10 +593,10 @@ separate route driver beginning at
 
 The streaming route still performs the same major decisions:
 
-- count complexity and depth intent at [`routes/openai/pipeline.py:217`](../../src/audrey/routes/openai/pipeline.py#L217)
+- count complexity and depth intent at [`routes/openai/pipeline.py:237`](../../src/audrey/routes/openai/pipeline.py#L237)
 - force image, OWUI utility, or virtual-model decisions at [`routes/openai/pipeline.py:223`](../../src/audrey/routes/openai/pipeline.py#L223)
 - choose deep banners or fast streaming at [`routes/openai/pipeline.py:240`](../../src/audrey/routes/openai/pipeline.py#L240)
-- classify (to pick the concrete model) at [`routes/openai/pipeline.py:242`](../../src/audrey/routes/openai/pipeline.py#L242) for deep, [`pipeline.py:304`](../../src/audrey/routes/openai/pipeline.py#L304) for fast
+- classify (to pick the concrete model) at [`routes/openai/pipeline.py:242`](../../src/audrey/routes/openai/pipeline.py#L242) for deep, [`pipeline.py:334`](../../src/audrey/routes/openai/pipeline.py#L334) for fast
 
 But it is not literally the graph. It mirrors the same ideas so it can stream
 the right user experience. We will revisit the streaming route in a later

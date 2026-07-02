@@ -25,6 +25,7 @@ from audrey.pipeline.banners import (
     BANNER_THINKING,
     PhaseTicker,
     _format_calls,
+    panel_drafts_block,
     tool_summary_block,
     worker_ok,
 )
@@ -210,6 +211,77 @@ def test_tool_summary_block_ends_with_newline():
         ("m", [{"name": "t", "is_error": False}]),
     ])
     assert out.endswith("\n")
+
+
+# ─── panel_drafts_block (debug/eval draft-vs-synth comparison) ─────────
+
+def test_panel_drafts_block_empty_returns_empty_string():
+    assert panel_drafts_block([]) == ""
+
+
+def test_panel_drafts_block_renders_model_meta_and_content():
+    out = panel_drafts_block([
+        {"model": "qwen3.6:35b", "content": "The draft body.",
+         "elapsed_s": 42.34, "tool_rounds": 2},
+    ])
+    assert "## Panel drafts (debug)" in out
+    assert "### qwen3.6:35b — 42.3s · 2 tool rounds" in out
+    assert "The draft body." in out
+
+
+def test_panel_drafts_block_omits_zero_tool_rounds():
+    # A tool-free worker's heading carries latency only — "0 tool rounds"
+    # would be noise on every non-agentic draft.
+    out = panel_drafts_block([
+        {"model": "m", "content": "x", "elapsed_s": 10.0, "tool_rounds": 0},
+    ])
+    assert "tool round" not in out
+    assert "### m — 10.0s" in out
+
+
+def test_panel_drafts_block_failed_worker_named_without_error_markers():
+    # A failed worker still gets a subsection (naming who dropped is the
+    # point), but its error text must never collide with the eval harness's
+    # error markers — brackets are stripped.
+    out = panel_drafts_block([
+        {"model": "glm-5.2:cloud", "content": "", "error": "[ollama error: boom]"},
+    ])
+    assert "### glm-5.2:cloud" in out
+    assert "_no usable draft — ollama error: boom_" in out
+    assert "[ollama error" not in out
+    assert "[internal error]" not in out
+
+
+def test_panel_drafts_block_neutralizes_hr_lines_in_drafts():
+    # The eval splits the answer body on the LAST "\n\n---\n\n" — a draft
+    # carrying its own hr would truncate the saved answer. Neutralized.
+    out = panel_drafts_block([
+        {"model": "m", "content": "before\n\n---\n\nafter"},
+    ])
+    assert BANNER_SEPARATOR not in out
+    assert "before" in out and "after" in out
+
+
+def test_panel_drafts_block_never_contains_banner_separator():
+    # Structural invariant: even the block's own opener (`\n\n---\n#`, no
+    # blank line after the hr) must not form the banner/answer separator.
+    out = panel_drafts_block([
+        {"model": "a", "content": "one"},
+        {"model": "b", "content": "", "error": "timeout"},
+        {"model": "c", "content": "----\nindented hr\n\t---\t\nkept"},
+    ])
+    assert BANNER_SEPARATOR not in out
+    assert out.startswith("\n\n---\n#")
+    assert out.endswith("\n")
+
+
+def test_panel_drafts_block_preserves_table_rows():
+    # Markdown table delimiter rows (|---|---|) are not hr lines — a draft
+    # with a table must keep it intact.
+    out = panel_drafts_block([
+        {"model": "m", "content": "| a | b |\n|---|---|\n| 1 | 2 |"},
+    ])
+    assert "|---|---|" in out
 
 
 # ─── Banner header constants ──────────────────────────────────────────

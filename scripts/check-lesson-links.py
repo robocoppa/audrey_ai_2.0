@@ -62,7 +62,7 @@ USAGE
 
 ENVIRONMENT (override if your repo is shaped differently)
 
-    DOCS_GLOB    Glob for the docs to audit. Default: docs/lessons/*.md
+    DOCS_GLOB    Glob for the docs to audit. Default: docs/lesson-ai/lesson-*.md
                  Example: DOCS_GLOB="docs/**/*.md" check-lesson-links.py
     REPO_ROOT    Path the cite URLs are relative to. Default: the
                  enclosing git repo root. Cites in lessons typically use
@@ -97,7 +97,7 @@ from pathlib import Path
 
 # ─── Config ──────────────────────────────────────────────────────────
 
-DOCS_GLOB = os.environ.get("DOCS_GLOB", "docs/lessons/lesson-*.md")
+DOCS_GLOB = os.environ.get("DOCS_GLOB", "docs/lesson-ai/lesson-*.md")
 
 # Docs to skip even when they match DOCS_GLOB. Useful for excluding
 # scaffolding files (e.g. AUDIT.md) that contain illustrative cites the

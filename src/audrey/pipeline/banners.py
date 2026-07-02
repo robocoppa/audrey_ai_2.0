@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable, Callable
 
 log = logging.getLogger(__name__)
@@ -154,6 +155,63 @@ def tool_summary_block(
     for model, formatted in formatted_rows:
         lines.append(f"> - **{model}** — {formatted}")
     return "\n".join(lines) + "\n"
+
+
+# ─── Panel-drafts debug block (opt-in via agentic.debug_panel_drafts) ─
+
+# A standalone horizontal-rule line (---, ----, …) inside a draft. Replaced
+# before rendering because the eval harness treats the literal "\n\n---\n\n"
+# as the banner/answer separator and splits the answer body on its LAST
+# occurrence — a draft carrying its own hr would silently truncate the saved
+# answer to everything after it. Table rows (|---|) don't match: they don't
+# start at line-begin with hyphens only.
+_HR_LINE = re.compile(r"(?m)^[ \t]*-{3,}[ \t]*$")
+
+
+def _sanitize_draft_text(text: str) -> str:
+    """Neutralize hr lines in a draft so the block can't fake a separator."""
+    return _HR_LINE.sub("– – –", text).strip()
+
+
+def panel_drafts_block(drafts: list[dict]) -> str:
+    """Render every worker's full draft after the deep answer — debug/eval only.
+
+    Input: the deep panel's `WorkerDraft` dicts (model, content, error,
+    elapsed_s, tool_rounds). Output: a "## Panel drafts (debug)" section with
+    one `### <model>` subsection per worker, so draft-vs-synth quality can be
+    compared from the answer artifact alone (the eval's saved answers file
+    then carries both). Empty input → "" (no header on a draft-less answer).
+
+    Failed workers still get a subsection (naming who dropped is the point),
+    with the error text stripped of square brackets so it can never collide
+    with the eval's error markers ("[internal error]" / "[ollama error").
+    Like `tool_summary_block`, the opener is `\\n\\n---\\n#…` — hr with NO
+    blank line after it — so the block itself never contains the eval's
+    `\\n\\n---\\n\\n` separator either.
+    """
+    if not drafts:
+        return ""
+    lines = ["", "", "---", "## Panel drafts (debug)", ""]
+    for d in drafts:
+        model = str(d.get("model") or "?")
+        content = (d.get("content") or "").strip()
+        meta: list[str] = []
+        elapsed = d.get("elapsed_s")
+        if elapsed is not None:
+            meta.append(f"{float(elapsed):.1f}s")
+        rounds = int(d.get("tool_rounds") or 0)
+        if rounds:
+            meta.append(f"{rounds} tool round{'s' if rounds != 1 else ''}")
+        head = f"### {model}" + (" — " + " · ".join(meta) if meta else "")
+        lines.append(head)
+        lines.append("")
+        if content:
+            lines.append(_sanitize_draft_text(content))
+        else:
+            err = str(d.get("error") or "").replace("[", "").replace("]", "")[:200]
+            lines.append(f"_no usable draft{' — ' + err if err else ''}_")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 # Type alias — async function that takes a string and yields it as an

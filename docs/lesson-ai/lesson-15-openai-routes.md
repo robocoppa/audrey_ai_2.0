@@ -225,7 +225,7 @@ OpenAI's chat-completion streaming spec is more structured: each
 frame is a JSON object describing a *delta* (a piece of the response
 being built), with a final `data: [DONE]\n\n` marker. Audrey emits
 that shape directly. You can see the helpers at
-[`routes/openai/pipeline.py:516`](../../src/audrey/routes/openai/pipeline.py#L516)
+[`routes/openai/pipeline.py:528`](../../src/audrey/routes/openai/pipeline.py#L528)
 inside `_stream_deep_with_banners`:
 
 ```python
@@ -256,7 +256,7 @@ streams — and why the next subsection's architecture matters.
 ### 2.4 The non-streaming path
 
 `_generate_via_pipeline` at
-[`routes/openai/pipeline.py:106`](../../src/audrey/routes/openai/pipeline.py#L106)
+[`routes/openai/pipeline.py:107`](../../src/audrey/routes/openai/pipeline.py#L107)
 is the simpler half. The shape:
 
 ```
@@ -303,7 +303,7 @@ behavior, not a streaming-path one-off.
 ### 2.5 The streaming deep path — `_stream_deep_with_banners`
 
 Open
-[`routes/openai/pipeline.py:465`](../../src/audrey/routes/openai/pipeline.py#L465).
+[`routes/openai/pipeline.py:492`](../../src/audrey/routes/openai/pipeline.py#L492).
 This function is the single longest in the file (~330 lines) and
 the most complicated. It's a streaming deep panel: a 30-second
 response built from multiple parallel workers, with banner text
@@ -404,7 +404,7 @@ the lifecycle of a single phase's progress line.
 **It's an async context manager.** You met those in Lesson 1; here's one
 doing real work. The route uses it like this (the actual call site for the
 panel phase is
-[routes/openai/pipeline.py:604](../../src/audrey/routes/openai/pipeline.py#L604)):
+[routes/openai/pipeline.py:616](../../src/audrey/routes/openai/pipeline.py#L616)):
 
 ```python
 async with PhaseTicker(BANNER_DISPATCHING, emit) as ticker:
@@ -479,11 +479,11 @@ Trace the cancel through:
      `asyncio.CancelledError` into the generator that's producing
      SSE frames.
   2. **The generator's `try` block catches it** at
-     [`routes/openai/pipeline.py:755`](../../src/audrey/routes/openai/pipeline.py#L755).
+     [`routes/openai/pipeline.py:786`](../../src/audrey/routes/openai/pipeline.py#L786).
      The route records `pipeline_outcome = "cancelled"` (so the
      metric reflects "user left," not "ok") and re-raises.
   3. **The inner `try/finally` at
-     [`routes/openai/pipeline.py:757`](../../src/audrey/routes/openai/pipeline.py#L757)**
+     [`routes/openai/pipeline.py:778`](../../src/audrey/routes/openai/pipeline.py#L778)**
      cancels the synth producer task explicitly:
 
      ```python
@@ -638,7 +638,7 @@ disagree.
 does the client see? What does the archive write look like?**
 
 The `_stream_deep_with_banners` exception handler at
-[`routes/openai/pipeline.py:757`](../../src/audrey/routes/openai/pipeline.py#L757)
+[`routes/openai/pipeline.py:778`](../../src/audrey/routes/openai/pipeline.py#L778)
 catches the failure, sets `pipeline_outcome = "error"`, and yields
 two final frames: a delta containing `"\n\n[ollama error: ...]"`
 (or `"\n\n[internal error]"` for non-Ollama exceptions) and a stop
@@ -648,7 +648,7 @@ the HTTP response already started streaming and the status was
 committed to `200 OK` the moment the first frame went out.
 
 The archive write at
-[`routes/openai/pipeline.py:780`](../../src/audrey/routes/openai/pipeline.py#L780)
+[`routes/openai/pipeline.py:818`](../../src/audrey/routes/openai/pipeline.py#L818)
 runs in the `finally` block, which fires *after* the error
 handling. It captures whatever `final_content` accumulated up to
 the failure (which may be partial or empty if the failure came
@@ -689,9 +689,9 @@ Five things have to land cleanly:
 
 - **The route generator** receives `asyncio.CancelledError` from
   Starlette. It catches at
-  [`routes/openai/pipeline.py:755`](../../src/audrey/routes/openai/pipeline.py#L755),
+  [`routes/openai/pipeline.py:786`](../../src/audrey/routes/openai/pipeline.py#L786),
   records `outcome="cancelled"`, and re-raises.
-- **The inner `try/finally` at [`routes/openai/pipeline.py:757`](../../src/audrey/routes/openai/pipeline.py#L757)** cancels
+- **The inner `try/finally` at [`routes/openai/pipeline.py:778`](../../src/audrey/routes/openai/pipeline.py#L778)** cancels
   `synth_task` and awaits it — making sure the synth producer
   doesn't keep streaming into a queue nobody reads.
 - **The panel phase task** is the current weak point. In the normal path,

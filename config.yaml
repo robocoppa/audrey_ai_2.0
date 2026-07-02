@@ -237,6 +237,13 @@ agentic:
     # (it changes writer wording — plain statement becomes explicitly allowed).
     # Requires `enabled: true` to have any effect. Off by default.
     hedge_policy: true
+  # Debug/eval: when true, deep-panel answers end with a "## Panel drafts
+  # (debug)" section carrying every worker's full draft (model, latency, tool
+  # rounds) so draft-vs-synth quality can be compared from the answer artifact
+  # alone — the eval's saved answers file then holds both. Client-visible
+  # only, never written to the chat archive. Deep panel only (not research).
+  # Off by default; flip for an eval window (restart, no rebuild), flip back.
+  debug_panel_drafts: false
   react:
     max_rounds: 3
     compress_after_round: 2

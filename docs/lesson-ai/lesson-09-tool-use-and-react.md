@@ -116,7 +116,7 @@ These are the files we'll reference in this lesson:
   - executes one tool call, returns a `ToolResult`, never raises.
 - [`src/audrey/pipeline/react.py:101`](../../src/audrey/pipeline/react.py#L101)
   - the loop: chat, dispatch, repeat.
-- [`config.yaml:172`](../../config.yaml#L172) - `agentic.react.*` knobs.
+- [`config.yaml:247`](../../config.yaml#L247) - `agentic.react.*` knobs.
 - [`tools-server/app.py`](../../tools-server/app.py) - the FastAPI service
   that exposes the actual tools.
 
@@ -383,7 +383,7 @@ of ingested documentation can easily run to 8-15 KB. A `web_search` for a
 busy topic can return paragraphs of snippets.
 
 `max_tool_result_chars` (default 2000, from
-[`config.yaml:175`](../../config.yaml#L175)) is the single-shot cap. The
+[`config.yaml:250`](../../config.yaml#L250)) is the single-shot cap. The
 dispatcher truncates to that length and appends `…[truncated]` so the
 model knows it didn't see everything. The helper lives at
 [`tools/dispatch.py:66`](../../src/audrey/tools/dispatch.py#L66):

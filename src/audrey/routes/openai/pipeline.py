@@ -40,6 +40,7 @@ from audrey.pipeline.banners import (
     BANNER_VERIFYING,
     BANNER_WRITING,
     PhaseTicker,
+    panel_drafts_block,
     tool_summary_block,
     worker_fail,
     worker_ok,
@@ -168,10 +169,20 @@ async def _generate_via_pipeline(
         final.get("concrete_model"),
         extra,
     )
+    content = final.get("content", "") or ""
+    # Debug/eval parity with the streaming path: append the panel drafts when
+    # `agentic.debug_panel_drafts` is on. After the archive write above, so
+    # chat history never carries the block. Deep panel only — research-mode
+    # drafts are researcher notes, not competing answers (same scoping as the
+    # streaming path, where research streams through a different function).
+    if final.get("mode") == "deep" and final.get("panel_pool") != "deep_panel_research":
+        agentic_cfg = app.state.cfg.raw.get("agentic", {}) or {}
+        if bool(agentic_cfg.get("debug_panel_drafts", False)):
+            content += panel_drafts_block(list(final.get("drafts") or []))
     return _to_openai_response(
         virtual=payload.model,
         concrete=final.get("concrete_model", "?"),
-        content=final.get("content", "") or "",
+        content=content,
         prompt_tokens=int(final.get("prompt_eval_count", 0)),
         completion_tokens=int(final.get("eval_count", 0)),
     )
@@ -752,6 +763,15 @@ async def _stream_deep_with_banners(
             ])
             if footer:
                 yield _delta_frame(footer)
+
+            # Debug/eval: append every worker's full draft (opt-in via
+            # `agentic.debug_panel_drafts`) so draft-vs-synth quality can be
+            # compared from the answer artifact alone. Yielded but NOT folded
+            # into `final_content` — the chat archive never carries it.
+            if bool(agentic.get("debug_panel_drafts", False)):
+                drafts_debug = panel_drafts_block(drafts)
+                if drafts_debug:
+                    yield _delta_frame(drafts_debug)
 
             yield _stop_frame()
             yield "data: [DONE]\n\n"

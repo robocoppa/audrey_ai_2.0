@@ -366,7 +366,7 @@ Two details:
   deep-streaming branch instead keeps banners out of the archive by
   accumulating the answer body manually in `final_content` inside
   `_stream_deep_with_banners`
-  ([`routes/openai/pipeline.py:465`](../../src/audrey/routes/openai/pipeline.py#L465)).
+  ([`routes/openai/pipeline.py:492`](../../src/audrey/routes/openai/pipeline.py#L492)).
 - **`partial=True` on client disconnect.** `wrap()` catches
   `CancelledError` from the source generator and sets
   `self.partial = True` before re-raising. Cancellation happens when
@@ -436,7 +436,7 @@ client (see [`routes/openai/pipeline.py:123`](../../src/audrey/routes/openai/pip
 For a streaming-deep request, the reply is *only* fully known once
 the SSE stream has been fully emitted — so the archive call lives at
 the very end of `_stream_deep_with_banners` (see
-[`routes/openai/pipeline.py:780`](../../src/audrey/routes/openai/pipeline.py#L780)),
+[`routes/openai/pipeline.py:818`](../../src/audrey/routes/openai/pipeline.py#L818)),
 using the `final_content` string accumulated from synthesizer deltas. Two call
 sites, two different "the content is now known" moments, one writer.
 
@@ -547,11 +547,11 @@ recall are wrappers; the *building blocks* (`datetime_system_message`,
 `recall_for_request`, `compose_system_messages`) are plain functions
 in `pipeline/context.py` and `pipeline/memory.py`. That's because the
 streaming-deep route bypasses the graph and calls them directly at
-[`routes/openai/pipeline.py:853`](../../src/audrey/routes/openai/pipeline.py#L853).
+[`routes/openai/pipeline.py:1161`](../../src/audrey/routes/openai/pipeline.py#L1161).
 
 | | Non-streaming | Streaming-deep |
 |---|---|---|
-| Lives in | [`graph.py:139, 155`](../../src/audrey/pipeline/graph.py#L139) | [`routes/openai/pipeline.py:853`](../../src/audrey/routes/openai/pipeline.py#L853) |
+| Lives in | [`graph.py:139, 155`](../../src/audrey/pipeline/graph.py#L139) | [`routes/openai/pipeline.py:1161`](../../src/audrey/routes/openai/pipeline.py#L1161) |
 | Datetime | `node_datetime` | direct `datetime_system_message()` call |
 | Recall | `node_memory_recall` | direct `recall_for_request()` call |
 | Composer | `compose_system_messages(...)` | `compose_system_messages(...)` |
