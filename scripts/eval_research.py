@@ -218,10 +218,6 @@ def _post_stream(base_url: str, api_key: str, model: str, prompt: str,
         "stream": True,
     }
     content_parts: list[str] = []
-    banners: list[str] = []
-    # Fast emits 'Thinking'; include it so a fast turn's banner is captured and
-    # route inference can classify it (see infer_route).
-    seen_banner_phrases = [*_RESEARCH_BANNERS, _FACTCHECK_BANNER, _FAST_BANNER, *_DEEP_BANNERS]
     timing = StreamTiming()
     t0 = time.monotonic()
     try:
@@ -250,14 +246,48 @@ def _post_stream(base_url: str, api_key: str, model: str, prompt: str,
                 if timing.ttft_s is None:
                     timing.ttft_s = time.monotonic() - t0
                 content_parts.append(text)
-                for phrase in seen_banner_phrases:
-                    if phrase in text and phrase not in banners:
-                        banners.append(phrase)
     except httpx.HTTPError as e:
         timing.total_s = time.monotonic() - t0
         return "", [], f"{type(e).__name__}: {e}", timing
     timing.total_s = time.monotonic() - t0
-    return "".join(content_parts), banners, "", timing
+    full = "".join(content_parts)
+    return full, _detect_banners(full), "", timing
+
+
+# Fast emits 'Thinking'; include it so a fast turn's banner is captured and
+# route inference can classify it (see infer_route).
+_BANNER_PHRASES = [*_RESEARCH_BANNERS, _FACTCHECK_BANNER, _FAST_BANNER, *_DEEP_BANNERS]
+
+
+def _detect_banners(full_content: str) -> list[str]:
+    """Ordered list of progress-banner phrases the server emitted.
+
+    Detected from the BANNER REGION only — the text BEFORE the first
+    `\\n\\n---\\n\\n` separator — and only when a phrase appears in the server's
+    blockquote-italic banner form (`> _Phrase_`), never as a bare word. Both
+    guards matter now that the panel-drafts debug block streams worker PROSE
+    after the answer: a draft that opens a sentence with "Writing in the 4th
+    century…" or mentions "Thinking" would otherwise trip a bare substring scan
+    and mislabel a plain deep turn as research/fast (observed on
+    deep-pythagoras → 'Writing', deep-false-premise-einstein → 'Thinking').
+    Scanning only the pre-separator region AND requiring the `> _` marker makes
+    prose — wherever it sits — unable to register as a banner.
+
+    Order follows first appearance in the region, so the ordered-subsequence
+    banner check still sees Planning→Dispatching panel→Synthesizing as emitted.
+    """
+    region = full_content.split(_SEPARATOR, 1)[0] if _SEPARATOR in full_content else full_content
+    hits: list[tuple[int, str]] = []
+    for phrase in _BANNER_PHRASES:
+        idx = region.find(f"> _{phrase}")
+        if idx != -1:
+            hits.append((idx, phrase))
+    hits.sort(key=lambda h: h[0])
+    ordered: list[str] = []
+    for _, phrase in hits:
+        if phrase not in ordered:
+            ordered.append(phrase)
+    return ordered
 
 
 def _answer_body(full_content: str) -> str:

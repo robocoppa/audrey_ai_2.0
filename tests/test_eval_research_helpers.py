@@ -59,6 +59,57 @@ class TestInferRoute:
             ["Planning", "Synthesizing", "Writing"]) == "research"
 
 
+class TestDetectBanners:
+    """Banners are read from the pre-separator region in the server's `> _X_`
+    blockquote form only — so panel-drafts PROSE can't fake a banner (the
+    deep-pythagoras 'Writing' / einstein 'Thinking' false positives)."""
+
+    SEP = "\n\n---\n\n"
+    DEEP = "> _Planning_ ✅\n> _Dispatching panel_ ✅\n> _Synthesizing_ ✅"
+
+    def test_deep_banners_detected_in_order(self):
+        assert eval_research._detect_banners(self.DEEP + self.SEP + "answer") == \
+            ["Planning", "Dispatching panel", "Synthesizing"]
+
+    def test_draft_prose_writing_does_not_register(self):
+        # A draft opening "Writing in the 4th century…" after the answer must
+        # NOT add a 'Writing' banner (would mislabel deep as research).
+        content = (self.DEEP + self.SEP + "answer body"
+                   "\n\n## Panel drafts (debug)\n\n### m\n\n"
+                   "Writing in the 4th century BCE, Aristotle is our source.")
+        b = eval_research._detect_banners(content)
+        assert "Writing" not in b
+        assert eval_research.infer_route(b) == "deep"
+
+    def test_draft_prose_thinking_does_not_register(self):
+        content = (self.DEEP + self.SEP + "answer body"
+                   "\n\n## Panel drafts (debug)\n\n### m\n\n"
+                   "Einstein's Thinking was intensely visual.")
+        b = eval_research._detect_banners(content)
+        assert "Thinking" not in b
+        assert eval_research.infer_route(b) == "deep"
+
+    def test_real_research_banners_still_detected(self):
+        content = ("> _Planning_\n> _Researching_\n> _Verifying_\n> _Writing_"
+                   + self.SEP + "answer")
+        assert eval_research._detect_banners(content) == \
+            ["Planning", "Researching", "Verifying", "Writing"]
+
+    def test_real_fast_banner_still_detected(self):
+        assert eval_research._detect_banners("> _Thinking_ ✅" + self.SEP + "x") == \
+            ["Thinking"]
+
+    def test_bare_word_in_answer_body_ignored(self):
+        # Even a capitalized banner word in the ANSWER prose (not just drafts)
+        # is ignored — detection is scoped to the pre-separator region.
+        content = self.DEEP + self.SEP + "Planning is important. We are Writing now."
+        assert eval_research._detect_banners(content) == \
+            ["Planning", "Dispatching panel", "Synthesizing"]
+
+    def test_no_banners_returns_empty(self):
+        assert eval_research._detect_banners("just an answer, no banners") == []
+
+
 class TestFmtLatency:
     def test_full_latency(self):
         r = eval_research.CaseResult(
