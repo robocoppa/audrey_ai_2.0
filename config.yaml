@@ -291,7 +291,14 @@ agentic:
       compress_keep_last: 1
   planning:
     enabled: true
-    min_prompt_tokens: 40
+    # Below this, the prompt runs whole (no decomposition) and every worker
+    # answers the full question. Raised 40→120: a short standalone prompt split
+    # into subtasks hands each worker a bare fragment that can lose the original
+    # subject ("...tradeoffs between the leading ones?" with no "Rust runtimes"),
+    # so the worker searches chat history for the missing referent and asks to
+    # clarify — wasting a panel slot. 120 keeps decomposition for genuinely
+    # multi-part asks while letting short single-topic prompts run whole.
+    min_prompt_tokens: 120
     max_subtasks: 3        # matches the 3-worker text deep-panel pools; prevents dropped subtasks
   reflection:
     enabled: true

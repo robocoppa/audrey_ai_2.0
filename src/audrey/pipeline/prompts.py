@@ -67,6 +67,13 @@ PLANNER_SYSTEM = (
     "Rules:\n"
     "- 2 to 3 entries, each a complete question or instruction (≤ 200 chars).\n"
     "- Sub-questions must be independent — no 'first do X then Y' chaining.\n"
+    "- Each sub-question must be SELF-CONTAINED: a worker will see ONLY that "
+    "one sub-question, never the original request. Restate the concrete "
+    "subject in every entry. Do NOT use pronouns or back-references like "
+    "'it', 'them', 'the leading ones', or 'the above' that point at the "
+    "original wording — name the actual topic. (Bad: 'What are the main "
+    "tradeoffs between the leading ones?' Good: 'What are the main tradeoffs "
+    "between the leading Rust async runtimes (Tokio, smol, async-std)?')\n"
     "- If the request is already atomic (one clear ask), return {\"subtasks\": []}.\n"
     "Output ONLY the JSON. No prose, no markdown."
 )

@@ -144,7 +144,7 @@ away the conflict would hide exactly what the next stage exists to catch.
 With a grounded ledger in hand, the verifier
 ([`deep_panel.py:1233`](../../src/audrey/pipeline/deep_panel.py#L1233)) audits
 the merged findings for overclaiming. Its prompt
-([`prompts.py:167`](../../src/audrey/pipeline/prompts.py#L167)) is narrow and
+([`prompts.py:174`](../../src/audrey/pipeline/prompts.py#L174)) is narrow and
 specific: flag claims stated more precisely than the evidence supports — an
 exact date presented as certain when the sources hedge, a superlative
 ("the first to", "invented"), an over-specific attribution. It does **not**

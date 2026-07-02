@@ -533,7 +533,7 @@ DRAFTS:
 
 The `[tool-grounded: N rounds]` tag isn't just labeling — it's a signal.
 The synthesizer prompt (read it at
-[`prompts.py:74`](../../src/audrey/pipeline/prompts.py#L74)) tells the
+[`prompts.py:81`](../../src/audrey/pipeline/prompts.py#L81)) tells the
 model to treat a tool-grounded draft as the factual spine of the answer:
 
 > FACTUAL ANCHORING: when one or more drafts are `[tool-grounded]`, treat
