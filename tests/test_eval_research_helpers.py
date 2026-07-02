@@ -150,7 +150,7 @@ class TestAnswerBody:
             f"> _Synthesizing_ ✅{self.SEP}"
             f"Answer with a rule.{self.SEP}More answer."
             "\n\n---\n> _Tools used:_\n> - **m** — `web_search` ✅1"
-            "\n\n---\n## Panel drafts (debug)\n\n### m\n\ndraft text"
+            "\n\n## Panel drafts (debug)\n\n### m\n\ndraft text"
         )
         body = eval_research._answer_body(content)
         assert "Answer with a rule." in body

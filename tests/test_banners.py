@@ -263,15 +263,19 @@ def test_panel_drafts_block_neutralizes_hr_lines_in_drafts():
 
 
 def test_panel_drafts_block_never_contains_banner_separator():
-    # Structural invariant: even the block's own opener (`\n\n---\n#`, no
-    # blank line after the hr) must not form the banner/answer separator.
+    # Structural invariant: the block contains NO standalone `---` line at all
+    # (heading-only opener + hr neutralization), so it can never form the
+    # banner/answer separator regardless of how a consumer splits.
     out = panel_drafts_block([
         {"model": "a", "content": "one"},
         {"model": "b", "content": "", "error": "timeout"},
         {"model": "c", "content": "----\nindented hr\n\t---\t\nkept"},
     ])
     assert BANNER_SEPARATOR not in out
-    assert out.startswith("\n\n---\n#")
+    assert out.startswith("\n\n## Panel drafts (debug)")
+    # No bare horizontal-rule line anywhere in the rendered block.
+    assert not any(ln.strip("- \t") == "" and set(ln.strip()) == {"-"}
+                   for ln in out.splitlines())
     assert out.endswith("\n")
 
 

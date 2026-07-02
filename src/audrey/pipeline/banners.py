@@ -160,11 +160,13 @@ def tool_summary_block(
 # ─── Panel-drafts debug block (opt-in via agentic.debug_panel_drafts) ─
 
 # A standalone horizontal-rule line (---, ----, …) inside a draft. Replaced
-# before rendering because the eval harness treats the literal "\n\n---\n\n"
-# as the banner/answer separator and splits the answer body on its LAST
-# occurrence — a draft carrying its own hr would silently truncate the saved
-# answer to everything after it. Table rows (|---|) don't match: they don't
-# start at line-begin with hyphens only.
+# before rendering so a draft's own hr can't reproduce the banner/answer
+# separator ("\n\n---\n\n"). Defence-in-depth: the eval now splits the answer
+# body on the FIRST separator (see `_answer_body` in scripts/eval_research.py),
+# which is already immune to in-prose rules — but neutralizing hr lines here
+# keeps the debug block self-contained (a stray draft rule won't render as a
+# page-wide divider) and holds even if a consumer splits differently. Table
+# rows (|---|) don't match: they don't start at line-begin with hyphens only.
 _HR_LINE = re.compile(r"(?m)^[ \t]*-{3,}[ \t]*$")
 
 
@@ -185,13 +187,18 @@ def panel_drafts_block(drafts: list[dict]) -> str:
     Failed workers still get a subsection (naming who dropped is the point),
     with the error text stripped of square brackets so it can never collide
     with the eval's error markers ("[internal error]" / "[ollama error").
-    Like `tool_summary_block`, the opener is `\\n\\n---\\n#…` — hr with NO
-    blank line after it — so the block itself never contains the eval's
-    `\\n\\n---\\n\\n` separator either.
+
+    Separator-proof by construction: the block contains NO standalone `---`
+    line anywhere. The opener is `\\n\\n## Panel drafts (debug)` — a blank gap
+    then a heading, with no horizontal rule at all — so it cannot reproduce the
+    banner/answer separator (`\\n\\n---\\n\\n`) no matter how a consumer splits,
+    and in-draft hr lines are neutralized by `_sanitize_draft_text`. (The eval
+    also splits on the FIRST separator, which is already immune; this makes the
+    block safe independent of that.)
     """
     if not drafts:
         return ""
-    lines = ["", "", "---", "## Panel drafts (debug)", ""]
+    lines = ["", "", "## Panel drafts (debug)", ""]
     for d in drafts:
         model = str(d.get("model") or "?")
         content = (d.get("content") or "").strip()
