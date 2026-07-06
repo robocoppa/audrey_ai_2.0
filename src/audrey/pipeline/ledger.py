@@ -226,6 +226,33 @@ def _backfill_ids(r: ResearchResult) -> ResearchResult:
     return r
 
 
+def _repair_source_links(r: ResearchResult) -> ResearchResult:
+    """Re-point `claim.source_ids` entries that name a source by TITLE or URL
+    instead of by id — an observed failure shape (2026-07-06 eval,
+    `current-rust-async`): the model wrote
+    `source_ids: ["Glommio repository (Datadog)"]` while the source itself was
+    `{id: "s3", title: "Glommio repository (Datadog)"}`. Unrepaired, the bad
+    refs poison every downstream consumer at once: `_surviving_source_ids`
+    keeps garbage (defeating the render-all fallback), and
+    `_source_types_for_claim` finds no backing so `hedge_policy` hedges claims
+    that actually had authoritative sources. Best-effort and pure: entries
+    that match nothing are kept as-is (downstream treats unknown ids as
+    no-linkage). Runs after `_backfill_ids` so every source has an id."""
+    ids = {s.id for s in r.sources}
+    by_alias: dict[str, str] = {}
+    for s in r.sources:
+        for alias in (s.title, s.url):
+            a = alias.strip().lower()
+            if a:
+                by_alias.setdefault(a, s.id)
+    for c in r.claims:
+        c.source_ids = [
+            sid if sid in ids else by_alias.get(sid.strip().lower(), sid)
+            for sid in c.source_ids
+        ]
+    return r
+
+
 def _extract_json(raw: str) -> str | None:
     """Best-effort: pull a JSON value (object OR array) out of a model reply.
 
@@ -268,7 +295,7 @@ def parse_research_result(raw: str) -> ResearchResult | None:
         if isinstance(data, list):
             data = {"claims": data}
         result = ResearchResult.model_validate(data)
-        return _backfill_ids(result)
+        return _repair_source_links(_backfill_ids(result))
     except ValidationError as e:
         # Log the distinct failing fields (not the full multi-error dump) so a
         # recurring strict-field problem is visible at a glance.

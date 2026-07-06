@@ -106,6 +106,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -309,21 +310,35 @@ def _answer_body(full_content: str) -> str:
     return full_content.strip()
 
 
+_SOURCES_HEADING = re.compile(r"(?m)^## sources")
+
+
 def _sources_block(answer: str) -> str:
     """Return the '## Sources' section text, or '' if absent.
 
-    Bounded at the next `## ` heading: the opt-in debug blocks are appended
-    AFTER the Sources list, and the research trace ("## Research trace
-    (debug)") carries the full ledger — every candidate URL, including the
-    junk the ranking excluded — which would otherwise pollute the
-    source-quality read. (The trace renderer guarantees none of its headings
-    start with "Sources", so the rfind can't land inside it.)
+    The real block is the LAST line-anchored `## Sources` heading BEFORE the
+    research trace, bounded at the next `## ` heading. Two hijacks this must
+    dodge (both bit the 2026-07-06 trace-on run):
+
+    - The trace renderer keeps its own headings clear of "Sources", but
+      researcher NOTES are embedded verbatim and carry their own `## Sources`
+      / `## SOURCES:` headings — after the real block, so a whole-answer
+      search lands inside the trace (counted 25 "sources" on a block capped
+      at 8). Cut at the trace opener before searching.
+    - A bare substring search also matches INSIDE `### Sources…` (offset 1),
+      so a note's H3 heading hijacks it too. Anchor to line-start `## `.
+
+    Bounding at the next `## ` still matters for the panel-drafts block on
+    deep answers (its opener is a level-2 heading).
     """
     low = answer.lower()
-    idx = low.rfind("## sources")
-    if idx == -1:
+    cut = low.find("\n## research trace (debug)")
+    if cut != -1:
+        answer, low = answer[:cut], low[:cut]
+    matches = list(_SOURCES_HEADING.finditer(low))
+    if not matches:
         return ""
-    block = answer[idx:]
+    block = answer[matches[-1].start():]
     nxt = block.find("\n## ", 1)
     return block[:nxt] if nxt != -1 else block
 

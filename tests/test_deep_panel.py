@@ -783,6 +783,31 @@ def test_render_claims_includes_ids_and_no_source_marker():
     assert "[no source]" in out  # c2 has none
 
 
+# ── Worker-reply think-stripping ───────────────────────────────────────
+def test_strip_think_dangling_close_keeps_final():
+    # The observed leak shape: opening tag missing, reasoning (a full draft)
+    # before a dangling </think>, the real draft after — keep only the after.
+    from audrey.pipeline.deep_panel import _strip_think
+    assert _strip_think("draft v1 …</think>final draft") == "final draft"
+
+
+def test_strip_think_wellformed_block_removed():
+    from audrey.pipeline.deep_panel import _strip_think
+    assert _strip_think("<think>hmm</think>the answer").strip() == "the answer"
+
+
+def test_strip_think_all_think_falls_back_to_original():
+    # A reply wrapped entirely in think tags: an empty draft reads as a
+    # dropped worker, so return the original rather than "".
+    from audrey.pipeline.deep_panel import _strip_think
+    assert _strip_think("<think>only reasoning</think>") == "<think>only reasoning</think>"
+
+
+def test_strip_think_plain_content_untouched():
+    from audrey.pipeline.deep_panel import _strip_think
+    assert _strip_think("no tags here") == "no tags here"
+
+
 # ── Stage 3: deterministic Sources block ───────────────────────────────
 def _grounded_ledger():
     """A ledger with two claims each linked to a distinct usable-URL source."""
@@ -838,6 +863,19 @@ def test_sources_block_falls_back_to_all_when_no_linkage():
     from audrey.pipeline.ledger import Claim, ResearchResult, Source
     led = ResearchResult(
         claims=[Claim(id="c1", text="x")],  # no source_ids
+        sources=[Source(id="s1", title="T", url="https://e.com", source_type="news")])
+    out = _render_sources_block(led, None)
+    assert "[T](https://e.com)" in out
+
+
+def test_sources_block_garbage_linkage_still_falls_back():
+    # source_ids that resolve to NO real source (unrepairable title fragments)
+    # must not count as linkage — a non-empty-but-useless keep-set was silently
+    # defeating the render-all fallback (2026-07-06 `current-rust-async`).
+    from audrey.pipeline.deep_panel import _render_sources_block
+    from audrey.pipeline.ledger import Claim, ResearchResult, Source
+    led = ResearchResult(
+        claims=[Claim(id="c1", text="x", source_ids=["Glommio repository"])],
         sources=[Source(id="s1", title="T", url="https://e.com", source_type="news")])
     out = _render_sources_block(led, None)
     assert "[T](https://e.com)" in out
@@ -1033,6 +1071,35 @@ def test_dispositions_block_suppressed_when_all_hedge():
         sources=[Source(id="s1", title="a blog", url="https://b.com", source_type="blog")],
     )
     assert _render_dispositions_block(led, None) == ""
+
+
+def test_dispositions_block_suppressed_when_starved_hedge_or_cite():
+    # No ledger source has a usable URL → nothing can be "cited strongly", so
+    # hedge_or_cite_strongly degenerates to blanket caution and counts toward
+    # the all-hedge suppression (the 44-line HEDGE wall from the 2026-07-06
+    # search-starved run slipped through this gap).
+    from audrey.pipeline.deep_panel import _render_dispositions_block
+    from audrey.pipeline.ledger import Claim, ResearchResult, Source
+    led = ResearchResult(
+        claims=[Claim(id="c1", text="high-risk claim", risk="high"),
+                Claim(id="c2", text="unbacked claim", risk="low")],
+        sources=[Source(id="s1", title="Tokio official site", url="tokio.rs",
+                        source_type="official")])  # scheme-less → not usable
+    assert _render_dispositions_block(led, None) == ""
+
+
+def test_dispositions_block_renders_hedge_or_cite_when_citable():
+    # With a usable-URL source in the ledger, hedge_or_cite_strongly keeps its
+    # non-hedge signal (the writer CAN cite strongly) → block renders.
+    from audrey.pipeline.deep_panel import _render_dispositions_block
+    from audrey.pipeline.ledger import Claim, ResearchResult, Source
+    led = ResearchResult(
+        claims=[Claim(id="c1", text="high-risk claim", risk="high"),
+                Claim(id="c2", text="plain fact", source_ids=["s1"], risk="low")],
+        sources=[Source(id="s1", title="ref", url="https://e.com",
+                        source_type="reference")])
+    out = _render_dispositions_block(led, None)
+    assert "HEDGE (unless a strong source backs it): high-risk claim" in out
 
 
 def test_dispositions_block_renders_selective_hedge_against_plain():

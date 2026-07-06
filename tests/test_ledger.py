@@ -152,6 +152,41 @@ class TestParseResearchResult:
         r = parse_research_result(raw)
         assert r.claims[0].source_ids == ["1", "2"]
 
+    def test_title_as_source_id_repaired(self):
+        # The 2026-07-06 rust-async failure shape: the model cites a source by
+        # its TITLE, not its id — unrepaired, the Sources block and hedge_policy
+        # both lose the linkage. Match is case-insensitive.
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "x", "risk": "medium",
+                        "source_ids": ["glommio repository (datadog)"]}],
+            "sources": [{"id": "s3", "title": "Glommio repository (Datadog)",
+                         "url": "https://github.com/DataDog/glommio",
+                         "source_type": "official"}],
+        })
+        r = parse_research_result(raw)
+        assert r.claims[0].source_ids == ["s3"]
+
+    def test_url_as_source_id_repaired(self):
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "x", "risk": "low",
+                        "source_ids": ["https://e.com"]}],
+            "sources": [{"id": "s1", "title": "T", "url": "https://e.com",
+                         "source_type": "reference"}],
+        })
+        r = parse_research_result(raw)
+        assert r.claims[0].source_ids == ["s1"]
+
+    def test_unresolvable_source_id_kept_as_is(self):
+        # Garbage refs stay put — downstream treats unknown ids as no-linkage.
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "x", "risk": "low",
+                        "source_ids": ["nonsense"]}],
+            "sources": [{"id": "s1", "title": "T", "url": "https://e.com",
+                         "source_type": "reference"}],
+        })
+        r = parse_research_result(raw)
+        assert r.claims[0].source_ids == ["nonsense"]
+
     def test_source_without_id_backfilled_and_unknown_type(self):
         raw = ('{"claims": [], "sources": [{"title": "T", "url": "https://e.com", '
                '"source_type": "wikipedia"}]}')  # unknown type + no id

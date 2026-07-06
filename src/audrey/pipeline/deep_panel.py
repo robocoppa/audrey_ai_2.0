@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from typing import Any
@@ -140,6 +141,31 @@ def select_workers(
     return out
 
 
+# A worker's inline thinking block. Ollama normally routes reasoning to a
+# separate `thinking` field, but a cloud model has been observed emitting it
+# in `content` — with the OPENING tag missing, i.e. `<reasoning>...</think>
+# <final draft>` (2026-07-06 eval, glm on bio-euclid: the note carried its
+# whole draft twice around a dangling `</think>`). Drafts feed structuring,
+# the verifier, and the debug trace, so the leak doubles a worker's context
+# contribution, not just its display.
+_THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def _strip_think(content: str) -> str:
+    """Drop inline thinking from a worker reply.
+
+    Well-formed `<think>…</think>` blocks are removed; a dangling `</think>`
+    means everything before it was reasoning, so keep only what follows. If
+    stripping would leave nothing (a reply wrapped entirely in think tags),
+    return the original — an empty draft reads as a dropped worker, which is
+    worse than a tagged one.
+    """
+    s = _THINK_BLOCK.sub("", content)
+    if "</think>" in s:
+        s = s.rsplit("</think>", 1)[1]
+    return s if s.strip() else content
+
+
 async def _run_one_worker(
     ollama: OllamaClient,
     health: HealthTracker,
@@ -196,7 +222,7 @@ async def _run_one_worker(
                 # run_react already records success/failure per chat call.
                 return WorkerDraft(
                     model=model,
-                    content=react.content,
+                    content=_strip_think(react.content),
                     elapsed_s=elapsed,
                     prompt_eval_count=react.prompt_eval_count,
                     eval_count=react.eval_count,
@@ -219,7 +245,7 @@ async def _run_one_worker(
         health.record_success(model)
         return WorkerDraft(
             model=model,
-            content=content,
+            content=_strip_think(content),
             elapsed_s=elapsed,
             prompt_eval_count=int(resp.get("prompt_eval_count", 0) or 0),
             eval_count=int(resp.get("eval_count", 0) or 0),
@@ -914,16 +940,22 @@ def _surviving_source_ids(ledger: ResearchResult, fc: FactCheckResult | None) ->
     A claim is "dropped" iff the fact-check verdict is `unsupported`. With no
     fact-check result every claim survives. A source backs a claim through either
     direction of the link (`claim.source_ids` or `source.supports`) since models
-    populate one or the other inconsistently."""
+    populate one or the other inconsistently.
+
+    Only ids that actually exist in `ledger.sources` count: models also emit
+    unresolvable refs (titles, fragments — see `_repair_source_links` for the
+    repairable shape), and keeping those would make the result non-empty-but-
+    useless, silently defeating the caller's empty-linkage fallback."""
     dropped = {
         chk.claim_id for chk in (fc.checks if fc else [])
         if chk.verdict == "unsupported"
     }
     surviving_claims = {c.id for c in ledger.claims if c.id not in dropped}
+    real_ids = {s.id for s in ledger.sources}
     keep: set[str] = set()
     for c in ledger.claims:
         if c.id in surviving_claims:
-            keep.update(c.source_ids)
+            keep.update(sid for sid in c.source_ids if sid in real_ids)
     for s in ledger.sources:
         if any(cid in surviving_claims for cid in s.supports):
             keep.add(s.id)
@@ -1014,13 +1046,20 @@ def _render_dispositions_block(
     (pure blanket caution — the over-hedge trap that turned a plain "explain
     recursion" into mush). A MIX — some plain, a few hedges/attributions — DOES
     render: that selective handling against a plain-by-default backdrop is exactly
-    the point of the stage."""
+    the point of the stage.
+
+    When NO ledger source has a usable URL, "cite strongly" is an empty option,
+    so `hedge_or_cite_strongly` degenerates to plain hedging and counts toward
+    the all-hedge suppression — otherwise a search-starved run renders a wall
+    of blanket-caution lines through that dodge (observed 2026-07-06: 44 HEDGE
+    lines on `current-rust-async`, soaking the answer in "reportedly")."""
     if ledger is None or not ledger.claims:
         return ""
     dropped = {
         chk.claim_id for chk in (fc.checks if fc else [])
         if chk.verdict == "unsupported"
     }
+    citable = any(_usable_url(s.url) for s in ledger.sources)
     lines: list[str] = []
     n_surviving = 0
     n_hedge = 0
@@ -1031,7 +1070,9 @@ def _render_dispositions_block(
         disposition = hedge_policy(c, _source_types_for_claim(c, ledger))
         if disposition == "state_plainly":
             continue  # plain is the default; the framing line covers these
-        if disposition == "hedge":
+        if disposition == "hedge" or (
+            disposition == "hedge_or_cite_strongly" and not citable
+        ):
             n_hedge += 1
         lines.append(f"- {_DISPOSITION_LABEL[disposition]}: {c.text.strip()}")
     # No action lines → all-plain, nothing to instruct. Every claim a plain `hedge`

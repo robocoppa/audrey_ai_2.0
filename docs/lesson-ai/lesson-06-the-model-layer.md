@@ -604,14 +604,14 @@ deep mode from becoming brittle when a pool entry is temporarily unavailable.
 Each worker runs through `_run_one_worker(...)` (defined at
 [`deep_panel.py:121`](../../src/audrey/pipeline/deep_panel.py#L121)). The most
 important behavior is in its docstring at
-[`deep_panel.py:163`](../../src/audrey/pipeline/deep_panel.py#L163):
+[`deep_panel.py:189`](../../src/audrey/pipeline/deep_panel.py#L189):
 
 ```python
 """Execute one worker. Always returns a WorkerDraft — never raises."""
 ```
 
 A deep worker failure becomes a draft with an `error` field at
-[`deep_panel.py:229`](../../src/audrey/pipeline/deep_panel.py#L229):
+[`deep_panel.py:255`](../../src/audrey/pipeline/deep_panel.py#L255):
 
 ```python
 except OllamaError as e:

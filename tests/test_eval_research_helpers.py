@@ -351,6 +351,37 @@ class TestSourcesBlock:
         assert "_Tools used:_" in block
         assert "Research trace" not in block
 
+    def test_note_sources_heading_in_trace_ignored(self):
+        # Researcher notes are embedded in the trace verbatim and carry their
+        # own `## Sources` headings AFTER the real block — the 2026-07-06 run
+        # counted a note's 6-URL list instead of the real 8-entry block. The
+        # search must stop at the trace opener.
+        answer = (
+            "Body.\n\n## Sources\n- [t](https://arxiv.org/abs/1)\n"
+            "\n\n## Research trace (debug)\n\n### Researcher notes\n\n"
+            "#### glm — 5s\n\nnotes\n\n## Sources\n"
+            "- junk: https://www.facebook.com/groups/1\n"
+            "- junk2: https://www.scribd.com/doc/2\n"
+        )
+        block = eval_research._sources_block(answer)
+        assert "arxiv.org" in block
+        assert "facebook.com" not in block
+
+    def test_no_real_block_trace_sources_not_counted(self):
+        # No `## Sources` before the trace → '' even when a note has one
+        # (uppercase `## SOURCES:` included — the match is case-insensitive).
+        answer = (
+            "Body.\n\n## Research trace (debug)\n\n#### w — 5s\n\n"
+            "## SOURCES:\n- https://e.com\n"
+        )
+        assert eval_research._sources_block(answer) == ""
+
+    def test_h3_sources_heading_not_matched(self):
+        # `### Sources used` CONTAINS the substring `## sources` at offset 1;
+        # only a line-anchored `## ` heading is the real block.
+        answer = "Body.\n\n### Sources used\n- https://e.com\n"
+        assert eval_research._sources_block(answer) == ""
+
     def test_trace_junk_does_not_pollute_quality(self):
         # End-to-end through source_stats: junk URL in the trace only →
         # the breakdown stays GOOD and the junk isn't counted at all.
