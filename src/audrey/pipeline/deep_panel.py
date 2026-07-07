@@ -713,22 +713,43 @@ def _merge_ledgers(ledgers: list[ResearchResult]) -> ResearchResult:
     """Merge per-worker ledgers into one. Sources deduped by URL; claims
     concatenated (ids already worker-prefixed). Conflicting claims across
     workers are NOT reconciled here — they're surfaced as-is for the
-    fact-check stage to flag."""
+    fact-check stage to flag.
+
+    Dropping a duplicate-URL source must not orphan the claims that cite it
+    (2026-07-07 eval, `tech-transformer-attention`: one worker's arXiv sources
+    matched another's by URL, and its claims — citing the dropped ids — lost
+    all backing, so `hedge_policy` hedged textbook facts). So on a URL hit we
+    remap the dropped id to the canonical one, fold the dropped source's
+    `supports` into it, and let a typed duplicate upgrade a canonical typed
+    `unknown` — the surviving source carries the best of both copies."""
     seen_urls: dict[str, str] = {}  # url → canonical source id
+    by_id: dict[str, Source] = {}  # canonical id → kept Source
+    remap: dict[str, str] = {}  # dropped duplicate id → canonical id
     merged_sources: list[Source] = []
     for led in ledgers:
         for s in led.sources:
             key = s.url.strip().rstrip("/").lower()
             if key and key in seen_urls:
+                canon = by_id[seen_urls[key]]
+                remap[s.id] = canon.id
+                canon.supports.extend(
+                    c for c in s.supports if c not in canon.supports
+                )
+                if canon.source_type == "unknown" and s.source_type != "unknown":
+                    canon.source_type = s.source_type
                 continue
             if key:
                 seen_urls[key] = s.id
+            by_id[s.id] = s
             merged_sources.append(s)
     merged_claims: list[Claim] = []
     summaries: list[str] = []
     unresolved: list[str] = []
     for led in ledgers:
-        merged_claims.extend(led.claims)
+        for c in led.claims:
+            if remap:
+                c.source_ids = [remap.get(sid, sid) for sid in c.source_ids]
+            merged_claims.append(c)
         if led.summary_notes.strip():
             summaries.append(led.summary_notes.strip())
         unresolved.extend(led.unresolved_questions)

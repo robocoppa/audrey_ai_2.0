@@ -176,6 +176,19 @@ class TestParseResearchResult:
         r = parse_research_result(raw)
         assert r.claims[0].source_ids == ["s1"]
 
+    def test_case_variant_source_id_repaired(self):
+        # The 2026-07-07 euclid/pythagoras failure shape: the model cites
+        # "S1" while the source's id is "s1". The id itself is an alias, so
+        # the lowercased lookup repairs case variants.
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "x", "risk": "low",
+                        "source_ids": ["S1"]}],
+            "sources": [{"id": "s1", "title": "T", "url": "https://e.com",
+                         "source_type": "reference"}],
+        })
+        r = parse_research_result(raw)
+        assert r.claims[0].source_ids == ["s1"]
+
     def test_unresolvable_source_id_kept_as_is(self):
         # Garbage refs stay put — downstream treats unknown ids as no-linkage.
         raw = json.dumps({

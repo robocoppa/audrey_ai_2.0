@@ -1,14 +1,26 @@
 # Plan — research-mode followups from the 2026-07-06 run-3 assessment
 
-> **STATUS (2026-07-07):** user approved with one scope change — Brave-key
-> renewal is conditional on a per-request search cap, so the cap became part
-> of Stage 0 and is BUILT. Shipped on laptop, awaiting deploy: **S0 cap**
-> (per-worker `max_web_searches` in every ReAct profile: research 4/worker,
-> deep 3, fast 3, factcheck 3 → a research request tops out ≈15 Brave calls,
-> down from 30–45), **S2** structuring-prompt discipline, **S3** wall dedup,
-> **S5** `compress_keep_last` 2→3, **S6** eval ConnectError retry (mnemonic
-> repair stays parked). **S1** = user-run box commands (below). **S4**
-> remains deferred pending a grounded post-S2 baseline.
+> **STATUS (2026-07-07, post-gate):** deployed and **GATE PASSED** — run 4
+> ([report](../testing/2026-07-07-audrey_research-onbox-report.md)): 10/10,
+> cap verified ≤4/worker on all 22 worker footers, grounding recovered (8/8
+> Sources), euclid "reportedly" 20→10 with five cases at 1–2, zero exact wall
+> dups, zero compaction refusals, no under-hedging. The two remaining
+> hedge-soaked answers (postulate 43, transformer 30) traced to **two new
+> code-verified linkage bugs**: (A) `_repair_source_links` doesn't alias
+> source *ids* → case-variant refs (`w1_S1` vs `w1_s1`) unresolved;
+> (B) `_merge_ledgers` URL-dedup drops duplicate sources without remapping
+> the dropping worker's claim refs. **A+B are BUILT (2026-07-07, laptop,
+> awaiting deploy):** id added to the repair alias map; merge now remaps
+> dropped→canonical, folds `supports`, and lets a typed duplicate upgrade a
+> canonical `unknown` — pinned with the captured run-4 shapes (one eval
+> gate). **S1** box greps still pending (euclid + library aborted
+> fact-check again). **S4** stays deferred — post-A+B walls look like
+> legitimate uncertainty.
+>
+> _(Previous status: user approved with the S0-cap scope change — Brave-key
+> renewal conditional on the per-request cap: research 4/worker, deep 3,
+> fast 3, factcheck 3 → ≈15 Brave calls/request, down from 30–45. S2/S3/S5/S6
+> shipped with it; mnemonic repair parked.)_
 
 Source: [`docs/testing/2026-07-06-audrey_research-onbox-run3-report.md`](../testing/2026-07-06-audrey_research-onbox-run3-report.md)
 (and the +53…+57 PROJECT_STATE entries). Run 3 validated the pipeline and the

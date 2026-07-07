@@ -227,21 +227,24 @@ def _backfill_ids(r: ResearchResult) -> ResearchResult:
 
 
 def _repair_source_links(r: ResearchResult) -> ResearchResult:
-    """Re-point `claim.source_ids` entries that name a source by TITLE or URL
-    instead of by id — an observed failure shape (2026-07-06 eval,
-    `current-rust-async`): the model wrote
+    """Re-point `claim.source_ids` entries that name a source by TITLE, URL,
+    or a case-variant of its id — observed failure shapes. 2026-07-06 eval
+    (`current-rust-async`): the model wrote
     `source_ids: ["Glommio repository (Datadog)"]` while the source itself was
-    `{id: "s3", title: "Glommio repository (Datadog)"}`. Unrepaired, the bad
-    refs poison every downstream consumer at once: `_surviving_source_ids`
-    keeps garbage (defeating the render-all fallback), and
-    `_source_types_for_claim` finds no backing so `hedge_policy` hedges claims
-    that actually had authoritative sources. Best-effort and pure: entries
-    that match nothing are kept as-is (downstream treats unknown ids as
-    no-linkage). Runs after `_backfill_ids` so every source has an id."""
+    `{id: "s3", title: "Glommio repository (Datadog)"}`. 2026-07-07 eval
+    (`bio-euclid`, `bio-pythagoras`): claims cited `S1` against a source whose
+    id was `s1` — the id itself is an alias so the lowercased lookup repairs
+    case variants. Unrepaired, the bad refs poison every downstream consumer
+    at once: `_surviving_source_ids` keeps garbage (defeating the render-all
+    fallback), and `_source_types_for_claim` finds no backing so
+    `hedge_policy` hedges claims that actually had authoritative sources.
+    Best-effort and pure: entries that match nothing are kept as-is
+    (downstream treats unknown ids as no-linkage). Runs after `_backfill_ids`
+    so every source has an id."""
     ids = {s.id for s in r.sources}
     by_alias: dict[str, str] = {}
     for s in r.sources:
-        for alias in (s.title, s.url):
+        for alias in (s.id, s.title, s.url):
             a = alias.strip().lower()
             if a:
                 by_alias.setdefault(a, s.id)

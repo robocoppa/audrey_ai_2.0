@@ -715,6 +715,53 @@ def test_merge_ledgers_empty_is_safe():
     assert m.sources == []
 
 
+def test_merge_ledgers_remaps_claim_refs_of_deduped_sources():
+    # The 2026-07-07 transformer failure shape: worker 2's arXiv source
+    # matched worker 0's by URL and was dropped, orphaning every w2 claim
+    # that cited it — hedge_policy then hedged textbook facts. The dedup must
+    # remap the dropped id to the canonical one, fold `supports` across, and
+    # let the typed duplicate upgrade a canonical typed `unknown`.
+    r0 = _prefix_ledger_ids(ResearchResult(
+        claims=[Claim(id="c1", text="a", source_ids=["s1"])],
+        sources=[Source(id="s1", title="Attention Is All You Need",
+                        url="https://arxiv.org/abs/1706.03762",
+                        source_type="unknown")],
+    ), "w0_")
+    r2 = _prefix_ledger_ids(ResearchResult(
+        claims=[Claim(id="c1", text="b", source_ids=["vaswani2017"])],
+        sources=[Source(id="vaswani2017", title="Vaswani et al. (2017)",
+                        url="https://arxiv.org/abs/1706.03762",
+                        source_type="reference", supports=["c1"])],
+    ), "w2_")
+    m = _merge_ledgers([r0, r2])
+    assert [s.id for s in m.sources] == ["w0_s1"]
+    # The w2 claim now cites the canonical source instead of the dropped id.
+    w2_claim = next(c for c in m.claims if c.id == "w2_c1")
+    assert w2_claim.source_ids == ["w0_s1"]
+    # Supports folded; the typed duplicate upgraded the `unknown` canonical.
+    assert "w2_c1" in m.sources[0].supports
+    assert m.sources[0].source_type == "reference"
+
+
+def test_merge_ledgers_leaves_refs_to_kept_sources_alone():
+    # Distinct URLs → nothing dropped, nothing remapped; a known canonical
+    # type is NOT overwritten by a duplicate's type.
+    r0 = _prefix_ledger_ids(ResearchResult(
+        claims=[Claim(id="c1", text="a", source_ids=["s1"])],
+        sources=[Source(id="s1", title="T", url="https://e.com",
+                        source_type="official")],
+    ), "w0_")
+    r1 = _prefix_ledger_ids(ResearchResult(
+        claims=[Claim(id="c1", text="b", source_ids=["s1"])],
+        sources=[Source(id="s1", title="T2", url="https://e.com",  # dup URL
+                        source_type="news")],
+    ), "w1_")
+    m = _merge_ledgers([r0, r1])
+    assert next(c for c in m.claims if c.id == "w0_c1").source_ids == ["w0_s1"]
+    assert next(c for c in m.claims if c.id == "w1_c1").source_ids == ["w0_s1"]
+    assert m.sources[0].source_type == "official"  # not downgraded to news
+
+
 # ── Phase 26 Stage 2: factcheck-result → corrections rendering ──────────
 
 def _ledger_with(*claims):
