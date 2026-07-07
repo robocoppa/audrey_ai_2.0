@@ -31,7 +31,7 @@ planner → panel → synth → reflect: several workers draft, and a synthesize
 **research → verify → fact-check → write** — and the answer is one model's
 prose (the *writer's*), built from findings the other stages have already
 checked. The whole entry point is
-[`run_research_pipeline_streaming`](../../src/audrey/pipeline/deep_panel.py#L1146);
+[`run_research_pipeline_streaming`](../../src/audrey/pipeline/deep_panel.py#L1170);
 its docstring lists the four stages and the events each one emits.
 
 The learner question to hold onto: *what makes the answer more trustworthy?*

@@ -267,6 +267,13 @@ agentic:
     # compression) — to wipe history aggressively, lower
     # `compress_after_round` instead.
     compress_keep_last: 1
+    # Per-worker cap on dispatched `web_search` calls (0 = unlimited).
+    # Every dispatched search spends real provider quota (Brave), and panel
+    # modes multiply it by worker count — pre-cap research requests burned
+    # 30–45 searches each. Over-budget calls get a budget-note tool message
+    # (never dispatched) and web_search stops being offered for the rest of
+    # the loop. kb_search/memory are local and never capped.
+    max_web_searches: 3
     # Deep-panel workers run ReAct with a tighter budget than fast path:
     # N workers × M rounds multiplies, and each local worker holds the GPU
     # gate for the whole loop (see pipeline/deep_panel.py).
@@ -275,6 +282,8 @@ agentic:
       compress_after_round: 2
       max_tool_result_chars: 2000
       compress_keep_last: 1
+      # 3 workers × 3 searches ≤ 9 Brave calls per deep request.
+      max_web_searches: 3
     # `audrey_research` Stage-1 researchers run with a deliberately bigger
     # budget than deep_worker: the +10 Euclid post-mortem found the tight
     # deep_worker budget (2 rounds, 2000 chars) made grounded workers rush
@@ -284,13 +293,20 @@ agentic:
       max_rounds: 5
       compress_after_round: 3
       max_tool_result_chars: 6000
-      # Keep the *two* most recent search rounds verbatim (not just one). A
-      # researcher runs up to 5 rounds; at keep_last=1 a heavy-search worker had
-      # all but its final round compacted before it wrote its findings, then
-      # narrated the compaction stub as "searches returned elided results"
-      # (the current-2025-recent regression, 2026-06-30). Research mode is
-      # thoroughness-first, so the extra context budget is worth it.
-      compress_keep_last: 2
+      # Keep the *three* most recent search rounds verbatim (not just one).
+      # A researcher runs up to 5 rounds; at keep_last=1 a heavy-search worker
+      # had all but its final round compacted before it wrote its findings,
+      # then narrated the compaction stub as "searches returned elided
+      # results" (the current-2025-recent regression, 2026-06-30). Raised
+      # 2→3 (2026-07-07) after a worker refused to answer because its own
+      # early-round results were compacted away (the parallel-postulate
+      # deepseek refusal, run 3). Research mode is thoroughness-first, so the
+      # extra context budget is worth it; watch per-case latency.
+      compress_keep_last: 3
+      # 3 researchers × 4 searches ≤ 12 Brave calls per research request
+      # (plus the fact-checker's 3) — down from 30–45 pre-cap. Grounding on
+      # hard cases may thin; this is the deliberate quota trade.
+      max_web_searches: 4
     # `audrey_research` Stage-3 fact-checker: confirms a handful of specific
     # high-risk/dated/current claims against sources — NOT open-ended research.
     # Tighter than research_worker (fewer rounds) but keeps the large result
@@ -300,6 +316,7 @@ agentic:
       compress_after_round: 2
       max_tool_result_chars: 6000
       compress_keep_last: 1
+      max_web_searches: 3
   planning:
     enabled: true
     # Below this, the prompt runs whole (no decomposition) and every worker

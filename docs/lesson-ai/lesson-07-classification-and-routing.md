@@ -426,7 +426,7 @@ def is_complex(messages: list[dict], *, threshold: int) -> tuple[bool, int]:
 That function starts at
 [`complexity.py:122`](../../src/audrey/pipeline/complexity.py#L122). The
 threshold and explicit depth cues come from
-[`config.yaml:414`](../../config.yaml#L414):
+[`config.yaml:431`](../../config.yaml#L431):
 
 ```yaml
 complexity:
@@ -449,7 +449,7 @@ task family.
 ### 2.7 Virtual models can force the route
 
 Now read the middle of `node_complexity`, starting at
-[`graph.py:214`](../../src/audrey/pipeline/graph.py#L214):
+[`graph.py:225`](../../src/audrey/pipeline/graph.py#L225):
 
 ```python
 complex_, n = is_complex(...)

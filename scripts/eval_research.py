@@ -199,6 +199,15 @@ class StreamTiming:
     total_s: float | None = None  # request start → stream end
 
 
+# One retry after this many seconds when the server refuses connections.
+# Connection-refused means the endpoint is down NOW (observed: the Unraid
+# scheduled stack restart mid-run, 2026-07-06 — OWUI was back ~51s later);
+# without a retry every remaining case burns through in seconds. Only
+# ConnectError gets this treatment: an in-flight stream error is not safely
+# retryable (the turn may have partially executed server-side).
+_CONNECT_RETRY_DELAY_S = 60.0
+
+
 def _post_stream(base_url: str, api_key: str, model: str, prompt: str,
                  timeout_s: float) -> tuple[str, list[str], str, StreamTiming]:
     """Stream a chat completion. Returns (full_content, banner_words, error, timing).
@@ -210,7 +219,23 @@ def _post_stream(base_url: str, api_key: str, model: str, prompt: str,
     path's whole reason to exist, so we make them falsifiable run-to-run. TTFT
     counts the first content delta, which for Audrey is the banner ack (the
     deliberate latency fix), so it reflects time-to-first-visible-output.
+
+    A connection-refused (`httpx.ConnectError`) gets ONE retry after
+    `_CONNECT_RETRY_DELAY_S` — enough to ride out a container restart
+    without turning a genuinely-down stack into a hung run.
     """
+    for attempt in (1, 2):
+        out = _post_stream_once(base_url, api_key, model, prompt, timeout_s)
+        if attempt == 1 and out[2].startswith("ConnectError"):
+            print(f"    connection refused; retrying once in {_CONNECT_RETRY_DELAY_S:.0f}s...")
+            time.sleep(_CONNECT_RETRY_DELAY_S)
+            continue
+        return out
+    return out
+
+
+def _post_stream_once(base_url: str, api_key: str, model: str, prompt: str,
+                      timeout_s: float) -> tuple[str, list[str], str, StreamTiming]:
     url = base_url.rstrip("/") + "/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     body = {

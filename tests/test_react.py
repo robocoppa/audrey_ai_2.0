@@ -16,7 +16,17 @@ What this file covers:
 
 from __future__ import annotations
 
-from audrey.pipeline.react import _compress_history, _summarize_tool_message
+import pytest
+
+from audrey.pipeline.react import (
+    _WEB_SEARCH_BUDGET_STUB,
+    _compress_history,
+    _summarize_tool_message,
+    _without_web_search,
+    run_react,
+)
+from audrey.tools.discovery import ToolRegistry, ToolSpec
+from audrey.tools.dispatch import ToolResult
 
 
 def _tool_msg(name: str, content: str) -> dict:
@@ -131,3 +141,124 @@ def test_summarize_tool_message_handles_missing_fields():
     """Defensive against malformed history. Should not raise."""
     out = _summarize_tool_message({"role": "tool"})
     assert "?" in out  # falls back to "?" for missing name
+
+
+# ─── web_search budget (max_web_searches) ─────────────────────────────
+#
+# Every dispatched web_search spends real provider quota (Brave), so the
+# loop enforces a per-worker cap: over-budget calls get a budget-note tool
+# message instead of a dispatch, and web_search stops being offered in
+# later rounds. These tests drive run_react with a fake Ollama and a fake
+# dispatcher — no network.
+
+
+def _registry_ws_kb() -> ToolRegistry:
+    mk = lambda n: ToolSpec(name=n, description=n,  # noqa: E731
+                            parameters={"type": "object", "properties": {}},
+                            server_url="http://unused", path=f"/{n}")
+    return ToolRegistry(by_name={"web_search": mk("web_search"), "kb_search": mk("kb_search")})
+
+
+def _call(name: str, cid: str) -> dict:
+    return {"id": cid, "function": {"name": name, "arguments": {}}}
+
+
+class _FakeHealth:
+    def record_success(self, model): pass
+    def record_failure(self, model, err): pass
+
+
+class _FakeOllama:
+    """Returns queued chat responses; records the kwargs of every call."""
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls: list[dict] = []
+
+    async def chat(self, *, model, messages, options=None, tools=None, timeout_s=0):
+        self.calls.append({"messages": list(messages), "tools": tools})
+        return self.responses.pop(0)
+
+
+@pytest.fixture
+def fake_dispatch(monkeypatch):
+    """Replace the real HTTP dispatcher; records dispatched tool names."""
+    dispatched: list[str] = []
+
+    async def _fake(http, registry, tc, *, max_result_chars, timeout_s, user_id=None):
+        name = ((tc.get("function") or {}).get("name")) or "?"
+        dispatched.append(name)
+        return ToolResult(name=name, call_id=tc.get("id"),
+                          content='{"ok": true}', elapsed_s=0.01, is_error=False)
+
+    monkeypatch.setattr("audrey.pipeline.react.dispatch_one", _fake)
+    return dispatched
+
+
+async def test_web_search_cap_stubs_overflow_and_stops_offering(fake_dispatch):
+    # Round 1: two web searches (budget 3 → both dispatch).
+    # Round 2: two more web searches + one kb_search → one web dispatches
+    #          (3rd), one is stubbed; kb_search always dispatches.
+    # Round 3: model answers. Its chat call must no longer offer web_search.
+    ollama = _FakeOllama([
+        {"message": {"tool_calls": [_call("web_search", "a"), _call("web_search", "b")]}},
+        {"message": {"tool_calls": [_call("web_search", "c"), _call("web_search", "d"),
+                                    _call("kb_search", "e")]}},
+        {"message": {"content": "final answer"}, "prompt_eval_count": 1, "eval_count": 1},
+    ])
+    out = await run_react(
+        ollama, _FakeHealth(), _registry_ws_kb(),
+        model="m", messages=[{"role": "user", "content": "q"}],
+        options={}, timeout_s=5, max_rounds=3, compress_after_round=99,
+        max_tool_result_chars=1000, tool_dispatch_timeout_s=5,
+        location="cloud", max_web_searches=3,
+    )
+    assert out.content == "final answer"
+    assert fake_dispatch == ["web_search", "web_search", "web_search", "kb_search"]
+    # Footer data counts real dispatches only — the stub is not in tool_calls.
+    assert len(out.tool_calls) == 4
+    # The stubbed call got a budget-note tool message in the convo.
+    round3_msgs = ollama.calls[2]["messages"]
+    stubs = [m for m in round3_msgs if m.get("role") == "tool"
+             and m.get("content") == _WEB_SEARCH_BUDGET_STUB]
+    assert len(stubs) == 1
+    # And round 3 no longer offers web_search (kb_search still offered).
+    round3_tools = ollama.calls[2]["tools"]
+    names = {((t.get("function") or {}).get("name")) for t in round3_tools}
+    assert names == {"kb_search"}
+
+
+async def test_web_search_cap_zero_means_unlimited(fake_dispatch):
+    ollama = _FakeOllama([
+        {"message": {"tool_calls": [_call("web_search", str(i)) for i in range(5)]}},
+        {"message": {"content": "done"}},
+    ])
+    out = await run_react(
+        ollama, _FakeHealth(), _registry_ws_kb(),
+        model="m", messages=[{"role": "user", "content": "q"}],
+        options={}, timeout_s=5, max_rounds=2, compress_after_round=99,
+        max_tool_result_chars=1000, tool_dispatch_timeout_s=5,
+        location="cloud", max_web_searches=0,
+    )
+    assert out.content == "done"
+    assert fake_dispatch.count("web_search") == 5
+    # Both rounds still offered the full toolset.
+    for call in ollama.calls:
+        names = {((t.get("function") or {}).get("name")) for t in call["tools"]}
+        assert "web_search" in names
+
+
+def test_web_search_budget_stub_reads_as_limit_not_failure():
+    """Same wording discipline as the compaction stub: a model quoting this
+    must not narrate a FAILED search."""
+    low = _WEB_SEARCH_BUDGET_STUB.lower()
+    assert "limit" in low
+    for bad in ("elided", "error", "failed", "empty", "sparse", "unavailable"):
+        assert bad not in low
+
+
+def test_without_web_search_filters_and_none_when_empty():
+    ws = {"function": {"name": "web_search"}}
+    kb = {"function": {"name": "kb_search"}}
+    assert _without_web_search([ws, kb]) == [kb]
+    assert _without_web_search([ws]) is None   # nothing left → None, not []
+    assert _without_web_search(None) is None

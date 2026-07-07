@@ -625,6 +625,8 @@ async def _stream_deep_with_banners(
             float(react_cfg.get("dispatch_timeout_s", 30))))
         deep_react_compress_keep_last = int(deep_react_cfg.get("compress_keep_last",
             int(react_cfg.get("compress_keep_last", 1))))
+        deep_react_max_web_searches = int(deep_react_cfg.get("max_web_searches",
+            int(react_cfg.get("max_web_searches", 0))))
 
         async with PhaseTicker(BANNER_DISPATCHING, emit) as ticker:
             panel_task = asyncio.create_task(_phase_dispatch(
@@ -638,6 +640,7 @@ async def _stream_deep_with_banners(
                 react_max_tool_chars=deep_react_max_tool_chars,
                 react_dispatch_timeout_s=deep_react_dispatch_timeout,
                 react_compress_keep_last=deep_react_compress_keep_last,
+                react_max_web_searches=deep_react_max_web_searches,
                 user_id=user_id or None,
                 ticker=ticker,
             ))
@@ -1247,7 +1250,7 @@ async def _phase_dispatch(
     tools, tool_capable_models,
     react_max_rounds, react_compress_after,
     react_max_tool_chars, react_dispatch_timeout_s,
-    react_compress_keep_last,
+    react_compress_keep_last, react_max_web_searches,
     user_id, ticker: PhaseTicker,
 ):
     """Run the panel and feed per-worker results to the ticker. Returns drafts."""
@@ -1263,6 +1266,7 @@ async def _phase_dispatch(
         react_max_tool_chars=react_max_tool_chars,
         react_dispatch_timeout_s=react_dispatch_timeout_s,
         react_compress_keep_last=react_compress_keep_last,
+        react_max_web_searches=react_max_web_searches,
         user_id=user_id,
     ):
         if evt["type"] == "worker_done":

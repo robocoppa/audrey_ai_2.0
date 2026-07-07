@@ -79,7 +79,8 @@ def _prep(cfg, registry, health, *, subtasks=None):
         options={}, timeout_s=5.0, max_workers_cloud=3,
         tools=None, tool_capable_models=None,
         react_max_rounds=2, react_compress_after=2, react_max_tool_chars=2000,
-        react_dispatch_timeout_s=30.0, react_compress_keep_last=1, user_id=None,
+        react_dispatch_timeout_s=30.0, react_compress_keep_last=1,
+        react_max_web_searches=0, user_id=None,
     )
 
 
@@ -1100,6 +1101,40 @@ def test_dispositions_block_renders_hedge_or_cite_when_citable():
                         source_type="reference")])
     out = _render_dispositions_block(led, None)
     assert "HEDGE (unless a strong source backs it): high-risk claim" in out
+
+
+def test_dispositions_block_dedups_near_identical_claims():
+    # Three workers each contribute the same fact; the wall gets ONE line for
+    # it, not three. Normalization ignores case/punctuation differences.
+    from audrey.pipeline.deep_panel import _render_dispositions_block
+    from audrey.pipeline.ledger import Claim, ResearchResult, Source
+    led = ResearchResult(
+        claims=[Claim(id="w0_c1", text="Euclid flourished c. 300 BCE.",
+                      source_ids=["s1"], risk="high"),
+                Claim(id="w1_c1", text="euclid flourished c 300 bce",
+                      source_ids=["s1"], risk="high"),
+                Claim(id="w2_c1", text="Euclid flourished C. 300 BCE",
+                      source_ids=["s1"], risk="high"),
+                Claim(id="w0_c2", text="plain fact", source_ids=["s1"], risk="low")],
+        sources=[Source(id="s1", title="ref", url="https://e.com",
+                        source_type="reference")])
+    out = _render_dispositions_block(led, None)
+    assert out.count("Euclid flourished") == 1
+    # Distinct claims are untouched (the plain one folds into the framing line).
+    assert out.startswith("State every claim plainly EXCEPT")
+
+
+def test_dispositions_block_dedup_does_not_change_suppression():
+    # All-hedge stays suppressed even when duplicates would have deduped —
+    # the suppression counters see every claim, dedup only trims lines.
+    from audrey.pipeline.deep_panel import _render_dispositions_block
+    from audrey.pipeline.ledger import Claim, ResearchResult, Source
+    led = ResearchResult(
+        claims=[Claim(id="c1", text="unbacked claim", risk="low"),
+                Claim(id="c2", text="Unbacked claim!", risk="low")],
+        sources=[Source(id="s1", title="a blog", url="https://b.com",
+                        source_type="blog")])
+    assert _render_dispositions_block(led, None) == ""
 
 
 def test_dispositions_block_renders_selective_hedge_against_plain():

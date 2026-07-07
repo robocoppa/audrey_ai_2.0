@@ -125,7 +125,7 @@ a tighter slice instead of trying to cover everything at once.
 #### When the planner runs
 
 The graph node is at
-[`graph.py:293`](../../src/audrey/pipeline/graph.py#L293):
+[`graph.py:304`](../../src/audrey/pipeline/graph.py#L304):
 
 ```python
 async def node_planner(state: PipelineState) -> dict[str, Any]:
@@ -217,7 +217,7 @@ goes on. The planner is opt-in routing, not a hard requirement — when it
 works, it sharpens the panel; when it fails, the panel doesn't notice.
 
 When the planner *does* return subtasks, the log line at
-[`graph.py:306`](../../src/audrey/pipeline/graph.py#L306) shows the count
+[`graph.py:317`](../../src/audrey/pipeline/graph.py#L317) shows the count
 and the first 60 chars of each:
 
 ```python

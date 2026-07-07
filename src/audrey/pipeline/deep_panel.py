@@ -183,6 +183,7 @@ async def _run_one_worker(
     react_max_tool_chars: int,
     react_dispatch_timeout_s: float,
     react_compress_keep_last: int = 1,
+    react_max_web_searches: int = 0,
     user_id: str | None = None,
     cfg: Any = None,
 ) -> WorkerDraft:
@@ -213,6 +214,7 @@ async def _run_one_worker(
                     max_tool_result_chars=react_max_tool_chars,
                     tool_dispatch_timeout_s=react_dispatch_timeout_s,
                     compress_keep_last=react_compress_keep_last,
+                    max_web_searches=react_max_web_searches,
                     user_id=user_id,
                     gate=None,
                     location=location,
@@ -310,6 +312,7 @@ def _prepare_panel(
     react_max_tool_chars: int,
     react_dispatch_timeout_s: float,
     react_compress_keep_last: int,
+    react_max_web_searches: int,
     user_id: str | None,
 ) -> tuple[list[tuple[str, str]], list[Any]]:
     """Select workers and build their coroutines — shared by both run_panel variants.
@@ -373,6 +376,7 @@ def _prepare_panel(
             react_max_tool_chars=react_max_tool_chars,
             react_dispatch_timeout_s=react_dispatch_timeout_s,
             react_compress_keep_last=react_compress_keep_last,
+            react_max_web_searches=react_max_web_searches,
             user_id=user_id,
             cfg=cfg,
         )
@@ -402,6 +406,7 @@ async def run_panel(
     react_max_tool_chars: int = 2000,
     react_dispatch_timeout_s: float = 30.0,
     react_compress_keep_last: int = 1,
+    react_max_web_searches: int = 0,
     user_id: str | None = None,
 ) -> tuple[list[WorkerDraft], list[str]]:
     """Run the panel and return (drafts, attempted_models).
@@ -420,7 +425,8 @@ async def run_panel(
         react_max_rounds=react_max_rounds, react_compress_after=react_compress_after,
         react_max_tool_chars=react_max_tool_chars,
         react_dispatch_timeout_s=react_dispatch_timeout_s,
-        react_compress_keep_last=react_compress_keep_last, user_id=user_id,
+        react_compress_keep_last=react_compress_keep_last,
+        react_max_web_searches=react_max_web_searches, user_id=user_id,
     )
     if not coros:
         return [], []
@@ -450,6 +456,7 @@ async def run_panel_streaming(
     react_max_tool_chars: int = 2000,
     react_dispatch_timeout_s: float = 30.0,
     react_compress_keep_last: int = 1,
+    react_max_web_searches: int = 0,
     user_id: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Streaming variant of `run_panel`.
@@ -478,7 +485,8 @@ async def run_panel_streaming(
         react_max_rounds=react_max_rounds, react_compress_after=react_compress_after,
         react_max_tool_chars=react_max_tool_chars,
         react_dispatch_timeout_s=react_dispatch_timeout_s,
-        react_compress_keep_last=react_compress_keep_last, user_id=user_id,
+        react_compress_keep_last=react_compress_keep_last,
+        react_max_web_searches=react_max_web_searches, user_id=user_id,
     )
     if not coros:
         yield {"type": "final", "drafts": [], "attempted": []}
@@ -1052,7 +1060,14 @@ def _render_dispositions_block(
     so `hedge_or_cite_strongly` degenerates to plain hedging and counts toward
     the all-hedge suppression — otherwise a search-starved run renders a wall
     of blanket-caution lines through that dodge (observed 2026-07-06: 44 HEDGE
-    lines on `current-rust-async`, soaking the answer in "reportedly")."""
+    lines on `current-rust-async`, soaking the answer in "reportedly").
+
+    Rendered lines are deduped by normalized claim text: three workers each
+    contribute a near-identical claim ("Euclid flourished c. 300 BCE"), and a
+    repeated instruction is pure wall-padding. First occurrence wins (its
+    disposition included). Dedup affects the RENDERED lines only — the
+    all-plain/all-hedge suppression counters still see every claim, so
+    suppression semantics don't shift with worker overlap."""
     if ledger is None or not ledger.claims:
         return ""
     dropped = {
@@ -1061,6 +1076,7 @@ def _render_dispositions_block(
     }
     citable = any(_usable_url(s.url) for s in ledger.sources)
     lines: list[str] = []
+    seen_texts: set[str] = set()
     n_surviving = 0
     n_hedge = 0
     for c in ledger.claims:
@@ -1074,6 +1090,10 @@ def _render_dispositions_block(
             disposition == "hedge_or_cite_strongly" and not citable
         ):
             n_hedge += 1
+        norm = re.sub(r"[\W_]+", " ", c.text).casefold().strip()
+        if norm in seen_texts:
+            continue
+        seen_texts.add(norm)
         lines.append(f"- {_DISPOSITION_LABEL[disposition]}: {c.text.strip()}")
     # No action lines → all-plain, nothing to instruct. Every claim a plain `hedge`
     # → blanket caution (the over-hedge trap). Both: the writer's defaults cover it.
@@ -1130,6 +1150,10 @@ def _react_budget(cfg: Config, key: str, *, default_rounds: int) -> dict[str, in
         "max_tool_chars": int(rw.get("max_tool_result_chars", react.get("max_tool_result_chars", 6000))),
         "compress_keep_last": int(rw.get("compress_keep_last", react.get("compress_keep_last", 1))),
         "dispatch_timeout_s": int(rw.get("dispatch_timeout_s", react.get("dispatch_timeout_s", 30))),
+        # Per-worker cap on dispatched web_search calls (0 = unlimited).
+        # Real provider quota (Brave) is spent per call and multiplied by
+        # panel width, so the budget is enforced per worker in run_react.
+        "max_web_searches": int(rw.get("max_web_searches", react.get("max_web_searches", 0))),
     }
 
 
@@ -1217,6 +1241,7 @@ async def run_research_pipeline_streaming(
                 react_max_tool_chars=budget["max_tool_chars"],
                 react_dispatch_timeout_s=float(budget["dispatch_timeout_s"]),
                 react_compress_keep_last=budget["compress_keep_last"],
+                react_max_web_searches=budget["max_web_searches"],
                 user_id=user_id,
                 cfg=cfg,
             )
@@ -1358,6 +1383,7 @@ async def run_research_pipeline_streaming(
                     max_tool_result_chars=fc_budget["max_tool_chars"],
                     tool_dispatch_timeout_s=float(fc_budget["dispatch_timeout_s"]),
                     compress_keep_last=fc_budget["compress_keep_last"],
+                    max_web_searches=fc_budget["max_web_searches"],
                     user_id=user_id,
                     gate=None,  # gate held for the whole stage (as deep panel does)
                     location=registry.location_of(factchecker),

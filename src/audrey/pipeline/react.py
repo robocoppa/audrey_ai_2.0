@@ -72,6 +72,29 @@ def _summarize_tool_message(msg: dict[str, Any]) -> str:
     return f"[history compacted: an earlier `{name}` result is omitted here to save context]"
 
 
+# Tool message for a web_search call skipped because the per-request budget is
+# spent. Same wording discipline as the compaction stub above: nothing here may
+# read as a FAILED search ("error"/"failed"/"empty"), or the model narrates a
+# grounding failure that never happened. "Limit reached" is truthful and safe
+# to narrate. JSON-shaped like a real result body.
+_WEB_SEARCH_BUDGET_STUB = (
+    '{"note": "web_search limit for this request reached; no further web '
+    'searches will run. Answer from the evidence already gathered."}'
+)
+
+
+def _tool_name(tc: dict[str, Any]) -> str:
+    return str(((tc.get("function") or {}).get("name")) or "?")
+
+
+def _without_web_search(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """The offered-tools list minus web_search; None if nothing remains."""
+    if not tools:
+        return tools
+    kept = [t for t in tools if ((t.get("function") or {}).get("name")) != "web_search"]
+    return kept or None
+
+
 def _compress_history(messages: list[dict[str, Any]], *, keep_last_round: int) -> list[dict[str, Any]]:
     """Replace older tool messages with one-line summaries, keep the last N tool messages verbatim."""
     out: list[dict[str, Any]] = []
@@ -122,18 +145,28 @@ async def run_react(
     location: str = "local",
     cfg: Any = None,
     compress_keep_last: int = 1,
+    max_web_searches: int = 0,
 ) -> ReactResult:
     """Drive the model through up to `max_rounds` of tool use, then return the answer.
 
     Errors from individual tool calls become tool messages — the model decides
     how to recover. A network/Ollama error in the chat call propagates as
     `OllamaError` to the caller (graph node) which surfaces it as a 502.
+
+    `max_web_searches` caps how many `web_search` calls this loop will
+    dispatch (0 = unlimited). Every dispatched web search spends real
+    provider quota (Brave), and a research request multiplies the spend by
+    the panel width, so the cap is per-worker. Calls over budget are not
+    dispatched: the model gets a budget-note tool message instead, and
+    web_search stops being offered in later rounds. Other tools (kb_search,
+    memory) are free/local and never capped.
     """
     tools = registry.to_ollama_tools() if registry.by_name else None
     convo: list[dict[str, Any]] = list(messages)
     all_results: list[ToolResult] = []
     rounds_used = 0
     last_resp: dict[str, Any] = {}
+    web_searches_used = 0
 
     async with httpx.AsyncClient() as http:
         for round_idx in range(max_rounds):
@@ -173,6 +206,28 @@ async def run_react(
                 "tool_calls": tool_calls,
             })
 
+            # Spend the web_search budget in call order; stub the overflow.
+            # Stubs answer the model's call (every tool_call needs a tool
+            # message) but are NOT recorded in all_results — the tools-used
+            # footer must count real dispatches only.
+            to_dispatch: list[dict[str, Any]] = []
+            stubs: list[ToolResult] = []
+            for tc in tool_calls:
+                name = _tool_name(tc)
+                if name == "web_search" and max_web_searches > 0:
+                    if web_searches_used >= max_web_searches:
+                        stubs.append(ToolResult(
+                            name=name, call_id=tc.get("id"),
+                            content=_WEB_SEARCH_BUDGET_STUB,
+                            elapsed_s=0.0, is_error=False,
+                        ))
+                        continue
+                    web_searches_used += 1
+                to_dispatch.append(tc)
+            if stubs:
+                log.info("react: web_search budget (%d) reached for %s; skipped %d call(s)",
+                         max_web_searches, model, len(stubs))
+
             # Dispatch concurrently.
             results = await asyncio.gather(*[
                 dispatch_one(
@@ -181,12 +236,19 @@ async def run_react(
                     timeout_s=tool_dispatch_timeout_s,
                     user_id=user_id,
                 )
-                for tc in tool_calls
+                for tc in to_dispatch
             ])
             for r in results:
                 convo.append(to_tool_message(r))
                 all_results.append(r)
+            for s in stubs:
+                convo.append(to_tool_message(s))
             rounds_used += 1
+
+            # Budget spent → stop offering web_search in later rounds so the
+            # model pivots to writing (or free tools) instead of re-calling.
+            if max_web_searches > 0 and web_searches_used >= max_web_searches:
+                tools = _without_web_search(tools)
 
         # Hit max_rounds and the model is still asking for tools. Force a final
         # pass without tools so it has to commit to an answer.
