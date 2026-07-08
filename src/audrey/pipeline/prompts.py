@@ -262,8 +262,13 @@ FACTCHECK_STRUCTURE_SYSTEM = (
     "disputed authorship uses \"attributed to\", not \"authored\"; claims using "
     "\"first\"/\"only\"/\"proved\"/\"invented\"/\"founded\"/\"definitively\"/"
     "\"worldwide\"/\"complete\"/\"all\" require strong support or get a softer "
-    "`corrected_text`. Put any claim that contradicts another claim in "
-    "`fatal_errors`. Do not invent claim_ids — only reference ids from the list."
+    "`corrected_text`. When one claim contradicts another, mark EACH affected "
+    "claim \"conflicting\" (its own `ClaimCheck`) — do NOT put contradictions in "
+    "`fatal_errors`, and never let a contradiction stop you from emitting checks "
+    "for the other claims. Always return a per-claim verdict for every claim the "
+    "notes address; `fatal_errors` is only for a whole-pass failure (you could "
+    "not produce verdicts at all), and is normally empty. Do not invent "
+    "claim_ids — only reference ids from the list."
 )
 
 WRITER_SYSTEM = (
