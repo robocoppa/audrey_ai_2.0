@@ -158,6 +158,33 @@ def _norm_verdict(v: Any) -> Any:
     return "irrelevant"
 
 
+def _norm_fatal_errors(v: Any) -> Any:
+    """Coerce each `fatal_errors` entry to a one-line string. Same fail-soft
+    intent as `_norm_verdict`: one malformed entry must not sink the whole
+    fact-check. 2026-07-08 eval (`bio-euclid`, `hist-library-alexandria`): the
+    model returned a correction/conflict OBJECT here — `{'claim_ids': [...],
+    ...}` and `{'claim_id': ..., 'conflicting_claim_id': ...}` — against a
+    `list[str]` field, so Pydantic rejected the entire FactCheckResult and the
+    writer silently got NO CORRECTIONS while a fact-check with real drops/hedges
+    was discarded. We flatten dicts to a readable line (preferring a
+    message-like field, else a compact `key=value` join) rather than drop them."""
+    if not isinstance(v, list):
+        return v
+
+    def _flatten(e: Any) -> str:
+        if isinstance(e, str):
+            return e
+        if isinstance(e, dict):
+            for key in ("message", "text", "error", "detail", "reason"):
+                val = e.get(key)
+                if isinstance(val, str) and val.strip():
+                    return val.strip()
+            return "; ".join(f"{k}={v}" for k, v in e.items())
+        return str(e)
+
+    return [_flatten(e) for e in v]
+
+
 class ClaimCheck(BaseModel):
     claim_id: StrId = ""
     verdict: Annotated[Verdict, BeforeValidator(_norm_verdict)] = "irrelevant"
@@ -167,7 +194,7 @@ class ClaimCheck(BaseModel):
 
 class FactCheckResult(BaseModel):
     checks: list[ClaimCheck] = []
-    fatal_errors: list[str] = []
+    fatal_errors: Annotated[list[str], BeforeValidator(_norm_fatal_errors)] = []
 
 
 def _inline_refs(node: Any, defs: dict[str, Any]) -> Any:

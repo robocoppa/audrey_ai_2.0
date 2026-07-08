@@ -326,6 +326,38 @@ class TestParseFactCheckResult:
         assert isinstance(r, FactCheckResult)
         assert r.checks[0].verdict == "irrelevant"
 
+    def test_fatal_errors_object_entries_coerced_not_dropped(self):
+        # 2026-07-08 eval (bio-euclid, hist-library-alexandria): the model put
+        # correction/conflict OBJECTS into fatal_errors (a list[str] field), so
+        # Pydantic rejected the whole FactCheckResult and the writer silently got
+        # NO CORRECTIONS while a fact-check with real checks was discarded. The
+        # coercer flattens the dicts; crucially, `checks` must survive.
+        euclid_shape = json.dumps({
+            "checks": [{"claim_id": "w0_c3", "verdict": "unsupported"}],
+            "fatal_errors": [
+                {"claim_ids": ["w0_c3", "w0_c4"],
+                 "message": "birthplace is unknown."},
+            ],
+        })
+        r = parse_factcheck_result(euclid_shape)
+        assert isinstance(r, FactCheckResult)
+        assert len(r.checks) == 1  # the valid check is NOT lost
+        assert r.checks[0].claim_id == "w0_c3"
+        assert r.fatal_errors == ["birthplace is unknown."]
+
+        # library shape: no message-like key → compact key=value flatten.
+        library_shape = json.dumps({
+            "checks": [{"claim_id": "w2_claim-1", "verdict": "supported"}],
+            "fatal_errors": [
+                {"claim_id": "w2_claim-10", "conflicting_claim_id": "w0_c6"},
+            ],
+        })
+        r = parse_factcheck_result(library_shape)
+        assert isinstance(r, FactCheckResult)
+        assert len(r.checks) == 1
+        assert "w2_claim-10" in r.fatal_errors[0]
+        assert "w0_c6" in r.fatal_errors[0]
+
     def test_garbage_returns_none(self):
         assert parse_factcheck_result("¯\\_(ツ)_/¯") is None
 

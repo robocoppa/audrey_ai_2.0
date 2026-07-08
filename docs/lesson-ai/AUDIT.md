@@ -93,6 +93,16 @@ findings, so they're hand-verified.)
 
 - **`consider` - CODEBASE: planner local Ollama call bypasses the fair gate -> `open` (validated still-live 2026-06-25).** `planner.py:60` calls `ollama.chat(...)` with no `gate.acquire()` wrapper anywhere in the function. If the planner model is local, that call contends with gated local fast/deep/synth/ReAct calls ungoverned. Suggested drain: decide whether planner calls should accept/use `FairLocalGate`, or pin planner config to cloud/small local models intentionally.
 
+#### Surfaced during run-7 research-eval work — 2026-07-08 (not lesson-driven)
+
+Two pre-existing problems hit while fixing S4 (fact-check parser). Neither was
+introduced this session — both confirmed failing on clean `main` (HEAD
+`e954975`). Logged here so they aren't lost; not yet drained.
+
+- **`should-fix` - CODEBASE: `test_research_stream_no_trace_block_by_default` fails on clean `main` -> `open` (2026-07-08).** [`tests/test_research_stream.py`](../../tests/test_research_stream.py) — the `_FakeOllama.chat()` test double raises `TypeError: got an unexpected keyword argument 'format'`; production now passes `format=` (the Ollama structured-output schema) but the double's signature was never updated. Confirmed pre-existing by stashing the S4 edits and re-running: identical failure at HEAD. Suggested drain: add `format=None` (or `**kwargs`) to the `_FakeOllama.chat` signature.
+
+- **`should-fix` - LESSON 17: ~104 stale cites (drift/drift?) into `prompts.py` / `deep_panel.py` -> `open` (2026-07-08).** `scripts/check-lesson-links.py` reports 5 `DRIFT` + 99 `DRIFT?` for [`docs/lesson-ai/lesson-17-research-mode.md`](lesson-17-research-mode.md), all pointing at `prompts.py` / `deep_panel.py` lines shifted by the research-trace plumbing commits (e.g. `prompts.py#L174`, `deep_panel.py#L1315`, `#L1468`). Zero drift is attributable to the S4 `ledger.py` edit (checked: `ledger.py` cites did not move). Suggested drain: re-anchor lesson-17's `file:line` cites against current source, per the standing "re-anchor by hand after source edits" rule.
+
 #### Lesson 15 — synth event-loop spin-poll (optimization, deferred-by-trigger)
 
 - **`optimization` — the synth event-loop polls with 50ms timeouts instead of `wait` with FIRST_COMPLETED -> `open` (validated still-live 2026-06-25).** [`routes/openai/pipeline.py:649`](../../src/audrey/routes/openai/pipeline.py#L649) loops on `await asyncio.wait_for(events_q.get(), timeout=0.05)` while draining the banner queue; same pattern in [`_drain_q_until_task` at routes/openai/pipeline.py:794](../../src/audrey/routes/openai/pipeline.py#L794). Functionally correct (50ms is small enough that banners don't visibly lag), but it's a spin-poll at ~20 wakeups/sec per active deep stream; the cleaner shape is `asyncio.wait({task_get, banner_q_get}, return_when=FIRST_COMPLETED)`. Cost is near-zero, so this is principle-driven, not performance-driven. **Deferral trigger:** revisit when Grafana's asyncio task-wakeup count climbs under streaming load correlated with concurrent deep streams — the rewrite has real complexity risk (interleaving two queues with explicit drain semantics), so pay it only when measurement justifies it.
