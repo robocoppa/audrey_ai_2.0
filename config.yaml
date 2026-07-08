@@ -254,7 +254,7 @@ agentic:
   # vs aggressive claim drops vs writer timidity) from the answer artifact
   # alone. Client-visible only, never written to the chat archive.
   # Off by default; flip for an eval window (restart, no rebuild), flip back.
-  debug_research_trace: false
+  debug_research_trace: true
   react:
     max_rounds: 3
     compress_after_round: 2
@@ -295,16 +295,23 @@ agentic:
       max_rounds: 5
       compress_after_round: 3
       max_tool_result_chars: 6000
-      # Keep the *three* most recent search rounds verbatim (not just one).
-      # A researcher runs up to 5 rounds; at keep_last=1 a heavy-search worker
-      # had all but its final round compacted before it wrote its findings,
-      # then narrated the compaction stub as "searches returned elided
-      # results" (the current-2025-recent regression, 2026-06-30). Raised
-      # 2→3 (2026-07-07) after a worker refused to answer because its own
-      # early-round results were compacted away (the parallel-postulate
-      # deepseek refusal, run 3). Research mode is thoroughness-first, so the
-      # extra context budget is worth it; watch per-case latency.
-      compress_keep_last: 3
+      # Keep ALL search rounds verbatim: keep_last == max_rounds means a
+      # researcher (≤5 rounds) never has a round replaced by the contentless
+      # compaction stub (react._summarize_tool_message drops the payload —
+      # URLs and all). This is the terminal fix for a recurring failure: at
+      # keep_last=1 a heavy-search worker had all but its final round compacted
+      # before it wrote its findings, then narrated the stub as "searches
+      # returned elided results" (current-2025-recent regression, 2026-06-30);
+      # raised 2→3 (2026-07-07) after a worker refused because its early-round
+      # results were compacted away (parallel-postulate deepseek refusal, run
+      # 3); the run-6 gate (2026-07-08) still showed "compacted out before I
+      # could read them" narrations at keep_last=3 (pythagoras/archimedes/
+      # library/current-2025). Each prior bump only shrank the eviction window;
+      # keep_last=5 closes it. The Stage-2 "notes are your working memory"
+      # prompt nudge is now belt-and-suspenders, not load-bearing. Research
+      # mode is thoroughness-first; the extra context budget is worth it, watch
+      # per-case latency. If max_rounds ever rises, raise this in lockstep.
+      compress_keep_last: 5
       # 3 researchers × 6 searches ≤ 18 Brave calls per research request
       # (plus the fact-checker's 4) — tops out ≈22, still half the 30–45
       # pre-cap. Raised 4→6 (2026-07-08): Brave renewed as primary with
