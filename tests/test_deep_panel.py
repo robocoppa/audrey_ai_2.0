@@ -823,12 +823,74 @@ def test_has_corrections_recognizes_drop():
 def test_render_claims_includes_ids_and_no_source_marker():
     from audrey.pipeline.deep_panel import _render_claims_for_factcheck
     from audrey.pipeline.ledger import Claim, Source
-    led = _ledger_with(Claim(id="c1", text="grounded", source_ids=["s1"], risk="high"),
-                       Claim(id="c2", text="ungrounded"))
-    led.sources = [Source(id="s1", title="T", url="https://e.com", source_type="official")]
-    out = _render_claims_for_factcheck(led)
+    claims = [Claim(id="c1", text="grounded", source_ids=["s1"], risk="high"),
+              Claim(id="c2", text="ungrounded")]
+    sources = [Source(id="s1", title="T", url="https://e.com", source_type="official")]
+    out = _render_claims_for_factcheck(claims, sources)
     assert "c1" in out and "c2" in out
     assert "[no source]" in out  # c2 has none
+
+
+def test_render_claims_shows_all_sources_for_a_batch():
+    # A batch is judged against the FULL source set, not just the sources its
+    # own claims cite — so both sources must render even though the single claim
+    # in this batch cites neither.
+    from audrey.pipeline.deep_panel import _render_claims_for_factcheck
+    from audrey.pipeline.ledger import Claim, Source
+    claims = [Claim(id="c9", text="a claim", source_ids=[])]
+    sources = [Source(id="s1", title="One", url="https://a.com", source_type="official"),
+               Source(id="s2", title="Two", url="https://b.com", source_type="reference")]
+    out = _render_claims_for_factcheck(claims, sources)
+    assert "s1" in out and "s2" in out
+
+
+async def test_structure_factcheck_chunks_and_merges():
+    # 2026-07-08 eval: a single structuring call over a 75+-claim ancient-bio
+    # ledger collapsed to an empty checks array, losing every fact-check verdict.
+    # Batching must (a) split the ledger, (b) merge all batches' checks, and
+    # (c) survive one batch collapsing to empty — the other batches' verdicts
+    # must still reach the caller.
+    import json
+
+    from audrey.pipeline.deep_panel import (
+        _FACTCHECK_STRUCTURE_BATCH,
+        _structure_factcheck,
+    )
+    from audrey.pipeline.ledger import Claim
+
+    n = _FACTCHECK_STRUCTURE_BATCH + 3  # forces a second batch
+    claims = [Claim(id=f"c{i}", text=f"claim {i}", risk="low") for i in range(n)]
+    led = _ledger_with(*claims)
+
+    class _BatchFake:
+        """Returns a `supported` verdict for every claim_id it is ASKED about,
+        except the second batch, which returns an empty checks array (the
+        collapse we're guarding against)."""
+        def __init__(self):
+            self.batch_calls = 0
+
+        async def chat(self, *, model, messages, options=None, timeout_s=0, tools=None, format=None):
+            self.batch_calls += 1
+            user = messages[-1]["content"]
+            asked = [c.id for c in claims if f"- {c.id} (" in user]
+            if self.batch_calls == 2:  # simulate a collapsed batch
+                asked = []
+            body = {"checks": [{"claim_id": cid, "verdict": "supported"} for cid in asked],
+                    "fatal_errors": []}
+            return {"message": {"content": json.dumps(body)}, "prompt_eval_count": 1, "eval_count": 1}
+
+    fake = _BatchFake()
+    fc = await _structure_factcheck(
+        fake, HealthTracker(), FairLocalGate(concurrency=1), _Cfg({}),
+        model="fc", location="cloud", ledger=led,
+        fc_notes="notes", timeout_s=1, user_id=None,
+    )
+    assert fc is not None
+    assert fake.batch_calls == 2  # split into two batches
+    checked = {c.claim_id for c in fc.checks}
+    # First batch's 15 claims survived even though the second batch collapsed.
+    assert len(checked) == _FACTCHECK_STRUCTURE_BATCH
+    assert "c0" in checked and f"c{_FACTCHECK_STRUCTURE_BATCH - 1}" in checked
 
 
 # ── Worker-reply think-stripping ───────────────────────────────────────

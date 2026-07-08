@@ -815,22 +815,33 @@ def _factcheck_user_block(user_text: str, findings: str, critique: str) -> str:
     return "\n".join(parts)
 
 
-def _render_claims_for_factcheck(ledger: ResearchResult) -> str:
+def _render_claims_for_factcheck(claims: list[Claim], sources: list[Source]) -> str:
     """A compact claim list (id, risk, text) for the fact-check structuring
-    prompt to reference by claim_id. Sources appended so the checker can judge
-    support without re-fetching."""
+    prompt to reference by claim_id. `claims` is the batch to verdict; `sources`
+    is the FULL source set (a batch is judged against all sources, not just the
+    ones its claims cite). Sources appended so the checker can judge support
+    without re-fetching."""
     lines = ["CLAIMS:"]
-    for c in ledger.claims:
+    for c in claims:
         src = f" [sources: {', '.join(c.source_ids)}]" if c.source_ids else " [no source]"
         lines.append(f"- {c.id} (risk={c.risk}): {c.text}{src}")
-    if ledger.sources:
+    if sources:
         lines.append("\nSOURCES:")
-        for s in ledger.sources:
+        for s in sources:
             lines.append(f"- {s.id} ({s.source_type}): {s.title} — {s.url}")
     return "\n".join(lines)
 
 
-async def _structure_factcheck(
+# Claims per structuring call. A single call over a whole 75–95-claim ancient-bio
+# ledger reliably collapsed to a near-empty `checks` array (2026-07-08 eval:
+# euclid/pythagoras/archimedes returned zero verdicts, so the fact-checker's
+# CORRECT/DROP judgments were lost and only the deterministic hedge path
+# survived). Batching keeps each call small enough that the model fills every
+# verdict, and a collapse in one batch can't zero the others.
+_FACTCHECK_STRUCTURE_BATCH = 15
+
+
+async def _structure_factcheck_batch(
     ollama: OllamaClient,
     health: HealthTracker,
     gate: FairLocalGate,
@@ -838,19 +849,19 @@ async def _structure_factcheck(
     *,
     model: str,
     location: str,
-    ledger: ResearchResult,
+    claims: list[Claim],
+    sources: list[Source],
     fc_notes: str,
     timeout_s: float,
     user_id: str | None,
 ) -> FactCheckResult | None:
-    """Convert the fact-checker's prose notes into a FactCheckResult keyed to
-    the claim ledger. Second mechanical pass (no tools), pinned to the
-    FactCheckResult schema. Fail-soft: any error returns None and the caller
-    keeps the prose corrections path."""
-    if not ledger.claims:
+    """Structure one batch of claims into a FactCheckResult. Second mechanical
+    pass (no tools), pinned to the FactCheckResult schema. Fail-soft: any error
+    returns None so the chunked caller can keep the batches that succeeded."""
+    if not claims:
         return None
     block = (
-        f"{_render_claims_for_factcheck(ledger)}\n\n"
+        f"{_render_claims_for_factcheck(claims, sources)}\n\n"
         f"FACT-CHECKER NOTES:\n{fc_notes.strip()}\n\n"
         "Return the per-claim verdict list as JSON."
     )
@@ -881,6 +892,52 @@ async def _structure_factcheck(
             len(raw), raw[:200], raw[-120:],
         )
     return result
+
+
+async def _structure_factcheck(
+    ollama: OllamaClient,
+    health: HealthTracker,
+    gate: FairLocalGate,
+    cfg: Config,
+    *,
+    model: str,
+    location: str,
+    ledger: ResearchResult,
+    fc_notes: str,
+    timeout_s: float,
+    user_id: str | None,
+) -> FactCheckResult | None:
+    """Convert the fact-checker's prose notes into a FactCheckResult keyed to
+    the claim ledger, structuring in `_FACTCHECK_STRUCTURE_BATCH`-claim chunks
+    and merging the results (see the batch-size comment). Every batch sees the
+    full source set. Fail-soft: returns None only if EVERY batch failed — a
+    partial merge still reaches the writer. Order-preserving; `fatal_errors`
+    concatenate across batches. Runs after the fact-checker's ReAct loop."""
+    if not ledger.claims:
+        return None
+    batches = [
+        ledger.claims[i:i + _FACTCHECK_STRUCTURE_BATCH]
+        for i in range(0, len(ledger.claims), _FACTCHECK_STRUCTURE_BATCH)
+    ]
+    coros = [
+        _structure_factcheck_batch(
+            ollama, health, gate, cfg,
+            model=model, location=location,
+            claims=batch, sources=ledger.sources, fc_notes=fc_notes,
+            timeout_s=timeout_s, user_id=user_id,
+        )
+        for batch in batches
+    ]
+    results = await asyncio.gather(*coros)
+    if all(r is None for r in results):
+        return None
+    merged = FactCheckResult()
+    for r in results:
+        if r is None:
+            continue
+        merged.checks.extend(r.checks)
+        merged.fatal_errors.extend(r.fatal_errors)
+    return merged
 
 
 def _factcheck_result_to_corrections(fc: FactCheckResult, ledger: ResearchResult) -> str:
