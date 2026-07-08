@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ValidationError
@@ -228,31 +229,52 @@ def _backfill_ids(r: ResearchResult) -> ResearchResult:
 
 def _repair_source_links(r: ResearchResult) -> ResearchResult:
     """Re-point `claim.source_ids` entries that name a source by TITLE, URL,
-    or a case-variant of its id — observed failure shapes. 2026-07-06 eval
-    (`current-rust-async`): the model wrote
-    `source_ids: ["Glommio repository (Datadog)"]` while the source itself was
-    `{id: "s3", title: "Glommio repository (Datadog)"}`. 2026-07-07 eval
-    (`bio-euclid`, `bio-pythagoras`): claims cited `S1` against a source whose
-    id was `s1` — the id itself is an alias so the lowercased lookup repairs
-    case variants. Unrepaired, the bad refs poison every downstream consumer
-    at once: `_surviving_source_ids` keeps garbage (defeating the render-all
-    fallback), and `_source_types_for_claim` finds no backing so
-    `hedge_policy` hedges claims that actually had authoritative sources.
-    Best-effort and pure: entries that match nothing are kept as-is
-    (downstream treats unknown ids as no-linkage). Runs after `_backfill_ids`
-    so every source has an id."""
+    a case-variant of its id, or a `src{N}`/`source{N}` variant of an `s{N}`
+    id — observed failure shapes. 2026-07-06 eval (`current-rust-async`): the
+    model wrote `source_ids: ["Glommio repository (Datadog)"]` while the
+    source itself was `{id: "s3", title: "Glommio repository (Datadog)"}`.
+    2026-07-07 eval (`bio-euclid`, `bio-pythagoras`): claims cited `S1`
+    against a source whose id was `s1` — the id itself is an alias so the
+    lowercased lookup repairs case variants. 2026-07-07 second run
+    (`bio-euclid`, `tech-transformer-attention`): claims cited `SRC-1` /
+    `src_1` against a source whose id was `s1` (the `_backfill_ids` shape) —
+    the number-suffix aliases below repair that spelling. Unrepaired, the bad
+    refs poison every downstream consumer at once: `_surviving_source_ids`
+    keeps garbage (defeating the render-all fallback), and
+    `_source_types_for_claim` finds no backing so `hedge_policy` hedges claims
+    that actually had authoritative sources. Best-effort and pure: entries
+    that match nothing are kept as-is (downstream treats unknown ids as
+    no-linkage). Runs after `_backfill_ids` so every source has an id."""
     ids = {s.id for s in r.sources}
+    # Exact aliases (id / title / URL), matched on `.strip().lower()`.
     by_alias: dict[str, str] = {}
+    # Separate map for the `src{N}`/`source{N}`↔`s{N}` shape, keyed on the
+    # punctuation-stripped form so `SRC-1`, `src_1`, `source1` all collapse to
+    # `src1`/`source1`. Kept apart from `by_alias` so the aggressive
+    # punctuation strip can't collide with a title that happens to reduce to
+    # the same letters.
+    by_num_ref: dict[str, str] = {}
     for s in r.sources:
         for alias in (s.id, s.title, s.url):
             a = alias.strip().lower()
             if a:
                 by_alias.setdefault(a, s.id)
+        m = re.fullmatch(r"s(\d+)", s.id.strip().lower())
+        if m:
+            by_num_ref.setdefault(f"src{m.group(1)}", s.id)
+            by_num_ref.setdefault(f"source{m.group(1)}", s.id)
+
+    def _resolve(sid: str) -> str:
+        if sid in ids:
+            return sid
+        hit = by_alias.get(sid.strip().lower())
+        if hit:
+            return hit
+        num = by_num_ref.get(re.sub(r"[\W_]+", "", sid).lower())
+        return num or sid
+
     for c in r.claims:
-        c.source_ids = [
-            sid if sid in ids else by_alias.get(sid.strip().lower(), sid)
-            for sid in c.source_ids
-        ]
+        c.source_ids = [_resolve(sid) for sid in c.source_ids]
     return r
 
 

@@ -13,9 +13,15 @@
 > awaiting deploy):** id added to the repair alias map; merge now remaps
 > dropped→canonical, folds `supports`, and lets a typed duplicate upgrade a
 > canonical `unknown` — pinned with the captured run-4 shapes (one eval
-> gate). **S1** box greps still pending (euclid + library aborted
-> fact-check again). **S4** stays deferred — post-A+B walls look like
-> legitimate uncertainty.
+> gate). **Run-5 gate (2026-07-07 second run): Bug-B remap VERIFIED in 3
+> ledgers; transformer 30→17 "reportedly" (partial — a NEW `src{N}`-vs-`s{N}`
+> orphan shape appeared), and the cap→tool-pivot→compaction interaction MET
+> the S5-fallback trigger (prompt nudge to restate facts+URLs per round).
+> Next proposed: src-alias extension + S5 nudge, one gate — see
+> [run-5 report](../testing/2026-07-07-audrey_research-onbox-run2-report.md).**
+> **S1** box greps still pending (pythagoras + library no-verdicts this
+> run). **S4** stays deferred — post-A+B walls look like legitimate
+> uncertainty.
 >
 > _(Previous status: user approved with the S0-cap scope change — Brave-key
 > renewal conditional on the per-request cap: research 4/worker, deep 3,

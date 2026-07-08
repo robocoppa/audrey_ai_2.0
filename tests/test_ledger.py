@@ -189,6 +189,45 @@ class TestParseResearchResult:
         r = parse_research_result(raw)
         assert r.claims[0].source_ids == ["s1"]
 
+    def test_src_and_source_number_refs_repaired(self):
+        # The 2026-07-07 second-run shape (euclid/transformer/pythagoras):
+        # a claim cites a positional source as "SRC-2" / "src_1" / "source3"
+        # while the backfilled id is "s2" / "s1" / "s3". The punctuation-
+        # stripped src{N}/source{N} alias resolves all these spellings.
+        raw = json.dumps({
+            "claims": [
+                {"id": "c1", "text": "a", "risk": "low", "source_ids": ["SRC-2"]},
+                {"id": "c2", "text": "b", "risk": "low", "source_ids": ["src_1"]},
+                {"id": "c3", "text": "c", "risk": "low", "source_ids": ["source3"]},
+            ],
+            "sources": [
+                {"id": "s1", "title": "T1", "url": "https://e.com/1",
+                 "source_type": "reference"},
+                {"id": "s2", "title": "T2", "url": "https://e.com/2",
+                 "source_type": "reference"},
+                {"id": "s3", "title": "T3", "url": "https://e.com/3",
+                 "source_type": "reference"},
+            ],
+        })
+        r = parse_research_result(raw)
+        assert [c.source_ids for c in r.claims] == [["s2"], ["s1"], ["s3"]]
+
+    def test_real_src_prefixed_id_not_shadowed_by_num_alias(self):
+        # A genuine source whose id IS "src2" must win over the src{N} alias
+        # for a positional "s2" source — exact-id match takes priority.
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "x", "risk": "low",
+                        "source_ids": ["src2"]}],
+            "sources": [
+                {"id": "s2", "title": "positional", "url": "https://e.com/a",
+                 "source_type": "reference"},
+                {"id": "src2", "title": "real", "url": "https://e.com/b",
+                 "source_type": "reference"},
+            ],
+        })
+        r = parse_research_result(raw)
+        assert r.claims[0].source_ids == ["src2"]
+
     def test_unresolvable_source_id_kept_as_is(self):
         # Garbage refs stay put — downstream treats unknown ids as no-linkage.
         raw = json.dumps({
