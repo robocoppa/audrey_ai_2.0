@@ -60,6 +60,15 @@ class ReactResult:
     eval_count: int = 0
 
 
+def _debug_research_trace(cfg: Any) -> bool:
+    """True when `agentic.debug_research_trace` is on. Defensive against a
+    missing/None cfg so the diagnostic can never break the researcher loop."""
+    try:
+        return bool(cfg.raw.get("agentic", {}).get("debug_research_trace", False))
+    except AttributeError:
+        return False
+
+
 def _summarize_tool_message(msg: dict[str, Any]) -> str:
     # Replaces an older tool result during history compaction (see
     # _compress_history). Wording is deliberate: a model that quotes its own
@@ -172,6 +181,18 @@ async def run_react(
         for round_idx in range(max_rounds):
             if round_idx >= compress_after_round:
                 convo = _compress_history(convo, keep_last_round=compress_keep_last)
+
+            # When the research-trace debug flag is on, log the web_search tool
+            # content actually in the model's context this round — so a thin
+            # ledger can be diagnosed as "grounding never reached the model"
+            # vs. "model discarded grounding it received". Read-only over
+            # `convo`; ships dark with the flag (agentic.debug_research_trace).
+            if _debug_research_trace(cfg):
+                for _m in convo:
+                    if _m.get("role") == "tool" and "url" in str(_m.get("content", "")).lower():
+                        _c = str(_m.get("content", ""))
+                        log.info("research-trace: model=%s round=%d web_search in context: %d chars, head=%r",
+                                 model, round_idx, len(_c), _c[:200])
 
             start = time.monotonic()
             try:
