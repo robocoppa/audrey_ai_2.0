@@ -72,45 +72,64 @@ never wiping the whole pass.
 
 ---
 
-## Why euclid and archimedes show `sources:0` (grounding, not the fix)
+## Why euclid and archimedes show `sources:0` (CORRECTED: structuring, not grounding)
 
-This is upstream of the structuring pass and is **not** a regression — it's the
-known intermittent-grounding story. The chain:
+> **Correction (2026-07-09 run, with `debug_research_trace` on).** The original
+> version of this section attributed the euclid/archimedes `sources:0` to
+> SearXNG upstream throttle ("`200 + 0 results`", "Brave-key renewal is the
+> cure"). **That diagnosis was wrong.** The research-trace debug block, which
+> logs the web_search tool content actually present in each researcher's model
+> context and renders the merged ledger, shows the opposite: grounding *reached
+> the model*. In the 2026-07-09 run the same two topics returned `sources:8`
+> each, with the researchers' notes full of real URLs
+> (`en.wikipedia.org/wiki/Euclid`, `britannica.com/biography/Euclid`,
+> `plato.stanford.edu/entries/euclid/`, the Walters palimpsest site, …). SearXNG
+> was never the failure. The real defect is downstream, in the notes→ledger
+> **structuring pass**.
 
-1. **web_search returned empty / irrelevant, not errored.** Every researcher's
-   footer shows `web_search ✅6` (euclid) / `✅6` / `✅5 ❌1` (archimedes) — the
-   calls succeeded at the HTTP level. But the researchers' own notes say the
-   payloads were empty: euclid/deepseek "web searches… returned no usable
-   results"; euclid/glm "my web-search quota for this turn was hit after a few
-   calls, and the knowledge base had no Euclid material"; archimedes/glm "the
-   web searches came back empty… the KB hits were irrelevant (PowerApps entity
-   references, mineralogy textbooks)." A `200 + 0 results` is the documented
-   SearXNG upstream-throttle signature, and the footer's `✅/❌` counts
-   `is_error` only, so an empty 200 shows green.
+The corrected chain:
 
-2. **No retrieved pages → training-data fallback → `no url` sources.** With
-   nothing retrieved, the researchers cited scholarly works by name (Heath,
-   Bulmer-Thomas, Proclus, Netz…) with `— no url`, `supports: none`. Every
-   source in the euclid and archimedes ledgers is a `no url` reference.
+1. **Grounding arrived; the structuring pass dropped it for one worker.** The
+   notes→`ResearchResult` pass (`_structure_one_draft`) converts each
+   researcher's prose SOURCES block into a structured `sources` array. For the
+   qwen worker (`w2_`), that pass intermittently emits **content-free source
+   rows** — the 2026-07-09 trace shows them as `w2_, (unknown) untitled — no
+   url` (a stray token became the `id`; title and url came back empty) even
+   though qwen's *prose* notes for the same query carry real URLs. The
+   fail-soft `Source` schema — every field defaulted so one `url: null` can't
+   discard the whole worker (the 2/3-drop guard in `ledger.py`) — is now *too*
+   tolerant: it resurrects an empty row instead of dropping it.
 
-3. **The `sources:N` counter only counts URL-bearing retrieved sources.**
-   Named-but-unretrieved references don't qualify, so the footer reads
-   `sources:0`.
+2. **The `sources:N` counter only counts URL-bearing rows.** An empty
+   `— no url` row doesn't qualify. When the *other* workers' clean sources also
+   failed to carry (or in run 10 hadn't been structured at all), the footer read
+   `sources:0`. In the 2026-07-09 run deepseek+glm's clean rows carried the
+   count to `8`, while qwen's rows were *still* malformed — which is exactly why
+   the failure looked topic-specific and intermittent.
 
-**Pythagoras is the tell:** same topic, same session, but `sources:1` because
-one researcher (glm) *did* retrieve the SEP page with a real URL
-(`https://plato.stanford.edu/entries/pythagoras/`) while its siblings came up
-empty. Same query, different luck against the throttled upstream — the
-signature of intermittent rate-limiting, not a dead SearXNG. Nothing to
-restart; the cure is Brave-key renewal. See memory
-`project_searxng_upstream_throttle`.
+3. **This is per-worker and non-deterministic**, so it masqueraded as "luck
+   against a throttled upstream." It is not. There is nothing to restart and no
+   Brave key to renew; the fix is in `ledger.py` (drop content-free sources;
+   see the S5 ledger-hardening change).
+
+**Pythagoras in run 10** (`sources:1`) fits the corrected story: one worker's
+clean URL survived structuring while its siblings' rows were dropped or empty —
+a structuring outcome, not a retrieval one.
+
+A genuinely ungrounded case *does* exist and is now distinguishable from this
+bug: `hist-parallel-postulate` and `current-rust-async` (2026-07-09 run) show
+`sources:0` where **all three** researchers' notes explicitly report empty
+web_search + irrelevant KB, and the answers hedge the whole body. That is the
+pipeline degrading correctly on real grounding loss — a different failure from
+the structuring drop, and only tellable apart now that the trace shows what
+reached the model.
 
 Crucially, the pipeline **degraded correctly** on the ungrounded cases: every
 ancient-bio answer opens with a hedge banner ("I couldn't fully verify these
 details against retrieved sources"), the fact-check pass hedged the anecdotes
 and dropped the unsupported specifics, and nothing was fabricated. Thin
-grounding is a quality ceiling on these three answers, not a correctness bug —
-and it is orthogonal to the structuring fix this run confirms.
+grounding is a quality ceiling on those answers, not a correctness bug — and it
+is orthogonal to the structuring fix this run confirms.
 
 ---
 

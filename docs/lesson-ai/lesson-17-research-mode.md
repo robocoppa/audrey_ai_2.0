@@ -99,9 +99,9 @@ facts — it only re-expresses what the researcher already found as claims and
 sources.
 
 The ledger types live in [`ledger.py`](../../src/audrey/pipeline/ledger.py): a
-[`Claim`](../../src/audrey/pipeline/ledger.py#L134) carries its text, the
+[`Claim`](../../src/audrey/pipeline/ledger.py#L135) carries its text, the
 `source_ids` that back it, a `risk` rating, and a `needs_hedge` flag; a
-[`Source`](../../src/audrey/pipeline/ledger.py#L119) carries a title, URL, and a
+[`Source`](../../src/audrey/pipeline/ledger.py#L120) carries a title, URL, and a
 `source_type` (official, primary_paper, scholarly, reference, news,
 company_claim, …). The controlling idea, stated at the top of the file: **the
 ledger is internal scaffolding the models reason over — it is not user-facing.**
@@ -115,7 +115,7 @@ writer makes it read well.
 > decoder, which constrains it to emit JSON matching that shape. There's a
 > sharp edge — schema `$ref`s (the references Pydantic generates for nested
 > models) aren't reliably handled across different models, so
-> [`inlined_schema`](../../src/audrey/pipeline/ledger.py#L193) flattens every
+> [`inlined_schema`](../../src/audrey/pipeline/ledger.py#L221) flattens every
 > `$ref` into an inline copy first. Some models choke on the nested form and
 > handle the flat one; inlining makes the call portable across the panel.
 
@@ -126,8 +126,8 @@ writer makes it read well.
 > field — losing everything that worker found because one URL was null. The
 > ledger refuses to pay that price: nearly every field has a `BeforeValidator`
 > that *coerces* instead of rejecting — see
-> [`_to_str_or_empty`](../../src/audrey/pipeline/ledger.py#L43) (null/int URL →
-> usable value) and [`_norm_risk`](../../src/audrey/pipeline/ledger.py#L106)
+> [`_to_str_or_empty`](../../src/audrey/pipeline/ledger.py#L44) (null/int URL →
+> usable value) and [`_norm_risk`](../../src/audrey/pipeline/ledger.py#L107)
 > (off-enum risk → a sane default). The rule it encodes: **one malformed field
 > must never throw away a whole worker's work.** A blank URL is harmless — we
 > sanity-check URL shape later, when we decide what to show the user, not here.
@@ -164,7 +164,7 @@ and proceeds, exactly as the verify → write flow did before.
 
 When a ledger exists, the prose corrections are structured back against it
 ([`deep_panel.py:1315`](../../src/audrey/pipeline/deep_panel.py#L1315)) into a
-[`FactCheckResult`](../../src/audrey/pipeline/ledger.py#L167) — per-claim
+[`FactCheckResult`](../../src/audrey/pipeline/ledger.py#L195) — per-claim
 verdicts like `supported`, `unsupported`, `needs_hedge`. Those verdicts are what
 let the next steps drop an unsupported claim from the Sources list and soften a
 shaky one. As everywhere, this is fail-soft: any problem keeps the plain prose
@@ -198,7 +198,7 @@ surviving sourced claim, so no empty Sources header sprouts on a birthday toast.
 ([`config.yaml:233`](../../config.yaml#L233)), each surviving claim gets a
 *disposition* — state it plainly, attribute it to its source, or hedge it —
 from the pure function
-[`hedge_policy`](../../src/audrey/pipeline/ledger.py#L375). The rules are ordered
+[`hedge_policy`](../../src/audrey/pipeline/ledger.py#L437). The rules are ordered
 and small: a vendor's own claim is *attributed*, never endorsed; a claim flagged
 `needs_hedge` is softened; a high-risk claim hedges unless a strong source
 carries it; an authoritative, non-high-risk claim is stated plainly; everything
@@ -273,7 +273,7 @@ URL is `null`. What happens to that worker's claims, and why isn't the whole
 worker dropped?**
 
 Nothing is dropped. The `Source.url` field has a `BeforeValidator`
-([`_to_str_or_empty`](../../src/audrey/pipeline/ledger.py#L43)) that coerces a
+([`_to_str_or_empty`](../../src/audrey/pipeline/ledger.py#L44)) that coerces a
 `null` (or an integer) URL into an empty string instead of letting Pydantic
 raise. Without it, one null URL would `ValidationError` the entire
 `ResearchResult` and discard everything that worker found — see the §2.2
@@ -327,7 +327,7 @@ from it — it spends effort tracking citations and pads with weak sources to
 satisfy the instruction, instead of writing well (the §2.5 spotlight). Pushing
 the deterministic decisions into pure functions
 ([`_render_sources_block`](../../src/audrey/pipeline/deep_panel.py#L994),
-[`hedge_policy`](../../src/audrey/pipeline/ledger.py#L375)) keeps the writer
+[`hedge_policy`](../../src/audrey/pipeline/ledger.py#L437)) keeps the writer
 focused on prose *and* makes those decisions unit-testable, which a prompt never
 is. The principle: if you can compute it from data, compute it — don't ask the
 model.

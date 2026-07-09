@@ -240,17 +240,52 @@ def _strip_fence(s: str) -> str:
 
 def _backfill_ids(r: ResearchResult) -> ResearchResult:
     """Give every claim/source a stable id when the model omitted one, and drop
-    claims with no text. Models often write the content but skip `id`; we assign
-    positional ids (`c1`, `c2`, `s1`, …) so downstream id-linkage (source_ids,
-    claim_id verdicts) still has something to reference. Pure (returns r mutated;
-    r is freshly parsed, not shared)."""
+    claims with no text and sources with no content. Models often write the
+    content but skip `id`; we assign positional ids (`c1`, `c2`, `s1`, …) so
+    downstream id-linkage (source_ids, claim_id verdicts) still has something to
+    reference. Pure (returns r mutated; r is freshly parsed, not shared).
+
+    Dropping content-free sources: the fail-soft `Source` schema defaults every
+    field (so one `url: null` can't discard the whole worker ledger — the
+    2/3-drop guard), but that also lets a source with NO title AND NO url
+    validate cleanly. 2026-07-09 trace run (`bio-euclid`, `hist-library-alexandria`):
+    the qwen structuring pass emitted rows that rendered as `w2_, untitled — no
+    url` (a stray token became the id) — content-free artifacts the too-tolerant
+    schema resurrected, inflating the ledger with sources that back nothing and
+    read as broken. A source with neither a title nor a url is not a source; drop
+    it. A real source with a url but a blank title (the null-title case the
+    schema tolerates) still survives — only the entirely-empty rows go."""
     r.claims = [c for c in r.claims if c.text.strip()]
+    r.sources = [s for s in r.sources if s.title.strip() or s.url.strip()]
     for i, c in enumerate(r.claims, 1):
         if not c.id:
             c.id = f"c{i}"
     for i, s in enumerate(r.sources, 1):
         if not s.id:
             s.id = f"s{i}"
+    return r
+
+
+def _backfill_supports(r: ResearchResult) -> ResearchResult:
+    """Populate each source's `supports` from the claims that cite it, so the
+    source→claim index is complete regardless of what the model emitted.
+
+    Models reliably fill `claim.source_ids` (the claim→source direction) but
+    routinely leave `source.supports` empty — 2026-07-09 trace run showed
+    `supports: none` on EVERY source across every ledger, even where claims
+    clearly cited them. Any consumer reading the source→claim direction (or a
+    human reading the rendered ledger) then sees no linkage. We invert
+    `source_ids` into `supports`: for each claim, add its id to every source it
+    cites. Runs AFTER `_repair_source_links`, so `source_ids` already point at
+    real source ids; a `source_ids` entry that still matches nothing is skipped
+    (no phantom support). Union with any `supports` the model did emit — we only
+    add, never drop. Pure (mutates the freshly-parsed r)."""
+    by_id = {s.id: s for s in r.sources}
+    for c in r.claims:
+        for sid in c.source_ids:
+            s = by_id.get(sid)
+            if s is not None and c.id not in s.supports:
+                s.supports.append(c.id)
     return r
 
 
@@ -347,7 +382,7 @@ def parse_research_result(raw: str) -> ResearchResult | None:
         if isinstance(data, list):
             data = {"claims": data}
         result = ResearchResult.model_validate(data)
-        return _repair_source_links(_backfill_ids(result))
+        return _backfill_supports(_repair_source_links(_backfill_ids(result)))
     except ValidationError as e:
         # Log the distinct failing fields (not the full multi-error dump) so a
         # recurring strict-field problem is visible at a glance.

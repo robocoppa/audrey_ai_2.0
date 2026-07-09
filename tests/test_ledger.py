@@ -239,6 +239,69 @@ class TestParseResearchResult:
         r = parse_research_result(raw)
         assert r.claims[0].source_ids == ["nonsense"]
 
+    def test_content_free_source_dropped(self):
+        # The 2026-07-09 trace-run `w2_, untitled — no url` shape: the qwen
+        # structuring pass emitted source rows with no title AND no url (a stray
+        # token became the id). The fail-soft schema resurrects them; they back
+        # nothing and render as broken. A source with neither title nor url is
+        # dropped; the real one survives.
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "x", "risk": "low"}],
+            "sources": [
+                {"id": ",", "source_type": "unknown"},          # content-free
+                {"id": "s1", "title": "Euclid — Britannica",
+                 "url": "https://britannica.com/euclid",
+                 "source_type": "reference"},
+            ],
+        })
+        r = parse_research_result(raw)
+        assert [s.url for s in r.sources] == ["https://britannica.com/euclid"]
+
+    def test_source_with_url_but_blank_title_kept(self):
+        # The null-title case the schema deliberately tolerates: a real source
+        # (has a url) with a blank title must NOT be dropped by the content-free
+        # filter — only the entirely-empty rows go.
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "x", "risk": "low"}],
+            "sources": [{"id": "s1", "title": "", "url": "https://e.com/page",
+                         "source_type": "reference"}],
+        })
+        r = parse_research_result(raw)
+        assert len(r.sources) == 1
+        assert r.sources[0].url == "https://e.com/page"
+
+    def test_supports_backfilled_from_source_ids(self):
+        # The 2026-07-09 `supports: none` shape: the model fills claim.source_ids
+        # but leaves source.supports empty on every source. The source→claim
+        # index is inverted from source_ids so the linkage is complete.
+        raw = json.dumps({
+            "claims": [
+                {"id": "c1", "text": "a", "risk": "low", "source_ids": ["s1"]},
+                {"id": "c2", "text": "b", "risk": "low", "source_ids": ["s1", "s2"]},
+            ],
+            "sources": [
+                {"id": "s1", "title": "T1", "url": "https://e.com/1",
+                 "source_type": "reference", "supports": []},
+                {"id": "s2", "title": "T2", "url": "https://e.com/2",
+                 "source_type": "reference", "supports": []},
+            ],
+        })
+        r = parse_research_result(raw)
+        by_id = {s.id: s for s in r.sources}
+        assert by_id["s1"].supports == ["c1", "c2"]
+        assert by_id["s2"].supports == ["c2"]
+
+    def test_supports_backfill_unions_not_replaces(self):
+        # If the model DID emit some supports, backfill only adds — never drops
+        # or duplicates. s1 already claims c1; source_ids also links c1 → no dup.
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "a", "risk": "low", "source_ids": ["s1"]}],
+            "sources": [{"id": "s1", "title": "T", "url": "https://e.com",
+                         "source_type": "reference", "supports": ["c1"]}],
+        })
+        r = parse_research_result(raw)
+        assert r.sources[0].supports == ["c1"]
+
     def test_source_without_id_backfilled_and_unknown_type(self):
         raw = ('{"claims": [], "sources": [{"title": "T", "url": "https://e.com", '
                '"source_type": "wikipedia"}]}')  # unknown type + no id
