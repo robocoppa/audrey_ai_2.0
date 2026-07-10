@@ -21,12 +21,10 @@ docs/guides/openclaw-builders-guide.md
 # Hermes Agent integration via passthrough; references LAN IP + OWUI.
 docs/guides/hermes-reference.md
 
-# Bot workspace tools — laptop-local build/deploy plans for the shared
-# email/docs/sheets/calendar MCP server. Reference LAN IP, the
-# builtryte.xyz domain, smarthost/Nextcloud/per-bot token setup. Not
-# teaching material; keep off GitHub like the bot guides above.
-docs/plans/bot-workspace-tools-plan.md
-docs/plans/bot-tools/
+# Bot workspace tools — the build/deploy plans MOVED to the standalone
+# bot-tools-mcp repo (2026-07-10): ~/Documents/github/bot-tools-mcp/docs/plans/
+# (still gitignored there). Nothing bot-tools-plan-related lives in this repo
+# anymore; these ignore lines are kept as a breadcrumb only.
 
 # Python
 __pycache__/
