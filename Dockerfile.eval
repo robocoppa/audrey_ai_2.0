@@ -39,6 +39,9 @@ COPY scripts/eval_prompts.json \
      scripts/eval_prompts_protocol.json \
      scripts/eval_prompts_deep.json \
      scripts/eval_prompts_fast.json \
+     scripts/eval_prompts_code.json \
+     scripts/eval_prompts_code_models.json \
+     scripts/eval_prompts_topics.json \
      /eval/
 
 # The script IS the entrypoint; append harness flags after the image name at

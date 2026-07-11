@@ -22,6 +22,21 @@
 #   scripts/eval-onbox.sh audrey_deep eval_prompts_deep.json
 #   MODEL=audrey_fast CASES=eval_prompts_fast.json scripts/eval-onbox.sh
 #
+#   # Code / topics protocols (LABEL de-collides the answers file from a plain
+#   # same-day deep run — without it both would be <date>-audrey_deep-onbox-…):
+#   MODEL=audrey_deep CASES=eval_prompts_code.json LABEL=code scripts/eval-onbox.sh
+#   MODEL=audrey_deep CASES=eval_prompts_topics.json LABEL=topics scripts/eval-onbox.sh
+#
+#   # Per-model sweep (MODELS= adds --models + a results JSON next to the
+#   # answers file; feed that JSON to scripts/eval_compare.py afterwards):
+#   CASES=eval_prompts_code_models.json LABEL=code-sweep \
+#     MODELS='audrey_passthrough/qwen3-coder-next:latest,audrey_passthrough/kimi-k2.7-code:cloud' \
+#     scripts/eval-onbox.sh
+#
+# NOTE: the case files are BAKED into the audrey-eval image — after pulling new
+# protocols (or harness changes), rebuild once:
+#   docker compose --profile eval build audrey-eval
+#
 # Run it detached so it survives a disconnect and still notifies:
 #   nohup scripts/eval-onbox.sh >/mnt/user/appdata/audrey_ai_2.0/testing-out/last-run.log 2>&1 &
 #
@@ -39,8 +54,20 @@ CONTAINER="${CONTAINER:-audrey-eval}"
 # model + cases: first two positional args, or env, or the research defaults
 MODEL="${MODEL:-${1:-audrey_research}}"
 CASES="${CASES:-${2:-eval_prompts_protocol.json}}"
+# LABEL names the output files (default: the model — the historical naming).
+# Set it when the model alone is ambiguous (code/topics both run audrey_deep).
+LABEL="${LABEL:-${MODEL}}"
 DATE="$(date +%F)"
-SAVE_FILE="${DATE}-${MODEL}-onbox-answers.md"
+SAVE_FILE="${DATE}-${LABEL}-onbox-answers.md"
+
+# MODELS (comma-separated) turns the run into a per-model sweep: the harness
+# runs every case once per model and we also save the per-case results JSON
+# (the input for scripts/eval_compare.py). Empty = normal single-model run.
+MODELS="${MODELS:-}"
+SWEEP_ARGS=()
+if [[ -n "${MODELS}" ]]; then
+  SWEEP_ARGS=(--models "${MODELS}" --save-json "/out/${DATE}-${LABEL}-onbox-results.json")
+fi
 
 # ── preflight ───────────────────────────────────────────────────────────────
 die() { echo "ERROR: $*" >&2; exit 2; }
@@ -60,6 +87,7 @@ docker run -d --name "${CONTAINER}" --network "${NETWORK}" \
     --model "${MODEL}" \
     --cases "/eval/${CASES}" \
     --save-file "/out/${SAVE_FILE}" \
+    "${SWEEP_ARGS[@]}" \
   || die "docker run failed."
 
 # ── wait, then notify (always) ──────────────────────────────────────────────
