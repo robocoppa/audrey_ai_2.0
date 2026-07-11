@@ -244,7 +244,7 @@ agentic:
   # only, never written to the chat archive. Deep panel only — research mode
   # has its own view (`debug_research_trace` below).
   # Off by default; flip for an eval window (restart, no rebuild), flip back.
-  debug_panel_drafts: false
+  debug_panel_drafts: true
   # Debug/eval: research-mode counterpart. When true, audrey_research answers
   # end with a "## Research trace (debug)" section carrying the staged
   # pipeline's intermediates — every researcher's notes, the structured
@@ -254,7 +254,7 @@ agentic:
   # vs aggressive claim drops vs writer timidity) from the answer artifact
   # alone. Client-visible only, never written to the chat archive.
   # Off by default; flip for an eval window (restart, no rebuild), flip back.
-  debug_research_trace: true
+  debug_research_trace: false
   react:
     max_rounds: 3
     compress_after_round: 2
