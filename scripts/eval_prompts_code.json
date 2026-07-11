@@ -1,0 +1,72 @@
+[
+  {
+    "name": "code-lru-cache",
+    "prompt": "Write a Python class LRUCache with a capacity set in the constructor, a get(key) method that returns the stored value or None when the key is absent, and a put(key, value) method that inserts or updates and evicts the least-recently-used entry when over capacity. Both get and put count as use. Reply with a single complete Python code block using only the standard library, defining the class exactly as named.",
+    "model": "audrey_deep",
+    "expect_sources": false,
+    "code_test": "c = LRUCache(2)\nc.put(1, \"a\")\nc.put(2, \"b\")\nassert c.get(1) == \"a\"\nc.put(3, \"c\")\nassert c.get(2) is None\nassert c.get(1) == \"a\"\nassert c.get(3) == \"c\"\nc.put(4, \"d\")\nassert c.get(1) is None or c.get(3) is None\nprint(\"ok\")"
+  },
+  {
+    "name": "code-merge-intervals",
+    "prompt": "Write a Python function merge_intervals(intervals) that takes a list of [start, end] pairs (ints, possibly unsorted, possibly touching) and returns the merged list sorted by start, treating touching intervals like [1,4] and [4,5] as one. Reply with a single complete Python code block using only the standard library, defining the function exactly as named.",
+    "model": "audrey_deep",
+    "expect_sources": false,
+    "code_test": "assert merge_intervals([[1, 3], [2, 6], [8, 10], [15, 18]]) == [[1, 6], [8, 10], [15, 18]]\nassert merge_intervals([]) == []\nassert merge_intervals([[1, 4], [4, 5]]) == [[1, 5]]\nassert merge_intervals([[5, 6], [1, 2]]) == [[1, 2], [5, 6]]\nprint(\"ok\")"
+  },
+  {
+    "name": "code-rle",
+    "prompt": "Write a Python function rle(s) that run-length-encodes a string: 'aaabcc' becomes 'a3b1c2'. The empty string returns ''. Reply with a single complete Python code block using only the standard library, defining the function exactly as named.",
+    "model": "audrey_deep",
+    "expect_sources": false,
+    "code_test": "assert rle(\"aaabcc\") == \"a3b1c2\"\nassert rle(\"\") == \"\"\nassert rle(\"a\") == \"a1\"\nassert rle(\"abba\") == \"a1b2a1\"\nprint(\"ok\")"
+  },
+  {
+    "name": "code-debug-binary-search",
+    "prompt": "This Python binary search sometimes hangs forever on inputs it should handle. Find the bug, explain it in one short paragraph, and then give the corrected function in a single complete Python code block (keep the name binary_search and the same return contract):\n\ndef binary_search(a, x):\n    lo, hi = 0, len(a)\n    while lo < hi:\n        mid = (lo + hi) // 2\n        if a[mid] < x:\n            lo = mid\n        else:\n            hi = mid\n    return lo if lo < len(a) and a[lo] == x else -1",
+    "model": "audrey_deep",
+    "expect_sources": false,
+    "code_test": "assert binary_search([1, 3, 5, 7, 9], 7) == 3\nassert binary_search([1, 3, 5, 7, 9], 2) == -1\nassert binary_search([], 1) == -1\nassert binary_search([2, 4], 4) == 1\nassert binary_search([2], 2) == 0\nprint(\"ok\")"
+  },
+  {
+    "name": "code-debug-mutable-default",
+    "prompt": "Users report that tags from different items leak into each other when using this Python helper. Explain why in one short paragraph, then give a fixed version in a single complete Python code block (keep the name add_tag and the same call shape):\n\ndef add_tag(tag, tags=[]):\n    tags.append(tag)\n    return tags",
+    "model": "audrey_deep",
+    "expect_sources": false,
+    "code_test": "a = add_tag(\"x\")\nb = add_tag(\"y\")\nassert b == [\"y\"], b\nassert a == [\"x\"], a\nassert add_tag(\"z\", [\"q\"]) == [\"q\", \"z\"]\nprint(\"ok\")"
+  },
+  {
+    "name": "code-csv-top-spenders",
+    "prompt": "Write a Python function top_spenders(csv_text, n) that takes CSV text with header 'name,amount' (amount is a number, names repeat) and returns a list of the n names with the highest total amount, highest first. Reply with a single complete Python code block using only the standard library, defining the function exactly as named.",
+    "model": "audrey_deep",
+    "expect_sources": false,
+    "code_test": "text = \"name,amount\\nann,10\\nbob,5\\nann,3\\ncid,9\\nbob,2\\n\"\nassert top_spenders(text, 2) == [\"ann\", \"cid\"]\nassert top_spenders(text, 1) == [\"ann\"]\nassert top_spenders(\"name,amount\\n\", 3) == []\nprint(\"ok\")"
+  },
+  {
+    "name": "code-roman-numerals",
+    "prompt": "Write a Python function int_to_roman(n) that converts an integer from 1 to 3999 into a Roman numeral string. Reply with a single complete Python code block using only the standard library, defining the function exactly as named.",
+    "model": "audrey_deep",
+    "expect_sources": false,
+    "code_test": "assert int_to_roman(1994) == \"MCMXCIV\"\nassert int_to_roman(4) == \"IV\"\nassert int_to_roman(9) == \"IX\"\nassert int_to_roman(3999) == \"MMMCMXCIX\"\nassert int_to_roman(1) == \"I\"\nprint(\"ok\")"
+  },
+  {
+    "name": "code-refactor-duplicates",
+    "prompt": "Refactor this Python function for clarity and performance, then explain in a short paragraph what you changed and why (include the complexity before and after):\n\ndef find_duplicates(items):\n    dupes = []\n    for i in range(len(items)):\n        for j in range(len(items)):\n            if i != j and items[i] == items[j] and items[i] not in dupes:\n                dupes.append(items[i])\n    return dupes",
+    "model": "audrey_deep",
+    "expect_sources": false,
+    "expect_code": true
+  },
+  {
+    "name": "code-explain-timsort",
+    "prompt": "What algorithm does Python's built-in list.sort() use, what is its time complexity, and why is that algorithm a good fit for real-world data? No code needed — a clear prose explanation.",
+    "model": "audrey_deep",
+    "expect_sources": false,
+    "answer_contains": ["timsort"]
+  },
+  {
+    "name": "code-bash-largest-files",
+    "prompt": "Give a bash command that lists the 10 largest files under a directory recursively, largest first, with human-readable sizes. Put the command in a single fenced bash code block and explain it in one or two sentences.",
+    "model": "audrey_deep",
+    "expect_sources": false,
+    "expect_code": true
+  }
+]

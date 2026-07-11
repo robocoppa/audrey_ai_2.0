@@ -94,5 +94,19 @@
     "prompt": "Is it better to rent or buy a home? Give me an actual framework for deciding, including the factors people most often get wrong, not just 'it depends'.",
     "model": "audrey_deep",
     "expect_sources": false
+  },
+  {
+    "name": "code-lru-cache",
+    "prompt": "Write a Python class LRUCache with a capacity set in the constructor, a get(key) method that returns the stored value or None when the key is absent, and a put(key, value) method that inserts or updates and evicts the least-recently-used entry when over capacity. Both get and put count as use. Reply with a single complete Python code block using only the standard library, defining the class exactly as named.",
+    "model": "audrey_deep",
+    "expect_sources": false,
+    "code_test": "c = LRUCache(2)\nc.put(1, \"a\")\nc.put(2, \"b\")\nassert c.get(1) == \"a\"\nc.put(3, \"c\")\nassert c.get(2) is None\nassert c.get(1) == \"a\"\nassert c.get(3) == \"c\"\nc.put(4, \"d\")\nassert c.get(1) is None or c.get(3) is None\nprint(\"ok\")"
+  },
+  {
+    "name": "code-debug-mutable-default",
+    "prompt": "Users report that tags from different items leak into each other when using this Python helper. Explain why in one short paragraph, then give a fixed version in a single complete Python code block (keep the name add_tag and the same call shape):\n\ndef add_tag(tag, tags=[]):\n    tags.append(tag)\n    return tags",
+    "model": "audrey_deep",
+    "expect_sources": false,
+    "code_test": "a = add_tag(\"x\")\nb = add_tag(\"y\")\nassert b == [\"y\"], b\nassert a == [\"x\"], a\nassert add_tag(\"z\", [\"q\"]) == [\"q\", \"z\"]\nprint(\"ok\")"
   }
 ]

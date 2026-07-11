@@ -426,7 +426,7 @@ def is_complex(messages: list[dict], *, threshold: int) -> tuple[bool, int]:
 That function starts at
 [`complexity.py:122`](../../src/audrey/pipeline/complexity.py#L122). The
 threshold and explicit depth cues come from
-[`config.yaml:431`](../../config.yaml#L431):
+[`config.yaml:446`](../../config.yaml#L446):
 
 ```yaml
 complexity:

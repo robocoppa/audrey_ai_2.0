@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     # of a SearXNG instance on the LAN, e.g. http://192.168.1.11:8088
     searxng_url: str = Field(default="", alias="SEARXNG_URL")
 
+    # Alternate web_search between Brave and SearXNG per query (halves Brave
+    # quota, decorrelates the two backends so a bad window on one doesn't sink
+    # every worker on a request). Query-hash picks the PRIMARY; each backend
+    # still cross-falls-back to the other on failure. When off, or when
+    # SEARXNG_URL is unset, web_search is Brave-primary with SearXNG only as a
+    # failure fallback (the pre-2026-07-09 behavior). Flip + `up -d
+    # --force-recreate custom-tools` to apply.
+    web_search_alternate: bool = Field(default=True, alias="WEB_SEARCH_ALTERNATE")
+
     # Audrey (for kb_search / kb_image_search proxying)
     audrey_url: str = Field(default="http://audrey-ai:8000", alias="AUDREY_URL")
     audrey_kb_timeout_seconds: float = Field(default=30.0, alias="AUDREY_KB_TIMEOUT_SECONDS")

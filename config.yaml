@@ -495,6 +495,29 @@ passthrough:
   allowed_models:                        # concrete models clients may target
     - qwen3.6:35b-64k
     - qwen3-coder-next-64k:latest
+    # Registry text-pool models (code + reasoning + general, deduped), exposed
+    # for the per-model eval sweeps (scripts/eval_research.py --models
+    # 'audrey_passthrough/<name>,…'): testing panel candidates in isolation is
+    # how lineups get compared before editing the deep_panel* workers lists.
+    # Keep in sync with model_registry when models are added/retired.
+    - qwen3-coder-next:latest
+    - minimax-m3:cloud
+    - qwen2.5-coder:32b
+    - granite4.1:30b
+    - deepseek-v4-pro:cloud
+    - kimi-k2.7-code:cloud
+    - glm-5.2:cloud
+    - qwen3.6:35b
+    - kimi-k2.6:cloud
+    - deepseek-v4-flash:cloud
+    - deepseek-v3.2:cloud
+    - cogito-2.1:671b-cloud
+    - deepseek-r1:32b
+    - nemotron-3-super:cloud
+    - qwen3.5:397b-cloud
+    - glm-4.7-flash:q8_0
+    - olmo-3.1:32b
+    - llama4:latest
   require_role: null                     # null | "admin" — gate by OWUI role
 
 # ─── Classification pre-filter ─────────────────────────────────────────

@@ -25,6 +25,7 @@ OpenAPI → Ollama-tool converter produces sensible tool names.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
@@ -236,6 +237,69 @@ async def health() -> dict[str, str]:
 
 # ─── Tools ────────────────────────────────────────────────────────────
 
+
+def _prefer_searxng(query: str) -> bool:
+    """Deterministically route a query to SearXNG-primary (True) or
+    Brave-primary (False) by hashing the query. Deterministic per query so the
+    same query always hits the same backend — keeps Brave's cache TTL effective
+    and needs no shared mutable counter. blake2b (not Python's salted hash())
+    so the split is stable across processes/restarts."""
+    digest = hashlib.blake2b(query.strip().lower().encode(), digest_size=8).digest()
+    return digest[0] % 2 == 1
+
+
+async def _search_with_fallback(
+    *,
+    primary: BraveClient | SearxngClient,
+    other: BraveClient | SearxngClient | None,
+    query: str,
+    count: int,
+) -> list[SearchResult]:
+    """Run `primary.search`; on a recoverable provider error, cross-fall-back to
+    `other` (the opposite backend) if configured. 503 only if both fail (or the
+    primary fails and there's no `other`). Works in either direction — Brave
+    primary → SearXNG other, or SearXNG primary → Brave other — because both
+    clients share the `search(query, count) -> list[SearchResult]` shape and
+    raise provider-specific errors we normalize here.
+
+    Recoverable = the errors that mean "this backend is unavailable right now":
+    Brave 402/429/upstream, or any SearxngError. A `ValueError` (e.g. empty
+    Brave key) is a config bug, not a transient outage → 500, no fallback."""
+    prim_name = "Brave" if isinstance(primary, BraveClient) else "SearXNG"
+    other_name = "SearXNG" if prim_name == "Brave" else "Brave"
+    try:
+        return await primary.search(query=query, count=count)
+    except ValueError as e:  # misconfiguration (e.g. empty API key) — not transient
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e),
+        ) from e
+    except (BraveQuotaError, BraveRateLimitError, BraveUpstreamError, SearxngError) as e:
+        if other is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"{prim_name} unavailable ({e}) and no fallback backend configured.",
+            ) from e
+        log.warning(
+            "web_search: %s unavailable (%s); falling back to %s",
+            prim_name, e, other_name,
+        )
+        try:
+            hits = await other.search(query=query, count=count)
+            log.warning(
+                "web_search: %s returned %d results (first url=%r)",
+                other_name, len(hits), (hits[0].url if hits else ""),
+            )
+            return hits
+        except (
+            BraveQuotaError, BraveRateLimitError, BraveUpstreamError, SearxngError, ValueError,
+        ) as fe:
+            log.warning("web_search: %s fallback failed: %s", other_name, fe)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Search unavailable ({prim_name}: {e}; {other_name}: {fe})",
+            ) from fe
+
+
 @app.post(
     "/web_search",
     operation_id="web_search",
@@ -251,40 +315,21 @@ async def health() -> dict[str, str]:
 async def web_search(req: WebSearchRequest) -> WebSearchResponse:
     brave: BraveClient = app.state.brave
     searxng: SearxngClient | None = app.state.searxng
-    try:
-        hits: list[SearchResult] = await brave.search(query=req.query, count=req.count)
-    except (BraveQuotaError, BraveRateLimitError) as e:
-        # Quota (402) or rate-limit (429): fall back to the self-hosted SearXNG
-        # provider so research grounding survives a Brave outage. Same response
-        # shape. If SEARXNG_URL isn't configured, there's no fallback → 503.
-        if searxng is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Brave unavailable ({e}) and no SEARXNG_URL fallback configured.",
-            ) from e
-        log.warning("web_search: Brave unavailable (%s); falling back to SearXNG", e)
-        try:
-            hits = await searxng.search(query=req.query, count=req.count)
-            log.warning(
-                "web_search: SearXNG returned %d results (first url=%r)",
-                len(hits), (hits[0].url if hits else ""),
-            )
-        except SearxngError as se:
-            log.warning("web_search: SearXNG fallback failed: %s", se)
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Search unavailable (Brave: {e}; SearXNG: {se})",
-            ) from se
-    except BraveUpstreamError as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Brave Search unavailable: {e}",
-        ) from e
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e),
-        ) from e
+
+    # Route to a PRIMARY backend, then cross-fall-back to the other on failure.
+    # With alternation off (or no SearXNG configured), primary is always Brave —
+    # the pre-2026-07-09 Brave-primary/SearXNG-fallback behavior. With it on,
+    # a per-query hash splits primaries ~50/50 between the two: this halves Brave
+    # quota and decorrelates the backends (a bad window on one no longer sinks
+    # every worker on a request), while cross-fallback preserves resilience.
+    if settings.web_search_alternate and searxng is not None and _prefer_searxng(req.query):
+        hits = await _search_with_fallback(
+            primary=searxng, other=brave, query=req.query, count=req.count,
+        )
+    else:
+        hits = await _search_with_fallback(
+            primary=brave, other=searxng, query=req.query, count=req.count,
+        )
     return WebSearchResponse(
         query=req.query,
         results=[WebSearchResult(title=h.title, url=h.url, snippet=h.snippet) for h in hits],

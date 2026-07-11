@@ -18,9 +18,9 @@
 #   - .venv exists (.venv/bin/python). Run from the repo root.
 #
 # USAGE
-#   scripts/run_all_evals.sh                 # all three protocols, today's date
+#   scripts/run_all_evals.sh                 # the default trio (research deep fast), today's date
 #   scripts/run_all_evals.sh research deep   # only the named protocols, in order
-#   scripts/run_all_evals.sh fast            # just one
+#   scripts/run_all_evals.sh code            # opt-in protocols: code, topics (not in the default trio)
 #   DATE=2026-07-01 scripts/run_all_evals.sh # override the date stamp
 #   ONLY=euclid scripts/run_all_evals.sh research   # pass --only through
 #
@@ -29,8 +29,8 @@
 # gate CI / a pre-deploy check). A short PASS/FAIL summary prints at the end.
 #
 # RUNTIME: the full suite is slow — deep/research cases are ~90–180s each, and
-# there are ~34 cases total. Budget 60–90 minutes. Run it in the background and
-# wait for completion; do not foreground-block on it.
+# the default trio is ~40 cases. Budget 60–90 minutes. Run it in the background
+# and wait for completion; do not foreground-block on it.
 #
 set -uo pipefail
 
@@ -52,14 +52,22 @@ declare -A MODEL=(
   [research]="audrey_research"
   [deep]="audrey_deep"
   [fast]="audrey_fast"
+  [code]="audrey_deep"
+  [topics]="audrey_deep"
 )
 declare -A CASES=(
   [research]="scripts/eval_prompts_protocol.json"
   [deep]="scripts/eval_prompts_deep.json"
   [fast]="scripts/eval_prompts_fast.json"
+  [code]="scripts/eval_prompts_code.json"
+  [topics]="scripts/eval_prompts_topics.json"
 )
 
-# protocols to run: CLI args if given, else all three in a sensible order
+# protocols to run: CLI args if given, else the default trio. code + topics
+# are OPT-IN (name them explicitly) so the routine full-suite runtime doesn't
+# grow; the deep protocol carries 2 coding anchor cases so every default run
+# still exercises deep-mode coding. Per-model sweeps don't run through this
+# script — see docs/testing/README.md "Per-model sweeps".
 if [[ $# -gt 0 ]]; then
   PROTOCOLS=("$@")
 else
@@ -74,7 +82,7 @@ die() { echo "ERROR: $*" >&2; exit 2; }
 [[ -f "${REPO_ROOT}/.env.test.local" ]] || die ".env.test.local missing at repo root. See docs/testing/README.md for setup (AUDREY_EVAL_BASE_URL + AUDREY_EVAL_API_KEY)."
 
 for p in "${PROTOCOLS[@]}"; do
-  [[ -n "${MODEL[$p]:-}" ]] || die "unknown protocol '$p' (valid: research deep fast)"
+  [[ -n "${MODEL[$p]:-}" ]] || die "unknown protocol '$p' (valid: research deep fast code topics)"
   [[ -f "${REPO_ROOT}/${CASES[$p]}" ]] || die "cases file missing for '$p': ${CASES[$p]}"
 done
 

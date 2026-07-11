@@ -59,6 +59,19 @@ Per case, against the reassembled streamed answer:
                      (fast | deep | research, from the banner family) matches
                      the case's "expect_route" — this is how we test the
                      fast/deep gate. Opt-in; skipped when no expect_route set.
+  - code_block     : opt-in ("expect_code": true, implied by "code_test"): a
+                     language-tagged fenced code block exists in the answer.
+  - code_runs      : opt-in ("code_test": "<python asserts>"): the largest
+                     ```python block is extracted, the case's asserts are
+                     appended, and the file is run in a subprocess (scratch
+                     cwd, "code_timeout" seconds, default 15). Pass iff exit
+                     0 — the objective signal for the coding suites. The code
+                     executed is our own models' output, on this laptop, with
+                     only a timeout for isolation: keep case prompts to
+                     stdlib-only tasks.
+  - contains       : opt-in ("answer_contains": [..]): every listed string
+                     appears (case-insensitively) in the answer body — a weak
+                     objective signal for reasoning/knowledge cases.
 
 Plus, for every case, latency is recorded: TTFT (first content delta) and
 total wall-clock. The fast path's reason to exist is speed, so these make
@@ -97,6 +110,14 @@ USAGE
     .venv/bin/python scripts/eval_research.py --model audrey_research
     .venv/bin/python scripts/eval_research.py --model audrey_deep
 
+    # Per-model sweep (every case once per model; passthrough names need the
+    # model in config.yaml passthrough.allowed_models on the box). --save-json
+    # is the input for scripts/eval_compare.py's case-by-model matrix:
+    .venv/bin/python scripts/eval_research.py \\
+        --cases scripts/eval_prompts_code_models.json \\
+        --models 'audrey_passthrough/qwen3.6:35b,audrey_passthrough/kimi-k2.7-code:cloud' \\
+        --save-json docs/testing/2026-07-10-code-sweep-results.json
+
 EXIT CODE
 
   0 if every case passed every check; 1 otherwise (so it can gate a script).
@@ -107,7 +128,9 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -186,6 +209,7 @@ class CaseResult:
     banners_seen: list[str] = field(default_factory=list)
     error: str = ""
     route: str = "unknown"            # inferred path: fast | deep | research
+    code_detail: str = ""             # code_runs outcome detail (informational)
     ttft_s: float | None = None
     total_s: float | None = None
     # Informational domain-based source breakdown (never a pass/fail check).
@@ -383,6 +407,82 @@ def _ordered_subsequence(found: list[str], expected: list[str]) -> bool:
     return all(any(f == e for f in it) for e in expected)
 
 
+# --- Code checks (coding suites: code_block / code_runs) ----------------------
+
+_CODE_FENCE = re.compile(r"```([^\s`]*)[ \t]*\n(.*?)```", re.DOTALL)
+# ```py and ```python3 both appear in the wild; treat them as python.
+_PY_TAGS = {"python", "py", "python3"}
+
+
+def _pre_debug_region(answer: str) -> str:
+    """The answer body BEFORE any appended debug block.
+
+    With `debug_panel_drafts` / `debug_research_trace` on, the server appends
+    every worker's full draft (or the research trace) after the answer — and a
+    worker draft can carry its own fenced code. Cutting at the debug openers
+    keeps code extraction (and answer_contains) reading the SYNTHESIZED answer,
+    not a stray worker draft. Same hardening move as _sources_block's trace cut.
+    """
+    low = answer.lower()
+    cut = len(answer)
+    for marker in ("\n## panel drafts (debug)", "\n## research trace (debug)"):
+        idx = low.find(marker)
+        if idx != -1:
+            cut = min(cut, idx)
+    return answer[:cut]
+
+
+def _has_tagged_code_block(answer: str) -> bool:
+    """True if any fenced code block with a non-empty language tag exists."""
+    return any(m.group(1) for m in _CODE_FENCE.finditer(_pre_debug_region(answer)))
+
+
+def _extract_code_block(answer: str, lang: str = "python") -> str | None:
+    """The LARGEST fenced block tagged `lang` (python accepts py/python3), or None.
+
+    Largest, not first: coding answers often show a small usage/example snippet
+    alongside the full implementation — the implementation is the big one. Case
+    prompts also instruct "a single complete code block" to keep this
+    unambiguous.
+    """
+    tags = _PY_TAGS if lang == "python" else {lang}
+    blocks = [m.group(2) for m in _CODE_FENCE.finditer(_pre_debug_region(answer))
+              if m.group(1).lower() in tags]
+    return max(blocks, key=len) if blocks else None
+
+
+def _run_code_check(code: str, test: str, timeout_s: float) -> tuple[bool, str]:
+    """Run `code` + the case's `test` asserts in a fresh python subprocess.
+
+    Scratch temp dir as cwd (auto-cleaned), `sys.executable` (the harness's own
+    venv python), hard timeout. Pass iff exit 0. The detail string is the last
+    stderr line on failure — for Python tracebacks that's the exception line,
+    which is what you want in the report. No sandbox beyond the timeout: the
+    code is our own models' output answering our own stdlib-only prompts.
+    """
+    with tempfile.TemporaryDirectory(prefix="audrey-eval-code-") as td:
+        script = Path(td) / "case.py"
+        script.write_text(code + "\n\n" + test + "\n")
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(script)], cwd=td,
+                capture_output=True, text=True, timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired:
+            return False, f"timeout after {timeout_s:.0f}s"
+    if proc.returncode == 0:
+        return True, "exit 0"
+    tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+    detail = tail[-1][:200] if tail else ""
+    return False, f"exit {proc.returncode}: {detail}" if detail else f"exit {proc.returncode}"
+
+
+def _contains_all(answer: str, needles: list[str]) -> bool:
+    """True if every needle appears case-insensitively in the answer body."""
+    low = _pre_debug_region(answer).lower()
+    return all(n.lower() in low for n in needles)
+
+
 # --- Source-quality reporting (informational, NOT a pass/fail check) ---------
 #
 # The eval reads the RENDERED answer, which is just `- [title](url)` lines — the
@@ -571,11 +671,39 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     else:
         checks["route"] = None
 
+    # Code checks (opt-in, the coding suites): `expect_code` requires a
+    # language-tagged fenced block; `code_test` (implies expect_code) extracts
+    # the largest ```python block, appends the case's asserts, and runs it in a
+    # subprocess — the objective pass/fail the other checks can't give.
+    code_test = case.get("code_test") or ""
+    expect_code = case.get("expect_code")
+    if expect_code is None:
+        expect_code = bool(code_test)
+    checks["code_block"] = _has_tagged_code_block(answer) if expect_code else None
+    code_detail = ""
+    if code_test:
+        code = _extract_code_block(answer, "python")
+        if code is None:
+            checks["code_runs"] = False
+            code_detail = "no ```python block to run"
+        else:
+            passed, code_detail = _run_code_check(
+                code, code_test, float(case.get("code_timeout", 15.0)))
+            checks["code_runs"] = passed
+    else:
+        checks["code_runs"] = None
+
+    # Contains check (opt-in): every `answer_contains` string must appear,
+    # case-insensitively — a weak objective signal for reasoning/knowledge
+    # cases where the right answer has a distinctive token ("82.8", "tungsten").
+    needles = case.get("answer_contains") or []
+    checks["contains"] = _contains_all(answer, needles) if needles else None
+
     ok = all(v for v in checks.values() if v is not None)
     return CaseResult(name=name, model=model, ok=ok, checks=checks,
                       answer=answer, banners_seen=banners, route=route,
                       ttft_s=timing.ttft_s, total_s=timing.total_s,
-                      source_stats=stats)
+                      source_stats=stats, code_detail=code_detail)
 
 
 def _fmt_check(v: bool | None) -> str:
@@ -597,12 +725,15 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
     print("audrey research/deep/fast live eval")
     print("=" * 70)
     cols = ["reachable", "no_error_marker", "has_answer", "banners",
-            "sources", "url_wellformed", "route"]
+            "sources", "url_wellformed", "route", "code_block", "code_runs",
+            "contains"]
     for r in results:
         status = "PASS" if r.ok else "FAIL"
         print(f"\n[{status}] {r.name}   (model={r.model})")
         if r.error:
             print(f"   error: {r.error}")
+        if r.code_detail:
+            print(f"   code: {r.code_detail}")
         line = "   " + "  ".join(f"{c}:{_fmt_check(r.checks.get(c))}" for c in cols)
         print(line)
         print(f"   {_fmt_latency(r)}")
@@ -648,12 +779,59 @@ def save_results(results: list[CaseResult], save_file: Path) -> None:
         )
         if r.source_stats is not None:
             section += f"- {r.source_stats.line()}\n"
+        if r.code_detail:
+            section += f"- code: {r.code_detail}\n"
         if r.error:
             section += f"- error: {r.error}\n"
         section += f"\n{r.answer or '(no answer body)'}\n"
         parts.append(section)
     save_file.parent.mkdir(parents=True, exist_ok=True)
     save_file.write_text("\n".join(parts))
+
+
+def save_json(results: list[CaseResult], save_json_file: Path) -> None:
+    """Machine-readable run record — the input for scripts/eval_compare.py.
+
+    One flat JSON array, one object per case: the structural verdicts plus the
+    informational measurements (latency, answer length). Deliberately dumb —
+    no schema version, no nesting — so the compare tool stays a pure
+    parse-and-format job. Answers are NOT included; they live in the paired
+    `--save-file` markdown (the human-read artifact).
+    """
+    records = [
+        {
+            "name": r.name,
+            "model": r.model,
+            "ok": r.ok,
+            "checks": r.checks,
+            "route": r.route,
+            "ttft_s": r.ttft_s,
+            "total_s": r.total_s,
+            "answer_len": len(r.answer),
+            "banners": r.banners_seen,
+            "error": r.error,
+            "code_detail": r.code_detail,
+        }
+        for r in results
+    ]
+    save_json_file.parent.mkdir(parents=True, exist_ok=True)
+    save_json_file.write_text(json.dumps(records, indent=2) + "\n")
+
+
+def _expand_sweep(cases: list[dict], models: list[str]) -> list[dict]:
+    """Cross every case with every sweep model: model overridden, name suffixed.
+
+    Grouped BY MODEL (all cases for model 1, then model 2, …), not by case:
+    consecutive requests to the same local model avoid Ollama reloading
+    weights between every turn. The ` [<model>]` name suffix keeps save-file
+    sections unique and diffable; eval_compare.py strips it to rebuild the
+    case-by-model matrix.
+    """
+    return [
+        {**c, "model": m, "name": f"{c.get('name') or c['prompt'][:48]} [{m}]"}
+        for m in models
+        for c in cases
+    ]
 
 
 def main() -> int:
@@ -669,6 +847,12 @@ def main() -> int:
                    help="OWUI API key sk-… (or env AUDREY_EVAL_API_KEY)")
     p.add_argument("--model", default="audrey_research",
                    help="default model for cases that don't pin one (default audrey_research)")
+    p.add_argument("--models", default="",
+                   help="comma-separated model sweep: run EVERY case once per "
+                        "model (overrides case/--model; result names get a "
+                        "' [<model>]' suffix). Use audrey_passthrough/<name> "
+                        "ids for per-model comparisons — the name must be in "
+                        "config.yaml passthrough.allowed_models on the box")
     p.add_argument("--cases", type=Path, default=DEFAULT_CASES,
                    help=f"prompt-case JSON (default {DEFAULT_CASES})")
     p.add_argument("--timeout", type=float, default=600.0,
@@ -682,6 +866,10 @@ def main() -> int:
                    help="write ALL answers from this run into one markdown file "
                         "(one section per case). Name it with a date + test "
                         "description, e.g. docs/testing/2026-06-26-accuracy-stress-answers.md")
+    p.add_argument("--save-json", type=Path, default=None,
+                   help="write per-case results (checks + latency, no answers) "
+                        "as JSON — the input for scripts/eval_compare.py, e.g. "
+                        "docs/testing/2026-07-10-code-sweep-results.json")
     args = p.parse_args()
 
     if not args.base_url or not args.api_key:
@@ -700,6 +888,10 @@ def main() -> int:
         print("error: no cases to run (check --only filter)", file=sys.stderr)
         return 2
 
+    sweep = [m.strip() for m in args.models.split(",") if m.strip()]
+    if sweep:
+        cases = _expand_sweep(cases, sweep)
+
     results: list[CaseResult] = []
     for case in cases:
         print(f"running: {case.get('name') or case['prompt'][:48]} "
@@ -710,6 +902,9 @@ def main() -> int:
     if args.save_file is not None:
         save_results(results, args.save_file)
         print(f"saved {len(results)} answers to {args.save_file}", file=sys.stderr)
+    if args.save_json is not None:
+        save_json(results, args.save_json)
+        print(f"saved {len(results)} results to {args.save_json}", file=sys.stderr)
     return 0 if all(r.ok for r in results) else 1
 
 

@@ -1,0 +1,73 @@
+[
+  {
+    "name": "reasoning-pen-notebook",
+    "prompt": "A pen and a notebook cost $8.50 together. The notebook costs $6.00 more than the pen. What does each cost? Show your reasoning step by step.",
+    "expect_sources": false,
+    "answer_contains": ["1.25", "7.25"]
+  },
+  {
+    "name": "reasoning-markup-discount",
+    "prompt": "A jacket costs $80. The store marks it up 15%, then runs a 10%-off sale on the new price. What is the final price? Show the arithmetic.",
+    "expect_sources": false,
+    "answer_contains": ["82.8"]
+  },
+  {
+    "name": "reasoning-calendar",
+    "prompt": "If the 1st of a month falls on a Friday and the month has 31 days, what day of the week is the last day of that month? Explain how you got there.",
+    "expect_sources": false,
+    "answer_contains": ["sunday"]
+  },
+  {
+    "name": "reasoning-race-order",
+    "prompt": "Three friends — Ada, Ben, and Cal — finished a race. Ada wasn't last. Cal finished before Ada. Ben didn't win. In what order did they finish? Lay out the deduction, not just the answer.",
+    "expect_sources": false
+  },
+  {
+    "name": "science-attention",
+    "prompt": "Explain how the attention mechanism in a transformer works, for a reader who knows basic linear algebra but no machine learning.",
+    "expect_sources": false
+  },
+  {
+    "name": "science-plate-tectonics",
+    "prompt": "What drives plate tectonics? Explain the mechanism and the main lines of evidence that convinced geologists.",
+    "expect_sources": false
+  },
+  {
+    "name": "science-mrna-vaccines",
+    "prompt": "How do mRNA vaccines work, and how do they differ from traditional attenuated or inactivated vaccines?",
+    "expect_sources": false
+  },
+  {
+    "name": "writing-cold-email",
+    "prompt": "Write a cold email (120 words maximum) to a hiring manager about a junior data analyst opening — friendly but professional, no clichés like 'passionate' or 'synergy', ending with one clear, specific ask.",
+    "expect_sources": false
+  },
+  {
+    "name": "writing-eli5-rewrite",
+    "prompt": "Rewrite this for a curious 10-year-old without losing the meaning: 'Photosynthesis is the process by which photoautotrophs convert electromagnetic radiation into chemical energy, fixing atmospheric carbon dioxide into organic compounds via the Calvin cycle while photolysis of water liberates molecular oxygen.'",
+    "expect_sources": false
+  },
+  {
+    "name": "writing-haiku-server-room",
+    "prompt": "Write three haiku about a server room at night. Follow the 5-7-5 syllable structure strictly.",
+    "expect_sources": false
+  },
+  {
+    "name": "gk-second-highest-mountain",
+    "prompt": "Which mountain is the second-highest above sea level, and roughly how tall is it in meters? If you're not certain, say so rather than guessing.",
+    "expect_sources": false,
+    "answer_contains": ["k2"]
+  },
+  {
+    "name": "gk-element-w",
+    "prompt": "Which chemical element has the symbol W, and where does that symbol come from? If you're not certain, say so rather than guessing.",
+    "expect_sources": false,
+    "answer_contains": ["tungsten", "wolfram"]
+  },
+  {
+    "name": "gk-berlin-wall",
+    "prompt": "In what year did the Berlin Wall fall, and what was the immediate trigger that night? If you're not certain, say so rather than guessing.",
+    "expect_sources": false,
+    "answer_contains": ["1989"]
+  }
+]

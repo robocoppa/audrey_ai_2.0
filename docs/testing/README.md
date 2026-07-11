@@ -8,13 +8,20 @@ doesn't.
 
 See `../plans/PLAN-mode-test-suite.md` for the design rationale and case taxonomy.
 
-## The three protocols
+## The protocols
 
 | Protocol | Cases file | Default model | What it tests |
 |----------|-----------|---------------|---------------|
 | **Research** | `scripts/eval_prompts_protocol.json` | `audrey_research` | Staged research→verify→fact-check→write; grounding, citation, hedge-vs-drop discipline |
-| **Deep** | `scripts/eval_prompts_deep.json` | `audrey_deep` | Panel synthesis quality across a wide topic range; flourish-leak failure mode; merge coherence |
+| **Deep** | `scripts/eval_prompts_deep.json` | `audrey_deep` | Panel synthesis quality across a wide topic range; flourish-leak failure mode; merge coherence; 2 coding anchors |
 | **Fast** | `scripts/eval_prompts_fast.json` | `audrey_fast` / `audrey_auto` | Answer quality on simple turns; **routing correctness** (fast/deep gate); **latency/TTFT** |
+| **Code** *(opt-in)* | `scripts/eval_prompts_code.json` | `audrey_deep` | Coding on the deep panel's code pool: implement/debug/refactor, with **executed** Python asserts (`code_runs`) |
+| **Topics** *(opt-in)* | `scripts/eval_prompts_topics.json` | `audrey_deep` | Reasoning/math (`reasoning-*`), explanation (`science-*`), instruction-following prose (`writing-*`), factual recall vs hedging (`gk-*`) |
+
+Research/deep/fast are the default trio; **code and topics run on demand**
+(`scripts/run_all_evals.sh code topics`) so the routine full-suite runtime
+doesn't grow. Both also double as **per-model sweep sets** — see
+"Per-model sweeps" below.
 
 ## What the harness checks
 
@@ -29,6 +36,20 @@ Per case, against the reassembled streamed answer:
 - **route** — *(opt-in, for `audrey_auto`)* the inferred path (fast/deep/research,
   read from the banner family) matches the case's `expect_route`. This is how the
   fast/deep gate (token threshold + deep-intent phrases) is tested.
+- **code_block** — *(opt-in: `expect_code: true`, implied by `code_test`)* a
+  language-tagged fenced code block exists in the answer.
+- **code_runs** — *(opt-in: `code_test`)* the largest ` ```python ` block is
+  extracted, the case's asserts are appended, and the file **actually runs** in
+  a subprocess (scratch cwd, `code_timeout` seconds, default 15). Pass iff exit
+  0 — the one objective correctness signal in the suite. Safety posture: the
+  executed code is our own models' output answering our own stdlib-only
+  prompts, on this laptop, with only the timeout for isolation — keep case
+  prompts stdlib-only and don't point `code_test` at anything with side effects.
+- **contains** — *(opt-in: `answer_contains: [..]`)* every listed string appears
+  case-insensitively in the answer body. A weak objective signal for
+  reasoning/knowledge cases whose right answer has a distinctive token
+  ("82.8", "tungsten"). Pick tokens that survive formatting variance (avoid
+  "8,611"-style numbers).
 - **latency** — *(measured for every case, not pass/fail)* TTFT (first content
   delta) and total wall-clock. Printed per case and saved in the answers file.
 
@@ -64,16 +85,16 @@ live stack, never from off-network and never from inside a container.
 scripts/run_all_evals.sh
 ```
 
-This chains all three protocols and writes today's dated answers files into
-`docs/testing/` (`<date>-research-answers.md`, `-deep-`, `-fast-`). It does the
-same preflight checks (venv, `.env.test.local`, valid protocol) and **exits
-non-zero if any case in any protocol failed a check**, so it can gate CI / a
-pre-deploy check. The full suite is **slow (~60–90 min, ~34 cases)** — run it in
-the background and wait; don't foreground-block on it.
+This chains the default trio (research + deep + fast) and writes today's dated
+answers files into `docs/testing/` (`<date>-research-answers.md`, `-deep-`,
+`-fast-`). It does the same preflight checks (venv, `.env.test.local`, valid
+protocol) and **exits non-zero if any case in any protocol failed a check**, so
+it can gate CI / a pre-deploy check. The trio is **slow (~60–90 min, ~40
+cases)** — run it in the background and wait; don't foreground-block on it.
 
 ```bash
 scripts/run_all_evals.sh research deep      # only the named protocols, in order
-scripts/run_all_evals.sh fast               # just one
+scripts/run_all_evals.sh code topics        # the opt-in protocols (not in the default trio)
 DATE=2026-07-01 scripts/run_all_evals.sh    # override the date stamp
 ONLY=euclid scripts/run_all_evals.sh research   # pass --only through to one case
 ```
@@ -118,6 +139,58 @@ too). Full flag list: `.venv/bin/python scripts/eval_research.py --help`.
 The first run of each protocol establishes that mode's **baseline** — the file
 every future run diffs against.
 
+## Per-model sweeps (lineup optimization)
+
+Deep-panel lineups are **fixed lists** in `config.yaml` (`deep_panel*.workers`)
+— there is no per-request override. So optimizing a lineup means testing the
+candidate models **in isolation**, comparing them, editing the workers list,
+and confirming with a deep-protocol run. The isolation path is Audrey's
+passthrough route: `model: "audrey_passthrough/<concrete>"` proxies straight to
+Ollama — no classifier, no banners, no panel, **no tools** (so a `gk-*` case
+becomes pure recall: exactly what you want to know about a candidate), and
+latency is the model itself.
+
+**Prerequisite (once per model set):** the concrete model name must be in
+`passthrough.allowed_models` in `config.yaml` — the registry text-pool models
+are already listed. After editing, redeploy on the box
+(`docker compose up -d --force-recreate audrey-ai` — config-only, no rebuild)
+and confirm the new `audrey_passthrough/<name>` ids show up in OWUI's model
+list.
+
+**Run a sweep** (`--models` runs every case once per model, grouped by model so
+local models don't thrash GPU loads; ` [<model>]` is auto-suffixed onto case
+names):
+
+```bash
+.venv/bin/python scripts/eval_research.py \
+  --cases scripts/eval_prompts_code_models.json \
+  --models 'audrey_passthrough/qwen3-coder-next:latest,audrey_passthrough/kimi-k2.7-code:cloud,audrey_passthrough/deepseek-v4-pro:cloud' \
+  --save-file docs/testing/$(date +%F)-code-sweep-answers.md \
+  --save-json docs/testing/$(date +%F)-code-sweep-results.json
+```
+
+**Build the comparison** (case × model matrix + per-model pass rate / mean
+latency / answer length + failure list — the seed for the hand-written report):
+
+```bash
+.venv/bin/python scripts/eval_compare.py \
+  docs/testing/$(date +%F)-code-sweep-results.json \
+  --out docs/testing/$(date +%F)-code-compare.md
+```
+
+Feeding several results files merges them into one matrix (e.g. a sweep plus an
+`audrey_deep` run of the same cases — the anchors line up by name). Naming
+convention: `<date>-<desc>-sweep-answers.md` + `-results.json` + `-compare.md`,
+plus the usual hand-written `-report.md` for the quality read.
+
+**The lineup loop:** sweep the candidates (`eval_prompts_code_models.json` for
+code; `eval_prompts_topics.json` sweeps too) → read the compare table + answers
+→ propose a `deep_panel*.workers` edit in `config.yaml` → redeploy → re-run the
+affected deep protocol (`run_all_evals.sh code` or `deep`) and diff against its
+baseline. `agentic.debug_panel_drafts: true` (live-toggle) is the complementary
+view: it appends every worker's draft to deep answers, showing how panel
+members behave *inside* the panel rather than solo.
+
 ## Cross-mode anchors
 
 Some prompts appear in more than one protocol on purpose, so a mode-vs-mode diff
@@ -128,6 +201,12 @@ is a direct prose comparison on an identical prompt:
   fact-check stage adds over panel-anchor-only).
 - `birthday-toast`, `recursion`, `ambiguous-mercury` — in **deep** and **fast**
   (same prompt, different latency/depth tradeoff).
+- `code-lru-cache`, `code-debug-mutable-default` — in **deep** and **code**
+  (the deep protocol's routine coding coverage); those two plus
+  `code-merge-intervals`, `code-debug-binary-search` — in **code** and the
+  **per-model sweep set** `eval_prompts_code_models.json` (panel-vs-solo on an
+  identical prompt, and the rows that line up when merging results in
+  `eval_compare.py`).
 
 ## Adding or editing a case
 
@@ -145,26 +224,49 @@ protocol's array:
 }
 ```
 
-Only `name`, `model`, and `prompt` are required. The `expect_*` fields default
-sensibly from the model, so a research case needs none of them. Add a case,
-re-run the protocol, and it's checked + saved like the rest. Keep a cross-mode
-anchor's `name` and `prompt` byte-identical across protocols so the diff stays
-clean.
+Coding/knowledge cases add the objective-check fields:
+
+```json
+{
+  "name": "code-rle",
+  "prompt": "Write a Python function rle(s) that ... single complete Python code block ...",
+  "code_test": "assert rle(\"aaabcc\") == \"a3b1c2\"\nprint(\"ok\")",
+  "code_timeout": 15,                 // optional; seconds for the subprocess
+  "expect_code": true,                // optional; implied by code_test
+  "answer_contains": ["timsort"]      // optional; all must appear (case-insensitive)
+}
+```
+
+Only `name` and `prompt` are required (`model` falls back to `--model`). The
+`expect_*` fields default sensibly from the model, so a research case needs
+none of them. Cases with `code_test` should instruct "a single complete Python
+code block using only the standard library" and name the function/class exactly
+— the harness extracts the largest ` ```python ` block and runs it against the
+asserts. Add a case, re-run the protocol, and it's checked + saved like the
+rest. Keep a cross-mode anchor's `name` and `prompt` byte-identical across
+protocols so the diff stays clean. Sweep-set cases (`eval_prompts_code_models.json`)
+omit `model` entirely — `--models` supplies it.
 
 ## Files / layout
 
 ```
 scripts/
-  eval_research.py              # the one harness — auth, streaming, checks, save
-  run_all_evals.sh              # one-command runner: research + deep + fast, dated
+  eval_research.py              # the one harness — auth, streaming, checks, sweep, save
+  eval_compare.py               # case × model comparison table from --save-json results
+  run_all_evals.sh              # one-command runner: research + deep + fast (code/topics opt-in), dated
   eval_prompts.json             # quick 6-case smoke set (the harness default)
   eval_prompts_protocol.json    # research protocol (~10 cases)
-  eval_prompts_deep.json        # deep protocol (~12 cases)
+  eval_prompts_deep.json        # deep protocol (~18 cases, incl. 2 coding anchors)
   eval_prompts_fast.json        # fast + auto protocol (~12 cases)
+  eval_prompts_code.json        # coding protocol on audrey_deep (~10 cases)
+  eval_prompts_code_models.json # compact all-objective sweep set (~6 cases, no model field)
+  eval_prompts_topics.json      # reasoning/science/writing/gk domains (~13 cases)
 docs/testing/
   README.md                     # this file — how to use the suite
   <date>-<protocol>-answers.md  # machine-written: every answer from one run
   <date>-<protocol>-report.md   # hand-written: the quality read for that run
+  <date>-<desc>-results.json    # machine-written: per-case checks/latency (--save-json)
+  <date>-<desc>-compare.md      # eval_compare.py: case × model matrix for a sweep
 docs/plans/
   PLAN-mode-test-suite.md       # design rationale + case taxonomy
 ```
