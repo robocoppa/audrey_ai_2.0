@@ -20,7 +20,7 @@
 # USAGE
 #   scripts/run_all_evals.sh                 # the default trio (research deep fast), today's date
 #   scripts/run_all_evals.sh research deep   # only the named protocols, in order
-#   scripts/run_all_evals.sh code            # opt-in protocols: code, topics (not in the default trio)
+#   scripts/run_all_evals.sh code code-hard  # opt-in protocols: code, code-hard, topics (not in the default trio)
 #   DATE=2026-07-01 scripts/run_all_evals.sh # override the date stamp
 #   ONLY=euclid scripts/run_all_evals.sh research   # pass --only through
 #
@@ -53,6 +53,7 @@ declare -A MODEL=(
   [deep]="audrey_deep"
   [fast]="audrey_fast"
   [code]="audrey_deep"
+  [code-hard]="audrey_deep"
   [topics]="audrey_deep"
 )
 declare -A CASES=(
@@ -60,14 +61,17 @@ declare -A CASES=(
   [deep]="scripts/eval_prompts_deep.json"
   [fast]="scripts/eval_prompts_fast.json"
   [code]="scripts/eval_prompts_code.json"
+  [code-hard]="scripts/eval_prompts_code_hard.json"
   [topics]="scripts/eval_prompts_topics.json"
 )
 
-# protocols to run: CLI args if given, else the default trio. code + topics
-# are OPT-IN (name them explicitly) so the routine full-suite runtime doesn't
-# grow; the deep protocol carries 2 coding anchor cases so every default run
-# still exercises deep-mode coding. Per-model sweeps don't run through this
-# script — see docs/testing/README.md "Per-model sweeps".
+# protocols to run: CLI args if given, else the default trio. code, code-hard,
+# and topics are OPT-IN (name them explicitly) so the routine full-suite runtime
+# doesn't grow; the deep protocol carries 2 coding anchor cases so every default
+# run still exercises deep-mode coding. code = the easy plumbing/regression tier;
+# code-hard = the discriminating tier for lineup optimization (edge cases, subtle
+# bugs). Per-model sweeps don't run through this script — see
+# docs/testing/README.md "Per-model sweeps".
 if [[ $# -gt 0 ]]; then
   PROTOCOLS=("$@")
 else
@@ -82,7 +86,7 @@ die() { echo "ERROR: $*" >&2; exit 2; }
 [[ -f "${REPO_ROOT}/.env.test.local" ]] || die ".env.test.local missing at repo root. See docs/testing/README.md for setup (AUDREY_EVAL_BASE_URL + AUDREY_EVAL_API_KEY)."
 
 for p in "${PROTOCOLS[@]}"; do
-  [[ -n "${MODEL[$p]:-}" ]] || die "unknown protocol '$p' (valid: research deep fast code topics)"
+  [[ -n "${MODEL[$p]:-}" ]] || die "unknown protocol '$p' (valid: research deep fast code code-hard topics)"
   [[ -f "${REPO_ROOT}/${CASES[$p]}" ]] || die "cases file missing for '$p': ${CASES[$p]}"
 done
 

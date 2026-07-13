@@ -110,7 +110,7 @@ These are the files we'll reference in this lesson:
 - [`src/audrey/pipeline/complexity.py:72`](../../src/audrey/pipeline/complexity.py#L72)
   - token counting and depth-intent helpers for the fast/deep gate.
 - [`config.yaml:7`](../../config.yaml#L7) - router-model config.
-- [`config.yaml:414`](../../config.yaml#L414) - complexity threshold and depth-intent config.
+- [`config.yaml:450`](../../config.yaml#L450) - complexity threshold and depth-intent config.
 
 Open them as we go, but do not try to memorize all the code at once. The useful
 shape is the sequence of decisions.

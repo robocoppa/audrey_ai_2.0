@@ -90,7 +90,7 @@ it at the source that actually settles the question.
 
 The prose findings are the answer's raw material, but prose is hard for the
 *next* stages to reason over precisely. So — when the ledger feature is on
-([`config.yaml:231`](../../config.yaml#L231)) — a second, mechanical pass runs
+([`config.yaml:235`](../../config.yaml#L235)) — a second, mechanical pass runs
 per worker, converting each one's prose into a structured `ResearchResult`
 ([`deep_panel.py:1208`](../../src/audrey/pipeline/deep_panel.py#L1208)). This is
 a *separate* model call with a separate prompt
@@ -195,7 +195,7 @@ list. An ungrounded or creative answer produces **nothing** here — no ledger, 
 surviving sourced claim, so no empty Sources header sprouts on a birthday toast.
 
 **The hedging.** When the hedging feature is on
-([`config.yaml:233`](../../config.yaml#L233)), each surviving claim gets a
+([`config.yaml:243`](../../config.yaml#L243)), each surviving claim gets a
 *disposition* — state it plainly, attribute it to its source, or hedge it —
 from the pure function
 [`hedge_policy`](../../src/audrey/pipeline/ledger.py#L437). The rules are ordered
@@ -299,7 +299,7 @@ stays clean prose rather than sprouting empty scaffolding.
 actually read better — without rebuilding the image. What's the lever?**
 
 The `hedge_policy` flag in the research-ledger config
-([`config.yaml:233`](../../config.yaml#L233)). It's a *separate* flag from the
+([`config.yaml:243`](../../config.yaml#L243)). It's a *separate* flag from the
 ledger's own `enabled` flag precisely so the hedging can be toggled against a
 ledger-on baseline: flip it, re-run a live eval over saved answers, and diff the
 two. It changes only the writer's wording (plain statement becomes explicitly

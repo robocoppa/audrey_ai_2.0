@@ -98,16 +98,20 @@ fast_path:
 deep_panel:
   code:
     workers: ["qwen3-coder-next:latest", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud"]
-    synthesizer: "qwen3.6:35b"
-    fallback_synth: "glm-5.2:cloud"
+    # glm-5.2 (cloud) primary synth: skips the local cold-load a synth on
+    # qwen3.6:35b incurred (synth can't co-reside in VRAM with a local worker
+    # under GPU_CONCURRENCY=1, so it had to load AFTER the worker unloaded).
+    # qwen3.6:35b stays as the local fallback if the cloud synth call fails.
+    synthesizer: "glm-5.2:cloud"
+    fallback_synth: "qwen3.6:35b"
   reasoning:
     workers: ["qwen3.6:35b", "kimi-k2.6:cloud", "deepseek-v4-pro:cloud"]
-    synthesizer: "qwen3.6:35b"
-    fallback_synth: "glm-5.2:cloud"
+    synthesizer: "glm-5.2:cloud"
+    fallback_synth: "qwen3.6:35b"
   general:
     workers: ["qwen3.6:35b", "kimi-k2.6:cloud", "deepseek-v4-pro:cloud"]
-    synthesizer: "qwen3.6:35b"
-    fallback_synth: "glm-5.2:cloud"
+    synthesizer: "glm-5.2:cloud"
+    fallback_synth: "qwen3.6:35b"
   # vl stays one local + one cloud: the deep path rebuilds prompts text-only,
   # so the cloud workers never see the image — and image turns force the fast
   # path anyway (the local qwen3-vl is the real worker). A second cloud draft

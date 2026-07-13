@@ -15,13 +15,17 @@ See `../plans/PLAN-mode-test-suite.md` for the design rationale and case taxonom
 | **Research** | `scripts/eval_prompts_protocol.json` | `audrey_research` | Staged research→verify→fact-check→write; grounding, citation, hedge-vs-drop discipline |
 | **Deep** | `scripts/eval_prompts_deep.json` | `audrey_deep` | Panel synthesis quality across a wide topic range; flourish-leak failure mode; merge coherence; 2 coding anchors |
 | **Fast** | `scripts/eval_prompts_fast.json` | `audrey_fast` / `audrey_auto` | Answer quality on simple turns; **routing correctness** (fast/deep gate); **latency/TTFT** |
-| **Code** *(opt-in)* | `scripts/eval_prompts_code.json` | `audrey_deep` | Coding on the deep panel's code pool: implement/debug/refactor, with **executed** Python asserts (`code_runs`) |
+| **Code** *(opt-in)* | `scripts/eval_prompts_code.json` | `audrey_deep` | Coding on the deep panel's code pool: implement/debug/refactor, with **executed** Python asserts (`code_runs`). The **easy/regression** tier — every pooled model tends to pass, so it's a plumbing gate, not a discriminator |
+| **Code-hard** *(opt-in)* | `scripts/eval_prompts_code_hard.json` | `audrey_deep` | The **discriminating** coding tier for lineup optimization: edge-case-heavy algorithms (TTL+LRU cache, deterministic topo-sort with cycle detection), subtle async exception isolation, strict parsers/tokenizers. Asserts cover the corners easy prompts miss, so models actually diverge |
 | **Topics** *(opt-in)* | `scripts/eval_prompts_topics.json` | `audrey_deep` | Reasoning/math (`reasoning-*`), explanation (`science-*`), instruction-following prose (`writing-*`), factual recall vs hedging (`gk-*`) |
 
-Research/deep/fast are the default trio; **code and topics run on demand**
-(`scripts/run_all_evals.sh code topics`) so the routine full-suite runtime
-doesn't grow. Both also double as **per-model sweep sets** — see
-"Per-model sweeps" below.
+Research/deep/fast are the default trio; **code, code-hard, and topics run on
+demand** (`scripts/run_all_evals.sh code code-hard topics`) so the routine
+full-suite runtime doesn't grow. Reach for **code-hard over code** when the
+question is "which models earn a panel seat" — the easy tier can't separate them
+(a real run had all pooled models pass every easy case; the only signal was
+per-worker latency in the drafts). `code` and `code_models` also double as
+**per-model sweep sets** — see "Per-model sweeps" below.
 
 ## What the harness checks
 
@@ -186,10 +190,16 @@ plus the usual hand-written `-report.md` for the quality read.
 **The lineup loop:** sweep the candidates (`eval_prompts_code_models.json` for
 code; `eval_prompts_topics.json` sweeps too) → read the compare table + answers
 → propose a `deep_panel*.workers` edit in `config.yaml` → redeploy → re-run the
-affected deep protocol (`run_all_evals.sh code` or `deep`) and diff against its
-baseline. `agentic.debug_panel_drafts: true` (live-toggle) is the complementary
-view: it appends every worker's draft to deep answers, showing how panel
-members behave *inside* the panel rather than solo.
+affected deep protocol (`run_all_evals.sh code-hard` or `deep`) and diff against
+its baseline. Sweep the **`code-hard`** cases, not the easy ones, when the goal
+is separating candidates — the easy set doesn't discriminate. And write
+`code_test` asserts that cover the corners (edge cases, input non-mutation, the
+raise-on-bad-input contract): a passing easy case can still hide a real defect,
+which is exactly what the harder asserts surface. `agentic.debug_panel_drafts:
+true` (live-toggle) is the complementary view: it appends every worker's draft
+to deep answers, showing how panel members behave *inside* the panel rather than
+solo — and the per-worker latency there is itself a lineup signal (a local
+worker running 15–40× slower than the cloud ones gates the whole panel).
 
 ## Cross-mode anchors
 
@@ -253,12 +263,13 @@ omit `model` entirely — `--models` supplies it.
 scripts/
   eval_research.py              # the one harness — auth, streaming, checks, sweep, save
   eval_compare.py               # case × model comparison table from --save-json results
-  run_all_evals.sh              # one-command runner: research + deep + fast (code/topics opt-in), dated
+  run_all_evals.sh              # one-command runner: research + deep + fast (code/code-hard/topics opt-in), dated
   eval_prompts.json             # quick 6-case smoke set (the harness default)
   eval_prompts_protocol.json    # research protocol (~10 cases)
   eval_prompts_deep.json        # deep protocol (~18 cases, incl. 2 coding anchors)
   eval_prompts_fast.json        # fast + auto protocol (~12 cases)
-  eval_prompts_code.json        # coding protocol on audrey_deep (~10 cases)
+  eval_prompts_code.json        # easy/regression coding tier on audrey_deep (~10 cases)
+  eval_prompts_code_hard.json   # discriminating coding tier for lineup optimization (~5 cases)
   eval_prompts_code_models.json # compact all-objective sweep set (~6 cases, no model field)
   eval_prompts_topics.json      # reasoning/science/writing/gk domains (~13 cases)
 docs/testing/
