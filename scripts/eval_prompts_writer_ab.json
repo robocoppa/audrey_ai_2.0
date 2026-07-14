@@ -1,0 +1,28 @@
+[
+  {
+    "name": "science-attention",
+    "prompt": "Explain how the attention mechanism in a transformer works, for a reader who knows basic linear algebra but no machine learning.",
+    "expect_sources": false
+  },
+  {
+    "name": "science-plate-tectonics",
+    "prompt": "What drives plate tectonics? Explain the mechanism and the main lines of evidence that convinced geologists.",
+    "expect_sources": false
+  },
+  {
+    "name": "science-mrna-vaccines",
+    "prompt": "How do mRNA vaccines work, and how do they differ from traditional attenuated or inactivated vaccines?",
+    "expect_sources": false
+  },
+  {
+    "name": "reasoning-race-order",
+    "prompt": "Three friends — Ada, Ben, and Cal — finished a race. Ada wasn't last. Cal finished before Ada. Ben didn't win. In what order did they finish? Lay out the deduction, not just the answer.",
+    "expect_sources": false
+  },
+  {
+    "name": "gk-element-w",
+    "prompt": "Which chemical element has the symbol W, and where does that symbol come from? If you're not certain, say so rather than guessing.",
+    "expect_sources": false,
+    "answer_contains": ["tungsten", "wolfram"]
+  }
+]
