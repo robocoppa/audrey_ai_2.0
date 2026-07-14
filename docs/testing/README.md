@@ -167,10 +167,10 @@ names):
 
 ```bash
 .venv/bin/python scripts/eval_research.py \
-  --cases scripts/eval_prompts_code_models.json \
-  --models 'audrey_passthrough/qwen3-coder-next:latest,audrey_passthrough/kimi-k2.7-code:cloud,audrey_passthrough/deepseek-v4-pro:cloud' \
-  --save-file docs/testing/$(date +%F)-code-sweep-answers.md \
-  --save-json docs/testing/$(date +%F)-code-sweep-results.json
+  --cases scripts/eval_prompts_code_hard_models.json \
+  --models 'audrey_passthrough/qwen2.5-coder:32b,audrey_passthrough/qwen3-coder-next:latest,audrey_passthrough/kimi-k2.7-code:cloud,audrey_passthrough/deepseek-v4-pro:cloud' \
+  --save-file docs/testing/$(date +%F)-code-hard-sweep-answers.md \
+  --save-json docs/testing/$(date +%F)-code-hard-sweep-results.json
 ```
 
 **Build the comparison** (case × model matrix + per-model pass rate / mean
@@ -187,15 +187,21 @@ Feeding several results files merges them into one matrix (e.g. a sweep plus an
 convention: `<date>-<desc>-sweep-answers.md` + `-results.json` + `-compare.md`,
 plus the usual hand-written `-report.md` for the quality read.
 
-**The lineup loop:** sweep the candidates (`eval_prompts_code_models.json` for
-code; `eval_prompts_topics.json` sweeps too) → read the compare table + answers
-→ propose a `deep_panel*.workers` edit in `config.yaml` → redeploy → re-run the
+**The lineup loop:** sweep the candidates → read the compare table + answers →
+propose a `deep_panel*.workers` edit in `config.yaml` → redeploy → re-run the
 affected deep protocol (`run_all_evals.sh code-hard` or `deep`) and diff against
-its baseline. Sweep the **`code-hard`** cases, not the easy ones, when the goal
-is separating candidates — the easy set doesn't discriminate. And write
-`code_test` asserts that cover the corners (edge cases, input non-mutation, the
-raise-on-bad-input contract): a passing easy case can still hide a real defect,
-which is exactly what the harder asserts surface. `agentic.debug_panel_drafts:
+its baseline. **Which sweep set:** `eval_prompts_code_hard_models.json` is the
+one to reach for when the goal is *separating* candidates — it's the discriminating
+`code-hard` cases with the `model` field stripped, so `--models` supplies the
+model. `eval_prompts_code_models.json` (the easy set) is only useful as a
+fast liveness/latency sweep; a real sweep on it comes back all-pass and tells you
+nothing about correctness (a documented run had all 6 models pass every easy case
+— the only signal was latency). Both sweep sets are cross-set anchors of their
+respective protocols (byte-identical `name`/`prompt`/`code_test`), so a sweep row
+lines up with the same case in the panel run. When you write new `code_test`
+asserts, cover the corners (edge cases, input non-mutation, the raise-on-bad-input
+contract): a passing easy case can still hide a real defect, which is exactly what
+the harder asserts surface. `agentic.debug_panel_drafts:
 true` (live-toggle) is the complementary view: it appends every worker's draft
 to deep answers, showing how panel members behave *inside* the panel rather than
 solo — and the per-worker latency there is itself a lineup signal (a local
@@ -270,7 +276,8 @@ scripts/
   eval_prompts_fast.json        # fast + auto protocol (~12 cases)
   eval_prompts_code.json        # easy/regression coding tier on audrey_deep (~10 cases)
   eval_prompts_code_hard.json   # discriminating coding tier for lineup optimization (~5 cases)
-  eval_prompts_code_models.json # compact all-objective sweep set (~6 cases, no model field)
+  eval_prompts_code_models.json # easy sweep set (~6 cases, no model field) — liveness/latency only
+  eval_prompts_code_hard_models.json # discriminating sweep set (~5 cases, no model field) — the lineup-decision one
   eval_prompts_topics.json      # reasoning/science/writing/gk domains (~13 cases)
 docs/testing/
   README.md                     # this file — how to use the suite

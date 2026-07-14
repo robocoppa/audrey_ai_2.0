@@ -1,0 +1,32 @@
+[
+  {
+    "name": "code-hard-lru-ttl",
+    "prompt": "Write a Python class TTLCache(capacity, ttl, clock) combining LRU eviction with time-based expiry. `clock` is a zero-arg callable returning the current time as a number; `ttl` is a duration in the same units. An entry set at time T expires once clock() reaches T+ttl (expired entries return None from get and free capacity). get(key) returns the value or None, and counts as a use for LRU ordering. put(key, value) inserts/updates. When more than `capacity` unexpired entries would be held, evict the least-recently-used. Reply with a single complete Python code block using only the standard library, defining the class exactly as named.",
+    "code_test": "\nt = [100]\ndef clock():\n    return t[0]\nc = TTLCache(2, ttl=10, clock=clock)\nc.put(\"a\", 1)\nc.put(\"b\", 2)\nassert c.get(\"a\") == 1\nt[0] = 105\nassert c.get(\"b\") == 2          # still fresh (expiry 110)\nt[0] = 111\nassert c.get(\"a\") is None       # expired (a set at 100, expiry 110)\nassert c.get(\"b\") is None       # expired (b set at 100, expiry 110)\n# expiry frees capacity: two fresh entries fit without eviction\nt[0] = 200\nc.put(\"x\", 10)\nc.put(\"y\", 20)\nassert c.get(\"x\") == 10 and c.get(\"y\") == 20\n# LRU eviction still applies among fresh entries\nc.put(\"z\", 30)                  # capacity 2, x is LRU (y,z accessed later)\nassert c.get(\"x\") is None\nassert c.get(\"y\") == 20 and c.get(\"z\") == 30\nprint(\"ok\")\n",
+    "code_timeout": 15
+  },
+  {
+    "name": "code-hard-debug-async",
+    "prompt": "This async helper is meant to fetch every key and return a list of results aligned to the input order, but a single failing key makes the whole call blow up and lose the other results. Explain the bug in one short paragraph, then give a corrected async function in a single complete Python code block. Contract for fetch_all(fetch, keys): `fetch` is an async callable; return a list the same length and order as `keys`, where a key whose fetch raised any Exception becomes None and all other results are preserved. Keep the name fetch_all.\n\nimport asyncio\n\nasync def fetch_all(fetch, keys):\n    return await asyncio.gather(*(fetch(k) for k in keys))",
+    "code_test": "\nimport asyncio\n\nasync def fetch(k):\n    await asyncio.sleep(0)\n    if k == 3:\n        raise ValueError(\"boom\")\n    return k * 10\n\nout = asyncio.run(fetch_all(fetch, [1, 2, 3, 4]))\nassert out == [10, 20, None, 40], out\nassert asyncio.run(fetch_all(fetch, [])) == []\nprint(\"ok\")\n",
+    "code_timeout": 15
+  },
+  {
+    "name": "code-hard-tokenizer",
+    "prompt": "Write a Python function tokenize(s) that splits a simple arithmetic expression into a list of tokens. Tokens are: integers (possibly multi-digit) as Python ints, and the single-character strings + - * / ( ). Spaces are skipped. Any other character raises ValueError. Examples: tokenize('12 + 34*(5-6)') returns [12, '+', 34, '*', '(', 5, '-', 6, ')']. Reply with a single complete Python code block using only the standard library, defining the function exactly as named.",
+    "code_test": "\nassert tokenize(\"12 + 34*(5-6)\") == [12, \"+\", 34, \"*\", \"(\", 5, \"-\", 6, \")\"]\nassert tokenize(\"\") == []\nassert tokenize(\"   7   \") == [7]\nassert tokenize(\"100\") == [100]\ntry:\n    tokenize(\"1 $ 2\")\n    raise SystemExit(\"should have raised on '$'\")\nexcept ValueError:\n    pass\nprint(\"ok\")\n",
+    "code_timeout": 15
+  },
+  {
+    "name": "code-hard-topo",
+    "prompt": "Write a Python function toposort(graph) that returns a topological ordering of a directed acyclic graph. `graph` is a dict mapping each node to a list of the nodes it points to (edges u->v mean u must come before v). When several nodes are simultaneously available (indegree zero), pick them in ascending sorted order so the result is deterministic. If the graph contains a cycle, raise ValueError. Reply with a single complete Python code block using only the standard library, defining the function exactly as named.",
+    "code_test": "\ng = {\"a\": [\"b\", \"c\"], \"b\": [\"d\"], \"c\": [\"d\"], \"d\": []}\nassert toposort(g) == [\"a\", \"b\", \"c\", \"d\"], toposort(g)\n# deterministic lexicographic tie-break among ready nodes\ng2 = {\"z\": [\"m\"], \"a\": [\"m\"], \"m\": []}\nassert toposort(g2) == [\"a\", \"z\", \"m\"], toposort(g2)\n# cycle -> ValueError\ntry:\n    toposort({\"a\": [\"b\"], \"b\": [\"a\"]})\n    raise SystemExit(\"should have raised on cycle\")\nexcept ValueError:\n    pass\nassert toposort({\"solo\": []}) == [\"solo\"]\nprint(\"ok\")\n",
+    "code_timeout": 15
+  },
+  {
+    "name": "code-hard-parse-duration",
+    "prompt": "Write a Python function parse_duration(s) that parses a compact duration string like '1h30m', '45s', or '2h' into a total number of seconds (h=3600, m=60, s=1). The string is a sequence of <integer><unit> chunks with no separators; each unit h/m/s may appear at most once; there is no required order but chunks must be contiguous with no gaps or stray characters. Any malformed input — empty string, unknown unit, duplicate unit, trailing garbage, embedded spaces — raises ValueError. Reply with a single complete Python code block using only the standard library, defining the function exactly as named.",
+    "code_test": "\nassert parse_duration(\"1h30m\") == 5400\nassert parse_duration(\"45s\") == 45\nassert parse_duration(\"2h\") == 7200\nassert parse_duration(\"1h1m1s\") == 3661\nfor bad in [\"\", \"1x\", \"1h1h\", \"h\", \"10\", \"1h 30m\", \"1hh\"]:\n    try:\n        parse_duration(bad)\n        raise SystemExit(f\"should have raised on {bad!r}\")\n    except ValueError:\n        pass\nprint(\"ok\")\n",
+    "code_timeout": 15
+  }
+]
