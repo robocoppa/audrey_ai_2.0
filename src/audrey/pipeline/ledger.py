@@ -289,6 +289,63 @@ def _backfill_supports(r: ResearchResult) -> ResearchResult:
     return r
 
 
+# Unambiguous authoritative domains, matched against a source URL's host when the
+# model left `source_type: unknown`. Regex on the host (substring of the netloc)
+# rather than urlparse to match this module's `re`-only idiom. Kept deliberately
+# narrow — only domains whose *type* is not in doubt, so we never upgrade a blog
+# that merely quotes a paper. 2026-07-14 writer-A/B trace: researchers tagged the
+# NeurIPS PDF and arxiv.org/abs/1706.03762 for "Attention Is All You Need" as
+# `unknown`, so `hedge_policy` rule 5 hedged settled facts ("softmax is applied
+# row-wise") for lack of an authoritative source type. Repairing the type here —
+# next to the other parse-time normalizers — restores plain statement without
+# touching the (intentionally conservative) policy logic.
+_DOMAIN_SOURCE_TYPES: tuple[tuple[re.Pattern[str], SourceType], ...] = (
+    (re.compile(r"(^|\.)arxiv\.org$"), "primary_paper"),
+    (re.compile(r"(^|\.)doi\.org$"), "primary_paper"),
+    (re.compile(r"(^|\.)papers\.neurips\.cc$"), "primary_paper"),
+    (re.compile(r"(^|\.)proceedings\.neurips\.cc$"), "primary_paper"),
+    (re.compile(r"(^|\.)pubmed\.ncbi\.nlm\.nih\.gov$"), "primary_paper"),
+    (re.compile(r"(^|\.)pmc\.ncbi\.nlm\.nih\.gov$"), "scholarly"),
+    (re.compile(r"\.gov$"), "official"),
+    (re.compile(r"\.edu$"), "scholarly"),
+    (re.compile(r"(^|\.)wikipedia\.org$"), "reference"),
+)
+
+_HOST_RE = re.compile(r"^[a-z]+://([^/?#]+)", re.IGNORECASE)
+
+
+def _host_of(url: str) -> str:
+    """Lowercased host of `url` (netloc without port), or '' if unparseable.
+    Tolerant like the rest of the parser — a malformed url yields no upgrade
+    rather than an error."""
+    m = _HOST_RE.match(url.strip())
+    if not m:
+        return ""
+    return m.group(1).split("@")[-1].split(":")[0].lower()
+
+
+def _upgrade_source_types(r: ResearchResult) -> ResearchResult:
+    """Upgrade a source's `source_type` from `unknown` to its real authoritative
+    type when its URL host is on an unambiguous authoritative domain.
+
+    Only touches sources the model left as `unknown` — an explicit type the model
+    chose is never overridden (it may know something the domain doesn't, e.g. a
+    `.gov` page that is really a news release). Pure; runs at parse time so the
+    corrected types reach `_source_types_for_claim`/`hedge_policy` downstream.
+    See `_DOMAIN_SOURCE_TYPES` for the rationale and the eval that motivated it."""
+    for s in r.sources:
+        if s.source_type != "unknown" or not s.url:
+            continue
+        host = _host_of(s.url)
+        if not host:
+            continue
+        for pattern, upgraded in _DOMAIN_SOURCE_TYPES:
+            if pattern.search(host):
+                s.source_type = upgraded
+                break
+    return r
+
+
 def _repair_source_links(r: ResearchResult) -> ResearchResult:
     """Re-point `claim.source_ids` entries that name a source by TITLE, URL,
     a case-variant of its id, or a `src{N}`/`source{N}` variant of an `s{N}`
@@ -382,7 +439,9 @@ def parse_research_result(raw: str) -> ResearchResult | None:
         if isinstance(data, list):
             data = {"claims": data}
         result = ResearchResult.model_validate(data)
-        return _backfill_supports(_repair_source_links(_backfill_ids(result)))
+        return _backfill_supports(
+            _upgrade_source_types(_repair_source_links(_backfill_ids(result)))
+        )
     except ValidationError as e:
         # Log the distinct failing fields (not the full multi-error dump) so a
         # recurring strict-field problem is visible at a glance.

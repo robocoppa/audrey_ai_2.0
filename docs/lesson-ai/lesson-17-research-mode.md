@@ -198,7 +198,7 @@ surviving sourced claim, so no empty Sources header sprouts on a birthday toast.
 ([`config.yaml:243`](../../config.yaml#L243)), each surviving claim gets a
 *disposition* — state it plainly, attribute it to its source, or hedge it —
 from the pure function
-[`hedge_policy`](../../src/audrey/pipeline/ledger.py#L437). The rules are ordered
+[`hedge_policy`](../../src/audrey/pipeline/ledger.py#L496). The rules are ordered
 and small: a vendor's own claim is *attributed*, never endorsed; a claim flagged
 `needs_hedge` is softened; a high-risk claim hedges unless a strong source
 carries it; an authoritative, non-high-risk claim is stated plainly; everything
@@ -327,7 +327,7 @@ from it — it spends effort tracking citations and pads with weak sources to
 satisfy the instruction, instead of writing well (the §2.5 spotlight). Pushing
 the deterministic decisions into pure functions
 ([`_render_sources_block`](../../src/audrey/pipeline/deep_panel.py#L994),
-[`hedge_policy`](../../src/audrey/pipeline/ledger.py#L437)) keeps the writer
+[`hedge_policy`](../../src/audrey/pipeline/ledger.py#L496)) keeps the writer
 focused on prose *and* makes those decisions unit-testable, which a prompt never
 is. The principle: if you can compute it from data, compute it — don't ask the
 model.

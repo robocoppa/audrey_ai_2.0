@@ -239,6 +239,93 @@ class TestParseResearchResult:
         r = parse_research_result(raw)
         assert r.claims[0].source_ids == ["nonsense"]
 
+    def test_unknown_arxiv_source_upgraded_to_primary_paper(self):
+        # 2026-07-14 writer-A/B trace: researchers tagged arxiv.org/abs/1706.03762
+        # ("Attention Is All You Need") as `unknown`, so hedge_policy hedged
+        # settled facts. The domain upgrade repairs the type at parse time.
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "x", "risk": "low"}],
+            "sources": [{"id": "s1", "title": "Attention Is All You Need",
+                         "url": "https://arxiv.org/abs/1706.03762",
+                         "source_type": "unknown"}],
+        })
+        r = parse_research_result(raw)
+        assert r.sources[0].source_type == "primary_paper"
+
+    def test_unknown_gov_source_upgraded_to_official(self):
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "x", "risk": "low"}],
+            "sources": [{"id": "s1", "title": "USGS", "source_type": "unknown",
+                         "url": "https://pubs.usgs.gov/gip/dynamic/stripes.html"}],
+        })
+        r = parse_research_result(raw)
+        assert r.sources[0].source_type == "official"
+
+    def test_unknown_neurips_and_wikipedia_upgraded(self):
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "x", "risk": "low"}],
+            "sources": [
+                {"id": "s1", "title": "NeurIPS", "source_type": "unknown",
+                 "url": "https://papers.neurips.cc/paper/7181-attention.pdf"},
+                {"id": "s2", "title": "Wikipedia", "source_type": "unknown",
+                 "url": "https://en.wikipedia.org/wiki/Attention_(machine_learning)"},
+            ],
+        })
+        r = parse_research_result(raw)
+        assert r.sources[0].source_type == "primary_paper"
+        assert r.sources[1].source_type == "reference"
+
+    def test_explicit_source_type_not_overridden_by_domain(self):
+        # Only `unknown` is upgraded — a model that deliberately labels a .gov
+        # page as `news` (e.g. a press release) keeps its choice.
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "x", "risk": "low"}],
+            "sources": [{"id": "s1", "title": "gov release", "source_type": "news",
+                         "url": "https://example.gov/press/release"}],
+        })
+        r = parse_research_result(raw)
+        assert r.sources[0].source_type == "news"
+
+    def test_non_authoritative_domain_stays_unknown(self):
+        # A blog that merely quotes a paper is not upgraded.
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "x", "risk": "low"}],
+            "sources": [{"id": "s1", "title": "blog", "source_type": "unknown",
+                         "url": "https://medium.com/@x/attention-explained"}],
+        })
+        r = parse_research_result(raw)
+        assert r.sources[0].source_type == "unknown"
+
+    def test_lookalike_domain_not_upgraded(self):
+        # `notarxiv.org` / `arxiv.org.evil.com` must not match the arxiv rule.
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "x", "risk": "low"}],
+            "sources": [
+                {"id": "s1", "title": "a", "source_type": "unknown",
+                 "url": "https://notarxiv.org/abs/1"},
+                {"id": "s2", "title": "b", "source_type": "unknown",
+                 "url": "https://arxiv.org.evil.com/abs/1"},
+            ],
+        })
+        r = parse_research_result(raw)
+        assert r.sources[0].source_type == "unknown"
+        assert r.sources[1].source_type == "unknown"
+
+    def test_domain_upgrade_reaches_hedge_policy(self):
+        # End-to-end: a low-risk claim backed only by a `unknown`-tagged arxiv
+        # source would hedge (rule 5); after the upgrade it states plainly. This
+        # is the whole point of the fix — the writer-A/B over-hedge.
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "softmax is applied row-wise",
+                        "risk": "low", "source_ids": ["s1"]}],
+            "sources": [{"id": "s1", "title": "Attention Is All You Need",
+                         "url": "https://arxiv.org/abs/1706.03762",
+                         "source_type": "unknown"}],
+        })
+        r = parse_research_result(raw)
+        types = {s.source_type for s in r.sources if "c1" in s.supports}
+        assert hedge_policy(r.claims[0], types) == "state_plainly"
+
     def test_content_free_source_dropped(self):
         # The 2026-07-09 trace-run `w2_, untitled — no url` shape: the qwen
         # structuring pass emitted source rows with no title AND no url (a stray
