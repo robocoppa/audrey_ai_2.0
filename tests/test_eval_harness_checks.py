@@ -135,6 +135,8 @@ def test_expand_sweep_name_falls_back_to_prompt():
 # ── save_json ───────────────────────────────────────────────────────────────
 
 def test_save_json_round_trips(tmp_path):
+    # No source_stats on this result → the "sources" field serializes to null,
+    # keeping the record shape stable (e.g. a code case).
     r = er.CaseResult(
         name="c1 [m1]", model="m1", ok=False,
         checks={"reachable": True, "code_runs": False, "banners": None},
@@ -149,8 +151,27 @@ def test_save_json_round_trips(tmp_path):
         "checks": {"reachable": True, "code_runs": False, "banners": None},
         "route": "unknown", "ttft_s": 1.5, "total_s": 12.0,
         "answer_len": 40, "banners": [], "error": "",
-        "code_detail": "exit 1: AssertionError",
+        "code_detail": "exit 1: AssertionError", "sources": None,
     }]
+
+
+def test_save_json_includes_source_stats(tmp_path):
+    # A research case carries grounding-quality numbers into the record so runs
+    # can be compared on source quality, not just pass/fail + latency.
+    r = er.CaseResult(
+        name="attn", model="audrey_research", ok=True,
+        checks={"reachable": True}, answer="ans", route="research",
+        source_stats=er.SourceStats(
+            total=5, official=1, academic=1, low_quality=0, other=3, quality="GOOD",
+        ),
+    )
+    out = tmp_path / "results.json"
+    er.save_json([r], out)
+    rec = json.loads(out.read_text())[0]
+    assert rec["sources"] == {
+        "total": 5, "official": 1, "academic": 1,
+        "low_quality": 0, "other": 3, "quality": "GOOD",
+    }
 
 
 # ── eval_compare.build_table ────────────────────────────────────────────────

@@ -811,6 +811,21 @@ def save_json(results: list[CaseResult], save_json_file: Path) -> None:
             "banners": r.banners_seen,
             "error": r.error,
             "code_detail": r.code_detail,
+            # Grounding-quality numbers (research/sourced cases). None when the
+            # case computed no source stats (e.g. a code case) — kept as an
+            # explicit null so the record shape is stable for eval_compare.py.
+            "sources": (
+                {
+                    "total": r.source_stats.total,
+                    "official": r.source_stats.official,
+                    "academic": r.source_stats.academic,
+                    "low_quality": r.source_stats.low_quality,
+                    "other": r.source_stats.other,
+                    "quality": r.source_stats.quality,
+                }
+                if r.source_stats is not None
+                else None
+            ),
         }
         for r in results
     ]

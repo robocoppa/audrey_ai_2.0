@@ -57,16 +57,27 @@ CASES="${CASES:-${2:-eval_prompts_protocol.json}}"
 # LABEL names the output files (default: the model — the historical naming).
 # Set it when the model alone is ambiguous (code/topics both run audrey_deep).
 LABEL="${LABEL:-${MODEL}}"
-DATE="$(date +%F)"
-SAVE_FILE="${DATE}-${LABEL}-onbox-answers.md"
+# STAMP is date + time (YYYY-MM-DD-HHMMSS) so re-running the same protocol/LABEL
+# on the same day no longer overwrites the previous answers file (the old
+# date-only stamp collided — e.g. three writer-glm-hedgefix runs in one day all
+# wrote the same filename). Still date-first, so files sort chronologically and
+# the paired <date>-<desc>-report.md convention still matches on the date prefix.
+STAMP="$(date +%F-%H%M%S)"
+SAVE_FILE="${STAMP}-${LABEL}-onbox-answers.md"
 
-# MODELS (comma-separated) turns the run into a per-model sweep: the harness
-# runs every case once per model and we also save the per-case results JSON
-# (the input for scripts/eval_compare.py). Empty = normal single-model run.
+# The per-case results JSON (machine-readable: checks, latency, source stats) is
+# written for EVERY run, not just sweeps — it's the input for eval_compare.py and
+# lets any two runs be diffed programmatically (single-model research re-runs used
+# to leave only the human .md, so run-over-run comparison was eyeball-only).
+RESULTS_FILE="${STAMP}-${LABEL}-onbox-results.json"
+
+# MODELS (comma-separated) turns the run into a per-model sweep: the harness runs
+# every case once per model. Empty = normal single-model run. Either way we emit
+# --save-json below.
 MODELS="${MODELS:-}"
 SWEEP_ARGS=()
 if [[ -n "${MODELS}" ]]; then
-  SWEEP_ARGS=(--models "${MODELS}" --save-json "/out/${DATE}-${LABEL}-onbox-results.json")
+  SWEEP_ARGS=(--models "${MODELS}")
 fi
 
 # ── preflight ───────────────────────────────────────────────────────────────
@@ -87,6 +98,7 @@ docker run -d --name "${CONTAINER}" --network "${NETWORK}" \
     --model "${MODEL}" \
     --cases "/eval/${CASES}" \
     --save-file "/out/${SAVE_FILE}" \
+    --save-json "/out/${RESULTS_FILE}" \
     "${SWEEP_ARGS[@]}" \
   || die "docker run failed."
 
@@ -131,4 +143,5 @@ else
 fi
 
 echo ">> answers: ${OUT_DIR}/${SAVE_FILE}"
+echo ">> results: ${OUT_DIR}/${RESULTS_FILE}  (feed to scripts/eval_compare.py)"
 exit "${rc}"
