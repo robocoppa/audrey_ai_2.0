@@ -179,9 +179,17 @@ RESEARCH_STRUCTURE_SYSTEM = (
     "`source_type` — use \"company_claim\" for a vendor's own benchmark or "
     "marketing assertion (not independent fact), \"official\" for vendor docs / "
     "release notes, \"reference\" for Britannica/MacTutor/encyclopedias, and so "
-    "on. If a claim has no real source in the notes, give it an empty "
-    "`source_ids` rather than inventing one. Put any leftover prose in "
-    "`summary_notes`."
+    "on. LINK EACH CLAIM to the source(s) that back it: if the notes attribute "
+    "a claim inline, use that; and when a claim clearly rests on a source the "
+    "notes list (e.g. the notes end with a `SOURCES:` block and the claim "
+    "restates that source's content), set its `source_ids` to that source even "
+    "if the note didn't repeat the citation next to the sentence — the sources "
+    "are already in the notes, so wiring a claim to the one it came from is "
+    "re-expressing, not inventing. Only leave `source_ids` empty when the notes "
+    "genuinely carry no source for that claim (e.g. a pure-reasoning step, or "
+    "the researcher explicitly worked from memory with no `SOURCES:` list). Do "
+    "NOT fabricate a URL or attach an unrelated source to make a claim look "
+    "grounded. Put any leftover prose in `summary_notes`."
 )
 
 VERIFIER_SYSTEM = (

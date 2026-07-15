@@ -78,7 +78,7 @@ class WebSearchRequest(BaseModel):                      # ① request schema
     count: Annotated[int, Field(ge=1, le=10, ...)] = 5
 ```
 
-and its route decorator + handler at [app.py:239](../../tools-server/app.py#L239):
+and its route decorator + handler at [app.py:341](../../tools-server/app.py#L341):
 
 ```python
 @app.post(
@@ -127,7 +127,7 @@ Not every route should be a tool. The chat archive has three routes the
 model must **never** call — writing a turn, pruning old data, reading
 stats. Those are for Audrey's archive client and the admin operator only.
 
-The mechanism is one flag ([app.py:514](../../tools-server/app.py#L514)):
+The mechanism is one flag ([app.py:597](../../tools-server/app.py#L597)):
 
 ```python
 @app.post("/chat_history/archive", include_in_schema=False, tags=["internal"])
@@ -159,7 +159,7 @@ into three groups with very different implementations:
 
 The **proxy** kind is worth pausing on because it's counterintuitive: the
 sidecar calls *back into Audrey*. Here's the whole of `kb_search`
-([app.py:306](../../tools-server/app.py#L306)), which is representative:
+([app.py:389](../../tools-server/app.py#L389)), which is representative:
 
 ```python
 async def kb_search(req: KBSearchRequest) -> KBSearchResponse:

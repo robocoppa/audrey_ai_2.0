@@ -110,6 +110,50 @@ async def test_searxng_primary_falls_back_to_brave():
     assert [h.url for h in hits] == ["https://brave.example/3"]
 
 
+# ── EMPTY primary result also triggers cross-fallback (both directions) ────────
+
+async def test_empty_primary_falls_back_to_other():
+    # SearXNG returns 200 + [] (all upstream engines throttled — not an error).
+    # Before the fix this returned [] and never tried Brave; now it falls back.
+    primary = _FakeSearxng(hits=[])
+    other = _FakeBrave(hits=[_hit("https://brave.example/4")])
+    hits = await _search_with_fallback(primary=primary, other=other, query="q", count=5)
+    assert [h.url for h in hits] == ["https://brave.example/4"]
+
+
+async def test_empty_brave_primary_falls_back_to_searxng():
+    # Symmetric: an empty Brave primary also tries SearXNG (fallback both ways).
+    primary = _FakeBrave(hits=[])
+    other = _FakeSearxng(hits=[_hit("https://searxng.example/4")])
+    hits = await _search_with_fallback(primary=primary, other=other, query="q", count=5)
+    assert [h.url for h in hits] == ["https://searxng.example/4"]
+
+
+async def test_empty_primary_and_empty_other_returns_empty():
+    # Both backends genuinely empty → honest empty result, NOT a 503.
+    primary = _FakeSearxng(hits=[])
+    other = _FakeBrave(hits=[])
+    hits = await _search_with_fallback(primary=primary, other=other, query="q", count=5)
+    assert hits == []
+
+
+async def test_empty_primary_no_other_returns_empty():
+    # Empty primary + no fallback configured → return the empty (200), not 503.
+    # (An empty is a valid "no results found"; only an ERROR with no fallback 503s.)
+    primary = _FakeSearxng(hits=[])
+    hits = await _search_with_fallback(primary=primary, other=None, query="q", count=5)
+    assert hits == []
+
+
+async def test_empty_primary_other_errors_returns_empty():
+    # Empty primary, and the fallback itself hits a recoverable error → degrade to
+    # the primary's empty rather than crashing or 503-ing (the primary succeeded).
+    primary = _FakeSearxng(hits=[])
+    other = _FakeBrave(error=BraveQuotaError("402"))
+    hits = await _search_with_fallback(primary=primary, other=other, query="q", count=5)
+    assert hits == []
+
+
 # ── both fail → 503 naming both; primary fails + no other → 503 ────────────
 
 async def test_both_backends_fail_raises_503_naming_both():

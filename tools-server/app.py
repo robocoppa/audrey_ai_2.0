@@ -248,6 +248,34 @@ def _prefer_searxng(query: str) -> bool:
     return digest[0] % 2 == 1
 
 
+# Provider errors that mean "this backend is unavailable right now" and so
+# warrant a cross-fallback (vs. a ValueError = config bug that must surface).
+_RECOVERABLE = (BraveQuotaError, BraveRateLimitError, BraveUpstreamError, SearxngError)
+
+
+async def _try_other(
+    other: BraveClient | SearxngClient,
+    other_name: str,
+    query: str,
+    count: int,
+) -> list[SearchResult] | None:
+    """Attempt the fallback backend. Return its hits (possibly empty), or None if
+    it too hit a recoverable failure (a ValueError here is also treated as a
+    recoverable dead-end for the fallback, not re-raised as a 500 — the primary
+    already ran; we just couldn't get a second opinion). Shared by the
+    error-path and empty-path fallbacks so their handling stays identical."""
+    try:
+        hits = await other.search(query=query, count=count)
+        log.warning(
+            "web_search: %s returned %d results (first url=%r)",
+            other_name, len(hits), (hits[0].url if hits else ""),
+        )
+        return hits
+    except (*_RECOVERABLE, ValueError) as fe:
+        log.warning("web_search: %s fallback failed: %s", other_name, fe)
+        return None
+
+
 async def _search_with_fallback(
     *,
     primary: BraveClient | SearxngClient,
@@ -255,49 +283,59 @@ async def _search_with_fallback(
     query: str,
     count: int,
 ) -> list[SearchResult]:
-    """Run `primary.search`; on a recoverable provider error, cross-fall-back to
-    `other` (the opposite backend) if configured. 503 only if both fail (or the
-    primary fails and there's no `other`). Works in either direction — Brave
+    """Run `primary.search`; cross-fall-back to `other` (the opposite backend) if
+    the primary is unavailable OR returns EMPTY. Works either direction — Brave
     primary → SearXNG other, or SearXNG primary → Brave other — because both
-    clients share the `search(query, count) -> list[SearchResult]` shape and
-    raise provider-specific errors we normalize here.
+    clients share `search(query, count) -> list[SearchResult]`.
 
-    Recoverable = the errors that mean "this backend is unavailable right now":
-    Brave 402/429/upstream, or any SearxngError. A `ValueError` (e.g. empty
-    Brave key) is a config bug, not a transient outage → 500, no fallback."""
+    Two fallback triggers:
+      * a recoverable provider ERROR (Brave 402/429/upstream, any SearxngError);
+      * an EMPTY primary result. An empty is NOT an exception — a SearXNG `200`
+        with zero results is usually all its upstream engines throttling at once,
+        not "nothing exists" (see searxng.py). Before this, an empty primary
+        returned `[]` and silently skipped a healthy `other`, so ~half of queries
+        (whatever hashes to SearXNG-primary) got nothing whenever SearXNG's
+        general engines throttled, even with Brave quota available. Cost: an empty
+        primary now spends one `other` call, eroding the `_prefer_searxng` quota
+        split — accepted, since an empty result is useless and grounding matters
+        more than conserving the second provider's quota on empties.
+
+    Outcomes: primary hits → return them. Primary empty/error + `other` has hits
+    → return other's. Both empty → return empty (an honest "no results", NOT a
+    503). Primary error + no `other` (or `other` also errors) → 503. A
+    `ValueError` from the PRIMARY is a config bug (e.g. empty API key) → 500."""
     prim_name = "Brave" if isinstance(primary, BraveClient) else "SearXNG"
     other_name = "SearXNG" if prim_name == "Brave" else "Brave"
     try:
-        return await primary.search(query=query, count=count)
+        hits = await primary.search(query=query, count=count)
     except ValueError as e:  # misconfiguration (e.g. empty API key) — not transient
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e),
         ) from e
-    except (BraveQuotaError, BraveRateLimitError, BraveUpstreamError, SearxngError) as e:
+    except _RECOVERABLE as e:
         if other is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"{prim_name} unavailable ({e}) and no fallback backend configured.",
             ) from e
-        log.warning(
-            "web_search: %s unavailable (%s); falling back to %s",
-            prim_name, e, other_name,
-        )
-        try:
-            hits = await other.search(query=query, count=count)
-            log.warning(
-                "web_search: %s returned %d results (first url=%r)",
-                other_name, len(hits), (hits[0].url if hits else ""),
-            )
-            return hits
-        except (
-            BraveQuotaError, BraveRateLimitError, BraveUpstreamError, SearxngError, ValueError,
-        ) as fe:
-            log.warning("web_search: %s fallback failed: %s", other_name, fe)
+        log.warning("web_search: %s unavailable (%s); falling back to %s",
+                    prim_name, e, other_name)
+        result = await _try_other(other, other_name, query, count)
+        if result is None:  # both backends down → 503 naming both
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Search unavailable ({prim_name}: {e}; {other_name}: {fe})",
-            ) from fe
+                detail=f"Search unavailable ({prim_name}: {e}; {other_name}: failed)",
+            ) from e
+        return result
+
+    # Primary succeeded. Non-empty → done. Empty → try `other` for a better
+    # answer; if there's no `other` or it also comes back empty/failed, the
+    # honest result is the primary's empty (a 200 with [], never a 503).
+    if hits or other is None:
+        return hits
+    log.warning("web_search: %s returned 0 results; trying %s", prim_name, other_name)
+    result = await _try_other(other, other_name, query, count)
+    return result or hits
 
 
 @app.post(
