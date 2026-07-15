@@ -58,6 +58,13 @@ class ReactResult:
     tool_calls: list[ToolResult] = field(default_factory=list)
     prompt_eval_count: int = 0
     eval_count: int = 0
+    # Total chars of successful web_search tool-result bodies dispatched this
+    # loop — i.e. how much retrieved web content actually reached the model's
+    # context. The research-trace diagnostic distinguishes "worker never
+    # retrieved" (≈0) from "worker retrieved but wrote thin grounding anyway"
+    # (large). Successful web_search only: errors and the budget stub carry no
+    # grounding, so counting them would inflate the "reached the model" figure.
+    web_search_chars: int = 0
 
 
 def _debug_research_trace(cfg: Any) -> bool:
@@ -176,6 +183,7 @@ async def run_react(
     rounds_used = 0
     last_resp: dict[str, Any] = {}
     web_searches_used = 0
+    web_search_chars = 0  # chars of successful web_search bodies reaching context
 
     async with httpx.AsyncClient() as http:
         for round_idx in range(max_rounds):
@@ -218,6 +226,7 @@ async def run_react(
                     tool_calls=all_results,
                     prompt_eval_count=int(last_resp.get("prompt_eval_count", 0) or 0),
                     eval_count=int(last_resp.get("eval_count", 0) or 0),
+                    web_search_chars=web_search_chars,
                 )
 
             # The assistant's tool-call turn must be in history before we add tool results.
@@ -262,6 +271,8 @@ async def run_react(
             for r in results:
                 convo.append(to_tool_message(r))
                 all_results.append(r)
+                if r.name == "web_search" and not r.is_error:
+                    web_search_chars += len(r.content or "")
             for s in stubs:
                 convo.append(to_tool_message(s))
             rounds_used += 1
@@ -308,6 +319,7 @@ async def run_react(
             tool_calls=all_results,
             prompt_eval_count=int(final.get("prompt_eval_count", 0) or 0),
             eval_count=int(final.get("eval_count", 0) or 0),
+            web_search_chars=web_search_chars,
         )
 
 

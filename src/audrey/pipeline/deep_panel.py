@@ -233,6 +233,7 @@ async def _run_one_worker(
                         {"name": r.name, "elapsed_s": r.elapsed_s, "is_error": r.is_error}
                         for r in react.tool_calls
                     ],
+                    web_search_chars=react.web_search_chars,
                 )
 
             resp = await ollama.chat(

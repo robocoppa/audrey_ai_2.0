@@ -223,11 +223,31 @@ def test_panel_drafts_block_empty_returns_empty_string():
 def test_panel_drafts_block_renders_model_meta_and_content():
     out = panel_drafts_block([
         {"model": "qwen3.6:35b", "content": "The draft body.",
-         "elapsed_s": 42.34, "tool_rounds": 2},
+         "elapsed_s": 42.34, "tool_rounds": 2, "web_search_chars": 4210},
     ])
     assert "## Panel drafts (debug)" in out
-    assert "### qwen3.6:35b — 42.3s · 2 tool rounds" in out
+    assert "### qwen3.6:35b — 42.3s · 2 tool rounds · web_search→ctx: 4210 chars" in out
     assert "The draft body." in out
+
+
+def test_panel_drafts_block_web_search_chars_defaults_zero_for_tool_worker():
+    # A tool-using worker that retrieved nothing (native-fetch failure / empty
+    # web_search) renders `0 chars` — that's the research-grounding diagnostic
+    # signal ("retrieved nothing" vs a large count), so it must show, not omit.
+    out = panel_drafts_block([
+        {"model": "m", "content": "x", "elapsed_s": 5.0, "tool_rounds": 1},
+    ])
+    assert "web_search→ctx: 0 chars" in out
+
+
+def test_panel_drafts_block_omits_web_search_chars_for_tool_free_worker():
+    # A tool-free worker never searched — no round count, and no web_search
+    # line either (gated on tool_rounds so it can't read as "searched, got 0").
+    out = panel_drafts_block([
+        {"model": "m", "content": "x", "elapsed_s": 10.0, "tool_rounds": 0,
+         "web_search_chars": 0},
+    ])
+    assert "web_search→ctx" not in out
 
 
 def test_panel_drafts_block_omits_zero_tool_rounds():

@@ -195,6 +195,13 @@ def _draft_section_lines(drafts: list[dict], *, heading: str) -> list[str]:
         rounds = int(d.get("tool_rounds") or 0)
         if rounds:
             meta.append(f"{rounds} tool round{'s' if rounds != 1 else ''}")
+            # How much web_search content actually reached this worker's context.
+            # Only meaningful for a tool-using worker (a tool-free one never
+            # searched), so it's gated on `rounds` alongside the round count.
+            # The research-grounding diagnostic reads this to tell "never
+            # retrieved" (≈0) from "retrieved but wrote thin grounding".
+            ws_chars = int(d.get("web_search_chars") or 0)
+            meta.append(f"web_search→ctx: {ws_chars} chars")
         head = f"{heading} {model}" + (" — " + " · ".join(meta) if meta else "")
         lines.append(head)
         lines.append("")

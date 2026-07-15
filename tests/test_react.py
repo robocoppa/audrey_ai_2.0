@@ -216,6 +216,10 @@ async def test_web_search_cap_stubs_overflow_and_stops_offering(fake_dispatch):
     assert fake_dispatch == ["web_search", "web_search", "web_search", "kb_search"]
     # Footer data counts real dispatches only — the stub is not in tool_calls.
     assert len(out.tool_calls) == 4
+    # web_search_chars sums ONLY successful web_search bodies (11 chars each,
+    # '{"ok": true}'), not kb_search and not the budget-stubbed 4th web call:
+    # 3 dispatched web_search × 11 = 33.
+    assert out.web_search_chars == 3 * len('{"ok": true}')
     # The stubbed call got a budget-note tool message in the convo.
     round3_msgs = ollama.calls[2]["messages"]
     stubs = [m for m in round3_msgs if m.get("role") == "tool"
@@ -245,6 +249,30 @@ async def test_web_search_cap_zero_means_unlimited(fake_dispatch):
     for call in ollama.calls:
         names = {((t.get("function") or {}).get("name")) for t in call["tools"]}
         assert "web_search" in names
+
+
+async def test_web_search_chars_excludes_failed_searches(monkeypatch):
+    # A web_search that errors carried NO grounding to the model, so it must
+    # not inflate web_search_chars — otherwise "retrieved but thin" and
+    # "search failed" read the same in the trace. Here every dispatch errors.
+    async def _fail(http, registry, tc, *, max_result_chars, timeout_s, user_id=None):
+        name = ((tc.get("function") or {}).get("name")) or "?"
+        return ToolResult(name=name, call_id=tc.get("id"),
+                          content='{"error": "boom"}', elapsed_s=0.01, is_error=True)
+
+    monkeypatch.setattr("audrey.pipeline.react.dispatch_one", _fail)
+    ollama = _FakeOllama([
+        {"message": {"tool_calls": [_call("web_search", "a"), _call("web_search", "b")]}},
+        {"message": {"content": "done"}},
+    ])
+    out = await run_react(
+        ollama, _FakeHealth(), _registry_ws_kb(),
+        model="m", messages=[{"role": "user", "content": "q"}],
+        options={}, timeout_s=5, max_rounds=2, compress_after_round=99,
+        max_tool_result_chars=1000, tool_dispatch_timeout_s=5,
+        location="cloud", max_web_searches=0,
+    )
+    assert out.web_search_chars == 0
 
 
 def test_web_search_budget_stub_reads_as_limit_not_failure():
