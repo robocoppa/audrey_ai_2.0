@@ -84,10 +84,87 @@ docker logs custom-tools 2>&1 | grep "SearXNG returned"
 Expect `SearXNG returned N results` with **N > 0** (the abandoned DDG attempt
 returned 0 — that's the regression this fixes).
 
+## 5. Enable throttle-resistant general engines (REQUIRED — defaults are NOT enough)
+
+**The default engine set is not reliable for grounding.** A general web query only
+routes to *general-category* engines, and SearXNG's defaults leave the general
+category resting almost entirely on three engines that actively fight scrapers:
+**brave**, **google cse**, and **startpage**. All three rate-limit or CAPTCHA a
+self-hosted instance under normal load, and when they do, `web_search` returns
+**zero results** — the "trusted fallback" silently fails exactly when Brave (the
+primary) is also capped. (Diagnosed 2026-07-15: a real research query returned 0
+results with `unresponsive_engines = [brave: too many requests, google cse: too
+many requests, startpage: Suspended: CAPTCHA]`, while 80 engines were "enabled" —
+but the other 77 are category-locked, e.g. arxiv/pubmed/github, and never serve a
+general query.)
+
+The fix is to enable **independent, throttle-resistant general engines** that
+don't fight self-hosted instances. With `use_default_settings: true` (the normal
+setup), your `settings.yml` `engines:` block is an **override layer** on top of
+SearXNG's built-in defaults — you only list the general-web engines whose
+`disabled:` flag you want to change. Everything else keeps its default (so the
+category engines — arxiv/pubmed/github/etc. — stay on automatically; don't touch
+them).
+
+**The verified-good set on this box (2026-07-15):**
+
+```yaml
+engines:
+  # general web — enable independent engines that don't block self-hosted instances
+  - name: duckduckgo
+    disabled: false      # ✅ workhorse
+  - name: mojeek
+    disabled: false      # ✅ independent crawler + own index
+  - name: mwmbl
+    disabled: false      # ✅ independent community index
+  - name: brave
+    disabled: false      # works when its quota resets; harmless (just skipped) when capped
+  # explicitly OFF — proven to fail on this box, they only clutter unresponsive_engines
+  - name: startpage
+    disabled: true       # CAPTCHA (Google proxy — Google CAPTCHAs it)
+  - name: qwant
+    disabled: true       # access denied on this instance
+  # keep these off too (default was on; images/news aren't general grounding)
+  - name: duckduckgo images
+    disabled: true
+  - name: duckduckgo news
+    disabled: true
+```
+
+**This is a measured result, not a guess.** Enabling this set and restarting took
+a real research query from **0 → 86 results**, with `unresponsive_engines` down to
+just `[brave: too many requests]` (the expected quota cap, which recovers). ddg +
+mojeek + mwmbl all verified working — three independent general engines, so no
+single point of failure. qwant (`access denied`) and startpage (`CAPTCHA`) were
+verified dead here and left off.
+
+Restart the `searxng` container after editing — **config changes do NOT take
+effect until restart** (common gotcha: editing the file, then probing the still-
+old running config and seeing no change).
+
+> **Verify the engines actually work on your version** (no `curl` inside app
+> containers — they don't have it; use `python3` from custom-tools):
+> ```bash
+> docker exec custom-tools python3 -c "import urllib.request,json,urllib.parse; \
+>   q=urllib.parse.quote('transformer attention mechanism'); \
+>   d=json.load(urllib.request.urlopen('http://searxng:8080/search?q='+q+'&format=json',timeout=15)); \
+>   print('results:',len(d.get('results',[]))); print('unresponsive:',d.get('unresponsive_engines',[]))"
+> ```
+> Expect **results in the double digits** and DDG/Mojeek/Qwant NOT in
+> `unresponsive`. If any of them appears there with an error, that engine is
+> broken on your SearXNG version (DDG occasionally breaks when DuckDuckGo changes
+> their API) — leave it off and try alternatives (`mwmbl`, `yep`, `yandex`).
+> A `200` with an empty `results` array is not "healthy": always check the count
+> in the body, not the HTTP status.
+
 ## Notes
 
 - **No Dockerfile / `docker build`** — SearXNG is third-party, pulled prebuilt.
   It lives on the Unraid UI like ollama/qdrant, NOT in `compose.yaml` (which
   scopes to audrey-ai + custom-tools only).
-- SearXNG aggregates many engines; if results are thin, its own `settings.yml`
-  lets you enable/disable engines, but the defaults are fine for grounding.
+- SearXNG's `settings.yml` is **not tracked in this repo** — it lives only on the
+  box at `/mnt/user/appdata/searxng/`. This guide is the tracked record of what it
+  should contain; keep it in sync when you change the box's engine set.
+- **Why so many "enabled" engines still fails:** engine count is misleading. What
+  matters is how many *general-category*, *throttle-resistant* engines answer a
+  plain query. See step 5 — that's the number to keep healthy.
