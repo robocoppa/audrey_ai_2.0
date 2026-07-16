@@ -167,3 +167,59 @@ was "a separate tool failing independently." Answer: **yes, it's a separate tool
 but `web_search` itself is healthy.** The budget and merge angles were both dead
 ends (budget is generously tuned at `max_web_searches:6`/`keep_last:5`; the merge
 unions rather than intersects). Update the OPEN QUESTION to point here.
+
+## Sub-finding: the mrna KB junk — a co-mingled corpus, not a bug
+
+The mrna case (`sources:0`, 2026-07-15 trace) had a second cause beside the
+`read_url` failure: all three workers' `kb_search` returned totally off-topic docs
+(PowerApps, ServiceNow, Forest-Service medicinal plants) for a vaccine query.
+
+**Root cause (data-proven, not theorized):** `kb.dataset_paths` in `config.yaml`
+**deliberately loads `powerapps` and `servicenow`** alongside the research corpus
+(geology/botany/bushcraft/fishing/survival/first-aid/…). One KB serves two
+purposes — research grounding AND ops/work docs — and a research worker's
+`kb_search` sees both. So a research query that happens to be nearest an ops doc
+retrieves it; the ops doc is a *genuine* high-similarity match for its own topic,
+not corrupt data.
+
+**A cosine floor (`kb.min_score`) was tried and is only a PARTIAL fix.** The
+floor (added this phase in `routes/kb.py` `_search_text_merged`, applied
+before the `top_k` cut, over-fetching so a below-floor near-neighbour can't
+starve a real hit) is set to **0.53** and is **deployed + verified live**
+(2026-07-16). Its measured net effect, from `scripts/kb_score_probe.py` (22
+labeled queries) + a live `/v1/kb/query` probe:
+- **Win:** genuinely-foreign queries now return EMPTY instead of nearest-junk —
+  `capital of France`, `TCP vs UDP`, `sourdough`, and `how do mRNA vaccines work`
+  all → `{"results":[]}` (their top hit fell below 0.53). This is the direct fix
+  for the mrna symptom: no more PowerApps injected into a vaccine researcher's
+  context when nothing relevant exists.
+- **Does NOT fix ops-doc leakage:** a `PowerApps pipeline` query still scores 0.69
+  and survives, because it's a *real* match for the deliberately-loaded PowerApps
+  docs. No floor below the real-hit floor (~0.54, e.g. a fishing-knot hit) can
+  exclude it.
+- **Small cost:** cuts the weakest real hits (a medicinal-plants hit at 0.53).
+
+**Why a floor can't fully solve it, and the harness that proved it:** the initial
+0.53 came from two hand-probes that showed a clean valley (on-domain 0.57–0.59 vs
+off-domain 0.49–0.52). `scripts/kb_score_probe.py` (built to get more data) swept
+22 queries and found the distributions actually **OVERLAP** — real on-domain hits
+as low as 0.54, off-domain/ops hits as high as 0.69 — so no single global cosine
+floor cleanly separates them. The two-point estimate was a sampling artifact; the
+harness caught it. **Keep the harness; re-run it after any corpus change.**
+
+**The real fix (NOT done — bigger, separable):** research `kb_search` should not
+see the ops datasets at all. Either drop `powerapps`/`servicenow` from
+`kb.dataset_paths`, or route research queries to a research-only collection
+(separate from the ops KB). That's an ingest/collection-topology change; the 0.53
+floor is the cheap partial win kept in the meantime. **Decision (2026-07-16, with
+user): keep the 0.53 floor as-is; corpus separation is the deferred proper fix.**
+
+**Harnesses shipped this phase** (both hermetic where possible):
+- `scripts/kb_score_probe.py` + `kb_probe_queries.json` — probe `/v1/kb/query` with
+  labeled on/off-domain queries, report score distributions + the safe-floor
+  window (or "OVERLAP — no clean cut"). Run on the box via a throwaway container
+  on `ollama-net` mounting the host scripts dir (the running `audrey-ai`/
+  `custom-tools` images don't carry newly-pulled scripts until rebuilt).
+- `scripts/sources_block_probe.py` — replay captured/real ledgers through the REAL
+  `_render_sources_block` to catch Sources-rendering regressions (seeds the
+  attention url-less-linked shape + surrounding contracts). Fully laptop-hermetic.

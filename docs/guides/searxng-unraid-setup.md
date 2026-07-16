@@ -106,17 +106,19 @@ SearXNG's built-in defaults — you only list the general-web engines whose
 category engines — arxiv/pubmed/github/etc. — stay on automatically; don't touch
 them).
 
-**The verified-good set on this box (2026-07-15):**
+**The verified-good set on this box (2026-07-15, DDG→yep swap 2026-07-16):**
 
 ```yaml
 engines:
   # general web — enable independent engines that don't block self-hosted instances
   - name: duckduckgo
-    disabled: false      # ✅ workhorse
+    disabled: false      # workhorse WHEN UP — fell to CAPTCHA 2026-07-16; left listed so it auto-rejoins if their API settles
   - name: mojeek
     disabled: false      # ✅ independent crawler + own index
   - name: mwmbl
     disabled: false      # ✅ independent community index
+  - name: yep
+    disabled: false      # ✅ Ahrefs' independent index — added 2026-07-16 to restore the 3rd general engine after DDG broke
   - name: brave
     disabled: false      # works when its quota resets; harmless (just skipped) when capped
   # explicitly OFF — proven to fail on this box, they only clutter unresponsive_engines
@@ -131,12 +133,20 @@ engines:
     disabled: true
 ```
 
-**This is a measured result, not a guess.** Enabling this set and restarting took
-a real research query from **0 → 86 results**, with `unresponsive_engines` down to
-just `[brave: too many requests]` (the expected quota cap, which recovers). ddg +
-mojeek + mwmbl all verified working — three independent general engines, so no
-single point of failure. qwant (`access denied`) and startpage (`CAPTCHA`) were
-verified dead here and left off.
+**This is a measured result, not a guess.** The original set (ddg + mojeek + mwmbl)
+took a real research query from **0 → 86 results** on 2026-07-15. On **2026-07-16**
+DDG fell to `CAPTCHA` (a DuckDuckGo API change, not a transient quota cap — it does
+not self-recover on a timescale that helps), dropping general web to 2 engines
+(mojeek + mwmbl); grounding still worked (~48 results) but flickered per-query
+because the redundancy margin was gone. Adding **yep** restored 3 independent
+general engines: post-add probe returned **116 results** with `yep` NOT in
+`unresponsive` (verified working on this SearXNG version). `duckduckgo` stays in
+`unresponsive [CAPTCHA]` but is harmless (enabled-but-skipped, auto-rejoins if it
+recovers). qwant (`access denied`) and startpage (`CAPTCHA`) remain verified-dead
+and off. **Lesson: a self-hosted general-web engine can break at any time (API
+change / CAPTCHA wall); keep ≥3 independent ones enabled so losing one degrades
+gracefully instead of collapsing grounding. Candidates that work here: mojeek,
+mwmbl, yep. When one dies, swap in another — don't wait for recovery.**
 
 Restart the `searxng` container after editing — **config changes do NOT take
 effect until restart** (common gotcha: editing the file, then probing the still-
