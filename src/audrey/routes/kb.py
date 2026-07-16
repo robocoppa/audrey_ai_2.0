@@ -95,6 +95,26 @@ class StatsResponse(BaseModel):
     image_collection: str
 
 
+def _kb_min_score(request: Request) -> float:
+    """Cosine-similarity floor for KB text hits, from `kb.min_score` (default 0.0).
+
+    Below the floor, a hit is discarded rather than returned. The KB always
+    returns its top_k *nearest* vectors regardless of how far they are, so on a
+    query the corpus can't answer it hands back the least-irrelevant junk — which
+    then pollutes a researcher's context and reads as a real source (2026-07-15
+    trace run: a vaccine query returned PowerApps / ServiceNow / Forest-Service
+    docs). A floor turns "nothing relevant" into an *empty* result, which the
+    researcher already handles gracefully (falls back to web/prior knowledge),
+    instead of injecting off-topic text. Default 0.0 = OFF (no behavior change
+    until tuned on the box), since the right threshold is corpus-dependent —
+    unit-normalized nomic-embed cosine, relevant chunks typically score well
+    above unrelated ones, but the exact cut must be set against real hit scores."""
+    cfg = getattr(request.app.state, "cfg", None)
+    if cfg is None:
+        return 0.0
+    return float((cfg.raw.get("kb", {}) or {}).get("min_score", 0.0))
+
+
 @router.post("/query", response_model=QueryResponse)
 async def kb_query(req: TextQuery, request: Request) -> QueryResponse:
     qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
@@ -103,7 +123,9 @@ async def kb_query(req: TextQuery, request: Request) -> QueryResponse:
         raise HTTPException(status_code=503, detail="KB is not initialized")
     t0 = time.perf_counter()
     vec = await embedder.embed_one(req.query)
-    hits, had_user = await _search_text_merged(qdrant, vec, top_k=req.top_k, user=req.user)
+    hits, had_user = await _search_text_merged(
+        qdrant, vec, top_k=req.top_k, user=req.user, min_score=_kb_min_score(request),
+    )
     elapsed = time.perf_counter() - t0
     kb_search_seconds.labels(kind="text", had_user_collection=str(had_user).lower()).observe(elapsed)
     kb_search_hits.labels(kind="text").observe(len(hits))
@@ -118,6 +140,7 @@ async def kb_query(req: TextQuery, request: Request) -> QueryResponse:
 
 async def _search_text_merged(
     qdrant: QdrantKB, vec: list[float], *, top_k: int, user: str | None,
+    min_score: float = 0.0,
 ) -> tuple[list[KBHit], bool]:
     """Search global kb_text and, if the user has one, their kb_user_text_* too. Merge by score.
 
@@ -128,16 +151,27 @@ async def _search_text_merged(
     (currently 768-d nomic-embed-text, cosine) so the raw scores are
     comparable. If a per-user collection ever ships with a different model,
     switch to reciprocal-rank-fusion rather than sorting by raw score.
+
+    `min_score` drops hits below the cosine floor (see `_kb_min_score`). To keep
+    `top_k` *usable* hits when a floor is active, we over-fetch from Qdrant (the
+    floor may reject the nearest few), then filter, then cap — otherwise fetching
+    only `top_k` and filtering could return fewer than `top_k` real hits when the
+    nearest ones are below the floor. `0.0` (the default) keeps every hit and
+    fetches exactly `top_k`, so this is a no-op until tuned.
     """
-    coros = [qdrant.search_text(vec, top_k=top_k)]
+    # Over-fetch when a floor is active so below-floor near-neighbours can't
+    # starve real hits ranked just past top_k; cap the fetch so a huge top_k
+    # can't balloon the Qdrant scan. No floor → fetch exactly top_k (unchanged).
+    fetch_k = min(top_k * 4, 40) if min_score > 0.0 else top_k
+    coros = [qdrant.search_text(vec, top_k=fetch_k)]
     had_user = False
     if user:
         user_col = user_text_collection(user)
         if await qdrant.collection_exists(user_col):
-            coros.append(qdrant.search_text(vec, top_k=top_k, collection=user_col))
+            coros.append(qdrant.search_text(vec, top_k=fetch_k, collection=user_col))
             had_user = True
     results = await asyncio.gather(*coros)
-    merged: list[KBHit] = [h for batch in results for h in batch]
+    merged: list[KBHit] = [h for batch in results for h in batch if h.score >= min_score]
     merged.sort(key=lambda h: h.score, reverse=True)
     return merged[:top_k], had_user
 

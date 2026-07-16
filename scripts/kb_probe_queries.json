@@ -1,0 +1,29 @@
+{
+  "_comment": "Labeled probe queries for scripts/kb_score_probe.py. Each query is tagged on_domain (the KB — geology/botany/bushcraft/fishing — SHOULD have a relevant chunk) or off_domain (it should NOT; a good floor returns empty). The harness reports the score distribution per label so kb.min_score can be picked from data, not two hand-probes. Add queries as the corpus grows.",
+  "on_domain": [
+    "what drives plate tectonics",
+    "how does decompression melting produce magma at mid-ocean ridges",
+    "what is regional metamorphism and where does it occur",
+    "explain fractional crystallization in a magma chamber",
+    "how do you identify an edible wild mushroom",
+    "what plants can be foraged for food in temperate forests",
+    "how do you build a fire without matches in wet conditions",
+    "what knots are useful for setting up a tarp shelter",
+    "how do you tie a fishing knot for a hook",
+    "what bait works best for freshwater bass",
+    "how does the asthenosphere enable plate motion",
+    "what causes flux melting in subduction zones"
+  ],
+  "off_domain": [
+    "how do mRNA vaccines work",
+    "what is the mechanism of attention in transformer neural networks",
+    "how does the softmax function normalize logits",
+    "what are the side effects of ibuprofen",
+    "how do I configure a PowerApps canvas app pipeline",
+    "how do I validate an HMAC signature on an inbound webhook",
+    "what is the capital of France",
+    "how does a nuclear reactor generate electricity",
+    "what is the difference between TCP and UDP",
+    "how do I make a sourdough bread starter"
+  ]
+}
