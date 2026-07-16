@@ -1064,9 +1064,21 @@ def _render_sources_block(ledger: ResearchResult | None, fc: FactCheckResult | N
     if ledger is None or not ledger.sources:
         return ""
     keep = _surviving_source_ids(ledger, fc)
-    # If linkage is empty across the board (models didn't fill source_ids/supports),
-    # fall back to every source — better to show what was consulted than nothing.
-    candidates = [s for s in ledger.sources if not keep or s.id in keep]
+    # Fall back to every source when the linkage yields nothing *renderable* —
+    # better to show what was consulted than nothing. Two cases collapse to the
+    # same fallback: (1) linkage is empty across the board (models didn't fill
+    # source_ids/supports), and (2) linkage is non-empty but NO kept source has a
+    # usable URL. Case 2 bit `tech-transformer-attention` (2026-07-15 trace run):
+    # a claim linked the one URL-less "Search result" source, so `keep` was
+    # non-empty and the fallback DIDN'T fire — even though the ledger also held
+    # real arXiv/Wikipedia URLs that simply weren't linked to a surviving claim.
+    # Result: `sources:0` on an answer that clearly had citable sources. Gating on
+    # "no kept source is renderable" rescues those unlinked-but-usable URLs.
+    keep_has_usable_url = any(
+        s.id in keep and _usable_url(s.url) for s in ledger.sources
+    )
+    use_all = not keep or not keep_has_usable_url
+    candidates = [s for s in ledger.sources if use_all or s.id in keep]
     # Most-authoritative first so the cap keeps the best sources, not whichever
     # the panel happened to list first. Stable sort → same-tier sources retain
     # ledger order; dedup below then keeps the higher-ranked of a shared URL.

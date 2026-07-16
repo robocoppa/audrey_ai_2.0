@@ -991,6 +991,26 @@ def test_sources_block_garbage_linkage_still_falls_back():
     assert "[T](https://e.com)" in out
 
 
+def test_sources_block_falls_back_when_kept_source_has_no_usable_url():
+    # tech-transformer-attention (2026-07-15 trace run): a claim linked the one
+    # URL-less "Search result" source, so `keep` was non-empty and the render-all
+    # fallback DIDN'T fire — even though the ledger also held a real arXiv URL that
+    # simply wasn't linked to a surviving claim. The answer rendered `sources:0`
+    # despite having a citable source. The fallback must fire when NO kept source
+    # has a usable URL, not only when `keep` is empty.
+    from audrey.pipeline.deep_panel import _render_sources_block
+    from audrey.pipeline.ledger import Claim, ResearchResult, Source
+    led = ResearchResult(
+        claims=[Claim(id="c1", text="x", source_ids=["s_search"])],  # links the URL-less one
+        sources=[
+            Source(id="s_search", title="Search result", url="", source_type="reference"),
+            Source(id="s1", title="Attention Is All You Need",
+                   url="https://arxiv.org/abs/1706.03762", source_type="primary_paper"),
+        ])
+    out = _render_sources_block(led, None)
+    assert "[Attention Is All You Need](https://arxiv.org/abs/1706.03762)" in out
+
+
 def test_sources_block_dedups_by_url_and_caps():
     from audrey.pipeline.deep_panel import _MAX_SOURCES_RENDERED, _render_sources_block
     from audrey.pipeline.ledger import Claim, ResearchResult, Source
