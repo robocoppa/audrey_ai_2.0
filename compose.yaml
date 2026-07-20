@@ -42,8 +42,20 @@ services:
         condition: service_healthy
     networks:
       - ollama-net
-    ports:
-      - "8000:8000"
+    # No host `ports:` publish (security review Item 1, 2026-07-18). Audrey's
+    # KB query routes (`/v1/kb/query`, `/v1/kb/query/image`) accept a caller-
+    # supplied `user` and merge that user's private upload collection, but have
+    # no `require_user` gate — the auth-forcing override only fires on the
+    # model→tool path, not on direct HTTP. Publishing 8000 to the host put those
+    # routes on the LAN unauthenticated, so any LAN host could read another
+    # user's uploads. All *legitimate* consumers reach Audrey over ollama-net
+    # DNS (`http://audrey-ai:8000`), which does NOT require a host publish:
+    #   - OWUI → Audrey  (OPENAI_API_BASE_URL=http://audrey-ai:8000/v1)
+    #   - Prometheus     (scrape target audrey-ai:8000, monitoring/ compose)
+    # The in-container healthcheck hits 127.0.0.1:8000 and is unaffected.
+    # To reach Audrey directly from the laptop for debugging, tunnel it:
+    #   ssh -N -L 8000:audrey-ai:8000 <unraid>   # then use http://localhost:8000
+    # (The eval harness's documented path is OWUI :8080/api, not this.)
     env_file:
       - .env
     environment:
@@ -83,8 +95,15 @@ services:
     restart: unless-stopped
     networks:
       - ollama-net
-    ports:
-      - "8001:8001"
+    # No host `ports:` publish (security review Item 1, 2026-07-18). EVERY
+    # custom-tools route is unauthenticated and several take a caller-supplied
+    # `user` (`/memory_search`, `/memory_recall`, `/memory_store`, `/kb_search`,
+    # `/chat_history_search`). Publishing 8001 to the host let any LAN device
+    # read or write ANY user's memory and chat history by naming their email.
+    # The only legitimate caller is Audrey, over ollama-net DNS:
+    #   Audrey → custom-tools  (config.yaml tools.servers = http://custom-tools:8001)
+    # The in-container healthcheck hits 127.0.0.1:8001 and is unaffected.
+    # Debug access from the laptop, if ever needed: tunnel it like audrey-ai above.
     env_file:
       - .env
     environment:

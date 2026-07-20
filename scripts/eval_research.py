@@ -37,10 +37,12 @@ your laptop and can't be committed). The script auto-loads them:
 Then just run `.venv/bin/python scripts/eval_research.py` — no exports needed.
 A one-off `export AUDREY_EVAL_*` or a `--flag` still overrides the file.
 
-(`--base-url` / `--api-key` flags override env / .env. If you instead want
-to hit Audrey directly, point `--base-url` at `http://192.168.1.11:8000/v1`
-and pass a valid OWUI JWT as `--api-key` — but JWTs expire, so the OWUI path
-is the repeatable one.)
+(`--base-url` / `--api-key` flags override env / .env. The OWUI path above is
+the repeatable one and needs nothing else. Hitting Audrey directly is no longer
+possible over the LAN — as of the 2026-07-18 security review Audrey's `:8000`
+is not published to the host (ollama-net only). To debug against Audrey
+directly, tunnel it first — `ssh -N -L 8000:audrey-ai:8000 <unraid>` — then
+`--base-url http://localhost:8000/v1` with a valid (short-lived) OWUI JWT.)
 
 WHAT IT CHECKS (structural / heuristic — no exact-match, models vary)
 

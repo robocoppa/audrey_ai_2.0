@@ -12,12 +12,16 @@ floor is set from data: the max off-domain score and the min on-domain score
 bound the safe window, and a candidate floor's misclassifications are counted.
 
 It hits Audrey's `/v1/kb/query` directly (NOT OWUI): that endpoint takes no auth
-and returns per-hit scores. Run it on the box, or over the LAN at the box IP.
+and returns per-hit scores. Run it ON THE BOX (ollama-net DNS resolves there).
+As of the 2026-07-18 security review, Audrey's `:8000` is NOT published to the
+host, so the old `http://192.168.1.11:8000` over-the-LAN form no longer works —
+run from a container on ollama-net, or tunnel `:8000` from the laptop first
+(`ssh -N -L 8000:audrey-ai:8000 <unraid>` then KB_PROBE_BASE_URL=http://localhost:8000).
 
-USAGE (on the box, or with the box IP over LAN):
+USAGE (on the box, on ollama-net):
     # default: http://audrey-ai:8000 (internal name) or set --base-url
     python3 scripts/kb_score_probe.py
-    KB_PROBE_BASE_URL=http://192.168.1.11:8000 python3 scripts/kb_score_probe.py
+    KB_PROBE_BASE_URL=http://localhost:8000 python3 scripts/kb_score_probe.py  # via tunnel
     python3 scripts/kb_score_probe.py --queries scripts/kb_probe_queries.json --top-k 5
     python3 scripts/kb_score_probe.py --save-json /out/kb-scores.json   # machine-readable
 
