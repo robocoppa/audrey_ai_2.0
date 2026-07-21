@@ -282,10 +282,20 @@ agentic:
     # N workers × M rounds multiplies, and each local worker holds the GPU
     # gate for the whole loop (see pipeline/deep_panel.py).
     deep_worker:
-      max_rounds: 2
-      compress_after_round: 2
-      max_tool_result_chars: 2000
-      compress_keep_last: 1
+      # keep_last == max_rounds so NO search round is ever replaced by the
+      # contentless compaction stub before the worker writes — the terminal
+      # fix research_worker landed after five eval regressions (see its block
+      # below). Deep mode had been at keep_last=1 + max_rounds=2, which stubbed
+      # a worker's round-0 web_search results at the forced-final step: a 2026
+      # World Cup deep answer had deepseek fetch 8000 chars then narrate
+      # "compacted out of context" and hedge the whole answer (2026-07-18).
+      # Raised to a MIDDLE setting — closes the eviction window without taking
+      # deep all the way to research_worker's 5-round thoroughness budget, so
+      # deep stays the lighter tier.
+      max_rounds: 3               # was 2
+      compress_after_round: 3     # was 2
+      max_tool_result_chars: 4000 # was 2000 (research_worker uses 6000)
+      compress_keep_last: 3       # was 1 — now == max_rounds
       # 3 workers × 4 searches ≤ 12 Brave calls per deep request. Raised
       # 3→4 (2026-07-08) — Brave renewed, SearXNG absorbs overflow, so the
       # per-request cap can carry more headroom than the renewal-era floor.
