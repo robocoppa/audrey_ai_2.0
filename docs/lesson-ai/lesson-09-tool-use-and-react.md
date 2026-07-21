@@ -213,7 +213,7 @@ schemas the model gets per request.
 
 ### 2.4 The ReAct loop, top-down
 
-Open [`pipeline/react.py:130`](../../src/audrey/pipeline/react.py#L130).
+Open [`pipeline/react.py:179`](../../src/audrey/pipeline/react.py#L179).
 The function signature is long but the body is short:
 
 ```python
@@ -405,7 +405,7 @@ query," not "raise the cap."
 ### 2.9 Concept spotlight — concurrent dispatch
 
 Tool dispatch within one ReAct round is parallel. From
-[`react.py:232`](../../src/audrey/pipeline/react.py#L232):
+[`react.py:295`](../../src/audrey/pipeline/react.py#L295):
 
 ```python
 results = await asyncio.gather(*[
@@ -457,7 +457,7 @@ strong enough: small models can stall (no bytes for minutes), or invent a
 "pseudo tool-call" in plain text ("I would search for ...").
 
 Audrey forces the mode change explicitly. From
-[`react.py:263`](../../src/audrey/pipeline/react.py#L263):
+[`react.py:328`](../../src/audrey/pipeline/react.py#L328):
 
 ```python
 log.warning("react: max_rounds=%d reached for %s; forcing final answer without tools", ...)
@@ -486,7 +486,7 @@ and "the user just asked me to wrap up" is a very clear mode signal.
 
 Each `ollama.chat` call in ReAct is wrapped in `health.record_success`
 and `health.record_failure`. From
-[`react.py:177`](../../src/audrey/pipeline/react.py#L177):
+[`react.py:239`](../../src/audrey/pipeline/react.py#L239):
 
 ```python
 try:

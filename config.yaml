@@ -282,20 +282,21 @@ agentic:
     # N workers × M rounds multiplies, and each local worker holds the GPU
     # gate for the whole loop (see pipeline/deep_panel.py).
     deep_worker:
-      # keep_last == max_rounds so NO search round is ever replaced by the
-      # contentless compaction stub before the worker writes — the terminal
-      # fix research_worker landed after five eval regressions (see its block
-      # below). Deep mode had been at keep_last=1 + max_rounds=2, which stubbed
-      # a worker's round-0 web_search results at the forced-final step: a 2026
-      # World Cup deep answer had deepseek fetch 8000 chars then narrate
-      # "compacted out of context" and hedge the whole answer (2026-07-18).
-      # Raised to a MIDDLE setting — closes the eviction window without taking
-      # deep all the way to research_worker's 5-round thoroughness budget, so
-      # deep stays the lighter tier.
+      # ⚠ compress_keep_last COUNTS TOOL MESSAGES, NOT ROUNDS. One round can
+      # dispatch several tools at once, so rounds are the wrong unit and
+      # "keep_last == max_rounds" protects nothing. This block previously said
+      # it did; that was wrong. On 2026-07-21 deep_worker ran keep_last=3
+      # against a worker holding 7 tool messages (4 web_search + 1 memory_search
+      # + 2 failed web_fetch) — all four searches were stubbed while the two
+      # FAILURES were kept, and the worker reported its searches "returned empty
+      # results" despite 12k chars having been fetched. Budget it against the
+      # tool-call ceiling instead: max_web_searches (4) + headroom for
+      # kb/memory/web_fetch ≈ 8. react.py now also evicts errors before
+      # successes, so overflow can no longer drop grounding in favour of junk.
       max_rounds: 3               # was 2
       compress_after_round: 3     # was 2
       max_tool_result_chars: 4000 # was 2000 (research_worker uses 6000)
-      compress_keep_last: 3       # was 1 — now == max_rounds
+      compress_keep_last: 8       # was 3 — sized to TOOL MESSAGES, not rounds
       # 3 workers × 4 searches ≤ 12 Brave calls per deep request. Raised
       # 3→4 (2026-07-08) — Brave renewed, SearXNG absorbs overflow, so the
       # per-request cap can carry more headroom than the renewal-era floor.
@@ -309,23 +310,22 @@ agentic:
       max_rounds: 5
       compress_after_round: 3
       max_tool_result_chars: 6000
-      # Keep ALL search rounds verbatim: keep_last == max_rounds means a
-      # researcher (≤5 rounds) never has a round replaced by the contentless
-      # compaction stub (react._summarize_tool_message drops the payload —
-      # URLs and all). This is the terminal fix for a recurring failure: at
-      # keep_last=1 a heavy-search worker had all but its final round compacted
-      # before it wrote its findings, then narrated the stub as "searches
-      # returned elided results" (current-2025-recent regression, 2026-06-30);
-      # raised 2→3 (2026-07-07) after a worker refused because its early-round
-      # results were compacted away (parallel-postulate deepseek refusal, run
-      # 3); the run-6 gate (2026-07-08) still showed "compacted out before I
-      # could read them" narrations at keep_last=3 (pythagoras/archimedes/
-      # library/current-2025). Each prior bump only shrank the eviction window;
-      # keep_last=5 closes it. The Stage-2 "notes are your working memory"
-      # prompt nudge is now belt-and-suspenders, not load-bearing. Research
-      # mode is thoroughness-first; the extra context budget is worth it, watch
-      # per-case latency. If max_rounds ever rises, raise this in lockstep.
-      compress_keep_last: 5
+      # ⚠ COUNTS TOOL MESSAGES, NOT ROUNDS — see the deep_worker note above.
+      # This is why the same regression kept coming back: at keep_last=1 a
+      # heavy-search worker had all but its final round compacted before it
+      # wrote, then narrated the stub as "searches returned elided results"
+      # (current-2025-recent, 2026-06-30); raised 2→3 (2026-07-07) after a
+      # refusal caused by early-round eviction (parallel-postulate deepseek,
+      # run 3); the run-6 gate (2026-07-08) STILL showed "compacted out before
+      # I could read them" at keep_last=3 (pythagoras/archimedes/library/
+      # current-2025), and 5 was declared "terminal". It was not. Every one of
+      # those bumps was reasoned in rounds against code counting messages, so
+      # each only shrank the window: keep_last=5 against max_web_searches=6
+      # guarantees eviction on any thorough run, before other tools are counted.
+      # Budget against the tool-call ceiling: 6 searches + headroom ≈ 12.
+      # Research mode is thoroughness-first; the extra context is worth it,
+      # watch per-case latency. If max_web_searches rises, raise this with it.
+      compress_keep_last: 12      # was 5 — sized to TOOL MESSAGES, not rounds
       # 3 researchers × 6 searches ≤ 18 Brave calls per research request
       # (plus the fact-checker's 4) — tops out ≈22, still half the 30–45
       # pre-cap. Raised 4→6 (2026-07-08): Brave renewed as primary with

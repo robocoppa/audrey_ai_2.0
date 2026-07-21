@@ -16,6 +16,8 @@ What this file covers:
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from audrey.pipeline.react import (
@@ -72,23 +74,60 @@ def test_compress_history_keep_last_round_two():
 
 
 def test_compress_history_keep_zero_is_a_no_op_today():
-    """Regression-only test: `keep_last_round=0` is not a recommended
-    value. With the current helper it accidentally no-ops because
-    `tool_indices[-0]` evaluates to `tool_indices[0]` (the first
-    index), so the "older than this" branch never triggers. Sensible
-    values are ≥1; to wipe tool history aggressively, lower
+    """Regression-only test: `keep_last_round=0` is not a recommended value.
+    It no-ops via an explicit `<= 0` guard in the helper. (Before the
+    2026-07-21 rewrite this fell out *accidentally* from `tool_indices[-0]`
+    evaluating to `tool_indices[0]`; the guard makes it intentional.)
+    Sensible values are ≥1; to wipe tool history aggressively, lower
     `compress_after_round` instead.
 
-    This test exists as a tripwire — if someone refactors the helper
-    later (e.g. switches to `tool_indices[len(...) - keep_last_round]`),
-    the new semantics will show up as a failed assertion here, and the
-    config doc note in `config.yaml` should be revisited."""
+    This test exists as a tripwire — if someone drops the guard while
+    refactoring, 0 would start stubbing *every* tool message, and the config
+    doc note in `config.yaml` should be revisited."""
     convo = [
         _tool_msg("web_search", "a"),
         _tool_msg("kb_search", "b"),
     ]
     out = _compress_history(convo, keep_last_round=0)
     assert out == convo  # current behavior: no compression at 0
+
+
+def test_compress_history_evicts_failures_before_successful_searches():
+    """A failed tool call must never displace a successful `web_search`.
+
+    The failures here are the two MOST RECENT messages, so a purely
+    recency-based policy would keep them and stub both searches — exactly the
+    2026-07-21 production failure, where a worker kept two failed `web_fetch`
+    calls, lost all four of its searches, and then reported that its searches
+    "returned empty results"."""
+    err = json.dumps({"error": "http_502", "detail": "bad gateway"})
+    convo = [
+        _tool_msg("web_search", "grounding one"),
+        _tool_msg("web_search", "grounding two"),
+        _tool_msg("web_fetch", err),
+        _tool_msg("web_fetch", err),
+    ]
+    out = _compress_history(convo, keep_last_round=2)
+    # Both successful searches survive verbatim despite being oldest.
+    assert out[0] == convo[0]
+    assert out[1] == convo[1]
+    # Both failures are stubbed despite being newest.
+    assert out[2]["role"] == "system" and "web_fetch" in out[2]["content"]
+    assert out[3]["role"] == "system" and "web_fetch" in out[3]["content"]
+
+
+def test_compress_history_recency_still_decides_among_successes():
+    """The error tier must not disturb ordinary recency behavior when every
+    tool message succeeded — pins that the new tier is additive."""
+    convo = [
+        _tool_msg("web_search", "oldest"),
+        _tool_msg("kb_search", "middle"),
+        _tool_msg("memory_search", "newest"),
+    ]
+    out = _compress_history(convo, keep_last_round=2)
+    assert out[0]["role"] == "system"          # oldest stubbed
+    assert out[1] == convo[1]
+    assert out[2] == convo[2]
 
 
 def test_compress_history_does_nothing_when_count_below_threshold():

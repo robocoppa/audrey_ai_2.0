@@ -111,15 +111,48 @@ def _without_web_search(tools: list[dict[str, Any]] | None) -> list[dict[str, An
     return kept or None
 
 
+def _is_error_tool_message(msg: dict[str, Any]) -> bool:
+    """True when a tool message carries a dispatch failure body.
+
+    `dispatch.py` serialises every failure as `{"error": …}` — timeout,
+    network_error, http_4xx/5xx, unknown_tool, malformed arguments. Sniffing the
+    content here, rather than threading `ToolResult.is_error` into the message,
+    keeps the wire shape untouched: `_to_ollama_messages` forwards every key on a
+    message verbatim, so an extra bookkeeping field would be sent to the model.
+    """
+    content = msg.get("content")
+    return isinstance(content, str) and content.lstrip().startswith('{"error"')
+
+
 def _compress_history(messages: list[dict[str, Any]], *, keep_last_round: int) -> list[dict[str, Any]]:
-    """Replace older tool messages with one-line summaries, keep the last N tool messages verbatim."""
+    """Replace older tool messages with one-line summaries, keeping N verbatim.
+
+    **The unit is tool MESSAGES, not ReAct rounds.** One round can dispatch
+    several tools concurrently, so a 3-round worker running 4 searches plus 2
+    failed fetches holds 6+ tool messages. Setting this equal to `max_rounds`
+    therefore does NOT protect a round's results — a mistake made here on
+    2026-07-21, when `deep_worker` ran `keep_last=3` against 7 tool messages and
+    a worker lost all four `web_search` results while retaining two failures,
+    then reported that its searches "returned empty results".
+
+    Eviction order: **failures go before successes**, then oldest-first. Without
+    that tier, two failed `web_fetch` calls landing at the end of a round
+    displace the four good `web_search` results the worker needs in order to
+    write — the newest messages are not the most valuable ones.
+
+    `keep_last_round <= 0` is a no-op (see the config note in `config.yaml`); to
+    wipe tool history aggressively, lower `compress_after_round` instead.
+    """
     out: list[dict[str, Any]] = []
     tool_indices = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
-    if len(tool_indices) <= keep_last_round:
+    if keep_last_round <= 0 or len(tool_indices) <= keep_last_round:
         return list(messages)
-    keep_threshold = tool_indices[-keep_last_round]
+    # Successes (False) sort before errors (True); within a tier, `-i` puts the
+    # most recent first. Keep the top `keep_last_round`, stub everything else.
+    ranked = sorted(tool_indices, key=lambda i: (_is_error_tool_message(messages[i]), -i))
+    keep = set(ranked[:keep_last_round])
     for i, m in enumerate(messages):
-        if m.get("role") == "tool" and i < keep_threshold:
+        if m.get("role") == "tool" and i not in keep:
             out.append({"role": "system", "content": _summarize_tool_message(m)})
         else:
             out.append(m)
