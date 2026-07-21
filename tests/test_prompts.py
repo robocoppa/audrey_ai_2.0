@@ -299,6 +299,15 @@ def test_deep_worker_system_forbids_fabrication_and_process_narration():
     assert "Do NOT write about your own search process" in DEEP_WORKER_SYSTEM
 
 
+def test_deep_worker_system_names_no_nonexistent_tool():
+    # Deep workers only get web_search + kb_search + memory. There is no
+    # web_fetch/read_url tool. Naming one made models CALL it (2026-07-21 eval:
+    # every deepseek deep run fired failing web_fetch calls the prompt-less run
+    # never made). The prompt must not name a page-opener it can't offer.
+    assert "web_fetch" not in DEEP_WORKER_SYSTEM
+    assert "read_url" not in DEEP_WORKER_SYSTEM
+
+
 def test_react_final_answer_unchanged():
     expected = (
         "You have reached the tool-call budget. Do not call any more tools. "

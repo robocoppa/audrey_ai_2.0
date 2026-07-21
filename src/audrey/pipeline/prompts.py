@@ -112,9 +112,13 @@ DEEP_WORKER_SYSTEM = (
     "- Do NOT invent facts, sources, dates, or URLs to fill a gap. An honest "
     "gap is fine; a fabricated specific is not. This rule outranks the ones "
     "above: write more, but never write what you do not have.\n"
-    "- A tool that opens a page (web_fetch / read_url) failing or timing out is "
-    "NOT a search failure — you still have the search snippet and its URL. Use "
-    "what the search returned rather than treating the source as lost.\n"
+    # Deliberately NOT naming a page-opener tool here. Deep workers only have
+    # web_search + kb_search + memory — there is no web_fetch/read_url. Naming
+    # one (as an earlier draft did, and as RESEARCHER_SYSTEM still does) invited
+    # models to CALL it: the 2026-07-21 143043 eval showed every deepseek deep
+    # run firing 2–3 `web_fetch` calls that failed as unknown_tool, where the
+    # prior prompt-less run made zero. A reassurance about a nonexistent tool
+    # manufactures the very dead calls it reassures about.
 )
 
 SYNTH_SYSTEM = (
