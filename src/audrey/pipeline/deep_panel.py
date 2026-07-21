@@ -21,6 +21,9 @@ model is in `fast_path.tool_capable_models`, the worker runs a ReAct loop
 `agentic.react.deep_worker`. The GPU gate is held for the *entire* loop —
 not just a single chat call — so local workers never overlap across tool
 rounds. Tool-grounded drafts carry `tool_rounds` > 0 in their `WorkerDraft`.
+Those workers also receive `DEEP_WORKER_SYSTEM` (see `_with_worker_system`),
+which tells them they're producing one draft of several — tool-free workers
+run on the unmodified conversation, exactly as before.
 
 If `state["subtasks"]` is non-empty, workers are assigned to subtasks
 round-robin so each draft answers a different slice. Otherwise every worker
@@ -55,6 +58,7 @@ from audrey.pipeline.ledger import (
 )
 from audrey.pipeline.messages import last_user_text
 from audrey.pipeline.prompts import (
+    DEEP_WORKER_SYSTEM,
     FACTCHECK_STRUCTURE_SYSTEM,
     FACTCHECK_SYSTEM,
     RESEARCH_STRUCTURE_SYSTEM,
@@ -292,6 +296,29 @@ def _messages_for_subtask(base_messages: list[dict[str, Any]], subtask: str) -> 
     return out
 
 
+def _with_worker_system(
+    messages: list[dict[str, Any]], role_prompt: str
+) -> list[dict[str, Any]]:
+    """Insert the worker role prompt AFTER any leading system messages.
+
+    Deliberately different from `_with_role_system`, which research mode uses to
+    prepend. `prompts.compose_system_messages` fixes the canonical order —
+    incoming system messages first, so the user's own persona wins on tone, then
+    the task role — and this is the `task_role` slot that composer left open
+    (see its docstring). Prepending would put the panel's role ahead of the
+    user's persona and quietly invert that.
+
+    Returns a new list; `messages` is never mutated, so the caller can keep
+    sharing one list across workers that don't get a role.
+    """
+    idx = 0
+    for m in messages:
+        if m.get("role") != "system":
+            break
+        idx += 1
+    return [*messages[:idx], {"role": "system", "content": role_prompt}, *messages[idx:]]
+
+
 def _prepare_panel(
     cfg: Config,
     ollama: OllamaClient,
@@ -348,15 +375,24 @@ def _prepare_panel(
     if not workers:
         return [], []
 
-    if subtasks:
-        per_worker_messages = [
-            _messages_for_subtask(messages, subtasks[i % len(subtasks)])
-            for i in range(len(workers))
-        ]
-    else:
-        per_worker_messages = [messages] * len(workers)
-
     capable = tool_capable_models or set()
+    have_tools = bool(tools is not None and tools.by_name)
+    worker_role = prompt_from_config(cfg, "deep_worker", DEEP_WORKER_SYSTEM)
+
+    # Only TOOL-CAPABLE workers get the role prompt. A worker running a plain
+    # one-shot chat has no evidence to reason about and no search process to
+    # narrate, so the prompt would be pure token cost — and leaving those
+    # messages untouched keeps the tool-free path byte-identical to before.
+    per_worker_messages: list[list[dict[str, Any]]] = []
+    for i, (name, _loc) in enumerate(workers):
+        msgs = (
+            _messages_for_subtask(messages, subtasks[i % len(subtasks)])
+            if subtasks else messages
+        )
+        if have_tools and name in capable:
+            msgs = _with_worker_system(msgs, worker_role)
+        per_worker_messages.append(msgs)
+
     for name, _loc in workers:
         dispatch_total.labels(
             model=name,

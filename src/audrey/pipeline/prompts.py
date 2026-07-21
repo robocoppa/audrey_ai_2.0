@@ -78,6 +78,45 @@ PLANNER_SYSTEM = (
     "Output ONLY the JSON. No prose, no markdown."
 )
 
+# ─── Deep-panel worker role ───────────────────────────────────────────
+# Injected only for TOOL-CAPABLE deep-panel workers (see
+# `deep_panel._prepare_panel`). Until 2026-07-21 deep workers ran with no role
+# prompt at all — they saw the bare conversation and had no idea they were one
+# of several drafts feeding a synthesizer.
+#
+# That gap had a measurable cost. In the 2026-07-21 eval one cloud worker
+# declined to answer on half its grounded runs — writing meta-commentary about
+# its own search quality ("the gathered material is insufficient... I cannot
+# fabricate it") instead of a draft — while its panel-mates, holding evidence of
+# the SAME size on the SAME question, wrote complete answers. On
+# `deep-pythagoras` the refusing worker held 6,668 chars of search results and
+# the worker that wrote a full draft held 6,719. The evidence was there; the
+# disposition was the problem, and there was nowhere to address it.
+#
+# Overridable via `agentic.prompts.deep_worker`.
+DEEP_WORKER_SYSTEM = (
+    "You are one of several workers answering the same request in parallel. "
+    "Your output is a DRAFT — a later pass merges the drafts into the user's "
+    "final answer. Write the draft as a direct answer to the request.\n"
+    "- Ground checkable claims with the tools available, then write. Thin "
+    "search results do not mean you know nothing: state what you know reliably "
+    "as plain fact, and let retrieval sharpen the dates, names, and specifics.\n"
+    "- Do NOT withhold the whole answer because one part is unverified. Write "
+    "what your evidence and knowledge support, and mark a specific gap in one "
+    "line where it falls. Declining to answer contributes nothing to the merge; "
+    "a partial draft with an honest gap contributes a lot.\n"
+    "- Do NOT write about your own search process. How many results you got, "
+    "how useful they were, or what someone would need to do for a better "
+    "answer is not part of the answer — and another worker's evidence may "
+    "already cover the gap you are describing.\n"
+    "- Do NOT invent facts, sources, dates, or URLs to fill a gap. An honest "
+    "gap is fine; a fabricated specific is not. This rule outranks the ones "
+    "above: write more, but never write what you do not have.\n"
+    "- A tool that opens a page (web_fetch / read_url) failing or timing out is "
+    "NOT a search failure — you still have the search snippet and its URL. Use "
+    "what the search returned rather than treating the source as lost.\n"
+)
+
 SYNTH_SYSTEM = (
     "You are the panel synthesizer. You receive the original user request "
     "plus several draft answers produced in parallel by different worker models. "
@@ -326,11 +365,27 @@ WRITER_SYSTEM = (
     "a wall of hedged maybes."
 )
 
+# Fires at `max_rounds` (react.py), so it is the LAST thing a budget-exhausted
+# worker reads before writing — a strong position. The old closing clause ("If
+# the gathered information is insufficient, say so explicitly") was true but
+# unscoped, and read as permission to replace the answer with a note about the
+# search. Every refusal in the 2026-07-21 eval arrived through this path
+# (`tool_rounds == max_rounds`). Scoping the admission to the specific missing
+# detail keeps the anti-fabrication intent without licensing a non-answer.
+#
+# NOTE: "using only the information already gathered" is deliberately retained.
+# It is in tension with the fix — a worker with thin results may still read it
+# as "you may not answer" — but relaxing it invites the parametric-hallucination
+# failure the ledger and hedge work exist to prevent. If refusals survive this
+# change, that clause is the next lever, and it needs its own measurement.
 REACT_FINAL_ANSWER_USER = (
     "You have reached the tool-call budget. Do not call any more tools. "
     "Using only the information already gathered above, write the final "
-    "answer to the original request now as plain prose. If the gathered "
-    "information is insufficient, say so explicitly — do not fabricate."
+    "answer to the original request now as plain prose. Where a specific "
+    "detail is missing or unconfirmed, say so in one line for THAT detail and "
+    "answer the rest — a note about what you could not verify is not a "
+    "substitute for the answer, and do not narrate your search process. Do "
+    "not fabricate facts, sources, or dates to fill a gap."
 )
 
 MEMORY_STORE_HINT = (
@@ -361,6 +416,7 @@ _WARNED_OVERRIDES: set[str] = set()  # one warning per key per process
 _PROMPT_KEYS = frozenset({
     "classifier",
     "planner",
+    "deep_worker",
     "synthesizer",
     "researcher",
     "research_structure",
@@ -473,6 +529,7 @@ def compose_system_messages(
 __all__ = [
     "CLASSIFIER_SYSTEM",
     "PLANNER_SYSTEM",
+    "DEEP_WORKER_SYSTEM",
     "SYNTH_SYSTEM",
     "RESEARCHER_SYSTEM",
     "VERIFIER_SYSTEM",

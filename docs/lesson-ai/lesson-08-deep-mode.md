@@ -347,7 +347,7 @@ If `select_workers` returns nothing — every pool worker is unhealthy —
 the panel falls back to the model registry itself. This selection logic lives
 in a shared helper, `_prepare_panel`, that both the non-streaming `run_panel`
 and the streaming `run_panel_streaming` call, at
-[`deep_panel.py:336`](../../src/audrey/pipeline/deep_panel.py#L336):
+[`deep_panel.py:367`](../../src/audrey/pipeline/deep_panel.py#L367):
 
 ```python
 if not workers:
@@ -414,17 +414,25 @@ working as designed, not a worker cheating its way to a smaller number.
 
 If the planner produced subtasks, each worker gets one. `_prepare_panel`
 distributes them round-robin at
-[`deep_panel.py:299-304`](../../src/audrey/pipeline/deep_panel.py#L347):
+[`deep_panel.py:386-394`](../../src/audrey/pipeline/deep_panel.py#L386):
 
 ```python
-if subtasks:
-    per_worker_messages = [
+per_worker_messages: list[list[dict[str, Any]]] = []
+for i, (name, _loc) in enumerate(workers):
+    msgs = (
         _messages_for_subtask(messages, subtasks[i % len(subtasks)])
-        for i in range(len(workers))
-    ]
-else:
-    per_worker_messages = [messages] * len(workers)
+        if subtasks else messages
+    )
+    if have_tools and name in capable:
+        msgs = _with_worker_system(msgs, worker_role)
+    per_worker_messages.append(msgs)
 ```
+
+The loop does two jobs at once. `_messages_for_subtask` swaps in this
+worker's slice of the question when the planner produced subtasks;
+`_with_worker_system` adds the worker role prompt, but only for workers
+that can actually call tools. A worker running a plain one-shot chat has
+no evidence to reason about, so it sees the conversation untouched.
 
 Two scenarios make the math concrete. Three subtasks and two workers:
 worker 0 gets subtask 0, worker 1 gets subtask 1, subtask 2 is dropped

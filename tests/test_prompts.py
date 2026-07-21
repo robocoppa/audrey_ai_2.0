@@ -27,6 +27,7 @@ from audrey.pipeline import prompts
 from audrey.pipeline.prompts import (
     CHAT_HISTORY_SEARCH_SYSTEM,
     CLASSIFIER_SYSTEM,
+    DEEP_WORKER_SYSTEM,
     FACTCHECK_SYSTEM,
     MEMORY_STORE_HINT,
     PLANNER_SYSTEM,
@@ -280,12 +281,33 @@ def test_research_role_override_keys_resolve():
     assert prompt_from_config(_cfg_with({}), "researcher", RESEARCHER_SYSTEM) == RESEARCHER_SYSTEM
 
 
+def test_deep_worker_override_key_resolves():
+    # The deep-panel worker role must be overridable like every other role.
+    # An unregistered key silently falls back to the default with a warning,
+    # which would make `agentic.prompts.deep_worker` look wired but do nothing.
+    cfg = _cfg_with({"deep_worker": "DW_OVERRIDE"})
+    assert prompt_from_config(cfg, "deep_worker", DEEP_WORKER_SYSTEM) == "DW_OVERRIDE"
+    assert prompt_from_config(_cfg_with({}), "deep_worker", DEEP_WORKER_SYSTEM) == DEEP_WORKER_SYSTEM
+
+
+def test_deep_worker_system_forbids_fabrication_and_process_narration():
+    # Two clauses this prompt cannot lose. It exists to make workers write MORE,
+    # so the anti-fabrication rule is the counterweight that keeps "write more"
+    # from becoming "invent more"; the process-narration ban targets the exact
+    # output the refusing workers produced instead of a draft.
+    assert "Do NOT invent facts, sources, dates, or URLs" in DEEP_WORKER_SYSTEM
+    assert "Do NOT write about your own search process" in DEEP_WORKER_SYSTEM
+
+
 def test_react_final_answer_unchanged():
     expected = (
         "You have reached the tool-call budget. Do not call any more tools. "
         "Using only the information already gathered above, write the final "
-        "answer to the original request now as plain prose. If the gathered "
-        "information is insufficient, say so explicitly — do not fabricate."
+        "answer to the original request now as plain prose. Where a specific "
+        "detail is missing or unconfirmed, say so in one line for THAT detail and "
+        "answer the rest — a note about what you could not verify is not a "
+        "substitute for the answer, and do not narrate your search process. Do "
+        "not fabricate facts, sources, or dates to fill a gap."
     )
     assert REACT_FINAL_ANSWER_USER == expected
 

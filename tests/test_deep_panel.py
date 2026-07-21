@@ -22,6 +22,7 @@ from audrey.config import get_config
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
+from audrey.pipeline import deep_panel as dpmod
 from audrey.pipeline import graph as gmod
 from audrey.pipeline.deep_panel import (
     _merge_ledgers,
@@ -34,6 +35,7 @@ from audrey.pipeline.deep_panel import (
 )
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.ledger import Claim, ResearchResult, Source
+from audrey.pipeline.prompts import DEEP_WORKER_SYSTEM
 
 
 class _Cfg:
@@ -69,15 +71,15 @@ def _cfg_with_pool(workers: list[str], registry_models: tuple, synth: str = "s")
     })
 
 
-def _prep(cfg, registry, health, *, subtasks=None):
+def _prep(cfg, registry, health, *, subtasks=None, tools=None, capable=None, messages=None):
     """Call _prepare_panel with sane defaults; return (workers, coros)."""
     return _prepare_panel(
         cfg, object(), registry, health, FairLocalGate(concurrency=1),
         pool_key="deep_panel", task="reasoning",
-        messages=[{"role": "user", "content": "q"}],
+        messages=messages if messages is not None else [{"role": "user", "content": "q"}],
         subtasks=subtasks or [],
         options={}, timeout_s=5.0, max_workers_cloud=3,
-        tools=None, tool_capable_models=None,
+        tools=tools, tool_capable_models=capable,
         react_max_rounds=2, react_compress_after=2, react_max_tool_chars=2000,
         react_dispatch_timeout_s=30.0, react_compress_keep_last=1,
         react_max_web_searches=0, user_id=None,
@@ -164,6 +166,106 @@ def test_prepare_panel_builds_one_coro_per_worker():
         assert len(coros) == len(workers) == 2
     finally:
         _close(coros)
+
+
+# ─── _prepare_panel: worker role prompt ────────────────────────────────
+# Deep workers ran with NO role prompt until 2026-07-21, which is why a cloud
+# worker could decline to answer while holding the same evidence its panel-mates
+# wrote from — there was nowhere to tell it its output is one draft of several.
+# These pin who gets the prompt and where it lands.
+
+
+def _captured_worker_messages(cfg, registry, health, **kw) -> dict[str, list]:
+    """Map model name → the `messages` `_prepare_panel` built for it.
+
+    `_run_one_worker` is stubbed with a *sync* function that records its kwargs
+    and hands back a coroutine. It has to be sync: calling an `async def`
+    only builds a coroutine object without running the body, so an async stub
+    would capture nothing until awaited — and `_prepare_panel` never awaits.
+    """
+    seen: dict[str, list] = {}
+
+    async def _noop() -> dict:
+        return {}
+
+    def _fake_worker(*_args, **kwargs):
+        seen[kwargs["model"]] = kwargs["messages"]
+        return _noop()
+
+    with patch.object(dpmod, "_run_one_worker", _fake_worker):
+        _workers, coros = _prep(cfg, registry, health, **kw)
+        _close(coros)
+    return seen
+
+
+def test_worker_role_prompt_only_reaches_tool_capable_workers():
+    reg = _registry(("a", 100, "local"), ("b", 50, "local"))
+    cfg = _cfg_with_pool(["a", "b"], (("a", 100, "local"), ("b", 50, "local")))
+
+    seen = _captured_worker_messages(
+        cfg, reg, HealthTracker(),
+        tools=_one_tool_registry(), capable={"a"},
+    )
+
+    assert any(DEEP_WORKER_SYSTEM in m.get("content", "") for m in seen["a"])
+    # `b` runs a plain one-shot chat: no evidence to reason about, so no prompt.
+    assert not any(DEEP_WORKER_SYSTEM in m.get("content", "") for m in seen["b"])
+
+
+def test_worker_role_prompt_lands_after_the_users_own_system_messages():
+    # compose_system_messages fixes the order: incoming system messages first so
+    # the user's persona wins on tone, THEN the task role. Prepending would
+    # invert that silently.
+    reg = _registry(("a", 100, "local"))
+    cfg = _cfg_with_pool(["a"], (("a", 100, "local"),))
+
+    seen = _captured_worker_messages(
+        cfg, reg, HealthTracker(),
+        tools=_one_tool_registry(), capable={"a"},
+        messages=[
+            {"role": "system", "content": "PERSONA"},
+            {"role": "system", "content": "DATETIME"},
+            {"role": "user", "content": "q"},
+        ],
+    )
+
+    roles = [m["role"] for m in seen["a"]]
+    contents = [m["content"] for m in seen["a"]]
+    assert roles == ["system", "system", "system", "user"]
+    assert contents[0] == "PERSONA"
+    assert contents[1] == "DATETIME"
+    assert contents[2] == DEEP_WORKER_SYSTEM
+    assert contents[3] == "q"
+
+
+def test_no_tool_registry_leaves_messages_untouched():
+    # The tool-free path must stay byte-identical: a capable name means nothing
+    # when there are no tools to call.
+    reg = _registry(("a", 100, "local"))
+    cfg = _cfg_with_pool(["a"], (("a", 100, "local"),))
+    original = [{"role": "user", "content": "q"}]
+
+    seen = _captured_worker_messages(
+        cfg, reg, HealthTracker(), tools=None, capable={"a"}, messages=original,
+    )
+    assert seen["a"] == original
+
+
+def test_worker_role_prompt_composes_with_subtask_substitution():
+    # Subtask assignment replaces the focal user turn; the role prompt rides
+    # along rather than being dropped by whichever branch runs.
+    reg = _registry(("a", 100, "local"))
+    cfg = _cfg_with_pool(["a"], (("a", 100, "local"),))
+
+    seen = _captured_worker_messages(
+        cfg, reg, HealthTracker(),
+        tools=_one_tool_registry(), capable={"a"}, subtasks=["sub1"],
+    )
+
+    contents = [m["content"] for m in seen["a"]]
+    assert DEEP_WORKER_SYSTEM in contents
+    assert "sub1" in contents
+    assert "q" not in contents  # the original user turn was replaced
 
 
 # ─── entry-point short-circuit (no workers) ────────────────────────────
