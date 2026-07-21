@@ -253,6 +253,14 @@ def _prefer_searxng(query: str) -> bool:
 _RECOVERABLE = (BraveQuotaError, BraveRateLimitError, BraveUpstreamError, SearxngError)
 
 
+def _qlog(query: str, limit: int = 80) -> str:
+    """Collapse+truncate a query for logging. Model-generated queries run long;
+    80 chars is enough to tell two near-identical panel-worker searches apart,
+    which is the whole reason these lines carry the query at all."""
+    q = " ".join(query.split())
+    return q if len(q) <= limit else q[: limit - 1] + "…"
+
+
 async def _try_other(
     other: BraveClient | SearxngClient,
     other_name: str,
@@ -267,8 +275,8 @@ async def _try_other(
     try:
         hits = await other.search(query=query, count=count)
         log.warning(
-            "web_search: %s returned %d results (first url=%r)",
-            other_name, len(hits), (hits[0].url if hits else ""),
+            "web_search: %s returned %d results for %r (first url=%r)",
+            other_name, len(hits), _qlog(query), (hits[0].url if hits else ""),
         )
         return hits
     except (*_RECOVERABLE, ValueError) as fe:
@@ -318,8 +326,8 @@ async def _search_with_fallback(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"{prim_name} unavailable ({e}) and no fallback backend configured.",
             ) from e
-        log.warning("web_search: %s unavailable (%s); falling back to %s",
-                    prim_name, e, other_name)
+        log.warning("web_search: %s unavailable (%s); falling back to %s for %r",
+                    prim_name, e, other_name, _qlog(query))
         result = await _try_other(other, other_name, query, count)
         if result is None:  # both backends down → 503 naming both
             raise HTTPException(
@@ -333,7 +341,8 @@ async def _search_with_fallback(
     # honest result is the primary's empty (a 200 with [], never a 503).
     if hits or other is None:
         return hits
-    log.warning("web_search: %s returned 0 results; trying %s", prim_name, other_name)
+    log.warning("web_search: %s returned 0 results for %r; trying %s",
+                prim_name, _qlog(query), other_name)
     result = await _try_other(other, other_name, query, count)
     return result or hits
 
@@ -353,6 +362,14 @@ async def _search_with_fallback(
 async def web_search(req: WebSearchRequest) -> WebSearchResponse:
     brave: BraveClient = app.state.brave
     searxng: SearxngClient | None = app.state.searxng
+
+    # One line per REQUEST, logged before any routing. The warnings further down
+    # only fire when a backend errors or comes back empty — a SearXNG-primary hit
+    # logs nothing — so this is the ONLY complete record of what was asked. It's
+    # what makes "how many of a deep panel's searches were near-duplicates of each
+    # other?" a measurable question rather than an argument: one deep case can fan
+    # out to 3 workers x 4 searches, and the cache below only dedups exact matches.
+    log.info("web_search: q=%r count=%d", _qlog(req.query), req.count)
 
     # Route to a PRIMARY backend, then cross-fall-back to the other on failure.
     # With alternation off (or no SearXNG configured), primary is always Brave —

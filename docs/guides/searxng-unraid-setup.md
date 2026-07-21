@@ -106,22 +106,37 @@ SearXNG's built-in defaults — you only list the general-web engines whose
 category engines — arxiv/pubmed/github/etc. — stay on automatically; don't touch
 them).
 
-**The verified-good set on this box (2026-07-15, DDG→yep swap 2026-07-16):**
+**The verified-good set on this box (2026-07-15; DDG→yep swap 2026-07-16;
+bing/yandex/wiby/encyclosearch added 2026-07-21):**
 
 ```yaml
 engines:
   # general web — enable independent engines that don't block self-hosted instances
-  - name: duckduckgo
-    disabled: false      # workhorse WHEN UP — fell to CAPTCHA 2026-07-16; left listed so it auto-rejoins if their API settles
+  - name: bing
+    disabled: false      # ✅ added 2026-07-21 — own index; 10 results on EVERY probe query
+  - name: yandex
+    disabled: false      # ✅ added 2026-07-21 — own index; 14 results on EVERY probe query
   - name: mojeek
-    disabled: false      # ✅ independent crawler + own index
+    disabled: false      # ✅ independent crawler + own index — but quota-drops out after ~6 queries (see below)
   - name: mwmbl
     disabled: false      # ✅ independent community index
   - name: yep
     disabled: false      # ✅ Ahrefs' independent index — added 2026-07-16 to restore the 3rd general engine after DDG broke
+  - name: wiby
+    disabled: false      # ✅ added 2026-07-21 — tiny indie-web index; answered 2/3 probes, never blocks
+  - name: encyclosearch
+    disabled: false      # ✅ added 2026-07-21 — encyclopedic sources; fires on encyclopedic queries, aimed at RESULT QUALITY
+  - name: duckduckgo
+    disabled: false      # workhorse WHEN UP — fell to CAPTCHA 2026-07-16; left listed so it auto-rejoins if their API settles
   - name: brave
     disabled: false      # works when its quota resets; harmless (just skipped) when capped
   # explicitly OFF — proven to fail on this box, they only clutter unresponsive_engines
+  - name: seznam
+    disabled: true       # timeout on 2/3 probes 2026-07-21 — a timeout is worse than an error: every search waits it out
+  - name: crowdview
+    disabled: true       # returned 0 results SILENTLY on all 3 probes 2026-07-21 — never even reached unresponsive_engines
+  - name: wikidata
+    disabled: true       # access denied, persistent — enabled for months without ever contributing a result
   - name: startpage
     disabled: true       # CAPTCHA (Google proxy — Google CAPTCHAs it)
   - name: qwant
@@ -131,6 +146,21 @@ engines:
     disabled: true
   - name: duckduckgo news
     disabled: true
+```
+
+**Don't bother with the metasearch fronts.** `dogpile`, `infospace`, `zapmeta`,
+`privacywall`, `gmx`, `reloado`, `yahoo` all proxy Google/Bing, so they inherit
+exactly the CAPTCHA/blocking problem you're trying to route around. Only engines
+with their **own index** add real redundancy.
+
+**Check the engine exists before you add it.** `marginalia`, `stract` and
+`rightdao` are commonly recommended but are NOT in this build's engine list; a
+name that doesn't exist creates a malformed override entry with no `engine:`
+module and **SearXNG can fail to start**. Enumerate first:
+
+```bash
+curl -s http://localhost:8088/config \
+  | jq -r '.engines[] | select(.categories | index("general")) | "\(.enabled)\t\(.name)"' | sort
 ```
 
 **This is a measured result, not a guess.** The original set (ddg + mojeek + mwmbl)
@@ -147,6 +177,43 @@ and off. **Lesson: a self-hosted general-web engine can break at any time (API
 change / CAPTCHA wall); keep ≥3 independent ones enabled so losing one degrades
 gracefully instead of collapsing grounding. Candidates that work here: mojeek,
 mwmbl, yep. When one dies, swap in another — don't wait for recovery.**
+
+### 2026-07-21 — engines also **quota-drop mid-session**, not just die
+
+The `unresponsive_engines` list does NOT catch every failure. **mojeek stops
+contributing after roughly six queries while still reporting healthy** — it never
+appears in `unresponsive`, it just silently returns nothing.
+
+Measured with two back-to-back sequential passes over the same six queries:
+**five of the six dropped by exactly 10 results** — mojeek's per-query
+contribution — between pass 1 and pass 2. The query whose *only* contributor was
+mojeek (`tokio vs smol vs glommio`) went **10 → 0**. In production this showed up
+as a **28% zero-result rate** (16 of 57 `web_search` calls over six hours), with
+the zeros clustered exactly where a query's sole contributor had dropped out.
+
+Two things this rules out, both tested rather than assumed:
+
+- **It is not concurrency.** A 12-query burst produced the same empty rate as
+  sequential calls (17% both). These engines rate-limit on *requests per window*,
+  not on simultaneity — so staggering, semaphores, or capping searches-per-round
+  buy nothing. Only **fewer total requests** or **more engines** helps.
+- **It is not `safesearch`.** Audrey sends `safesearch=1` ([`searxng.py`](../../tools-server/searxng.py)); an
+  A/B against the same queries without it returned *more* results with it on.
+  Leave it alone.
+
+**The fix was more engines, and the target is ≥3 SURVIVING under load — not ≥3
+configured.** Adding `bing` + `yandex` (each answered *every* probe query — 10 and
+14 results respectively) plus `wiby` and `encyclosearch` took the three probe
+queries from **10/23/40 → 32/54/92 results**, and the worst-case query from 1
+surviving engine to 3. `bing` and `yandex` are worth trying on a home connection
+even though they block datacenter IPs — that residential IP is very likely why
+mojeek/mwmbl/yep work here at all.
+
+**Watch for the silent-zero failure shape**, since `unresponsive_engines` won't
+report it: an engine that vanishes from the per-result `engines` breakdown while
+never showing up as an error. `crowdview` did this on all three probe queries and
+was disabled. A `timeout` (seznam) is worse than a hard error — every search waits
+it out before returning.
 
 Restart the `searxng` container after editing — **config changes do NOT take
 effect until restart** (common gotcha: editing the file, then probing the still-

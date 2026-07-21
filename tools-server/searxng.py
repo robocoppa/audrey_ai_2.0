@@ -25,11 +25,12 @@ evidence → a thin ledger → an over-timid degraded answer. So this client:
   "no sources" from a transient throttle). One extra attempt recovers most of
   these. Deliberately just ONE, with a longer wait than the transport backoff:
   hammering a throttled instance makes the throttle worse.
-- **caches** by (query, count) so identical queries across workers in the same
-  run don't each re-hit SearXNG. Short TTL — web results for current topics go
-  stale, but the win is intra-run dedup, not long-term caching. **Empty results
-  are never cached** — caching a transient-throttle empty would poison every
-  other worker's identical query for the whole TTL.
+- **caches** by QUERY (not `(query, count)` — see `search`) so identical queries
+  across workers in the same run don't each re-hit SearXNG. Short TTL — web
+  results for current topics go stale, but the win is intra-run dedup, not
+  long-term caching. **Empty results are never cached** — caching a
+  transient-throttle empty would poison every other worker's identical query for
+  the whole TTL.
 
 Note: the SearXNG instance must have the JSON format enabled in its
 `settings.yml` (`search.formats: [html, json]`) — it's off by default.
@@ -55,6 +56,12 @@ from tenacity import (
 # to recover rather than re-hitting instantly.
 _EMPTY_RETRY_WAIT_SECONDS = 1.5
 
+# How many parsed results to keep per cache entry. `count` is never sent upstream
+# (see `_fetch` — params are q/format/safesearch only), so parsing more costs
+# nothing on the wire; it just lets ONE cached entry serve callers asking for
+# different `count` values.
+_MAX_KEEP = 20
+
 
 class SearxngError(Exception):
     """Raised when the SearXNG fallback itself fails (so the handler can 503)."""
@@ -76,7 +83,7 @@ class SearxngClient:
         self._base_url = base_url.rstrip("/")
         self._cache_ttl = cache_ttl_seconds
         self._cache_max = cache_max_entries
-        self._cache: OrderedDict[tuple[str, int], tuple[float, list[SearchResult]]] = OrderedDict()
+        self._cache: OrderedDict[str, tuple[float, list[SearchResult]]] = OrderedDict()
         self._cache_lock = asyncio.Lock()
         self._client = httpx.AsyncClient(
             timeout=timeout_seconds,
@@ -88,18 +95,28 @@ class SearxngClient:
 
     async def search(self, query: str, count: int = 5) -> list[SearchResult]:
         """Run a SearXNG search. Returns up to `count` results. Best-effort."""
-        key = (query.strip(), max(1, min(count, 20)))
+        # Key on the QUERY ALONE, not (query, count). `count` is never sent
+        # upstream here — it only slices the response client-side — so including
+        # it in the key made two panel workers asking the SAME question with
+        # different `count` values miss each other and fire two identical HTTP
+        # requests at a rate-limited instance. Keep the full parsed list, slice
+        # per caller. **brave.py must NOT copy this**: Brave does send `count`
+        # upstream (`params={"q":…, "count": count}`), so its (query, count) key
+        # is correct there and dropping it would serve short cached results to a
+        # caller that asked for more.
+        key = query.strip()
+        want = max(1, min(count, _MAX_KEEP))
         cached = await self._cache_get(key)
         if cached is not None:
-            return cached
-        results = await self._fetch(query=key[0], count=key[1])
+            return cached[:want]
+        results = await self._fetch(query=key, count=_MAX_KEEP)
         # Never cache an empty result: a 200+0-results is usually a transient
         # upstream throttle, and caching it would starve every identical query
         # in this run for the whole TTL. Let the next caller re-fetch (and get
         # its own empty-retry shot).
         if results:
             await self._cache_put(key, results)
-        return results
+        return results[:want]
 
     async def _fetch(self, query: str, count: int) -> list[SearchResult]:
         async def _do() -> dict:
@@ -142,7 +159,7 @@ class SearxngClient:
             results = await _fetch_once()
         return results
 
-    async def _cache_get(self, key: tuple[str, int]) -> list[SearchResult] | None:
+    async def _cache_get(self, key: str) -> list[SearchResult] | None:
         async with self._cache_lock:
             entry = self._cache.get(key)
             if entry is None:
@@ -154,7 +171,7 @@ class SearxngClient:
             self._cache.move_to_end(key)
             return results
 
-    async def _cache_put(self, key: tuple[str, int], results: list[SearchResult]) -> None:
+    async def _cache_put(self, key: str, results: list[SearchResult]) -> None:
         async with self._cache_lock:
             self._cache[key] = (time.monotonic() + self._cache_ttl, results)
             self._cache.move_to_end(key)

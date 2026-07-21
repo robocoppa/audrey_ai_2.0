@@ -578,7 +578,7 @@ The model never talks to Audrey's KB directly. It dispatches
 `kb_search` (or `kb_image_search`) as a tool call (Lesson 9), which
 hits the custom-tools server, which then HTTP-proxies into Audrey's
 `/v1/kb/query`. Closing the loop:
-[`tools-server/app.py:389`](../../tools-server/app.py#L389):
+[`tools-server/app.py:406`](../../tools-server/app.py#L406):
 
 ```python
 async def kb_search(req: KBSearchRequest) -> KBSearchResponse:

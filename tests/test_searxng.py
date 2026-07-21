@@ -138,6 +138,60 @@ class TestRetryAndCache:
         asyncio.run(_run())
         assert calls["n"] == 1  # second call did not hit the network
 
+    def test_cache_dedups_same_query_across_different_counts(self):
+        """Two panel workers asking the SAME question with different `count`
+        values must share one upstream request. `count` is never sent to SearXNG
+        (it only slices client-side), so keying the cache on it fired duplicate
+        HTTP requests at a rate-limited instance for no benefit."""
+        import asyncio
+
+        import httpx
+        calls = {"n": 0}
+
+        def handler(_r):
+            calls["n"] += 1
+            return httpx.Response(200, json=_RESPONSE)
+
+        c = self._client_with(handler)
+
+        async def _run():
+            try:
+                a = await c.search("same query", count=10)
+                b = await c.search("same query", count=1)  # cache hit, re-sliced
+                return a, b
+            finally:
+                await c.aclose()
+
+        a, b = asyncio.run(_run())
+        assert calls["n"] == 1          # one network call served both counts
+        assert len(b) == 1              # smaller count still respected
+        assert b[0].url == a[0].url     # and it's the same top result
+
+    def test_count_is_not_sent_upstream(self):
+        """Guards the assumption the query-only cache key rests on: if SearXNG
+        ever starts receiving `count`, one cached entry can no longer serve
+        callers who asked for different amounts."""
+        import asyncio
+
+        import httpx
+        seen = {}
+
+        def handler(request):
+            seen.update(dict(request.url.params))
+            return httpx.Response(200, json=_RESPONSE)
+
+        c = self._client_with(handler)
+
+        async def _run():
+            try:
+                await c.search("q", count=7)
+            finally:
+                await c.aclose()
+
+        asyncio.run(_run())
+        assert "count" not in seen
+        assert seen.get("q") == "q"
+
 
 _EMPTY = {"results": []}
 
