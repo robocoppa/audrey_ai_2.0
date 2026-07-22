@@ -22,7 +22,7 @@ hygiene.
 
 HOW IT WORKS
 
-For each lesson under docs/lessons/lesson-*.md (or any file passed on
+For each lesson under docs/lesson-*/lesson-*.md (or any file passed on
 the command line), the checker walks the file line-by-line outside
 fenced code blocks (` ``` ` and ` ~~~ `) and applies five rules. Each
 finding prints:
@@ -69,13 +69,14 @@ RULES
 USAGE
 
     .venv/bin/python scripts/check-lesson-conventions.py
-    .venv/bin/python scripts/check-lesson-conventions.py docs/lessons/lesson-04-*.md
+    .venv/bin/python scripts/check-lesson-conventions.py docs/lesson-ai/lesson-04-*.md
     .venv/bin/python scripts/check-lesson-conventions.py --json
     .venv/bin/python scripts/check-lesson-conventions.py --quiet
 
 ENVIRONMENT
 
-    DOCS_GLOB     Default `docs/lessons/lesson-*.md`. Override to scan
+    DOCS_GLOB     Default `docs/lesson-*/lesson-*.md` — covers BOTH courses
+                  (docs/lesson-ai/ and docs/lesson-python/). Override to scan
                   a different directory (e.g. for testing).
 
 Run after editing a lesson; run periodically across the corpus.
@@ -94,7 +95,11 @@ from pathlib import Path
 
 # ─── Config ──────────────────────────────────────────────────────────
 
-DOCS_GLOB = os.environ.get("DOCS_GLOB", "docs/lessons/lesson-*.md")
+# `docs/lesson-*/` matches BOTH courses: docs/lesson-ai/ and docs/lesson-python/.
+# The old default was `docs/lessons/lesson-*.md`, a directory that stopped existing
+# when the courses were renamed — so the checker silently matched zero files and
+# exited clean while AGENTS.md told every session to run it after lesson edits.
+DOCS_GLOB = os.environ.get("DOCS_GLOB", "docs/lesson-*/lesson-*.md")
 
 # RFC 2606 reserved test domains. Everything outside this set is
 # considered a "real" email for the REAL_EMAIL check.
