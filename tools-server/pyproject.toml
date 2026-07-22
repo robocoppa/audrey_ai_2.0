@@ -17,6 +17,7 @@ dependencies = [
     "qdrant-client>=1.12",
     "tenacity>=9.0",
     "python-dotenv>=1.0",
+    "trafilatura>=1.12",               # web_fetch: HTML → readable text extraction
 ]
 
 [build-system]

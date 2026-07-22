@@ -67,6 +67,11 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.8",
     "mypy>=1.13",
+    # tools-server-only runtime dep (web_fetch HTML extraction). Listed here so
+    # the hermetic suite can import tools-server/fetch.py; NOT a root runtime dep,
+    # so the audrey-ai image never ships it. custom-tools gets it for real from
+    # tools-server/pyproject.toml.
+    "trafilatura>=1.12",
 ]
 
 [project.scripts]

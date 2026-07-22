@@ -2,6 +2,7 @@
 
 Endpoints, OpenAPI auto-discovered by the Audrey orchestrator:
   POST /web_search             — Brave Search API
+  POST /web_fetch              — open one URL, return its readable text (SSRF-guarded)
   POST /kb_search              — text query proxied to Audrey /v1/kb/query
   POST /kb_image_search        — image query proxied to Audrey /v1/kb/query/image
   POST /memory_store           — save (key, value, user:<id>-tagged) to Qdrant
@@ -41,6 +42,7 @@ from brave import (
 from chat_archive import ChatArchiveStore
 from db import MemoryEntry, MemoryStore
 from fastapi import FastAPI, HTTPException, status
+from fetch import FetchError, fetch_readable
 from pydantic import BaseModel, Field
 from searxng import SearxngClient, SearxngError
 from settings import settings
@@ -143,6 +145,22 @@ class WebSearchResult(BaseModel):
 class WebSearchResponse(BaseModel):
     query: str
     results: list[WebSearchResult]
+
+
+class WebFetchRequest(BaseModel):
+    url: Annotated[str, Field(
+        min_length=1, max_length=2000,
+        description="Full http(s) URL of a page to open and read, e.g. one returned by web_search.",
+    )]
+    max_chars: Annotated[int, Field(
+        ge=500, le=20000,
+        description="Maximum characters of extracted text to return.",
+    )] = 6000
+
+
+class WebFetchResponse(BaseModel):
+    url: str            # final URL after any redirects
+    text: str
 
 
 class KBSearchRequest(BaseModel):
@@ -389,6 +407,33 @@ async def web_search(req: WebSearchRequest) -> WebSearchResponse:
         query=req.query,
         results=[WebSearchResult(title=h.title, url=h.url, snippet=h.snippet) for h in hits],
     )
+
+
+@app.post(
+    "/web_fetch",
+    operation_id="web_fetch",
+    response_model=WebFetchResponse,
+    tags=["tools"],
+    summary="Open a web page and return its readable text",
+    description=(
+        "Open a single http(s) URL — typically one a web_search result returned — "
+        "and return its main readable text with navigation and boilerplate stripped. "
+        "Use this to read past a search snippet when you need an exact date, version "
+        "number, spec, or a direct quote the snippet doesn't contain. One URL per "
+        "call. Returns an error (with the reason) for non-HTML pages, unreachable "
+        "or internal hosts, or pages with no extractable text — on error, fall back "
+        "to the search snippet and its URL rather than dropping the source."
+    ),
+)
+async def web_fetch(req: WebFetchRequest) -> WebFetchResponse:
+    try:
+        final_url, text = await fetch_readable(req.url, max_chars=req.max_chars)
+    except FetchError as e:
+        # 422 so the reason reaches the model via dispatch's http_4xx detail — it
+        # can then pick another URL or use the snippet. FetchError messages are
+        # written to be model-safe (no internals). A genuine bug still 500s.
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)) from e
+    return WebFetchResponse(url=final_url, text=text)
 
 
 @app.post(

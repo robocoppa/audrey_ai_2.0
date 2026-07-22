@@ -296,12 +296,15 @@ def test_deep_worker_system_forbids_fabrication_and_process_narration():
     assert "Do NOT write about your own search process" in DEEP_WORKER_SYSTEM
 
 
-def test_tool_prompts_name_no_nonexistent_tool():
-    # The registered tools are web_search, kb_search, kb_image_search, and three
-    # memory tools (tools-server operation_ids). There is NO web_fetch/read_url
-    # page-opener. Naming one made models CALL it (2026-07-21 143043 eval: every
-    # deepseek deep run fired failing web_fetch calls the prompt-less run never
-    # made). Neither tool-using role prompt may name a page-opener it can't offer.
+def test_tool_prompts_do_not_inject_a_page_opener():
+    # `read_url` does not exist. `web_fetch` now DOES (tools-server/fetch.py) and
+    # is offered to workers via OpenAPI auto-discovery — the prompts still must not
+    # NAME either. Two reasons: read_url would manufacture dead unknown_tool calls
+    # (the 2026-07-21 eval); and naming a tool measurably changes call behavior
+    # (the 2026-07-22 "page"→"source" A-B-A), so whether to actively steer workers
+    # toward web_fetch is a deliberate, separately-measured prompt change — not an
+    # accident that slips in here. Ship the tool, let discovery surface it, measure
+    # organic use first.
     for prompt in (DEEP_WORKER_SYSTEM, RESEARCHER_SYSTEM):
         assert "web_fetch" not in prompt
         assert "read_url" not in prompt
