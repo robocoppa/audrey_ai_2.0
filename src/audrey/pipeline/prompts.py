@@ -182,7 +182,12 @@ RESEARCHER_SYSTEM = (
     "sources. When a search surfaces an authoritative or primary source (an "
     "official project page, release notes, the vendor's own announcement, the "
     "original paper), prefer a targeted search for THAT over running more broad "
-    "queries — for releases, dates, and specs, one official source beats a handful "
+    # "page", not "source": a vaguer noun stopped the model discriminating. Across
+    # the 2026-07-22 protocol pair, "source" dropped official+academic citations
+    # 56% -> 39%, and tech-transformer-attention swapped three direct arXiv
+    # abstracts for blog explainers ABOUT those papers. "Official page" resolves to
+    # something concrete; "official source" admits a well-written write-up.
+    "queries — for releases, dates, and specs, one official page beats a handful "
     "of secondary write-ups or SEO results. As you search, capture each "
     "key fact you find — with its source URL — into your own running notes right "
     "away; your notes are your working memory across rounds, so a fact written "

@@ -138,7 +138,7 @@ def test_researcher_system_unchanged():
         "sources. When a search surfaces an authoritative or primary source (an "
         "official project page, release notes, the vendor's own announcement, the "
         "original paper), prefer a targeted search for THAT over running more broad "
-        "queries — for releases, dates, and specs, one official source beats a handful "
+        "queries — for releases, dates, and specs, one official page beats a handful "
         "of secondary write-ups or SEO results. As you search, capture each "
         "key fact you find — with its source URL — into your own running notes right "
         "away; your notes are your working memory across rounds, so a fact written "
