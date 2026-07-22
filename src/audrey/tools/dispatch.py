@@ -137,9 +137,18 @@ async def dispatch_one(
     if spec is None:
         log.warning("dispatch: unknown tool %r (registered: %s)", name, registry.names())
         tool_calls_total.labels(tool=name, outcome="error").inc()
+        # Deliberately does NOT echo `name` back in the body. A model that
+        # invented a tool has that name in context exactly once (its own call);
+        # repeating it in the error text reinforces it, and a prompt that names
+        # a tool makes models call it. The 2026-07-22 research eval caught this:
+        # a worker invented `web_fetch`, got the name handed back, and called it
+        # a second time. `available` gives it somewhere real to go instead.
+        # (The `role=tool` envelope in `to_tool_message` still carries `name` —
+        # that's required for the model to match the reply to its call — so this
+        # halves the reinforcement rather than removing it.)
         return ToolResult(
             name=name, call_id=call_id,
-            content=json.dumps({"error": "unknown_tool", "tool": name, "available": registry.names()}),
+            content=json.dumps({"error": "unknown_tool", "available": registry.names()}),
             elapsed_s=0.0, is_error=True,
         )
 

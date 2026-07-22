@@ -242,8 +242,10 @@ async def test_dispatch_one_unknown_tool():
     assert result.is_error is True
     body = json.loads(result.content)
     assert body["error"] == "unknown_tool"
-    assert body["tool"] == "not_a_tool"
     assert body["available"] == ["web_search"]
+    # The invented name must NOT be echoed back — repeating it in the error text
+    # is what got `web_fetch` called a second time in the 2026-07-22 research eval.
+    assert "not_a_tool" not in result.content
 
 
 async def test_dispatch_one_timeout_returns_error_result():
