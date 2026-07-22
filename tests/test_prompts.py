@@ -137,19 +137,16 @@ def test_researcher_system_unchanged():
         "retrieved evidence — prefer reliable, primary, or widely-corroborated "
         "sources. When a search surfaces an authoritative or primary source (an "
         "official project page, release notes, the vendor's own announcement, the "
-        "original paper), prefer searching for and reading THAT directly over running "
-        "more broad queries — for releases, dates, and specs, one official page beats "
-        "a handful of secondary write-ups or SEO results. As you search, capture each "
+        "original paper), prefer a targeted search for THAT over running more broad "
+        "queries — for releases, dates, and specs, one official page beats a handful "
+        "of secondary write-ups or SEO results. As you search, capture each "
         "key fact you find — with its source URL — into your own running notes right "
         "away; your notes are your working memory across rounds, so a fact written "
         "into them is one you can still build on later even after many more tool "
         "calls. A web_search result already carries a usable title and URL in its "
-        "snippet: that URL is a citable source on its own. If a follow-up tool that "
-        "opens a page (read_url / web_fetch) errors or times out, that is NOT a "
-        "search failure — you still have the search snippet and its URL, so cite the "
-        "URL the search returned rather than dropping the source or falling back to "
-        "\"no sources\". A failed page fetch means \"I could not read the full page\", "
-        "not \"the search found nothing\". Report what you found as "
+        "snippet: that URL is a citable source on its own — cite the URL the search "
+        "returned rather than dropping the source or falling back to \"no sources\". "
+        "Report what you found as "
         "concise factual notes: include dates, "
         "named entities, and direct attributions, and mark anything uncertain, "
         "disputed, or that you could not verify. Do NOT speculate to fill gaps — "
@@ -299,13 +296,15 @@ def test_deep_worker_system_forbids_fabrication_and_process_narration():
     assert "Do NOT write about your own search process" in DEEP_WORKER_SYSTEM
 
 
-def test_deep_worker_system_names_no_nonexistent_tool():
-    # Deep workers only get web_search + kb_search + memory. There is no
-    # web_fetch/read_url tool. Naming one made models CALL it (2026-07-21 eval:
-    # every deepseek deep run fired failing web_fetch calls the prompt-less run
-    # never made). The prompt must not name a page-opener it can't offer.
-    assert "web_fetch" not in DEEP_WORKER_SYSTEM
-    assert "read_url" not in DEEP_WORKER_SYSTEM
+def test_tool_prompts_name_no_nonexistent_tool():
+    # The registered tools are web_search, kb_search, kb_image_search, and three
+    # memory tools (tools-server operation_ids). There is NO web_fetch/read_url
+    # page-opener. Naming one made models CALL it (2026-07-21 143043 eval: every
+    # deepseek deep run fired failing web_fetch calls the prompt-less run never
+    # made). Neither tool-using role prompt may name a page-opener it can't offer.
+    for prompt in (DEEP_WORKER_SYSTEM, RESEARCHER_SYSTEM):
+        assert "web_fetch" not in prompt
+        assert "read_url" not in prompt
 
 
 def test_react_final_answer_unchanged():
