@@ -53,7 +53,7 @@ reaching a service from the host/LAN.
 | Container | ollama-net IP | host → internal port | Role |
 |---|---|---|---|
 | **audrey-ai** | 172.18.0.10 | 8000 → 8000 | FastAPI app (THIS repo) |
-| **custom-tools** | 172.18.0.16 | 8001 → 8001 | Tools server — serves `web_search` (Brave↔SearXNG logic lives here, **separate repo**) |
+| **custom-tools** | 172.18.0.16 | 8001 → 8001 | Tools server — serves `web_search` (Brave↔SearXNG logic lives here). Built from **`tools-server/` IN THIS REPO**, not a separate project |
 | **SearXNG** | 172.18.0.15 | **8088 → 8080** | Search engine behind `web_search` |
 | **open-webui** | 172.18.0.5 | **8080 → 8080** | OWUI frontend / public surface |
 | **ollama** | 172.18.0.13 | 11434 → 11434 | Model runtime |
@@ -166,6 +166,24 @@ nohup env MODEL=audrey_research CASES=<file>.json LABEL=<label> \
   and answers can still be correct, just unsourced (which then makes `hedge_policy`
   hedge more, since unsourced claims hedge by default). Empty search ≠ broken
   pipeline. Fix is at the provider/tools-server layer, not audrey-ai.
+- **`kb_search` fails intermittently (`✅0 ❌1`) with no error body.** Diagnosed
+  2026-07-22. NOT a tool, dispatch, or corpus bug: `OLLAMA_MAX_LOADED_MODELS=1`
+  could not hold the 323 MB `nomic-embed-text` embedder alongside a ~24 GB panel
+  worker model, so every `kb_search` following a generation paid a full model
+  swap. Measured embed latency: **0.06s resident, 12.98s idle-swap, 28.53s and
+  42.17s under a live local panel** — past the 30s tool-dispatch ceiling.
+  **Fixed by `OLLAMA_MAX_LOADED_MODELS=2`** (Unraid UI → ollama container; do NOT
+  add a Device entry while in there, it breaks GPU startup). `NUM_PARALLEL` stays
+  `1` — it gives Audrey's gated local runs de-facto exclusivity against the
+  ungated co-tenants (OpenClaw, OWUI), and KV cache is allocated per parallel
+  slot at load time whether or not the slot is used.
+  - **Diagnostic:** `docker exec -i custom-tools python3 - < scripts/embed_contention_probe.py`
+    samples embed latency against Ollama residency. Single hand-timed probes are
+    worthless here — three identical back-to-back calls returned 1.01s, 23.82s and
+    0.08s. Judge by the distribution and the over-ceiling count, not one reading.
+  - **Watch for:** a slow sample sitting next to a big model in the `resident`
+    column is an eviction; a slow sample while a NEW model appears is a cold-load
+    stall (narrower, and mostly disjoint from when real `kb_search` calls fire).
 - **Wrong-port probe.** See §3 — `localhost:8080` is OWUI.
 - **"Just renew the Brave key" is not always the cure.** A past PROJECT_STATE
   entry recorded this as a struck-through misdiagnosis; the real issue was

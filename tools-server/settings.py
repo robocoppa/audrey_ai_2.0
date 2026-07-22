@@ -35,7 +35,12 @@ class Settings(BaseSettings):
 
     # Audrey (for kb_search / kb_image_search proxying)
     audrey_url: str = Field(default="http://audrey-ai:8000", alias="AUDREY_URL")
-    audrey_kb_timeout_seconds: float = Field(default=30.0, alias="AUDREY_KB_TIMEOUT_SECONDS")
+    # Middle rung of the KB timeout ladder. Must sit BELOW Audrey's tool-dispatch
+    # timeout (`graph.DEFAULT_DISPATCH_TIMEOUT_S`, 30s) and ABOVE the embed budget
+    # inside /v1/kb/query (`TextEmbedder.query_timeout_s`, 24s). Previously 30.0 —
+    # tied with its own caller, so the 502 raised at app.py `kb_search` could never
+    # win the race and every slow KB query reached the model as a bare timeout.
+    audrey_kb_timeout_seconds: float = Field(default=27.0, alias="AUDREY_KB_TIMEOUT_SECONDS")
 
     # Local storage
     data_dir: Path = Field(default=Path("/app/data"), alias="TOOLS_DATA_DIR")

@@ -83,6 +83,15 @@ from audrey.tools.discovery import ToolRegistry
 
 log = logging.getLogger(__name__)
 
+# Outermost rung of the KB timeout ladder: how long a ReAct tool dispatch waits
+# on custom-tools. The two inner hops (custom-tools -> /v1/kb/query, and the
+# query's Ollama embed) MUST expire before this one, or a slow embed surfaces
+# as a bare `{"error": "timeout"}` with no diagnosable body — which is exactly
+# how the 2026-07-22 `kb_search` failure stayed unexplained for a month while
+# both inner layers were sized at or above this value. See
+# `tests/test_kb_timeout_ladder.py`, which pins the ordering.
+DEFAULT_DISPATCH_TIMEOUT_S = 30.0
+
 
 def build_graph(
     cfg: Config,
@@ -107,7 +116,9 @@ def build_graph(
     react_max_rounds = int(react_cfg.get("max_rounds", 3))
     react_compress_after = int(react_cfg.get("compress_after_round", 2))
     react_max_tool_chars = int(react_cfg.get("max_tool_result_chars", 2000))
-    react_dispatch_timeout = float(react_cfg.get("dispatch_timeout_s", 30))
+    react_dispatch_timeout = float(
+        react_cfg.get("dispatch_timeout_s", DEFAULT_DISPATCH_TIMEOUT_S)
+    )
     react_compress_keep_last = int(react_cfg.get("compress_keep_last", 1))
     react_max_web_searches = int(react_cfg.get("max_web_searches", 0))
 

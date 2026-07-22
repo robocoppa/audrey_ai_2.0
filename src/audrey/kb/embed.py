@@ -105,22 +105,42 @@ log = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class TextEmbedder:
+    """Embeds text via Ollama for both KB ingest and live `kb_search` queries.
+
+    The two callers want different deadlines, hence two timeouts. Ingest embeds
+    batches of `batch_size` chunks and nobody is waiting on it, so it keeps the
+    generous `timeout_s`. A query embeds ONE string on the request hot path,
+    underneath a tool dispatch that gives up at
+    `graph.DEFAULT_DISPATCH_TIMEOUT_S` — so `query_timeout_s` must expire first,
+    or the failure reaches the model as an undiagnosable bare timeout.
+
+    Sizing (measured on the deployed box 2026-07-22): a resident embedder answers
+    in ~0.06s. The pathological case is not a slow embed but a cold model load
+    blocking it — 24-42s while a worker model swapped into VRAM. Anything past
+    `query_timeout_s` was going to blow the dispatch ceiling regardless, so
+    failing here costs no successful queries and buys a legible error.
+    """
+
     ollama: OllamaClient
     model: str = "nomic-embed-text"
     timeout_s: float = 60.0
+    query_timeout_s: float = 24.0
     batch_size: int = 64
 
     async def embed_one(self, text: str) -> list[float]:
-        out = await self.embed_many([text])
+        out = await self.embed_many([text], timeout_s=self.query_timeout_s)
         return out[0]
 
-    async def embed_many(self, texts: list[str]) -> list[list[float]]:
+    async def embed_many(
+        self, texts: list[str], *, timeout_s: float | None = None,
+    ) -> list[list[float]]:
         if not texts:
             return []
+        budget = self.timeout_s if timeout_s is None else timeout_s
         vectors: list[list[float]] = []
         for i in range(0, len(texts), self.batch_size):
             batch = texts[i : i + self.batch_size]
-            got = await self.ollama.embed(model=self.model, texts=batch, timeout_s=self.timeout_s)
+            got = await self.ollama.embed(model=self.model, texts=batch, timeout_s=budget)
             vectors.extend(_normalize(v) for v in got)
         return vectors
 

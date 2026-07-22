@@ -176,7 +176,7 @@ node reads state
 
 ### 2.2 The graph order puts context before classification
 
-Open [`graph.py:496`](../../src/audrey/pipeline/graph.py#L496). The graph adds
+Open [`graph.py:515`](../../src/audrey/pipeline/graph.py#L515). The graph adds
 nodes in one block:
 
 ```python
@@ -186,7 +186,7 @@ g.add_node("classify", node_classify)
 g.add_node("complexity", node_complexity)
 ```
 
-Then the edges at [`graph.py:508`](../../src/audrey/pipeline/graph.py#L508)
+Then the edges at [`graph.py:527`](../../src/audrey/pipeline/graph.py#L527)
 make the order explicit:
 
 ```python
@@ -222,7 +222,7 @@ user's actual ask."
 
 ### 2.3 `node_classify`: the graph asks for a task type
 
-The graph node lives at [`graph.py:198`](../../src/audrey/pipeline/graph.py#L198):
+The graph node lives at [`graph.py:219`](../../src/audrey/pipeline/graph.py#L219):
 
 ```python
 async def node_classify(state: PipelineState) -> dict[str, Any]:
@@ -449,7 +449,7 @@ task family.
 ### 2.7 Virtual models can force the route
 
 Now read the middle of `node_complexity`, starting at
-[`graph.py:225`](../../src/audrey/pipeline/graph.py#L225):
+[`graph.py:236`](../../src/audrey/pipeline/graph.py#L236):
 
 ```python
 complex_, n = is_complex(...)
@@ -512,7 +512,7 @@ def route_after_complexity(state: PipelineState) -> str:
 
 That is at [`graph.py:384`](../../src/audrey/pipeline/graph.py#L384).
 
-The wiring at [`graph.py:512`](../../src/audrey/pipeline/graph.py#L512) tells
+The wiring at [`graph.py:531`](../../src/audrey/pipeline/graph.py#L531) tells
 LangGraph what those return strings mean:
 
 ```python
@@ -537,7 +537,7 @@ block.
 
 After `fast_path` returns, Audrey may still decide the answer was not good
 enough. The router for that is
-[`graph.py:435`](../../src/audrey/pipeline/graph.py#L435).
+[`graph.py:454`](../../src/audrey/pipeline/graph.py#L454).
 
 The first guard is simple: if escalation is disabled, stop.
 
