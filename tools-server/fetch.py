@@ -20,7 +20,9 @@ model-steerable HTTP client on the LAN. The guards below are defense-in-depth
     `302 → http://qdrant:6333`, and the initial-host check never sees the
     internal target. So `follow_redirects=False` and we re-run `_validate_url`
     on each Location.
-  - **byte cap while streaming** — a multi-GB body can't OOM the container.
+  - **byte cap on the raw download AND the decompressed body** — decoded output
+    is bounded per-codec (`_decompress_bounded`), so a gzip/zstd bomb can't OOM
+    the container before the cap trips; unknown encodings (brotli) are rejected.
   - **content-type gate** — only HTML/plain text is extracted; a binary blob is
     rejected before trafilatura ever sees it.
   - **timeout well under the tool-dispatch ceiling** so a slow page reports
@@ -40,13 +42,20 @@ which would do its own unguarded HTTP request and bypass everything above.
 from __future__ import annotations
 
 import asyncio
+import io
 import ipaddress
 import logging
 import socket
 import urllib.parse
+import zlib
 
 import httpx
 import trafilatura
+
+try:
+    import zstandard
+except ImportError:  # pragma: no cover - declared dep; guarded so an absent build fails safe
+    zstandard = None
 
 log = logging.getLogger("custom-tools")
 
@@ -123,16 +132,69 @@ def _validate_url(url: str) -> None:
         )
 
 
+def _decompress_bounded(raw: bytes, encoding: str) -> bytes:
+    """Decompress `raw` per its Content-Encoding with output bounded to the byte cap.
+
+    httpx's transparent decoders call `decompressor.decompress(data)` with no length
+    limit, so a few-KB gzip/zstd body can expand to hundreds of MB in a single step
+    before any cap check runs. Here every codec is capped at `_BYTE_CAP + 1` output
+    bytes — a decompression bomb raises instead of ballooning memory. Encodings we
+    can't safely bound (brotli, or anything unknown) are rejected outright.
+    """
+    if encoding in ("", "identity"):
+        return raw
+    limit = _BYTE_CAP + 1  # +1 lets us tell "exactly at cap" (ok) from "over cap"
+    over_cap = f"page body exceeds the {_BYTE_CAP // (1024 * 1024)} MB cap"
+    if encoding in ("gzip", "x-gzip", "deflate"):
+        # gzip/zlib headers auto-detect at wbits=47; raw deflate needs -15. The raw
+        # buffer is already capped, so trying both formats is cheap.
+        for wbits in (47, -15):
+            try:
+                dobj = zlib.decompressobj(wbits)
+                out = dobj.decompress(raw, limit)
+            except zlib.error:
+                continue
+            if dobj.unconsumed_tail:            # output hit the limit -> over cap
+                raise FetchError(over_cap)
+            out += dobj.flush()
+            break
+        else:
+            raise FetchError("the page body could not be decompressed")
+    elif encoding == "zstd" and zstandard is not None:
+        try:
+            reader = zstandard.ZstdDecompressor().stream_reader(io.BytesIO(raw))
+            out = reader.read(limit)            # decompresses at most `limit` bytes
+        except zstandard.ZstdError as e:
+            raise FetchError("the page body could not be decompressed") from e
+    else:
+        raise FetchError(f"page uses unsupported content-encoding {encoding!r}")
+    if len(out) > _BYTE_CAP:
+        raise FetchError(over_cap)
+    return out
+
+
 async def _read_capped(resp: httpx.Response) -> bytes:
-    """Stream the body, raising FetchError if it exceeds the byte cap."""
+    """Stream the raw body under a byte cap, then decompress with bounded output.
+
+    We iterate `aiter_raw()` (undecoded wire bytes) rather than `aiter_bytes()` so
+    decompression runs through `_decompress_bounded`, which bounds decoded output.
+    This caps both the raw download and the decompressed result, so no compression
+    ratio can OOM the container before the cap trips.
+    """
+    encodings = [e.strip().lower() for e in resp.headers.get("content-encoding", "").split(",")]
+    encodings = [e for e in encodings if e and e != "identity"]
+    if len(encodings) > 1:
+        raise FetchError("page uses multiple content-encodings, which are not supported")
+    encoding = encodings[0] if encodings else ""
+
     chunks: list[bytes] = []
     total = 0
-    async for chunk in resp.aiter_bytes():
+    async for chunk in resp.aiter_raw():
         total += len(chunk)
         if total > _BYTE_CAP:
             raise FetchError(f"page body exceeds the {_BYTE_CAP // (1024 * 1024)} MB cap")
         chunks.append(chunk)
-    return b"".join(chunks)
+    return _decompress_bounded(b"".join(chunks), encoding)
 
 
 def _extract_text(html: str) -> str:

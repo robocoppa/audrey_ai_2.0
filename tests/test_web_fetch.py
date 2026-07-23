@@ -31,6 +31,25 @@ _HTML = (
 )
 
 
+class _AsyncBytes(httpx.AsyncByteStream):
+    """One-shot async byte stream. A MockTransport response built with `content=`
+    pre-sets `_content` and marks the stream consumed, which `aiter_raw()` rejects;
+    a real streaming response (what production sees) exposes a raw stream. fetch.py
+    reads `aiter_raw()` to bound decompression, so response-body tests must serve
+    genuine streams rather than `content=`.
+    """
+
+    def __init__(self, data: bytes):
+        self._data = data
+
+    async def __aiter__(self):
+        yield self._data
+
+
+def _resp(status_code: int, *, headers: dict | None = None, content: bytes = b"") -> httpx.Response:
+    return httpx.Response(status_code, headers=headers or {}, stream=_AsyncBytes(content))
+
+
 # ─── The DNS guard, directly (raw IPs don't hit the network) ──────────
 
 @pytest.mark.parametrize("host", [
@@ -137,7 +156,7 @@ async def test_byte_cap_enforced(monkeypatch):
     big = b"<html><body>" + b"x" * 4096 + b"</body></html>"
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, headers={"content-type": "text/html"}, content=big)
+        return _resp(200, headers={"content-type": "text/html"}, content=big)
 
     with pytest.raises(FetchError, match="cap"):
         await fetch_readable(
@@ -152,8 +171,8 @@ async def test_successful_fetch_extracts_readable_text(monkeypatch):
     monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, headers={"content-type": "text/html; charset=utf-8"},
-                              content=_HTML.encode())
+        return _resp(200, headers={"content-type": "text/html; charset=utf-8"},
+                     content=_HTML.encode())
 
     final_url, text = await fetch_readable(
         "http://example.com/paper", max_chars=6000,
@@ -173,7 +192,7 @@ async def test_max_chars_truncates(monkeypatch):
     monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, headers={"content-type": "text/html"}, content=_HTML.encode())
+        return _resp(200, headers={"content-type": "text/html"}, content=_HTML.encode())
 
     _, text = await fetch_readable(
         "http://example.com/paper", max_chars=20,
@@ -187,8 +206,8 @@ async def test_empty_extraction_reports_no_text(monkeypatch):
 
     def handler(request: httpx.Request) -> httpx.Response:
         # Valid HTML with nothing trafilatura will treat as article content.
-        return httpx.Response(200, headers={"content-type": "text/html"},
-                              content=b"<html><body></body></html>")
+        return _resp(200, headers={"content-type": "text/html"},
+                     content=b"<html><body></body></html>")
 
     with pytest.raises(FetchError, match="no readable text"):
         await fetch_readable(
@@ -303,3 +322,105 @@ def test_web_fetch_endpoint_malformed_url_is_422_not_500(client):
     # Passes Pydantic (valid string) but is malformed for urlparse → must map to the
     # model-safe 422 via FetchError, not an uncaught 500. urlparse raises before any DNS.
     assert client.post("/web_fetch", json={"url": "http://[::1"}).status_code == 422
+
+
+# ─── Decompression is bounded: a compression bomb can't balloon memory ─
+# The cap must count DECODED bytes AND bound the transient. httpx's own decoders
+# expand each chunk fully before any check (a few-KB body → hundreds of MB), so
+# fetch.py reads raw bytes and decompresses with a per-codec output limit. Bombs
+# must raise, and peak memory must stay near the cap — not the decompressed size.
+
+_MEM_CEILING = 24 * 1024 * 1024   # generous headroom over the 2 MB cap; the pre-fix
+                                  # path peaked at 200-400 MB, so this is a wide margin
+
+
+def _gzip(data: bytes) -> bytes:
+    import gzip
+    return gzip.compress(data)
+
+
+def _handler_for(content: bytes, encoding: str):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _resp(
+            200, headers={"content-type": "text/html", "content-encoding": encoding},
+            content=content,
+        )
+    return handler
+
+
+async def test_gzip_bomb_rejected_with_bounded_memory(monkeypatch):
+    import tracemalloc
+    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    bomb = _gzip(b"A" * (80 * 1024 * 1024))        # 80 MB → ~80 KB on the wire
+    tracemalloc.start()
+    try:
+        with pytest.raises(FetchError, match="cap"):
+            await fetch_readable(
+                "http://e.example/b", max_chars=6000,
+                transport=httpx.MockTransport(_handler_for(bomb, "gzip")),
+            )
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < _MEM_CEILING, f"peak {peak / 1e6:.0f} MB — decompression not bounded"
+
+
+async def test_zstd_bomb_rejected_with_bounded_memory(monkeypatch):
+    import tracemalloc
+    zstd = pytest.importorskip("zstandard")
+    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    bomb = zstd.ZstdCompressor(level=19).compress(b"B" * (150 * 1024 * 1024))
+    tracemalloc.start()
+    try:
+        with pytest.raises(FetchError, match="cap"):
+            await fetch_readable(
+                "http://e.example/z", max_chars=6000,
+                transport=httpx.MockTransport(_handler_for(bomb, "zstd")),
+            )
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < _MEM_CEILING, f"peak {peak / 1e6:.0f} MB — decompression not bounded"
+
+
+async def test_gzip_encoded_page_is_decoded(monkeypatch):
+    # The happy path: a legitimately gzip-encoded page must still decode and extract.
+    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    _, text = await fetch_readable(
+        "http://e.example/g", max_chars=6000,
+        transport=httpx.MockTransport(_handler_for(_gzip(_HTML.encode()), "gzip")),
+    )
+    assert "self-attention" in text
+
+
+async def test_raw_deflate_encoded_page_is_decoded(monkeypatch):
+    # Raw deflate (no zlib header) exercises the wbits=-15 fallback in the decoder.
+    import zlib
+    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    co = zlib.compressobj(9, zlib.DEFLATED, -15)
+    body = co.compress(_HTML.encode()) + co.flush()
+    _, text = await fetch_readable(
+        "http://e.example/d", max_chars=6000,
+        transport=httpx.MockTransport(_handler_for(body, "deflate")),
+    )
+    assert "self-attention" in text
+
+
+async def test_unsupported_content_encoding_rejected(monkeypatch):
+    # brotli isn't handled — an attacker-forced `br` body must be rejected, never
+    # handed to trafilatura as raw bytes.
+    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    with pytest.raises(FetchError, match="content-encoding"):
+        await fetch_readable(
+            "http://e.example/br", max_chars=6000,
+            transport=httpx.MockTransport(_handler_for(b"\x1b\x0e\x00\xf8nope", "br")),
+        )
+
+
+async def test_multiple_content_encodings_rejected(monkeypatch):
+    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    with pytest.raises(FetchError, match="multiple content-encodings"):
+        await fetch_readable(
+            "http://e.example/m", max_chars=6000,
+            transport=httpx.MockTransport(_handler_for(b"x", "gzip, br")),
+        )
