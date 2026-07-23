@@ -101,16 +101,25 @@ def _is_unsafe_address(host: str) -> bool:
 
 def _validate_url(url: str) -> None:
     """Raise FetchError if `url` is unsafe to fetch. Called on every redirect hop."""
-    parsed = urllib.parse.urlparse(url)
+    try:
+        parsed = urllib.parse.urlparse(url)
+        hostname = parsed.hostname
+        _ = parsed.port  # property access validates the port range (raises ValueError)
+    except ValueError as e:
+        # Malformed URL — a bad IPv6 literal (`http://[::1`) makes urlparse raise, an
+        # out-of-range port makes `.port` raise. These reach us because the Pydantic
+        # layer only length-checks the string; without this they surface as an uncaught
+        # 500 instead of a model-safe reason to pick another URL.
+        raise FetchError("the URL is malformed and cannot be opened") from e
     if parsed.scheme not in _ALLOWED_SCHEMES:
         raise FetchError(
             f"unsupported URL scheme {parsed.scheme or '(none)'!r}; only http/https can be opened"
         )
-    if not parsed.hostname:
+    if not hostname:
         raise FetchError("URL has no host")
-    if _is_unsafe_address(parsed.hostname):
+    if _is_unsafe_address(hostname):
         raise FetchError(
-            f"host {parsed.hostname!r} resolves to a private/internal address and cannot be opened"
+            f"host {hostname!r} resolves to a private/internal address and cannot be opened"
         )
 
 
@@ -167,7 +176,11 @@ async def fetch_readable(
                     raw = await _read_capped(resp)
             except httpx.TimeoutException as e:
                 raise FetchError(f"fetch timed out after {int(_FETCH_TIMEOUT_S)}s") from e
-            except httpx.HTTPError as e:
+            except (httpx.HTTPError, httpx.InvalidURL, ValueError) as e:
+                # httpx.InvalidURL is NOT a subclass of httpx.HTTPError, and httpx can
+                # raise a bare ValueError on some malformed inputs — a control char in
+                # the URL or a redirect Location triggers this. Both must map to a clean
+                # reportable failure, never an uncaught 500 that bypasses FetchError.
                 raise FetchError(f"could not reach the page ({type(e).__name__})") from e
 
             html = raw.decode("utf-8", errors="replace")

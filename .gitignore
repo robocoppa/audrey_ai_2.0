@@ -14,6 +14,10 @@ docs/lessons/AUDIT.md
 docs/lesson-python/AUDIT.md
 docs/lesson-python/_LESSON-*-HANDOFF.md
 
+# Security hardening working docs — internal remediation plans/tracking for
+# audited surfaces (web_fetch SSRF, etc.); not shipped as project docs.
+docs/campaign-2/web-fetch-hardening-plan.md
+
 # OpenClaw builder's guide — laptop-local; references Unraid LAN IP
 # and personal channel tokens. Reference doc for building agents.
 docs/guides/openclaw-builders-guide.md
