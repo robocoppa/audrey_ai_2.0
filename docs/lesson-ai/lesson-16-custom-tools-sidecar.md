@@ -50,12 +50,13 @@ OpenAPI remain service plumbing, not model-callable tools.
 > in earlier lessons — the sidecar's `/health` route ([app.py:218](../../tools-server/app.py#L218))
 > is what that healthcheck hits.
 
-### 1.2 The four files
+### 1.2 The five files
 
 | File | Role |
 |---|---|
 | [`app.py`](../../tools-server/app.py) | The FastAPI app: every tool route, its request/response schemas, the lifespan that wires up clients. |
 | [`brave.py`](../../tools-server/brave.py) | The Brave Search client behind `web_search` — caching + retry. |
+| [`fetch.py`](../../tools-server/fetch.py) | The SSRF-guarded page fetcher behind `web_fetch`. |
 | [`db.py`](../../tools-server/db.py) | The Qdrant-backed durable memory store behind `memory_*`. |
 | [`settings.py`](../../tools-server/settings.py) | Env-driven config (Pydantic Settings). |
 
@@ -154,7 +155,7 @@ into three groups with very different implementations:
 | Kind | Tools | What the handler does |
 |---|---|---|
 | **Proxy** | `kb_search`, `kb_image_search` | Forwards back to Audrey's `/v1/kb/query`. |
-| **External** | `web_search` | Calls a third-party API (Brave) via `brave.py`. |
+| **External** | `web_search`, `web_fetch` | Reach the outside web — Brave via `brave.py`, a model-chosen page via `fetch.py` (§2.5). |
 | **Stateful** | `memory_*`, `chat_history_search` | Reads/writes Qdrant + SQLite via `db.py` / `chat_archive.py`. |
 
 The **proxy** kind is worth pausing on because it's counterintuitive: the
@@ -212,7 +213,7 @@ while any other 4xx is Audrey's own verdict on the query. `kb_image_search`
 `/v1/kb/query/image`, with one extra guard: it requires exactly one of
 `query` / `image_url` / `image_b64` and 422s if the model sends none.
 
-The next two sections take the External and Stateful kinds in depth.
+The following sections take the External and Stateful kinds in depth.
 
 ### 2.4 `brave.py`: an external API client, done carefully
 
@@ -292,7 +293,36 @@ concrete.
 > value, the *outermost enforced* one is the contract; the inner ones are
 > defense in depth.
 
-### 2.5 `db.py`: the durable memory store
+### 2.5 `fetch.py`: when the model picks the URL
+
+`web_search` returns a title, URL, and a ~150-character snippet — enough to
+cite, not to *read*. `web_fetch` ([`fetch.py`](../../tools-server/fetch.py))
+opens one page and returns its main text, so a worker can pull the exact date or
+quote a snippet leaves out.
+
+It's a second External tool, but with a twist that makes it the file's most
+security-sensitive route: **the model supplies the URL.** The handler becomes a
+fetcher aimed wherever the model says — running on the internal network, next to
+Qdrant and Ollama. Get a research query to fetch a hostile URL and it could be
+steered at those internal services. That attack is **SSRF** (server-side request
+forgery), and `fetch.py` is a stack of guards against it:
+
+| Guard | Stops |
+|---|---|
+| scheme allowlist (http/https) | `file://`, `gopher://` |
+| resolve the host, judge the *IP* | `qdrant:6333`, `127.0.0.1`, `2130706433` |
+| revalidate every redirect hop | `evil.com` → `302` → `qdrant:6333` |
+| 2 MB cap · 15 s timeout · content-type gate | oversized / slow / binary bodies |
+
+The redirect row is the subtle one: let `httpx` follow redirects itself and the
+host check passes on the *first* URL while the redirect quietly lands on the
+internal target — so `fetch.py` follows them by hand, re-checking each hop. One
+gap stays open and documented: DNS rebinding, where a host resolves safe, then
+re-resolves to something internal at connect time. And like every tool here,
+`web_fetch` isn't named in a prompt — it rides in on the §1.1 discovery
+handshake, and workers reach for it on their own.
+
+### 2.6 `db.py`: the durable memory store
 
 [`db.py`](../../tools-server/db.py) backs `memory_store` / `memory_recall`
 / `memory_search`. It is Qdrant-backed, embedded with `nomic-embed-text`
@@ -342,7 +372,7 @@ drops anything below `MEMORY_SIMILARITY_THRESHOLD`. That threshold is set
 *tight* (0.5) on purpose: a memory false-positive is injected into the
 prompt as "a fact about the user," so a wrong hit actively misleads the
 model — worse than no hit. (Contrast the chat archive's looser threshold in
-§2.7, where the stakes are lower.)
+§2.8, where the stakes are lower.)
 
 **User scoping that can't be fooled by substrings.** Memories are
 per-user; the scope must be exact, or one user's memory leaks into
@@ -371,7 +401,7 @@ means a second boot finds no `memory.db` and does nothing. This is a
 one-shot data migration that lives in the application's startup path rather
 than a separate script, which is fine for a single-replica sidecar.
 
-### 2.6 `settings.py` and the lifespan: wiring it together
+### 2.7 `settings.py` and the lifespan: wiring it together
 
 [`settings.py`](../../tools-server/settings.py) is Pydantic Settings —
 every knob is an env var with a default (see Lesson 2 for the pattern, and
@@ -406,7 +436,7 @@ client. This is the standard FastAPI lifespan shape (Lesson 5 §startup
 covered Audrey's): construct expensive, long-lived clients *once*, share
 them across requests, close them cleanly.
 
-### 2.7 The chat archive's read side
+### 2.8 The chat archive's read side
 
 [Lesson 13](lesson-13-memory-and-context-injection.md) covered how a turn
 gets written — `archive_turn`, the Q+A-pair chunking, the embed-and-upsert.
@@ -513,7 +543,7 @@ validator existed, the bad config would have crashed *later* — on the first
 archive write large enough to trigger a hard split, where the chunk step
 `max_chars - overlap` goes ≤ 0 — a much harder failure to trace back to its
 cause. This is fail-fast at boot turning a lurking runtime bug into an obvious
-config error (the §2.5 pattern).
+config error (the §2.6 pattern).
 
 ## One more subsystem: research mode
 
