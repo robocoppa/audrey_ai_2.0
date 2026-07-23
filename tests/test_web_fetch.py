@@ -21,7 +21,7 @@ if str(_TOOLS_SERVER) not in sys.path:
     sys.path.insert(0, str(_TOOLS_SERVER))
 
 import fetch  # noqa: E402
-from fetch import FetchError, _is_unsafe_address, _validate_url, fetch_readable  # noqa: E402
+from fetch import FetchError, _resolve_safe, _validate_url, fetch_readable  # noqa: E402
 
 _HTML = (
     "<html><head><title>T</title><style>.x{}</style></head><body>"
@@ -55,18 +55,22 @@ def _resp(status_code: int, *, headers: dict | None = None, content: bytes = b""
 @pytest.mark.parametrize("host", [
     "127.0.0.1", "10.0.0.5", "192.168.1.11", "169.254.1.1", "::1", "0.0.0.0",  # noqa: S104 — SSRF-guard inputs, not a bind address
 ])
-def test_is_unsafe_address_blocks_internal(host):
-    assert _is_unsafe_address(host) is True
+def test_resolve_safe_blocks_internal(host):
+    # getaddrinfo on a raw IP returns it without a network hit; an internal one must
+    # fail the whole host rather than yield a pinnable IP.
+    with pytest.raises(FetchError, match="private/internal"):
+        _resolve_safe(host)
 
 
 @pytest.mark.parametrize("host", ["8.8.8.8", "1.1.1.1"])
-def test_is_unsafe_address_allows_public(host):
-    assert _is_unsafe_address(host) is False
+def test_resolve_safe_returns_public_ip(host):
+    assert _resolve_safe(host) == [host]
 
 
-def test_unresolvable_host_is_unsafe():
+def test_resolve_safe_rejects_unresolvable_host():
     # A name that won't resolve → reject rather than risk a search-domain hit.
-    assert _is_unsafe_address("no-such-host.invalid") is True
+    with pytest.raises(FetchError, match="could not be resolved"):
+        _resolve_safe("no-such-host.invalid")
 
 
 # ─── URL validation ──────────────────────────────────────────────────
@@ -81,22 +85,27 @@ def test_validate_url_rejects_nonhttp_schemes(url):
         _validate_url(url)
 
 
-def test_validate_url_rejects_internal_host():
+async def test_internal_host_url_is_blocked_end_to_end():
+    # The whole chain must refuse an internal URL: _validate_url passes it (valid
+    # shape), then _resolve_safe vets the pinned IP and rejects loopback before any
+    # socket opens. No transport → real (local) resolution of 127.0.0.1.
     with pytest.raises(FetchError, match="private/internal"):
-        _validate_url("http://127.0.0.1:6333/collections")
+        await fetch_readable("http://127.0.0.1:6333/collections", max_chars=6000)
 
 
 # ─── The redirect-revalidation bypass (the reason this tool was hard) ─
 
 async def test_redirect_to_internal_host_is_blocked(monkeypatch):
     # evil.example 302s to an internal service. Automatic redirect-following
-    # would sail past the initial-host check; manual per-hop revalidation must
-    # catch the internal Location. We fake DNS so evil.example looks public and
-    # the redirect target looks internal.
-    def fake_unsafe(host: str) -> bool:
-        return host != "evil.example"
+    # would sail past the initial-host check; manual per-hop re-resolution must
+    # catch the internal Location. We fake DNS so evil.example resolves public and
+    # the redirect target resolves internal.
+    def fake_resolve(host: str) -> list[str]:
+        if host == "evil.example":
+            return ["93.184.216.34"]
+        raise FetchError(f"host {host!r} resolves to a private/internal address and cannot be opened")
 
-    monkeypatch.setattr(fetch, "_is_unsafe_address", fake_unsafe)
+    monkeypatch.setattr(fetch, "_resolve_safe", fake_resolve)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(302, headers={"location": "http://qdrant:6333/collections"})
@@ -109,7 +118,7 @@ async def test_redirect_to_internal_host_is_blocked(monkeypatch):
 
 
 async def test_too_many_redirects(monkeypatch):
-    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
 
     def handler(request: httpx.Request) -> httpx.Response:
         # Always redirect onward to another public-looking host.
@@ -125,7 +134,7 @@ async def test_too_many_redirects(monkeypatch):
 # ─── Response gating ──────────────────────────────────────────────────
 
 async def test_non_html_content_type_rejected(monkeypatch):
-    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, headers={"content-type": "application/pdf"}, content=b"%PDF-")
@@ -138,7 +147,7 @@ async def test_non_html_content_type_rejected(monkeypatch):
 
 
 async def test_http_error_status_rejected(monkeypatch):
-    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, headers={"content-type": "text/html"}, content=b"nope")
@@ -151,7 +160,7 @@ async def test_http_error_status_rejected(monkeypatch):
 
 
 async def test_byte_cap_enforced(monkeypatch):
-    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
     monkeypatch.setattr(fetch, "_BYTE_CAP", 1024)  # tiny cap for the test
     big = b"<html><body>" + b"x" * 4096 + b"</body></html>"
 
@@ -168,7 +177,7 @@ async def test_byte_cap_enforced(monkeypatch):
 # ─── The happy path + truncation ──────────────────────────────────────
 
 async def test_successful_fetch_extracts_readable_text(monkeypatch):
-    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
 
     def handler(request: httpx.Request) -> httpx.Response:
         return _resp(200, headers={"content-type": "text/html; charset=utf-8"},
@@ -189,7 +198,7 @@ async def test_successful_fetch_extracts_readable_text(monkeypatch):
 
 
 async def test_max_chars_truncates(monkeypatch):
-    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
 
     def handler(request: httpx.Request) -> httpx.Response:
         return _resp(200, headers={"content-type": "text/html"}, content=_HTML.encode())
@@ -202,7 +211,7 @@ async def test_max_chars_truncates(monkeypatch):
 
 
 async def test_empty_extraction_reports_no_text(monkeypatch):
-    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
 
     def handler(request: httpx.Request) -> httpx.Response:
         # Valid HTML with nothing trafilatura will treat as article content.
@@ -234,7 +243,7 @@ async def test_malformed_url_reports_not_crashes(monkeypatch, url):
     # Stub the DNS guard so the control-char cases get past validation and reach
     # httpx (which rejects the URL before opening a socket — still hermetic). The
     # urlparse/port cases fail earlier, inside _validate_url.
-    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
     with pytest.raises(FetchError):
         await fetch_readable(url, max_chars=6000)
 
@@ -350,7 +359,7 @@ def _handler_for(content: bytes, encoding: str):
 
 async def test_gzip_bomb_rejected_with_bounded_memory(monkeypatch):
     import tracemalloc
-    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
     bomb = _gzip(b"A" * (80 * 1024 * 1024))        # 80 MB → ~80 KB on the wire
     tracemalloc.start()
     try:
@@ -368,7 +377,7 @@ async def test_gzip_bomb_rejected_with_bounded_memory(monkeypatch):
 async def test_zstd_bomb_rejected_with_bounded_memory(monkeypatch):
     import tracemalloc
     zstd = pytest.importorskip("zstandard")
-    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
     bomb = zstd.ZstdCompressor(level=19).compress(b"B" * (150 * 1024 * 1024))
     tracemalloc.start()
     try:
@@ -385,7 +394,7 @@ async def test_zstd_bomb_rejected_with_bounded_memory(monkeypatch):
 
 async def test_gzip_encoded_page_is_decoded(monkeypatch):
     # The happy path: a legitimately gzip-encoded page must still decode and extract.
-    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
     _, text = await fetch_readable(
         "http://e.example/g", max_chars=6000,
         transport=httpx.MockTransport(_handler_for(_gzip(_HTML.encode()), "gzip")),
@@ -396,7 +405,7 @@ async def test_gzip_encoded_page_is_decoded(monkeypatch):
 async def test_raw_deflate_encoded_page_is_decoded(monkeypatch):
     # Raw deflate (no zlib header) exercises the wbits=-15 fallback in the decoder.
     import zlib
-    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
     co = zlib.compressobj(9, zlib.DEFLATED, -15)
     body = co.compress(_HTML.encode()) + co.flush()
     _, text = await fetch_readable(
@@ -409,7 +418,7 @@ async def test_raw_deflate_encoded_page_is_decoded(monkeypatch):
 async def test_unsupported_content_encoding_rejected(monkeypatch):
     # brotli isn't handled — an attacker-forced `br` body must be rejected, never
     # handed to trafilatura as raw bytes.
-    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
     with pytest.raises(FetchError, match="content-encoding"):
         await fetch_readable(
             "http://e.example/br", max_chars=6000,
@@ -418,7 +427,7 @@ async def test_unsupported_content_encoding_rejected(monkeypatch):
 
 
 async def test_multiple_content_encodings_rejected(monkeypatch):
-    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
     with pytest.raises(FetchError, match="multiple content-encodings"):
         await fetch_readable(
             "http://e.example/m", max_chars=6000,
@@ -437,7 +446,7 @@ async def test_overall_deadline_stops_a_slow_fetch(monkeypatch):
     # 15s per-op timeout, not hang. The deadline, not the per-op timeout, is the wall.
     import asyncio
     import time
-    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
     monkeypatch.setattr(fetch, "_OVERALL_DEADLINE_S", 0.2)
 
     async def slow(request: httpx.Request) -> httpx.Response:
@@ -457,7 +466,7 @@ async def test_concurrency_cap_bounds_in_flight(monkeypatch):
     # With the semaphore at 2, exactly 2 handlers are ever in flight together — the
     # cap holds, and concurrency actually happens (peak == 2, not serialized to 1).
     import asyncio
-    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
     monkeypatch.setattr(fetch, "_FETCH_SEMAPHORE", asyncio.Semaphore(2))
 
     in_flight = 0
@@ -477,3 +486,29 @@ async def test_concurrency_cap_bounds_in_flight(monkeypatch):
         for _ in range(6)
     ))
     assert peak == 2, f"peak in-flight {peak}, expected the cap of 2"
+
+
+# ─── DNS rebinding closed: the socket is pinned to the vetted IP ───────
+# The guard resolves ONCE and the request connects to THAT IP, carrying the real
+# hostname only in the Host header + sni_hostname extension. httpx never re-resolves,
+# so a post-validation rebind can't move the socket to an internal address.
+
+async def test_request_is_pinned_to_validated_ip(monkeypatch):
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["connect_host"] = request.url.host
+        seen["host_header"] = request.headers.get("host")
+        seen["sni"] = request.extensions.get("sni_hostname")
+        return _resp(200, headers={"content-type": "text/html"}, content=_HTML.encode())
+
+    final_url, text = await fetch_readable(
+        "https://example.com/paper", max_chars=6000,
+        transport=httpx.MockTransport(handler),
+    )
+    assert seen["connect_host"] == "93.184.216.34"  # socket → the vetted IP, not the name
+    assert seen["host_header"] == "example.com"     # vhost routing preserved
+    assert seen["sni"] == "example.com"             # TLS SNI + cert verification on the real name
+    assert final_url == "https://example.com/paper"  # we report the human URL, not the IP
+    assert "self-attention" in text

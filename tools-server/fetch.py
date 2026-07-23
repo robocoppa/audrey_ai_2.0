@@ -12,14 +12,20 @@ model-steerable HTTP client on the LAN. The guards below are defense-in-depth
 (chat-completions already requires auth):
 
   - **scheme allowlist** (http/https only) — no `file://`, `gopher://`, etc.
-  - **host must not resolve to a private/loopback/link-local/reserved address**
-    (`_is_unsafe_address`, ported from `audrey/kb/embed.py`) — blocks
-    `http://qdrant:6333`, `http://127.0.0.1:9099`, cloud metadata, and friends.
-  - **redirects are followed MANUALLY, re-validating every hop.** Automatic
-    redirect-following is the classic bypass: `http://evil.example` returns
-    `302 → http://qdrant:6333`, and the initial-host check never sees the
-    internal target. So `follow_redirects=False` and we re-run `_validate_url`
-    on each Location.
+  - **the host is resolved ONCE and the socket is PINNED to a vetted IP**
+    (`_resolve_safe`): every address `getaddrinfo` returns must be public — a
+    single private/loopback/link-local/reserved IP (or a resolution failure) fails
+    the whole host — and the request then connects to that vetted IP directly, with
+    the real hostname carried via the `Host` header and the TLS `sni_hostname`
+    extension (SNI + cert verification still use the real name). Because httpx never
+    re-resolves, there is no DNS-rebinding TOCTOU: the socket can only ever reach an
+    address we validated. Blocks `http://qdrant:6333`, `http://127.0.0.1:9099`,
+    cloud metadata, and friends.
+  - **redirects are followed MANUALLY, re-resolving+re-pinning every hop.**
+    Automatic redirect-following is the classic bypass: `http://evil.example`
+    returns `302 → http://qdrant:6333`, and the initial-host check never sees the
+    internal target. So `follow_redirects=False` and we re-run `_validate_url` +
+    `_resolve_safe` on each Location before connecting.
   - **byte cap on the raw download AND the decompressed body** — decoded output
     is bounded per-codec (`_decompress_bounded`), so a gzip/zstd bomb can't OOM
     the container before the cap trips; unknown encodings (brotli) are rejected.
@@ -33,12 +39,6 @@ model-steerable HTTP client on the LAN. The guards below are defense-in-depth
   - **a concurrency cap** — web_fetch is model-steerable, so a burst mustn't open
     unbounded sockets or decompress unbounded bodies at once; excess callers wait
     out the deadline and fail as a clean timeout instead of hanging.
-
-KNOWN GAP (identical to the image path): DNS rebinding. We validate the host's
-resolved IPs, but httpx re-resolves at connect time and could land elsewhere.
-The real fix (connect to the validated IP, pass the hostname via SNI) is out of
-scope; the bar is an attacker who controls DNS for a domain a research query is
-induced to fetch.
 
 We use ONLY `trafilatura.extract(html_string)` — never `trafilatura.fetch_url`,
 which would do its own unguarded HTTP request and bypass everything above.
@@ -100,32 +100,52 @@ class FetchError(Exception):
     """
 
 
-def _is_unsafe_address(host: str) -> bool:
-    """True if any DNS-resolved IP for `host` is private / loopback / etc.
+def _ip_is_unsafe(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """True if `ip` is in a non-public range we must never connect to."""
+    return (ip.is_private or ip.is_loopback or ip.is_link_local
+            or ip.is_multicast or ip.is_reserved or ip.is_unspecified)
 
-    Ported verbatim from `audrey/kb/embed.py`. Resolves via `getaddrinfo`
-    (IPv4 + IPv6); any single resolved address in a non-public range fails the
-    host, as does an unresolvable host (reject rather than risk a weird hit via
-    DNS search domains).
+
+def _resolve_safe(host: str) -> list[str]:
+    """Resolve `host` and return its vetted public IPs, or raise FetchError.
+
+    The classification is ported from `audrey/kb/embed.py`, but this does more than
+    the old bool guard: it resolves ONCE and hands back the IPs so the fetch can PIN
+    the socket to one of them. That closes the DNS-rebinding TOCTOU — a validate-now,
+    httpx-re-resolves-at-connect gap where the second lookup could land internal.
+    Every address `getaddrinfo` returns must be public (a host that resolves partly
+    internal is hostile); an unresolvable host is rejected rather than risking a hit
+    via DNS search domains. `SOCK_STREAM` dedupes the per-socktype duplicates.
     """
     try:
-        infos = socket.getaddrinfo(host, None)
-    except socket.gaierror:
-        return True
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror as e:
+        raise FetchError(f"host {host!r} could not be resolved") from e
+    ips: list[str] = []
     for *_, sockaddr in infos:
         addr = sockaddr[0]
         try:
             ip = ipaddress.ip_address(addr)
-        except ValueError:
-            return True
-        if (ip.is_private or ip.is_loopback or ip.is_link_local
-                or ip.is_multicast or ip.is_reserved or ip.is_unspecified):
-            return True
-    return False
+        except ValueError as e:
+            raise FetchError(f"host {host!r} resolved to an unparseable address") from e
+        if _ip_is_unsafe(ip):
+            raise FetchError(
+                f"host {host!r} resolves to a private/internal address and cannot be opened"
+            )
+        if addr not in ips:
+            ips.append(addr)
+    if not ips:
+        raise FetchError(f"host {host!r} could not be resolved")
+    return ips
 
 
-def _validate_url(url: str) -> None:
-    """Raise FetchError if `url` is unsafe to fetch. Called on every redirect hop."""
+def _validate_url(url: str) -> str:
+    """Validate `url`'s scheme + shape and return its hostname. Raise FetchError.
+
+    Does NOT resolve — resolution and address vetting happen in `_resolve_safe` at
+    fetch time so the vetted IPs can be pinned into the connection. Called on every
+    redirect hop.
+    """
     try:
         parsed = urllib.parse.urlparse(url)
         hostname = parsed.hostname
@@ -142,10 +162,7 @@ def _validate_url(url: str) -> None:
         )
     if not hostname:
         raise FetchError("URL has no host")
-    if _is_unsafe_address(hostname):
-        raise FetchError(
-            f"host {hostname!r} resolves to a private/internal address and cannot be opened"
-        )
+    return hostname
 
 
 def _decompress_bounded(raw: bytes, encoding: str) -> bytes:
@@ -245,7 +262,6 @@ async def _fetch_readable(
     Raises FetchError for every reportable failure. Runs under the deadline +
     concurrency guard in `fetch_readable`; don't call directly outside a bound.
     """
-    _validate_url(url)
     current = url
     async with httpx.AsyncClient(
         follow_redirects=False,
@@ -254,14 +270,27 @@ async def _fetch_readable(
         transport=transport,
     ) as client:
         for _ in range(_MAX_REDIRECTS + 1):
-            _validate_url(current)  # re-validate BEFORE following any hop
+            hostname = _validate_url(current)   # scheme/shape; returns the hostname
+            ips = _resolve_safe(hostname)       # resolve + vet BEFORE connecting to any hop
             try:
-                async with client.stream("GET", current) as resp:
+                # Pin the socket to a vetted IP: connect to the IP, but keep the real
+                # hostname in the Host header (vhost routing) and the sni_hostname
+                # extension (TLS SNI + cert verification). httpx never re-resolves, so
+                # the connection can't be rebound to an internal address after the vet.
+                target = httpx.URL(current)
+                host_header = client.build_request("GET", target).headers["host"]
+                req = client.build_request(
+                    "GET", target.copy_with(host=ips[0]),
+                    extensions={"sni_hostname": hostname},
+                )
+                req.headers["Host"] = host_header
+                resp = await client.send(req, stream=True, follow_redirects=False)
+                try:
                     if resp.is_redirect:
                         loc = resp.headers.get("location")
                         if not loc:
                             raise FetchError("server sent a redirect with no Location header")
-                        current = str(httpx.URL(current).join(loc))
+                        current = str(target.join(loc))
                         continue
                     if resp.status_code >= 400:
                         raise FetchError(f"the page returned HTTP {resp.status_code}")
@@ -271,6 +300,8 @@ async def _fetch_readable(
                             f"page is {ctype!r}, not readable text; only HTML/plain-text can be opened"
                         )
                     raw = await _read_capped(resp)
+                finally:
+                    await resp.aclose()
             except httpx.TimeoutException as e:
                 raise FetchError(f"fetch timed out after {int(_FETCH_TIMEOUT_S)}s") from e
             except (httpx.HTTPError, httpx.InvalidURL, ValueError) as e:
