@@ -33,6 +33,19 @@ class Settings(BaseSettings):
     # --force-recreate custom-tools` to apply.
     web_search_alternate: bool = Field(default=True, alias="WEB_SEARCH_ALTERNATE")
 
+    # web_fetch (page-opener). Bounds on a model-steerable HTTP client: an overall
+    # wall-clock deadline for the whole call — redirects + reads + extraction — and
+    # a cap on concurrent in-flight fetches. The deadline must stay UNDER Audrey's
+    # 30s tool-dispatch ceiling (`graph.DEFAULT_DISPATCH_TIMEOUT_S`) so a slow or
+    # redirect-chained page reports "deadline" instead of surfacing as a bare
+    # dispatch timeout with an orphaned coroutine; the per-op `_FETCH_TIMEOUT_S`
+    # resets on each hop and can't do that alone. The concurrency cap is acquired
+    # INSIDE the deadline, so a saturated pool makes further callers wait it out and
+    # fail as a clean timeout, bounding sockets + memory under a burst. Change
+    # either + `up -d --force-recreate custom-tools` to apply.
+    web_fetch_overall_deadline_s: float = Field(default=25.0, alias="WEB_FETCH_OVERALL_DEADLINE_S")
+    web_fetch_max_concurrent: int = Field(default=8, alias="WEB_FETCH_MAX_CONCURRENT")
+
     # Audrey (for kb_search / kb_image_search proxying)
     audrey_url: str = Field(default="http://audrey-ai:8000", alias="AUDREY_URL")
     # Middle rung of the KB timeout ladder. Must sit BELOW Audrey's tool-dispatch

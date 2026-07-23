@@ -424,3 +424,56 @@ async def test_multiple_content_encodings_rejected(monkeypatch):
             "http://e.example/m", max_chars=6000,
             transport=httpx.MockTransport(_handler_for(b"x", "gzip, br")),
         )
+
+
+# ─── Overall deadline + concurrency cap: a whole call is bounded ───────
+# `_FETCH_TIMEOUT_S` is per-operation and resets on each redirect hop, so it can't
+# bound a whole chain; `fetch_readable` wraps the call in an overall wall-clock
+# deadline (under the 30s dispatch ceiling) and a global concurrency semaphore
+# acquired inside that deadline.
+
+async def test_overall_deadline_stops_a_slow_fetch(monkeypatch):
+    # A page slower than the deadline must raise near the deadline — not run to the
+    # 15s per-op timeout, not hang. The deadline, not the per-op timeout, is the wall.
+    import asyncio
+    import time
+    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_OVERALL_DEADLINE_S", 0.2)
+
+    async def slow(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(5)
+        return _resp(200, headers={"content-type": "text/html"}, content=_HTML.encode())
+
+    t = time.monotonic()
+    with pytest.raises(FetchError, match="deadline"):
+        await fetch_readable(
+            "http://e.example/slow", max_chars=6000, transport=httpx.MockTransport(slow),
+        )
+    assert time.monotonic() - t < 3, "deadline did not fire near _OVERALL_DEADLINE_S"
+
+
+async def test_concurrency_cap_bounds_in_flight(monkeypatch):
+    # web_fetch is model-steerable; a burst must not run unbounded fetches at once.
+    # With the semaphore at 2, exactly 2 handlers are ever in flight together — the
+    # cap holds, and concurrency actually happens (peak == 2, not serialized to 1).
+    import asyncio
+    monkeypatch.setattr(fetch, "_is_unsafe_address", lambda _h: False)
+    monkeypatch.setattr(fetch, "_FETCH_SEMAPHORE", asyncio.Semaphore(2))
+
+    in_flight = 0
+    peak = 0
+
+    async def tracked(request: httpx.Request) -> httpx.Response:
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.05)
+        in_flight -= 1
+        return _resp(200, headers={"content-type": "text/html"}, content=_HTML.encode())
+
+    transport = httpx.MockTransport(tracked)
+    await asyncio.gather(*(
+        fetch_readable("http://e.example/c", max_chars=6000, transport=transport)
+        for _ in range(6)
+    ))
+    assert peak == 2, f"peak in-flight {peak}, expected the cap of 2"

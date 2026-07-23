@@ -25,9 +25,14 @@ model-steerable HTTP client on the LAN. The guards below are defense-in-depth
     the container before the cap trips; unknown encodings (brotli) are rejected.
   - **content-type gate** — only HTML/plain text is extracted; a binary blob is
     rejected before trafilatura ever sees it.
-  - **timeout well under the tool-dispatch ceiling** so a slow page reports
-    "fetch timed out" instead of surfacing as a bare dispatch timeout (the same
-    legibility lesson as the KB timeout ladder).
+  - **a per-operation timeout AND an overall wall-clock deadline, both under the
+    tool-dispatch ceiling** so a slow or redirect-chained page reports itself
+    instead of surfacing as a bare dispatch timeout (the same legibility lesson as
+    the KB timeout ladder). The per-op timeout resets on each redirect hop, so it
+    can't bound a whole chain; the overall deadline hard-stops the entire call.
+  - **a concurrency cap** — web_fetch is model-steerable, so a burst mustn't open
+    unbounded sockets or decompress unbounded bodies at once; excess callers wait
+    out the deadline and fail as a clean timeout instead of hanging.
 
 KNOWN GAP (identical to the image path): DNS rebinding. We validate the host's
 resolved IPs, but httpx re-resolves at connect time and could land elsewhere.
@@ -51,6 +56,7 @@ import zlib
 
 import httpx
 import trafilatura
+from settings import settings
 
 try:
     import zstandard
@@ -66,7 +72,17 @@ _ALLOWED_SCHEMES = frozenset({"http", "https"})
 _ALLOWED_CONTENT_TYPES = ("text/html", "application/xhtml+xml", "text/plain")
 _BYTE_CAP = 2 * 1024 * 1024        # 2 MB of HTML — generous for an article, bounds memory
 _MAX_REDIRECTS = 4
-_FETCH_TIMEOUT_S = 15.0            # < the 30s dispatch ceiling, so a slow page reports itself
+_FETCH_TIMEOUT_S = 15.0            # per-op; resets each redirect hop — see _OVERALL_DEADLINE_S
+# Overall wall-clock deadline for a whole fetch (redirects + reads + extraction).
+# `_FETCH_TIMEOUT_S` is per-operation and resets on each hop, so a chain of
+# slow-but-under-15s hops could stack past Audrey's 30s dispatch ceiling and orphan
+# the coroutine. This hard-stops the whole call under that ceiling. Config-surfaced.
+_OVERALL_DEADLINE_S = settings.web_fetch_overall_deadline_s
+# Cap on concurrent in-flight fetches. Acquired INSIDE the deadline (see
+# fetch_readable), so a saturated pool makes callers wait it out and fail as a clean
+# timeout rather than hanging or opening unbounded sockets. Config-surfaced.
+_MAX_CONCURRENT_FETCHES = settings.web_fetch_max_concurrent
+_FETCH_SEMAPHORE = asyncio.Semaphore(_MAX_CONCURRENT_FETCHES)
 # A plain desktop UA. The point is to read public pages the model already found;
 # an obvious bot UA gets blocked by many sites, defeating the purpose.
 _USER_AGENT = (
@@ -207,8 +223,27 @@ async def fetch_readable(
 ) -> tuple[str, str]:
     """Fetch `url` and return (final_url_after_redirects, extracted_text).
 
-    Raises FetchError for every reportable failure. `transport` is a test seam
-    (an httpx.MockTransport); production passes None.
+    Wraps `_fetch_readable` in two bounds: an overall wall-clock deadline
+    (`_OVERALL_DEADLINE_S`, under Audrey's 30s dispatch ceiling) and a global
+    concurrency semaphore. The semaphore is acquired INSIDE the deadline, so when
+    the pool is saturated a caller waits it out and fails as a clean FetchError
+    timeout rather than hanging past the ceiling and orphaning the coroutine.
+    Raises FetchError for every reportable failure. `transport` is a test seam.
+    """
+    try:
+        async with asyncio.timeout(_OVERALL_DEADLINE_S), _FETCH_SEMAPHORE:
+            return await _fetch_readable(url, max_chars=max_chars, transport=transport)
+    except TimeoutError as e:
+        raise FetchError(f"fetch exceeded the {int(_OVERALL_DEADLINE_S)}s deadline") from e
+
+
+async def _fetch_readable(
+    url: str, *, max_chars: int, transport: httpx.AsyncBaseTransport | None = None,
+) -> tuple[str, str]:
+    """Validate, follow redirects manually re-validating each hop, and extract text.
+
+    Raises FetchError for every reportable failure. Runs under the deadline +
+    concurrency guard in `fetch_readable`; don't call directly outside a bound.
     """
     _validate_url(url)
     current = url
