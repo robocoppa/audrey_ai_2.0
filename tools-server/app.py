@@ -53,6 +53,15 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 # ─── Lifespan (startup / shutdown) ────────────────────────────────────
 
+def _service_headers(token: str) -> dict[str, str]:
+    """Header custom-tools presents to Audrey's gated KB routes (Phase 31).
+
+    Empty token → no header, so a dev/local custom-tools without the secret falls
+    through to Audrey's user-bearer arm rather than sending a blank secret.
+    """
+    return {"X-Audrey-Service-Token": token} if token else {}
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     brave = BraveClient(
@@ -76,6 +85,7 @@ async def lifespan(app: FastAPI):
     audrey = httpx.AsyncClient(
         base_url=settings.audrey_url,
         timeout=settings.audrey_kb_timeout_seconds,
+        headers=_service_headers(settings.kb_service_token),
     )
     chat_archive = ChatArchiveStore(
         sqlite_path=settings.chat_archive_db_path,

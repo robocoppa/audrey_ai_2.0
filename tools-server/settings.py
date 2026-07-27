@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     # tied with its own caller, so the 502 raised at app.py `kb_search` could never
     # win the race and every slow KB query reached the model as a bare timeout.
     audrey_kb_timeout_seconds: float = Field(default=27.0, alias="AUDREY_KB_TIMEOUT_SECONDS")
+    # Shared secret presented to Audrey's gated KB query routes (Phase 31), sent in
+    # the `X-Audrey-Service-Token` header on the audrey client so kb_search /
+    # kb_image_search act on behalf of the pipeline user. Empty → header omitted
+    # (dev/local); Audrey then requires a user bearer instead. Must match Audrey's
+    # `KB_SERVICE_TOKEN`. Change + `up -d --force-recreate custom-tools` to apply.
+    kb_service_token: str = Field(default="", alias="KB_SERVICE_TOKEN")
 
     # Local storage
     data_dir: Path = Field(default=Path("/app/data"), alias="TOOLS_DATA_DIR")

@@ -21,7 +21,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from audrey.auth import AuthedUser, require_admin
+from audrey.auth import AuthedUser, KBCaller, require_admin, resolve_kb_caller
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
 from audrey.kb.ingest import ingest_many
 from audrey.kb.qdrant import KBHit, QdrantKB
@@ -116,15 +116,24 @@ def _kb_min_score(request: Request) -> float:
 
 
 @router.post("/query", response_model=QueryResponse)
-async def kb_query(req: TextQuery, request: Request) -> QueryResponse:
+async def kb_query(
+    req: TextQuery,
+    request: Request,
+    caller: KBCaller = Depends(resolve_kb_caller),
+) -> QueryResponse:
     qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
     embedder: TextEmbedder | None = getattr(request.app.state, "text_embedder", None)
     if qdrant is None or embedder is None:
         raise HTTPException(status_code=503, detail="KB is not initialized")
+    # A service caller (custom-tools) may act on behalf of the pipeline user, so
+    # its request-body `user` is honored; an authenticated end user is pinned to
+    # their own email, so `req.user` can never widen the search to someone else's
+    # private collection.
+    effective_user = req.user if caller.is_service else caller.email
     t0 = time.perf_counter()
     vec = await embedder.embed_one(req.query)
     hits, had_user = await _search_text_merged(
-        qdrant, vec, top_k=req.top_k, user=req.user, min_score=_kb_min_score(request),
+        qdrant, vec, top_k=req.top_k, user=effective_user, min_score=_kb_min_score(request),
     )
     elapsed = time.perf_counter() - t0
     kb_search_seconds.labels(kind="text", had_user_collection=str(had_user).lower()).observe(elapsed)
@@ -195,7 +204,11 @@ async def _search_images_merged(
 
 
 @router.post("/query/image", response_model=QueryResponse)
-async def kb_query_image(req: ImageQuery, request: Request) -> QueryResponse:
+async def kb_query_image(
+    req: ImageQuery,
+    request: Request,
+    caller: KBCaller = Depends(resolve_kb_caller),
+) -> QueryResponse:
     qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
     embedder: ImageEmbedder | None = getattr(request.app.state, "image_embedder", None)
     if qdrant is None or embedder is None:
@@ -215,7 +228,10 @@ async def kb_query_image(req: ImageQuery, request: Request) -> QueryResponse:
             vec = await embedder.embed_text(req.query or "")
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"image embed failed: {e}") from e
-    hits, had_user = await _search_images_merged(qdrant, vec, top_k=req.top_k, user=req.user)
+    # Same rule as the text route: honor `req.user` only for a trusted service
+    # caller; pin an end user to their own email.
+    effective_user = req.user if caller.is_service else caller.email
+    hits, had_user = await _search_images_merged(qdrant, vec, top_k=req.top_k, user=effective_user)
     elapsed = time.perf_counter() - t0
     kb_search_seconds.labels(kind="image", had_user_collection=str(had_user).lower()).observe(elapsed)
     kb_search_hits.labels(kind="image").observe(len(hits))

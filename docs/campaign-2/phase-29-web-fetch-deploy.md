@@ -42,23 +42,28 @@ auth chat-completions already requires (all in
 [`tools-server/fetch.py`](../../tools-server/fetch.py)):
 
 - **scheme allowlist** — http/https only; no `file://`, `gopher://`, etc.
-- **`_is_unsafe_address`** — ported from `kb/embed.py`; rejects any host whose
-  DNS resolves to a private / loopback / link-local / reserved address, and
-  unresolvable hosts. Blocks `qdrant:6333`, `127.0.0.1:*`, cloud metadata.
+- **`_resolve_safe` + IP pinning** (hardened; was `_is_unsafe_address`) — resolves
+  the host once, rejects it if any resolved IP is private / loopback / link-local /
+  reserved (or unresolvable), and connects to the **vetted IP** directly, carrying
+  the real hostname via the `Host` header + TLS `sni_hostname`. Because httpx never
+  re-resolves, there is no DNS-rebinding window. Blocks `qdrant:6333`, `127.0.0.1:*`,
+  cloud metadata.
 - **manual per-hop redirect revalidation** — the guard that made this hard.
   Automatic redirect-following is the classic bypass: `evil.example` returns
   `302 → http://qdrant:6333` and the initial-host check never sees the internal
-  target. So `follow_redirects=False` and `_validate_url` re-runs on every hop.
+  target. So `follow_redirects=False` and `_validate_url` + `_resolve_safe` re-run
+  on every hop.
 - **2 MB byte cap** streamed — a multi-GB body can't OOM the container.
 - **content-type gate** — only HTML/plain text is extracted; a binary is rejected
   before trafilatura sees it.
 - **15s timeout** — under the 30s tool-dispatch ceiling, so a slow page reports
   "fetch timed out" instead of surfacing as a bare dispatch timeout.
 
-**Known gap** (identical to the existing image path): DNS rebinding. We validate
-the host's resolved IPs, but httpx re-resolves at connect time. The real fix
-(connect to the validated IP, pass hostname via SNI) is out of scope; the bar is
-an attacker controlling DNS for a domain a research query is induced to fetch.
+**DNS rebinding — CLOSED** (SSRF-hardening Commit D, 2026-07-23). We now resolve
+once and pin the socket to a vetted IP (hostname via `Host` + `sni_hostname`), so
+httpx never re-resolves at connect time. See `docs/campaign-2/phase-30-web-fetch-hardening-deploy.md`.
+Residual robustness followup logged there: the pin uses `ips[0]` only, so it drops
+anyio's multi-address fallback (harmless on this IPv4-first box).
 
 ## What's in scope
 
