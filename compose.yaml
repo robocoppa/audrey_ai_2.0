@@ -42,20 +42,18 @@ services:
         condition: service_healthy
     networks:
       - ollama-net
-    # No host `ports:` publish (security review Item 1, 2026-07-18). Audrey's
-    # KB query routes (`/v1/kb/query`, `/v1/kb/query/image`) accept a caller-
-    # supplied `user` and merge that user's private upload collection, but have
-    # no `require_user` gate — the auth-forcing override only fires on the
-    # model→tool path, not on direct HTTP. Publishing 8000 to the host put those
-    # routes on the LAN unauthenticated, so any LAN host could read another
-    # user's uploads. All *legitimate* consumers reach Audrey over ollama-net
-    # DNS (`http://audrey-ai:8000`), which does NOT require a host publish:
-    #   - OWUI → Audrey  (OPENAI_API_BASE_URL=http://audrey-ai:8000/v1)
+    # Published to the host LAN. Safe since Phase 31 (2026-07-27): the KB query
+    # routes (`/v1/kb/query`, `/v1/kb/query/image`) are gated by
+    # `resolve_kb_caller` — custom-tools' `X-Audrey-Service-Token` may act-as
+    # `req.user`; a direct user bearer is pinned to its own email; anything else
+    # 401s. LAN exposure no longer leaks other users' uploads. Consumers:
+    #   - OWUI → Audrey  (http://audrey-ai:8000/v1, container DNS)
     #   - Prometheus     (scrape target audrey-ai:8000, monitoring/ compose)
-    # The in-container healthcheck hits 127.0.0.1:8000 and is unaffected.
-    # To reach Audrey directly from the laptop for debugging, tunnel it:
-    #   ssh -N -L 8000:audrey-ai:8000 <unraid>   # then use http://localhost:8000
-    # (The eval harness's documented path is OWUI :8080/api, not this.)
+    #   - Hermes LAN passthrough, e.g. Claudette (audrey_passthrough/* →
+    #     192.168.1.11:8000/v1) — REQUIRES this publish; the 2026-07-18 review
+    #     omitted this consumer and unpublishing broke it.
+    ports:
+      - "8000:8000"
     env_file:
       - .env
     environment:

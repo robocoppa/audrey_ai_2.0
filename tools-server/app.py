@@ -54,11 +54,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 # ─── Lifespan (startup / shutdown) ────────────────────────────────────
 
 def _service_headers(token: str) -> dict[str, str]:
-    """Header custom-tools presents to Audrey's gated KB routes (Phase 31).
-
-    Empty token → no header, so a dev/local custom-tools without the secret falls
-    through to Audrey's user-bearer arm rather than sending a blank secret.
-    """
     return {"X-Audrey-Service-Token": token} if token else {}
 
 

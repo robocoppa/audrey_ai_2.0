@@ -47,11 +47,6 @@ class EnvOverrides(BaseSettings):
     # internal ollama-net URL.
     owui_url: str = Field(default="http://open-webui:8080", alias="OWUI_URL")
 
-    # Shared secret gating the KB query routes (`/v1/kb/query[/image]`, Phase 31).
-    # custom-tools presents it in `X-Audrey-Service-Token` to act on behalf of the
-    # pipeline user; a direct/LAN caller without it must present its own OWUI bearer
-    # and can only read its own KB. Empty = the service arm is disabled (only the
-    # user-bearer arm authenticates), so a blank secret never grants act-as.
     kb_service_token: str = Field(default="", alias="KB_SERVICE_TOKEN")
 
     # Search

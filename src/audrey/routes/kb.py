@@ -125,10 +125,6 @@ async def kb_query(
     embedder: TextEmbedder | None = getattr(request.app.state, "text_embedder", None)
     if qdrant is None or embedder is None:
         raise HTTPException(status_code=503, detail="KB is not initialized")
-    # A service caller (custom-tools) may act on behalf of the pipeline user, so
-    # its request-body `user` is honored; an authenticated end user is pinned to
-    # their own email, so `req.user` can never widen the search to someone else's
-    # private collection.
     effective_user = req.user if caller.is_service else caller.email
     t0 = time.perf_counter()
     vec = await embedder.embed_one(req.query)
@@ -228,8 +224,6 @@ async def kb_query_image(
             vec = await embedder.embed_text(req.query or "")
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"image embed failed: {e}") from e
-    # Same rule as the text route: honor `req.user` only for a trusted service
-    # caller; pin an end user to their own email.
     effective_user = req.user if caller.is_service else caller.email
     hits, had_user = await _search_images_merged(qdrant, vec, top_k=req.top_k, user=effective_user)
     elapsed = time.perf_counter() - t0

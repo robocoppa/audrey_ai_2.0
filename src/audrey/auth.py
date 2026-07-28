@@ -76,17 +76,6 @@ class AuthedUser:
 
 @dataclass(slots=True)
 class KBCaller:
-    """Resolved caller for the KB query routes (Phase 31).
-
-    Two shapes:
-      - `is_service=True, email=None` — a trusted internal caller (custom-tools)
-        that presented a valid `X-Audrey-Service-Token`. It may act on behalf of
-        any user, so the route honors the request-body `user` (act-as).
-      - `is_service=False, email=<addr>` — an authenticated end user. The route
-        MUST force the search to `email`, ignoring any request-body `user`, so a
-        LAN caller can only ever read its own private collection.
-    """
-
     email: str | None
     is_service: bool
 
@@ -185,13 +174,6 @@ async def require_admin(me: AuthedUser = Depends(require_user)) -> AuthedUser:
 
 
 def verify_service_token(presented: str | None, expected: str) -> bool:
-    """Constant-time check of a presented service token against the expected one.
-
-    Returns False when either side is empty — a blank configured secret can never
-    authenticate (fail closed), and a missing header never matches. The routes are
-    LAN-reachable once 8000 is published, so `hmac.compare_digest` avoids leaking
-    the secret through response timing.
-    """
     if not expected or not presented:
         return False
     return hmac.compare_digest(presented, expected)
@@ -202,14 +184,6 @@ async def resolve_kb_caller(
     x_audrey_service_token: str | None = Header(default=None),
     authorization: str | None = Header(default=None),
 ) -> KBCaller:
-    """Dependency for the KB query routes — authenticate a service OR a user.
-
-    Priority: a valid `X-Audrey-Service-Token` (the internal custom-tools path)
-    wins and yields a service caller; otherwise fall through to `require_user`,
-    which 401s on a missing/invalid bearer and 502s if OWUI is down. Either way,
-    an unauthenticated caller cannot reach the route. See `KBCaller` for how the
-    two shapes map to the effective search user.
-    """
     expected = request.app.state.cfg.env.kb_service_token
     if verify_service_token(x_audrey_service_token, expected):
         return KBCaller(email=None, is_service=True)
