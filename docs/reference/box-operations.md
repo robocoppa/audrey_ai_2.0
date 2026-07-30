@@ -50,19 +50,37 @@ All services join the Docker network **`ollama-net`**. **Container-name DNS
 **internal** port + container name; the **host-published** port is only for
 reaching a service from the host/LAN.
 
-| Container | ollama-net IP | host → internal port | Role |
+**Host ports are the stable fact; container IPs are not.** The `ollama-net` IPs below
+are DHCP-assigned and **reshuffle on container restart** — every IP in this table was
+stale when re-verified on 2026-07-30. They're recorded as a point-in-time observation
+only. Never hardcode one; address services by container name.
+
+Full listing verified against the Unraid docker view **2026-07-30**.
+
+| Container | host → internal port | ollama-net IP (volatile) | Role |
 |---|---|---|---|
-| **audrey-ai** | 172.18.0.10 | 8000 → 8000 | FastAPI app (THIS repo) |
-| **custom-tools** | 172.18.0.16 | 8001 → 8001 | Tools server — serves `web_search` (Brave↔SearXNG logic lives here). Built from **`tools-server/` IN THIS REPO**, not a separate project |
-| **SearXNG** | 172.18.0.15 | **8088 → 8080** | Search engine behind `web_search` |
-| **open-webui** | 172.18.0.5 | **8080 → 8080** | OWUI frontend / public surface |
-| **ollama** | 172.18.0.13 | 11434 → 11434 | Model runtime |
-| **qdrant** | 172.18.0.14 | 6333/6334 | Vector DB (KB) |
-| **bot-tools-mcp** | 172.18.0.7 | 9110 | Separate MCP (bot fleet — NOT Audrey web_search) |
-| **fleet-watchdog** | 172.18.0.6 | 9099 | Notify hub (Telegram eval-completion pings) |
-| **prometheus** | 172.18.0.11 | 9090 | Metrics |
-| **grafana** | 172.18.0.4 | 3000 | Dashboards |
-| nextcloud / -db / -redis, collabora (9980), radicale (5232), cloudflared | — | — | Adjacent services, not in the Audrey request path |
+| **audrey-ai** | 8000 → 8000 | 172.18.0.16 | FastAPI app (THIS repo) |
+| **custom-tools** | **none → 8001 (INTERNAL ONLY)** | 172.18.0.5 | Tools server — serves `web_search` (Brave↔SearXNG logic lives here). Built from **`tools-server/` IN THIS REPO**, not a separate project |
+| **SearXNG** | **8088 → 8080** | 172.18.0.12 | Search engine behind `web_search` |
+| **open-webui** | **8080 → 8080** | 172.18.0.14 | OWUI frontend / public surface |
+| **ollama** | 11434 → 11434 | 172.18.0.13 | Model runtime |
+| **qdrant** | 6333/6334 | 172.18.0.15 | Vector DB (KB) |
+| **bot-tools-mcp** | 9110 | 172.18.0.9 | Separate MCP (bot fleet — NOT Audrey web_search) |
+| **fleet-watchdog** | 9099 | 172.18.0.8 | Notify hub (Telegram eval-completion pings) |
+| **prometheus** | 9090 | 172.18.0.2 | Metrics |
+| **grafana** | 3000 | 172.18.0.7 | Dashboards |
+| nextcloud | **8081 → 80** | 172.18.0.4 | Adjacent — not in the Audrey request path |
+| nextcloud-db (postgres) | none (internal) | 172.18.0.3 | Adjacent |
+| nextcloud-redis | none (internal) | 172.18.0.6 | Adjacent |
+| collabora | 9980 | 172.18.0.11 | Adjacent |
+| radicale | 5232 | 172.17.0.2 (bridge) + 172.18.0.10 | Adjacent — dual-homed |
+| cloudflared | **host network — all ports** | host | Tunnel; not port-mapped |
+| audrey-eval | none (stopped) | — | Eval runner, run on demand |
+
+**Host ports occupied:** `3000`, `5232`, `6333`, `6334`, `8000`, `8080`, `8081`,
+`8088`, `9090`, `9099`, `9110`, `9980`, `11434`. Plus whatever the Unraid webGUI and
+host services hold (`80`/`443`/`22`) — those are NOT in the docker view above, so
+check `netstat -tlnp` before claiming a low port is free.
 
 ### Port traps (these have bitten before)
 - **Host `8080` = open-webui, NOT SearXNG.** SearXNG is **`8088`** on the host,
@@ -70,6 +88,28 @@ reaching a service from the host/LAN.
   a misleading `200`.
 - **SearXNG internal address is `http://SearXNG:8080`** (capital S, port 8080) —
   that's what `custom-tools` calls, not `:8088`.
+- **`custom-tools` publishes NO host port.** `8001` is reachable only as
+  `http://custom-tools:8001` from inside `ollama-net`. A host-side `localhost:8001`
+  probe will fail — that is not evidence the service is down.
+- **Container IPs in this table go stale silently.** Every one drifted between the
+  last update and 2026-07-30. Use container-name DNS.
+
+### ai-sec lab stack (separate project, same box)
+
+`ai-sec` (`~/Documents/github/ai-sec`) runs its own compose project under
+`/mnt/user/appdata/ai-security-lab/` — **not** folded into this repo's `compose.yaml`.
+It shares this box's **qdrant** (`6333`) using its own `kb_security` collection, and it
+will claim these host ports when Phase 1 Track B (Wazuh single-node) comes up:
+
+| Port | Role | Status 2026-07-30 |
+|---|---|---|
+| `8443` | Wazuh dashboard (→ 5601 internal) | reserved — remapped off default `443` |
+| `9200` | Wazuh indexer | free |
+| `55000` | Wazuh manager API | free |
+| `1514` / `1515` | Wazuh agent events / enrollment | free |
+
+**This file is the single port map for the box** — ai-sec deliberately does not keep its
+own copy. When a port changes on either side, it changes here.
 
 ## 4. Request path (who calls whom)
 

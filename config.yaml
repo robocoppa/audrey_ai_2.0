@@ -18,24 +18,9 @@ router:
 # ─── Model registry ────────────────────────────────────────────────────
 # Per task type, ranked by priority (higher = preferred when healthy).
 # Speed/quality are informational hints used by the planner when building panels.
-#
-# kimi-k3:cloud (pulled 2026-07-30) leads every text pool at 100 — the strongest
-# model on the box, so it takes the fast-path primary slot for code/reasoning/
-# general and the answer-producing slots in the deep pools below. The incumbent
-# locals moved 100 → 99 to break the tie, nothing else re-ranked.
-# ⚠ Two things this promotion assumes and NOBODY has verified yet:
-#   1. k3 does Ollama tool calling (it's listed in `fast_path.tool_capable_models`
-#      below, so a fast-path turn will hand it tools).
-#   2. Cloud headroom. `general`'s primary is now cloud, so an ordinary chat turn
-#      competes with deep-panel cloud workers for Ollama Pro's ~3 parallel-cloud
-#      budget. The non-tools branch falls back to the next healthy model on
-#      error; the TOOLS branch is single-shot and 502s (see fast_path.py:107-112).
-# Rollback if either bites: drop k3's priority below the local incumbent in the
-# offending pool — the pools below keep working, they just stop being led by it.
 model_registry:
   code:
-    - { name: "kimi-k3:cloud",            priority: 100, speed: 90, quality: 97, location: cloud }
-    - { name: "qwen3-coder-next:latest",  priority:  99, speed: 60, quality: 95, location: local }
+    - { name: "qwen3-coder-next:latest",  priority: 100, speed: 60, quality: 95, location: local }
     - { name: "minimax-m3:cloud",         priority:  98, speed: 85, quality: 96, location: cloud }
     - { name: "qwen2.5-coder:32b",        priority:  90, speed: 70, quality: 90, location: local }
     - { name: "granite4.1:30b",           priority:  82, speed: 80, quality: 86, location: local }
@@ -49,8 +34,7 @@ model_registry:
     - { name: "cogito-2.1:671b-cloud",    priority:  65, speed: 80, quality: 93, location: cloud }
 
   reasoning:
-    - { name: "kimi-k3:cloud",            priority: 100, speed: 90, quality: 97, location: cloud }
-    - { name: "qwen3.6:35b",              priority:  99, speed: 70, quality: 93, location: local }
+    - { name: "qwen3.6:35b",              priority: 100, speed: 70, quality: 93, location: local }
     - { name: "deepseek-v4-pro:cloud",    priority:  97, speed: 80, quality: 95, location: cloud }
     - { name: "minimax-m3:cloud",         priority:  96, speed: 85, quality: 95, location: cloud }
     - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 94, location: cloud }
@@ -60,8 +44,7 @@ model_registry:
     - { name: "nemotron-3-super:cloud",   priority:  70, speed: 85, quality: 90, location: cloud }
 
   general:
-    - { name: "kimi-k3:cloud",            priority: 100, speed: 90, quality: 97, location: cloud }
-    - { name: "qwen3.6:35b",              priority:  99, speed: 75, quality: 92, location: local }
+    - { name: "qwen3.6:35b",              priority: 100, speed: 75, quality: 92, location: local }
     - { name: "deepseek-v4-pro:cloud",    priority:  97, speed: 80, quality: 95, location: cloud }
     - { name: "minimax-m3:cloud",         priority:  96, speed: 85, quality: 95, location: cloud }
     - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 93, location: cloud }
@@ -90,10 +73,6 @@ fast_path:
   enabled: true
   confidence_threshold: 0.88
   tool_capable_models:
-    # Listed so the new fast-path primary keeps its tools — a model that leads
-    # a registry pool but is missing here silently answers every fast turn with
-    # no web_search/kb_search/memory. Unverified on k3: smoke-test one tool turn.
-    - "kimi-k3:cloud"
     - "qwen3.6:35b"
     - "kimi-k2.7-code:cloud"
     - "kimi-k2.6:cloud"
@@ -116,61 +95,55 @@ fast_path:
 # near-free on wall-clock and gives the synthesizer a third, independent take.
 # The two cloud models are deliberately different vendors for draft diversity.
 # VRAM on the host fits one local model at a time (GPU_CONCURRENCY=1).
-#
-# kimi-k3 takes the KIMI worker slot (so vendor diversity is unchanged: kimi +
-# deepseek + one local) and the SYNTHESIZER, whose output is the answer — the
-# highest-leverage slot for the strongest model. It being both a worker and the
-# synth is the same arrangement `deep_panel_cloud` has always run.
 deep_panel:
   code:
-    workers: ["qwen3-coder-next:latest", "kimi-k3:cloud", "deepseek-v4-pro:cloud"]
-    # A CLOUD primary synth skips the local cold-load a synth on qwen3.6:35b
-    # incurred (synth can't co-reside in VRAM with a local worker under
-    # GPU_CONCURRENCY=1, so it had to load AFTER the worker unloaded).
+    workers: ["qwen3-coder-next:latest", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud"]
+    # glm-5.2 (cloud) primary synth: skips the local cold-load a synth on
+    # qwen3.6:35b incurred (synth can't co-reside in VRAM with a local worker
+    # under GPU_CONCURRENCY=1, so it had to load AFTER the worker unloaded).
     # qwen3.6:35b stays as the local fallback if the cloud synth call fails.
-    synthesizer: "kimi-k3:cloud"
+    synthesizer: "glm-5.2:cloud"
     fallback_synth: "qwen3.6:35b"
   reasoning:
-    workers: ["qwen3.6:35b", "kimi-k3:cloud", "deepseek-v4-pro:cloud"]
-    synthesizer: "kimi-k3:cloud"
+    workers: ["qwen3.6:35b", "kimi-k2.6:cloud", "deepseek-v4-pro:cloud"]
+    synthesizer: "glm-5.2:cloud"
     fallback_synth: "qwen3.6:35b"
   general:
-    workers: ["qwen3.6:35b", "kimi-k3:cloud", "deepseek-v4-pro:cloud"]
-    synthesizer: "kimi-k3:cloud"
+    workers: ["qwen3.6:35b", "kimi-k2.6:cloud", "deepseek-v4-pro:cloud"]
+    synthesizer: "glm-5.2:cloud"
     fallback_synth: "qwen3.6:35b"
   # vl stays one local + one cloud: the deep path rebuilds prompts text-only,
   # so the cloud workers never see the image — and image turns force the fast
   # path anyway (the local qwen3-vl is the real worker). A second cloud draft
   # here would merge a blind text take, so it isn't worth the call.
   vl:
-    workers: ["qwen3-vl:32b", "kimi-k3:cloud"]
+    workers: ["qwen3-vl:32b", "kimi-k2.6:cloud"]
     synthesizer: "qwen3.6:35b"
     fallback_synth: "glm-5.2:cloud"
 
 # ─── Deep panel: cloud-only (audrey_cloud) ─────────────────────────────
 # Both workers run in parallel (Ollama Pro caps at 3 concurrent cloud).
-# kimi-k3 leads every task here and synthesizes: this is the all-cloud mode, so
-# there is no local-vs-cloud tradeoff to weigh — the best model simply takes
-# both slots that decide the answer. The second worker stays a different vendor
-# for draft diversity, and fallback_synth stays glm-5.2 so a k3 outage degrades
-# onto something that isn't k3.
+# glm-5.2 leads and synthesizes (2026-07-30). Each task keeps its existing
+# second worker for vendor diversity, and deepseek-v4-pro — which held both
+# slots before — becomes the degrade target, so a glm outage falls onto a
+# different vendor rather than a second glm call.
 deep_panel_cloud:
   code:
-    workers: ["kimi-k3:cloud", "deepseek-v4-pro:cloud"]
-    synthesizer: "kimi-k3:cloud"
-    fallback_synth: "glm-5.2:cloud"
+    workers: ["glm-5.2:cloud", "minimax-m3:cloud"]
+    synthesizer: "glm-5.2:cloud"
+    fallback_synth: "deepseek-v4-pro:cloud"
   reasoning:
-    workers: ["kimi-k3:cloud", "deepseek-v4-pro:cloud"]
-    synthesizer: "kimi-k3:cloud"
-    fallback_synth: "glm-5.2:cloud"
+    workers: ["glm-5.2:cloud", "qwen3.5:397b-cloud"]
+    synthesizer: "glm-5.2:cloud"
+    fallback_synth: "deepseek-v4-pro:cloud"
   general:
-    workers: ["kimi-k3:cloud", "deepseek-v4-pro:cloud"]
-    synthesizer: "kimi-k3:cloud"
-    fallback_synth: "glm-5.2:cloud"
+    workers: ["glm-5.2:cloud", "qwen3.5:397b-cloud"]
+    synthesizer: "glm-5.2:cloud"
+    fallback_synth: "deepseek-v4-pro:cloud"
   vl:
-    workers: ["kimi-k3:cloud", "deepseek-v4-pro:cloud"]
-    synthesizer: "kimi-k3:cloud"
-    fallback_synth: "glm-5.2:cloud"
+    workers: ["glm-5.2:cloud", "qwen3.5:397b-cloud"]
+    synthesizer: "glm-5.2:cloud"
+    fallback_synth: "deepseek-v4-pro:cloud"
 
 # ─── Deep panel: local-only (audrey_local) ─────────────────────────────
 # Both workers serialize through GpuGate (GPU_CONCURRENCY=1) — no parallelism.
@@ -216,44 +189,41 @@ deep_panel_local:
 # Validated by `_validate_deep_panel_pools` (staged branch). Opt-in only:
 # selecting `audrey_research` is the signal — there is no auto-routing into it.
 #
-# kimi-k3 takes lead researcher, verifier, and WRITER (the writer's output is
-# the final answer). It replaced glm-5.2 in all three, so the two cloud
-# researchers stay different vendors under `max_research_workers_cloud: 2`.
-# `factchecker` is the deliberate hold-out on deepseek-v4-pro: that stage is
-# pure tool work (web_search-confirm each high-risk claim), deepseek is proven
-# at it, and k3's tool calling is unverified — keeping it here means a k3
-# tool-calling weakness can't silently gut the corrections block. Promote it
-# once k3 has a clean research run. glm-5.2 stays the degrade target.
-# ⚠ This is the ONE eval-tuned pipeline in the file: the official+academic
-# citation metric's historical spread is 39–56%, so a single run can't tell a
-# k3 gain from noise. A/B it with `scripts/eval_research.py`, not by eye.
+# glm-5.2 took `verifier` on 2026-07-30 (it already held researcher + writer).
+# `factchecker` is the deliberate hold-out on deepseek-v4-pro: that stage runs a
+# constrained-decoding pass pinned to the `FactCheckResult` schema, and
+# `ledger.py:203-207` records glm-5.2 as one of the models that returned
+# unusable JSON for nested schemas — `inlined_schema` works around it, but this
+# is the one stage where a glm regression silently empties the corrections
+# block (`_structure_factcheck_batch` is fail-soft: bad JSON → None → no
+# corrections, no error). Promote it only after a clean research eval.
 deep_panel_research:
   code:
-    researchers: ["kimi-k3:cloud", "deepseek-v4-pro:cloud", "qwen3.6:35b"]
-    verifier: "kimi-k3:cloud"
+    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.6:35b"]
+    verifier: "glm-5.2:cloud"
     factchecker: "deepseek-v4-pro:cloud"
-    writer: "kimi-k3:cloud"
+    writer: "glm-5.2:cloud"
     fallback_synth: "glm-5.2:cloud"
   reasoning:
-    researchers: ["kimi-k3:cloud", "deepseek-v4-pro:cloud", "qwen3.6:35b"]
-    verifier: "kimi-k3:cloud"
+    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.6:35b"]
+    verifier: "glm-5.2:cloud"
     factchecker: "deepseek-v4-pro:cloud"
-    writer: "kimi-k3:cloud"
+    writer: "glm-5.2:cloud"
     fallback_synth: "glm-5.2:cloud"
   general:
-    researchers: ["kimi-k3:cloud", "deepseek-v4-pro:cloud", "qwen3.6:35b"]
-    verifier: "kimi-k3:cloud"
+    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.6:35b"]
+    verifier: "glm-5.2:cloud"
     factchecker: "deepseek-v4-pro:cloud"
-    writer: "kimi-k3:cloud"
+    writer: "glm-5.2:cloud"
     fallback_synth: "glm-5.2:cloud"
   # vl: the research path grounds with text tools; image turns force fast
   # anyway. Kept here so the pool resolves for every task type, with a
   # text-only researcher set (the deep path rebuilds prompts text-only).
   vl:
-    researchers: ["kimi-k3:cloud", "deepseek-v4-pro:cloud"]
-    verifier: "kimi-k3:cloud"
+    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud"]
+    verifier: "glm-5.2:cloud"
     factchecker: "deepseek-v4-pro:cloud"
-    writer: "kimi-k3:cloud"
+    writer: "glm-5.2:cloud"
     fallback_synth: "glm-5.2:cloud"
 
 # ─── Agentic behavior ──────────────────────────────────────────────────
@@ -572,7 +542,6 @@ passthrough:
     # 'audrey_passthrough/<name>,…'): testing panel candidates in isolation is
     # how lineups get compared before editing the deep_panel* workers lists.
     # Keep in sync with model_registry when models are added/retired.
-    - kimi-k3:cloud
     - qwen3-coder-next:latest
     - minimax-m3:cloud
     - qwen2.5-coder:32b
