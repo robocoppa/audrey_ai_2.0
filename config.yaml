@@ -291,7 +291,7 @@ agentic:
   # only, never written to the chat archive. Deep panel only — research mode
   # has its own view (`debug_research_trace` below).
   # Off by default; flip for an eval window (restart, no rebuild), flip back.
-  debug_panel_drafts: true
+  debug_panel_drafts: false
   # Debug/eval: research-mode counterpart. When true, audrey_research answers
   # end with a "## Research trace (debug)" section carrying the staged
   # pipeline's intermediates — every researcher's notes, the structured
