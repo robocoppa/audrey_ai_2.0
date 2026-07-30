@@ -7,6 +7,11 @@ docs/PROJECT_STATE-archive-*.md
 docs/campaign-1/HISTORY.md
 CLAUDE.md
 
+# AI-security campaign MOVED to its own repo (2026-07-30):
+# ~/Documents/github/ai-sec/ — a separate service that runs on the same box and
+# shares this box's Qdrant + model server, but is NOT coupled to Audrey's pipeline.
+# Nothing ai-security lives in this repo anymore; this note is a breadcrumb only.
+
 # Lesson-side working docs that should not ship to GitHub.
 # AUDIT.md collects code-review findings raised during lesson writing —
 # it's an internal queue, not teaching material. One per course.
