@@ -79,6 +79,7 @@ from audrey.pipeline.prompts import compose_system_messages
 from audrey.pipeline.reflect import reflect as reflect_fn
 from audrey.pipeline.state import PipelineState
 from audrey.pipeline.synthesize import synthesize as synthesize_fn
+from audrey.pipeline.vision import describe_enabled, describe_for_text_model
 from audrey.tools.discovery import ToolRegistry
 
 log = logging.getLogger(__name__)
@@ -241,7 +242,8 @@ def build_graph(
         owui_task = is_owui_task_request(state["messages"])
         image_turn = has_image_part(state["messages"])
         task_override: str | None = None
-        if image_turn:
+        describe_first = image_turn and forced_deep and describe_enabled(cfg)
+        if image_turn and not describe_first:
             # An attached image must reach a vision model: force the fast path
             # (the deep path rebuilds prompts text-only and would drop the
             # image) and override the task to `vl` so the fast path picks from
@@ -280,6 +282,20 @@ def build_graph(
         out: dict[str, Any] = {"prompt_tokens": n, "complex": complex_, "mode": mode}
         if task_override is not None:
             out["task_type"] = task_override
+        if describe_first and mode == "deep":
+            # The caller named a deep/research model, so honour that pick
+            # instead of overriding it with the vl pool: transcribe the image
+            # and let the panel they chose reason over the text. Runs after
+            # the mode decision so the complexity gate judged the user's own
+            # words, not the description's length.
+            described, _n = await describe_for_text_model(
+                state["messages"],
+                ollama=ollama, registry=registry, health=health, gate=gate,
+                cfg=cfg, target_model="",
+                user_question=last_user_text(state["messages"]),
+                user_id=state.get("user_id") or None,
+            )
+            out["messages"] = described
         return out
 
     async def node_fast_path(state: PipelineState) -> dict[str, Any]:

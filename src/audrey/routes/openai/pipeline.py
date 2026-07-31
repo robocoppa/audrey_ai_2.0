@@ -75,6 +75,7 @@ from audrey.pipeline.messages import has_image_part, last_user_text
 from audrey.pipeline.planner import plan as planner_plan
 from audrey.pipeline.prompts import compose_system_messages
 from audrey.pipeline.synthesize import synthesize_stream
+from audrey.pipeline.vision import describe_enabled, describe_for_text_model
 from audrey.routes.openai.responses import _to_openai_response
 from audrey.routes.openai.schemas import ChatCompletionRequest
 
@@ -253,9 +254,14 @@ async def _stream_via_pipeline(
             forced_fast = payload.model == "audrey_fast"
             owui_task = is_owui_task_request(messages)
             image_turn = has_image_part(messages)
-            if image_turn:
+            if image_turn and not (forced_deep and describe_enabled(cfg)):
                 # An attached image must reach a vision model — force fast.
                 # (See the classify branch below: `task` is pinned to "vl".)
+                #
+                # The exception is an explicit deep/research pick: there the
+                # caller named the model they want, so honour it. The image
+                # gets transcribed below and the panel they chose reasons
+                # over the text instead of being overridden by the vl pool.
                 use_deep = False
             elif owui_task:
                 # OWUI utility tasks (title gen, tags, follow-up suggestions)
@@ -269,6 +275,19 @@ async def _stream_via_pipeline(
                 # audrey_auto: deep if the prompt is long OR explicitly asks for
                 # depth (short-but-demanding prompts the length gate misses).
                 use_deep = complex_ or deep_intent
+
+            if use_deep and image_turn:
+                # Transcribe before the panel runs: every worker and the
+                # synthesizer rebuild prompts from `messages`, and none of
+                # the text pools can read an `image_url` part. Done after
+                # the mode decision so the complexity gate still judges the
+                # user's own words, not the description's length.
+                messages, _n_described = await describe_for_text_model(
+                    messages,
+                    ollama=ollama, registry=registry, health=health,
+                    gate=app.state.gate, cfg=cfg,
+                    target_model="", user_question=user_text, user_id=user_id,
+                )
 
             if use_deep:
                 # Deep classification still needs the router LLM (the panel

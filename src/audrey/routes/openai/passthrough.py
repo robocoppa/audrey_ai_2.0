@@ -26,7 +26,9 @@ from audrey.metrics import pipeline_seconds, pipeline_total
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.pipeline.messages import last_user_text
 from audrey.pipeline.passthrough import passthrough_chat, passthrough_stream
+from audrey.pipeline.vision import describe_for_text_model
 from audrey.routes.openai.responses import (
     _ollama_to_openai_tool_calls,
     _options_from_request,
@@ -117,6 +119,22 @@ async def _handle_passthrough(
     inflight = app.state.inflight
     ollama: OllamaClient = app.state.ollama
     gate: FairLocalGate = app.state.gate
+
+    # Passthrough forwards verbatim, so an attached image reaches the
+    # concrete model as Ollama's `images: [...]`. Text-only targets — most
+    # of `passthrough.allowed_models`, including every cloud model — either
+    # error on that or answer blind. Transcribe first so the model the
+    # client actually named is still the one that answers.
+    # Its own inflight slot rather than the request's: the transcription is
+    # a separate dispatch, and both branches below open their own slot for
+    # the forward itself. Sequential, never nested.
+    async with inflight.slot(me.email):
+        messages, _n_described = await describe_for_text_model(
+            messages,
+            ollama=ollama, registry=registry, health=app.state.health, gate=gate,
+            cfg=cfg, target_model=concrete, user_question=last_user_text(messages),
+            user_id=me.email,
+        )
 
     if payload.stream:
         async def _emit_passthrough_sse():

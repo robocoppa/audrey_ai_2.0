@@ -15,6 +15,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from audrey.models.health import HealthTracker
+from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.passthrough import passthrough_chat, passthrough_stream
 from audrey.routes.inflight import UserInflightRegistry
@@ -85,19 +87,30 @@ def _stub_app(
     inflight: UserInflightRegistry,
     location: str = "local",
     passthrough_block: dict | None = None,
+    vision_block: dict | None = None,
 ) -> SimpleNamespace:
     """Build the minimal `request.app` shape `_handle_passthrough` reads."""
+    raw: dict = {"passthrough": passthrough_block or {
+        "enabled": True,
+        "allowed_models": ["qwen3.6:35b-64k"],
+        "require_role": None,
+    }}
+    if vision_block is not None:
+        raw["vision"] = vision_block
     cfg = SimpleNamespace(
-        raw={"passthrough": passthrough_block or {
-            "enabled": True,
-            "allowed_models": ["qwen3.6:35b-64k"],
-            "require_role": None,
-        }},
+        raw=raw,
         timeouts={"medium": 180},
+        # The vision sidecar reads the `vl` pool to decide whether the
+        # concrete target can see an image on its own.
+        model_registry={"vl": [
+            {"name": "qwen3-vl:32b", "priority": 100, "location": "local"},
+        ]},
     )
-    registry = SimpleNamespace(location_of=lambda _name: location)
+    registry = ModelRegistry(cfg)  # type: ignore[arg-type]
+    registry.location_of = lambda _name: location  # type: ignore[method-assign]
     state = SimpleNamespace(
         cfg=cfg, registry=registry, ollama=ollama, gate=gate, inflight=inflight,
+        health=HealthTracker(),
     )
     return SimpleNamespace(state=state)
 
@@ -577,3 +590,86 @@ async def test_handle_passthrough_without_tools_does_not_set_tool_calls():
     choice = resp["choices"][0]
     assert choice["finish_reason"] == "stop"
     assert "tool_calls" not in choice["message"]
+
+
+# ─── Vision sidecar on the passthrough path ────────────────────────────
+# The reported bug: attaching an image to a text-only concrete model (e.g.
+# `glm-5.2:cloud`, whose Ollama capabilities are tools/thinking/cloud —
+# no vision) forwarded the data URI to a model with no vision encoder.
+
+_IMAGE_TURN = [
+    {"type": "text", "text": "what does this error say?"},
+    {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+]
+
+
+@pytest.mark.asyncio
+async def test_image_to_text_only_model_is_transcribed_before_forwarding():
+    ollama = _FakeOllama()
+    gate = _RecordingGate()
+    inflight = UserInflightRegistry(max_inflight_per_user=3)
+    app = _stub_app(ollama=ollama, gate=gate, inflight=inflight)
+
+    payload = ChatCompletionRequest(
+        model=f"{PASSTHROUGH_PREFIX}qwen3.6:35b-64k",
+        messages=[{"role": "user", "content": _IMAGE_TURN}],
+    )
+    await _handle_passthrough(
+        app, request=SimpleNamespace(app=app), payload=payload, me=_stub_user(),
+    )
+
+    # Two dispatches: the vl transcription, then the forward to the target.
+    assert [c["model"] for c in ollama.chat_calls] == [
+        "qwen3-vl:32b", "qwen3.6:35b-64k",
+    ]
+    forwarded = ollama.chat_calls[1]["messages"]
+    assert isinstance(forwarded[0]["content"], str)  # image part is gone
+    assert "what does this error say?" in forwarded[0]["content"]
+    assert "hello from fake ollama" in forwarded[0]["content"]  # the description
+
+
+@pytest.mark.asyncio
+async def test_image_to_vision_capable_model_is_forwarded_untouched():
+    """qwen3-vl reads the image itself — no transcription, no loss."""
+    ollama = _FakeOllama()
+    gate = _RecordingGate()
+    inflight = UserInflightRegistry(max_inflight_per_user=3)
+    app = _stub_app(
+        ollama=ollama, gate=gate, inflight=inflight,
+        passthrough_block={
+            "enabled": True, "allowed_models": ["qwen3-vl:32b"], "require_role": None,
+        },
+    )
+
+    payload = ChatCompletionRequest(
+        model=f"{PASSTHROUGH_PREFIX}qwen3-vl:32b",
+        messages=[{"role": "user", "content": _IMAGE_TURN}],
+    )
+    await _handle_passthrough(
+        app, request=SimpleNamespace(app=app), payload=payload, me=_stub_user(),
+    )
+
+    assert [c["model"] for c in ollama.chat_calls] == ["qwen3-vl:32b"]
+    assert ollama.chat_calls[0]["messages"][0]["content"] == _IMAGE_TURN
+
+
+@pytest.mark.asyncio
+async def test_sidecar_off_restores_the_old_verbatim_forward():
+    ollama = _FakeOllama()
+    gate = _RecordingGate()
+    inflight = UserInflightRegistry(max_inflight_per_user=3)
+    app = _stub_app(
+        ollama=ollama, gate=gate, inflight=inflight,
+        vision_block={"describe_for_text_models": False},
+    )
+
+    payload = ChatCompletionRequest(
+        model=f"{PASSTHROUGH_PREFIX}qwen3.6:35b-64k",
+        messages=[{"role": "user", "content": _IMAGE_TURN}],
+    )
+    await _handle_passthrough(
+        app, request=SimpleNamespace(app=app), payload=payload, me=_stub_user(),
+    )
+
+    assert [c["model"] for c in ollama.chat_calls] == ["qwen3.6:35b-64k"]
+    assert ollama.chat_calls[0]["messages"][0]["content"] == _IMAGE_TURN
