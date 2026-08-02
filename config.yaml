@@ -34,10 +34,15 @@ model_registry:
     - { name: "cogito-2.1:671b-cloud",    priority:  65, speed: 80, quality: 93, location: cloud }
 
   reasoning:
-    - { name: "qwen3.6:35b",              priority: 100, speed: 70, quality: 93, location: local }
-    - { name: "deepseek-v4-pro:cloud",    priority:  97, speed: 80, quality: 95, location: cloud }
-    - { name: "minimax-m3:cloud",         priority:  96, speed: 85, quality: 95, location: cloud }
-    - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 94, location: cloud }
+    # Ranked by the quality column, not by locality: qwen3.6:35b led this pool
+    # at 100 despite being the lowest-quality entry of the top group (93 vs
+    # 95/95/94). It stays the highest-priority LOCAL entry, so it is still the
+    # first failover when cloud is unhealthy or credits run out.
+    # `general` deliberately keeps its local lead — see the cost note there.
+    - { name: "deepseek-v4-pro:cloud",    priority: 100, speed: 80, quality: 95, location: cloud }
+    - { name: "minimax-m3:cloud",         priority:  98, speed: 85, quality: 95, location: cloud }
+    - { name: "kimi-k2.6:cloud",          priority:  96, speed: 90, quality: 94, location: cloud }
+    - { name: "qwen3.6:35b",              priority:  94, speed: 70, quality: 93, location: local }
     - { name: "kimi-k2.7-code:cloud",     priority:  88, speed: 90, quality: 93, location: cloud }
     - { name: "deepseek-r1:32b",          priority:  85, speed: 65, quality: 90, location: local }
     - { name: "cogito-2.1:671b-cloud",    priority:  75, speed: 80, quality: 93, location: cloud }
@@ -585,6 +590,18 @@ passthrough:
     - glm-4.7-flash:q8_0
     - olmo-3.1:32b
     - llama4:latest
+    # Vision-language pool, exposed so an image-capable model can be targeted
+    # directly. Batch image work (Phase 32 media-worker keyframe description)
+    # reaches the GPU through passthrough precisely so both fair-scheduling
+    # layers still fire — a sidecar calling Ollama itself would contend behind
+    # FairLocalGate's back, since the gate is in-process to audrey-ai.
+    # These are the only entries here that receive pixels rather than prose:
+    # an image turn to a vl target forwards untouched, with no transcription
+    # hop (`test_image_to_vision_capable_model_is_forwarded_untouched`).
+    # Side effect, accepted: /v1/models lists one entry per allowed concrete,
+    # so OWUI users can now pick these two directly as well.
+    - qwen3-vl:32b
+    - llava:34b
   require_role: null                     # null | "admin" — gate by OWUI role
 
 # ─── Classification pre-filter ─────────────────────────────────────────
