@@ -19,12 +19,24 @@ Three regression areas pinned here:
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from pathlib import Path
 
 import pytest
 
-from audrey.kb.extract import ALLOWED_EXTENSIONS, ALLOWED_MIMES, SUFFIX_MIMES
-from audrey.routes.files import _stream_to_disk
+from audrey.kb.extract import (
+    ALLOWED_EXTENSIONS,
+    ALLOWED_IMAGE_MIMES,
+    ALLOWED_MIMES,
+    ALLOWED_TEXT_MIMES,
+    ALLOWED_VIDEO_MIMES,
+    SUFFIX_MIMES,
+    is_image_mime,
+    is_text_mime,
+    is_video_mime,
+)
+from audrey.kb.uploads_db import UploadsDB
+from audrey.routes.files import _assemble_parts, _stream_to_disk
 
 # ─── _stream_to_disk cap-before-extending ──────────────────────────────
 
@@ -135,11 +147,30 @@ def test_allowed_extensions_covers_every_mapped_allowed_mime():
     assert set(ALLOWED_EXTENSIONS) == expected
 
 
-def test_allowed_extensions_excludes_unsupported_formats():
-    # Guards the case that started this: video has no ingest path, so it
-    # must never reach the client hint list.
-    for ext in (".mp4", ".mov", ".mkv", ".webm", ".exe"):
+def test_mp4_is_offered_to_the_client():
+    # mp4 is accepted for STORAGE (status='pending') even though nothing
+    # extracts it yet, so the pre-check must not refuse it up front.
+    assert ".mp4" in ALLOWED_EXTENSIONS
+    assert SUFFIX_MIMES[".mp4"] in ALLOWED_VIDEO_MIMES
+
+
+def test_allowed_extensions_excludes_formats_with_no_path_at_all():
+    # Only mp4 was asked for. These have neither a storage nor an extraction
+    # path, so offering them would produce a 415 after a full upload.
+    for ext in (".mov", ".mkv", ".webm", ".exe"):
         assert ext not in ALLOWED_EXTENSIONS
+
+
+def test_video_mimes_are_disjoint_from_text_and_image():
+    # `_validate_and_ingest` dispatches on these. An overlap would route a
+    # video into `load_text` (which cannot read it) or CLIP (which cannot
+    # embed it), turning a 415 into a 500.
+    assert not (ALLOWED_VIDEO_MIMES & ALLOWED_TEXT_MIMES)
+    assert not (ALLOWED_VIDEO_MIMES & ALLOWED_IMAGE_MIMES)
+    for mime in ALLOWED_VIDEO_MIMES:
+        assert is_video_mime(mime)
+        assert not is_text_mime(mime)
+        assert not is_image_mime(mime)
 
 
 def test_every_extension_is_dot_prefixed_and_lowercase():
@@ -148,6 +179,174 @@ def test_every_extension_is_dot_prefixed_and_lowercase():
     # that format at the pre-check.
     for ext in ALLOWED_EXTENSIONS:
         assert ext.startswith(".") and ext == ext.lower()
+
+
+# ─── status column + migration ────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_status_defaults_to_ready_and_pending_round_trips(tmp_path: Path):
+    db = UploadsDB(tmp_path / "uploads.sqlite")
+    await db.record_upload(
+        file_id="f1", user="a@x", filename="notes.md", mime="text/markdown",
+        bytes_=10, kind="text", collection="c", chunks=3, uploaded_at="t0",
+    )
+    await db.record_upload(
+        file_id="f2", user="a@x", filename="clip.mp4", mime="video/mp4",
+        bytes_=99, kind="video", collection="", chunks=0, uploaded_at="t1",
+        status="pending",
+    )
+    rows = {r["file_id"]: r for r in await db.list_user("a@x")}
+    assert rows["f1"]["status"] == "ready"
+    assert rows["f2"]["status"] == "pending"
+    assert rows["f2"]["chunks"] == 0
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_migration_adds_status_to_a_preexisting_database(tmp_path: Path):
+    # The deployed sqlite predates `status`, and CREATE TABLE IF NOT EXISTS
+    # is a no-op against an existing table — without the ALTER, every read
+    # against the live file would raise on the missing column.
+    path = tmp_path / "legacy.sqlite"
+    legacy = sqlite3.connect(str(path))
+    legacy.execute(
+        "CREATE TABLE uploads ("
+        " file_id TEXT PRIMARY KEY, user TEXT NOT NULL, filename TEXT NOT NULL,"
+        " mime TEXT NOT NULL, bytes INTEGER NOT NULL, kind TEXT NOT NULL,"
+        " collection TEXT NOT NULL, chunks INTEGER NOT NULL,"
+        " uploaded_at TEXT NOT NULL)",
+    )
+    legacy.execute(
+        "INSERT INTO uploads VALUES ('old', 'a@x', 'old.md', 'text/markdown',"
+        " 5, 'text', 'c', 2, 't0')",
+    )
+    legacy.commit()
+    legacy.close()
+
+    db = UploadsDB(path)
+    rows = await db.list_user("a@x")
+    # Pre-existing rows were ingested synchronously, so 'ready' is correct.
+    assert [(r["file_id"], r["status"]) for r in rows] == [("old", "ready")]
+    db.close()
+
+
+# ─── Chunked upload sessions (Phase 32b) ──────────────────────────────
+
+
+def _db(tmp_path: Path) -> UploadsDB:
+    return UploadsDB(tmp_path / "uploads.sqlite")
+
+
+@pytest.mark.asyncio
+async def test_session_round_trips_and_reports_progress(tmp_path: Path):
+    db = _db(tmp_path)
+    await db.open_session(
+        upload_id="u1", user="a@x", filename="v.mp4", total_bytes=30,
+        part_size=10, parts_total=3, now="2026-08-02T00:00:00+00:00",
+    )
+    for n in range(3):
+        await db.record_part(
+            upload_id="u1", part_no=n, bytes_=10, now="2026-08-02T00:01:00+00:00",
+        )
+    assert await db.session_progress("u1") == (3, 30)
+    assert await db.received_part_numbers("u1") == {0, 1, 2}
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_retried_part_does_not_double_count(tmp_path: Path):
+    # A flaky connection resending part 1 is the normal case. Without the
+    # REPLACE semantics the received-bytes total would inflate past the
+    # declared size and `/complete` would assemble from a lie.
+    db = _db(tmp_path)
+    await db.open_session(
+        upload_id="u1", user="a@x", filename="v.mp4", total_bytes=20,
+        part_size=10, parts_total=2, now="t0",
+    )
+    await db.record_part(upload_id="u1", part_no=0, bytes_=10, now="t1")
+    await db.record_part(upload_id="u1", part_no=0, bytes_=10, now="t2")
+    await db.record_part(upload_id="u1", part_no=1, bytes_=10, now="t3")
+    assert await db.session_progress("u1") == (2, 20)
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_session_lookup_is_scoped_to_its_owner(tmp_path: Path):
+    # The parts directory is derived from this row, so a permissive lookup
+    # would let a leaked upload_id append into another user's assembly.
+    db = _db(tmp_path)
+    await db.open_session(
+        upload_id="u1", user="owner@x", filename="v.mp4", total_bytes=10,
+        part_size=10, parts_total=1, now="t0",
+    )
+    assert await db.get_session("u1", user="owner@x") is not None
+    assert await db.get_session("u1", user="attacker@x") is None
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_close_session_clears_rows_and_parts(tmp_path: Path):
+    db = _db(tmp_path)
+    await db.open_session(
+        upload_id="u1", user="a@x", filename="v.mp4", total_bytes=10,
+        part_size=10, parts_total=1, now="t0",
+    )
+    await db.record_part(upload_id="u1", part_no=0, bytes_=10, now="t1")
+    await db.close_session("u1")
+    assert await db.get_session("u1", user="a@x") is None
+    assert await db.session_progress("u1") == (0, 0)
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_stale_sessions_finds_only_untouched_ones(tmp_path: Path):
+    # The TTL sweep's input. A session touched after the cutoff is still
+    # in flight and must not have its parts deleted underneath it.
+    db = _db(tmp_path)
+    await db.open_session(
+        upload_id="old", user="a@x", filename="a.mp4", total_bytes=10,
+        part_size=10, parts_total=1, now="2026-08-01T00:00:00+00:00",
+    )
+    await db.open_session(
+        upload_id="fresh", user="a@x", filename="b.mp4", total_bytes=10,
+        part_size=10, parts_total=1, now="2026-08-02T12:00:00+00:00",
+    )
+    stale = await db.stale_sessions(older_than="2026-08-02T00:00:00+00:00")
+    assert [s["upload_id"] for s in stale] == ["old"]
+    db.close()
+
+
+def test_assemble_parts_concatenates_in_order(tmp_path: Path):
+    # Order is by part number, not directory listing — a naive glob sorts
+    # "10" before "2" and would silently corrupt any upload past 9 parts.
+    session_dir = tmp_path / "sess"
+    session_dir.mkdir()
+    for n in range(12):
+        (session_dir / f"{n:06d}.part").write_bytes(f"<{n}>".encode())
+    dest = tmp_path / "out.bin"
+
+    written = _assemble_parts(session_dir, dest, 12)
+
+    expected = b"".join(f"<{n}>".encode() for n in range(12))
+    assert dest.read_bytes() == expected
+    assert written == len(expected)
+
+
+def test_assemble_parts_handles_a_large_multi_part_file(tmp_path: Path):
+    # Exercises the streaming copy loop across a part boundary rather than
+    # a single small read.
+    session_dir = tmp_path / "sess"
+    session_dir.mkdir()
+    blob = b"x" * (1024 * 1024 + 7)
+    for n in range(3):
+        (session_dir / f"{n:06d}.part").write_bytes(blob)
+    dest = tmp_path / "out.bin"
+
+    written = _assemble_parts(session_dir, dest, 3)
+
+    assert written == len(blob) * 3
+    assert dest.stat().st_size == len(blob) * 3
 
 
 # ─── Upload-rollback double-failure (#6) ──────────────────────────────

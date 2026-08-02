@@ -680,7 +680,7 @@ disk unlink are housekeeping that can take their own time.
 But what about drift that happens *outside* the request flow?
 Manual `qdrant` purges, container restarts mid-upload, a sqlite
 file restored from an old backup? That's what
-[`reconcile_with_qdrant`](../../src/audrey/kb/uploads_db.py#L176)
+[`reconcile_with_qdrant`](../../src/audrey/kb/uploads_db.py#L349)
 is for — a two-direction sweep:
 - **Backfill.** Anything in Qdrant that's missing from sqlite gets
   added. So if sqlite was restored from an old backup, any uploads

@@ -172,8 +172,12 @@
   function precheckFailure(file, pending) {
     if (!limits) return null;
     if (file.size === 0) return "the file is empty";
-    if (file.size > limits.max_upload_bytes) {
-      return `${fmtBytes(file.size)} is over the ${fmtBytes(limits.max_upload_bytes)} per-file limit`;
+    // Above the single-shot cap the file goes out in parts, so the ceiling
+    // that applies is the chunked one — not `max_upload_bytes`, which only
+    // bounds what a single request body may carry.
+    const ceiling = limits.chunked_max_bytes || limits.max_upload_bytes;
+    if (file.size > ceiling) {
+      return `${fmtBytes(file.size)} is over the ${fmtBytes(ceiling)} limit`;
     }
     const ext = extOf(file.name);
     if (!ext) return `no file extension — supported: ${limits.allowed_extensions.join(", ")}`;
@@ -257,17 +261,23 @@
 
   async function uploadOne(file) {
     const line = logLine(`Uploading ${file.name} (${fmtBytes(file.size)})…`);
-    const fd = new FormData();
-    fd.append("file", file);
     try {
-      const r = await authedFetch(`/v1/files`, { method: "POST", body: fd });
+      // Anything a single request body can still carry goes the simple way.
+      // Above that the edge proxy would refuse the body outright, so the
+      // file has to travel as parts.
+      const chunked = limits && file.size > limits.max_upload_bytes;
+      const r = chunked ? await sendChunked(file, line) : await sendSingle(file);
       if (!r.ok) {
         line.textContent = await describeFailure(r, file);
         line.className = "err";
         return false;
       }
       const body = await r.json();
-      line.textContent = `Uploaded ${body.filename} → ${body.chunks} chunk${body.chunks === 1 ? "" : "s"}.`;
+      line.textContent = body.status === "pending"
+        // Say plainly that it is stored but not yet searchable. Reporting
+        // "0 chunks" as a success would read as a silent failure.
+        ? `Stored ${body.filename} — awaiting processing, not searchable yet.`
+        : `Uploaded ${body.filename} → ${body.chunks} chunk${body.chunks === 1 ? "" : "s"}.`;
       line.className = "ok";
       return true;
     } catch (e) {
@@ -279,6 +289,47 @@
       line.className = "err";
       return false;
     }
+  }
+
+  function sendSingle(file) {
+    const fd = new FormData();
+    fd.append("file", file);
+    return authedFetch(`/v1/files`, { method: "POST", body: fd });
+  }
+
+  /** Slice the file and send it part by part, then ask the server to assemble.
+   *
+   * Returns the /complete response, so the caller handles success and failure
+   * identically for both transports. A non-ok response from any earlier step
+   * is returned as-is for `describeFailure` to explain.
+   */
+  async function sendChunked(file, line) {
+    const open = await authedFetch(`/v1/files/upload-sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: file.name, total_bytes: file.size }),
+    });
+    if (!open.ok) return open;
+    const { upload_id, part_size, parts_total } = await open.json();
+
+    for (let n = 0; n < parts_total; n++) {
+      const slice = file.slice(n * part_size, (n + 1) * part_size);
+      const put = await authedFetch(
+        `/v1/files/upload-sessions/${encodeURIComponent(upload_id)}/parts/${n}`,
+        { method: "PUT", body: slice },
+      );
+      if (!put.ok) return put;
+      const pct = Math.round(((n + 1) / parts_total) * 100);
+      line.textContent =
+        `Uploading ${file.name} (${fmtBytes(file.size)}) — ${pct}% `
+        + `(part ${n + 1}/${parts_total})…`;
+    }
+
+    line.textContent = `Processing ${file.name}…`;
+    return authedFetch(
+      `/v1/files/upload-sessions/${encodeURIComponent(upload_id)}/complete`,
+      { method: "POST" },
+    );
   }
 
   async function deleteOne(fileId) {
@@ -318,12 +369,12 @@
         return;
       }
       rows.innerHTML = body.files.map(f => `
-        <tr>
+        <tr class="${f.status === "pending" ? "pending" : ""}">
           <td>${escapeHtml(f.filename)}</td>
           <td>${escapeHtml(f.mime)}</td>
           <td class="right">${fmtBytes(f.bytes)}</td>
-          <td class="right">${f.chunks}</td>
-          <td>${escapeHtml(f.uploaded_at)}</td>
+          <td class="right">${f.status === "pending" ? "—" : f.chunks}</td>
+          <td>${f.status === "pending" ? "pending" : escapeHtml(f.uploaded_at)}</td>
           <td><button class="danger" data-id="${escapeAttr(f.file_id)}">delete</button></td>
         </tr>
       `).join("");
@@ -340,10 +391,14 @@
   // a cap that config.yaml no longer sets.
   function applyLimits(next) {
     limits = next;
+    const ceiling = limits.chunked_max_bytes || limits.max_upload_bytes;
     hint.textContent =
-      `Max ${fmtBytes(limits.max_upload_bytes)} per file · `
-      + `${fmtBytes(limits.max_user_bytes)} total per user.`;
-    supported.textContent = `Supported: ${limits.allowed_extensions.join(", ")}.`;
+      `Max ${fmtBytes(ceiling)} per file · `
+      + `${fmtBytes(limits.max_user_bytes)} total per user. `
+      + `Files over ${fmtBytes(limits.max_upload_bytes)} upload in parts.`;
+    supported.textContent =
+      `Supported: ${limits.allowed_extensions.join(", ")}. `
+      + `Video is stored but not searchable until processing lands.`;
   }
 
   function escapeHtml(s) {

@@ -51,7 +51,17 @@ ALLOWED_TEXT_MIMES: frozenset[str] = frozenset({
 ALLOWED_IMAGE_MIMES: frozenset[str] = frozenset({
     "image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp", "image/tiff",
 })
-ALLOWED_MIMES: frozenset[str] = ALLOWED_TEXT_MIMES | ALLOWED_IMAGE_MIMES
+# Video is accepted for STORAGE only. There is no extraction path for it yet —
+# the upload route stores the bytes and records the row as `pending`, and the
+# Phase 32c media worker is what will turn it into a transcript, frame
+# descriptions, and a summary. Do NOT add a video mime to a text or image
+# branch: `load_text` cannot read one and CLIP cannot embed one.
+ALLOWED_VIDEO_MIMES: frozenset[str] = frozenset({
+    "video/mp4",
+})
+ALLOWED_MIMES: frozenset[str] = (
+    ALLOWED_TEXT_MIMES | ALLOWED_IMAGE_MIMES | ALLOWED_VIDEO_MIMES
+)
 
 # Suffix → mime, used both by the libmagic fallback below and to derive the
 # extension hint list the upload page pre-checks against. Entries whose mime
@@ -67,6 +77,7 @@ SUFFIX_MIMES: dict[str, str] = {
     ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
     ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp",
     ".tif": "image/tiff", ".tiff": "image/tiff",
+    ".mp4": "video/mp4",
 }
 
 # Derived, never hand-maintained: adding a mime to the allowlist above
@@ -110,6 +121,10 @@ def is_text_mime(mime: str) -> bool:
     return mime in ALLOWED_TEXT_MIMES
 
 
+def is_video_mime(mime: str) -> bool:
+    return mime in ALLOWED_VIDEO_MIMES
+
+
 def extract_text(path: Path) -> str:
     """Run the appropriate loader for `path`. Raises EmptyExtractionError on no-op extracts.
 
@@ -130,7 +145,8 @@ def extract_text(path: Path) -> str:
 
 __all__ = [
     "ALLOWED_MIMES", "ALLOWED_TEXT_MIMES", "ALLOWED_IMAGE_MIMES",
-    "ALLOWED_EXTENSIONS", "SUFFIX_MIMES",
+    "ALLOWED_VIDEO_MIMES", "ALLOWED_EXTENSIONS", "SUFFIX_MIMES",
     "ExtractError", "UnsupportedMimeError", "EmptyExtractionError",
-    "sniff_mime", "is_image_mime", "is_text_mime", "extract_text",
+    "sniff_mime", "is_image_mime", "is_text_mime", "is_video_mime",
+    "extract_text",
 ]

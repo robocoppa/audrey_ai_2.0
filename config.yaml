@@ -482,6 +482,19 @@ kb:
   # Reconciled against Qdrant at startup.
   uploads_db_path: "/data/uploads.sqlite"
 
+  # Phase 32b: chunked upload transport. A single POST cannot carry a large
+  # file — cloudflared fronts this app and the CDN edge refuses request
+  # bodies past its plan limit (100 MB on Free/Pro/Business) before they
+  # reach us, returning an HTML error page rather than our JSON. Slicing the
+  # file into parts that each clear that ceiling is the only transport that
+  # works through the tunnel, which is why `max_upload_mb` below is allowed
+  # to dwarf the single-shot `max_upload_mb` above: that cap exists because
+  # a single-shot body must survive the edge, and a chunked one need not.
+  chunked:
+    part_size_mb: 8                      # per-part body — keep far under the edge cap
+    max_upload_mb: 2048                  # whole-file ceiling for chunked uploads
+    session_ttl_minutes: 120             # abandoned part dirs swept after this
+
 # ─── Tools (OpenAPI auto-discovery) ────────────────────────────────────
 tools:
   enabled: true

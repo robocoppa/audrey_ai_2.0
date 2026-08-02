@@ -48,9 +48,41 @@ CREATE TABLE IF NOT EXISTS uploads (
   kind        TEXT NOT NULL,
   collection  TEXT NOT NULL,
   chunks      INTEGER NOT NULL,
-  uploaded_at TEXT NOT NULL
+  uploaded_at TEXT NOT NULL,
+  -- 'ready'   — ingested, searchable now.
+  -- 'pending' — bytes stored, nothing extracted yet. Video lands here: it is
+  --             accepted for storage but has no extraction path until the
+  --             Phase 32c media worker exists.
+  status      TEXT NOT NULL DEFAULT 'ready'
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_user ON uploads(user);
+
+-- Chunked-upload sessions (Phase 32b). A row lives only while an upload is
+-- in flight: created by `open_session`, dropped when `/complete` succeeds or
+-- the TTL sweep collects it. Nothing here is authoritative about stored
+-- files — that stays `uploads` above, written only after assembly lands.
+CREATE TABLE IF NOT EXISTS upload_sessions (
+  upload_id    TEXT PRIMARY KEY,
+  user         TEXT NOT NULL,
+  filename     TEXT NOT NULL,
+  total_bytes  INTEGER NOT NULL,
+  part_size    INTEGER NOT NULL,
+  parts_total  INTEGER NOT NULL,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON upload_sessions(user);
+
+-- One row per part that has actually landed on disk. The PRIMARY KEY makes
+-- a retried part idempotent rather than double-counted, which matters
+-- because a flaky connection retrying part 7 is the normal case, not an
+-- edge case.
+CREATE TABLE IF NOT EXISTS upload_parts (
+  upload_id  TEXT NOT NULL,
+  part_no    INTEGER NOT NULL,
+  bytes      INTEGER NOT NULL,
+  PRIMARY KEY (upload_id, part_no)
+);
 """
 
 
@@ -79,6 +111,27 @@ class UploadsDB:
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._lock = threading.Lock()
         self._conn.executescript(_SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Additive column migrations for databases created before a column existed.
+
+        The deployed sqlite predates `status` (Phase 32), and `CREATE TABLE IF
+        NOT EXISTS` is a no-op against an existing table — so a fresh schema
+        string alone would leave the live file without the column and every
+        read would raise. Existing rows are `ready` because everything already
+        stored was ingested synchronously before pending states existed.
+        """
+        with self._lock:
+            cols = {
+                r["name"]
+                for r in self._conn.execute("PRAGMA table_info(uploads)").fetchall()
+            }
+            if "status" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE uploads ADD COLUMN status TEXT NOT NULL DEFAULT 'ready'",
+                )
+                log.info("uploads_db: migrated uploads table — added `status`")
 
     def close(self) -> None:
         with self._lock:
@@ -96,22 +149,26 @@ class UploadsDB:
         collection: str,
         chunks: int,
         uploaded_at: str,
+        status: str = "ready",
     ) -> None:
         await asyncio.to_thread(
             self._record_sync, file_id, user, filename, mime, bytes_,
-            kind, collection, chunks, uploaded_at,
+            kind, collection, chunks, uploaded_at, status,
         )
 
     def _record_sync(
         self, file_id: str, user: str, filename: str, mime: str,
         bytes_: int, kind: str, collection: str, chunks: int, uploaded_at: str,
+        status: str,
     ) -> None:
         with self._lock:
             self._conn.execute(
                 "INSERT OR REPLACE INTO uploads "
-                "(file_id, user, filename, mime, bytes, kind, collection, chunks, uploaded_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (file_id, user, filename, mime, bytes_, kind, collection, chunks, uploaded_at),
+                "(file_id, user, filename, mime, bytes, kind, collection, "
+                " chunks, uploaded_at, status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (file_id, user, filename, mime, bytes_, kind, collection,
+                 chunks, uploaded_at, status),
             )
 
     async def delete_upload(self, file_id: str, *, user: str) -> bool:
@@ -137,7 +194,7 @@ class UploadsDB:
         with self._lock:
             cur = self._conn.execute(
                 "SELECT file_id, filename, mime, bytes, kind, collection, "
-                "       chunks, uploaded_at "
+                "       chunks, uploaded_at, status "
                 "FROM uploads WHERE user = ? ORDER BY uploaded_at DESC",
                 (user,),
             )
@@ -171,6 +228,122 @@ class UploadsDB:
                 "SELECT file_id FROM uploads WHERE user = ?", (user,),
             )
             return {r["file_id"] for r in cur.fetchall()}
+
+    # ── Chunked-upload sessions (Phase 32b) ───────────────────────────
+
+    async def open_session(
+        self, *, upload_id: str, user: str, filename: str,
+        total_bytes: int, part_size: int, parts_total: int, now: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._open_session_sync, upload_id, user, filename,
+            total_bytes, part_size, parts_total, now,
+        )
+
+    def _open_session_sync(
+        self, upload_id: str, user: str, filename: str,
+        total_bytes: int, part_size: int, parts_total: int, now: str,
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO upload_sessions "
+                "(upload_id, user, filename, total_bytes, part_size, "
+                " parts_total, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (upload_id, user, filename, total_bytes, part_size,
+                 parts_total, now, now),
+            )
+
+    async def get_session(self, upload_id: str, *, user: str) -> dict | None:
+        """Fetch a session, double-keyed on user like every other read here.
+
+        A leaked upload_id from another user must not resolve — the parts
+        directory is derived from this row, so a permissive lookup would
+        let one user append to another's assembly.
+        """
+        return await asyncio.to_thread(self._get_session_sync, upload_id, user)
+
+    def _get_session_sync(self, upload_id: str, user: str) -> dict | None:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM upload_sessions WHERE upload_id = ? AND user = ?",
+                (upload_id, user),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    async def record_part(
+        self, *, upload_id: str, part_no: int, bytes_: int, now: str,
+    ) -> None:
+        await asyncio.to_thread(self._record_part_sync, upload_id, part_no, bytes_, now)
+
+    def _record_part_sync(
+        self, upload_id: str, part_no: int, bytes_: int, now: str,
+    ) -> None:
+        with self._lock:
+            # REPLACE, not INSERT: a client retrying a part it already sent
+            # must not inflate the received-bytes total.
+            self._conn.execute(
+                "INSERT OR REPLACE INTO upload_parts (upload_id, part_no, bytes) "
+                "VALUES (?, ?, ?)",
+                (upload_id, part_no, bytes_),
+            )
+            self._conn.execute(
+                "UPDATE upload_sessions SET updated_at = ? WHERE upload_id = ?",
+                (now, upload_id),
+            )
+
+    async def session_progress(self, upload_id: str) -> tuple[int, int]:
+        """Return (parts_received, bytes_received) for a session."""
+        return await asyncio.to_thread(self._session_progress_sync, upload_id)
+
+    def _session_progress_sync(self, upload_id: str) -> tuple[int, int]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT COUNT(*) AS n, COALESCE(SUM(bytes), 0) AS total "
+                "FROM upload_parts WHERE upload_id = ?",
+                (upload_id,),
+            )
+            row = cur.fetchone()
+            return int(row["n"]), int(row["total"])
+
+    async def received_part_numbers(self, upload_id: str) -> set[int]:
+        """Which parts have landed — lets a resumed client skip what it sent."""
+        return await asyncio.to_thread(self._received_parts_sync, upload_id)
+
+    def _received_parts_sync(self, upload_id: str) -> set[int]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT part_no FROM upload_parts WHERE upload_id = ?", (upload_id,),
+            )
+            return {int(r["part_no"]) for r in cur.fetchall()}
+
+    async def close_session(self, upload_id: str) -> None:
+        await asyncio.to_thread(self._close_session_sync, upload_id)
+
+    def _close_session_sync(self, upload_id: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM upload_parts WHERE upload_id = ?", (upload_id,),
+            )
+            self._conn.execute(
+                "DELETE FROM upload_sessions WHERE upload_id = ?", (upload_id,),
+            )
+
+    async def stale_sessions(self, *, older_than: str) -> list[dict]:
+        """Sessions untouched since `older_than` (ISO stamp), for the TTL sweep.
+
+        A closed browser tab leaves parts on disk forever otherwise; this is
+        what the sweep enumerates before unlinking them.
+        """
+        return await asyncio.to_thread(self._stale_sessions_sync, older_than)
+
+    def _stale_sessions_sync(self, older_than: str) -> list[dict]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM upload_sessions WHERE updated_at < ?", (older_than,),
+            )
+            return [dict(r) for r in cur.fetchall()]
 
 
 async def reconcile_with_qdrant(db: UploadsDB, qdrant) -> dict[str, int]:
