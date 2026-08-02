@@ -11,6 +11,9 @@ Three regression areas pinned here:
   - Filenames are capped at 255 chars (Linux NAME_MAX) before they
     land in sqlite or the Qdrant payload — a 10 MB filename string
     can't bloat either store.
+  - `ALLOWED_EXTENSIONS` stays derived from `ALLOWED_MIMES`, so the
+    extension hint the upload page pre-checks against can never offer a
+    format the sniff gate would then reject.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from pathlib import Path
 
 import pytest
 
+from audrey.kb.extract import ALLOWED_EXTENSIONS, ALLOWED_MIMES, SUFFIX_MIMES
 from audrey.routes.files import _stream_to_disk
 
 # ─── _stream_to_disk cap-before-extending ──────────────────────────────
@@ -110,6 +114,40 @@ def test_filename_cap_is_no_op_when_already_short():
     name = "geology-notes.md"
     capped = Path(name).name[:255]
     assert capped == name
+
+
+# ─── Client pre-check hint list stays derived ─────────────────────────
+
+
+def test_allowed_extensions_only_maps_to_allowed_mimes():
+    # The upload page refuses a file whose extension isn't in this set, so
+    # anything advertised here must actually survive the sniff gate. A
+    # hand-maintained list would drift the first time a mime was dropped.
+    for ext in ALLOWED_EXTENSIONS:
+        assert SUFFIX_MIMES[ext] in ALLOWED_MIMES, f"{ext} maps outside the allowlist"
+
+
+def test_allowed_extensions_covers_every_mapped_allowed_mime():
+    # The other direction: every suffix whose mime is allowed must be
+    # offered. Dropping one silently makes the page reject files the
+    # server would happily accept.
+    expected = {ext for ext, mime in SUFFIX_MIMES.items() if mime in ALLOWED_MIMES}
+    assert set(ALLOWED_EXTENSIONS) == expected
+
+
+def test_allowed_extensions_excludes_unsupported_formats():
+    # Guards the case that started this: video has no ingest path, so it
+    # must never reach the client hint list.
+    for ext in (".mp4", ".mov", ".mkv", ".webm", ".exe"):
+        assert ext not in ALLOWED_EXTENSIONS
+
+
+def test_every_extension_is_dot_prefixed_and_lowercase():
+    # `extOf()` in upload.html lowercases and keeps the dot; a bare or
+    # uppercase entry here would never match and would silently block
+    # that format at the pre-check.
+    for ext in ALLOWED_EXTENSIONS:
+        assert ext.startswith(".") and ext == ext.lower()
 
 
 # ─── Upload-rollback double-failure (#6) ──────────────────────────────

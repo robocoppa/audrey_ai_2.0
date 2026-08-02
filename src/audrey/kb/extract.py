@@ -10,9 +10,11 @@ or raise a typed error. Thin layer over `kb.chunk.load_text` plus:
     with a clear message, instead of silently writing zero chunks.
 
 Mime whitelist lives in `ALLOWED_MIMES`; any sniffed mime outside it is
-rejected with `UnsupportedMimeError`. The route layer does a cheap
-extension pre-check before saving, but the real gate is here — extension
-is a hint, sniffing is the truth.
+rejected with `UnsupportedMimeError`. The upload page does a cheap
+extension pre-check before it sends anything (`ALLOWED_EXTENSIONS`, served
+to it by `GET /v1/files`), but that is only there to spare the user a
+doomed upload — the real gate is here. Extension is a hint, sniffing is
+the truth, and a client that skips the pre-check changes nothing.
 
 Images take the same sniff path (so we can reject `a.png.exe`-style
 tricks) but don't go through `load_text`; the route hands them to the
@@ -51,6 +53,29 @@ ALLOWED_IMAGE_MIMES: frozenset[str] = frozenset({
 })
 ALLOWED_MIMES: frozenset[str] = ALLOWED_TEXT_MIMES | ALLOWED_IMAGE_MIMES
 
+# Suffix → mime, used both by the libmagic fallback below and to derive the
+# extension hint list the upload page pre-checks against. Entries whose mime
+# is not in ALLOWED_MIMES are still listed: the fallback needs to name them
+# accurately so the sniff gate can reject them by mime.
+SUFFIX_MIMES: dict[str, str] = {
+    ".pdf": "application/pdf",
+    ".txt": "text/plain", ".log": "text/plain",
+    ".md": "text/markdown", ".rst": "text/x-rst",
+    ".csv": "text/csv",
+    ".html": "text/html", ".htm": "text/html",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp",
+    ".tif": "image/tiff", ".tiff": "image/tiff",
+}
+
+# Derived, never hand-maintained: adding a mime to the allowlist above
+# automatically offers its extensions to the client pre-check, and dropping
+# one withdraws them. A hand-written second list would drift.
+ALLOWED_EXTENSIONS: frozenset[str] = frozenset(
+    ext for ext, mime in SUFFIX_MIMES.items() if mime in ALLOWED_MIMES
+)
+
 
 class ExtractError(Exception):
     """Base for upload extraction errors."""
@@ -74,18 +99,7 @@ def sniff_mime(path: Path) -> str:
 
 
 def _guess_from_suffix(path: Path) -> str:
-    suffix = path.suffix.lower()
-    return {
-        ".pdf": "application/pdf",
-        ".txt": "text/plain", ".log": "text/plain",
-        ".md": "text/markdown", ".rst": "text/x-rst",
-        ".csv": "text/csv",
-        ".html": "text/html", ".htm": "text/html",
-        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
-        ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp",
-        ".tif": "image/tiff", ".tiff": "image/tiff",
-    }.get(suffix, "application/octet-stream")
+    return SUFFIX_MIMES.get(path.suffix.lower(), "application/octet-stream")
 
 
 def is_image_mime(mime: str) -> bool:
@@ -116,6 +130,7 @@ def extract_text(path: Path) -> str:
 
 __all__ = [
     "ALLOWED_MIMES", "ALLOWED_TEXT_MIMES", "ALLOWED_IMAGE_MIMES",
+    "ALLOWED_EXTENSIONS", "SUFFIX_MIMES",
     "ExtractError", "UnsupportedMimeError", "EmptyExtractionError",
     "sniff_mime", "is_image_mime", "is_text_mime", "extract_text",
 ]

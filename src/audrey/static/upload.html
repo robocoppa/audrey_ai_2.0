@@ -56,8 +56,9 @@
     button:hover { background: var(--panel); }
 
     #status { margin-top: 12px; font-size: 0.85rem; }
-    #status.ok { color: var(--ok); }
-    #status.err { color: var(--danger); }
+    #status div { margin-top: 4px; }
+    #status div.ok { color: var(--ok); }
+    #status div.err { color: var(--danger); }
 
     .quota { font-size: 0.85rem; color: var(--muted); margin-top: 4px; }
     a { color: var(--accent); }
@@ -67,14 +68,14 @@
   <h1>Audrey · Knowledge Upload</h1>
   <p class="sub">
     Upload files into your private knowledge collection.
-    Supported: PDF, TXT, MD, CSV, HTML, DOCX, PNG, JPEG, WEBP, GIF.
+    <span id="supported">Loading supported formats…</span>
   </p>
 
   <p class="who">Signed in as <strong id="who">…</strong> · <a href="/" id="signout">sign out</a></p>
 
   <div id="drop">
     <p><strong>Drop files here</strong> or click to select.</p>
-    <p class="hint">Max 50 MB per file. Quota per user applies.</p>
+    <p class="hint" id="hint">Max 50 MB per file. Quota per user applies.</p>
     <input id="picker" type="file" multiple />
   </div>
 
@@ -110,6 +111,15 @@
   const quota = document.getElementById("quota");
   const who = document.getElementById("who");
   const signout = document.getElementById("signout");
+  const hint = document.getElementById("hint");
+  const supported = document.getElementById("supported");
+
+  // Populated by refreshList() from GET /v1/files. Null until that lands,
+  // in which case the pre-check fails OPEN and defers to the server — a
+  // client that can't see the limits must never be the reason an upload
+  // is refused.
+  let limits = null;
+  let storedBytes = 0;
 
   signout.addEventListener("click", (e) => {
     e.preventDefault();
@@ -136,6 +146,77 @@
     return (n / (1024 * 1024 * 1024)).toFixed(2) + " GB";
   }
 
+  function clearLog() { status.replaceChildren(); }
+
+  // One line per file. Returns the node so uploadOne can rewrite "Uploading…"
+  // into the outcome in place rather than stacking two lines per file.
+  function logLine(msg, cls) {
+    const line = document.createElement("div");
+    line.textContent = msg;
+    if (cls) line.className = cls;
+    status.appendChild(line);
+    return line;
+  }
+
+  function extOf(name) {
+    const i = name.lastIndexOf(".");
+    return i > 0 ? name.slice(i).toLowerCase() : "";
+  }
+
+  /** Reason this file can't be accepted, or null to go ahead.
+   *
+   * `pending` is the total already committed by earlier files in the same
+   * batch — without it, dropping ten files that each individually fit under
+   * the remaining quota would pass ten pre-checks and then fail server-side.
+   */
+  function precheckFailure(file, pending) {
+    if (!limits) return null;
+    if (file.size === 0) return "the file is empty";
+    if (file.size > limits.max_upload_bytes) {
+      return `${fmtBytes(file.size)} is over the ${fmtBytes(limits.max_upload_bytes)} per-file limit`;
+    }
+    const ext = extOf(file.name);
+    if (!ext) return `no file extension — supported: ${limits.allowed_extensions.join(", ")}`;
+    if (!limits.allowed_extensions.includes(ext)) {
+      return `${ext} is not a supported format — supported: ${limits.allowed_extensions.join(", ")}`;
+    }
+    const free = limits.max_user_bytes - storedBytes - pending;
+    if (file.size > free) {
+      return `not enough quota — needs ${fmtBytes(file.size)}, ${fmtBytes(Math.max(0, free))} free `
+           + `of ${fmtBytes(limits.max_user_bytes)}`;
+    }
+    return null;
+  }
+
+  /** Turn a failed response into something that names the actual cause.
+   *
+   * Audrey's own rejections are JSON with a `detail`. Anything else means the
+   * response was written by something in front of Audrey — cloudflared or the
+   * CDN edge — which is worth saying out loud, because the fix lives in a
+   * different place than a limit the app controls.
+   */
+  async function describeFailure(r, file) {
+    const raw = await r.text().catch(() => "");
+    let detail = null;
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        detail = parsed && parsed.detail;
+        // FastAPI sends a list of error objects for 422s.
+        if (detail && typeof detail !== "string") detail = JSON.stringify(detail);
+      } catch (_) { /* not JSON — fall through to the edge/opaque cases */ }
+    }
+    if (detail) return `${file.name} — upload failed (${r.status}): ${detail}`;
+    if (r.status === 413) {
+      return `${file.name} — upload failed (413): rejected before it reached Audrey. `
+           + `The request body exceeded a proxy/CDN limit that sits in front of the app, `
+           + `not Audrey's own ${limits ? fmtBytes(limits.max_upload_bytes) : ""} cap.`;
+    }
+    const snippet = raw.trim().replace(/\s+/g, " ").slice(0, 200);
+    return `${file.name} — upload failed (${r.status})`
+         + (snippet ? `: ${snippet}` : " with an empty response body.");
+  }
+
   drop.addEventListener("click", () => picker.click());
   picker.addEventListener("change", (e) => handleFiles(e.target.files));
   drop.addEventListener("dragover", (e) => {
@@ -148,50 +229,72 @@
   });
 
   async function handleFiles(files) {
-    for (const f of files) {
-      await uploadOne(f);
+    const batch = Array.from(files);
+    if (!batch.length) return;
+    clearLog();
+
+    // The pre-check needs the limits and the current quota usage. On a cold
+    // page that hasn't finished its first list call, wait for one.
+    if (!limits) await refreshList();
+
+    let pending = 0;
+    let uploaded = 0;
+    for (const file of batch) {
+      const problem = precheckFailure(file, pending);
+      if (problem) {
+        logLine(`Skipped ${file.name} (${fmtBytes(file.size)}) — ${problem}.`, "err");
+        continue;
+      }
+      pending += file.size;
+      if (await uploadOne(file)) uploaded += 1;
     }
-    await refreshList();
+
+    // Re-picking the same file after fixing it fires no `change` event unless
+    // the input is cleared first, which makes a rejection look like a hang.
+    picker.value = "";
+    if (uploaded) await refreshList();
   }
 
   async function uploadOne(file) {
-    status.textContent = `Uploading ${file.name} (${fmtBytes(file.size)})…`;
-    status.className = "";
+    const line = logLine(`Uploading ${file.name} (${fmtBytes(file.size)})…`);
     const fd = new FormData();
     fd.append("file", file);
     try {
       const r = await authedFetch(`/v1/files`, { method: "POST", body: fd });
-      const body = await r.json().catch(() => ({}));
       if (!r.ok) {
-        status.textContent = `Upload failed (${r.status}): ${body.detail || "unknown error"}`;
-        status.className = "err";
-      } else {
-        status.textContent = `Uploaded ${body.filename} → ${body.chunks} chunk${body.chunks === 1 ? "" : "s"}.`;
-        status.className = "ok";
+        line.textContent = await describeFailure(r, file);
+        line.className = "err";
+        return false;
       }
+      const body = await r.json();
+      line.textContent = `Uploaded ${body.filename} → ${body.chunks} chunk${body.chunks === 1 ? "" : "s"}.`;
+      line.className = "ok";
+      return true;
     } catch (e) {
-      if (String(e.message) === "unauthorized") return;
-      status.textContent = `Upload failed: ${e}`;
-      status.className = "err";
+      if (String(e.message) === "unauthorized") return false;
+      // fetch() rejects rather than resolving when the transport itself
+      // fails, so there is no status to report — a connection reset partway
+      // through a large body is the usual cause.
+      line.textContent = `${file.name} — upload failed: connection error (${e}).`;
+      line.className = "err";
+      return false;
     }
   }
 
   async function deleteOne(fileId) {
     if (!confirm(`Delete ${fileId}? This removes all chunks.`)) return;
+    clearLog();
     try {
       const r = await authedFetch(`/v1/files/${encodeURIComponent(fileId)}`, { method: "DELETE" });
       if (!r.ok) {
-        status.textContent = `Delete failed (${r.status}).`;
-        status.className = "err";
+        logLine(`Delete failed (${r.status}).`, "err");
       } else {
-        status.textContent = `Deleted.`;
-        status.className = "ok";
+        logLine(`Deleted.`, "ok");
       }
       await refreshList();
     } catch (e) {
       if (String(e.message) === "unauthorized") return;
-      status.textContent = `Delete failed: ${e}`;
-      status.className = "err";
+      logLine(`Delete failed: ${e}`, "err");
     }
   }
 
@@ -204,7 +307,12 @@
       }
       const body = await r.json();
       who.textContent = body.user;
-      quota.textContent = `Stored: ${fmtBytes(body.total_bytes)} across ${body.files.length} file${body.files.length === 1 ? "" : "s"}.`;
+      storedBytes = body.total_bytes;
+      if (body.limits) applyLimits(body.limits);
+      quota.textContent =
+        `Stored: ${fmtBytes(body.total_bytes)}`
+        + (limits ? ` of ${fmtBytes(limits.max_user_bytes)}` : "")
+        + ` across ${body.files.length} file${body.files.length === 1 ? "" : "s"}.`;
       if (body.files.length === 0) {
         rows.innerHTML = `<tr><td colspan="6" style="color: var(--muted);">No files yet.</td></tr>`;
         return;
@@ -226,6 +334,16 @@
       if (String(e.message) === "unauthorized") return;
       rows.innerHTML = `<tr><td colspan="6">Error: ${e}</td></tr>`;
     }
+  }
+
+  // Server-published limits drive the copy too, so the page can't advertise
+  // a cap that config.yaml no longer sets.
+  function applyLimits(next) {
+    limits = next;
+    hint.textContent =
+      `Max ${fmtBytes(limits.max_upload_bytes)} per file · `
+      + `${fmtBytes(limits.max_user_bytes)} total per user.`;
+    supported.textContent = `Supported: ${limits.allowed_extensions.join(", ")}.`;
   }
 
   function escapeHtml(s) {

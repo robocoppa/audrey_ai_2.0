@@ -39,6 +39,7 @@ from pydantic import BaseModel
 
 from audrey.auth import AuthedUser, require_user
 from audrey.kb.extract import (
+    ALLOWED_EXTENSIONS,
     ALLOWED_IMAGE_MIMES,
     ALLOWED_TEXT_MIMES,
     EmptyExtractionError,
@@ -81,10 +82,25 @@ class UploadResponse(BaseModel):
     chunks: int              # text only; 1 for images
 
 
+class Limits(BaseModel):
+    """The gates an upload has to clear, published so the client can pre-check.
+
+    Advisory only. Every value here is re-enforced server-side on the way in
+    (`_stream_to_disk` cap, the quota checks, the libmagic sniff); shipping
+    them to the browser just means a doomed upload can be refused before the
+    bytes go on the wire instead of after.
+    """
+
+    max_upload_bytes: int
+    max_user_bytes: int
+    allowed_extensions: list[str]
+
+
 class ListResponse(BaseModel):
     user: str
     files: list[FileRow]
     total_bytes: int
+    limits: Limits
 
 
 class DeleteResponse(BaseModel):
@@ -305,7 +321,14 @@ async def list_files(
         "file_id", "filename", "mime", "bytes", "uploaded_at", "chunks",
     )}) for row in rows]
     total = sum(r.bytes for r in files)
-    return ListResponse(user=user, files=files, total_bytes=total)
+    return ListResponse(
+        user=user, files=files, total_bytes=total,
+        limits=Limits(
+            max_upload_bytes=_max_upload_bytes(request),
+            max_user_bytes=_max_user_bytes(request),
+            allowed_extensions=sorted(ALLOWED_EXTENSIONS),
+        ),
+    )
 
 
 @router.delete("/{file_id}", response_model=DeleteResponse)
