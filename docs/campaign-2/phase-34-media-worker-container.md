@@ -36,13 +36,33 @@ Once it can reach Ollama directly, someone will eventually make it — and every
 fairness guarantee in [`scheduling.py`](../../src/audrey/scheduling.py) is
 bypassed the moment they do, silently and only under load.
 
-**As built, this is topology, not a promise.** A new compose-managed
-`media-net` joins `media-worker` to `audrey-ai`; `audrey-ai` sits on both that
-and the existing external `ollama-net`. The worker is on `media-net` only, so
-`ollama` is not merely un-addressed but unresolvable. Handing the worker an
-`OLLAMA_HOST` later would not be enough to break the invariant — someone would
-also have to move it onto `ollama-net`, which is a visible edit to
-`compose.yaml` rather than an env var nobody reviews.
+**As built, this is topology, not a promise.** A compose-managed `media-net`
+joins `media-worker` to `audrey-ai`; `audrey-ai` sits on both that and the
+external `ollama-net`. The worker is on `media-net` only.
+
+**The first on-box run failed this check, twice, and both are worth keeping.**
+
+*DNS isolation is not network isolation.* `socket.gethostbyname('ollama')`
+correctly failed — and the worker still connected to `192.168.1.11:11434`.
+Ollama publishes that port on the host, and an ordinary bridge network has NAT
+egress to the host like anything else. Putting a container on its own network
+hides other containers' *names* from it; it does nothing about addresses. The
+fix is `internal: true` on `media-net`, which removes the default route rather
+than the name. Consequence to remember in phase 35: the worker can no longer
+download anything at runtime, so whisper weights must be baked into the image.
+
+*`env_file: .env` handed it `OLLAMA_HOST` anyway.* The compose stanza carried
+the comment "No OLLAMA_HOST, deliberately" directly below an `env_file` that
+injected exactly that, because `.env` defines it for `audrey-ai`. A comment
+stating an intention next to a line contradicting it is worse than neither —
+it reads as verified. The service now names the one variable it needs,
+`KB_SERVICE_TOKEN`, and compose still sources it from `.env` via `${...}`
+interpolation.
+
+Both were caught by verification step 1 existing at all. Neither would have
+been noticed in normal running: the worker never calls a model, so nothing
+would have exercised the reachability it wrongly had until phase 36 quietly
+took advantage of it.
 
 ### We extract, we never transform
 
@@ -131,11 +151,21 @@ try: s.connect(('192.168.1.11', 11434)); print('REACHABLE - fix the network')
 except Exception as e: print('unreachable, correct:', type(e).__name__)"
 ```
 
-Also confirm the worker resolves what it *is* supposed to reach:
+Both must pass. The name check alone is not sufficient — see the design note
+above; the socket check to the host IP is the one that caught the real hole.
+
+Also confirm the worker still resolves what it *is* supposed to reach, and
+that `audrey-ai` kept its own egress despite joining an internal network:
 
 ```
 docker exec media-worker python3 -c "import socket; print(socket.gethostbyname('audrey-ai'))"
+docker exec audrey-ai   python3 -c "import socket; print(socket.gethostbyname('ollama'))"
 ```
+
+The second is the regression risk of `internal: true`: `audrey-ai` is on both
+networks and takes its default route from `ollama-net`, the only one with a
+gateway. If that ever stops being true, chat breaks — so it is checked here
+rather than discovered.
 
 **2. It claims a real job** and the row moves `pending` → `processing`.
 

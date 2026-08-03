@@ -141,22 +141,30 @@ services:
     depends_on:
       audrey-ai:
         condition: service_healthy
-    # ONLY media-net. This is the fairness invariant from Phase 34 expressed
-    # as network topology rather than as a promise: CPU work is isolated in
-    # this container, but GPU work must keep going through audrey-ai's
-    # passthrough so `FairLocalGate` and `UserInflightRegistry` still apply.
-    # A worker that can reach ollama:11434 directly bypasses both — silently,
-    # and only under load. Phase 36 adds the first model call and is exactly
-    # when someone will be tempted; the network makes it fail loudly instead.
+    # ONLY media-net, and media-net is `internal: true`. This is the fairness
+    # invariant from Phase 34 expressed as topology rather than as a promise:
+    # CPU work is isolated in this container, but GPU work must keep going
+    # through audrey-ai's passthrough so `FairLocalGate` and
+    # `UserInflightRegistry` still apply. A worker that reaches Ollama directly
+    # bypasses both — silently, and only under load.
+    #
+    # A separate bridge network is NOT enough on its own, which the first
+    # on-box run proved: ollama publishes 11434 on the host, so any container
+    # with ordinary egress routes to 192.168.1.11:11434 regardless of which
+    # docker network it is on. Container DNS isolation is not network
+    # isolation. `internal: true` is what removes the route.
     networks:
       - media-net
-    env_file:
-      - .env
+    # NOT `env_file: .env`. That file carries OLLAMA_HOST among other things,
+    # and injecting the whole of it handed this container the very address the
+    # design says it must not have. Name the one variable it needs instead —
+    # compose still reads .env for `${...}` interpolation, so the token comes
+    # from the same place, without the rest riding along.
     environment:
       TZ: America/Denver
       AUDREY_ENDPOINT: http://audrey-ai:8000
       POLL_SECONDS: ${MEDIA_POLL_SECONDS:-10}
-      # No OLLAMA_HOST, deliberately. Do not add one.
+      KB_SERVICE_TOKEN: ${KB_SERVICE_TOKEN:?media-worker needs KB_SERVICE_TOKEN in .env}
     volumes:
       # Read-only, and the same path audrey-ai uses, so the `path` returned by
       # /v1/files/jobs/claim resolves unchanged inside this container. If these
@@ -193,5 +201,20 @@ networks:
   # Phase 34: compose-managed, unlike ollama-net. It exists only to join
   # media-worker to audrey-ai, so nothing outside this file needs to know
   # about it and compose may create and destroy it freely.
+  #
+  # `internal: true` removes the default route, not just the DNS entry. The
+  # first on-box run showed why that distinction matters: `ollama` did not
+  # resolve, and the worker still reached 192.168.1.11:11434 — the published
+  # port on the host — because a normal bridge has NAT egress. Being on a
+  # different docker network only isolates you from other containers' names,
+  # never from the host's own published ports.
+  #
+  # audrey-ai is on this network too and keeps its egress from ollama-net,
+  # which has the only gateway of the two. Verify after any change here:
+  #   docker exec audrey-ai python3 -c "import socket;print(socket.gethostbyname('ollama'))"
+  #
+  # Consequence for Phase 35: whisper weights must be baked into the image at
+  # build time. The worker cannot download anything at runtime, on purpose.
   media-net:
     driver: bridge
+    internal: true
