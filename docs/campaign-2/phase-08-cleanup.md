@@ -158,7 +158,7 @@ the earlier one passing.
 
 #### Test 2.4 — KB image search via URL
 
-Per [phase-6-deploy.md §2.4](phase-6-deploy.md). Two arms:
+Per [phase-06-kb-audit-fixes.md §2.4](phase-06-kb-audit-fixes.md). Two arms:
 
 **Happy path (the one not yet verified):**
 
@@ -187,7 +187,7 @@ directly`.
 
 #### Test 2.5 — Per-user collection merge
 
-Per [phase-6-deploy.md §2.5](phase-6-deploy.md).
+Per [phase-06-kb-audit-fixes.md §2.5](phase-06-kb-audit-fixes.md).
 
 In OWUI (logged in as the test user who has uploads), send a query
 that should hit content known to be in their uploads. Then:
@@ -208,7 +208,7 @@ landed cleanly.
 
 #### Test 2.6 — Upload flow exercises `_ensure_user_indexes_sync`
 
-Per [phase-6-deploy.md §2.6](phase-6-deploy.md).
+Per [phase-06-kb-audit-fixes.md §2.6](phase-06-kb-audit-fixes.md).
 
 Upload one small text file via OWUI's uploads UI (the test user
 from 2.5 works fine — the re-upload path is the more important arm
@@ -230,8 +230,8 @@ Qdrant-side problem the prior broad handler was hiding.
 
 #### Test 2.7 — Phase 4 Category 4 sweep
 
-Per [phase-4-testing.md](phase-4-testing.md) Category 4 plus
-[phase-6-deploy.md §2.7](phase-6-deploy.md).
+Per [phase-04-manual-ui-smoke-testing.md](phase-04-manual-ui-smoke-testing.md) Category 4 plus
+[phase-06-kb-audit-fixes.md §2.7](phase-06-kb-audit-fixes.md).
 
 In OWUI, send a prompt that triggers `kb_search` end-to-end, e.g.
 "look up BTRFS in the KB" (or any topic you know is in the curated

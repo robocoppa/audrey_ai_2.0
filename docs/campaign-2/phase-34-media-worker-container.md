@@ -1,6 +1,6 @@
 # Campaign 2 Phase 34 — the media-worker container (ffmpeg, no model)
 
-Turn [phase 33](phase-33-video-job-api-deploy.md)'s stub into a real container
+Turn [phase 33](phase-33-video-job-lifecycle.md)'s stub into a real container
 that claims real jobs and does real work with the file — demux the audio, report
 its duration, hand it back. No transcription, no model calls, no GPU.
 
@@ -22,7 +22,7 @@ Demux, resample and (later) whisper are CPU-bound and long. Running them in
 serving chat. That is the whole reason for a separate container.
 
 GPU work is the opposite case and stays in `audrey-ai` — see
-[phase 36](phase-36-video-visual-deploy.md), where every model call goes back
+[phase 36](phase-36-video-visual-assessment.md), where every model call goes back
 through passthrough rather than out to Ollama directly.
 
 ### The worker holds no Ollama address
@@ -46,7 +46,7 @@ read, never rewritten.
 
 - **`docker/media-worker.Dockerfile`** (new) — `ffmpeg`, which is installed in
   no current image, plus the python client. Whisper weights come in
-  [phase 35](phase-35-video-transcript-deploy.md).
+  [phase 35](phase-35-video-transcript.md).
 - **`compose.yaml`** — the `media-worker` service: `env_file: - .env` for
   `KB_SERVICE_TOKEN`, a read-only mount of the uploads volume, and no ports.
 - **`src/audrey/media/worker.py`** (new) — the claim loop, the audio extraction
@@ -58,8 +58,8 @@ read, never rewritten.
 
 ## What's NOT in scope
 
-- **No whisper.** [Phase 35](phase-35-video-transcript-deploy.md).
-- **No frame extraction.** [Phase 36](phase-36-video-visual-deploy.md).
+- **No whisper.** [Phase 35](phase-35-video-transcript.md).
+- **No frame extraction.** [Phase 36](phase-36-video-visual-assessment.md).
 - **No model calls of any kind.** The worker has no reason to speak to a model
   yet and should not be given credentials to try.
 - **No autoscaling or multiple replicas.** One worker. The lease design permits
@@ -138,5 +138,5 @@ which is exactly the phase 32 state — uploads keep working throughout.
 ## What this unblocks
 
 There is now a real process, in a real container, holding a real video file
-with ffmpeg available. [Phase 35](phase-35-video-transcript-deploy.md) gives it
+with ffmpeg available. [Phase 35](phase-35-video-transcript.md) gives it
 something worth doing with the audio it just learned to extract.

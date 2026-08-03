@@ -17,7 +17,7 @@ Two responsibilities, paired:
 
 Conversation id resolution is here too, because both the streaming and
 non-streaming paths need it. Order is documented in
-`docs/campaign-2/phase-1-chat-archive-memory.md`.
+`docs/campaign-2/phase-01-chat-archive-plan.md`.
 
 This module never raises out of the chat path. If it can't archive, it
 logs and increments `chat_archive_writes_total{result="fail"}`.

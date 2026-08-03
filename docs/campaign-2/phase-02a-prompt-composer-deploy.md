@@ -321,7 +321,7 @@ only undoes the prompt centralization and composer wiring.
 ## 5. Followups
 
 - Phase 2b (new role prompts) — gated on evidence. Open
-  `docs/campaign-2/phase-2-task-role-prompts.md` for the trigger
+  `docs/campaign-2/phase-02-prompt-centralization-plan.md` for the trigger
   conditions.
 - If we ever add a per-turn timing signal for prompt-token totals,
   pin a regression test against `audrey_fast` token counts so a

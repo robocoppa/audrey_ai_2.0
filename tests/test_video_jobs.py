@@ -494,3 +494,179 @@ class TestListing:
     @pytest.mark.asyncio
     async def test_an_unknown_file_id_resolves_to_nothing(self, db: UploadsDB):
         assert await db.get_upload("nope") is None
+
+
+class _RecordingQdrant:
+    """Records delete calls; optionally fails, to test the ordering guarantee."""
+
+    def __init__(self, *, fail: bool = False):
+        self.deletes: list[tuple[str, str, str]] = []  # (file_id, user, collection)
+        self._fail = fail
+
+    async def delete_by_file_id(self, file_id: str, *, user: str, collection: str) -> None:
+        if self._fail:
+            raise RuntimeError("qdrant is down")
+        self.deletes.append((file_id, user, collection))
+
+
+def _app_with_qdrant(db: UploadsDB, tmp_path: Path, qdrant) -> FastAPI:
+    app = _build_app(db, tmp_path)
+    app.state.qdrant = qdrant
+    return app
+
+
+class TestRequeue:
+    """Requeue is the only route back into the queue. Without it a video that
+    failed for a since-fixed reason can only be deleted and re-uploaded."""
+
+    @pytest.mark.asyncio
+    async def test_a_ready_row_goes_back_to_pending_and_forgets_its_ingest(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        await _add(db, "v1")
+        claimed = await db.claim_job(lease_id="L1", now="t")
+        await db.complete_job(
+            file_id="v1", lease_id=claimed["lease_id"], collection="kb_user_text_a_b_c",
+            chunks=7,
+        )
+
+        r = TestClient(_app_with_qdrant(db, tmp_path, _RecordingQdrant())).post(
+            "/v1/files/v1/requeue", headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        assert r.status_code == 200
+        row = await db.get_upload("v1")
+        assert row["status"] == "pending"
+        assert row["chunks"] == 0
+        assert row["collection"] == ""
+        assert row["lease_id"] == ""
+
+    @pytest.mark.asyncio
+    async def test_attempts_reset_to_zero(self, db: UploadsDB, tmp_path: Path):
+        """A row that burned its attempts would otherwise fail out on the first
+        pass after a fix, and look like the fix didn't work."""
+        await _add(db, "v1")
+        for _ in range(3):
+            claimed = await db.claim_job(lease_id="L", now="t")
+            await db.fail_job(file_id="v1", lease_id=claimed["lease_id"], reason="boom")
+            await db.requeue_job("v1")
+        assert (await db.get_upload("v1"))["attempts"] == 0
+
+        claimed = await db.claim_job(lease_id="L9", now="t")
+        assert claimed["attempts"] == 1
+
+    @pytest.mark.asyncio
+    async def test_the_failure_reason_is_cleared(self, db: UploadsDB, tmp_path: Path):
+        """A queued row showing last run's error would misreport its own state."""
+        await _add(db, "v1")
+        claimed = await db.claim_job(lease_id="L1", now="t")
+        await db.fail_job(file_id="v1", lease_id=claimed["lease_id"], reason="no audio")
+
+        TestClient(_app_with_qdrant(db, tmp_path, _RecordingQdrant())).post(
+            "/v1/files/v1/requeue", headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        row = await db.get_upload("v1")
+        assert row["failure_reason"] == ""
+        assert row["status"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_the_old_points_are_deleted_from_the_users_collection(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        """A re-run that produces no transcript never calls the ingest path, so
+        nothing else would ever clear these — and reconcile exempts `chunks = 0`
+        rows, so its ghost sweep won't either."""
+        await _add(db, "v1", user="owner@x.y")
+        qdrant = _RecordingQdrant()
+
+        TestClient(_app_with_qdrant(db, tmp_path, qdrant)).post(
+            "/v1/files/v1/requeue", headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        assert qdrant.deletes == [("v1", "owner@x.y", "kb_user_text_owner_x_y")]
+
+    @pytest.mark.asyncio
+    async def test_a_failed_qdrant_delete_leaves_the_row_untouched(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        """The ordering guarantee. Resetting the row first would leave points
+        searchable under a row claiming none, with no sweep that collects them."""
+        await _add(db, "v1")
+        claimed = await db.claim_job(lease_id="L1", now="t")
+        await db.complete_job(
+            file_id="v1", lease_id=claimed["lease_id"], collection="c", chunks=7,
+        )
+
+        client = TestClient(
+            _app_with_qdrant(db, tmp_path, _RecordingQdrant(fail=True)),
+            raise_server_exceptions=False,
+        )
+        r = client.post(
+            "/v1/files/v1/requeue", headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        assert r.status_code == 500
+        row = await db.get_upload("v1")
+        assert row["status"] == "ready"
+        assert row["chunks"] == 7
+
+    @pytest.mark.asyncio
+    async def test_requeueing_a_processing_row_invalidates_the_running_lease(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        """Taking a job back from a live worker is allowed; its late post must
+        then be refused rather than landing on a row it no longer owns."""
+        await _add(db, "v1")
+        claimed = await db.claim_job(lease_id="L1", now="t")
+
+        TestClient(_app_with_qdrant(db, tmp_path, _RecordingQdrant())).post(
+            "/v1/files/v1/requeue", headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        assert (await db.get_upload("v1"))["status"] == "pending"
+        assert not await db.complete_job(
+            file_id="v1", lease_id=claimed["lease_id"], collection="c", chunks=3,
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_requeued_row_is_claimable_again(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        """The point of the whole route."""
+        await _add(db, "v1")
+        claimed = await db.claim_job(lease_id="L1", now="t")
+        await db.complete_job(
+            file_id="v1", lease_id=claimed["lease_id"], collection="c", chunks=2,
+        )
+        assert await db.claim_job(lease_id="L2", now="t") is None
+
+        TestClient(_app_with_qdrant(db, tmp_path, _RecordingQdrant())).post(
+            "/v1/files/v1/requeue", headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        again = await db.claim_job(lease_id="L3", now="t")
+        assert again is not None
+        assert again["file_id"] == "v1"
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_file_id_is_404(self, db: UploadsDB, tmp_path: Path):
+        r = TestClient(_app_with_qdrant(db, tmp_path, _RecordingQdrant())).post(
+            "/v1/files/nope/requeue", headers={"X-Audrey-Service-Token": SECRET},
+        )
+        assert r.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_requeue_is_service_only(self, db: UploadsDB, tmp_path: Path):
+        """It discards a user's ingested chunks — a user JWT must not reach it."""
+        await _add(db, "v1")
+        client = TestClient(_app_with_qdrant(db, tmp_path, _RecordingQdrant()))
+
+        assert client.post("/v1/files/v1/requeue").status_code == 401
+        assert client.post(
+            "/v1/files/v1/requeue", headers={"X-Audrey-Service-Token": "nope"},
+        ).status_code == 401
+        assert client.post(
+            "/v1/files/v1/requeue", headers={"Authorization": "Bearer user-jwt"},
+        ).status_code == 401
+        assert (await db.get_upload("v1"))["status"] == "pending"

@@ -61,7 +61,7 @@ safety clamp on `overlap_tokens >= chunk_tokens`.
     at n=1101 (one past the threshold), keeps tail at n=2700
     (800 new tokens — the normal case). Single-chunk path,
     empty-input path, and the overlap safety clamp also covered.
-  - **[`docs/lessons/AUDIT.md`](../../docs/lessons/AUDIT.md)** —
+  - **[`docs/lesson-ai/AUDIT.md`](../lesson-ai/AUDIT.md)** —
     moved the chunk-tail finding from Deferred to Resolved with
     the 2026-05-26 date. The Deferred section's Lesson 11 entry
     is now empty (only Lesson 4 entries remain there).

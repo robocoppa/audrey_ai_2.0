@@ -218,7 +218,7 @@ rolling back.
 
 ### 2.7 Quick Phase 4 Category 4 sweep (optional)
 
-`docs/campaign-2/phase-4-testing.md` Category 4 (KB use) exercises
+`docs/campaign-2/phase-04-manual-ui-smoke-testing.md` Category 4 (KB use) exercises
 `kb_search` end-to-end through a chat completion. One trivial prompt
 ("look up BTRFS in the KB") is enough to confirm the model can still
 dispatch the tool and synthesize an answer from the hits.

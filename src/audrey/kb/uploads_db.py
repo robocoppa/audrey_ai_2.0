@@ -384,6 +384,38 @@ class UploadsDB:
             )
             return cur.rowcount > 0
 
+    async def requeue_job(self, file_id: str) -> bool:
+        """Put a row back in the queue as if it had just been uploaded.
+
+        False when there is no such row.
+
+        `attempts` resets to 0 deliberately. Requeue means "the reason this
+        failed is fixed, try it properly" — carrying the old count forward
+        would let a row that already burned its attempts fail out on the first
+        pass and look like the fix didn't work.
+
+        Any status may be requeued, including 'processing'. Taking a row back
+        from a running worker invalidates its lease, so that worker's eventual
+        post is refused rather than landing on a row it no longer owns — which
+        is what the lease guard in `complete_job` is for.
+
+        `collection` and `chunks` are cleared because the caller is expected to
+        have removed the Qdrant points first. A row that still claimed them
+        after they were deleted would read as ingested with nothing behind it.
+        """
+        return await asyncio.to_thread(self._requeue_job_sync, file_id)
+
+    def _requeue_job_sync(self, file_id: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE uploads SET status = 'pending', lease_id = '', "
+                "       leased_at = '', attempts = 0, failure_reason = '', "
+                "       collection = '', chunks = 0 "
+                "WHERE file_id = ?",
+                (file_id,),
+            )
+            return cur.rowcount > 0
+
     async def sweep_expired_leases(
         self, *, expired_before: str, max_attempts: int,
     ) -> dict[str, int]:

@@ -1,8 +1,8 @@
 # Campaign 2 Phase 37 — video summary (one call, shown in the file list)
 
 One model call over the transcript and frame descriptions that
-[phase 35](phase-35-video-transcript-deploy.md) and
-[phase 36](phase-36-video-visual-deploy.md) produced, stored on the row and
+[phase 35](phase-35-video-transcript.md) and
+[phase 36](phase-36-video-visual-assessment.md) produced, stored on the row and
 shown in `GET /v1/files`.
 
 **Status: PLANNED.** The smallest phase of the video work, and the one that
@@ -28,7 +28,7 @@ already know.
 
 `audrey_passthrough/glm-5.2:cloud` is already in `allowed_models` and touches no
 GPU at all. Summarising is a text task over text inputs, so unlike
-[phase 36](phase-36-video-visual-deploy.md)'s frame descriptions it carries no
+[phase 36](phase-36-video-visual-assessment.md)'s frame descriptions it carries no
 image-capability risk — the failure mode that made the `vl` pool local-only does
 not apply here.
 
@@ -102,4 +102,4 @@ descriptions and lose the summary field.
 
 All four artifacts now exist for a video: transcript, visual assessment,
 keyframe embeddings, summary. [Phase
-38](phase-38-video-optimise-deploy.md) makes producing them affordable.
+38](phase-38-video-optimise.md) makes producing them affordable.

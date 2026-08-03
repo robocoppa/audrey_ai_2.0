@@ -1,7 +1,7 @@
 # Campaign 2 Phase 36 — visual assessment (keyframes through the vl pool)
 
 What is actually on screen, in words. Keyframes come out of the video, through
-the [keyframe gate](phase-38-video-optimise-deploy.md), into
+the [keyframe gate](phase-38-video-optimise.md), into
 `audrey_passthrough/qwen3-vl:32b`, and the resulting prose is ingested as
 ordinary searchable text alongside the transcript.
 
@@ -73,7 +73,7 @@ identity would pool all ingests into one slice and blur exactly the distinction
 the gate exists to draw.
 
 The `allowed_models` half of this landed in
-[phase 32](phase-32-video-ingest-deploy.md) — both `vl` members are already
+[phase 32](phase-32-video-upload-transport.md) — both `vl` members are already
 permitted, so the model path is open before this phase starts.
 
 ### Ship it slow, measure it, then make it fast
@@ -87,7 +87,7 @@ already treats four images as a lot for a single turn.
 
 **The first version ships on and instrumented, not behind a flag defaulting
 off.** A conservative default that never gets measured just hides the cost, and
-[phase 38](phase-38-video-optimise-deploy.md) has nothing to work from. The
+[phase 38](phase-38-video-optimise.md) has nothing to work from. The
 point of this slice is to produce the first real per-frame timings.
 
 The one thing to hold from the start: `keyframes_max` is a **hard cap**, never a
@@ -124,7 +124,7 @@ the static stretch collapsing and the head and tail preserved.
 
 ## What's NOT in scope
 
-- **No summary.** [Phase 37](phase-37-video-summary-deploy.md).
+- **No summary.** [Phase 37](phase-37-video-summary.md).
 - **No batching frames per call.** A real lever, but it costs fidelity on small
   on-screen text and belongs in phase 38 where it can be A-B'd against
   single-frame output that actually exists.
@@ -184,4 +184,4 @@ visual half and stay searchable by speech.
 
 "What was on the slide at that point" becomes answerable, and phase 38 finally
 has numbers instead of estimates. [Phase
-37](phase-37-video-summary-deploy.md) puts a readable face on all of it.
+37](phase-37-video-summary.md) puts a readable face on all of it.

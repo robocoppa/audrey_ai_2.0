@@ -61,7 +61,7 @@ auth chat-completions already requires (all in
 
 **DNS rebinding — CLOSED** (SSRF-hardening Commit D, 2026-07-23). We now resolve
 once and pin the socket to a vetted IP (hostname via `Host` + `sni_hostname`), so
-httpx never re-resolves at connect time. See `docs/campaign-2/phase-30-web-fetch-hardening-deploy.md`.
+httpx never re-resolves at connect time. See `docs/campaign-2/phase-30-web-fetch-ssrf-hardening.md`.
 Residual robustness followup logged there: the pin uses `ips[0]` only, so it drops
 anyio's multi-address fallback (harmless on this IPv4-first box).
 

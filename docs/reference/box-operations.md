@@ -26,7 +26,7 @@ If you're an agent: **read this before handing the user any box command.**
 root@Tower:~# docker exec custom-tools sh -c 'curl ...'
 sh: 1: curl: not found
 ```
-The deploy docs (`docs/campaign-2/phase-1-deploy.md`) *do* use `curl` — so it
+The deploy docs (`docs/campaign-2/phase-01-chat-archive-deploy.md`) *do* use `curl` — so it
 exists in **some** context (the host, or a container that bundles it), but **not
 inside the Python app containers** (`audrey-ai`, `custom-tools`, `SearXNG`
 clients). The trap is `exec`ing into a container and assuming its shell has curl.

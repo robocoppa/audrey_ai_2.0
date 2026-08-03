@@ -1,6 +1,6 @@
 # Campaign 2 Phase 35 — audio to transcript (whisper in the sidecar)
 
-The first slice a user can see. [Phase 34](phase-34-media-worker-deploy.md)'s
+The first slice a user can see. [Phase 34](phase-34-media-worker-container.md)'s
 worker extracts audio and reports a duration; this one turns that audio into a
 timestamped transcript, ingests it through the existing text path, and flips the
 row to `ready`. The video becomes searchable.
@@ -33,7 +33,7 @@ exist rather than building a parallel video-shaped one.
 
 A silent or music-only video yields no text. That is not a failure — the file
 may still have rich visual content that
-[phase 36](phase-36-video-visual-deploy.md) will find.
+[phase 36](phase-36-video-visual-assessment.md) will find.
 
 Specifically: do **not** reuse `EmptyExtractionError` as a hard failure for
 video. That error exists to turn away a scanned PDF with no text layer, where
@@ -66,8 +66,8 @@ the retry in phase 33 would have nothing to retry against.
 
 ## What's NOT in scope
 
-- **No visual assessment.** [Phase 36](phase-36-video-visual-deploy.md).
-- **No summary.** [Phase 37](phase-37-video-summary-deploy.md).
+- **No visual assessment.** [Phase 36](phase-36-video-visual-assessment.md).
+- **No summary.** [Phase 37](phase-37-video-summary.md).
 - **No speaker diarisation.** Worth wanting, not worth blocking a first
   transcript on.
 - **No translation.** Transcribe in the source language.
@@ -77,7 +77,7 @@ the retry in phase 33 would have nothing to retry against.
 - **Baked weights make the image large.** Accepted deliberately — the
   alternative is a cold start inside a lease window, which reads as a stuck job.
 - **Whisper tier is a real cost lever** (`small` vs `medium`, int8 on CPU), but
-  tuning it before [phase 38](phase-38-video-optimise-deploy.md) has stage
+  tuning it before [phase 38](phase-38-video-optimise.md) has stage
   timings is guesswork. Pick a tier, record it, move on.
 - **Quota accounting flips mid-phase.** Once `keep_source: false` lands, a
   user's stored bytes *drop* when a video finishes. The file list has to not
@@ -134,5 +134,5 @@ Videos go back to sitting at `pending`; nothing already ingested is lost.
 ## What this unblocks
 
 A video is now searchable by what was said in it. [Phase
-36](phase-36-video-visual-deploy.md) makes it searchable by what was *shown* in
+36](phase-36-video-visual-assessment.md) makes it searchable by what was *shown* in
 it, which is the half a transcript cannot reach.

@@ -18,6 +18,9 @@ lease bug without waiting minutes for a real transcode.
     # report a failure instead of a transcript
     python scripts/stub_media_worker.py --fail "unreadable container"
 
+    # put an already-processed video back in the queue, to run it again
+    python scripts/stub_media_worker.py --requeue <file_id>
+
 The service token comes from KB_SERVICE_TOKEN, the same one `custom-tools`
 uses. Nothing here imports from `audrey` — a worker is an HTTP client, and
 keeping it that way is what makes the container in Phase 34 a small one.
@@ -80,11 +83,23 @@ def main(argv: list[str] | None = None) -> int:
                         help="report a failure instead of a transcript")
     parser.add_argument("--lease", help="post against this lease id instead of the "
                                         "one just issued, to prove a stale lease is refused")
+    parser.add_argument("--requeue", metavar="FILE_ID",
+                        help="send a processed video back to the queue and exit, "
+                             "instead of claiming")
     args = parser.parse_args(argv)
 
     if not args.token:
         print("KB_SERVICE_TOKEN is unset — the routes will 401.", file=sys.stderr)
         return 2
+
+    # Requeue is its own errand, not a step in the claim loop — the whole point
+    # is to put work back so a *later* run can pick it up.
+    if args.requeue:
+        status, body = _post(
+            args.endpoint, f"/v1/files/{args.requeue}/requeue", args.token, None,
+        )
+        print(f"requeue: {status} {body}")
+        return 0 if status == 200 else 1
 
     status, job = _post(args.endpoint, "/v1/files/jobs/claim", args.token, None)
     if status == 204 or not job:

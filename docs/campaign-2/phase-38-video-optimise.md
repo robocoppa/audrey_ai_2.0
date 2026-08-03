@@ -2,7 +2,7 @@
 
 By the time this phase starts, video ingest works and is slow. This is the phase
 that makes it fast, driven by the stage timings
-[phase 36](phase-36-video-visual-deploy.md) shipped rather than by estimates.
+[phase 36](phase-36-video-visual-assessment.md) shipped rather than by estimates.
 
 **Status: PLANNED — except the keyframe gate, which LANDED early.**
 
@@ -13,7 +13,7 @@ that makes it fast, driven by the stage timings
 Built out of order because it needed no container, no GPU, no ffmpeg and no
 model — the one part of the video work with no deployment dependency, so it
 could be built the moment real footage showed the redundancy. It has no caller
-until [phase 36](phase-36-video-visual-deploy.md).
+until [phase 36](phase-36-video-visual-assessment.md).
 
 **The observation.** A 288 MB, ~9½-minute retirement video sampled at 1
 frame/30s gave 19 frames. Three consecutive frames — 90 seconds apart — went to

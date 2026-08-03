@@ -2,33 +2,116 @@
 
 ## Layout
 
-- [`lessons/`](lessons/) — current-priority lesson plan teaching the
-  codebase end-to-end. Start at [`lessons/README.md`](lessons/README.md).
+- [`lesson-ai/`](lesson-ai/) — lesson plan teaching the codebase
+  end-to-end. Start at [`lesson-ai/README.md`](lesson-ai/README.md).
+- [`lesson-python/`](lesson-python/) — the language-level companion track.
 - [`campaign-1/`](campaign-1/) — historical phase-by-phase build docs
-  (Phases 1 → 31). Each `phase-N-deploy.md` ends with smoke-test commands
+  (Phases 1 → 33). Each `phase-N-deploy.md` ends with smoke-test commands
   that verified the phase when it shipped. `campaign-1/HISTORY.md` (gitignored,
   laptop-only) is the authoritative running state of the build campaign.
-- [`campaign-2/`](campaign-2/) — next build campaign. Phase 1 starts with a
-  searchable per-user chat archive integrated with Audrey's memory/tool path.
+- [`campaign-2/`](campaign-2/) — the current build campaign, Phase 1 → 38.
 - [`unraid-ollama.md`](guides/unraid-ollama.md) — canonical Ollama container config
   (referenced by Phase 1).
 - [`owui-prompt-suggestions.json`](owui-prompt-suggestions.json) — OWUI
   preset prompt suggestions.
+
+### Reading a phase number
+
+**Phase numbers repeat across campaigns.** Campaign 1 ran 1 → 33 and
+Campaign 2 is at 38, so "Phase 13" names two unrelated documents — the
+per-user upload work in Campaign 1, the passthrough virtual model in
+Campaign 2. Always say which campaign, and prefer the filename: since
+Campaign 2's docs are named for what they contain, the name disambiguates
+on its own.
+
+Campaign 2 filenames are zero-padded (`phase-07-…`) so they sort in phase
+order. Campaign 1's are not — it is closed, and its contents are indexed
+below. A trailing `-plan` / `-deploy` appears only where a phase has both
+documents; a bare topic name means it is the only one.
 
 ## Phase docs by feature area
 
 The phase docs in `campaign-1/` are historical — written when the feature
 shipped. Use the groupings below for navigation.
 
-### Campaign 2
+### Campaign 2 (current)
 
-- [phase-1-chat-archive-memory.md](campaign-2/phase-1-chat-archive-memory.md)
-  — plan for a per-user searchable chat archive that is stored automatically,
-  searched deliberately by tool call, and kept out of automatic prompt context
-  by default.
-- [phase-2-task-role-prompts.md](campaign-2/phase-2-task-role-prompts.md)
-  — plan to centralize Audrey's prompt defaults and add compact task-role
-  prompts after the chat archive phase.
+**Foundations and cleanup (1–12)**
+
+- [01 chat archive](campaign-2/phase-01-chat-archive-plan.md) — per-user
+  searchable chat archive: stored automatically, searched deliberately by tool
+  call, kept out of automatic prompt context by default.
+  ([deploy](campaign-2/phase-01-chat-archive-deploy.md))
+- [02 prompt centralization](campaign-2/phase-02-prompt-centralization-plan.md)
+  — one home for prompt defaults, plus compact task-role prompts.
+  ([02a composer deploy](campaign-2/phase-02a-prompt-composer-deploy.md))
+- [03 lesson-cite checker](campaign-2/phase-03-lesson-cite-checker.md) — the
+  drift checker that keeps `file.py#L42` cites in the lesson docs honest.
+- [04 manual UI smoke testing](campaign-2/phase-04-manual-ui-smoke-testing.md)
+- [05 tools-server uv workspace](campaign-2/phase-05-tools-server-uv-workspace.md)
+- [06 KB audit fixes](campaign-2/phase-06-kb-audit-fixes.md)
+  ([06a complexity gate](campaign-2/phase-06a-complexity-gate-investigation.md))
+- [07 fast-path Thinking banner](campaign-2/phase-07-fast-path-thinking-banner.md)
+- [08 cleanup](campaign-2/phase-08-cleanup.md)
+- [09 Grafana dashboard provisioning](campaign-2/phase-09-grafana-dashboard-provisioning.md)
+- [10 KB reconcile bookkeeping](campaign-2/phase-10-kb-reconcile-bookkeeping.md)
+- [11 image pinning audit](campaign-2/phase-11-image-pinning-audit.md)
+- [12 chunk-tail fix](campaign-2/phase-12-chunk-tail-fix.md) — drop
+  near-duplicate tail chunks.
+
+**Routing, models and the chat path (13–23)**
+
+- [13 passthrough virtual model](campaign-2/phase-13-passthrough-virtual-model.md)
+  — `audrey_passthrough/<concrete>`, the route that puts LAN clients behind
+  `FairLocalGate` and `UserInflightRegistry`.
+- [14 fleet watchdog](campaign-2/phase-14-fleet-watchdog.md) — bot liveness.
+- [15 inline image support](campaign-2/phase-15-inline-image-support.md)
+- [16 fast-path model fallback](campaign-2/phase-16-fast-path-model-fallback.md)
+- [17 deep-panel dedup](campaign-2/phase-17-deep-panel-dedup.md)
+- [18 concurrent tool discovery](campaign-2/phase-18-concurrent-tool-discovery.md)
+- [19 split openai routes](campaign-2/phase-19-split-openai-routes.md) —
+  `routes/openai.py` becomes a package.
+- [20 concurrent cloud workers](campaign-2/phase-20-concurrent-cloud-workers.md)
+- [21 local worker timeout fix](campaign-2/phase-21-local-worker-timeout-fix.md)
+- [22 depth-intent routing](campaign-2/phase-22-depth-intent-routing.md)
+- [23 deep synthesis timeout](campaign-2/phase-23-deep-synthesis-timeout.md)
+  — pool-aware. (Its heading says 23a; the phase is 23.)
+
+**Research quality (25–28)**
+
+- [25 research fact-check stage](campaign-2/phase-25-research-fact-check-stage.md)
+- [26 research claim ledger](campaign-2/phase-26-research-claim-ledger.md) —
+  claim/source ledger plus SearXNG fallback.
+- [27 eval on box](campaign-2/phase-27-eval-on-box.md) — run the live eval on
+  the box, independent of the laptop's internet.
+- [28 research grounding diagnostic](campaign-2/phase-28-research-grounding-diagnostic.md)
+  — the `read_url` failure.
+
+**Fetching and access (29–31)**
+
+- [29 web_fetch page-opener](campaign-2/phase-29-web-fetch-page-opener.md)
+- [30 web_fetch SSRF hardening](campaign-2/phase-30-web-fetch-ssrf-hardening.md)
+- [31 KB query auth](campaign-2/phase-31-kb-query-auth.md) — authentication on
+  the query routes, which is what made publishing `audrey-ai:8000` to the LAN
+  safe.
+
+**Video ingest (32–38)** — one pipeline built in slices; each phase is
+deployable and verifiable on its own.
+
+- [32 video upload transport](campaign-2/phase-32-video-upload-transport.md) —
+  chunked parts past Cloudflare's 100 MB body cap. **Landed.**
+- [33 video job lifecycle](campaign-2/phase-33-video-job-lifecycle.md) — claim,
+  lease, complete, fail. **Built, verification pending on the box.**
+- [34 media-worker container](campaign-2/phase-34-media-worker-container.md) —
+  ffmpeg in a sidecar, no model calls. *Next.*
+- [35 video transcript](campaign-2/phase-35-video-transcript.md) — whisper.
+- [36 video visual assessment](campaign-2/phase-36-video-visual-assessment.md)
+  — keyframes through the `vl` pool.
+- [37 video summary](campaign-2/phase-37-video-summary.md)
+- [38 video optimise](campaign-2/phase-38-video-optimise.md) — making it
+  affordable.
+
+There is no Phase 24 in Campaign 2.
 
 ### Foundation (Phases 1–10)
 

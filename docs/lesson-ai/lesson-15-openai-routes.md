@@ -78,7 +78,7 @@ Passthrough uses a *prefix* (`audrey_passthrough/`) so one virtual
 model can route to any concrete model in
 `passthrough.allowed_models`; the deploy notes for the passthrough
 family
-([`docs/campaign-2/phase-13-deploy.md`](../campaign-2/phase-13-deploy.md))
+([`docs/campaign-2/phase-13-passthrough-virtual-model.md`](../campaign-2/phase-13-passthrough-virtual-model.md))
 cover the wiring, and we'll only touch the route-side branch here.
 
 ### 1.3 Streaming vs. non-streaming as different code paths

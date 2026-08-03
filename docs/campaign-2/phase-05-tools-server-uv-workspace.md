@@ -141,7 +141,7 @@ Expected: seven tools — `web_search`, `kb_search`, `kb_image_search`,
 
 ### 2.3 Run Phase 4 Category 6 (the 3-minute end-to-end)
 
-See [`phase-4-testing.md`](phase-4-testing.md). The three Category 6
+See [`phase-04-manual-ui-smoke-testing.md`](phase-04-manual-ui-smoke-testing.md). The three Category 6
 prompts (trivial fast, trivial deep, tool dispatch under deep) exercise
 the full pipeline. If they pass, the conversion is verified.
 

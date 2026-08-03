@@ -431,7 +431,7 @@ curl -X DELETE http://qdrant:6333/collections/kb_chat_archive
 
 - Phase 2 (prompt centralization + system-message composer) is the
   next planned phase. Open
-  `docs/campaign-2/phase-2-task-role-prompts.md` for scope.
+  `docs/campaign-2/phase-02-prompt-centralization-plan.md` for scope.
 - Optional Grafana panel for the new
   `audrey_chat_archive_writes_total` and
   `audrey_chat_archive_write_seconds` series.

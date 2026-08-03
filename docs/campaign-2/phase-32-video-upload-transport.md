@@ -2,7 +2,7 @@
 
 Make a 300 MB video *arrive*. Not understood — arrived: stored, indexed, and
 honest about the fact that nothing has read it yet. Understanding it is
-[phase 33](phase-33-video-job-api-deploy.md) onward.
+[phase 33](phase-33-video-job-lifecycle.md) onward.
 
 **Status: DEPLOYED + verified on box 2026-08-02.** A 288 MB mp4 crossed the
 Cloudflare tunnel in 36 parts, assembled server-side, and indexed with
@@ -12,7 +12,7 @@ through `/v1/models`. 908 hermetic tests pass, ruff clean.
 **Not yet deployed:** the upload progress bar and
 [`media/framegate.py`](../../src/audrey/media/framegate.py), both landed after
 the box rebuild. Neither changes server behaviour — the gate has no caller
-until [phase 36](phase-36-video-visual-deploy.md).
+until [phase 36](phase-36-video-visual-assessment.md).
 
 ---
 
@@ -75,13 +75,13 @@ as a success would read as a silent failure.
 **The `vl` models allowed through passthrough.** `passthrough.allowed_models`
 was text-only, so a future describe call would have returned `403 Passthrough
 not allowed for model 'qwen3-vl:32b'`. Both members of the `vl` pool are now
-allowed, unblocking [phase 36](phase-36-video-visual-deploy.md)'s model path
+allowed, unblocking [phase 36](phase-36-video-visual-assessment.md)'s model path
 before any worker exists. Side effect accepted deliberately: `/v1/models` lists
 one entry per allowed concrete, so both are now directly targetable by any
 authenticated OWUI user.
 
 **The keyframe gate**, built early because it needed no container. See
-[phase 38](phase-38-video-optimise-deploy.md) for what it is and why it landed
+[phase 38](phase-38-video-optimise.md) for what it is and why it landed
 out of order.
 
 ## What's in scope
@@ -183,5 +183,5 @@ route in place and untouched.
 ## What this unblocks
 
 Video stops failing with an opaque 413 after a long wait. It now arrives, and
-sits in a state that names itself. [Phase 33](phase-33-video-job-api-deploy.md)
+sits in a state that names itself. [Phase 33](phase-33-video-job-lifecycle.md)
 gives that state a lifecycle and something to claim it.

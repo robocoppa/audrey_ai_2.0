@@ -899,6 +899,57 @@ async def ingest_failed(
     return JobResultResponse(file_id=file_id, status="failed", chunks=0)
 
 
+@router.post("/{file_id}/requeue", response_model=JobResultResponse)
+async def requeue_job(
+    file_id: str,
+    request: Request,
+    _: None = Depends(require_service),
+) -> JobResultResponse:
+    """Send a processed video back to the queue to be done again.
+
+    Two callers. An operator whose video failed for a reason since fixed — a
+    bad codec, a worker bug — which otherwise has no route back into the queue
+    at all, only delete-and-re-upload. And development against a real file:
+    Phases 34-38 each run a new worker over the same video repeatedly, and
+    re-uploading hundreds of megabytes per iteration is the kind of friction
+    that stops things from being tested.
+
+    Service-token only, like the other job routes. A user-facing "reprocess"
+    button is a separate decision — this one is for the operator.
+    """
+    db = _get_uploads_db(request)
+    qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
+    if qdrant is None:
+        raise HTTPException(status_code=503, detail="KB is not initialized.")
+
+    row = await db.get_upload(file_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such file.")
+
+    user = str(row["user"])
+    # Qdrant first, and fatally. `ingest_user_text_file` deletes by file_id
+    # before upserting, so a re-run that produces a transcript would clear
+    # these anyway — but a re-run that produces *no* transcript never calls it,
+    # and the old chunks would stay searchable under a row claiming none. The
+    # reconcile sweep can't catch that either: it exempts `chunks = 0` rows by
+    # design. So the points go now, and if this raises, the row is left alone
+    # and the caller retries against unchanged state.
+    #
+    # Text only. A transcript is the only thing this path ever puts in Qdrant;
+    # nothing here writes to the image collection.
+    await qdrant.delete_by_file_id(
+        file_id, user=user, collection=user_text_collection(user),
+    )
+
+    if not await db.requeue_job(file_id):
+        raise HTTPException(status_code=404, detail="No such file.")
+
+    log.info(
+        "files: requeued file_id=%s user=%s (was %s)", file_id, user, row["status"],
+    )
+    return JobResultResponse(file_id=file_id, status="pending", chunks=0)
+
+
 @router.get("", response_model=ListResponse)
 async def list_files(
     request: Request, me: AuthedUser = Depends(require_user),

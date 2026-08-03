@@ -1,6 +1,6 @@
 # Campaign 2 Phase 33 — video job lifecycle (claim, lease, complete, fail)
 
-[Phase 32](phase-32-video-ingest-deploy.md) leaves a video sitting at
+[Phase 32](phase-32-video-upload-transport.md) leaves a video sitting at
 `status: "pending"` with nothing that will ever pick it up. This phase builds
 the lifecycle that lets something claim it — and nothing else. No ffmpeg, no
 whisper, no container. A stub worker claims a job and returns a fixed string.
@@ -8,7 +8,7 @@ whisper, no container. A stub worker claims a job and returns a fixed string.
 **Status: PLANNED.**
 
 Building the state machine before the media that flows through it is the same
-call [phase 32](phase-32-video-ingest-deploy.md) made by proving chunked
+call [phase 32](phase-32-video-upload-transport.md) made by proving chunked
 transport on file types where a failure cost nothing. When a real transcode
 fails later, the question should be "why did ffmpeg fail", not "is it ffmpeg or
 is it the lease logic".
@@ -66,7 +66,7 @@ carries it.
 
 ## The routes
 
-Three, all service-token, all under the existing `/v1/files` prefix:
+Four, all service-token, all under the existing `/v1/files` prefix:
 
 - **`POST /v1/files/jobs/claim`** — lease the oldest `pending` row. Sets
   `status` to `processing`, generates a `lease_id`, stamps `leased_at`,
@@ -79,14 +79,39 @@ Three, all service-token, all under the existing `/v1/files` prefix:
   to `ready`. `409` on a stale lease.
 - **`POST /v1/files/{file_id}/ingest-failed`** — carries the `lease_id` and a
   reason. `409` on a stale lease.
+- **`POST /v1/files/{file_id}/requeue`** — put a processed row back to
+  `pending`, clearing the lease, `attempts`, the failure reason, and the
+  claimed collection. Added after the first on-box run, when it became obvious
+  there was no route back into the queue at all: a video that failed for a
+  since-fixed reason could only be deleted and re-uploaded, and every phase
+  from 34 on runs a new worker over the same file repeatedly.
+
+### Requeue deletes the Qdrant points first, and fatally
+
+The row reset is the easy half. The subtle half is that the previous run's
+chunks have to go, and they have to go *before* the row is touched.
+
+`ingest_user_text_file` deletes by `file_id` before upserting, so a re-run that
+produces a transcript cleans up after itself. But a re-run that produces *no*
+transcript never calls that path — and the ghost sweep in
+`reconcile_with_qdrant` won't collect the leftovers either, because it exempts
+`chunks = 0` rows by design (that exemption is what stops it eating the video
+queue). Nothing else in the system would ever remove them, so they would stay
+searchable under a row claiming to have none.
+
+Doing the delete first also means a Qdrant failure leaves the row exactly as it
+was, so the caller retries against unchanged state. The reverse order fails
+badly rather than safely: the row would already be `pending` with its points
+still live, and the operator would have no signal that anything was left behind.
 
 ## What's in scope
 
 - **[`kb/uploads_db.py`](../../src/audrey/kb/uploads_db.py)** — additive
   migration adding `lease_id`, `leased_at`, `attempts`, `failure_reason`, in the
   same `PRAGMA table_info` pattern that added `status`. New methods:
-  `claim_job`, `complete_job`, `fail_job`, `sweep_expired_leases`.
-- **[`routes/files.py`](../../src/audrey/routes/files.py)** — the three routes,
+  `claim_job`, `complete_job`, `fail_job`, `sweep_expired_leases`,
+  `requeue_job`.
+- **[`routes/files.py`](../../src/audrey/routes/files.py)** — the four routes,
   guarded by the service token. `FileRow` grows `failure_reason`.
 - **`config.yaml`** — a `kb.video` block with `lease_minutes` and
   `max_attempts`.
@@ -98,7 +123,7 @@ Three, all service-token, all under the existing `/v1/files` prefix:
 
 ## What's NOT in scope
 
-- **No container.** [Phase 34](phase-34-media-worker-deploy.md).
+- **No container.** [Phase 34](phase-34-media-worker-container.md).
 - **No ffmpeg, no whisper, no model calls.** Phases 34–36.
 - **No concurrency beyond one claim at a time.** Multiple workers are a real
   possibility later; the lease design permits it, but nothing here tests it and
@@ -147,7 +172,7 @@ loaded, the uploads volume as the container sees it, and the boot path.
 ```bash
 export BOX=http://192.168.1.11:8000
 export SVC=<KB_SERVICE_TOKEN from .env>
-export JWT=<a normal user token>
+export TOKEN=<a normal user token>  # the OWUI JWT
 alias claim='curl -s -o /tmp/j.json -w "%{http_code}\n" -X POST $BOX/v1/files/jobs/claim -H "X-Audrey-Service-Token: $SVC"'
 ```
 
@@ -157,7 +182,7 @@ a row to claim. Upload a video, confirm it is `pending`, restart `audrey-ai`,
 then list again — the row must still be there.
 
 ```bash
-curl -s $BOX/v1/files -H "Authorization: Bearer $JWT" \
+curl -s $BOX/v1/files -H "Authorization: Bearer $TOKEN" \
   | jq '.files[] | {filename, status, chunks}'
 ```
 
@@ -185,10 +210,27 @@ Then confirm the text is retrievable *as that user*, which is the part that
 proves attribution rather than mere storage:
 
 ```bash
-curl -s -X POST $BOX/v1/kb/query -H "Authorization: Bearer $JWT" \
+curl -s -X POST $BOX/v1/kb/query -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"query":"distinctive phrase","top_k":3}' | jq '.hits[] | {score, text}'
+  -d '{"query":"distinctive phrase","top_k":3}' \
+  | jq '.results[] | {score, source, text}'
 ```
+
+`source` should name the `<file_id>.transcript.txt` sidecar, which is what
+distinguishes "the transcript was ingested" from "something else matched".
+Expect global `kb_text` hits alongside it — `_search_text_merged` searches the
+user collection and the global one together.
+
+**3b. Requeue puts it back.** Run this before the lease checks below — they all
+need a pending row, and by this point the queue is empty.
+
+```bash
+python scripts/stub_media_worker.py --endpoint $BOX --requeue $FID
+```
+
+The row returns to `pending` with `chunks: 0`, and the phrase from step 3 stops
+being returned by `/v1/kb/query` — that second half is the one worth checking,
+because it is the only proof the old points actually went.
 
 **4. A stale lease is refused.** `scripts/stub_media_worker.py --lease bogus`
 does this in one shot — it claims normally, then posts against a lease id that
@@ -219,7 +261,7 @@ curl -s -o /dev/null -w "no token:    %{http_code}\n" -X POST $BOX/v1/files/jobs
 curl -s -o /dev/null -w "wrong token: %{http_code}\n" -X POST $BOX/v1/files/jobs/claim \
   -H "X-Audrey-Service-Token: nope"
 curl -s -o /dev/null -w "user JWT:    %{http_code}\n" -X POST $BOX/v1/files/jobs/claim \
-  -H "Authorization: Bearer $JWT"
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### Rollback
@@ -230,4 +272,4 @@ Revert `audrey-ai`. The added columns are additive and harmless to older code �
 ## What this unblocks
 
 Something can now own a video and be held to it. [Phase
-34](phase-34-media-worker-deploy.md) makes that something a real container.
+34](phase-34-media-worker-container.md) makes that something a real container.

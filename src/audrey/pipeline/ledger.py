@@ -11,7 +11,7 @@ well.
 
 Everything here is fail-soft: `parse_research_result` / `parse_factcheck_result`
 return `None` on malformed model output (never raise), so a stage can degrade to
-the prior prose behaviour for that request. See `docs/campaign-2/phase-26-deploy.md`.
+the prior prose behaviour for that request. See `docs/campaign-2/phase-26-research-claim-ledger.md`.
 """
 from __future__ import annotations
 
