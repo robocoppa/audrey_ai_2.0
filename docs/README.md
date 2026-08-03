@@ -101,9 +101,9 @@ deployable and verifiable on its own.
 - [32 video upload transport](campaign-2/phase-32-video-upload-transport.md) —
   chunked parts past Cloudflare's 100 MB body cap. **Landed.**
 - [33 video job lifecycle](campaign-2/phase-33-video-job-lifecycle.md) — claim,
-  lease, complete, fail. **Built, verification pending on the box.**
+  lease, complete, fail, requeue. **Landed and verified on the box.**
 - [34 media-worker container](campaign-2/phase-34-media-worker-container.md) —
-  ffmpeg in a sidecar, no model calls. *Next.*
+  ffmpeg in a sidecar, no model calls. **Built, not yet deployed.**
 - [35 video transcript](campaign-2/phase-35-video-transcript.md) — whisper.
 - [36 video visual assessment](campaign-2/phase-36-video-visual-assessment.md)
   — keyframes through the `vl` pool.

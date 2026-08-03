@@ -4,7 +4,7 @@ Turn [phase 33](phase-33-video-job-lifecycle.md)'s stub into a real container
 that claims real jobs and does real work with the file — demux the audio, report
 its duration, hand it back. No transcription, no model calls, no GPU.
 
-**Status: PLANNED.**
+**Status: BUILT.** Hermetic tests pass against real ffmpeg; unverified on the box.
 
 **New container — adds a `media-worker` service to `compose.yaml`.** This is the
 first compose change of the video work, and the reason this is its own phase: a
@@ -36,6 +36,14 @@ Once it can reach Ollama directly, someone will eventually make it — and every
 fairness guarantee in [`scheduling.py`](../../src/audrey/scheduling.py) is
 bypassed the moment they do, silently and only under load.
 
+**As built, this is topology, not a promise.** A new compose-managed
+`media-net` joins `media-worker` to `audrey-ai`; `audrey-ai` sits on both that
+and the existing external `ollama-net`. The worker is on `media-net` only, so
+`ollama` is not merely un-addressed but unresolvable. Handing the worker an
+`OLLAMA_HOST` later would not be enough to break the invariant — someone would
+also have to move it onto `ollama-net`, which is a visible edit to
+`compose.yaml` rather than an env var nobody reviews.
+
 ### We extract, we never transform
 
 ffmpeg is used to pull an audio stream and later to pull frames. No re-encoding,
@@ -54,7 +62,13 @@ read, never rewritten.
   it talks HTTP like any other client.
 - **`src/audrey/media/audio.py`** (new) — the ffmpeg invocation and its failure
   modes, separated so it can be tested against a fixture without a container.
-- **`config.yaml`** — `kb.video.poll_seconds` and the worker's audio settings.
+- **Environment, not `config.yaml`** — planned as a `kb.video.poll_seconds`
+  block; built as env vars instead. A sidecar that reads the orchestrator's
+  config file needs the file mounted and a YAML parser in an image whose whole
+  point is having neither, and none of `config.yaml`'s settings apply to it.
+  `AUDREY_ENDPOINT`, `POLL_SECONDS`, `WORK_DIR` and `ONCE` come from compose;
+  `lease_minutes` and `max_attempts` stay in `config.yaml` because audrey-ai is
+  what reads them.
 
 ## What's NOT in scope
 
@@ -93,7 +107,12 @@ docker compose up -d --build media-worker
 
 `audrey-ai` needs no rebuild — phase 33 already shipped the routes.
 
-## Verification (to be written against the built phase)
+## Verification
+
+Run in order — 0, 1 and 5 are image and topology checks that are cheaper to
+fail before a real job is in flight. You need a `pending` video; if the queue
+is empty, requeue one with
+`python scripts/stub_media_worker.py --requeue <file_id>`.
 
 **0. ffmpeg is present.**
 
@@ -112,13 +131,41 @@ try: s.connect(('192.168.1.11', 11434)); print('REACHABLE - fix the network')
 except Exception as e: print('unreachable, correct:', type(e).__name__)"
 ```
 
+Also confirm the worker resolves what it *is* supposed to reach:
+
+```
+docker exec media-worker python3 -c "import socket; print(socket.gethostbyname('audrey-ai'))"
+```
+
 **2. It claims a real job** and the row moves `pending` → `processing`.
 
-**3. It reports a plausible duration** for the uploaded mp4, matching
-`ffprobe` run by hand on the same file.
+```
+docker compose logs -f media-worker
+```
+
+Expect `claimed <name> (attempt 1)`, then a duration line. `queue empty,
+waiting` logs once on going idle, not every poll — if it repeats every 10s,
+the idle-transition logic regressed and the log will be useless in a week.
+
+**3. It reports a plausible duration**, matching `ffprobe` by hand:
+
+```
+docker exec media-worker ffprobe -v error -show_entries format=duration \
+  -of csv=p=0 /data/uploads/<sanitized-user>/<file_id>.mp4
+```
+
+The row then goes `ready` with `chunks: 0` — phase 34 knows how long the audio
+is, not what it says. Requeue it before phase 35.
 
 **4. A video with no audio track succeeds** with duration zero rather than
-failing.
+failing. Upload a screen recording with no mic, or generate one:
+
+```
+ffmpeg -f lavfi -i testsrc=duration=5:size=320x240:rate=10 -c:v mpeg4 silent.mp4
+```
+
+`ready`, not `failed`. A silent video still has frames worth describing in
+phase 36, and failing it here would deny it that.
 
 **5. The uploads mount is read-only.**
 
@@ -128,7 +175,13 @@ docker exec media-worker sh -c 'touch /data/uploads/.probe && echo WRITABLE || e
 
 **6. A killed worker's job returns to the queue.** `docker kill media-worker`
 mid-job; the row must reach `pending` again via the phase 33 lease sweep, not
-sit in `processing`.
+sit in `processing`. Note the sweep only runs *on a claim*, so the row moves
+when the restarted worker next polls — not on a timer. Set
+`kb.video.lease_minutes: 1` first unless you want to wait 30 minutes.
+
+**7. A `docker compose stop` drains rather than abandons.** SIGTERM sets a flag
+and the loop exits after the current job, so a planned stop costs nothing; only
+a `kill -9` costs a lease expiry.
 
 ### Rollback
 

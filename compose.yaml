@@ -42,6 +42,10 @@ services:
         condition: service_healthy
     networks:
       - ollama-net
+      # Phase 34: media-worker reaches audrey-ai here and ONLY here. It is not
+      # on ollama-net, so it cannot resolve or route to `ollama` even if some
+      # future edit hands it an address. See the media-worker stanza below.
+      - media-net
     # Published to the host LAN. Safe since Phase 31 (2026-07-27): the KB query
     # routes (`/v1/kb/query`, `/v1/kb/query/image`) are gated by
     # `resolve_kb_caller` — custom-tools' `X-Audrey-Service-Token` may act-as
@@ -124,6 +128,49 @@ services:
       start_period: 10s
       retries: 3
 
+  # Phase 34: the ffmpeg sidecar. Claims video jobs from audrey-ai over HTTP,
+  # demuxes audio, posts the result back. No ports, no model access, no
+  # database — it is an HTTP client that happens to run ffmpeg.
+  media-worker:
+    build:
+      context: .
+      dockerfile: docker/media-worker.Dockerfile
+    image: media-worker:latest
+    container_name: media-worker
+    restart: unless-stopped
+    depends_on:
+      audrey-ai:
+        condition: service_healthy
+    # ONLY media-net. This is the fairness invariant from Phase 34 expressed
+    # as network topology rather than as a promise: CPU work is isolated in
+    # this container, but GPU work must keep going through audrey-ai's
+    # passthrough so `FairLocalGate` and `UserInflightRegistry` still apply.
+    # A worker that can reach ollama:11434 directly bypasses both — silently,
+    # and only under load. Phase 36 adds the first model call and is exactly
+    # when someone will be tempted; the network makes it fail loudly instead.
+    networks:
+      - media-net
+    env_file:
+      - .env
+    environment:
+      TZ: America/Denver
+      AUDREY_ENDPOINT: http://audrey-ai:8000
+      POLL_SECONDS: ${MEDIA_POLL_SECONDS:-10}
+      # No OLLAMA_HOST, deliberately. Do not add one.
+    volumes:
+      # Read-only, and the same path audrey-ai uses, so the `path` returned by
+      # /v1/files/jobs/claim resolves unchanged inside this container. If these
+      # ever diverge the worker gets a valid-looking path it cannot open.
+      #
+      # Read-only matters beyond tidiness: Phase 33's single-writer argument
+      # covers sqlite, and a writable mount here would quietly make the same
+      # claim untrue for the upload bytes themselves.
+      - /mnt/user/appdata/runtime:/data:ro
+    # ffmpeg on a large file is CPU-hungry and this box also serves chat.
+    # Cap it so a 300 MB video can't starve audrey-ai of cores. Raise it if
+    # Phase 35's whisper turns out to be the bottleneck it probably is.
+    cpus: 2.0
+
   # Build-only: the live-eval harness image (see Dockerfile.eval + Phase 27).
   # `profiles: [eval]` keeps it OUT of the default `up`/`up --build` run graph,
   # so it never runs as a phantom service — but `docker compose --profile eval
@@ -143,3 +190,8 @@ services:
 networks:
   ollama-net:
     external: true
+  # Phase 34: compose-managed, unlike ollama-net. It exists only to join
+  # media-worker to audrey-ai, so nothing outside this file needs to know
+  # about it and compose may create and destroy it freely.
+  media-net:
+    driver: bridge
