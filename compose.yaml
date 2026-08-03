@@ -138,6 +138,13 @@ services:
     image: media-worker:latest
     container_name: media-worker
     restart: unless-stopped
+    # Docker's default is 10s, after which a stop becomes SIGKILL. The worker
+    # drains on SIGTERM — it finishes the job in hand rather than abandoning
+    # it to a lease expiry — but only if it is given long enough to. A demux
+    # is seconds; Phase 35's whisper pass will be minutes, and at the default
+    # every `compose stop` mid-transcription would throw that work away and
+    # wait out `lease_minutes` before anything retried it.
+    stop_grace_period: 180s
     depends_on:
       audrey-ai:
         condition: service_healthy

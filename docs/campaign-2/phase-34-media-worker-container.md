@@ -4,7 +4,10 @@ Turn [phase 33](phase-33-video-job-lifecycle.md)'s stub into a real container
 that claims real jobs and does real work with the file — demux the audio, report
 its duration, hand it back. No transcription, no model calls, no GPU.
 
-**Status: BUILT.** Hermetic tests pass against real ffmpeg; unverified on the box.
+**Status: DEPLOYED.** Verified on the box 2026-08-03: claims, demuxes, reports,
+and is network-isolated from Ollama by route as well as by name. Steps 3-7 of
+the verification below (hand-checked duration, silent video, read-only mount,
+killed worker, clean drain) are still outstanding.
 
 **New container — adds a `media-worker` service to `compose.yaml`.** This is the
 first compose change of the video work, and the reason this is its own phase: a
@@ -75,8 +78,10 @@ read, never rewritten.
 - **`docker/media-worker.Dockerfile`** (new) — `ffmpeg`, which is installed in
   no current image, plus the python client. Whisper weights come in
   [phase 35](phase-35-video-transcript.md).
-- **`compose.yaml`** — the `media-worker` service: `env_file: - .env` for
-  `KB_SERVICE_TOKEN`, a read-only mount of the uploads volume, and no ports.
+- **`compose.yaml`** — the `media-worker` service: an explicitly named
+  `KB_SERVICE_TOKEN` (*not* `env_file: .env` — see the design note above), a
+  read-only mount of the uploads volume, no ports, and a new `internal: true`
+  `media-net` that `audrey-ai` also joins.
 - **`src/audrey/media/worker.py`** (new) — the claim loop, the audio extraction
   call, the result post. Imports nothing from `audrey.routes` or `audrey.kb`;
   it talks HTTP like any other client.
@@ -125,7 +130,10 @@ From `/mnt/user/appdata/audrey_ai_2.0`:
 docker compose up -d --build media-worker
 ```
 
-`audrey-ai` needs no rebuild — phase 33 already shipped the routes.
+`audrey-ai` needs no *rebuild* — phase 33 already shipped the routes — but it
+is **recreated** anyway, because joining `media-net` changes its network list.
+Expect a few seconds of chat downtime on this deploy and on any later edit to
+either network. `custom-tools` is untouched.
 
 ## Verification
 
@@ -211,7 +219,24 @@ when the restarted worker next polls — not on a timer. Set
 
 **7. A `docker compose stop` drains rather than abandons.** SIGTERM sets a flag
 and the loop exits after the current job, so a planned stop costs nothing; only
-a `kill -9` costs a lease expiry.
+a `kill -9` costs a lease expiry. Expect `signal 15 received` then
+`worker: stopped` in the log — the process vanishing without those two lines
+means it was killed, not drained.
+
+The first on-box stop took **7.3s while idle**, which is the finding worth
+keeping from this step. Nothing was in flight; the time was spent inside
+`time.sleep(POLL_SECONDS)`, because the stop flag was only read at the top of
+the loop. Docker's default `stop_grace_period` is 10s, so the drain worked
+only by a 2.7s margin, and raising `POLL_SECONDS` to 30 would have turned
+every graceful stop into a SIGKILL — with the drain logic still present,
+still passing review, and never once running.
+
+Two changes came out of it: `Stopping.wait()` slices the sleep so shutdown
+latency no longer tracks poll frequency, and `stop_grace_period: 180s` gives
+an in-flight job time to finish. The second matters more in Phase 35 than
+here: a demux is seconds, a whisper pass is minutes, and at the 10s default
+every stop mid-transcription would discard that work and then wait out
+`lease_minutes` before anything retried it.
 
 ### Rollback
 

@@ -103,7 +103,7 @@ deployable and verifiable on its own.
 - [33 video job lifecycle](campaign-2/phase-33-video-job-lifecycle.md) — claim,
   lease, complete, fail, requeue. **Landed and verified on the box.**
 - [34 media-worker container](campaign-2/phase-34-media-worker-container.md) —
-  ffmpeg in a sidecar, no model calls. **Built, not yet deployed.**
+  ffmpeg in a sidecar, no model calls. **Deployed and verified.**
 - [35 video transcript](campaign-2/phase-35-video-transcript.md) — whisper.
 - [36 video visual assessment](campaign-2/phase-36-video-visual-assessment.md)
   — keyframes through the `vl` pool.

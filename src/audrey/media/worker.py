@@ -70,6 +70,23 @@ class Stopping:
         log.info("worker: signal %d received, finishing current job then stopping", signum)
         self.requested = True
 
+    def wait(self, seconds: float, *, slice_s: float = 0.5) -> None:
+        """Sleep, but notice a stop request while doing it.
+
+        A plain `time.sleep(poll_seconds)` makes an *idle* shutdown take up to
+        a full poll interval, because the flag is only read at the top of the
+        loop. That was measured at 7.3s against a 10s poll — and Docker's
+        default `stop_grace_period` is 10s, so raising POLL_SECONDS to 30
+        would have silently converted every graceful stop into a SIGKILL.
+        Slicing the sleep decouples shutdown latency from poll frequency.
+        """
+        deadline = time.monotonic() + seconds
+        while not self.requested:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(slice_s, remaining))
+
 
 def post(endpoint: str, path: str, token: str, body: dict | None) -> tuple[int, dict]:
     """POST JSON, returning `(status, parsed_body)`. Never raises on HTTP status."""
@@ -187,7 +204,7 @@ def run(
         except OSError as e:
             # Audrey restarting is normal and must not kill the worker.
             log.warning("worker: claim failed (%s), retrying in %ds", e, poll_seconds)
-            time.sleep(poll_seconds)
+            stopping.wait(poll_seconds)
             continue
 
         if status == 204 or not job:
@@ -198,14 +215,14 @@ def run(
                 idle_logged = True
             if once:
                 return 0
-            time.sleep(poll_seconds)
+            stopping.wait(poll_seconds)
             continue
 
         if status != 200:
             log.error("worker: claim rejected (%s): %s", status, job)
             if once:
                 return 1
-            time.sleep(poll_seconds)
+            stopping.wait(poll_seconds)
             continue
 
         idle_logged = False

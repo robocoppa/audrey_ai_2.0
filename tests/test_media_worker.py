@@ -257,3 +257,44 @@ class TestMain:
         alternative is an error every POLL_SECONDS forever."""
         monkeypatch.delenv("KB_SERVICE_TOKEN", raising=False)
         assert worker.main() == 2
+
+
+class TestShutdownLatency:
+    """A graceful stop has to be faster than Docker's patience.
+
+    The worker sleeps between polls. If the stop flag is only read at the top
+    of the loop, an idle shutdown takes up to a full poll interval — measured
+    at 7.3s against a 10s poll on the box. Docker's default
+    `stop_grace_period` is 10s, so a POLL_SECONDS of 30 would have turned
+    every graceful stop into a SIGKILL, and the drain logic would have been
+    dead code that still looked correct in review.
+    """
+
+    def test_wait_returns_immediately_once_stopping(self):
+        import time as _time
+        stopper = worker.Stopping()
+        stopper.requested = True
+
+        t0 = _time.monotonic()
+        stopper.wait(30)
+        assert _time.monotonic() - t0 < 0.5
+
+    def test_wait_notices_a_stop_raised_partway_through(self):
+        import threading
+        import time as _time
+        stopper = worker.Stopping()
+        threading.Timer(0.2, lambda: setattr(stopper, "requested", True)).start()
+
+        t0 = _time.monotonic()
+        stopper.wait(30)
+        elapsed = _time.monotonic() - t0
+        # Not the full 30s, and not instant either — it actually waited.
+        assert 0.1 < elapsed < 2.0
+
+    def test_wait_sleeps_the_whole_interval_when_not_stopping(self):
+        import time as _time
+        stopper = worker.Stopping()
+
+        t0 = _time.monotonic()
+        stopper.wait(0.3)
+        assert _time.monotonic() - t0 >= 0.25
