@@ -8,6 +8,24 @@ that makes it fast, driven by the stage timings
 
 ---
 
+
+## Inherited from phase 35: deleting the source
+
+`keep_source: false` was planned for [phase 35](phase-35-video-transcript.md)
+and deferred here. Unlinking the video after transcription would have broken
+phase 36 (which reads frames from the source), phase 37 (which summarises what
+36 produced), and phase 33's `requeue` (which points a re-run at a path that
+would no longer exist).
+
+This is the first phase where nothing downstream needs the bytes, so it is the
+first place the deletion is safe. The pressure is real — `max_user_bytes` is
+1 GiB and three 300 MB videos exhaust it — but note the consequence that made
+it a phase-38 problem in the first place: once the source is gone, a video can
+never be re-processed. Any change to the visual or summary stages after that
+point applies only to videos uploaded afterwards. A `keep_source: true`
+escape hatch, or deleting only after a retention window, is worth more than
+the quota it saves.
+
 ## The keyframe gate (landed 2026-08-02)
 
 Built out of order because it needed no container, no GPU, no ffmpeg and no

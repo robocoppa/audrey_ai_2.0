@@ -5,7 +5,19 @@ worker extracts audio and reports a duration; this one turns that audio into a
 timestamped transcript, ingests it through the existing text path, and flips the
 row to `ready`. The video becomes searchable.
 
-**Status: PLANNED.**
+**Status: BUILT.** Hermetic tests pass; unverified on the box — this is the
+first phase whose output quality cannot be checked by a test, only by reading a
+transcript of something you know the contents of.
+
+**Scope cut: `keep_source: false` is deferred to
+[phase 38](phase-38-video-optimise.md).** The plan below called for unlinking
+the video after a successful transcript, to stop 300 MB files eating a 1 GiB
+quota. That is incompatible with everything that comes after it: phase 36
+extracts *frames from the source*, phase 37 summarises both artifacts, and
+phase 33's `requeue` route — added after this plan was written — points a
+re-run at a path that would no longer exist. Deleting the bytes is only safe
+once nothing downstream needs them, which is after 36 has taken its frames.
+The quota pressure is real and the phase 38 doc now owns it.
 
 ---
 
@@ -22,8 +34,15 @@ the four artifacts ever shipped, this is the one worth having.
 
 faster-whisper returns `(t_start, t_end, text)`. Those go through
 [`ingest_user_text_file`](../../src/audrey/kb/ingest.py) exactly as any text
-file does — no new collection, no new point schema beyond a `t_start`/`t_end`
-payload pair and an `artifact` discriminator.
+file does — no new collection, no new point schema.
+
+**As built, the merging is free.** `ingest-result` already joins segments into
+one `[HH:MM:SS] line` document and writes it as a sidecar, and `chunk_text`
+already splits at 1000 tokens. So whisper's short segments — often a single
+sentence — are grouped into paragraph-sized chunks with a timestamp on every
+line, without any new code. One chunk per segment was the alternative, and it
+would have been worse: single-sentence embeddings are noisy, and `top_k`
+retrieval fills with fragments that each lack the context to be useful.
 
 The KB half of this work is nearly free, and that is by design. The expensive
 decision was made in phase 32: put the artifacts through the paths that already
@@ -40,29 +59,44 @@ video. That error exists to turn away a scanned PDF with no text layer, where
 empty means "we cannot use this". For video, empty audio is a fact about the
 file, not a defect in it.
 
-### Source bytes are discarded after success
+### Source bytes are NOT discarded here (changed)
 
-`max_user_bytes` is 1 GiB. At 300 MB a piece, three videos exhaust a user's
-whole quota — and nothing downstream ever re-reads the original. The ingest
-functions read their inputs once.
+The original plan unlinked the video on success, on the grounds that nothing
+downstream re-reads it. That was wrong, and the error is worth keeping visible
+because it is the kind that only shows up two phases later.
 
-So `kb.video.keep_source: false` by default: on success, unlink the video and
-charge the quota for the transcript instead. On failure the source stays, or
-the retry in phase 33 would have nothing to retry against.
+Phase 36 extracts keyframes *from the source video*. Phase 37 summarises what
+36 produced. And `requeue` — which did not exist when this was planned — puts a
+row back to `pending` for a worker that would then find no file. Unlinking
+after transcription would have left the pipeline able to run exactly once,
+with no way to re-run it and no way to add visual data to anything already
+processed.
+
+The quota problem is real: at 300 MB a piece, three videos exhaust a 1 GiB
+allowance. It now belongs to [phase 38](phase-38-video-optimise.md), which is
+the first point where nothing else needs the bytes.
 
 ## What's in scope
 
 - **`docker/media-worker.Dockerfile`** — faster-whisper plus **baked weights**.
   Downloading a model on first job turns a cold start into a silent multi-minute
   stall inside a lease window.
-- **`src/audrey/media/stt.py`** (new) — the whisper driver and segment mapping.
+- **[`src/audrey/media/stt.py`](../../src/audrey/media/stt.py)** (new) — the
+  whisper driver, the transcription budget, and the repetition collapse. The
+  `faster_whisper` import is lazy so the module stays importable (and testable)
+  outside the worker image.
 - **`src/audrey/media/worker.py`** — the transcript stage added to the claim
   loop, posted through `ingest-result`.
 - **[`routes/files.py`](../../src/audrey/routes/files.py)** — `ingest-result`
   learns to accept transcript segments and route them to the text ingest path.
 - **[`kb/uploads_db.py`](../../src/audrey/kb/uploads_db.py)** — `duration_s` on
   the row, so the file list can show something true about a video.
-- **`config.yaml`** — `kb.video.stt_model`, `chunk_seconds`, `keep_source`.
+- **`compose.yaml`** — `WHISPER_MODEL` and `TRANSCRIBE_BUDGET_S` on the
+  worker. Not `config.yaml`: the worker reads env, per the Phase 34 decision.
+  `WHISPER_MODEL` can only *select* a model baked into the image at build time
+  (`WHISPER_BAKE`), because the worker has no network to fetch another.
+- **[`kb/uploads_db.py`](../../src/audrey/kb/uploads_db.py)** — `duration_s`,
+  the sixth additive column, so the file list can say how long a video is.
 
 ## What's NOT in scope
 
@@ -100,12 +134,17 @@ docker compose up -d --build media-worker audrey-ai
 Both: the worker gains whisper, `audrey-ai` gains the transcript half of
 `ingest-result`.
 
-## Verification (to be written against the built phase)
+## Verification
 
-**0. Whisper and its weights are present, without network.**
+**0. Whisper and its weights are present, without network.** The second command
+is the one that matters — `local_files_only=True` means a missing bake raises
+immediately instead of hanging on a download that can never succeed.
 
 ```
 docker exec media-worker python3 -c "import faster_whisper; print(faster_whisper.__version__)"
+docker exec media-worker du -sh /opt/whisper
+docker exec media-worker python3 -c "
+from audrey.media.stt import load_model; load_model('small'); print('weights load OK')"
 ```
 
 **1. A short spoken video produces a transcript** whose text matches what was

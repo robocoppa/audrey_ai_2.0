@@ -90,6 +90,9 @@ class FileRow(BaseModel):
     # Only set on 'failed'. Shown to the user — a row that stops moving without
     # saying why is the failure this field exists to prevent.
     failure_reason: str = ""
+    # Seconds of audio, for video only. 0 everywhere else and for a video with
+    # no audio stream, so it is only meaningful read alongside `kind`.
+    duration_s: float = 0.0
 
 
 class UploadResponse(BaseModel):
@@ -861,6 +864,7 @@ async def ingest_result(
 
     if not await db.complete_job(
         file_id=file_id, lease_id=body.lease_id, collection=collection, chunks=chunks,
+        duration_s=float(body.duration_s or 0.0),
     ):
         # Valid when checked above and not now, so the sweep ran in between.
         # The chunks are already in Qdrant under this file_id; the newer
@@ -960,7 +964,7 @@ async def list_files(
     rows = await db.list_user(user)
     files = [FileRow(**{k: row[k] for k in (
         "file_id", "filename", "mime", "bytes", "uploaded_at", "chunks",
-        "status", "failure_reason",
+        "status", "failure_reason", "duration_s",
     )}) for row in rows]
     total = sum(r.bytes for r in files)
     return ListResponse(

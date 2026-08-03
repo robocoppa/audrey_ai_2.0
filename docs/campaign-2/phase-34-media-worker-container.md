@@ -10,9 +10,9 @@ pass: ffmpeg present, Ollama unreachable by name *and* by host address, a real
 hand, a no-audio video completing as `ready`, the uploads mount read-only, and
 a clean drain on SIGTERM.
 
-Step 6 (a killed worker's job returns to the queue) is outstanding. It shares
-its setup — `lease_minutes: 1`, a restart, a queued job — with the phase 33
-lease checks that are also unrun, so the two are worth doing as one batch.
+Step 6 (a killed worker's job returns to the queue) passed as part of the
+phase 33 lease batch, which shares its setup. Nothing in this phase is
+unverified.
 
 Two defects were found by this verification and fixed here; both are written up
 below rather than in a changelog, because each is an interaction someone will

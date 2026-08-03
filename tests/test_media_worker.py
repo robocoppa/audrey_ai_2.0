@@ -25,6 +25,7 @@ import pytest
 
 from audrey.media import worker
 from audrey.media.audio import FFmpegMissingError
+from audrey.media.stt import Segment, TranscriptionFailedError, WhisperUnavailableError
 
 TOKEN = "not-a-real-token"  # noqa: S105  (test fixture)
 
@@ -41,7 +42,10 @@ class _Calls:
         self.posted: list[tuple[str, dict | None]] = []
         self._replies = list(replies or [])
 
-    def __call__(self, endpoint: str, path: str, token: str, body: dict | None):
+    def __call__(self, endpoint: str, path: str, token: str, body: dict | None,
+                 **kwargs):
+        # **kwargs absorbs `timeout`, which the result post overrides — a
+        # transcript for a long video is a much bigger body than a claim.
         self.posted.append((path, body))
         if self._replies:
             return self._replies.pop(0)
@@ -55,6 +59,21 @@ class _Calls:
             if needle in path:
                 return body or {}
         raise AssertionError(f"nothing was posted to a path containing {needle!r}")
+
+
+@pytest.fixture(autouse=True)
+def stub_whisper(monkeypatch: pytest.MonkeyPatch):
+    """faster-whisper is not installed outside the media-worker image.
+
+    Autouse so every test in this file exercises the loop's decisions rather
+    than whisper's. The driver's own logic is covered in test_media_stt.py,
+    against a fake engine for the same reason.
+    """
+    def fake(wav, **kwargs):
+        return [Segment(0.0, 1.0, "spoken words")]
+
+    monkeypatch.setattr(worker, "transcribe", fake)
+    return fake
 
 
 @pytest.fixture
@@ -96,8 +115,9 @@ class TestHandleJob:
         body = calls.body_for("ingest-result")
         assert body["lease_id"] == "L1"
         assert body["duration_s"] == pytest.approx(1.0, abs=0.3)
-        # Phase 34 has nothing to say about what the audio contains.
-        assert body["segments"] == []
+        assert body["segments"] == [
+            {"t_start": 0.0, "t_end": 1.0, "text": "spoken words"},
+        ]
 
     def test_the_intermediate_wav_is_cleaned_up(
         self, video: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -298,3 +318,112 @@ class TestShutdownLatency:
         t0 = _time.monotonic()
         stopper.wait(0.3)
         assert _time.monotonic() - t0 >= 0.25
+
+
+class TestTranscriptStage:
+    """Phase 35. The worker now posts what was said, not just how long it was."""
+
+    def test_a_silent_video_is_not_sent_to_whisper(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Feeding whisper an audio file that does not exist would fail a job
+        that has nothing wrong with it. `extract_audio` returns 0.0 and writes
+        nothing for a file with no audio stream, and that is the signal."""
+        import subprocess
+        silent = tmp_path / "silent.mp4"
+        subprocess.run(
+            [shutil.which("ffmpeg") or "ffmpeg", "-v", "error", "-y",
+             "-f", "lavfi", "-i", "testsrc=duration=1:size=64x64:rate=10",
+             "-c:v", "mpeg4", str(silent)],
+            check=True, capture_output=True,
+        )
+        called = []
+        monkeypatch.setattr(worker, "transcribe", lambda *a, **k: called.append(1) or [])
+        calls = _Calls()
+        monkeypatch.setattr(worker, "post", calls)
+
+        worker.handle_job(
+            _job(silent), endpoint="http://x", token=TOKEN, work_dir=tmp_path / "w",
+        )
+
+        assert called == []
+        assert calls.paths() == ["/v1/files/f1/ingest-result"]
+        body = calls.body_for("ingest-result")
+        assert body["segments"] == []
+        assert body["duration_s"] == 0.0
+
+    def test_a_transcription_failure_fails_the_row(
+        self, video: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """Budget overrun or a mid-file decoder crash. The video is the
+        problem, so the row carries the reason."""
+        def boom(wav, **kwargs):
+            raise TranscriptionFailedError("exceeded its 1440s budget")
+
+        monkeypatch.setattr(worker, "transcribe", boom)
+        calls = _Calls()
+        monkeypatch.setattr(worker, "post", calls)
+
+        worker.handle_job(
+            _job(video), endpoint="http://x", token=TOKEN, work_dir=tmp_path / "w",
+        )
+
+        assert calls.paths() == ["/v1/files/f1/ingest-failed"]
+        assert "budget" in calls.body_for("ingest-failed")["reason"]
+
+    def test_missing_whisper_does_not_fail_the_row(
+        self, video: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """The image is broken, not the video — the same distinction ffmpeg
+        gets. Failing rows here would mark every queued video `failed` while
+        the image is being rebuilt."""
+        def missing(wav, **kwargs):
+            raise WhisperUnavailableError("weights are not baked into this image")
+
+        monkeypatch.setattr(worker, "transcribe", missing)
+        calls = _Calls()
+        monkeypatch.setattr(worker, "post", calls)
+
+        with pytest.raises(WhisperUnavailableError):
+            worker.handle_job(
+                _job(video), endpoint="http://x", token=TOKEN, work_dir=tmp_path / "w",
+            )
+
+        assert calls.posted == []
+
+    def test_the_wav_is_removed_even_when_transcription_fails(
+        self, video: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """A failed job is retried. Without cleanup each attempt leaves another
+        copy of the audio inside the container until the disk fills."""
+        work = tmp_path / "w"
+        monkeypatch.setattr(worker, "transcribe",
+                            lambda *a, **k: (_ for _ in ()).throw(
+                                TranscriptionFailedError("nope")))
+        monkeypatch.setattr(worker, "post", _Calls())
+
+        worker.handle_job(_job(video), endpoint="http://x", token=TOKEN, work_dir=work)
+
+        assert list(work.glob("*.wav")) == []
+
+    def test_the_model_size_reaches_the_driver(
+        self, video: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """WHISPER_MODEL only selects among models baked into the image, so a
+        value that never arrives is a silent fall back to the default."""
+        seen = {}
+
+        def capture(wav, **kwargs):
+            seen.update(kwargs)
+            return []
+
+        monkeypatch.setattr(worker, "transcribe", capture)
+        monkeypatch.setattr(worker, "post", _Calls())
+
+        worker.handle_job(
+            _job(video), endpoint="http://x", token=TOKEN, work_dir=tmp_path / "w",
+            model_size="medium", budget_s=99.0,
+        )
+
+        assert seen["model_size"] == "medium"
+        assert seen["budget_s"] == 99.0

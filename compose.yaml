@@ -172,6 +172,14 @@ services:
       AUDREY_ENDPOINT: http://audrey-ai:8000
       POLL_SECONDS: ${MEDIA_POLL_SECONDS:-10}
       KB_SERVICE_TOKEN: ${KB_SERVICE_TOKEN:?media-worker needs KB_SERVICE_TOKEN in .env}
+      # Phase 35. WHISPER_MODEL can only name a model baked into the image at
+      # build time (WHISPER_BAKE in the Dockerfile) — the worker has no network
+      # to fetch another. TRANSCRIBE_BUDGET_S must stay comfortably under
+      # kb.video.lease_minutes, or a slow transcription gets swept and
+      # re-claimed while it is still running: the same file transcribed twice
+      # at once, until its attempts run out.
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      TRANSCRIBE_BUDGET_S: ${TRANSCRIBE_BUDGET_S:-1440}
     volumes:
       # Read-only, and the same path audrey-ai uses, so the `path` returned by
       # /v1/files/jobs/claim resolves unchanged inside this container. If these

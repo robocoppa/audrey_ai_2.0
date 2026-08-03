@@ -5,7 +5,15 @@
 the lifecycle that lets something claim it — and nothing else. No ffmpeg, no
 whisper, no container. A stub worker claims a job and returns a fixed string.
 
-**Status: PLANNED.**
+**Status: LANDED AND FULLY VERIFIED** on the box, 2026-08-03. All seven
+verification steps pass, including the lease batch: a stale lease refused with
+409, two expired leases swept back to `pending` (proved by the attempt counter,
+which only a claim increments), and the attempt cap turning a poison job into a
+terminal `failed` rather than an endless cycle.
+
+Gained a fourth route during verification — `POST /{file_id}/requeue`. Nothing
+could put a processed video back in the queue, so every iteration of Phases
+34-38 would have meant deleting the row and re-uploading the source.
 
 Building the state machine before the media that flows through it is the same
 call [phase 32](phase-32-video-upload-transport.md) made by proving chunked
@@ -114,7 +122,12 @@ still live, and the operator would have no signal that anything was left behind.
 - **[`routes/files.py`](../../src/audrey/routes/files.py)** — the four routes,
   guarded by the service token. `FileRow` grows `failure_reason`.
 - **`config.yaml`** — a `kb.video` block with `lease_minutes` and
-  `max_attempts`.
+  `max_attempts`, both overridable from `.env` as `VIDEO_LEASE_MINUTES` /
+  `VIDEO_MAX_ATTEMPTS`. The override exists because verifying the sweep means
+  shortening the lease, and doing that by editing a tracked file on the box
+  dirties the deployed tree and has to be reverted by hand — a step that gets
+  forgotten, leaving production on a one-minute lease with no symptom beyond
+  jobs occasionally running twice.
 - **[`static/upload.html`](../../src/audrey/static/upload.html)** — show
   `processing` and `failed` in the file list, with the reason on a failure.
 - **`scripts/stub_media_worker.py`** (new) — claims a job, returns a fixed

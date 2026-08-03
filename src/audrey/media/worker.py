@@ -1,9 +1,7 @@
-"""The media worker's claim loop (Phase 34).
+"""The media worker's claim loop (Phases 34-35).
 
-Runs in its own container. Polls `POST /v1/files/jobs/claim`, does the work
-ffmpeg can do, posts the result back. Phase 35 gives it whisper; Phase 36
-gives it frames. Right now the "work" is a demux and a duration, which is
-enough to prove the container, the mount and the network path.
+Runs in its own container. Polls `POST /v1/files/jobs/claim`, demuxes the
+audio, transcribes it, posts the segments back. Phase 36 adds frames.
 
 Two invariants this file exists to hold:
 
@@ -21,11 +19,13 @@ Configured by environment, not `config.yaml`: a sidecar that parses the app's
 config file needs the file mounted and a YAML parser, and gains nothing — none
 of the orchestrator's settings apply to it.
 
-    AUDREY_ENDPOINT    default http://audrey-ai:8000
-    KB_SERVICE_TOKEN   required
-    POLL_SECONDS       default 10
-    WORK_DIR           default /tmp/media-worker
-    ONCE               set to 1 to take a single job and exit
+    AUDREY_ENDPOINT      default http://audrey-ai:8000
+    KB_SERVICE_TOKEN     required
+    POLL_SECONDS         default 10
+    WORK_DIR             default /tmp/media-worker
+    ONCE                 set to 1 to take a single job and exit
+    WHISPER_MODEL        default "small" — must be baked into the image
+    TRANSCRIBE_BUDGET_S  default 1440 (24 min); 0 disables the cap
 """
 
 from __future__ import annotations
@@ -43,12 +43,24 @@ from pathlib import Path
 from types import FrameType
 
 from audrey.media.audio import FFmpegFailedError, FFmpegMissingError, extract_audio, probe
+from audrey.media.stt import (
+    DEFAULT_MODEL,
+    TranscriptionFailedError,
+    WhisperUnavailableError,
+    transcribe,
+)
 
 log = logging.getLogger("media-worker")
 
 DEFAULT_ENDPOINT = "http://audrey-ai:8000"
 DEFAULT_POLL_SECONDS = 10
 HTTP_TIMEOUT_S = 60
+
+# A transcript for a long video is a large POST. It goes to audrey-ai directly
+# over the compose network, not through cloudflared, so the 100 MB edge cap
+# that shaped Phase 32 does not apply here — but a slow read on a big body
+# still shouldn't look like a hung worker.
+RESULT_TIMEOUT_S = 300
 
 
 class Stopping:
@@ -88,7 +100,10 @@ class Stopping:
             time.sleep(min(slice_s, remaining))
 
 
-def post(endpoint: str, path: str, token: str, body: dict | None) -> tuple[int, dict]:
+def post(
+    endpoint: str, path: str, token: str, body: dict | None,
+    *, timeout: int = HTTP_TIMEOUT_S,
+) -> tuple[int, dict]:
     """POST JSON, returning `(status, parsed_body)`. Never raises on HTTP status."""
     if not endpoint.startswith(("http://", "https://")):
         raise ValueError(f"endpoint must be http:// or https://, got {endpoint!r}")
@@ -103,7 +118,7 @@ def post(endpoint: str, path: str, token: str, body: dict | None) -> tuple[int, 
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT_S) as response:  # noqa: S310 - scheme checked above
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - scheme checked above
             raw = response.read()
             if response.status == 204 or not raw:
                 return response.status, {}
@@ -117,13 +132,26 @@ def post(endpoint: str, path: str, token: str, body: dict | None) -> tuple[int, 
             return e.code, {"detail": raw.decode("utf-8", "replace")[:400]}
 
 
-def handle_job(job: dict, *, endpoint: str, token: str, work_dir: Path) -> None:
+def handle_job(
+    job: dict,
+    *,
+    endpoint: str,
+    token: str,
+    work_dir: Path,
+    model_size: str = DEFAULT_MODEL,
+    budget_s: float | None = None,
+) -> None:
     """Do one job and report it. Any failure is reported, never swallowed.
 
     A worker that dies without reporting leaves the row in `processing` until
     the lease expires. That recovers, but it costs a full lease period and
-    tells the user nothing in the meantime — so ffmpeg's opinion of the file
-    gets posted as a failure rather than raised.
+    tells the user nothing in the meantime — so ffmpeg's and whisper's opinion
+    of the file gets posted as a failure rather than raised.
+
+    The two exceptions are `FFmpegMissingError` and `WhisperUnavailableError`,
+    which say the *image* is broken rather than the file. Those propagate:
+    failing the row would burn every queued video's attempts while the image
+    is being fixed, and they would all be `failed` by the time it was.
     """
     file_id = job["file_id"]
     source = Path(job["path"])
@@ -145,33 +173,41 @@ def handle_job(job: dict, *, endpoint: str, token: str, work_dir: Path) -> None:
     try:
         info = probe(source)
         duration = extract_audio(source, wav)
-    except FFmpegMissingError as e:
-        # An image defect, not a file defect. Don't burn an attempt on the
-        # row — let the lease expire so the job survives a fixed image.
+
+        segments: list[dict] = []
+        if duration > 0 and wav.exists():
+            segments = [
+                s.as_payload()
+                for s in transcribe(wav, model_size=model_size, budget_s=budget_s)
+            ]
+        else:
+            # No audio stream at all. Not a failure — the file may still have
+            # visual content Phase 36 will want, and the row completes with an
+            # empty transcript rather than an error nobody can act on.
+            log.info("worker: %s has no audio, nothing to transcribe", file_id)
+    except (FFmpegMissingError, WhisperUnavailableError) as e:
         log.error("worker: %s", e)
         raise
-    except FFmpegFailedError as e:
+    except (FFmpegFailedError, TranscriptionFailedError) as e:
         _report_failure(endpoint, token, file_id, lease_id, str(e))
         return
     finally:
-        # The wav is an intermediate. Phase 35 will consume it in-process;
-        # here it exists only to prove the demux ran.
-        if wav.exists():
-            log.info("worker: extracted %d bytes of audio for %s", wav.stat().st_size, file_id)
-            wav.unlink(missing_ok=True)
+        # The wav is an intermediate and can be a large fraction of the source
+        # — 18 MB for nine minutes. Left behind these accumulate inside the
+        # container, where nobody would think to look.
+        wav.unlink(missing_ok=True)
 
+    spoken = sum(len(s["text"]) for s in segments)
     log.info(
-        "worker: %s container=%.1fs audio=%.1fs has_audio=%s",
-        job.get("filename", file_id), info.container_duration_s, duration, info.has_audio,
+        "worker: %s container=%.1fs audio=%.1fs segments=%d chars=%d",
+        job.get("filename", file_id), info.container_duration_s, duration,
+        len(segments), spoken,
     )
 
-    # No segments: Phase 34 has nothing to say about what the audio contains,
-    # only that it exists and how long it is. The row still completes — with
-    # zero chunks and no collection — which is the same shape a silent video
-    # gets in Phase 35.
     status, body = post(
         endpoint, f"/v1/files/{file_id}/ingest-result", token,
-        {"lease_id": lease_id, "duration_s": duration, "segments": []},
+        {"lease_id": lease_id, "duration_s": duration, "segments": segments},
+        timeout=RESULT_TIMEOUT_S,
     )
     if status != 200:
         log.warning("worker: result rejected for %s (%s): %s", file_id, status, body)
@@ -190,12 +226,18 @@ def _report_failure(
 
 
 def run(
-    *, endpoint: str, token: str, poll_seconds: int, work_dir: Path, once: bool = False,
+    *, endpoint: str, token: str, poll_seconds: int, work_dir: Path,
+    once: bool = False, model_size: str = DEFAULT_MODEL,
+    budget_s: float | None = None,
 ) -> int:
     stopping = Stopping()
     stopping.install()
     work_dir.mkdir(parents=True, exist_ok=True)
-    log.info("worker: polling %s every %ds", endpoint, poll_seconds)
+    log.info(
+        "worker: polling %s every %ds (whisper=%s, budget=%s)",
+        endpoint, poll_seconds, model_size,
+        f"{budget_s:.0f}s" if budget_s else "none",
+    )
 
     idle_logged = False
     while not stopping.requested:
@@ -227,7 +269,10 @@ def run(
 
         idle_logged = False
         log.info("worker: claimed %s (attempt %s)", job.get("filename"), job.get("attempts"))
-        handle_job(job, endpoint=endpoint, token=token, work_dir=work_dir)
+        handle_job(
+            job, endpoint=endpoint, token=token, work_dir=work_dir,
+            model_size=model_size, budget_s=budget_s,
+        )
         if once:
             return 0
 
@@ -245,12 +290,20 @@ def main() -> int:
         log.error("KB_SERVICE_TOKEN is unset — every claim would 401. Refusing to start.")
         return 2
 
+    # The budget must sit inside the lease, or a slow transcription is swept
+    # and re-claimed while still running — the same file transcribed twice,
+    # concurrently, until its attempts run out. Default 80% of a 30-minute
+    # lease; set both together if you change either.
+    budget = float(os.environ.get("TRANSCRIBE_BUDGET_S", 24 * 60))
+
     return run(
         endpoint=os.environ.get("AUDREY_ENDPOINT", DEFAULT_ENDPOINT),
         token=token,
         poll_seconds=int(os.environ.get("POLL_SECONDS", DEFAULT_POLL_SECONDS)),
         work_dir=Path(os.environ.get("WORK_DIR", Path(tempfile.gettempdir()) / "media-worker")),
         once=os.environ.get("ONCE", "") == "1",
+        model_size=os.environ.get("WHISPER_MODEL", DEFAULT_MODEL),
+        budget_s=budget if budget > 0 else None,
     )
 
 
