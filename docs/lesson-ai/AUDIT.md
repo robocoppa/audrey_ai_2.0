@@ -1185,7 +1185,7 @@ accepted — see Accepted section.
   (and crash the process) is the right behavior. Qdrant's boot path
   degrades because Audrey can still serve chat/tools without the KB.
   Annotated with a one-line comment at
-  [`config.py:121-124`](../../src/audrey/config.py#L121) so future
+  [`config.py:121-124`](../../src/audrey/config.py#L137) so future
   readers see the choice was intentional.
 
 ---

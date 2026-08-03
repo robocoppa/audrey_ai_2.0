@@ -232,24 +232,95 @@ The row returns to `pending` with `chunks: 0`, and the phrase from step 3 stops
 being returned by `/v1/kb/query` — that second half is the one worth checking,
 because it is the only proof the old points actually went.
 
-**4. A stale lease is refused.** `scripts/stub_media_worker.py --lease bogus`
-does this in one shot — it claims normally, then posts against a lease id that
-was never issued. Expect `409` and an unchanged row.
+### Steps 4-6: the lease batch
 
-**5. A crashed worker's job comes back.** Set `kb.video.lease_minutes: 1` in
-`config.yaml` and restart, or this step takes half an hour. Then:
+These three share a setup, so run them as one pass. It also covers phase 34's
+step 6 — a killed worker and an abandoning one leave *identical* state (a lease
+with no reporter), and `--abandon` reaches it deliberately instead of racing a
+sub-second demux with `docker kill`.
+
+**Setup.** Shorten the lease — the default 30 makes this take two hours — and
+get the real worker out of the way so it doesn't claim rows from under the
+stub. On the box, add one line to `.env`:
 
 ```bash
-python scripts/stub_media_worker.py --endpoint $BOX --abandon   # claim, walk away
-sleep 70
-claim                                                           # sweeps, then re-claims
-jq '{file_id, attempts}' /tmp/j.json                            # attempts must be 2
+echo 'VIDEO_LEASE_MINUTES=1' >> .env
+docker compose up -d audrey-ai      # env + config.yaml are read at boot
+docker compose stop media-worker
 ```
 
-**6. Attempts terminate.** Repeat step 5 until `attempts` passes
-`max_attempts` (3). The row must land in `failed` with a reason and stop being
-returned by `claim` — a poison video that cycles forever would take the worker
-down with it on every pass. Put `lease_minutes` back to 30 afterwards.
+Use the env var, **not** an edit to `config.yaml`. That file is tracked, so
+editing it on the box dirties the deployed working tree and has to be undone by
+hand before the next pull; `.env` is gitignored and holds deployment-specific
+values already. A `config.yaml` edit left behind is also invisible — nothing
+reports the effective lease, so production would sit on a one-minute lease and
+the only symptom would be jobs occasionally running twice.
+
+From the laptop, using the small `silent.mp4` fixture (a 5s file makes each
+cycle instant; the only slow part is waiting out the lease):
+
+```bash
+export BOX=http://192.168.1.11:8000
+W="python3 scripts/stub_media_worker.py --endpoint $BOX"
+FID=$(curl -s $BOX/v1/files -H "Authorization: Bearer $TOKEN" \
+      | jq -r '.files[] | select(.filename=="silent.mp4") | .file_id')
+
+$W --requeue $FID          # pending, attempts 0
+```
+
+**4. A stale lease is refused.** Claims normally, then posts against a lease id
+that was never issued:
+
+```bash
+$W --lease bogus           # expect: reported: 409
+```
+
+The row stays `processing` under its *real* lease — the 409 must not have
+released it. This is the guard against a stalled worker overwriting a newer
+run's result with stale output, which leaves no trace afterwards.
+
+**5. A crashed worker's job comes back.**
+
+```bash
+sleep 70 && $W --abandon   # sweeps the expired lease, re-claims: "attempt 2"
+sleep 70 && $W --abandon   # "attempt 3"
+```
+
+The attempt counter rising is the proof the sweep ran — the claim increments
+it, so `attempt 2` can only happen if the row was returned to `pending` first.
+
+**6. Attempts terminate.**
+
+```bash
+sleep 70 && $W             # sweep sees attempts 3 >= max_attempts, fails it
+                           # then prints "queue empty" — nothing left to claim
+curl -s $BOX/v1/files -H "Authorization: Bearer $TOKEN" \
+  | jq '.files[] | select(.filename=="silent.mp4") | {status, failure_reason}'
+```
+
+Expect `failed` with `abandoned by the media worker after 3 attempt(s)`. A
+poison video that cycled forever would take the worker down on every pass, so
+this terminating is what makes the queue safe to leave running unattended.
+
+**Teardown.** Drop the override, restart, requeue the fixture, and bring the
+worker back. The requeue is not optional — step 6 deliberately leaves the row
+`failed`, and a `failed` row is never claimed again:
+
+```bash
+# on the box
+sed -i '/^VIDEO_LEASE_MINUTES=/d' .env
+docker compose up -d audrey-ai
+docker compose start media-worker
+
+# from the laptop
+$W --requeue $FID
+```
+
+Confirm the override is actually gone — this is the step that gets skipped:
+
+```bash
+docker exec audrey-ai python3 -c "import os; print(os.environ.get('VIDEO_LEASE_MINUTES','unset'))"
+```
 
 **7. The routes are service-only.** All three must be `401` with no token, with
 a wrong token, and with a *valid user JWT* — the last is the one worth checking,

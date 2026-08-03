@@ -4,10 +4,20 @@ Turn [phase 33](phase-33-video-job-lifecycle.md)'s stub into a real container
 that claims real jobs and does real work with the file — demux the audio, report
 its duration, hand it back. No transcription, no model calls, no GPU.
 
-**Status: DEPLOYED.** Verified on the box 2026-08-03: claims, demuxes, reports,
-and is network-isolated from Ollama by route as well as by name. Steps 3-7 of
-the verification below (hand-checked duration, silent video, read-only mount,
-killed worker, clean drain) are still outstanding.
+**Status: DEPLOYED AND VERIFIED** on the box, 2026-08-03. Steps 0-5 and 7 all
+pass: ffmpeg present, Ollama unreachable by name *and* by host address, a real
+9m25s video demuxed in under a second with its duration matching `ffprobe` by
+hand, a no-audio video completing as `ready`, the uploads mount read-only, and
+a clean drain on SIGTERM.
+
+Step 6 (a killed worker's job returns to the queue) is outstanding. It shares
+its setup — `lease_minutes: 1`, a restart, a queued job — with the phase 33
+lease checks that are also unrun, so the two are worth doing as one batch.
+
+Two defects were found by this verification and fixed here; both are written up
+below rather than in a changelog, because each is an interaction someone will
+otherwise re-introduce: `env_file` reinjecting `OLLAMA_HOST`, and shutdown
+latency being coupled to the poll interval.
 
 **New container — adds a `media-worker` service to `compose.yaml`.** This is the
 first compose change of the video work, and the reason this is its own phase: a
@@ -211,11 +221,22 @@ phase 36, and failing it here would deny it that.
 docker exec media-worker sh -c 'touch /data/uploads/.probe && echo WRITABLE || echo read-only'
 ```
 
-**6. A killed worker's job returns to the queue.** `docker kill media-worker`
-mid-job; the row must reach `pending` again via the phase 33 lease sweep, not
-sit in `processing`. Note the sweep only runs *on a claim*, so the row moves
-when the restarted worker next polls — not on a timer. Set
-`kb.video.lease_minutes: 1` first unless you want to wait 30 minutes.
+**6. A killed worker's job returns to the queue.** Covered by the lease batch
+in [phase 33](phase-33-video-job-lifecycle.md#steps-4-6-the-lease-batch); run
+it there rather than here.
+
+`docker kill media-worker` mid-job is the obvious way to write this step and a
+poor way to run it: a demux of a 9-minute video finishes in under a second, so
+there is no window to kill into and the test becomes a race you usually lose.
+The state a killed worker leaves — a lease with nobody coming back for it — is
+exactly what `--abandon` produces on purpose, so that is the instrument.
+
+Two things about the recovery are worth knowing either way. The sweep runs
+**on a claim**, not on a timer, so the row moves when some worker next polls;
+with `restart: unless-stopped` the killed container comes back and does that
+itself. And `restart` is what makes a SIGKILL survivable at all — the job is
+not lost, it just costs a full `lease_minutes` before anything retries it,
+which is the whole reason the SIGTERM drain in step 7 is worth having.
 
 **7. A `docker compose stop` drains rather than abandons.** SIGTERM sets a flag
 and the loop exits after the current job, so a planned stop costs nothing; only

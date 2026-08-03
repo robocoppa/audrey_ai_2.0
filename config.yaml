@@ -505,10 +505,17 @@ kb:
     # worker still working gets its job stolen out from under it; short enough
     # that a crashed worker's video is not stuck for an afternoon. Whisper on a
     # long file becomes the binding constraint once Phase 35 lands.
+    #
+    # Overridable from `.env` as VIDEO_LEASE_MINUTES — use that, not an edit
+    # here, when shortening the lease to verify the sweep. Editing this file on
+    # the box dirties the deployed working tree and has to be undone by hand,
+    # and a forgotten revert leaves production on a one-minute lease with
+    # nothing to notice it.
     lease_minutes: 30
     # Counts leases, not failures — a worker that dies silently never reports
     # one. Past this the row goes to 'failed' with a reason rather than cycling
     # forever and taking the worker down with it on every pass.
+    # Overridable as VIDEO_MAX_ATTEMPTS.
     max_attempts: 3
 
 # ─── Tools (OpenAPI auto-discovery) ────────────────────────────────────

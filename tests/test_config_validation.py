@@ -383,3 +383,49 @@ def test_pick_panel_timeout_defaults_when_keys_missing():
     cfg = _cfg({})
     assert pick_panel_timeout(cfg, "deep_panel_cloud") == 120.0
     assert pick_panel_timeout(cfg, "deep_panel") == 240.0
+
+
+class TestVideoLeaseEnvOverrides:
+    """`kb.video` is env-overridable so the lease verification never needs an
+    edit to `config.yaml` on the box.
+
+    That edit dirties the deployed working tree and has to be reverted by hand.
+    A forgotten revert leaves production on a one-minute lease — every worker
+    that takes longer than a minute has its job swept out from under it, and
+    the only symptom is jobs mysteriously running twice.
+    """
+
+    def test_yaml_wins_when_the_env_var_is_absent(self):
+        """The default that matters. An override that applied when unset would
+        make the committed config a lie."""
+        cfg = Config({"kb": {"video": {"lease_minutes": 30, "max_attempts": 3}}},
+                     EnvOverrides(VIDEO_LEASE_MINUTES=None, VIDEO_MAX_ATTEMPTS=None))
+        assert cfg.raw["kb"]["video"]["lease_minutes"] == 30
+        assert cfg.raw["kb"]["video"]["max_attempts"] == 3
+
+    def test_the_env_var_overrides_yaml(self):
+        cfg = Config({"kb": {"video": {"lease_minutes": 30, "max_attempts": 3}}},
+                     EnvOverrides(VIDEO_LEASE_MINUTES=1, VIDEO_MAX_ATTEMPTS=9))
+        assert cfg.raw["kb"]["video"]["lease_minutes"] == 1
+        assert cfg.raw["kb"]["video"]["max_attempts"] == 9
+
+    def test_it_works_when_yaml_has_no_video_block_at_all(self):
+        """`setdefault` has to build both levels — `kb` may exist without
+        `video`, or neither may exist."""
+        cfg = Config({}, EnvOverrides(VIDEO_LEASE_MINUTES=2))
+        assert cfg.raw["kb"]["video"]["lease_minutes"] == 2
+
+    def test_the_override_does_not_disturb_the_rest_of_kb(self):
+        cfg = Config({"kb": {"dataset_paths": ["/datasets/x"], "video": {"max_attempts": 3}}},
+                     EnvOverrides(VIDEO_LEASE_MINUTES=1))
+        assert cfg.raw["kb"]["dataset_paths"] == ["/datasets/x"]
+        assert cfg.raw["kb"]["video"]["max_attempts"] == 3
+        assert cfg.raw["kb"]["video"]["lease_minutes"] == 1
+
+    def test_the_committed_config_still_ships_production_values(self):
+        """Guards the exact accident the override exists to prevent: a
+        `lease_minutes: 1` left behind in the committed file."""
+        raw = _load_yaml(_REPO_ROOT / "config.yaml")
+        video = raw["kb"]["video"]
+        assert video["lease_minutes"] == 30
+        assert video["max_attempts"] == 3

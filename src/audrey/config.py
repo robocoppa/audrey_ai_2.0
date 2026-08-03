@@ -60,6 +60,16 @@ class EnvOverrides(BaseSettings):
     max_deep_workers_cloud: int | None = Field(default=None, alias="MAX_DEEP_WORKERS_CLOUD")
     max_inflight_per_user: int | None = Field(default=None, alias="MAX_INFLIGHT_PER_USER")
 
+    # Video job lease knobs (override `kb.video` in YAML). Env-overridable
+    # specifically so the Phase 33 lease verification doesn't require editing
+    # `config.yaml` on the box — that edit dirties the deployed working tree
+    # and has to be reverted by hand afterwards, which is the kind of step
+    # that gets forgotten and silently leaves production on a 1-minute lease.
+    # Put VIDEO_LEASE_MINUTES=1 in `.env` (gitignored) instead, and delete the
+    # line when the run is over.
+    video_lease_minutes: int | None = Field(default=None, alias="VIDEO_LEASE_MINUTES")
+    video_max_attempts: int | None = Field(default=None, alias="VIDEO_MAX_ATTEMPTS")
+
     # KB watcher toggle (Pydantic Settings parses 1/true/yes as True)
     kb_watcher_enabled: bool = Field(default=False, alias="KB_WATCHER_ENABLED")
 
@@ -93,6 +103,10 @@ class Config:
             self._merged.setdefault("kb", {})["dataset_paths"] = [
                 p.strip() for p in v.split(",") if p.strip()
             ]
+        if (v := self.env.video_lease_minutes) is not None:
+            self._merged.setdefault("kb", {}).setdefault("video", {})["lease_minutes"] = v
+        if (v := self.env.video_max_attempts) is not None:
+            self._merged.setdefault("kb", {}).setdefault("video", {})["max_attempts"] = v
 
     # Convenient typed accessors — add more as needed in later phases.
     @property

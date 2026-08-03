@@ -145,7 +145,7 @@ right slot of the YAML dict." The YAML dict is the merged result;
 You set `GPU_CONCURRENCY=2` in the environment Python sees at boot.
 Here's what happens:
 
-1. `lifespan()` calls [`get_config()`](../../src/audrey/config.py#L224).
+1. `lifespan()` calls [`get_config()`](../../src/audrey/config.py#L242).
 2. `get_config()` creates `EnvOverrides()`.
 3. Pydantic Settings sees `GPU_CONCURRENCY=2`, matches it to
    `gpu_concurrency`, and converts it to an integer.
@@ -281,7 +281,7 @@ Not every startup failure means the same thing.
 
 If `config.yaml` is missing or malformed, Audrey cannot know which models,
 tools, timeouts, and routing rules to use. There is no honest degraded mode.
-[`_load_yaml()`](../../src/audrey/config.py#L121) lets that exception crash
+[`_load_yaml()`](../../src/audrey/config.py#L137) lets that exception crash
 startup.
 
 If Qdrant is unreachable, Audrey loses some KB functionality, but it can still
