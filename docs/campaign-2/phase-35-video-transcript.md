@@ -108,6 +108,13 @@ the first point where nothing else needs the bytes.
 
 ## The parts that will bite
 
+- **faster-whisper needs `requests` and does not declare it.** *(hit on the
+  first build.)* Its `utils.py` does `import requests`, which used to arrive
+  transitively through `huggingface_hub` — that package has since moved off it.
+  So `pip install faster-whisper` succeeds and `import faster_whisper` raises
+  `ModuleNotFoundError: No module named 'requests'`, at build time, naming
+  neither package involved. The pip line installs it explicitly; **do not
+  remove it as redundant**, which is exactly what it looks like.
 - **Baked weights make the image large.** Accepted deliberately — the
   alternative is a cold start inside a lease window, which reads as a stuck job.
 - **Whisper tier is a real cost lever** (`small` vs `medium`, int8 on CPU), but

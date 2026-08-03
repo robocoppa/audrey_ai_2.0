@@ -36,7 +36,14 @@ WORKDIR /app
 # ── Whisper ──────────────────────────────────────────────────────────
 # Pinned: an unpinned STT engine changes transcript wording between builds,
 # which looks like a bug in retrieval rather than a dependency bump.
-RUN pip install --no-cache-dir faster-whisper==1.1.1
+#
+# `requests` is NOT redundant — do not remove it. faster-whisper's `utils.py`
+# does `import requests` without declaring it as a dependency; it used to
+# arrive transitively through `huggingface_hub`, which has since moved off it.
+# So `pip install faster-whisper` now succeeds and `import faster_whisper`
+# fails with ModuleNotFoundError, at build time, in a message that points at
+# neither package.
+RUN pip install --no-cache-dir faster-whisper==1.1.1 "requests>=2.31"
 
 # Bake the weights. The worker's network is `internal: true`, so it cannot
 # download them at runtime — and even with egress this would be wrong: a
@@ -47,9 +54,9 @@ RUN pip install --no-cache-dir faster-whisper==1.1.1
 # Changing tiers means rebuilding with a different WHISPER_BAKE.
 ARG WHISPER_BAKE=small
 ENV WHISPER_MODEL=${WHISPER_BAKE}
-RUN python -c "\
-from faster_whisper import WhisperModel; \
-WhisperModel('${WHISPER_BAKE}', device='cpu', compute_type='int8', download_root='/opt/whisper')" \
+COPY docker/bake_whisper.py /tmp/bake_whisper.py
+RUN WHISPER_BAKE=${WHISPER_BAKE} python /tmp/bake_whisper.py \
+    && rm /tmp/bake_whisper.py \
     && du -sh /opt/whisper
 
 # Just the media package and the version marker its parent needs to import.
