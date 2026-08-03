@@ -208,6 +208,47 @@ Then the levers, in the order I would try them:
    `vision.py`'s cache keys on `sha256` of the data URI — exact bytes — so it
    catches none of them. Pure win, no quality cost. Likely the largest single
    reduction.
+
+   **Confirmed against real footage, 2026-08-02.** A 288 MB, ~9½-minute
+   retirement video sampled at 1 frame/30s gave 19 frames. Three consecutive
+   frames — 90 seconds apart — were sent to `audrey_passthrough/qwen3-vl:32b`
+   and came back describing the same two men in the same red chairs against the
+   same printed fireplace backdrop, differing only in a gesture and one hair
+   detail. Ninety seconds of wall-clock separation, and the descriptions were
+   near-interchangeable. At `gpu.concurrency: 1` every one of those calls is
+   exclusive GPU that bought nothing.
+
+   This is the common case, not an edge case: talking-head recordings, ceremony
+   footage, screen recordings of a held slide. Sampling rate cannot fix it —
+   drop the rate and you miss the cuts that matter, raise it and you pay more
+   for the same answer. The decision has to be content-driven, which is what
+   the gate does.
+
+   Built ahead of the worker as
+   [`src/audrey/media/framegate.py`](../../src/audrey/media/framegate.py): pure
+   CPU, no GPU, no ffmpeg, no model. It is the one part of this phase with no
+   container dependency, so it can be built and tested before 32c exists.
+
+   dHash plus Hamming distance, each candidate compared against the last frame
+   *kept* rather than its immediate predecessor — under pairwise comparison a
+   slow pan differs from its neighbour by almost nothing at every step, so the
+   whole shot collapses and an ending that looks nothing like the beginning is
+   never described. `max_run` caps how many consecutive frames one keyframe may
+   stand for, so a three-hour lecture on one slide still gets periodic coverage
+   instead of reducing to a single description.
+
+   **On the 19 frames from the retirement video: 6 kept, 13 skipped, 68% fewer
+   describe calls.** Frames 4–16 — the static seated conversation — collapsed to
+   one; frames 1, 2, 17, 18 and 19 all survived as distinct. The reduction lands
+   where the redundancy actually is and leaves the head and tail alone, which is
+   the behaviour to re-check whenever the threshold is retuned.
+
+   The default distance of 8 bits is a starting point, not a finding. Run the
+   module against a corpus before trusting it:
+
+   ```bash
+   PYTHONPATH=src python -m audrey.media.framegate /tmp/frames/*.jpg
+   ```
 2. **Run audio and visual stages concurrently.** Whisper is CPU, frame
    description is GPU-via-passthrough. Serialising them wastes the idle
    resource; overlapping them is close to free wall-clock.

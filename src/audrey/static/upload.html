@@ -59,6 +59,14 @@
     #status div { margin-top: 4px; }
     #status div.ok { color: var(--ok); }
     #status div.err { color: var(--danger); }
+    #status .bar {
+      margin-top: 6px; height: 6px; border-radius: 3px;
+      background: var(--panel2); overflow: hidden;
+    }
+    #status .bar > span {
+      display: block; height: 100%; width: 0;
+      background: var(--accent); transition: width .12s linear;
+    }
 
     .quota { font-size: 0.85rem; color: var(--muted); margin-top: 4px; }
     a { color: var(--accent); }
@@ -149,13 +157,45 @@
   function clearLog() { status.replaceChildren(); }
 
   // One line per file. Returns the node so uploadOne can rewrite "Uploading…"
-  // into the outcome in place rather than stacking two lines per file.
+  // into the outcome in place rather than stacking two lines per file. The
+  // message lives in its own span so a progress bar can sit alongside it
+  // without the next text update wiping it out.
   function logLine(msg, cls) {
     const line = document.createElement("div");
-    line.textContent = msg;
+    const text = document.createElement("span");
+    text.className = "msg";
+    text.textContent = msg;
+    line.appendChild(text);
     if (cls) line.className = cls;
     status.appendChild(line);
     return line;
+  }
+
+  function setLine(line, msg, cls) {
+    line.querySelector(".msg").textContent = msg;
+    line.className = cls || "";
+  }
+
+  /** Add a progress bar to a line and return a setter for its fill.
+   *
+   * Only chunked uploads get one. fetch() reports nothing about how much of a
+   * request body has gone out, so a single-shot upload has no real progress to
+   * report and a bar that advanced on its own would be an invention.
+   */
+  function attachBar(line) {
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    const fill = document.createElement("span");
+    bar.appendChild(fill);
+    line.appendChild(bar);
+    return (done, total) => {
+      fill.style.width = `${Math.round((done / total) * 100)}%`;
+    };
+  }
+
+  function clearBar(line) {
+    const bar = line.querySelector(".bar");
+    if (bar) bar.remove();
   }
 
   function extOf(name) {
@@ -267,26 +307,26 @@
       // file has to travel as parts.
       const chunked = limits && file.size > limits.max_upload_bytes;
       const r = chunked ? await sendChunked(file, line) : await sendSingle(file);
+      clearBar(line);
       if (!r.ok) {
-        line.textContent = await describeFailure(r, file);
-        line.className = "err";
+        setLine(line, await describeFailure(r, file), "err");
         return false;
       }
       const body = await r.json();
-      line.textContent = body.status === "pending"
+      setLine(line, body.status === "pending"
         // Say plainly that it is stored but not yet searchable. Reporting
         // "0 chunks" as a success would read as a silent failure.
         ? `Stored ${body.filename} — awaiting processing, not searchable yet.`
-        : `Uploaded ${body.filename} → ${body.chunks} chunk${body.chunks === 1 ? "" : "s"}.`;
-      line.className = "ok";
+        : `Uploaded ${body.filename} → ${body.chunks} chunk${body.chunks === 1 ? "" : "s"}.`,
+        "ok");
       return true;
     } catch (e) {
       if (String(e.message) === "unauthorized") return false;
+      clearBar(line);
       // fetch() rejects rather than resolving when the transport itself
       // fails, so there is no status to report — a connection reset partway
       // through a large body is the usual cause.
-      line.textContent = `${file.name} — upload failed: connection error (${e}).`;
-      line.className = "err";
+      setLine(line, `${file.name} — upload failed: connection error (${e}).`, "err");
       return false;
     }
   }
@@ -311,6 +351,7 @@
     });
     if (!open.ok) return open;
     const { upload_id, part_size, parts_total } = await open.json();
+    const setProgress = attachBar(line);
 
     for (let n = 0; n < parts_total; n++) {
       const slice = file.slice(n * part_size, (n + 1) * part_size);
@@ -319,13 +360,17 @@
         { method: "PUT", body: slice },
       );
       if (!put.ok) return put;
-      const pct = Math.round(((n + 1) / parts_total) * 100);
-      line.textContent =
+      const done = n + 1;
+      setProgress(done, parts_total);
+      const pct = Math.round((done / parts_total) * 100);
+      setLine(line,
         `Uploading ${file.name} (${fmtBytes(file.size)}) — ${pct}% `
-        + `(part ${n + 1}/${parts_total})…`;
+        + `(part ${done}/${parts_total})…`);
     }
 
-    line.textContent = `Processing ${file.name}…`;
+    // The bar stays full through assembly: the bytes are all across, and the
+    // server-side concatenation has no progress to report.
+    setLine(line, `Processing ${file.name}…`);
     return authedFetch(
       `/v1/files/upload-sessions/${encodeURIComponent(upload_id)}/complete`,
       { method: "POST" },
