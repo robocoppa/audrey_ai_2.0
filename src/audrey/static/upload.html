@@ -46,6 +46,7 @@
     th { color: var(--muted); font-weight: 500; }
     tr.pending td { color: var(--muted); }
     tr.err td { color: var(--danger); }
+    tr.err td:nth-child(5) { white-space: normal; word-break: break-word; }
     td.right { text-align: right; }
 
     button {
@@ -414,12 +415,12 @@
         return;
       }
       rows.innerHTML = body.files.map(f => `
-        <tr class="${f.status === "pending" ? "pending" : ""}">
+        <tr class="${rowClass(f)}">
           <td>${escapeHtml(f.filename)}</td>
           <td>${escapeHtml(f.mime)}</td>
           <td class="right">${fmtBytes(f.bytes)}</td>
-          <td class="right">${f.status === "pending" ? "—" : f.chunks}</td>
-          <td>${f.status === "pending" ? "pending" : escapeHtml(f.uploaded_at)}</td>
+          <td class="right">${f.status === "ready" ? f.chunks : "—"}</td>
+          <td>${statusCell(f)}</td>
           <td><button class="danger" data-id="${escapeAttr(f.file_id)}">delete</button></td>
         </tr>
       `).join("");
@@ -430,6 +431,25 @@
       if (String(e.message) === "unauthorized") return;
       rows.innerHTML = `<tr><td colspan="6">Error: ${e}</td></tr>`;
     }
+  }
+
+  // A row that stops moving has to say so. 'pending' and 'processing' both
+  // mean not-yet-searchable; 'failed' means it never will be without another
+  // upload, and the reason is the only thing that makes that actionable.
+  function rowClass(f) {
+    if (f.status === "failed") return "err";
+    return f.status === "ready" ? "" : "pending";
+  }
+
+  function statusCell(f) {
+    if (f.status === "ready") return escapeHtml(f.uploaded_at);
+    if (f.status === "processing") return "processing…";
+    if (f.status === "failed") {
+      return f.failure_reason
+        ? `failed — ${escapeHtml(f.failure_reason)}`
+        : "failed";
+    }
+    return "pending";
   }
 
   // Server-published limits drive the copy too, so the page can't advertise

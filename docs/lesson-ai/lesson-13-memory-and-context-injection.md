@@ -243,7 +243,7 @@ eviction:
 - `POST /v1/admin/auth/clear` — drops every cached entry. Useful
   after an OWUI config or version change.
 - An email-scoped variant powered by
-  [`clear_auth_cache_for_email`](../../src/audrey/auth.py#L182) —
+  [`clear_auth_cache_for_email`](../../src/audrey/auth.py#L224) —
   drops just one user's entries (a user can have multiple tokens
   across devices) without disturbing others.
 

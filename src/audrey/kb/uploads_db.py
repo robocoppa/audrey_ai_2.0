@@ -7,7 +7,10 @@ collection.
 
 Source-of-truth contract:
   - Qdrant has the file's content → sqlite has a row for it.
-  - Qdrant has nothing for a file_id → sqlite must not either.
+  - Qdrant has nothing for a file_id → sqlite must not either, *unless
+    the row never claimed Qdrant content in the first place*. A video
+    waiting on the media worker is the case that carve-out exists for:
+    it holds bytes on disk and no points anywhere, on purpose.
 
 The startup `reconcile_with_qdrant` enforces (b) by deleting sqlite rows
 whose file_id has zero points in the user's Qdrant collections, and
@@ -49,15 +52,32 @@ CREATE TABLE IF NOT EXISTS uploads (
   collection  TEXT NOT NULL,
   chunks      INTEGER NOT NULL,
   uploaded_at TEXT NOT NULL,
-  -- 'ready'   — ingested, searchable now.
-  -- 'pending' — bytes stored, nothing extracted yet. Video lands here: it is
-  --             accepted for storage but has no extraction path until the
-  --             Phase 32c media worker exists.
-  status      TEXT NOT NULL DEFAULT 'ready'
+  -- 'ready'      — ingested, searchable now.
+  -- 'pending'    — bytes stored, nothing extracted yet, waiting for a worker.
+  --                Video lands here on upload.
+  -- 'processing' — leased by a media worker (Phase 33). `lease_id` says which
+  --                lease, `leased_at` says when it expires from.
+  -- 'failed'     — gave up. `failure_reason` says why, and it is shown to the
+  --                user: a row that sits at 'pending' forever with no
+  --                explanation is the failure mode this state exists to avoid.
+  status      TEXT NOT NULL DEFAULT 'ready',
+  -- Empty unless status is 'processing'. Presented back on completion and
+  -- checked, so a worker that stalled past its lease and woke up after the job
+  -- was re-leased cannot overwrite the newer run's result.
+  lease_id       TEXT NOT NULL DEFAULT '',
+  leased_at      TEXT NOT NULL DEFAULT '',
+  -- Counts leases, not failures — a worker that dies without reporting never
+  -- gets to increment anything, so the lease is the only reliable tally.
+  attempts       INTEGER NOT NULL DEFAULT 0,
+  failure_reason TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_user ON uploads(user);
+-- No index on `status` here. `_SCHEMA` runs before `_migrate`, and on the
+-- deployed database the column does not exist yet — indexing it at this point
+-- fails at boot with "no such column". It is created in `_migrate` instead,
+-- after the columns are in place.
 
--- Chunked-upload sessions (Phase 32b). A row lives only while an upload is
+-- Chunked-upload sessions (Phase 32). A row lives only while an upload is
 -- in flight: created by `open_session`, dropped when `/complete` succeeds or
 -- the TTL sweep collects it. Nothing here is authoritative about stored
 -- files — that stays `uploads` above, written only after assembly lands.
@@ -84,6 +104,19 @@ CREATE TABLE IF NOT EXISTS upload_parts (
   PRIMARY KEY (upload_id, part_no)
 );
 """
+
+
+#: Columns added to `uploads` after the table first shipped, in the order they
+#: were added. Fresh databases get them from `_SCHEMA`; deployed ones get them
+#: from `_migrate`. Both lists have to agree — a column here and not in the
+#: schema string means a fresh install silently lacks it.
+_UPLOADS_ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("status", "TEXT NOT NULL DEFAULT 'ready'"),
+    ("lease_id", "TEXT NOT NULL DEFAULT ''"),
+    ("leased_at", "TEXT NOT NULL DEFAULT ''"),
+    ("attempts", "INTEGER NOT NULL DEFAULT 0"),
+    ("failure_reason", "TEXT NOT NULL DEFAULT ''"),
+)
 
 
 class UploadsDB:
@@ -116,22 +149,31 @@ class UploadsDB:
     def _migrate(self) -> None:
         """Additive column migrations for databases created before a column existed.
 
-        The deployed sqlite predates `status` (Phase 32), and `CREATE TABLE IF
-        NOT EXISTS` is a no-op against an existing table — so a fresh schema
-        string alone would leave the live file without the column and every
-        read would raise. Existing rows are `ready` because everything already
-        stored was ingested synchronously before pending states existed.
+        The deployed sqlite predates these columns, and `CREATE TABLE IF NOT
+        EXISTS` is a no-op against an existing table — so a fresh schema string
+        alone would leave the live file without them and every read would
+        raise.
+
+        Every default here has to make an existing row correct without being
+        touched: rows stored before `status` existed were ingested
+        synchronously, so `ready` is true of them; nothing was ever leased, so
+        an empty lease and zero attempts are true too.
         """
         with self._lock:
             cols = {
                 r["name"]
                 for r in self._conn.execute("PRAGMA table_info(uploads)").fetchall()
             }
-            if "status" not in cols:
-                self._conn.execute(
-                    "ALTER TABLE uploads ADD COLUMN status TEXT NOT NULL DEFAULT 'ready'",
-                )
-                log.info("uploads_db: migrated uploads table — added `status`")
+            for name, ddl in _UPLOADS_ADDED_COLUMNS:
+                if name in cols:
+                    continue
+                self._conn.execute(f"ALTER TABLE uploads ADD COLUMN {name} {ddl}")
+                log.info("uploads_db: migrated uploads table — added `%s`", name)
+            # Only now that the column certainly exists. The claim query filters
+            # on status and orders by uploaded_at, and a worker polls it.
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_uploads_status ON uploads(status)",
+            )
 
     def close(self) -> None:
         with self._lock:
@@ -194,7 +236,7 @@ class UploadsDB:
         with self._lock:
             cur = self._conn.execute(
                 "SELECT file_id, filename, mime, bytes, kind, collection, "
-                "       chunks, uploaded_at, status "
+                "       chunks, uploaded_at, status, failure_reason "
                 "FROM uploads WHERE user = ? ORDER BY uploaded_at DESC",
                 (user,),
             )
@@ -219,17 +261,180 @@ class UploadsDB:
             cur = self._conn.execute("SELECT DISTINCT user FROM uploads")
             return [r["user"] for r in cur.fetchall()]
 
-    async def file_ids_for_user(self, user: str) -> set[str]:
-        return await asyncio.to_thread(self._file_ids_sync, user)
+    async def prunable_file_ids(self, user: str) -> set[str]:
+        """File ids that *claim* Qdrant content, and so may be pruned if absent.
 
-    def _file_ids_sync(self, user: str) -> set[str]:
+        `reconcile_with_qdrant`'s ghost sweep asks "is this row's content
+        really in Qdrant?" — a question only worth asking of rows that
+        assert there is any. Two kinds of row assert nothing and must be
+        withheld from that sweep, or boot deletes them:
+
+          - `status != 'ready'` — a pending or processing video hasn't been
+            ingested yet, and a failed one never will be. Having no points
+            is the expected state, not a ghost.
+          - `chunks = 0` — a video the worker completed with no transcript
+            (silent footage). It is 'ready' in the sense that the pipeline
+            is done with it, but nothing was ever written to Qdrant.
+
+        The upload path can't produce a 'ready' row with 0 chunks: images
+        record 1 and empty text is rejected with `EmptyExtractionError`
+        before any row is written. So `chunks = 0` here means a completed
+        video specifically, and excluding it costs no real ghost coverage.
+        """
+        return await asyncio.to_thread(self._prunable_ids_sync, user)
+
+    def _prunable_ids_sync(self, user: str) -> set[str]:
         with self._lock:
             cur = self._conn.execute(
-                "SELECT file_id FROM uploads WHERE user = ?", (user,),
+                "SELECT file_id FROM uploads "
+                "WHERE user = ? AND status = 'ready' AND chunks > 0",
+                (user,),
             )
             return {r["file_id"] for r in cur.fetchall()}
 
-    # ── Chunked-upload sessions (Phase 32b) ───────────────────────────
+    # ── Video job lifecycle (Phase 33) ────────────────────────────────
+
+    async def get_upload(self, file_id: str) -> dict | None:
+        """Fetch one row by file_id, NOT double-keyed on user.
+
+        Every other read here is keyed on user as well, deliberately. This one
+        cannot be: the caller is the media worker, which is authenticated by
+        service token and has no user of its own — resolving the owner is the
+        whole reason it asks. The routes that use this are service-only for
+        exactly that reason.
+        """
+        return await asyncio.to_thread(self._get_upload_sync, file_id)
+
+    def _get_upload_sync(self, file_id: str) -> dict | None:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT * FROM uploads WHERE file_id = ?", (file_id,),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    async def claim_job(self, *, lease_id: str, now: str) -> dict | None:
+        """Lease the oldest pending row, or None when nothing is waiting."""
+        return await asyncio.to_thread(self._claim_job_sync, lease_id, now)
+
+    def _claim_job_sync(self, lease_id: str, now: str) -> dict | None:
+        # SELECT and UPDATE under one lock hold. With a single connection that
+        # is the whole atomicity story: two workers polling at the same moment
+        # serialize here, so the second sees 'processing' and takes the next
+        # row rather than leasing the same one twice. Splitting this into two
+        # public calls would reintroduce exactly that race.
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM uploads WHERE status = 'pending' "
+                "ORDER BY uploaded_at ASC LIMIT 1",
+            ).fetchone()
+            if row is None:
+                return None
+            attempts = int(row["attempts"]) + 1
+            self._conn.execute(
+                "UPDATE uploads SET status = 'processing', lease_id = ?, "
+                "       leased_at = ?, attempts = ? WHERE file_id = ?",
+                (lease_id, now, attempts, row["file_id"]),
+            )
+            claimed = dict(row)
+            claimed.update(
+                status="processing", lease_id=lease_id, leased_at=now, attempts=attempts,
+            )
+            return claimed
+
+    async def complete_job(
+        self, *, file_id: str, lease_id: str, collection: str, chunks: int,
+    ) -> bool:
+        """Flip a leased row to 'ready'. False if the lease no longer holds.
+
+        The `lease_id` and `status` predicates are the guard against a late
+        worker: one that stalled past its lease, had the job swept back and
+        re-leased, then finally woke up and posted. Without them that stale
+        result overwrites the newer one and the row looks perfectly healthy
+        afterwards — no error, no log line, just a transcript that does not
+        match its video.
+        """
+        return await asyncio.to_thread(
+            self._complete_job_sync, file_id, lease_id, collection, chunks,
+        )
+
+    def _complete_job_sync(
+        self, file_id: str, lease_id: str, collection: str, chunks: int,
+    ) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE uploads SET status = 'ready', collection = ?, chunks = ?, "
+                "       lease_id = '', leased_at = '', failure_reason = '' "
+                "WHERE file_id = ? AND lease_id = ? AND status = 'processing'",
+                (collection, chunks, file_id, lease_id),
+            )
+            return cur.rowcount > 0
+
+    async def fail_job(self, *, file_id: str, lease_id: str, reason: str) -> bool:
+        """Mark a leased row 'failed' with a reason. Same lease guard as completion."""
+        return await asyncio.to_thread(self._fail_job_sync, file_id, lease_id, reason)
+
+    def _fail_job_sync(self, file_id: str, lease_id: str, reason: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE uploads SET status = 'failed', failure_reason = ?, "
+                "       lease_id = '', leased_at = '' "
+                "WHERE file_id = ? AND lease_id = ? AND status = 'processing'",
+                (reason[:500], file_id, lease_id),
+            )
+            return cur.rowcount > 0
+
+    async def sweep_expired_leases(
+        self, *, expired_before: str, max_attempts: int,
+    ) -> dict[str, int]:
+        """Return timed-out jobs to the queue, or fail them once attempts run out.
+
+        A worker crash leaves `status='processing'` forever otherwise. Same
+        spirit as the boot-time `reconcile_with_qdrant`: the recovery is a
+        sweep, not a human noticing.
+
+        The attempts cap is what makes this terminate. A video that crashes the
+        worker every time would otherwise cycle forever, taking the worker down
+        with it on every pass.
+        """
+        return await asyncio.to_thread(
+            self._sweep_leases_sync, expired_before, max_attempts,
+        )
+
+    def _sweep_leases_sync(
+        self, expired_before: str, max_attempts: int,
+    ) -> dict[str, int]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT file_id, attempts FROM uploads "
+                "WHERE status = 'processing' AND leased_at < ?",
+                (expired_before,),
+            ).fetchall()
+            requeued = failed = 0
+            for row in rows:
+                attempts = int(row["attempts"])
+                if attempts >= max_attempts:
+                    self._conn.execute(
+                        "UPDATE uploads SET status = 'failed', lease_id = '', "
+                        "       leased_at = '', failure_reason = ? WHERE file_id = ?",
+                        (f"abandoned by the media worker after {attempts} attempt(s)",
+                         row["file_id"]),
+                    )
+                    failed += 1
+                else:
+                    self._conn.execute(
+                        "UPDATE uploads SET status = 'pending', lease_id = '', "
+                        "       leased_at = '' WHERE file_id = ?",
+                        (row["file_id"],),
+                    )
+                    requeued += 1
+            if requeued or failed:
+                log.info(
+                    "uploads_db: lease sweep requeued=%d failed=%d", requeued, failed,
+                )
+            return {"requeued": requeued, "failed": failed}
+
+    # ── Chunked-upload sessions (Phase 32) ────────────────────────────
 
     async def open_session(
         self, *, upload_id: str, user: str, filename: str,
@@ -357,7 +562,8 @@ async def reconcile_with_qdrant(db: UploadsDB, qdrant) -> dict[str, int]:
       2. For every user already in sqlite, delete sqlite rows whose
          file_id no longer appears in either of that user's Qdrant
          collections. Catches files that were deleted in Qdrant out of
-         band (manual purge, migration, etc.).
+         band (manual purge, migration, etc.). Only rows that assert
+         Qdrant content are eligible — `prunable_file_ids` says which.
 
     Returns a small stats dict for the boot log.
 
@@ -409,6 +615,9 @@ async def reconcile_with_qdrant(db: UploadsDB, qdrant) -> dict[str, int]:
                 )
 
     # 2. Drop sqlite rows for files that no longer exist anywhere in qdrant.
+    #    Scoped to rows that claim Qdrant content — see `prunable_file_ids`.
+    #    Without that scope every boot deletes the whole video queue, since
+    #    a pending video has no points by definition.
     pruned = 0
     for user in await db.all_users():
         text_col = user_text_collection(user)
@@ -419,7 +628,7 @@ async def reconcile_with_qdrant(db: UploadsDB, qdrant) -> dict[str, int]:
                 continue
             for row in await qdrant.list_user_files(user=user, collection=col):
                 live_ids.add(row["file_id"])
-        sqlite_ids = await db.file_ids_for_user(user)
+        sqlite_ids = await db.prunable_file_ids(user)
         for fid in sqlite_ids - live_ids:
             if await db.delete_upload(fid, user=user):
                 pruned += 1

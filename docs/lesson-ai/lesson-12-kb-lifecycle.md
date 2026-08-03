@@ -649,7 +649,25 @@ The contract from
 [`kb/uploads_db.py:8-13`](../../src/audrey/kb/uploads_db.py#L8):
 
 > - Qdrant has the file's content → sqlite has a row for it.
-> - Qdrant has nothing for a file_id → sqlite must not either.
+> - Qdrant has nothing for a file_id → sqlite must not either, *unless
+>   the row never claimed Qdrant content in the first place*.
+
+That second clause is a patch, and the bruise it covers is worth
+looking at. The rule was originally unconditional, and it was
+correct for as long as every row in `uploads` described a file that
+had already been ingested — "no points" could only mean the row was
+a leftover. Video broke that: an uploaded video sits at
+`status='pending'` holding bytes on disk with no points anywhere, on
+purpose, until the media worker reaches it. The sweep read those as
+leftovers and deleted them on every boot. Nothing errored. The row
+just wasn't in `GET /v1/files` after a restart, with the mp4 still
+on disk and nothing left pointing at it.
+
+The lesson isn't "add a carve-out". It's that an invariant is a
+claim about what the rows in a table *mean*, and adding a row type
+that means something new silently repeals it. The code enforcing
+the invariant doesn't change and doesn't complain — it just starts
+being wrong.
 
 The upload flow enforces both invariants in the order shown
 above. The delete flow does the same in reverse:
@@ -680,14 +698,17 @@ disk unlink are housekeeping that can take their own time.
 But what about drift that happens *outside* the request flow?
 Manual `qdrant` purges, container restarts mid-upload, a sqlite
 file restored from an old backup? That's what
-[`reconcile_with_qdrant`](../../src/audrey/kb/uploads_db.py#L349)
+[`reconcile_with_qdrant`](../../src/audrey/kb/uploads_db.py#L554)
 is for — a two-direction sweep:
 - **Backfill.** Anything in Qdrant that's missing from sqlite gets
   added. So if sqlite was restored from an old backup, any uploads
   Qdrant has since accumulated get picked up.
 - **Prune.** Anything in sqlite whose `file_id` no longer exists
   anywhere in the user's Qdrant collections gets dropped. So if a
-  Qdrant collection was manually purged, sqlite catches up.
+  Qdrant collection was manually purged, sqlite catches up. Scoped
+  to rows that claim Qdrant content — `status='ready'` with at least
+  one chunk — for the reason in §2.10. A row that never made the
+  claim isn't evidence of drift.
 
 This is called once at startup from the lifespan, **before**
 Audrey serves any traffic. The precondition matters — it assumes

@@ -53,7 +53,7 @@ ALLOWED_IMAGE_MIMES: frozenset[str] = frozenset({
 })
 # Video is accepted for STORAGE only. There is no extraction path for it yet —
 # the upload route stores the bytes and records the row as `pending`, and the
-# Phase 32c media worker is what will turn it into a transcript, frame
+# Phase 35 media worker is what will turn it into a transcript, frame
 # descriptions, and a summary. Do NOT add a video mime to a text or image
 # branch: `load_text` cannot read one and CLIP cannot embed one.
 ALLOWED_VIDEO_MIMES: frozenset[str] = frozenset({

@@ -179,6 +179,23 @@ def verify_service_token(presented: str | None, expected: str) -> bool:
     return hmac.compare_digest(presented, expected)
 
 
+async def require_service(
+    request: Request,
+    x_audrey_service_token: str | None = Header(default=None),
+) -> None:
+    """Service-token-only gate, for routes no browser should ever reach.
+
+    Distinct from `resolve_kb_caller`, which accepts *either* a service token
+    or a user JWT. The video job routes (Phase 33) hand out filesystem paths
+    and accept results on behalf of an arbitrary user, so holding a valid user
+    token must not be enough to reach them — otherwise any logged-in user could
+    claim another's video and post a transcript into their collection.
+    """
+    expected = request.app.state.cfg.env.kb_service_token
+    if not verify_service_token(x_audrey_service_token, expected):
+        raise HTTPException(status_code=401, detail="Service token required.")
+
+
 async def resolve_kb_caller(
     request: Request,
     x_audrey_service_token: str | None = Header(default=None),
@@ -235,6 +252,6 @@ def cache_size() -> int:
 
 __all__ = [
     "AuthedUser", "KBCaller", "require_user", "require_admin",
-    "verify_service_token", "resolve_kb_caller",
+    "verify_service_token", "resolve_kb_caller", "require_service",
     "clear_auth_cache", "clear_auth_cache_for_email", "cache_size",
 ]

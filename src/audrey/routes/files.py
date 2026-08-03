@@ -6,7 +6,15 @@
     GET    /v1/files           — list the caller's files (one row per file_id).
     DELETE /v1/files/{file_id} — purge all points for a file + delete bytes.
 
-Identity: every endpoint depends on `require_user`, which proxies the
+    POST   /v1/files/upload-sessions            — open a chunked upload.
+    PUT    .../upload-sessions/{id}/parts/{n}   — one part.
+    POST   .../upload-sessions/{id}/complete    — assemble and ingest.
+
+    POST   /v1/files/jobs/claim               — SERVICE: lease a pending job.
+    POST   /v1/files/{file_id}/ingest-result  — SERVICE: worker output.
+    POST   /v1/files/{file_id}/ingest-failed  — SERVICE: worker gave up.
+
+Identity: every *user* endpoint depends on `require_user`, which proxies the
 browser's `Authorization: Bearer <jwt>` to OWUI and returns an `AuthedUser`.
 The caller's email *is* the user id — no `?user=` query param, no `X-User`
 header, no form field. Spoofing requires forging a token OWUI would accept.
@@ -24,6 +32,11 @@ Safety layers (all mandatory):
   - Filename sanitization: we keep the original filename for display, but
     the bytes land at `<upload_root>/<sanitized_user>/<file_id><ext>` —
     the client-supplied name is never used as a path segment.
+
+The three `jobs`/`ingest-*` routes are the exception to all of the above: they
+authenticate with `require_service` and carry no user identity of their own,
+because the media worker acts on behalf of whoever uploaded the file. A user
+JWT must never reach them — see `auth.require_service`.
 """
 
 from __future__ import annotations
@@ -35,10 +48,10 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
 
-from audrey.auth import AuthedUser, require_user
+from audrey.auth import AuthedUser, require_service, require_user
 from audrey.kb.extract import (
     ALLOWED_EXTENSIONS,
     ALLOWED_MIMES,
@@ -71,9 +84,12 @@ class FileRow(BaseModel):
     bytes: int
     uploaded_at: str
     chunks: int
-    # 'ready' | 'pending'. Defaulted so a row written before the column
-    # existed still validates after the additive migration.
+    # 'ready' | 'pending' | 'processing' | 'failed'. Defaulted so a row written
+    # before the column existed still validates after the additive migration.
     status: str = "ready"
+    # Only set on 'failed'. Shown to the user — a row that stops moving without
+    # saying why is the failure this field exists to prevent.
+    failure_reason: str = ""
 
 
 class UploadResponse(BaseModel):
@@ -288,7 +304,7 @@ async def _validate_and_ingest(
     # Video is stored, not extracted. There is no loader that reads a video
     # and no embedder that takes one, so it gets a row and its bytes and
     # nothing else — `status='pending'` is the honest description, and the
-    # Phase 32c media worker is what will move it to 'ready'. Returning early
+    # Phase 35 media worker is what will move it to 'ready'. Returning early
     # keeps it out of the try/except below, whose whole job is ingest.
     if kind == "video":
         try:
@@ -382,7 +398,7 @@ async def _validate_and_ingest(
     )
 
 
-# ─── Chunked upload sessions (Phase 32b) ──────────────────────────────
+# ─── Chunked upload sessions (Phase 32) ───────────────────────────────
 #
 # A single POST cannot carry a large file: cloudflared fronts this app and
 # the CDN edge refuses request bodies past its plan limit (100 MB on
@@ -656,6 +672,233 @@ async def _drop_session(db: UploadsDB, session_dir: Path, upload_id: str) -> Non
     await asyncio.to_thread(shutil.rmtree, session_dir, True)
 
 
+# ─── Video job lifecycle (Phase 33) ───────────────────────────────────
+#
+# A video uploads to `status='pending'` and nothing in this process will ever
+# read it — extraction is minutes of CPU and GPU and cannot live in a request.
+# These three routes are how a separate media worker takes ownership of that
+# row, and how it gives it back.
+#
+# The worker PULLS. Audrey holds no queue, no retry policy and no address for
+# a container it does not own; a worker that is down just means rows keep
+# accumulating as 'pending', which is where they already sit today.
+#
+# Service-token only. They hand out filesystem paths and write into an
+# arbitrary user's collection, so a user JWT must not reach them.
+
+
+class JobClaim(BaseModel):
+    file_id: str
+    user: str
+    filename: str
+    mime: str
+    bytes: int
+    path: str
+    lease_id: str
+    attempts: int
+
+
+class TranscriptSegment(BaseModel):
+    t_start: float
+    t_end: float
+    text: str
+
+
+class IngestResultRequest(BaseModel):
+    lease_id: str
+    duration_s: float | None = None
+    # Phase 33 ships the envelope and the state machine around it. Phase 35
+    # fills this with real whisper output; until then a stub worker posts one
+    # segment, which is enough to prove the path end to end.
+    segments: list[TranscriptSegment] = []
+
+
+class IngestFailedRequest(BaseModel):
+    lease_id: str
+    reason: str
+
+
+class JobResultResponse(BaseModel):
+    file_id: str
+    status: str
+    chunks: int
+
+
+def _video_cfg(request: Request) -> dict:
+    cfg = request.app.state.cfg
+    kb_cfg = cfg.raw.get("kb", {}) or {}
+    return kb_cfg.get("video", {}) or {}
+
+
+def _lease_minutes(request: Request) -> int:
+    return int(_video_cfg(request).get("lease_minutes", 30))
+
+
+def _max_attempts(request: Request) -> int:
+    return int(_video_cfg(request).get("max_attempts", 3))
+
+
+def _hhmmss(seconds: float) -> str:
+    """Timestamp prefix for a transcript line, so a chunk carries its own position."""
+    total = max(0, int(seconds))
+    return f"{total // 3600:02d}:{(total % 3600) // 60:02d}:{total % 60:02d}"
+
+
+# `response_model=None`: the return is either a JobClaim or a bare 204
+# Response, and FastAPI cannot build one response model from that union.
+@router.post("/jobs/claim", response_model=None)
+async def claim_job(
+    request: Request, _: None = Depends(require_service),
+) -> JobClaim | Response:
+    """Lease the oldest pending upload, or 204 when the queue is empty.
+
+    An empty queue is the steady state, not an error — a worker polling an idle
+    Audrey must not fill the log with failures.
+
+    The sweep runs here rather than on a timer. The only thing that needs
+    expired leases returned is a worker asking for work, so doing it on the
+    claim keeps recovery in one place with no background task to supervise.
+    """
+    db = _get_uploads_db(request)
+
+    expiry = _dt.datetime.now(_dt.UTC) - _dt.timedelta(minutes=_lease_minutes(request))
+    await db.sweep_expired_leases(
+        expired_before=expiry.isoformat(timespec="seconds"),
+        max_attempts=_max_attempts(request),
+    )
+
+    lease_id = str(uuid.uuid4())
+    now = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+    row = await db.claim_job(lease_id=lease_id, now=now)
+    if row is None:
+        return Response(status_code=204)
+
+    ext = Path(str(row["filename"])).suffix.lower()
+    path = _upload_root(request) / sanitize_user(str(row["user"])) / f"{row['file_id']}{ext}"
+    log.info(
+        "files: leased job file_id=%s user=%s attempt=%d",
+        row["file_id"], row["user"], row["attempts"],
+    )
+    return JobClaim(
+        file_id=str(row["file_id"]), user=str(row["user"]),
+        filename=str(row["filename"]), mime=str(row["mime"]),
+        bytes=int(row["bytes"]), path=str(path),
+        lease_id=lease_id, attempts=int(row["attempts"]),
+    )
+
+
+@router.post("/{file_id}/ingest-result", response_model=JobResultResponse)
+async def ingest_result(
+    file_id: str,
+    body: IngestResultRequest,
+    request: Request,
+    _: None = Depends(require_service),
+) -> JobResultResponse:
+    """Take a worker's output, ingest it, and flip the row to 'ready'.
+
+    Audrey does the ingest, not the worker. `UploadsDB` is a single connection
+    with no WAL guarded by an in-process lock — a second container writing that
+    file breaks the single-writer contract `reconcile_with_qdrant` depends on,
+    and breaks it quietly rather than loudly.
+    """
+    db = _get_uploads_db(request)
+    qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
+    text_embedder = getattr(request.app.state, "text_embedder", None)
+    if qdrant is None or text_embedder is None:
+        raise HTTPException(status_code=503, detail="KB is not initialized.")
+
+    row = await db.get_upload(file_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such file.")
+    if row["lease_id"] != body.lease_id or row["status"] != "processing":
+        # Refuse before ingesting, not after. A stale worker's transcript must
+        # not reach Qdrant at all — writing it and then declining to update the
+        # row would leave one run's chunks under another run's row.
+        raise HTTPException(
+            status_code=409,
+            detail="Lease is no longer valid — this job was reclaimed.",
+        )
+
+    user = str(row["user"])
+    stamp = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+
+    transcript = "\n".join(
+        f"[{_hhmmss(s.t_start)}] {s.text.strip()}"
+        for s in body.segments if s.text.strip()
+    )
+    chunks = 0
+    collection = ""
+    # A silent or music-only video produces no text. That is a fact about the
+    # file, not a defect in it — the row still completes, with nothing indexed
+    # and no collection claimed. Deliberately NOT the `EmptyExtractionError`
+    # treatment a scanned PDF gets, where empty means unusable.
+    if transcript:
+        # Ingest through the ordinary text path rather than a video-shaped one.
+        # `ingest_user_text_file` reads a Path, so the transcript is written
+        # beside the source under the same file_id — the row and its chunks
+        # then agree on identity, and delete-by-file_id still collects both.
+        text_col, _image_col = await ensure_user_collections(qdrant, user)
+        collection = text_col
+        sidecar = (
+            _upload_root(request) / sanitize_user(user) / f"{file_id}.transcript.txt"
+        )
+        sidecar.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(sidecar.write_text, transcript, "utf-8")
+        try:
+            chunks = await ingest_user_text_file(
+                sidecar, qdrant=qdrant, embedder=text_embedder,
+                collection=text_col, user=user, file_id=file_id,
+                filename=str(row["filename"]), mime=str(row["mime"]),
+                uploaded_at=stamp,
+            )
+        except Exception as e:
+            log.exception("files: transcript ingest failed for %s: %s", file_id, e)
+            await db.fail_job(
+                file_id=file_id, lease_id=body.lease_id,
+                reason=f"transcript ingest failed: {e}",
+            )
+            raise HTTPException(status_code=500, detail=f"Ingest failed: {e}") from e
+
+    if not await db.complete_job(
+        file_id=file_id, lease_id=body.lease_id, collection=collection, chunks=chunks,
+    ):
+        # Valid when checked above and not now, so the sweep ran in between.
+        # The chunks are already in Qdrant under this file_id; the newer
+        # lease's delete-before-upsert will clear them.
+        raise HTTPException(
+            status_code=409, detail="Lease expired during ingest — job was reclaimed.",
+        )
+
+    log.info(
+        "files: job complete file_id=%s user=%s chunks=%d segments=%d",
+        file_id, user, chunks, len(body.segments),
+    )
+    return JobResultResponse(file_id=file_id, status="ready", chunks=chunks)
+
+
+@router.post("/{file_id}/ingest-failed", response_model=JobResultResponse)
+async def ingest_failed(
+    file_id: str,
+    body: IngestFailedRequest,
+    request: Request,
+    _: None = Depends(require_service),
+) -> JobResultResponse:
+    """Record why a job could not be done, so the user is told rather than left waiting."""
+    db = _get_uploads_db(request)
+    row = await db.get_upload(file_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such file.")
+    if not await db.fail_job(
+        file_id=file_id, lease_id=body.lease_id, reason=body.reason,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Lease is no longer valid — this job was reclaimed.",
+        )
+    log.info("files: job failed file_id=%s reason=%r", file_id, body.reason[:200])
+    return JobResultResponse(file_id=file_id, status="failed", chunks=0)
+
+
 @router.get("", response_model=ListResponse)
 async def list_files(
     request: Request, me: AuthedUser = Depends(require_user),
@@ -665,7 +908,8 @@ async def list_files(
 
     rows = await db.list_user(user)
     files = [FileRow(**{k: row[k] for k in (
-        "file_id", "filename", "mime", "bytes", "uploaded_at", "chunks", "status",
+        "file_id", "filename", "mime", "bytes", "uploaded_at", "chunks",
+        "status", "failure_reason",
     )}) for row in rows]
     total = sum(r.bytes for r in files)
     return ListResponse(

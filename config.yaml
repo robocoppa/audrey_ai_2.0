@@ -482,7 +482,7 @@ kb:
   # Reconciled against Qdrant at startup.
   uploads_db_path: "/data/uploads.sqlite"
 
-  # Phase 32b: chunked upload transport. A single POST cannot carry a large
+  # Phase 32: chunked upload transport. A single POST cannot carry a large
   # file — cloudflared fronts this app and the CDN edge refuses request
   # bodies past its plan limit (100 MB on Free/Pro/Business) before they
   # reach us, returning an HTML error page rather than our JSON. Slicing the
@@ -494,6 +494,22 @@ kb:
     part_size_mb: 8                      # per-part body — keep far under the edge cap
     max_upload_mb: 2048                  # whole-file ceiling for chunked uploads
     session_ttl_minutes: 120             # abandoned part dirs swept after this
+
+  # Phase 33: the media-worker job lifecycle. A video uploads to
+  # `status='pending'` and nothing in audrey-ai will ever read it — extraction
+  # is minutes of CPU and GPU and cannot live in a request. A separate worker
+  # leases the row, does the work, and posts the result back over the service
+  # token. Audrey stays the only writer of uploads.sqlite.
+  video:
+    # How long a lease is good for. Longer than the slowest job expected, or a
+    # worker still working gets its job stolen out from under it; short enough
+    # that a crashed worker's video is not stuck for an afternoon. Whisper on a
+    # long file becomes the binding constraint once Phase 35 lands.
+    lease_minutes: 30
+    # Counts leases, not failures — a worker that dies silently never reports
+    # one. Past this the row goes to 'failed' with a reason rather than cycling
+    # forever and taking the worker down with it on every pass.
+    max_attempts: 3
 
 # ─── Tools (OpenAPI auto-discovery) ────────────────────────────────────
 tools:
@@ -604,7 +620,7 @@ passthrough:
     - olmo-3.1:32b
     - llama4:latest
     # Vision-language pool, exposed so an image-capable model can be targeted
-    # directly. Batch image work (Phase 32 media-worker keyframe description)
+    # directly. Batch image work (Phase 36 media-worker keyframe description)
     # reaches the GPU through passthrough precisely so both fair-scheduling
     # layers still fire — a sidecar calling Ollama itself would contend behind
     # FairLocalGate's back, since the gate is in-process to audrey-ai.
