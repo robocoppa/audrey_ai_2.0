@@ -26,6 +26,9 @@ of the orchestrator's settings apply to it.
     ONCE                 set to 1 to take a single job and exit
     WHISPER_MODEL        default "small" — must be baked into the image
     TRANSCRIBE_BUDGET_S  default 1440 (24 min); 0 disables the cap
+    FRAME_BUDGET_S       default 900 (15 min); 0 disables the cap. Bounded by
+                         the lease, not by patience — keyframes_max frames at
+                         vision.timeout_s each can exceed lease_minutes.
 """
 
 from __future__ import annotations
@@ -43,6 +46,8 @@ from pathlib import Path
 from types import FrameType
 
 from audrey.media.audio import FFmpegFailedError, FFmpegMissingError, extract_audio, probe
+from audrey.media.describe import DEFAULT_BUDGET_S, DescribeFailedError, describe_frames
+from audrey.media.frames import extract_frames, select_frames
 from audrey.media.stt import (
     DEFAULT_MODEL,
     TranscriptionFailedError,
@@ -140,6 +145,7 @@ def handle_job(
     work_dir: Path,
     model_size: str = DEFAULT_MODEL,
     budget_s: float | None = None,
+    frame_budget_s: float | None = DEFAULT_BUDGET_S,
 ) -> None:
     """Do one job and report it. Any failure is reported, never swallowed.
 
@@ -197,20 +203,104 @@ def handle_job(
         # container, where nobody would think to look.
         wav.unlink(missing_ok=True)
 
+    frames: list[dict] = []
+    planned = 0
+    if info.has_video:
+        frame_dir = work_dir / f"{file_id}.frames"
+        try:
+            frames, planned = _visual_pass(
+                source, frame_dir, job,
+                endpoint=endpoint, token=token, budget_s=frame_budget_s,
+            )
+        except FFmpegFailedError as e:
+            # A video stream that will not decode. The transcript may already
+            # be good, but reporting success would leave a video that is
+            # silently half-ingested and looks complete.
+            _report_failure(endpoint, token, file_id, lease_id, str(e))
+            return
+        except DescribeFailedError as e:
+            # Vision is down. Not this file's fault and not fixable by
+            # retrying it now — fail so the lease is released and the attempt
+            # counted, rather than posting a video with no visual half and
+            # calling it done.
+            _report_failure(endpoint, token, file_id, lease_id, str(e))
+            return
+        finally:
+            _clear_dir(frame_dir)
+
     spoken = sum(len(s["text"]) for s in segments)
     log.info(
-        "worker: %s container=%.1fs audio=%.1fs segments=%d chars=%d",
+        "worker: %s container=%.1fs audio=%.1fs segments=%d chars=%d frames=%d/%d",
         job.get("filename", file_id), info.container_duration_s, duration,
-        len(segments), spoken,
+        len(segments), spoken, len(frames), planned,
     )
 
     status, body = post(
         endpoint, f"/v1/files/{file_id}/ingest-result", token,
-        {"lease_id": lease_id, "duration_s": duration, "segments": segments},
+        {
+            "lease_id": lease_id, "duration_s": duration, "segments": segments,
+            "frames": frames, "frames_planned": planned,
+        },
         timeout=RESULT_TIMEOUT_S,
     )
     if status != 200:
         log.warning("worker: result rejected for %s (%s): %s", file_id, status, body)
+
+
+def _visual_pass(
+    source: Path,
+    frame_dir: Path,
+    job: dict,
+    *,
+    endpoint: str,
+    token: str,
+    budget_s: float | None,
+) -> tuple[list[dict], int]:
+    """Sample, thin, and describe. Returns `(descriptions, planned)`.
+
+    The settings arrive on the claim rather than from this container's
+    environment, so `kb.video.*` stays the single source of truth and a
+    threshold being calibrated against real footage takes effect on the next
+    job instead of the next worker restart.
+    """
+    settings = job.get("frames") or {}
+    interval_s = float(settings.get("interval_s", 30.0))
+
+    sampled = extract_frames(
+        source, frame_dir,
+        interval_s=interval_s,
+        max_width=int(settings.get("max_width", 1280)),
+    )
+    if not sampled:
+        return [], 0
+
+    keyframes = select_frames(
+        sampled,
+        min_distance=int(settings.get("dedup_distance", 8)),
+        limit=int(settings.get("keyframes_max", 24)),
+        interval_s=interval_s,
+    )
+    log.info(
+        "worker: %s keyframes %d of %d sampled frames",
+        job["file_id"], len(keyframes), len(sampled),
+    )
+    return describe_frames(
+        keyframes, user=str(job["user"]), post=post,
+        endpoint=endpoint, token=token, budget_s=budget_s,
+    )
+
+
+def _clear_dir(path: Path) -> None:
+    """Remove extracted frames. They are an intermediate, like the wav.
+
+    A 24-frame set is a couple of megabytes; left behind for every job they
+    accumulate inside the container, where nobody would think to look.
+    """
+    if not path.exists():
+        return
+    for child in path.iterdir():
+        child.unlink(missing_ok=True)
+    path.rmdir()
 
 
 def _report_failure(
@@ -228,7 +318,7 @@ def _report_failure(
 def run(
     *, endpoint: str, token: str, poll_seconds: int, work_dir: Path,
     once: bool = False, model_size: str = DEFAULT_MODEL,
-    budget_s: float | None = None,
+    budget_s: float | None = None, frame_budget_s: float | None = DEFAULT_BUDGET_S,
 ) -> int:
     stopping = Stopping()
     stopping.install()
@@ -272,6 +362,7 @@ def run(
         handle_job(
             job, endpoint=endpoint, token=token, work_dir=work_dir,
             model_size=model_size, budget_s=budget_s,
+            frame_budget_s=frame_budget_s,
         )
         if once:
             return 0
@@ -295,6 +386,7 @@ def main() -> int:
     # concurrently, until its attempts run out. Default 80% of a 30-minute
     # lease; set both together if you change either.
     budget = float(os.environ.get("TRANSCRIBE_BUDGET_S", 24 * 60))
+    frame_budget = float(os.environ.get("FRAME_BUDGET_S", DEFAULT_BUDGET_S))
 
     return run(
         endpoint=os.environ.get("AUDREY_ENDPOINT", DEFAULT_ENDPOINT),
@@ -304,6 +396,7 @@ def main() -> int:
         once=os.environ.get("ONCE", "") == "1",
         model_size=os.environ.get("WHISPER_MODEL", DEFAULT_MODEL),
         budget_s=budget if budget > 0 else None,
+        frame_budget_s=frame_budget if frame_budget > 0 else None,
     )
 
 

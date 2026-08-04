@@ -63,6 +63,7 @@ from audrey.kb.extract import (
     sniff_mime,
 )
 from audrey.kb.ingest import (
+    ingest_frame_descriptions,
     ingest_transcript_segments,
     ingest_user_image_file,
     ingest_user_text_file,
@@ -694,6 +695,26 @@ async def _drop_session(db: UploadsDB, session_dir: Path, upload_id: str) -> Non
 # arbitrary user's collection, so a user JWT must not reach them.
 
 
+class FrameSettings(BaseModel):
+    """Visual-pass knobs, handed to the worker with its job (Phase 36).
+
+    Phase 34 established that the worker reads env rather than `config.yaml`,
+    because it does not mount that file. These settings arrive on the claim
+    instead, which keeps `kb.video.*` the single source of truth without
+    either mounting config into a second container or maintaining a parallel
+    set of environment variables that can silently disagree with it.
+
+    A knob that changes here takes effect on the next *claim*, not the next
+    worker restart — which is the behaviour you want while calibrating a
+    threshold against real footage.
+    """
+
+    interval_s: float = 30.0
+    keyframes_max: int = 24
+    max_width: int = 1280
+    dedup_distance: int = 8
+
+
 class JobClaim(BaseModel):
     file_id: str
     user: str
@@ -703,9 +724,18 @@ class JobClaim(BaseModel):
     path: str
     lease_id: str
     attempts: int
+    frames: FrameSettings = FrameSettings()
 
 
 class TranscriptSegment(BaseModel):
+    t_start: float
+    t_end: float
+    text: str
+
+
+class FrameDescription(BaseModel):
+    """One keyframe's prose, and the span of video it speaks for."""
+
     t_start: float
     t_end: float
     text: str
@@ -718,6 +748,14 @@ class IngestResultRequest(BaseModel):
     # fills this with real whisper output; until then a stub worker posts one
     # segment, which is enough to prove the path end to end.
     segments: list[TranscriptSegment] = []
+    # Phase 36. Independent of `segments`: a silent video has frames and no
+    # speech, an audio-only upload has speech and no frames, and both are
+    # ordinary successful jobs.
+    frames: list[FrameDescription] = []
+    # How many keyframes the worker meant to describe. When this exceeds
+    # `len(frames)` the visual pass ran out of budget partway, which is
+    # recorded rather than hidden — see `ingest_frame_descriptions`.
+    frames_planned: int | None = None
 
 
 class IngestFailedRequest(BaseModel):
@@ -809,11 +847,18 @@ async def claim_job(
         "files: leased job file_id=%s user=%s attempt=%d",
         row["file_id"], row["user"], row["attempts"],
     )
+    video_cfg = _video_cfg(request)
     return JobClaim(
         file_id=str(row["file_id"]), user=str(row["user"]),
         filename=str(row["filename"]), mime=str(row["mime"]),
         bytes=int(row["bytes"]), path=str(path),
         lease_id=lease_id, attempts=int(row["attempts"]),
+        frames=FrameSettings(
+            interval_s=float(video_cfg.get("frame_interval_s", 30)),
+            keyframes_max=int(video_cfg.get("keyframes_max", 24)),
+            max_width=int(video_cfg.get("frame_max_width", 1280)),
+            dedup_distance=int(video_cfg.get("frame_dedup_distance", 8)),
+        ),
     )
 
 
@@ -856,8 +901,23 @@ async def ingest_result(
         f"[{_hhmmss(s.t_start)}] {s.text.strip()}"
         for s in body.segments if s.text.strip()
     )
+    frames = [f.model_dump() for f in body.frames if f.text.strip()]
     chunks = 0
     collection = ""
+
+    # Clear the file_id once, here, rather than inside each ingest call.
+    #
+    # `delete_by_file_id` removes *every* point for the file, so the transcript
+    # ingest deleting on its own way in would take out frame descriptions
+    # written moments earlier — and it would do it in whichever order the two
+    # calls happened to run. One delete up front means both artifacts write
+    # into the space it made, and a re-run still replaces its predecessor
+    # rather than doubling it.
+    if transcript or frames:
+        await qdrant.delete_by_file_id(
+            file_id, user=user, collection=user_text_collection(user),
+        )
+
     # A silent or music-only video produces no text. That is a fact about the
     # file, not a defect in it — the row still completes, with nothing indexed
     # and no collection claimed. Deliberately NOT the `EmptyExtractionError`
@@ -885,6 +945,7 @@ async def ingest_result(
                 source_bytes=int(row["bytes"]),
                 uploaded_at=stamp,
                 chunk_tokens=_transcript_chunk_tokens(request),
+                delete_existing=False,
             )
         except Exception as e:
             log.exception("files: transcript ingest failed for %s: %s", file_id, e)
@@ -893,6 +954,50 @@ async def ingest_result(
                 reason=f"transcript ingest failed: {e}",
             )
             raise HTTPException(status_code=500, detail=f"Ingest failed: {e}") from e
+
+    # Phase 36. Independent of the transcript in both directions: a silent
+    # video has frames and no speech, an audio-only upload has speech and no
+    # frames, and both are ordinary successful jobs.
+    if frames:
+        text_col, _image_col = await ensure_user_collections(qdrant, user)
+        collection = text_col
+        frame_sidecar = (
+            _upload_root(request) / sanitize_user(user) / f"{file_id}.frames.txt"
+        )
+        frame_sidecar.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(
+            frame_sidecar.write_text,
+            "\n\n".join(f"[{_hhmmss(f['t_start'])}] {f['text'].strip()}" for f in frames),
+            "utf-8",
+        )
+        try:
+            chunks += await ingest_frame_descriptions(
+                frames,
+                sidecar=frame_sidecar, qdrant=qdrant, embedder=text_embedder,
+                collection=text_col, user=user, file_id=file_id,
+                filename=str(row["filename"]), mime=str(row["mime"]),
+                source_bytes=int(row["bytes"]),
+                uploaded_at=stamp,
+                chunk_tokens=_transcript_chunk_tokens(request),
+            )
+        except Exception as e:
+            log.exception("files: frame ingest failed for %s: %s", file_id, e)
+            await db.fail_job(
+                file_id=file_id, lease_id=body.lease_id,
+                reason=f"frame ingest failed: {e}",
+            )
+            raise HTTPException(status_code=500, detail=f"Ingest failed: {e}") from e
+
+    if body.frames_planned is not None and len(frames) < body.frames_planned:
+        # Not a failure. Unlike a transcript, frame descriptions are
+        # independently timestamped, so an incomplete set is correct about
+        # what it covers rather than silently wrong about the whole. Logged
+        # because the alternative is a video that is quietly less searchable
+        # than the one next to it, for no visible reason.
+        log.warning(
+            "files: %s described %d of %d planned keyframes — the visual pass "
+            "ran out of budget", file_id, len(frames), body.frames_planned,
+        )
 
     if not await db.complete_job(
         file_id=file_id, lease_id=body.lease_id, collection=collection, chunks=chunks,
@@ -906,8 +1011,8 @@ async def ingest_result(
         )
 
     log.info(
-        "files: job complete file_id=%s user=%s chunks=%d segments=%d",
-        file_id, user, chunks, len(body.segments),
+        "files: job complete file_id=%s user=%s chunks=%d segments=%d frames=%d",
+        file_id, user, chunks, len(body.segments), len(frames),
     )
     return JobResultResponse(file_id=file_id, status="ready", chunks=chunks)
 

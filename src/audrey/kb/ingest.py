@@ -270,6 +270,7 @@ async def ingest_transcript_segments(
     uploaded_at: str | None = None,
     chunk_tokens: int = 250,
     overlap_tokens: int = 40,
+    delete_existing: bool = True,
 ) -> int:
     """Ingest whisper segments as timestamped chunks.
 
@@ -285,6 +286,12 @@ async def ingest_transcript_segments(
 
     Delete-before-upsert, matching `ingest_user_text_file`, so a re-run
     replaces its predecessor rather than doubling it.
+
+    `delete_existing=False` when the caller has already cleared this
+    `file_id`. Phase 36 needs that: `delete_by_file_id` removes *every* point
+    for the file, so a transcript ingest running after a frame ingest would
+    delete the frames it was supposed to sit alongside. The route clears once
+    and both artifacts write into the space it made.
     """
     chunks = chunk_segments(
         segments, chunk_tokens=chunk_tokens, overlap_tokens=overlap_tokens,
@@ -298,7 +305,8 @@ async def ingest_transcript_segments(
     stamp = uploaded_at or _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
     vectors = await embedder.embed_many([c.text for c in chunks])
 
-    await qdrant.delete_by_file_id(file_id, user=user, collection=collection)
+    if delete_existing:
+        await qdrant.delete_by_file_id(file_id, user=user, collection=collection)
     sparse = await qdrant.has_sparse(collection)
 
     points: list[qmodels.PointStruct] = [
@@ -332,6 +340,100 @@ async def ingest_transcript_segments(
     log.info(
         "ingest: transcript %s -> %d chunks (%d segments, %d tokens/chunk)",
         file_id, len(points), len(segments), chunk_tokens,
+    )
+    return len(points)
+
+
+async def ingest_frame_descriptions(
+    frames: list[dict],
+    *,
+    sidecar: Path,
+    qdrant: QdrantKB,
+    embedder: TextEmbedder,
+    collection: str,
+    user: str,
+    file_id: str,
+    filename: str,
+    mime: str,
+    source_bytes: int,
+    uploaded_at: str | None = None,
+    chunk_tokens: int = 250,
+    overlap_tokens: int = 40,
+    delete_existing: bool = False,
+) -> int:
+    """Ingest keyframe descriptions as timestamped chunks (Phase 36).
+
+    Each `frame` is `{t_start, t_end, text}` — the prose a `vl` model produced
+    for one keyframe, and the span of video that keyframe stands in for.
+
+    **Chunked per frame, not across frames.** Two descriptions are about two
+    different moments, so letting a chunk straddle them would produce text
+    that was never true of either and attach it to whichever timestamp came
+    first. Within one description the ordinary chunker applies: a dense slide
+    transcribed verbatim can be long, and a 250-token limit keeps these the
+    same size as transcript chunks so neither artifact outranks the other for
+    reasons of length alone.
+
+    Its own `sidecar` name, distinct from the transcript's. Both artifacts
+    live under one `file_id` in one collection, and `point_id` is derived from
+    `(source, kind, chunk_idx)` — so sharing a source would make frame chunk 0
+    and transcript chunk 0 the same point, each silently overwriting the
+    other.
+
+    `delete_existing` defaults to **False**, the opposite of the transcript
+    path. `delete_by_file_id` removes every point for the file including the
+    transcript, and in the one caller that matters the route has already
+    cleared the file_id once for both artifacts.
+    """
+    prepared: list[tuple[Chunk, dict]] = []
+    for frame in frames:
+        text = str(frame.get("text") or "").strip()
+        if not text:
+            continue
+        for piece in chunk_text(
+            text, chunk_tokens=chunk_tokens, overlap_tokens=overlap_tokens,
+        ):
+            prepared.append((piece, frame))
+    if not prepared:
+        return 0
+
+    source = normalize_source(sidecar)
+    stat = sidecar.stat()
+    stamp = uploaded_at or _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+    vectors = await embedder.embed_many([c.text for c, _ in prepared])
+
+    if delete_existing:
+        await qdrant.delete_by_file_id(file_id, user=user, collection=collection)
+    sparse = await qdrant.has_sparse(collection)
+
+    points: list[qmodels.PointStruct] = [
+        build_text_point(
+            # Numbered across the whole set, not per frame — `chunk_idx` is
+            # half of the point id, so restarting at 0 for each frame would
+            # collapse every frame's first chunk onto one point.
+            source=source, chunk_idx=idx, text=c.text, vector=v,
+            mtime=stat.st_mtime, sparse=sparse,
+            extra={
+                "user": user,
+                "file_id": file_id,
+                "filename": filename,
+                "mime": mime,
+                "bytes": int(source_bytes),
+                "uploaded_at": stamp,
+                "t_start": float(frame.get("t_start") or 0.0),
+                "t_end": float(frame.get("t_end") or 0.0),
+                # The discriminator that lets a caller tell "this was said"
+                # from "this was shown" — the two answer different questions
+                # about the same second of video.
+                "artifact": "visual",
+            },
+        )
+        for idx, ((c, frame), v) in enumerate(zip(prepared, vectors, strict=True))
+    ]
+    await qdrant.upsert_text(points, collection=collection)
+    log.info(
+        "ingest: frames %s -> %d chunks from %d descriptions",
+        file_id, len(points), len(frames),
     )
     return len(points)
 

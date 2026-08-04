@@ -129,6 +129,22 @@ class TestExtractFrames:
         turn phase 35's successful job into a failed one."""
         assert extract_frames(audio_only, tmp_path, interval_s=1.0) == []
 
+    def test_a_clip_shorter_than_the_interval_still_yields_one_frame(
+        self, tmp_path: Path,
+    ):
+        """`fps=1/30` on a 4-second video emits *nothing* — the filter never
+        reaches its first output time. Left alone that fails the whole job on
+        a video which decodes perfectly well, and it would have hit every
+        short upload."""
+        path = tmp_path / "short.mp4"
+        _ffmpeg("-f", "lavfi", "-i", "testsrc=size=320x240:rate=5:duration=4",
+                "-pix_fmt", "yuv420p", str(path))
+
+        frames = extract_frames(path, tmp_path / "out", interval_s=30.0)
+
+        assert len(frames) == 1
+        assert frames[0].t_start == 0.0
+
     def test_a_corrupt_source_raises(self, tmp_path: Path):
         bad = tmp_path / "not-a-video.mp4"
         bad.write_bytes(b"this is not a video")

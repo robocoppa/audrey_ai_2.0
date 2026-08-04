@@ -125,22 +125,28 @@ def extract_frames(
     # The single-quoted expression is for *ffmpeg's* filtergraph parser, not a
     # shell — there is no shell here. A bare comma inside min() would be read
     # as a filter separator and the graph would fail to parse.
-    vf = f"fps=1/{interval_s},scale='min({max_width},iw)':-2"
-    result = _run(
-        [
-            _binary("ffmpeg"), "-nostdin", "-y",
-            "-i", str(src),
-            "-vf", vf,
-            "-an",                    # no audio in a still; phase 35 owns that
-            "-q:v", str(quality),
-            str(dest_dir / "frame_%05d.jpg"),
-        ],
-        timeout=timeout_s,
-    )
-    if result.returncode != 0:
-        raise FFmpegFailedError(f"ffmpeg could not extract frames: {_tail(result.stderr)}")
-
+    scale = f"scale='min({max_width},iw)':-2"
+    _sample(src, dest_dir, vf=f"fps=1/{interval_s},{scale}",
+            quality=quality, timeout_s=timeout_s)
     frames = _collect(dest_dir, interval_s)
+
+    if not frames:
+        # A clip shorter than one sample interval produces *nothing* under
+        # `fps=1/N` — a 10-second upload at the 30-second default comes back
+        # empty, which would fail the whole job over a video that decodes
+        # perfectly well. Take its first frame instead.
+        #
+        # This doubles as the general fallback for a source whose duration
+        # ffmpeg does not report, which is common enough in matroska that
+        # deciding up front from the probe would be its own bug.
+        log.info(
+            "frames: %s yielded nothing at %.0fs sampling — taking one frame",
+            src.name, interval_s,
+        )
+        _sample(src, dest_dir, vf=scale, quality=quality, timeout_s=timeout_s,
+                extra=["-frames:v", "1"])
+        frames = _collect(dest_dir, interval_s)
+
     if not frames:
         raise FFmpegFailedError(
             "ffmpeg reported success but produced no frames — the video stream "
@@ -150,6 +156,27 @@ def extract_frames(
         "frames: %s sampled %d frames every %.0fs", src.name, len(frames), interval_s,
     )
     return frames
+
+
+def _sample(
+    src: Path, dest_dir: Path, *, vf: str, quality: int, timeout_s: int,
+    extra: list[str] | None = None,
+) -> None:
+    """One ffmpeg pass writing `frame_NNNNN.jpg` into `dest_dir`."""
+    result = _run(
+        [
+            _binary("ffmpeg"), "-nostdin", "-y",
+            "-i", str(src),
+            "-vf", vf,
+            "-an",                    # no audio in a still; phase 35 owns that
+            "-q:v", str(quality),
+            *(extra or []),
+            str(dest_dir / "frame_%05d.jpg"),
+        ],
+        timeout=timeout_s,
+    )
+    if result.returncode != 0:
+        raise FFmpegFailedError(f"ffmpeg could not extract frames: {_tail(result.stderr)}")
 
 
 def _collect(dest_dir: Path, interval_s: float) -> list[Frame]:

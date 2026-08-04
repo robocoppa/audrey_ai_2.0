@@ -54,6 +54,15 @@ class _Calls:
     def paths(self) -> list[str]:
         return [p for p, _ in self.posted]
 
+    def job_paths(self) -> list[str]:
+        """Job-lifecycle posts only, with the visual pass filtered out.
+
+        Phase 36 made `handle_job` post one `/v1/media/describe` per keyframe,
+        so a bare `paths()` assertion in a lifecycle test now measures how many
+        frames the fixture happened to contain. That is a different question
+        from the one these tests ask."""
+        return [p for p, _ in self.posted if "/v1/media/" not in p]
+
     def body_for(self, needle: str) -> dict:
         for path, body in self.posted:
             if needle in path:
@@ -111,7 +120,7 @@ class TestHandleJob:
             _job(video), endpoint="http://x", token=TOKEN, work_dir=tmp_path / "w",
         )
 
-        assert calls.paths() == ["/v1/files/f1/ingest-result"]
+        assert calls.job_paths() == ["/v1/files/f1/ingest-result"]
         body = calls.body_for("ingest-result")
         assert body["lease_id"] == "L1"
         assert body["duration_s"] == pytest.approx(1.0, abs=0.3)
@@ -215,7 +224,7 @@ class TestRunLoop:
             endpoint="http://x", token=TOKEN, poll_seconds=0,
             work_dir=tmp_path, once=True,
         ) == 0
-        assert calls.paths() == ["/v1/files/jobs/claim", "/v1/files/f1/ingest-result"]
+        assert calls.job_paths() == ["/v1/files/jobs/claim", "/v1/files/f1/ingest-result"]
 
     def test_a_rejected_claim_is_not_treated_as_an_empty_queue(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -347,7 +356,7 @@ class TestTranscriptStage:
         )
 
         assert called == []
-        assert calls.paths() == ["/v1/files/f1/ingest-result"]
+        assert calls.job_paths() == ["/v1/files/f1/ingest-result"]
         body = calls.body_for("ingest-result")
         assert body["segments"] == []
         assert body["duration_s"] == 0.0
