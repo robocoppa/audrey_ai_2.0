@@ -752,6 +752,48 @@ vision:
   cache_size: 64                         # OWUI resends the data URI every turn
   also_capable: []                       # vision models that aren't in the vl pool
 
+  # ─── Sampling (Phase 38) ─────────────────────────────────────────────
+  # Measured on the box 2026-08-04, six keyframes through qwen3-vl:32b:
+  # generation was 254.5s of a 291.1s visual pass — 87%. Queue was 0.0s on
+  # every call, model load was 20.1s on the first frame and 0.2s on the rest,
+  # and prefill was 2.3s. So every lever the phase-38 plan ranked (batching,
+  # downscaling, a cloud vl model, concurrency) attacks at most 13% between
+  # them, and `keep_alive` attacks a cold start that happens once.
+  #
+  # What generation was actually spent on: 9,486 tokens produced 12,490
+  # characters of description. That is 1.3 chars/token where prose runs at
+  # ~4 — roughly two thirds of everything generated never reached the output.
+  # `ollama show qwen3-vl:32b` lists `thinking` among its capabilities, and
+  # thinking tokens are counted in `eval_count` but are not in
+  # `message.content`.
+
+  # Off, because this model's only job is to transcribe what is in front of
+  # it. The prompt already forbids answering, reasoning about, or speculating
+  # on the image, so the reasoning is being paid for and then discarded — on
+  # the ingest path where nobody is waiting, and on the chat path where
+  # someone is.
+  #
+  # Set to `null` (not `false`) to send no thinking field at all. That is
+  # required if any model in the `vl` pool lacks the `thinking` capability:
+  # Ollama rejects the field outright rather than ignoring it, so `false`
+  # would break that model's calls entirely. Check with
+  # `docker exec ollama ollama show <model>` before adding to the pool.
+  think: false
+
+  # A ceiling, not a target. Descriptions measured 1,746-2,633 characters
+  # (~440-660 tokens), so 1024 leaves generous headroom while capping the
+  # runaway case — one frame generated 2,914 tokens and took 81.4s, three
+  # times its neighbours, for a description no longer than theirs.
+  num_predict: 1024
+
+  # The model ships at temperature 1.0, which is a creativity setting applied
+  # to a transcription task. It is also the likeliest cause of the known
+  # non-determinism in description length between requeues of an unchanged
+  # video (15 visual chunks one run, 17 the next). Lower is not obviously
+  # better for prose quality, so this is the knob to A-B first if the
+  # descriptions get worse.
+  temperature: 0.3
+
 # ─── Passthrough virtual model ─────────────────────────────────────────
 # audrey_passthrough/<concrete_model> forwards the request directly to
 # Ollama with no classifier, no complexity gate, no banners. Both fair-

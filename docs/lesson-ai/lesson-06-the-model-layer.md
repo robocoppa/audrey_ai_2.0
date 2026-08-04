@@ -176,8 +176,8 @@ Location decides whether local GPU fairness applies.
 Below `model_registry`, `config.yaml` also defines deep-panel pools:
 
 - [`deep_panel`](../../config.yaml#L98)
-- [`deep_panel_cloud`](../../config.yaml#L122)
-- [`deep_panel_local`](../../config.yaml#L147)
+- [`deep_panel_cloud`](../../config.yaml#L135)
+- [`deep_panel_local`](../../config.yaml#L160)
 
 Those pools are different from the registry. The registry is a ranked menu of
 possible models by task. A deep-panel pool is a more explicit recipe: "for this
@@ -728,8 +728,8 @@ All public methods are `async`:
 
 - [`tags()`](../../src/audrey/models/ollama.py#L110)
 - [`chat()`](../../src/audrey/models/ollama.py#L125)
-- [`chat_stream()`](../../src/audrey/models/ollama.py#L172)
-- [`embed()`](../../src/audrey/models/ollama.py#L223)
+- [`chat_stream()`](../../src/audrey/models/ollama.py#L198)
+- [`embed()`](../../src/audrey/models/ollama.py#L249)
 
 That means callers must use `await` or `async for`. Audrey is an async web app;
 while one request waits on Ollama, the event loop can keep serving other work.
@@ -737,7 +737,7 @@ while one request waits on Ollama, the event loop can keep serving other work.
 #### Non-streaming chat
 
 `chat(...)` builds an Ollama `/api/chat` payload at
-[`ollama.py:141`](../../src/audrey/models/ollama.py#L141):
+[`ollama.py:141`](../../src/audrey/models/ollama.py#L163):
 
 ```python
 payload: dict[str, Any] = {
@@ -752,7 +752,7 @@ if tools:
 ```
 
 Then it sends the request at
-[`ollama.py:152`](../../src/audrey/models/ollama.py#L152):
+[`ollama.py:152`](../../src/audrey/models/ollama.py#L178):
 
 ```python
 r = await self._client.post("/api/chat", json=payload, timeout=...)
@@ -768,7 +768,7 @@ There are three broad failure types:
 
 That last one is easy to miss. A "successful" HTTP status is not enough. Audrey
 expects a JSON object from Ollama. `_json_object(...)` enforces that at
-[`ollama.py:270`](../../src/audrey/models/ollama.py#L270):
+[`ollama.py:270`](../../src/audrey/models/ollama.py#L296):
 
 ```python
 def _json_object(r: httpx.Response, op: str) -> dict[str, Any]:
@@ -791,7 +791,7 @@ One exception type keeps the failure contract simple.
 #### Streaming chat
 
 `chat_stream(...)` is different at
-[`ollama.py:172`](../../src/audrey/models/ollama.py#L172):
+[`ollama.py:172`](../../src/audrey/models/ollama.py#L198):
 
 ```python
 async def chat_stream(...) -> AsyncIterator[dict[str, Any]]:
@@ -820,7 +820,7 @@ truncation/error message instead of silently retrying from scratch.
 #### Embeddings
 
 `embed(...)` calls `/api/embed` and expects one vector per input text, starting
-at [`ollama.py:223`](../../src/audrey/models/ollama.py#L223).
+at [`ollama.py:223`](../../src/audrey/models/ollama.py#L249).
 
 This is not used for normal chat answers. It supports the knowledge-base path:
 text needs to become embedding vectors before Audrey can store or search it in

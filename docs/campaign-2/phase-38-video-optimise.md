@@ -4,14 +4,26 @@ By the time this phase starts, video ingest works and is slow. This is the phase
 that makes it fast, driven by the stage timings
 [phase 36](phase-36-video-visual-assessment.md) shipped rather than by estimates.
 
-**Status: PARTLY BUILT, not yet deployed.** The keyframe gate landed early
-(2026-08-02). Cost attribution is built and hermetically tested (2026-08-04).
-Source reclamation is built, tested, and **off by default** — the plan was
-wrong to want it on, see
-[Why the default is `keep_source: true`](#why-the-default-is-keep_source-true).
-The four remaining levers are deliberately unbuilt — see
-[Instrument first](#instrument-first) for why that is the plan working rather
-than the plan stalling.
+**Status: MEASURED, and the plan's whole lever ranking is dead.**
+
+- The keyframe gate landed early (2026-08-02).
+- Cost attribution landed and **ran on the box** (2026-08-04).
+- **The measurement: generation is 87% of the visual pass, and two thirds of
+  the generated tokens never reach the output.** `qwen3-vl:32b` declares the
+  `thinking` capability, so the model was reasoning at length about a
+  photograph and the reasoning was being discarded. See
+  [The measurement](#the-measurement-on-the-box-2026-08-04).
+- **Lever 7** — `vision.think: false` — is built and hermetically tested, and
+  is the only lever pointed at that 87%. Not yet re-measured on the box.
+- **Levers 1-4 and 6 are all dead on the numbers**, including the two this
+  document added. Together they address at most 13%.
+- Source reclamation is built, tested, and **off by default** — the plan was
+  wrong to want it on, see
+  [Why the default is `keep_source: true`](#why-the-default-is-keep_source-true).
+
+The short version: the plan ranked five levers by expected payoff, and one
+ingest's worth of instrumentation retired all of them and found a sixth that
+nobody had listed.
 
 ---
 
@@ -48,6 +60,86 @@ a long answer about a frame with nothing in it to transcribe — which would mak
 `eval` the dominant stage, and would make the cheapest available lever one the
 plan never considered. That is a hypothesis, not a finding, and the point of
 the instrumentation is that it no longer has to be argued.
+
+## The measurement (on the box, 2026-08-04)
+
+Six keyframes of `jasonRetirement.mp4` through `qwen3-vl:32b`:
+
+| Stage | Total | Share |
+|---|---|---|
+| **generation** | **254.5s** | **87%** |
+| load | 21.1s | 7% — and 20.1s of that is frame 1 |
+| prefill | 14.3s | 5% |
+| queue | 0.0s | 0% |
+
+Per-frame wall clock 28.8-81.4s. The stages sum to 289.9s against 291.1s
+measured, so the attribution is complete.
+
+**Every lever the plan ranked is dead, and the numbers kill them individually:**
+
+1. **Concurrency** and **3. a cloud vl model** were both justified by GPU
+   contention. `queue=0.0s` on all six calls. *(Caveat: the box was idle. This
+   says the gate is not contended when nothing else runs, not that it is fair
+   under load — phase 36 step 5 remains genuinely open.)*
+2. **Batching frames per call** amortises per-call overhead, and there is none
+   to amortise: prefill is 2,249 tokens on *every* frame, so it is linear in
+   images, and generation would scale with the batch too.
+4. **Downscaling** attacks prefill — 2.3s per frame. Halving the image saves
+   roughly 7s out of 291s.
+6. **`keep_alive`**, the lever this document added: load is 20.1s on frame 1
+   and **0.2s on every frame after**. The model stays resident. Also dead.
+
+That is at most 13% between them, and the plan had nothing pointed at the
+other 87%.
+
+### What generation was actually spent on
+
+9,486 tokens produced 12,490 characters of description — **1.3 characters per
+token**, where prose runs at roughly 4. Those descriptions should have cost
+~3,100 tokens. Two thirds of everything generated never reached
+`message.content`.
+
+```
+Capabilities
+  completion
+  vision
+  tools
+  thinking      ← ollama show qwen3-vl:32b
+```
+
+Thinking tokens are counted in `eval_count` and billed in wall clock, and they
+are not in the reply. The worst frame is the clearest: 2,914 tokens and 81.4s —
+three times its neighbours — for a description no longer than theirs.
+
+**So the model was reasoning at length about a photograph, and then the
+reasoning was discarded.** On a background job with nobody waiting, and on the
+chat path where somebody is.
+
+## Lever 7 — stop paying for discarded reasoning (built 2026-08-04)
+
+`vision.think: false`, plus `num_predict: 1024` and `temperature: 0.3`, wired
+through a new `think` parameter on `OllamaClient.chat`.
+
+**`think` is tri-state, and that is not fussiness.** Ollama *rejects* the field
+for a model that does not declare the `thinking` capability rather than
+ignoring it, so a plain boolean default would break every non-thinking model in
+one edit. `None` means "send no field at all" and reproduces the previous
+request exactly; only an explicit setting changes anything. Check
+`ollama show <model>` before adding anything to the `vl` pool.
+
+The other two are hedges rather than the lever:
+
+- **`num_predict: 1024`** is a ceiling, not a target. Descriptions measured
+  440-660 tokens, so it only binds on the runaway case.
+- **`temperature: 0.3`** because the model ships at 1.0 — a creativity setting
+  applied to a transcription task, and the likeliest cause of the known
+  non-determinism in description length between requeues of an unchanged video
+  (15 visual chunks one run, 17 the next). This is the first knob to A-B if
+  the descriptions get worse.
+
+Applied to the chat path as well as the keyframe path. The transcription prompt
+forbids answering on both, so there is nothing for thinking to contribute
+either way — and the chat path is the one with a user waiting on the latency.
 
 ## Cost attribution (landed 2026-08-04)
 
@@ -490,19 +582,49 @@ verified in step 6 and then fail three times against a missing file.
 config alone, because it is what someone reaches for after realising they want
 old videos re-processed.
 
-### Part 3 — for any lever actually built
+### Part 3 — lever 7 (thinking off)
 
-**9. Stage timings before and after**, on the same source video. A lever with
+**9. The token/character ratio comes back to normal.** The whole diagnosis in
+one number: the describe log lines should move from ~1.3 chars/token toward
+~4. If they do not, thinking was not what the tokens were being spent on and
+the diagnosis above is wrong.
+
+```
+# Unraid box — requeue first, then:
+docker compose logs --tail=200 audrey-ai | grep "described a frame"
+```
+
+Expect generation roughly a third of its former self, and the per-frame wall
+clock to fall with it. The **before** is recorded here: 254.5s generation,
+9,486 tokens, 12,490 characters, 28.8-81.4s per frame.
+
+**10. The descriptions did not get worse.** The lever removes reasoning, and
+the reasoning might have been earning its keep. Read the new
+`{file_id}.frames.txt` beside the old one — same video, same frames. Watch
+specifically for on-screen text: verbatim transcription is what the prompt is
+built around, and it is what a lower temperature is most likely to affect.
+
+Speed that costs accuracy has to be a deliberate trade, not an accident. If
+the descriptions degrade, `temperature` is the first thing to put back, then
+`num_predict`, and `think` last — it is the one carrying the 87%.
+
+**11. No non-thinking model is in the `vl` pool.** `think: false` is rejected
+outright by a model without the capability, so this breaks vision entirely
+rather than degrading. `docker exec ollama ollama show <model>` for anything
+in the pool; set `think: null` if any lacks it.
+
+### Part 4 — for any further lever
+
+**12. Stage timings before and after**, on the same source video. A lever with
 no recorded before is not a measured improvement.
 
-**10. Output comparison per lever.** The same video's descriptions before and
-after, read side by side. Speed that costs accuracy has to be a deliberate
-trade, not an accident.
+**13. Output comparison per lever.** The same video's descriptions before and
+after, read side by side.
 
-**11. Fairness is unchanged.** `gate.snapshot()` during an ingest still shows
+**14. Fairness is unchanged.** `gate.snapshot()` during an ingest still shows
 interleaving with chat.
 
-**12. The gate's head-and-tail behaviour survives** any threshold retune.
+**15. The gate's head-and-tail behaviour survives** any threshold retune.
 
 ### Rollback
 

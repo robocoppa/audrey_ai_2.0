@@ -150,7 +150,7 @@ class _Ollama:
     def __init__(self, response: dict[str, Any]) -> None:
         self._response = response
 
-    async def chat(self, *, model, messages, options=None, tools=None, timeout_s=None):
+    async def chat(self, *, model, messages, options=None, tools=None, timeout_s=None, think=None):
         return self._response
 
 

@@ -15,10 +15,12 @@ vision model has to degrade to a note, never a 502.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from audrey.config import _load_yaml
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaError
 from audrey.models.registry import ModelRegistry
@@ -56,8 +58,11 @@ class _ScriptedOllama:
         self._outcome = outcome or {"message": {"content": "a red bicycle on a lawn"}}
         self.calls: list[dict[str, Any]] = []
 
-    async def chat(self, *, model: str, messages, options=None, tools=None, timeout_s=None):
-        self.calls.append({"model": model, "messages": messages, "timeout_s": timeout_s})
+    async def chat(self, *, model: str, messages, options=None, tools=None, timeout_s=None, think=None):
+        self.calls.append({
+            "model": model, "messages": messages, "timeout_s": timeout_s,
+            "options": options, "think": think,
+        })
         if isinstance(self._outcome, OllamaError):
             raise self._outcome
         return self._outcome
@@ -358,3 +363,90 @@ async def test_describe_images_ignores_capability_when_called_directly():
 
     assert n == 1
     assert isinstance(out[1]["content"], str)
+
+
+# ─── Sampling: thinking, num_predict, temperature (Phase 38) ───────────
+
+class TestSamplingSettings:
+    """Measured on the box 2026-08-04: six keyframes generated 9,486 tokens to
+    produce 12,490 characters — 1.3 chars/token where prose runs at ~4. Roughly
+    two thirds of the generation never reached `message.content`, and
+    `ollama show qwen3-vl:32b` lists `thinking` among its capabilities.
+
+    Generation was 87% of the visual pass, so this is the only lever that
+    matters — and it is one the phase-38 plan never listed.
+    """
+
+    async def test_nothing_configured_sends_no_sampling_fields(self):
+        """The pre-phase-38 request, byte for byte. A deployment that never
+        opts in must not have its vision calls quietly change shape."""
+        ollama = _ScriptedOllama()
+        cfg = _Cfg({"vision": {}})
+
+        await describe_images(
+            _image_msgs(), ollama=ollama, registry=_registry(cfg),
+            health=HealthTracker(), gate=FairLocalGate(concurrency=1), cfg=cfg,
+        )
+
+        assert ollama.calls[0]["think"] is None
+        assert ollama.calls[0]["options"] is None
+
+    async def test_think_false_is_forwarded(self):
+        ollama = _ScriptedOllama()
+        cfg = _Cfg({"vision": {"think": False}})
+
+        await describe_images(
+            _image_msgs(), ollama=ollama, registry=_registry(cfg),
+            health=HealthTracker(), gate=FairLocalGate(concurrency=1), cfg=cfg,
+        )
+
+        assert ollama.calls[0]["think"] is False
+
+    async def test_think_null_is_not_the_same_as_think_false(self):
+        """The distinction the whole tri-state exists for. Ollama REJECTS the
+        `think` field for a model without the capability rather than ignoring
+        it, so `null` has to mean "send no field" — otherwise adding a
+        non-thinking model to the `vl` pool breaks its calls outright."""
+        ollama = _ScriptedOllama()
+        cfg = _Cfg({"vision": {"think": None}})
+
+        await describe_images(
+            _image_msgs(), ollama=ollama, registry=_registry(cfg),
+            health=HealthTracker(), gate=FairLocalGate(concurrency=1), cfg=cfg,
+        )
+
+        assert ollama.calls[0]["think"] is None
+
+    async def test_num_predict_and_temperature_reach_the_options(self):
+        ollama = _ScriptedOllama()
+        cfg = _Cfg({"vision": {"num_predict": 1024, "temperature": 0.3}})
+
+        await describe_images(
+            _image_msgs(), ollama=ollama, registry=_registry(cfg),
+            health=HealthTracker(), gate=FairLocalGate(concurrency=1), cfg=cfg,
+        )
+
+        assert ollama.calls[0]["options"] == {"num_predict": 1024, "temperature": 0.3}
+
+    async def test_a_zero_temperature_is_not_dropped_as_falsy(self):
+        """`if conf.get("temperature")` would silently discard 0.0 — the most
+        deterministic setting, and the one someone reaches for first when
+        chasing the non-deterministic description lengths."""
+        ollama = _ScriptedOllama()
+        cfg = _Cfg({"vision": {"temperature": 0.0}})
+
+        await describe_images(
+            _image_msgs(), ollama=ollama, registry=_registry(cfg),
+            health=HealthTracker(), gate=FairLocalGate(concurrency=1), cfg=cfg,
+        )
+
+        assert ollama.calls[0]["options"] == {"temperature": 0.0}
+
+    def test_the_committed_config_turns_thinking_off(self):
+        """The measurement that justified this is in the config comment; this
+        pins that the value still matches it. Sync deliberately — reading a
+        file from an async test trips the blocking-`Path` lint."""
+        raw = _load_yaml(Path(__file__).resolve().parent.parent / "config.yaml")
+        vision_block = raw["vision"]
+        assert vision_block["think"] is False
+        assert vision_block["num_predict"] == 1024

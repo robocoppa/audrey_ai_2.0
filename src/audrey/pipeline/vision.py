@@ -69,6 +69,26 @@ _DEFAULT_TIMEOUT_S = 120.0
 _DEFAULT_MAX_IMAGES = 4
 _DEFAULT_CACHE_SIZE = 64
 
+
+def _sampling(conf: dict[str, Any]) -> tuple[dict[str, Any], bool | None]:
+    """Build `(options, think)` for a vision call from the `vision:` block.
+
+    Returns an empty options dict and `think=None` when nothing is configured,
+    which reproduces the pre-phase-38 request byte for byte.
+
+    **`think` is tri-state on purpose.** `None` omits the field; Ollama rejects
+    it for a model without the `thinking` capability, so a plain boolean
+    default would break any non-thinking member of the `vl` pool the moment
+    someone added one. Absent config means absent field.
+    """
+    options: dict[str, Any] = {}
+    if conf.get("num_predict") is not None:
+        options["num_predict"] = int(conf["num_predict"])
+    if conf.get("temperature") is not None:
+        options["temperature"] = float(conf["temperature"])
+    think = conf.get("think")
+    return options, None if think is None else bool(think)
+
 # Process-local LRU of image digest -> description. Bounded because the
 # values are model prose, not the image bytes. Two concurrent requests
 # carrying the same new image can both miss and both call the vision
@@ -267,6 +287,8 @@ async def _transcribe_one(
     user_question: str,
     timeout_s: float,
     user_id: str | None,
+    options: dict[str, Any] | None = None,
+    think: bool | None = None,
 ) -> tuple[str, VisionTiming]:
     """One vision call. Raises OllamaError; caller decides how to fail."""
     hint = (
@@ -287,7 +309,10 @@ async def _transcribe_one(
         },
     ]
     async with gate.acquire(model, location=location, user_id=user_id):
-        resp = await ollama.chat(model=model, messages=messages, timeout_s=timeout_s)
+        resp = await ollama.chat(
+            model=model, messages=messages, timeout_s=timeout_s,
+            options=options or None, think=think,
+        )
     text = str((resp.get("message") or {}).get("content") or "").strip()
     return text, VisionTiming.from_response(resp)
 
@@ -340,12 +365,13 @@ async def describe_one_image(
     model, location = picked
 
     conf = vision_cfg(cfg)
+    options, think = _sampling(conf)
     description, timing = await _transcribe_one(
         ollama, gate,
         url=data_url, model=model, location=location,
         user_question=user_question,
         timeout_s=float(conf.get("timeout_s", _DEFAULT_TIMEOUT_S)),
-        user_id=user_id,
+        user_id=user_id, options=options, think=think,
     )
     return description, model, timing
 
@@ -382,6 +408,10 @@ async def describe_images(
     timeout_s = float(conf.get("timeout_s", _DEFAULT_TIMEOUT_S))
     max_images = int(conf.get("max_images_per_turn", _DEFAULT_MAX_IMAGES))
     cache_size = int(conf.get("cache_size", _DEFAULT_CACHE_SIZE))
+    # Same settings as the keyframe path. The transcription prompt forbids
+    # answering on both, so there is nothing here for thinking to contribute —
+    # and unlike an ingest, a chat turn has someone waiting on the latency.
+    options, think = _sampling(conf)
 
     picked = _pick_vision_model(cfg, registry, health)
     if picked is None:
@@ -451,6 +481,7 @@ async def describe_images(
                     ollama, gate,
                     url=url, model=vl_model, location=vl_location,
                     user_question=user_question, timeout_s=timeout_s, user_id=user_id,
+                    options=options, think=think,
                 )
             except OllamaError as e:
                 health.record_failure(vl_model, str(e))

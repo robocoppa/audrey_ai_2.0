@@ -131,6 +131,7 @@ class OllamaClient:
         tools: list[dict[str, Any]] | None = None,
         timeout_s: float | None = None,
         format: dict[str, Any] | str | None = None,
+        think: bool | None = None,
     ) -> dict[str, Any]:
         """Non-streaming chat completion. Returns the full Ollama response dict.
 
@@ -145,6 +146,19 @@ class OllamaClient:
         instead of prose. Note: Ollama applies `format` to the model's *reply*,
         so a `format`-pinned call should not also pass `tools` — run the tool
         loop first, then a separate `format` call to structure the result.
+
+        `think` forwards Ollama's thinking toggle for models that declare the
+        `thinking` capability. **`None` means "do not send the field at all"**,
+        which is not the same as `False`: Ollama rejects the field outright for
+        a model that cannot think, so a default of `False` here would break
+        every non-thinking model in one edit. Callers opt in per path.
+
+        Why any caller would: thinking tokens are counted in `eval_count` and
+        billed in wall-clock, but they never reach `message.content`. Measured
+        on the keyframe path (2026-08-04), six describe calls generated 9,486
+        tokens to produce 12,490 characters — 1.3 chars per token against the
+        ~4 that prose runs at, so roughly two thirds of the generation was
+        reasoning that was then discarded.
         """
         payload: dict[str, Any] = {
             "model": model,
@@ -157,6 +171,8 @@ class OllamaClient:
             payload["tools"] = tools
         if format is not None:
             payload["format"] = format
+        if think is not None:
+            payload["think"] = think
         t0 = time.perf_counter()
         try:
             r = await self._client.post(

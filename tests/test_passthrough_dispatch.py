@@ -50,7 +50,7 @@ class _FakeOllama:
         self.chat_calls: list[dict] = []
         self.stream_calls: list[dict] = []
 
-    async def chat(self, *, model, messages, options=None, tools=None, timeout_s=None):
+    async def chat(self, *, model, messages, options=None, tools=None, timeout_s=None, think=None):
         self.chat_calls.append({
             "model": model, "messages": messages,
             "options": options, "tools": tools, "timeout_s": timeout_s,
