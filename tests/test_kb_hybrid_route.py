@@ -185,12 +185,18 @@ class TestConfigWiring:
         request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
         assert _hybrid_cfg(request) == {}
 
-    def test_the_shipped_config_has_hybrid_off_with_documented_knobs(self):
-        """The deployed default. Turning this on before the migration is
-        pointless; turning it on *by accident* would be worse."""
+    def test_the_shipped_config_enables_hybrid_with_sane_knobs(self):
+        """Pinned in both directions on purpose.
+
+        `enabled` was False until the migration ran on 2026-08-03; it is True
+        now because every text collection the query path reads has a bm25
+        vector. A flip in either direction is a real decision — off means
+        falling back to dense-only and losing exact quoting, on without a
+        migration means a lexical retriever with nothing in it — so neither
+        should happen without this test objecting."""
         cfg = yaml.safe_load(
             (Path(__file__).resolve().parent.parent / "config.yaml").read_text())
         hybrid = cfg["kb"]["hybrid"]
-        assert hybrid["enabled"] is False
+        assert hybrid["enabled"] is True
         assert hybrid["rrf_k"] == 60
         assert 0.0 < hybrid["min_term_overlap"] <= 1.0

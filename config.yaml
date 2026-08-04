@@ -453,11 +453,12 @@ kb:
   # decoy's 0.431, so the retriever had stopped discriminating, not merely
   # become strict.
   hybrid:
-    # OFF until the collections are migrated. `scripts/migrate_bm25.py` gives
-    # each existing text collection a sparse vector; until it has run, the
-    # lexical half returns nothing and this is dense-only with extra steps.
-    # Turning it on early is pointless rather than harmful.
-    enabled: false
+    # Migration ran 2026-08-03: kb_text (15,913 points) and all three
+    # kb_user_text_* rebuilt with a bm25 vector, counts verified, dense
+    # vectors carried over unchanged. `scripts/migrate_bm25.py` is idempotent
+    # and skips anything already migrated, so a new deployment runs it once
+    # before turning this on.
+    enabled: true
     # Reciprocal rank fusion's damping constant, from the original paper and
     # Qdrant's own default. It flattens the gap between top positions — rank 1
     # scores 1/61, rank 2 scores 1/62 — so a chunk both retrievers liked
