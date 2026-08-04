@@ -565,6 +565,46 @@ kb:
     # the worst failure a retrieval substrate can have.
     transcript_chunk_tokens: 250
 
+    # ─── Visual pass (Phase 36) ──────────────────────────────────────
+    # Frames are sampled on CPU, thinned by `media/framegate.py`, and only
+    # the survivors are described by the `vl` pool. At `gpu.concurrency: 1`
+    # every describe call is exclusive GPU that a chat turn is waiting for,
+    # so the thinning is not an optimisation — it is the difference between
+    # a video ingest being a background cost and being an outage.
+
+    # Seconds between sampled frames. 30s over a 9m25s video gives 19
+    # candidates, which is the run the gate's 8-bit threshold was calibrated
+    # against. Lowering it does not directly cost GPU — the gate absorbs
+    # near-identical extras — but it does cost decode time and disk.
+    frame_interval_s: 30
+
+    # Hard cap on describe calls per video, applied AFTER the gate. The gate
+    # thins by content and its answer is the good one; this thins by budget
+    # and is always a loss, so it is capped rather than targeted — a video
+    # whose gate output is under the cap pays nothing for it.
+    #
+    # 24 keeps the first runs finishing in a knowable time. Raise it once
+    # phase 38 has real per-frame timings; that is the whole point of
+    # shipping this instrumented rather than behind a flag.
+    keyframes_max: 24
+
+    # Longest edge of an extracted frame. A 4K frame carries no more legible
+    # text than a 1080p one once the vision encoder resizes it, and costs
+    # decode time at both ends. It also matters more than it looks: every
+    # frame is base64'd into a JSON request body.
+    frame_max_width: 1280
+
+    # dHash bits that must differ before a frame earns its own describe call.
+    # 8 was calibrated against one video (6 of 19 frames kept, 68% fewer GPU
+    # calls) — a starting point, not a finding. Bias low: a redundant
+    # description costs one GPU call, a dropped scene change costs coverage
+    # nothing downstream can recover.
+    #
+    # Known blind spot: dHash is gradient-based, so it cannot see a cut
+    # between two flat colour fields. Real footage has texture; a test
+    # fixture full of solid colours will look like a broken gate.
+    frame_dedup_distance: 8
+
 # ─── Tools (OpenAPI auto-discovery) ────────────────────────────────────
 tools:
   enabled: true

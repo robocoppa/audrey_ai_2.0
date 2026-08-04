@@ -118,9 +118,9 @@ deployable and verifiable on its own.
 - [39 hybrid retrieval](campaign-2/phase-39-hybrid-retrieval.md) — BM25
   alongside the vectors, so the KB can find what a document *says* and not
   only what it means. Prompted by measurements in phase 35: a 10-word
-  paraphrase returns its chunk at 0.796 while a 6-word verbatim quote from the
-  same transcript returns nothing, and the margin over an unrelated passage
-  collapses to 0.029. **Next to build.**
+  paraphrase returned its chunk at 0.796 while a 6-word verbatim quote from
+  the same transcript returned nothing. **Landed, fully verified** — that
+  quote now comes back at rank 1, at a cosine the floor had been discarding.
 
 There is no Phase 24 in Campaign 2.
 

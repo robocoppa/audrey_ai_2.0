@@ -49,11 +49,17 @@ class Probe:
     `audio_duration_s` is 0.0 for a file with no audio stream. That is a fact
     about the file, not an error: a silent screen recording still has frames
     worth describing in Phase 36, and failing it here would deny it that.
+
+    `has_video` is the mirror image, added in Phase 36 for the same reason. An
+    audio-only file in a video container has nothing to describe and must
+    still get its transcript — the visual pass reports zero frames, not a
+    failure.
     """
 
     container_duration_s: float
     audio_duration_s: float
     has_audio: bool
+    has_video: bool = False
 
 
 def _binary(name: str) -> str:
@@ -103,6 +109,17 @@ def probe(path: Path, *, timeout_s: int = DEFAULT_PROBE_TIMEOUT_S) -> Probe:
 
     streams = parsed.get("streams") or []
     audio = [s for s in streams if s.get("codec_type") == "audio"]
+    # Cover art in an MP3 is a video stream by codec_type, and extracting
+    # "frames" from it would describe the same JPEG once per sample interval.
+    # A real video track has more than one frame; `nb_frames` is absent on
+    # some containers, so treat unknown as real rather than discarding a
+    # genuine track on a missing field.
+    video = [
+        s for s in streams
+        if s.get("codec_type") == "video"
+        and s.get("disposition", {}).get("attached_pic", 0) != 1
+        and _as_float(s.get("nb_frames")) != 1.0
+    ]
 
     # Duration can be absent on either the format or the stream depending on
     # the container — matroska routinely omits the stream-level one. Take
@@ -116,6 +133,7 @@ def probe(path: Path, *, timeout_s: int = DEFAULT_PROBE_TIMEOUT_S) -> Probe:
         container_duration_s=container,
         audio_duration_s=audio_duration,
         has_audio=bool(audio),
+        has_video=bool(video),
     )
 
 

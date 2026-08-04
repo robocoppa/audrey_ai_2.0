@@ -43,7 +43,12 @@ WORKDIR /app
 # So `pip install faster-whisper` now succeeds and `import faster_whisper`
 # fails with ModuleNotFoundError, at build time, in a message that points at
 # neither package.
-RUN pip install --no-cache-dir faster-whisper==1.1.1 "requests>=2.31"
+#
+# `pillow` is Phase 36's addition, for `framegate.dhash`. It decodes the
+# sampled frames on CPU to decide which of them are worth a GPU call — the
+# frames themselves are produced by ffmpeg, so this is a few hundred KB of
+# image decoding, not an imaging stack.
+RUN pip install --no-cache-dir faster-whisper==1.1.1 "requests>=2.31" "pillow>=10.0"
 
 # Bake the weights. The worker's network is `internal: true`, so it cannot
 # download them at runtime — and even with egress this would be wrong: a
@@ -63,11 +68,11 @@ RUN WHISPER_BAKE=${WHISPER_BAKE} python /tmp/bake_whisper.py \
 # `src/audrey/__init__.py` is a single `__version__` assignment with no
 # imports, which is what makes this narrow copy work at all.
 #
-# NOTE: this also brings `media/framegate.py`, which imports Pillow — not
-# installed here. Nothing imports it today, so it is inert. Phase 36 is when
-# that stops being true: adding the frame path means adding `pillow` to the
-# pip step above, and the failure if you forget is an ImportError at claim
-# time, on the box, not at build time.
+# NOTE: this brings `media/framegate.py` and `media/frames.py`, which import
+# Pillow. That is installed above as of Phase 36 — it was not for 34 and 35,
+# where the modules were inert. The failure mode if it goes missing again is
+# an ImportError at *claim* time on the box rather than at build time, since
+# `framegate` imports PIL inside its functions rather than at module scope.
 COPY src/audrey/__init__.py       /app/src/audrey/__init__.py
 COPY src/audrey/media             /app/src/audrey/media
 

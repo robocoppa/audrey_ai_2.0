@@ -5,9 +5,25 @@ things that *say* what you asked. This phase adds a lexical retriever next to
 the dense one and merges them, so an exact quote and a vague question both
 work.
 
-**Status: BUILT, NOT YET DEPLOYED.** Off by default (`kb.hybrid.enabled:
-false`) and inert until [`scripts/migrate_bm25.py`](../../scripts/migrate_bm25.py)
-has run.
+**Status: DEPLOYED AND VERIFIED** on the box, 2026-08-04. Migration ran over
+15,963 points across `kb_text` and three `kb_user_text_*`, counts verified,
+dense vectors carried across unchanged.
+
+| test | result |
+|---|---|
+| the exact quote that started this | **rank 1**, alone — unfindable since phase 35 |
+| the paraphrase, as a regression check | two transcript chunks, no regression |
+| a query the corpus cannot answer | **empty** |
+| the same quote asked as another user | **empty** |
+
+The quote returns at a dense cosine of 0.4699 — well under the 0.53 floor that
+had been discarding it. The lexical retriever found what the dense one could
+not, which is the entire thesis of the phase.
+
+The isolation test is valid by construction rather than by assumption: the
+query used returns the transcript at rank 1 for its owner, so an empty result
+for another user cannot be an artifact of the query failing for everyone. That
+distinction cost a false pass in phase 35 and is worth keeping.
 
 Not video-specific, despite being found there. Every collection has this
 problem; transcripts just made it obvious, because a transcript is the one
