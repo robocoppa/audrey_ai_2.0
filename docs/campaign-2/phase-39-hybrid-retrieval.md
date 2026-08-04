@@ -25,7 +25,21 @@ query is a six-word phrase that appears **verbatim** in every passage below.
 | the surrounding paragraph | ~630 chars | **0.460** | **fails** |
 | an unrelated passage (decoy) | ~120 chars | 0.431 | correctly rejected |
 
-Two things follow, and the second is the alarming one.
+And the end-to-end result through the real retriever, taken 2026-08-03 after
+the transcript was re-ingested at 250-token chunks with the timestamps removed
+— so this is the *best* the dense path currently does:
+
+| query | result |
+|---|---|
+| a 10-word paraphrase of a passage | its chunk at **0.796** |
+| a 6-word phrase appearing **verbatim** in that transcript | **nothing** |
+
+That pair is the whole argument for this phase. Dense retrieval is not weak
+here — it improved sharply with the phase 35 chunking fix, from 0.586 to 0.796
+on the same query. It is simply the wrong retriever for a quote, and no amount
+of making it better at meaning will make it find a literal string.
+
+Two more things follow from the table above, and the second is the alarming one.
 
 **Dilution with length is steep.** The same exact phrase drops 0.118 by adding
 surrounding context that a reader would call relevant.

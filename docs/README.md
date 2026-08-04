@@ -105,7 +105,8 @@ deployable and verifiable on its own.
 - [34 media-worker container](campaign-2/phase-34-media-worker-container.md) —
   ffmpeg in a sidecar, no model calls. **Landed, fully verified.**
 - [35 video transcript](campaign-2/phase-35-video-transcript.md) — whisper,
-  baked into the worker image. **Landed, verified.**
+  baked into the worker image. **Landed, fully verified** (step 5 moved to 38
+  with `keep_source`).
 - [36 video visual assessment](campaign-2/phase-36-video-visual-assessment.md)
   — keyframes through the `vl` pool.
 - [37 video summary](campaign-2/phase-37-video-summary.md)
@@ -116,9 +117,10 @@ deployable and verifiable on its own.
 
 - [39 hybrid retrieval](campaign-2/phase-39-hybrid-retrieval.md) — BM25
   alongside the vectors, so the KB can find what a document *says* and not
-  only what it means. Prompted by measurements in phase 35: an exact quote
-  scored below the relevance floor, and the margin over an unrelated
-  passage collapsed to 0.029.
+  only what it means. Prompted by measurements in phase 35: a 10-word
+  paraphrase returns its chunk at 0.796 while a 6-word verbatim quote from the
+  same transcript returns nothing, and the margin over an unrelated passage
+  collapses to 0.029. **Next to build.**
 
 There is no Phase 24 in Campaign 2.
 

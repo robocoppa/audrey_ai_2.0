@@ -5,16 +5,22 @@ worker extracts audio and reports a duration; this one turns that audio into a
 timestamped transcript, ingests it through the existing text path, and flips the
 row to `ready`. The video becomes searchable.
 
-**Status: DEPLOYED AND VERIFIED** on the box, 2026-08-03. A 9m25s video
-transcribed in 74s (**7.6x real time**, `small` int8 on 2 CPU cores) into 153
-segments, ingested, and retrievable by its owner. Silent video completes as
+**Status: DEPLOYED AND VERIFIED** on the box, 2026-08-03 — every step except 5,
+which moved to [phase 38](phase-38-video-optimise.md) with `keep_source`. A 9m25s
+video transcribed in 74s (**7.6x real time**, `small` int8 on 2 CPU cores) into
+153 segments, ingested, and retrievable by its owner. Silent video completes as
 `ready` with an empty transcript. Per-user isolation confirmed: a query that
-returns the transcript at 0.586 for its owner returns nothing when asked as
-another user.
+returns the transcript for its owner returns nothing when asked as another
+user.
 
-**Step 6 (a worker killed mid-transcription leaves no partial transcript) is
-outstanding** — the budget path is covered hermetically and a partial cannot be
-posted, so this is confirmation rather than discovery.
+**Step 6 passed under a real SIGKILL.** `docker kill media-worker` 90 seconds
+into a transcription left `chunks: 0` and nothing retrievable — the worker
+posts once, at the end, so there is no partial to leave. The lease then expired
+and the *next claim's* sweep returned the row to `pending`, where attempt 2
+transcribed it fully with no intervention. Shortening the lease for this needs
+`VIDEO_LEASE_MINUTES` in `.env` (never an edit to `config.yaml` on the box) and
+a value **above** the transcription time — at 1 minute against a 74-second pass
+the job is swept out from under itself on every attempt and reaches `failed`.
 
 **This phase produced two findings bigger than itself**: transcripts needed
 their own ingest path rather than the document one (below), and the KB cannot
@@ -106,6 +112,26 @@ processed.
 The quota problem is real: at 300 MB a piece, three videos exhaust a 1 GiB
 allowance. It now belongs to [phase 38](phase-38-video-optimise.md), which is
 the first point where nothing else needs the bytes.
+
+### A transcript point must record the *video's* size, not the sidecar's
+
+The first build ingested the sidecar with `ingest_user_text_file(sidecar, ...)`,
+which takes the size from the file it reads. A 288 MB video therefore wrote
+`bytes: 9153` onto every one of its points — and `reconcile_with_qdrant` copies
+payload bytes back onto the uploads row at every boot, so the row followed. The
+file list showed **8.9 KB** for a 288 MB upload and the 1 GiB quota was
+under-counting by four orders of magnitude. The user spotted it in the UI; no
+test could have, because every layer was internally consistent.
+
+`ingest_transcript_segments` takes an explicit `source_bytes` for this reason.
+Derived metadata about a *representation* must not overwrite a fact about the
+*original*.
+
+The repair has a second half worth keeping. A re-run reads its `source_bytes`
+from the uploads row, so requeueing a row that had already been corrupted would
+stamp 9153 onto the new points and make it permanent. The requeue route now
+stats the file on disk and repairs the row before queueing it, because once
+reconcile has overwritten the row the file itself is the only surviving truth.
 
 ## What's in scope
 
