@@ -5,9 +5,14 @@ the [keyframe gate](phase-38-video-optimise.md), into
 `audrey_passthrough/qwen3-vl:32b`, and the resulting prose is ingested as
 ordinary searchable text alongside the transcript.
 
-**Status: PLANNED.** The model path is already proved by hand against the
-deployment — frames extracted from a real upload came back correctly described.
-What is unproved is doing it unattended, at volume, without starving chat.
+**Status: IN PROGRESS.** The CPU half is built and tested —
+[`media/frames.py`](../../src/audrey/media/frames.py) samples and thins, and
+[`routes/media.py`](../../src/audrey/routes/media.py) is the model door. What
+remains is the worker stage that joins them, and ingesting the result.
+
+The model path was already proved by hand against the deployment — frames
+extracted from a real upload came back correctly described. What is unproved
+is doing it unattended, at volume, without starving chat.
 
 ---
 
@@ -30,51 +35,49 @@ Keyframes are just images arriving from a different door.
 Keyframe CLIP vectors are still written. The two are complementary, not
 alternatives.
 
-### The worker reaches models through passthrough — no new model surface
+### The worker reaches models through a narrow service route (corrected)
 
 `FairLocalGate` is **in-process to `audrey-ai`**. A worker calling Ollama
 directly would not share that gate — it would contend with live chat at the
 Ollama level with no fairness whatsoever, and a long ingest would starve the
-box.
+box. So the worker must reach the model *through Audrey*. That part stands.
 
-This needs no new endpoint, because `audrey_passthrough/<concrete>` already
-exists for exactly this. Its config comment states the intent outright: *"Both
-fair-scheduling layers (FairLocalGate, UserInflightRegistry) still fire so
-direct-Ollama clients can be brought under Audrey's GPU contention story."*
-[`passthrough.py`](../../src/audrey/routes/openai/passthrough.py) wraps every
-forward in `inflight.slot(me.email)` and hands `gate` to `passthrough_chat`.
+**The transport this plan named does not exist.** It said the worker would
+`POST /v1/chat/completions` with `audrey_passthrough/qwen3-vl:32b`, "acting as
+the uploading user via the Phase 31 service-token act-as". That route depends
+on `require_user`, which demands a real OWUI bearer. Phase 31's act-as is
+`resolve_kb_caller` and it lives only on the KB *query* routes. The worker
+holds `KB_SERVICE_TOKEN` and cannot obtain a user JWT, so it would have got a
+401 on the first frame.
 
-So the worker is an ordinary OpenAI-API client:
+The obvious repair — teach `require_user` to accept a service token plus an
+act-as header — was rejected. `/v1/chat/completions` is the endpoint every
+OWUI user hits, and putting the entire chat surface behind a header that
+grants any identity, to close a gap for one background client, is a bad trade
+at any size.
 
-```
-POST /v1/chat/completions
-  { "model": "audrey_passthrough/qwen3-vl:32b",
-    "messages": [{ "role": "user", "content": [
-        {"type": "text", "text": "..."},
-        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,…"}}]}] }
-```
+Instead: **[`routes/media.py`](../../src/audrey/routes/media.py), service-token
+only, one verb.** `POST /v1/media/describe` takes an image and a user, and
+returns prose. No message history, no streaming, no model selection — nothing
+that would make it a second chat endpoint.
 
-Two properties fall out for free:
+**The fairness property is fully preserved**, which was the only reason the
+identity mattered. The route passes the uploader's email to both
+`inflight.slot(...)` and `gate.acquire(..., user_id=...)`, so a giant video
+slows its own owner's chat and leaves everyone else's alone. A shared service
+identity would pool every ingest into one slice and blur exactly the
+distinction the gate exists to draw.
 
-- **Images route correctly by target.** `_handle_passthrough` calls
-  `describe_for_text_model(..., target_model=concrete, ...)`, which rewrites an
-  image to prose only for *non-vl* targets. Naming a `vl` model sends the frame
-  straight to the vision encoder as Ollama's `images: [...]`.
+Two properties the plan expected from passthrough, and where they went:
+
+- **Images route correctly by target.** Moot — this route always calls the
+  `vl` pool directly, so there is no text-target rewrite to get right.
 - **The image must be a `data:` URI.**
   [`ollama.py:29-43`](../../src/audrey/models/ollama.py#L29-L43) silently drops
   `http(s)://` URLs, which yields a confidently blind answer rather than an
-  error. Verified the hard way during phase 32's manual testing.
-
-**Act as the uploading user**, via the Phase 31 service-token act-as, not as a
-distinct service identity. Both fairness layers key on `me.email`, so acting-as
-the uploader puts the ingest in *that user's* round-robin slice: a giant video
-slows its own owner's chat and leaves everyone else's alone. A shared service
-identity would pool all ingests into one slice and blur exactly the distinction
-the gate exists to draw.
-
-The `allowed_models` half of this landed in
-[phase 32](phase-32-video-upload-transport.md) — both `vl` members are already
-permitted, so the model path is open before this phase starts.
+  error — verified the hard way during phase 32's manual testing. Now
+  structurally impossible: the route takes raw base64 and builds the `data:`
+  URI itself, so there is no field a caller could put a URL in.
 
 ### Ship it slow, measure it, then make it fast
 
@@ -109,10 +112,24 @@ the static stretch collapsing and the head and tail preserved.
 
 ## What's in scope
 
-- **`src/audrey/media/frames.py`** (new) — ffmpeg frame extraction and scene
-  ranking, feeding [`framegate.py`](../../src/audrey/media/framegate.py).
-- **`src/audrey/media/describe.py`** (new) — the passthrough client, acting-as
-  the uploader, one frame per call to start.
+- **[`src/audrey/media/frames.py`](../../src/audrey/media/frames.py)** (new,
+  **done**) — ffmpeg sampling and the thinning that feeds
+  [`framegate.py`](../../src/audrey/media/framegate.py). Sampling is by time
+  rather than `-skip_frame nokey`, because I-frame spacing is a function of
+  the encoder's GOP settings and bitrate ladder, not of the content.
+- **[`src/audrey/routes/media.py`](../../src/audrey/routes/media.py)** (new,
+  **done**) — the model door, replacing the `describe.py` passthrough client
+  this plan assumed. See the corrected decision above.
+- **`Probe.has_video`** (**done**) — an audio-only file yields zero frames
+  rather than failing, mirroring phase 35's treatment of a silent video. This
+  refines verification step 6 below: a *corrupt* video stream must fail, a
+  genuinely absent one must not, or every podcast upload becomes a failed job.
+- **`docker/media-worker.Dockerfile`** (**done**) — Pillow, which
+  `framegate.dhash` needs. The Dockerfile had carried a note predicting this
+  exact trap since phase 34; the failure mode is an ImportError at *claim*
+  time on the box, not at build time, because `framegate` imports PIL inside
+  its functions.
+- **`src/audrey/media/worker.py`** — the frame stage in the claim loop.
 - **[`routes/files.py`](../../src/audrey/routes/files.py)** — `ingest-result`
   learns frame descriptions and keyframe images.
 - **`src/audrey/metrics.py`** — a `stage` label on the ingest timings
@@ -143,6 +160,15 @@ the static stretch collapsing and the head and tail preserved.
 - **The gate's threshold is a starting point, not a finding.** 8 bits was
   calibrated against one video. Re-check that the head and tail survive whenever
   it is retuned.
+- **dHash cannot see a cut between two flat colour fields.** It asks "is this
+  pixel brighter than the one to its right", so a solid colour has zero
+  gradient everywhere and red, blue and white all hash identically. Found by
+  building a test fixture out of colour cards and watching three scenes merge
+  into one. Pinned as a test rather than fixed: real footage has texture, and
+  the alternatives (average hash, colour histograms) trade this rare case for
+  sensitivity to exposure and colour-grade drift, which is the common one.
+  Worth knowing before someone else tests with solid colours and concludes the
+  gate is broken.
 - **`keyframes_max` interacts with the gate.** The gate may return fewer than
   the cap, which is the good case. It must never return *more*.
 

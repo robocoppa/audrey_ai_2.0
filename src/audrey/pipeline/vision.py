@@ -226,6 +226,57 @@ async def _transcribe_one(
     return str((resp.get("message") or {}).get("content") or "").strip()
 
 
+class VisionUnavailableError(RuntimeError):
+    """No healthy `vl` model. A deployment problem, not a problem with the image."""
+
+
+async def describe_one_image(
+    data_url: str,
+    *,
+    ollama: OllamaClient,
+    registry: ModelRegistry,
+    health: HealthTracker,
+    gate: FairLocalGate,
+    cfg: Any,
+    user_question: str = "",
+    user_id: str | None = None,
+) -> tuple[str, str]:
+    """Describe one image through the `vl` pool. Returns `(description, model)`.
+
+    The single-image entry point, for callers that already hold an image and
+    want prose back — Phase 36's keyframe pass. `describe_images` stays the
+    entry point for chat, where images arrive buried in a message history that
+    has to come out the other side intact.
+
+    **Raises rather than degrading.** `describe_images` is fail-soft on
+    purpose: a half-answered chat turn beats a 502, and a bracketed note tells
+    the answering model to own the gap. An ingest has no user waiting and no
+    reason to pretend — a frame that could not be described must be reported
+    as a failure the worker can record, not ingested as searchable text saying
+    a description was unavailable.
+
+    **Deliberately does not use `_cache`.** The keyframe gate already removes
+    the redundancy a digest cache could catch, and catches the near-identical
+    frames a digest cannot. What is left is up to `keyframes_max` unique
+    images per video, which would evict the entire 64-entry chat cache on
+    every ingest — an interactive path paying for a background one.
+    """
+    picked = _pick_vision_model(cfg, registry, health)
+    if picked is None:
+        raise VisionUnavailableError("no healthy vl model is available")
+    model, location = picked
+
+    conf = vision_cfg(cfg)
+    description = await _transcribe_one(
+        ollama, gate,
+        url=data_url, model=model, location=location,
+        user_question=user_question,
+        timeout_s=float(conf.get("timeout_s", _DEFAULT_TIMEOUT_S)),
+        user_id=user_id,
+    )
+    return description, model
+
+
 async def describe_images(
     messages: list[dict[str, Any]],
     *,

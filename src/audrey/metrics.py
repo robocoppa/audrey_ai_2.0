@@ -9,6 +9,7 @@ Each metric is tied to a specific operational question:
   audrey_gpu_gate_wait_seconds     — local-model queue wait time
   audrey_kb_search_seconds         — KB query latency (text/image; merged or not)
   audrey_kb_search_hits            — hits returned per query (zero = retrieval miss)
+  audrey_video_describe_seconds    — per-keyframe vision latency (phase 38 input)
   audrey_auth_cache_size           — OWUI token cache occupancy
   audrey_user_inflight_blocked_seconds — wait at the per-user concurrency cap
   audrey_inflight_cap_breached_total — soft cap on tracked users exceeded
@@ -114,6 +115,24 @@ kb_search_hits = Histogram(
     buckets=_HIT_COUNT_BUCKETS,
 )
 
+# ─── Video visual pass (Phase 36) ─────────────────────────────────────
+
+# Buckets run long on purpose. `vision.timeout_s` is 120s because a dense
+# screenshot is a slow decode, so a histogram topping out at 10s would report
+# every real frame as +Inf and answer nothing.
+#
+# Unlabelled deliberately. A `user` or `model` label would grow with the user
+# base, and the question this exists to answer — "what does a frame actually
+# cost, and can keyframes_max go up?" — is about the deployment rather than
+# about who uploaded. Phase 38 is the consumer; without this it is guesswork.
+_DESCRIBE_BUCKETS = (1, 2, 5, 10, 20, 30, 60, 120, 300)
+
+video_describe_seconds = Histogram(
+    "audrey_video_describe_seconds",
+    "Wall-clock time to describe one video keyframe through the vl pool.",
+    buckets=_DESCRIBE_BUCKETS,
+)
+
 # ─── Auth cache ───────────────────────────────────────────────────────
 
 auth_cache_size = Gauge(
@@ -194,6 +213,7 @@ __all__ = [
     "gpu_gate_wait_seconds",
     "kb_search_seconds",
     "kb_search_hits",
+    "video_describe_seconds",
     "auth_cache_size",
     "user_inflight_blocked_seconds",
     "inflight_cap_breached_total",

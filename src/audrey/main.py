@@ -36,6 +36,7 @@ from audrey.routes.admin import router as admin_router
 from audrey.routes.files import router as files_router
 from audrey.routes.inflight import UserInflightRegistry
 from audrey.routes.kb import router as kb_router
+from audrey.routes.media import router as media_router
 from audrey.routes.openai import router as openai_router
 from audrey.routes.upload_ui import router as upload_ui_router
 from audrey.tools.discovery import ToolRegistry, discover_all
@@ -270,6 +271,7 @@ app = FastAPI(
 app.include_router(openai_router)
 app.include_router(kb_router)
 app.include_router(files_router)
+app.include_router(media_router)
 app.include_router(upload_ui_router)
 app.include_router(admin_router)
 
