@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -237,10 +238,18 @@ async def _search_text_hybrid(
     fused = reciprocal_rank_fusion(
         dense, lexical, rrf_k=int(cfg.get("rrf_k", RRF_K)), query=query,
     )
-    min_overlap = float(cfg.get("min_term_overlap", 0.5))
+    min_overlap = float(cfg.get("min_term_overlap", 0.7))
     kept = [f for f in fused if passes_evidence(
         f, min_score=min_score, min_overlap=min_overlap)]
-    return [f.hit for f in kept[:top_k]], had_user
+
+    # Report the fused score, not the originating retriever's.
+    #
+    # A `KBHit` carries whichever score the retriever that found it produced,
+    # and those are different scales — a cosine of 0.47 next to a BM25 score
+    # of 13.8, ordered by neither. Shipped that way on 2026-08-03 it made the
+    # results unreadable and any downstream comparison meaningless. The fused
+    # value is the only number that describes the list it is in.
+    return [replace(f.hit, score=f.score) for f in kept[:top_k]], had_user
 
 
 async def _search_images_merged(

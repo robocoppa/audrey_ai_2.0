@@ -139,13 +139,23 @@ class TestTermOverlap:
     def test_an_unrelated_passage_scores_zero(self):
         assert bm25.term_overlap("watch us play baseball", "quarterly revenue figures") == 0.0
 
-    def test_one_incidental_word_scores_low(self):
-        """The failure this rule is built to catch. BM25 hands back its top-N
-        whether or not the match is good, so this arrives with a real rank."""
+    def test_function_words_are_not_evidence(self):
+        """The defect that shipped on 2026-08-03. This chunk shares `and`,
+        `us` and `some` with the query and nothing else — under an unweighted
+        count that was 3 of 6 terms, enough to clear the threshold and return
+        an unrelated document as a real source."""
         assert bm25.term_overlap(
             "and watch us play some baseball",
-            "some notes about the meeting",
-        ) == 1 / 6  # 'some' of {and, watch, us, play, some, baseball}
+            "and some of us went to the meeting",
+        ) == 0.0
+
+    def test_only_content_terms_count_toward_the_fraction(self):
+        """Query content terms are {watch, play, baseball}; the chunk has one
+        of them, so this is 1/3 rather than 1/6 of the raw token count."""
+        assert bm25.term_overlap(
+            "and watch us play some baseball",
+            "we play on tuesdays",
+        ) == 1 / 3
 
     def test_repeated_query_terms_do_not_inflate_the_fraction(self):
         assert bm25.term_overlap("fox fox fox", "one fox") == 1.0

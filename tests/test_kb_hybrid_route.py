@@ -51,7 +51,94 @@ class _FakeQdrant:
         return self._user_lexical if collection else list(self._lexical.values())
 
 
-CFG = {"enabled": True, "rrf_k": 60, "min_term_overlap": 0.5}
+CFG = {"enabled": True, "rrf_k": 60, "min_term_overlap": 0.7}
+
+
+class TestTheJunkThatShippedOn20260803:
+    """Regression tests built from the first live run of the hybrid path.
+
+    All three queries were run against the real corpus with
+    `min_term_overlap: 0.5` and no stopword list, and all three returned
+    documents that must never have been returned. They are reproduced here
+    with the actual sources that came back.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_vaccine_query_returns_nothing_from_a_powerapps_corpus(self):
+        """The 2026-07-15 incident, reproduced by the rule meant to prevent
+        it. `how`, `do` and `work` are three of the query's five terms, so
+        every long document cleared a 0.5 threshold while `mrna` and
+        `vaccines` appeared nowhere."""
+        q = _FakeQdrant(dense={}, lexical={
+            1: _hit("/datasets/servicenow/.../README.md",
+                    "This will not work unless you do the following steps", 11.39),
+            2: _hit("/datasets/powerapps/.../work-with-views.md",
+                    "How to work with views and how you do a query", 11.10),
+        })
+
+        hits, _ = await _search_text_hybrid(
+            q, [0.1], query="how do mRNA vaccines work", top_k=5, user=None,
+            min_score=0.53, cfg=CFG)
+
+        assert hits == []
+
+    @pytest.mark.asyncio
+    async def test_a_baseball_quote_does_not_drag_in_powerapps_docs(self):
+        """`and`, `us`, `some` and `play` are four of six terms, so a document
+        about audio controls passed while sharing one real word."""
+        quote = "and watch us play some baseball"
+        q = _FakeQdrant(
+            dense={1: _hit("transcript.txt", f"come out {quote} this year", 0.47)},
+            lexical={
+                1: _hit("transcript.txt", f"come out {quote} this year", 9.9),
+                2: _hit("/datasets/powerapps/.../control-audio-video.md",
+                        "Use this control to play some media and let us know", 13.83),
+            })
+
+        hits, _ = await _search_text_hybrid(
+            q, [0.1], query=quote, top_k=5, user=None, min_score=0.53, cfg=CFG)
+
+        assert [h.source for h in hits] == ["transcript.txt"]
+
+    @pytest.mark.asyncio
+    async def test_below_floor_documents_do_not_ride_in_on_function_words(self):
+        """The transcript is a real hit at 0.796. The USFS and BJJ documents
+        scored 0.43-0.46 — below the 0.53 floor that had refused them for a
+        year — and were admitted purely on `he`/`did`/`a`/`when`/`i`."""
+        query = "he actually did make a difference when I first started"
+        q = _FakeQdrant(
+            dense={
+                1: _hit("transcript.txt", "he actually did make a difference "
+                                          "when I first started here", 0.796),
+                2: _hit("/datasets/herbal-medicine/.../index.html",
+                        "he did not make a note of it when i first started", 0.463),
+            },
+            lexical={2: _hit("/datasets/herbal-medicine/.../index.html",
+                             "he did not make a note of it when i first started", 8.1)},
+        )
+
+        hits, _ = await _search_text_hybrid(
+            q, [0.1], query=query, top_k=5, user=None, min_score=0.53, cfg=CFG)
+
+        assert [h.source for h in hits] == ["transcript.txt"]
+
+
+class TestReportedScore:
+    @pytest.mark.asyncio
+    async def test_the_score_is_the_fused_rank_not_the_raw_retriever_score(self):
+        """Shipped on 2026-08-03 returning a cosine of 0.47 next to a BM25
+        score of 13.8 — two scales in one list, ordered by neither, and
+        meaningless to anything comparing them."""
+        q = _FakeQdrant(
+            dense={1: _hit("a.txt", "alpha text", 0.83)},
+            lexical={2: _hit("b.txt", "alpha text", 13.83)},
+        )
+
+        hits, _ = await _search_text_hybrid(
+            q, [0.1], query="alpha text", top_k=5, user=None, min_score=0.53, cfg=CFG)
+
+        assert all(0.0 < h.score < 1.0 for h in hits), [h.score for h in hits]
+        assert hits == sorted(hits, key=lambda h: h.score, reverse=True)
 
 
 class TestHybridSearch:

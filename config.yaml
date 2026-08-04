@@ -466,11 +466,21 @@ kb:
     rrf_k: 60
     # The evidence rule that replaces `min_score` on the lexical side. BM25
     # scores are unbounded and corpus-relative, so no threshold means the same
-    # thing twice; "the chunk contains at least half the words you asked for"
-    # means the same thing in every corpus at every size. Raise toward 1.0 to
-    # demand near-exact quotes, lower to admit looser keyword matches — and
-    # remember it is the 2026-07-15 junk-results incident this guards.
-    min_term_overlap: 0.5
+    # thing twice; "the chunk contains 70% of the meaningful words you asked
+    # for" means the same thing in every corpus at every size. Function words
+    # do not count toward it — see `kb/bm25.py`.
+    #
+    # Was 0.5 for one deployment on 2026-08-03 and that was too loose: "how do
+    # mRNA vaccines work" returned PowerApps and ServiceNow docs, because
+    # `how`/`do`/`work` alone cleared the bar.
+    #
+    # Re-measured against the passages that actually came back, with function
+    # words excluded: junk scored 0.25, 0.33 and 0.667; genuine hits scored
+    # 0.75 and 1.0. 0.7 is the gap. Note how narrow that is — the worst junk
+    # case is one content word away from the best threshold, so this number
+    # deserves re-measuring against any corpus with a different shape rather
+    # than being treated as a constant. Lowering it is how 2026-07-15 returns.
+    min_term_overlap: 0.7
   dataset_paths:                         # overridden by KB_DATASET_PATHS env var
     - "/datasets/geology"                # container path; host = /mnt/user/knowledge/<topic>
     - "/datasets/botany"

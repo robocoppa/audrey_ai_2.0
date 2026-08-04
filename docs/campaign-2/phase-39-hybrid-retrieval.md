@@ -157,6 +157,45 @@ round trip, issued concurrently with the first, on a path that already waits
 on an embedding call. `Fusion.DBSF` remains available and worth measuring once
 there is a corpus to measure on.
 
+### The evidence rule shipped broken once, and how (2026-08-03)
+
+The first live run returned PowerApps and ServiceNow documents for "how do
+mRNA vaccines work" — the 2026-07-15 incident, reproduced by the rule written
+to prevent it. Worth recording in full, because the mistake was in reasoning
+rather than in code.
+
+`term_overlap` counted **every** query term, function words included. Three of
+that query's five terms are `how`, `do` and `work`, which every long document
+contains, so junk cleared a 0.5 threshold while `mrna` and `vaccines` appeared
+nowhere at all.
+
+The reason it was written that way is the interesting part. `kb/bm25.py`
+argues at length that no stopword list is needed, because `Modifier.IDF`
+already drives common terms to near-zero weight. That argument is correct —
+**for the stored vector**. `term_overlap` was added later, is an unweighted
+count, and applies no IDF, so the same words that cost nothing in the vector
+were worth full marks as evidence. One inherited argument, two different jobs.
+
+The fix is a stopword list used *only* by `term_overlap`; the vectors still
+keep every term. Re-measured against the passages that actually came back:
+
+| passage | overlap |
+|---|---|
+| ServiceNow README (junk) | 0.25 |
+| PowerApps audio control (junk) | 0.33 |
+| USFS botany index (junk) | 0.667 |
+| a real answer | 0.75 |
+| the verbatim transcript | 1.00 |
+
+`min_term_overlap` moved 0.5 → **0.7**, which is the gap. It is a narrow one —
+the worst junk case is a single content word below the threshold — so this
+number is a measurement against this corpus, not a constant.
+
+A second defect shipped alongside it: the response reported each hit's *raw*
+retriever score, so a cosine of 0.47 sat next to a BM25 score of 13.8, in an
+order explained by neither. The fused RRF value is now what comes back, since
+it is the only number that describes the list it is in.
+
 ### `kb.min_score` has to be replaced, not ported
 
 The floor exists for a real reason — [`routes/kb.py`](../../src/audrey/routes/kb.py)

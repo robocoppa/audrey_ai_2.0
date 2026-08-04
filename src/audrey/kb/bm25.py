@@ -27,19 +27,27 @@ it is used. Handing the corpus-dependent half to the thing that owns the
 corpus means a vector written today is still correct after a thousand more
 uploads.
 
-## Why there is no stopword list
+## Why the *vector* has no stopword list, but `term_overlap` does
 
-Because `Modifier.IDF` makes one redundant, and a hand-maintained list is
-exactly the failure the phase plan warns about: "BM25 is tokenizer-dependent —
-stemming, stopwords and casing all change what *exact* means."
+The vector does not need one. `Modifier.IDF` gives a term appearing in every
+document a weight near zero, which is what a stopword list is *for*, and doing
+it twice would add a hand-maintained mechanism that changes what "exact"
+means. A query made entirely of common words — "to be or not to be" — still
+produces a usable vector this way.
 
-A term appearing in every document gets an IDF near zero and contributes
-nothing to the score, which is what a stopword list is *for*. Doing it by list
-as well would add a second, worse mechanism: someone would have to decide
-whether "us" is a stopword, and a query made entirely of common words — "to be
-or not to be" — would tokenize to nothing and become permanently unquotable.
-Letting IDF do it costs a few more indices per vector and cannot produce that
-failure.
+`term_overlap` is a different job and needs the opposite answer. It counts how
+many query terms a chunk contains, **unweighted**, so a common word is worth
+exactly as much as a rare one. Deployed without a list on 2026-08-03, that
+rule admitted PowerApps and ServiceNow documents for the query "how do mRNA
+vaccines work" — three of its five terms are `how`, `do` and `work`, which
+every long document contains, so junk cleared a 0.5 threshold while the
+distinctive terms `mrna` and `vaccines` appeared nowhere. That is precisely
+the 2026-07-15 incident the rule exists to prevent, reproduced by the rule
+meant to prevent it.
+
+The reasoning error is worth naming: "IDF makes stopwords redundant" is true
+of a scoring function that applies IDF, and the overlap test does not. Two
+different jobs, one inherited argument.
 
 ## Why there is no stemming
 
@@ -82,6 +90,27 @@ AVG_LEN = 256
 # Letters and digits, with apostrophes kept inside a word so "don't" stays one
 # token rather than becoming "don" + "t". Everything else splits.
 _TOKEN_RE = re.compile(r"[a-z0-9]+(?:'[a-z]+)*")
+
+# Function words, for `term_overlap` ONLY — never for the stored vectors.
+#
+# Deliberately confined to words that carry no topic: articles, pronouns,
+# prepositions, conjunctions, auxiliaries. Words like "work", "make" and
+# "first" are left out even though they are common, because they can be the
+# distinctive term in a real query ("how does X work"), and a list that grows
+# to cover every frequent word ends up deciding what users are allowed to ask
+# about.
+STOPWORDS = frozenset("""
+a an the this that these those there here
+i me my mine we us our ours you your yours he him his she her hers it its
+they them their theirs who whom whose what which
+am is are was were be been being do does did doing done have has had having
+will would shall should can could may might must
+and or nor but so if then than because while although though as
+of in on at by for with from into onto out up down over under
+about above below between through during before after again once
+no not only own same too very just also
+some any all each every both few many much more most other such
+""".split())
 
 
 def tokenize(text: str) -> list[str]:
@@ -145,26 +174,43 @@ def query_vector(text: str) -> tuple[list[int], list[float]]:
     return indices, [1.0] * len(indices)
 
 
+def content_terms(text: str) -> set[int]:
+    """The term indices of `text` with function words removed.
+
+    Only ever used by `term_overlap`. The stored vectors deliberately keep
+    these words — see the module docstring.
+    """
+    return {term_index(t) for t in tokenize(text) if t not in STOPWORDS}
+
+
 def term_overlap(query: str, text: str) -> float:
-    """Fraction of the query's distinct terms that appear in `text`, 0.0-1.0.
+    """Fraction of the query's distinct *content* terms in `text`, 0.0-1.0.
 
     This is the evidence test that replaces a score threshold on the lexical
     side. BM25 scores are unbounded and corpus-relative, so there is no
-    constant that means "this match is real" — but "the document contains four
-    of the query's five words" means the same thing in every corpus, at every
-    size, forever.
+    constant that means "this match is real" — but "the chunk contains four of
+    the five meaningful words you asked for" means the same thing in every
+    corpus, at every size, forever.
 
-    An empty query has no evidence to offer and scores 0.0 rather than
-    dividing by zero.
+    Function words are excluded because they are not evidence of anything. A
+    chunk sharing `and`, `us` and `some` with the query has told you nothing;
+    one sharing `watch`, `play` and `baseball` has told you a great deal, and
+    an unweighted count cannot see the difference.
+
+    Returns 0.0 when the query has no content terms at all. Such a query —
+    "to be or not to be" — is unusable as *evidence* even though it still
+    produces a perfectly good BM25 vector for ranking. It can still be
+    answered through the dense retriever, which is the right degradation:
+    nothing is admitted on lexical grounds that cannot be justified on them.
     """
-    q = {term_index(t) for t in tokenize(query)}
+    q = content_terms(query)
     if not q:
         return 0.0
-    d = {term_index(t) for t in tokenize(text)}
-    return len(q & d) / len(q)
+    return len(q & content_terms(text)) / len(q)
 
 
 __all__ = [
-    "AVG_LEN", "B", "K1",
-    "document_vector", "query_vector", "term_index", "term_overlap", "tokenize",
+    "AVG_LEN", "B", "K1", "STOPWORDS",
+    "content_terms", "document_vector", "query_vector", "term_index",
+    "term_overlap", "tokenize",
 ]
