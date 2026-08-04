@@ -110,7 +110,15 @@ deployable and verifiable on its own.
   — keyframes through the `vl` pool.
 - [37 video summary](campaign-2/phase-37-video-summary.md)
 - [38 video optimise](campaign-2/phase-38-video-optimise.md) — making it
-  affordable.
+  affordable, and where deleting the source video now lives.
+
+**Retrieval quality**
+
+- [39 hybrid retrieval](campaign-2/phase-39-hybrid-retrieval.md) — BM25
+  alongside the vectors, so the KB can find what a document *says* and not
+  only what it means. Prompted by measurements in phase 35: an exact quote
+  scored below the relevance floor, and the margin over an unrelated
+  passage collapsed to 0.029.
 
 There is no Phase 24 in Campaign 2.
 

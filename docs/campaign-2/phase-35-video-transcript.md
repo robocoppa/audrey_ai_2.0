@@ -32,21 +32,40 @@ the four artifacts ever shipped, this is the one worth having.
 
 ### Segments become chunks, with timestamps preserved
 
-faster-whisper returns `(t_start, t_end, text)`. Those go through
-[`ingest_user_text_file`](../../src/audrey/kb/ingest.py) exactly as any text
-file does — no new collection, no new point schema.
+faster-whisper returns `(t_start, t_end, text)`. These go through
+[`ingest_transcript_segments`](../../src/audrey/kb/ingest.py) into the same
+per-user collection as any other upload — no new collection, and the only new
+payload fields are `t_start`, `t_end` and an `artifact` discriminator.
 
-**As built, the merging is free.** `ingest-result` already joins segments into
-one `[HH:MM:SS] line` document and writes it as a sidecar, and `chunk_text`
-already splits at 1000 tokens. So whisper's short segments — often a single
-sentence — are grouped into paragraph-sized chunks with a timestamp on every
-line, without any new code. One chunk per segment was the alternative, and it
-would have been worse: single-sentence embeddings are noisy, and `top_k`
-retrieval fills with fragments that each lack the context to be useful.
+**Chunk size stays at 250, deliberately.** After the measurements in
+[phase 39](phase-39-hybrid-retrieval.md), dropping to ~120 tokens would make
+exact quoting mostly work — and would make broad questions worse, because a
+one-sentence chunk cannot hold several people's answers. There is no chunk size
+good at both, so tuning toward a compromise about to be deleted was rejected.
+Hybrid retrieval removes the trade-off; expect this number to go *up* once it
+lands.
 
-The KB half of this work is nearly free, and that is by design. The expensive
-decision was made in phase 32: put the artifacts through the paths that already
-exist rather than building a parallel video-shaped one.
+**The first build reused `ingest_user_text_file` and that was wrong.** It
+joined the segments into one `[HH:MM:SS] line` document and let `chunk_text`
+split it at the 1000-token document default, on the reasoning that reusing the
+existing path was free. It is free in code and expensive in retrieval, and the
+first real video showed both costs: 1000-token chunks are three-plus minutes of
+speech spanning several speakers, and the `[HH:MM:SS] ` prefixes were ~1,700 of
+7,318 characters — 23% of every embedding spent on strings with no meaning.
+
+A 25-word verbatim quote scored **0.586** against its own chunk. An exact quote
+that a search cannot find is the worst failure a retrieval substrate can have.
+
+So transcripts get their own path: 250-token chunks grouped on segment
+boundaries (whisper already split on natural pauses, which are better cut
+points than a token count), and timestamps in the payload rather than the text.
+The sidecar keeps its `[HH:MM:SS]` lines — it is the human-readable artifact
+and the identity anchor for `delete_by_file_id` — but its contents are not what
+gets embedded.
+
+The wider principle from phase 32 still holds: put artifacts through paths that
+already exist. The correction is that "reuse the path" is not the same as
+"reuse its defaults", and the difference is only visible if you measure.
 
 ### An empty transcript is a success
 
@@ -89,8 +108,6 @@ the first point where nothing else needs the bytes.
   loop, posted through `ingest-result`.
 - **[`routes/files.py`](../../src/audrey/routes/files.py)** — `ingest-result`
   learns to accept transcript segments and route them to the text ingest path.
-- **[`kb/uploads_db.py`](../../src/audrey/kb/uploads_db.py)** — `duration_s` on
-  the row, so the file list can show something true about a video.
 - **`compose.yaml`** — `WHISPER_MODEL` and `TRANSCRIBE_BUDGET_S` on the
   worker. Not `config.yaml`: the worker reads env, per the Phase 34 decision.
   `WHISPER_MODEL` can only *select* a model baked into the image at build time

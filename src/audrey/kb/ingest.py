@@ -264,6 +264,7 @@ async def ingest_transcript_segments(
     file_id: str,
     filename: str,
     mime: str,
+    source_bytes: int,
     uploaded_at: str | None = None,
     chunk_tokens: int = 250,
     overlap_tokens: int = 40,
@@ -306,7 +307,13 @@ async def ingest_transcript_segments(
                 "file_id": file_id,
                 "filename": filename,
                 "mime": mime,
-                "bytes": int(stat.st_size),
+                # The SOURCE video's size, not the sidecar's. Every payload
+                # field here describes the uploaded file this `file_id` names,
+                # and `reconcile_with_qdrant` rebuilds the uploads row from
+                # exactly these on every boot. Using the transcript's own size
+                # billed a 288 MB video as 9 KB against a 1 GiB quota — and
+                # did it silently, one boot after the ingest.
+                "bytes": int(source_bytes),
                 "uploaded_at": stamp,
                 # The timestamps ride in the payload so a hit can say *where*
                 # in the video it was said, without those characters diluting

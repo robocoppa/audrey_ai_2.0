@@ -870,6 +870,7 @@ async def ingest_result(
                 sidecar=sidecar, qdrant=qdrant, embedder=text_embedder,
                 collection=text_col, user=user, file_id=file_id,
                 filename=str(row["filename"]), mime=str(row["mime"]),
+                source_bytes=int(row["bytes"]),
                 uploaded_at=stamp,
                 chunk_tokens=_transcript_chunk_tokens(request),
             )
