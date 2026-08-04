@@ -15,7 +15,7 @@ makes the asserted shapes easy to reason about.
 
 from __future__ import annotations
 
-from audrey.kb.chunk import chunk_text
+from audrey.kb.chunk import chunk_segments, chunk_text
 
 
 def _make_text(n_words: int) -> str:
@@ -109,3 +109,110 @@ def test_chunk_text_idx_reflects_iteration_not_emission():
     # so indices are [0, 1].
     chunks = chunk_text(_make_text(1901), chunk_tokens=1000, overlap_tokens=100)
     assert [c.idx for c in chunks] == [0, 1]
+
+
+class TestChunkSegments:
+    """Transcript chunking (Phase 35, fixed after the first real video).
+
+    The original build joined segments into one `[HH:MM:SS] line` document and
+    ran it through `chunk_text` at the 1000-token document default. On the
+    first real transcript that produced 3 chunks of ~3 minutes of speech each,
+    and a 25-word verbatim quote scored **0.586** against its own chunk —
+    barely over the 0.53 `kb.min_score` floor, where an exact match should be
+    near 0.9. Two causes, both pinned below: chunks far too coarse for speech,
+    and `[HH:MM:SS] ` prefixes making up 23% of every embedding.
+    """
+
+    @staticmethod
+    def _segments(n: int, *, words: int = 8) -> list[dict]:
+        return [
+            {"t_start": i * 3.0, "t_end": i * 3.0 + 3.0,
+             "text": " ".join(f"word{i}x{w}" for w in range(words))}
+            for i in range(n)
+        ]
+
+    def test_timestamps_never_reach_the_embedded_text(self):
+        """The 23% dilution. Timestamps belong in the payload, where they are
+        still returned with a hit but never shift the vector."""
+        chunks = chunk_segments(self._segments(30))
+        assert chunks
+        for c in chunks:
+            assert "[" not in c.text
+            assert ":" not in c.text
+
+    def test_the_span_is_carried_on_the_chunk(self):
+        """Dropping timestamps from the text is only acceptable because they
+        survive as structured data — otherwise a hit could not say where in
+        the video it came from."""
+        chunks = chunk_segments(self._segments(30))
+        assert chunks[0].t_start == 0.0
+        assert chunks[-1].t_end == 90.0
+        for c in chunks:
+            assert c.t_end > c.t_start
+
+    def test_chunks_are_much_smaller_than_the_document_default(self):
+        """250 tokens, not 1000. A 1000-token chunk of speech is three-plus
+        minutes of talking — in an interview, several people answering several
+        questions, which is what diluted the match."""
+        segs = self._segments(200)
+        small = chunk_segments(segs, chunk_tokens=250)
+        large = chunk_segments(segs, chunk_tokens=1000)
+        assert len(small) > len(large) * 2
+
+    def test_boundaries_fall_between_segments(self):
+        """Whisper already splits on natural pauses; those are better cut
+        points than a token count landing mid-sentence."""
+        segs = self._segments(40)
+        chunks = chunk_segments(segs, chunk_tokens=60, overlap_tokens=0)
+        for c in chunks:
+            for word in c.text.split():
+                assert word.startswith("word")
+
+    def test_consecutive_chunks_overlap(self):
+        """A sentence spanning a boundary has to be findable from either side.
+
+        Overlap is carried as whole segments, so the budget must exceed one
+        segment's cost or nothing is carried. That is correct behaviour rather
+        than a bug — a half-segment of speech is not a useful overlap — but it
+        makes the knob coarser than a token count implies.
+        """
+        chunks = chunk_segments(self._segments(40), chunk_tokens=120, overlap_tokens=40)
+        assert len(chunks) > 2
+        assert chunks[1].t_start < chunks[0].t_end
+
+    def test_zero_overlap_is_honoured(self):
+        chunks = chunk_segments(self._segments(40), chunk_tokens=60, overlap_tokens=0)
+        assert chunks[1].t_start >= chunks[0].t_end
+
+    def test_empty_segments_are_skipped(self):
+        segs = [
+            {"t_start": 0.0, "t_end": 1.0, "text": "real content here"},
+            {"t_start": 1.0, "t_end": 2.0, "text": "   "},
+            {"t_start": 2.0, "t_end": 3.0, "text": ""},
+        ]
+        chunks = chunk_segments(segs)
+        assert len(chunks) == 1
+        assert chunks[0].text == "real content here"
+
+    def test_no_segments_is_no_chunks(self):
+        assert chunk_segments([]) == []
+
+    def test_a_single_short_segment_still_produces_a_chunk(self):
+        chunks = chunk_segments([{"t_start": 0.0, "t_end": 2.0, "text": "hello"}])
+        assert len(chunks) == 1
+        assert chunks[0].text == "hello"
+
+    def test_indices_are_sequential_from_zero(self):
+        """`point_id` is derived from (source, kind, idx) — a gap or repeat
+        would collide two chunks onto one point and silently lose content."""
+        chunks = chunk_segments(self._segments(60), chunk_tokens=60)
+        assert [c.idx for c in chunks] == list(range(len(chunks)))
+
+    def test_every_segment_survives_into_some_chunk(self):
+        """The failure that would be invisible: content dropped at a boundary
+        is only noticed by someone searching for the thing that vanished."""
+        segs = self._segments(50)
+        chunks = chunk_segments(segs, chunk_tokens=60, overlap_tokens=0)
+        joined = " ".join(c.text for c in chunks)
+        for seg in segs:
+            assert seg["text"] in joined

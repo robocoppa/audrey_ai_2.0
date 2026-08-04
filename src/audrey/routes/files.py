@@ -62,7 +62,11 @@ from audrey.kb.extract import (
     is_video_mime,
     sniff_mime,
 )
-from audrey.kb.ingest import ingest_user_image_file, ingest_user_text_file
+from audrey.kb.ingest import (
+    ingest_transcript_segments,
+    ingest_user_image_file,
+    ingest_user_text_file,
+)
 from audrey.kb.qdrant import QdrantKB
 from audrey.kb.uploads_db import UploadsDB
 from audrey.kb.user_store import (
@@ -741,6 +745,17 @@ def _max_attempts(request: Request) -> int:
     return int(_video_cfg(request).get("max_attempts", 3))
 
 
+def _transcript_chunk_tokens(request: Request) -> int:
+    """Tokens per transcript chunk, from `kb.video.transcript_chunk_tokens`.
+
+    Much smaller than the 1000 used for documents. A 1000-token chunk of
+    speech is three-plus minutes of talking, and on the first real video a
+    25-word verbatim quote scored 0.586 against its own chunk — barely over
+    the 0.53 floor, when an exact match should be near 0.9.
+    """
+    return int(_video_cfg(request).get("transcript_chunk_tokens", 250))
+
+
 def _hhmmss(seconds: float) -> str:
     """Timestamp prefix for a transcript line, so a chunk carries its own position."""
     total = max(0, int(seconds))
@@ -837,9 +852,11 @@ async def ingest_result(
     # treatment a scanned PDF gets, where empty means unusable.
     if transcript:
         # Ingest through the ordinary text path rather than a video-shaped one.
-        # `ingest_user_text_file` reads a Path, so the transcript is written
-        # beside the source under the same file_id — the row and its chunks
-        # then agree on identity, and delete-by-file_id still collects both.
+        # The sidecar is written beside the source under the same file_id, so
+        # the row and its chunks agree on identity and delete-by-file_id still
+        # collects both. It stays the human-readable artifact — timestamps and
+        # all — but its contents are NOT what gets embedded: see
+        # `ingest_transcript_segments`.
         text_col, _image_col = await ensure_user_collections(qdrant, user)
         collection = text_col
         sidecar = (
@@ -848,11 +865,13 @@ async def ingest_result(
         sidecar.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(sidecar.write_text, transcript, "utf-8")
         try:
-            chunks = await ingest_user_text_file(
-                sidecar, qdrant=qdrant, embedder=text_embedder,
+            chunks = await ingest_transcript_segments(
+                [s.model_dump() for s in body.segments if s.text.strip()],
+                sidecar=sidecar, qdrant=qdrant, embedder=text_embedder,
                 collection=text_col, user=user, file_id=file_id,
                 filename=str(row["filename"]), mime=str(row["mime"]),
                 uploaded_at=stamp,
+                chunk_tokens=_transcript_chunk_tokens(request),
             )
         except Exception as e:
             log.exception("files: transcript ingest failed for %s: %s", file_id, e)
@@ -907,6 +926,7 @@ async def ingest_failed(
 async def requeue_job(
     file_id: str,
     request: Request,
+    force: bool = False,
     _: None = Depends(require_service),
 ) -> JobResultResponse:
     """Send a processed video back to the queue to be done again.
@@ -920,6 +940,13 @@ async def requeue_job(
 
     Service-token only, like the other job routes. A user-facing "reprocess"
     button is a separate decision — this one is for the operator.
+
+    **A `processing` row is refused unless `force=true`.** Requeueing a live
+    job clears its lease, so the worker finishes, gets a `409`, and its work is
+    discarded — 74 seconds of whisper on the run that prompted this guard.
+    Nothing breaks and nothing is corrupted; the cost is silent and paid in
+    CPU. Taking a job back from a worker is still allowed, because a genuinely
+    stuck one needs it, but it should be something you meant to do.
     """
     db = _get_uploads_db(request)
     qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
@@ -929,6 +956,19 @@ async def requeue_job(
     row = await db.get_upload(file_id)
     if row is None:
         raise HTTPException(status_code=404, detail="No such file.")
+
+    if row["status"] == "processing" and not force:
+        # Refuse before touching Qdrant, so a refused call changes nothing at
+        # all — including for the worker that is still running.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{file_id} is being processed right now (lease "
+                f"{row['lease_id']}, since {row['leased_at']}). Requeueing "
+                "would discard that work. Retry with ?force=true if that is "
+                "what you want."
+            ),
+        )
 
     user = str(row["user"])
     # Qdrant first, and fatally. `ingest_user_text_file` deletes by file_id
@@ -949,7 +989,8 @@ async def requeue_job(
         raise HTTPException(status_code=404, detail="No such file.")
 
     log.info(
-        "files: requeued file_id=%s user=%s (was %s)", file_id, user, row["status"],
+        "files: requeued file_id=%s user=%s (was %s%s)",
+        file_id, user, row["status"], ", FORCED over a live lease" if force else "",
     )
     return JobResultResponse(file_id=file_id, status="pending", chunks=0)
 

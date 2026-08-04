@@ -24,7 +24,14 @@ from pathlib import Path
 
 from qdrant_client.http import models as qmodels
 
-from audrey.kb.chunk import IMAGE_SUFFIXES, TEXT_SUFFIXES, Chunk, chunk_text, load_text
+from audrey.kb.chunk import (
+    IMAGE_SUFFIXES,
+    TEXT_SUFFIXES,
+    Chunk,
+    chunk_segments,
+    chunk_text,
+    load_text,
+)
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
 from audrey.kb.extract import extract_text
 from audrey.kb.qdrant import QdrantKB, build_image_point, build_text_point, normalize_source
@@ -243,6 +250,79 @@ async def ingest_user_text_file(
         for c, v in zip(chunks, vectors, strict=True)
     ]
     await qdrant.upsert_text(points, collection=collection)
+    return len(points)
+
+
+async def ingest_transcript_segments(
+    segments: list[dict],
+    *,
+    sidecar: Path,
+    qdrant: QdrantKB,
+    embedder: TextEmbedder,
+    collection: str,
+    user: str,
+    file_id: str,
+    filename: str,
+    mime: str,
+    uploaded_at: str | None = None,
+    chunk_tokens: int = 250,
+    overlap_tokens: int = 40,
+) -> int:
+    """Ingest whisper segments as timestamped chunks.
+
+    Separate from `ingest_user_text_file` because a transcript is not a
+    document. It arrives already split on natural pauses, it carries a
+    timestamp per line that must not be embedded, and it needs much smaller
+    chunks — see `chunk_segments` for the measurements that forced all three.
+
+    `sidecar` is the human-readable `[HH:MM:SS] line` file. It stays the
+    identity anchor — `source` in the payload, and what `delete_by_file_id`
+    and the reconcile sweep key on — but its *contents* are never what gets
+    embedded. Chunk text is built from `segments` without the timestamps.
+
+    Delete-before-upsert, matching `ingest_user_text_file`, so a re-run
+    replaces its predecessor rather than doubling it.
+    """
+    chunks = chunk_segments(
+        segments, chunk_tokens=chunk_tokens, overlap_tokens=overlap_tokens,
+    )
+    if not chunks:
+        return 0
+
+    source = normalize_source(sidecar)
+    # One stat, not one per chunk — it was inside the comprehension below.
+    stat = sidecar.stat()
+    stamp = uploaded_at or _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+    vectors = await embedder.embed_many([c.text for c in chunks])
+
+    await qdrant.delete_by_file_id(file_id, user=user, collection=collection)
+
+    points: list[qmodels.PointStruct] = [
+        build_text_point(
+            source=source, chunk_idx=c.idx, text=c.text, vector=v,
+            mtime=stat.st_mtime,
+            extra={
+                "user": user,
+                "file_id": file_id,
+                "filename": filename,
+                "mime": mime,
+                "bytes": int(stat.st_size),
+                "uploaded_at": stamp,
+                # The timestamps ride in the payload so a hit can say *where*
+                # in the video it was said, without those characters diluting
+                # the vector that found it.
+                "t_start": c.t_start,
+                "t_end": c.t_end,
+                "artifact": "transcript",
+            },
+        )
+        for c, v in zip(chunks, vectors, strict=True)
+    ]
+    await qdrant.upsert_text(points, collection=collection)
+    log.info(
+        "ingest: transcript %s -> %d chunks (%d segments, %d tokens/chunk)",
+        file_id, len(points), len(segments), chunk_tokens,
+    )
     return len(points)
 
 

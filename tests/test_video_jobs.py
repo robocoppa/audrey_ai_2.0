@@ -615,13 +615,15 @@ class TestRequeue:
     async def test_requeueing_a_processing_row_invalidates_the_running_lease(
         self, db: UploadsDB, tmp_path: Path,
     ):
-        """Taking a job back from a live worker is allowed; its late post must
-        then be refused rather than landing on a row it no longer owns."""
+        """Taking a job back from a live worker is allowed — with `force`, see
+        TestRequeueForceGuard — and its late post must then be refused rather
+        than landing on a row it no longer owns."""
         await _add(db, "v1")
         claimed = await db.claim_job(lease_id="L1", now="t")
 
         TestClient(_app_with_qdrant(db, tmp_path, _RecordingQdrant())).post(
-            "/v1/files/v1/requeue", headers={"X-Audrey-Service-Token": SECRET},
+            "/v1/files/v1/requeue?force=true",
+            headers={"X-Audrey-Service-Token": SECRET},
         )
 
         assert (await db.get_upload("v1"))["status"] == "pending"
@@ -669,4 +671,88 @@ class TestRequeue:
         assert client.post(
             "/v1/files/v1/requeue", headers={"Authorization": "Bearer user-jwt"},
         ).status_code == 401
+        assert (await db.get_upload("v1"))["status"] == "pending"
+
+
+class TestRequeueForceGuard:
+    """Requeueing a live job silently discards its work.
+
+    It is allowed — a genuinely stuck worker needs someone to take the job
+    back — but it is almost never what you meant. On the run that prompted
+    this guard it threw away 74 seconds of whisper: the worker finished,
+    posted, got a 409 because its lease had been cleared underneath it, and
+    started over. Nothing broke, nothing was corrupted, and nothing said so.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_processing_row_is_refused_by_default(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        await _add(db, "v1")
+        await db.claim_job(lease_id="L1", now="t")
+        qdrant = _RecordingQdrant()
+
+        r = TestClient(_app_with_qdrant(db, tmp_path, qdrant)).post(
+            "/v1/files/v1/requeue", headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        assert r.status_code == 409
+        # Refused before Qdrant is touched, so a refused call changes nothing
+        # at all — including for the worker still running.
+        assert qdrant.deletes == []
+        row = await db.get_upload("v1")
+        assert row["status"] == "processing"
+        assert row["lease_id"] == "L1"
+
+    @pytest.mark.asyncio
+    async def test_the_refusal_names_the_lease_it_would_break(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        """'Conflict' alone sends the operator to the logs. The lease id and
+        its start time are what tell them whether it is stuck or just slow."""
+        await _add(db, "v1")
+        await db.claim_job(lease_id="L1", now="2026-08-03T17:57:22+00:00")
+
+        r = TestClient(_app_with_qdrant(db, tmp_path, _RecordingQdrant())).post(
+            "/v1/files/v1/requeue", headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        detail = r.json()["detail"]
+        assert "L1" in detail
+        assert "2026-08-03T17:57:22+00:00" in detail
+        assert "force=true" in detail
+
+    @pytest.mark.asyncio
+    async def test_force_takes_the_job_back(self, db: UploadsDB, tmp_path: Path):
+        """The escape hatch has to still work — a worker that died without
+        releasing its lease is exactly what it is for."""
+        await _add(db, "v1")
+        claimed = await db.claim_job(lease_id="L1", now="t")
+
+        r = TestClient(_app_with_qdrant(db, tmp_path, _RecordingQdrant())).post(
+            "/v1/files/v1/requeue?force=true",
+            headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        assert r.status_code == 200
+        assert (await db.get_upload("v1"))["status"] == "pending"
+        # And the displaced worker's late result is still refused.
+        assert not await db.complete_job(
+            file_id="v1", lease_id=claimed["lease_id"], collection="c", chunks=3,
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", ["ready", "failed", "pending"])
+    async def test_every_other_status_needs_no_force(
+        self, db: UploadsDB, tmp_path: Path, status: str,
+    ):
+        """The guard is narrow on purpose. Requeueing a finished or failed row
+        is the ordinary case and must not grow a flag."""
+        await _add(db, "v1", status=status)
+
+        r = TestClient(_app_with_qdrant(db, tmp_path, _RecordingQdrant())).post(
+            "/v1/files/v1/requeue", headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        assert r.status_code == 200
         assert (await db.get_upload("v1"))["status"] == "pending"

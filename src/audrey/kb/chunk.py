@@ -145,3 +145,95 @@ __all__ = [
     "Chunk", "chunk_text", "load_text",
     "TEXT_SUFFIXES", "IMAGE_SUFFIXES",
 ]
+
+
+@dataclass(slots=True)
+class TranscriptChunk:
+    """A group of speech segments, with the span they cover.
+
+    `text` carries no timestamps. That is the whole point: in the first
+    transcript we shipped, `[HH:MM:SS] ` prefixes were ~1,700 of 7,318
+    characters — 23% of every embedding spent on strings with no meaning,
+    pulling the vector away from the words that carry it. The timestamps go
+    into the point payload instead, where they are still returned with a hit
+    but never reach the embedder.
+    """
+
+    text: str
+    idx: int
+    t_start: float
+    t_end: float
+
+
+def chunk_segments(
+    segments: list[dict],
+    *,
+    chunk_tokens: int = 250,
+    overlap_tokens: int = 40,
+) -> list[TranscriptChunk]:
+    """Group `{t_start, t_end, text}` segments into embedding-sized chunks.
+
+    Deliberately NOT `chunk_text` on a joined blob. Two differences matter:
+
+    **Chunks are much smaller.** The 1000-token default is tuned for prose,
+    where a page stays on one subject. Speech at ~150 words a minute makes a
+    1000-token chunk three-plus minutes of talking, which in an interview is
+    several people answering several questions. Measured on the first real
+    video: a 25-word verbatim quote scored 0.586 against its own 1000-token
+    chunk — barely over the 0.53 floor, when an exact match should be ~0.9.
+    An exact quote that a search cannot find is the worst case for a
+    retrieval substrate.
+
+    **Boundaries fall between segments**, never mid-sentence, because whisper
+    already segments on natural pauses and those are better split points than
+    a token count.
+
+    Overlap is carried as whole trailing segments rather than tokens, for the
+    same reason.
+    """
+    if not segments:
+        return []
+
+    enc = _encoder()
+    out: list[TranscriptChunk] = []
+    current: list[dict] = []
+    current_tokens = 0
+
+    def flush() -> list[dict]:
+        """Emit `current` as a chunk; return the segments to carry forward."""
+        if not current:
+            return []
+        out.append(TranscriptChunk(
+            text=" ".join(s["text"].strip() for s in current if s["text"].strip()),
+            idx=len(out),
+            t_start=float(current[0]["t_start"]),
+            t_end=float(current[-1]["t_end"]),
+        ))
+        # Carry back whole segments until the overlap budget is spent, so the
+        # next chunk starts with the tail of this one and a sentence spanning
+        # a boundary is still findable from either side.
+        carried: list[dict] = []
+        budget = overlap_tokens
+        for seg in reversed(current):
+            cost = len(enc.encode(seg["text"]))
+            if cost > budget:
+                break
+            carried.insert(0, seg)
+            budget -= cost
+        return carried
+
+    for seg in segments:
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        cost = len(enc.encode(text))
+        if current and current_tokens + cost > chunk_tokens:
+            current = flush()
+            current_tokens = sum(len(enc.encode(s["text"])) for s in current)
+        current.append(seg)
+        current_tokens += cost
+
+    if current:
+        flush()
+
+    return [c for c in out if c.text.strip()]

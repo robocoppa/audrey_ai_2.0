@@ -86,6 +86,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--requeue", metavar="FILE_ID",
                         help="send a processed video back to the queue and exit, "
                              "instead of claiming")
+    parser.add_argument("--force", action="store_true",
+                        help="with --requeue, take the job back even if a worker "
+                             "is mid-run — its work is discarded")
     args = parser.parse_args(argv)
 
     if not args.token:
@@ -95,10 +98,14 @@ def main(argv: list[str] | None = None) -> int:
     # Requeue is its own errand, not a step in the claim loop — the whole point
     # is to put work back so a *later* run can pick it up.
     if args.requeue:
-        status, body = _post(
-            args.endpoint, f"/v1/files/{args.requeue}/requeue", args.token, None,
-        )
+        path = f"/v1/files/{args.requeue}/requeue"
+        if args.force:
+            path += "?force=true"
+        status, body = _post(args.endpoint, path, args.token, None)
         print(f"requeue: {status} {body}")
+        if status == 409:
+            print("  (a worker is mid-run; re-run with --force to take it back)",
+                  file=sys.stderr)
         return 0 if status == 200 else 1
 
     status, job = _post(args.endpoint, "/v1/files/jobs/claim", args.token, None)

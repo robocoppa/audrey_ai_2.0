@@ -517,6 +517,14 @@ kb:
     # forever and taking the worker down with it on every pass.
     # Overridable as VIDEO_MAX_ATTEMPTS.
     max_attempts: 3
+    # Tokens per transcript chunk. Much smaller than the 1000 used for
+    # documents: a 1000-token chunk of speech is three-plus minutes of talking,
+    # which in an interview spans several speakers and several subjects. The
+    # first real video proved it — a 25-word verbatim quote scored 0.586
+    # against its own chunk, barely over the 0.53 `kb.min_score` floor, when an
+    # exact match should be near 0.9. An exact quote a search cannot find is
+    # the worst failure a retrieval substrate can have.
+    transcript_chunk_tokens: 250
 
 # ─── Tools (OpenAPI auto-discovery) ────────────────────────────────────
 tools:
