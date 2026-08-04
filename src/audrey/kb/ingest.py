@@ -127,10 +127,11 @@ async def ingest_text_file(
     # Clear any stale points from a previous larger ingest; the upsert
     # below rewrites the current range with deterministic IDs.
     await qdrant.delete_by_source(source, collection=qdrant.text_collection)
+    sparse = await qdrant.has_sparse(qdrant.text_collection)
     points: list[qmodels.PointStruct] = [
         build_text_point(
             source=source, chunk_idx=c.idx, text=c.text,
-            vector=v, mtime=mtime,
+            vector=v, mtime=mtime, sparse=sparse,
         )
         for c, v in zip(chunks, vectors, strict=True)
     ]
@@ -242,10 +243,11 @@ async def ingest_user_text_file(
         "bytes": int(size_bytes),
         "uploaded_at": stamp,
     }
+    sparse = await qdrant.has_sparse(collection)
     points: list[qmodels.PointStruct] = [
         build_text_point(
             source=source, chunk_idx=c.idx, text=c.text,
-            vector=v, mtime=mtime, extra=extras,
+            vector=v, mtime=mtime, extra=extras, sparse=sparse,
         )
         for c, v in zip(chunks, vectors, strict=True)
     ]
@@ -297,11 +299,12 @@ async def ingest_transcript_segments(
     vectors = await embedder.embed_many([c.text for c in chunks])
 
     await qdrant.delete_by_file_id(file_id, user=user, collection=collection)
+    sparse = await qdrant.has_sparse(collection)
 
     points: list[qmodels.PointStruct] = [
         build_text_point(
             source=source, chunk_idx=c.idx, text=c.text, vector=v,
-            mtime=stat.st_mtime,
+            mtime=stat.st_mtime, sparse=sparse,
             extra={
                 "user": user,
                 "file_id": file_id,

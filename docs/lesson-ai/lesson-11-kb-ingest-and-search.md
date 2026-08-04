@@ -275,7 +275,7 @@ Five steps. Read top to bottom:
    ID and write the batch.
 
 **Concept spotlight — deterministic IDs.**
-[`kb/qdrant.py:56-57`](../../src/audrey/kb/qdrant.py#L56):
+[`kb/qdrant.py:74-75`](../../src/audrey/kb/qdrant.py#L74):
 
 ```python
 def point_id(*, source: str, kind: str, idx: int) -> str:

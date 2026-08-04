@@ -1,19 +1,30 @@
 #!/usr/bin/env python3
-"""Settle whether Phase 39's backfill is possible before building it.
+"""Settle how Phase 39's lexical index can be built, before building it.
 
-The phase plan rests on one claim: sparse vectors can be added to Audrey's
-*existing* collections, so no dense vector is ever recomputed and the embedder
-is never called. That was checked against the qdrant-client method list, which
-proves only that the call exists — not that a server accepts it.
+**Round 1 answered the plan's original question: no.** Qdrant 1.18.3 refuses
+`update_collection(sparse_vectors_config=...)` on a collection that has no
+sparse vector yet — `400 Wrong input: Not existing vector name error: bm25`.
+That call only edits the params of one that already exists. The phase plan's
+"no collection is recreated and no dense vector is recomputed" was checked
+against the client's method list, which proves the method exists, not that a
+server accepts it. Every existing collection must therefore be rebuilt.
 
-The specific doubt is `kb_text`'s **unnamed** dense vector. It was created with
-`vectors_config=VectorParams(...)`, no name, so Qdrant stores it under `""`.
-Adding named sparse vectors to a collection like that may be refused outright,
-and qdrant-client's local mode cannot answer the question — its
-`update_sparse_vectors_config` only edits a sparse vector that already exists.
+**Rebuilt does not have to mean re-embedded.** The dense vectors are already
+stored in Qdrant and can be scrolled back out, so a migration can copy them
+into a new collection and attach freshly-computed sparse vectors without ever
+calling the embedder or re-reading a source file. That is the plan's real
+saving, and it survives.
 
-If any of these fail, the backfill is not a scroll-and-update: it is a
-recreate-and-re-embed of every point in the KB, which is a different phase.
+What is now in doubt is the *shape* of the new collection. Audrey's dense
+vector is unnamed — created as `vectors_config=VectorParams(...)`, stored by
+Qdrant under `""` — and every search in `kb/qdrant.py` relies on that by
+passing no `using=`. If a collection can be created with an unnamed dense
+vector *and* named sparse vectors, the migration is invisible to all existing
+code. If Qdrant demands that the dense vector be named once sparse vectors
+exist, then every dense read and write in the codebase changes too, and the
+migration has to swap collection and code at the same instant.
+
+That is the question this probe now answers.
 
 Touches nothing that exists. Creates one scratch collection, exercises the
 mechanic, deletes it. Read-only against real data.
@@ -30,8 +41,15 @@ import sys
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qm
+from qdrant_client.http.exceptions import UnexpectedResponse
 
-SCRATCH = "phase39_bm25_probe"
+# The real vectoriser, not a stand-in. Whether `document_vector` emits
+# something Qdrant will accept — sorted, unique, uint32 indices — is a genuine
+# integration risk, and a hand-made sparse vector here would hide it.
+from audrey.kb import bm25
+
+SCRATCH = "phase39_bm25_probe"      # stands in for today's kb_text
+SCRATCH_V2 = "phase39_bm25_probe_v2"  # stands in for what it migrates to
 DIM = 768
 
 
@@ -49,8 +67,9 @@ def main() -> int:
     client = QdrantClient(host=args.host, port=args.port)
     print(f"qdrant {client.info().version} at {args.host}:{args.port}\n")
 
-    if client.collection_exists(SCRATCH):
-        client.delete_collection(SCRATCH)
+    for name in (SCRATCH, SCRATCH_V2):
+        if client.collection_exists(name):
+            client.delete_collection(name)
 
     # Built exactly like kb_text and every kb_user_text_*: one unnamed dense
     # vector, no sparse config. If the probe passed against a *named* dense
@@ -71,108 +90,130 @@ def main() -> int:
 
     ok = True
     try:
-        # 1. THE question. Everything else is moot if this fails.
+        # 0. Re-confirm the dead end, so this script keeps carrying the
+        #    evidence for why the migration exists at all.
         try:
             client.update_collection(SCRATCH, sparse_vectors_config={
                 "bm25": qm.SparseVectorParams(modifier=qm.Modifier.IDF)})
-            ok &= _report("add a sparse vector to an existing collection", True)
+            _report("in-place: add sparse to an existing collection", True,
+                    "UNEXPECTED — round 1 said this fails; re-read the plan")
+        except Exception as e:  # noqa: BLE001 — a refusal here is the expected result
+            detail = ((e.content or b"").decode("utf-8", errors="replace")
+                      if isinstance(e, UnexpectedResponse) else str(e))
+            _report("in-place add is refused (expected, this is why we migrate)",
+                    True, detail.strip()[:110])
+
+        # 1. THE question. Can the replacement collection keep the dense vector
+        #    unnamed while gaining named sparse vectors? If yes, every existing
+        #    dense read and write in kb/qdrant.py is untouched by this phase.
+        try:
+            client.create_collection(
+                SCRATCH_V2,
+                vectors_config=qm.VectorParams(size=DIM, distance=qm.Distance.COSINE),
+                sparse_vectors_config={
+                    "bm25": qm.SparseVectorParams(modifier=qm.Modifier.IDF)},
+            )
+            ok &= _report("create: unnamed dense AND named sparse together", True)
         except Exception as e:  # noqa: BLE001 — the whole point is to report it
-            ok &= _report(
-                "add a sparse vector to an existing collection", False,
-                f"{type(e).__name__}: {str(e)[:200]}")
-            print("\n  -> The backfill would require recreating every collection")
-            print("     and re-embedding every point. Re-plan the phase.\n")
+            ok &= _report("create: unnamed dense AND named sparse together", False,
+                          f"{type(e).__name__}: {str(e)[:200]}")
+            print("\n  -> The dense vector must be NAMED once sparse vectors exist.")
+            print("     Every dense read/write in kb/qdrant.py changes too, and")
+            print("     collection and code have to swap at the same instant.\n")
             return 1
 
-        info = client.get_collection(SCRATCH)
-        sparse_cfg = info.config.params.sparse_vectors
-        ok &= _report("the sparse config is readable afterwards", bool(sparse_cfg),
-                      str(sparse_cfg))
+        # 2. The migration itself: read the old points back WITH their vectors.
+        #    This is what makes the rebuild cheap — the embedder is never
+        #    called, because the dense vectors already exist in Qdrant.
+        old, _ = client.scroll(SCRATCH, limit=100, with_payload=True, with_vectors=True)
+        shape = type(old[0].vector).__name__
+        ok &= _report("old points scroll back with their dense vectors",
+                      bool(old) and old[0].vector is not None,
+                      f"{len(old)} points, vector is {shape}")
 
-        # 2. The dense vector must still be usable *unnamed* after the change.
-        #    If adding a sparse vector forces every existing point to be
-        #    addressed by name, the dense search path breaks on deploy.
+        # 3. Write them into the new collection, dense carried over verbatim,
+        #    sparse computed from payload.text. `""` is the unnamed dense
+        #    vector's real name — if that is wrong, the migration cannot write.
+        def _sparse(text: str) -> qm.SparseVector:
+            idx, val = bm25.document_vector(text)
+            return qm.SparseVector(indices=idx, values=val)
+
+        migrated = False
+        for name in ("", "dense"):
+            try:
+                client.upsert(SCRATCH_V2, points=[qm.PointStruct(
+                    id=p.id, payload=p.payload,
+                    vector={name: p.vector,
+                            "bm25": _sparse(str((p.payload or {}).get("text", "")))},
+                ) for p in old])
+                migrated = _report("migrate: dense carried over + sparse attached",
+                                   True, f"dense key {name!r}, real bm25 vectors")
+                break
+            except Exception as e:  # noqa: BLE001
+                _report(f"migrate with dense key {name!r}", False,
+                        f"{type(e).__name__}: {str(e)[:120]}")
+        ok &= migrated
+
+        # 4. Dense search must still work with no `using=`, or every existing
+        #    call site breaks on deploy.
         try:
-            r = client.query_points(SCRATCH, query=dense_a, limit=2)
-            ok &= _report("dense search still works with no `using=`", True,
-                          f"top id={r.points[0].id}")
+            r = client.query_points(SCRATCH_V2, query=dense_a, limit=2)
+            ok &= _report("dense search still works with no `using=`",
+                          bool(r.points), f"top id={r.points[0].id}")
         except Exception as e:  # noqa: BLE001
             ok &= _report("dense search still works with no `using=`", False,
                           f"{type(e).__name__}: {str(e)[:200]}")
 
-        # 3. Backfill mechanic: write a sparse vector onto a point that already
-        #    has a dense one, without touching its payload.
+        # 5. The lexical retriever itself, end to end through the real
+        #    tokenizer. "brown fox" is in point 1 and shares nothing with
+        #    point 2, so a correct lexical search returns exactly one hit —
+        #    which a dense search on this data could not do.
         try:
-            client.update_vectors(SCRATCH, points=[qm.PointVectors(
-                id=1, vector={"bm25": qm.SparseVector(indices=[10, 20], values=[1.5, 0.7])})])
-            got = client.retrieve(SCRATCH, ids=[1], with_payload=True, with_vectors=True)[0]
-            kept = (got.payload or {}).get("text") == "the quick brown fox"
-            ok &= _report("update_vectors adds sparse without touching payload", kept,
-                          f"vectors={sorted((got.vector or {}).keys())}")
-        except Exception as e:  # noqa: BLE001
-            ok &= _report("update_vectors adds sparse without touching payload", False,
-                          f"{type(e).__name__}: {str(e)[:200]}")
-
-        # 4. New writes must carry both at once. `""` is the unnamed dense
-        #    vector's real name — if this is wrong, ingest breaks after the
-        #    collection gains sparse config.
-        wrote_both = False
-        for name in ("", "dense"):
-            try:
-                client.upsert(SCRATCH, points=[qm.PointStruct(
-                    id=3, payload={"text": "a fast red fox"},
-                    vector={name: dense_a, "bm25": qm.SparseVector(
-                        indices=[10, 30], values=[1.1, 0.9])})])
-                wrote_both = _report(
-                    "upsert one point with dense + sparse together", True,
-                    f"dense key {name!r}")
-                break
-            except Exception as e:  # noqa: BLE001
-                _report(f"upsert with dense key {name!r}", False,
-                        f"{type(e).__name__}: {str(e)[:120]}")
-        ok &= wrote_both
-
-        # 5. Sparse-only search — the lexical retriever itself.
-        try:
+            q_idx, q_val = bm25.query_vector("brown fox")
             r = client.query_points(
-                SCRATCH, query=qm.SparseVector(indices=[10], values=[1.0]),
+                SCRATCH_V2, query=qm.SparseVector(indices=q_idx, values=q_val),
                 using="bm25", limit=5)
             hits = [(p.id, round(p.score, 4)) for p in r.points]
-            ok &= _report("sparse search returns only points that share a term",
-                          bool(hits) and all(i in (1, 3) for i, _ in hits), str(hits))
+            ok &= _report("sparse search matches only the point sharing terms",
+                          [i for i, _ in hits] == [1], str(hits))
         except Exception as e:  # noqa: BLE001
             ok &= _report("sparse search", False, f"{type(e).__name__}: {str(e)[:200]}")
 
-        # 6. Server-side RRF. Not required — the merge may end up client-side so
-        #    the junk rule can see each retriever's own score — but knowing
-        #    whether it works decides whether that is a choice or a constraint.
+        # 6. A point whose sparse vector has not been written yet must stay
+        #    dense-searchable. This is the state the whole migration runs in.
         try:
-            r = client.query_points(SCRATCH, prefetch=[
+            client.upsert(SCRATCH_V2, points=[qm.PointStruct(
+                id=99, vector={"": dense_b}, payload={"text": "no sparse yet"})])
+            r = client.query_points(SCRATCH_V2, query=dense_b, limit=3)
+            ok &= _report("a point with no sparse vector is still dense-searchable",
+                          any(p.id == 99 for p in r.points),
+                          f"ids={[p.id for p in r.points]}")
+        except Exception as e:  # noqa: BLE001
+            ok &= _report("a point with no sparse vector is still dense-searchable",
+                          False, f"{type(e).__name__}: {str(e)[:200]}")
+
+        # 7. Server-side RRF. Not required — the merge is client-side so the
+        #    junk rule can see each retriever's own score — but knowing whether
+        #    it works decides whether that stays a choice.
+        try:
+            q_idx, q_val = bm25.query_vector("brown fox")
+            r = client.query_points(SCRATCH_V2, prefetch=[
                 qm.Prefetch(query=dense_a, limit=5),
-                qm.Prefetch(query=qm.SparseVector(indices=[10], values=[1.0]),
+                qm.Prefetch(query=qm.SparseVector(indices=q_idx, values=q_val),
                             using="bm25", limit=5),
             ], query=qm.FusionQuery(fusion=qm.Fusion.RRF), limit=5)
-            ok &= _report("server-side RRF fusion over both retrievers", True,
-                          str([(p.id, round(p.score, 4)) for p in r.points]))
+            _report("server-side RRF fusion (informational)", True,
+                    str([(p.id, round(p.score, 4)) for p in r.points]))
         except Exception as e:  # noqa: BLE001
-            ok &= _report("server-side RRF fusion over both retrievers", False,
-                          f"{type(e).__name__}: {str(e)[:200]}")
-
-        # 7. A point with no sparse vector must stay findable by dense search.
-        #    This is the half-indexed state the whole backfill runs in.
-        try:
-            r = client.query_points(SCRATCH, query=dense_b, limit=2)
-            found = any(p.id == 2 for p in r.points)
-            ok &= _report("a not-yet-backfilled point is still dense-searchable",
-                          found, f"ids={[p.id for p in r.points]}")
-        except Exception as e:  # noqa: BLE001
-            ok &= _report("a not-yet-backfilled point is still dense-searchable",
-                          False, f"{type(e).__name__}: {str(e)[:200]}")
+            _report("server-side RRF fusion (informational)", False,
+                    f"{type(e).__name__}: {str(e)[:160]}")
     finally:
-        client.delete_collection(SCRATCH)
-        print(f"\nscratch collection {SCRATCH!r} deleted")
+        for name in (SCRATCH, SCRATCH_V2):
+            if client.collection_exists(name):
+                client.delete_collection(name)
+        print(f"\nscratch collections {SCRATCH!r}, {SCRATCH_V2!r} deleted")
 
-    print("\n" + ("ALL PASS — the phase 39 backfill plan holds"
+    print("\n" + ("ALL PASS — migrate by copying dense vectors, no re-embed"
                   if ok else "SOMETHING FAILED — re-read before building"))
     return 0 if ok else 1
 

@@ -80,6 +80,8 @@ class TestTranscriptPayloadBytes:
 
         class _Q:
             async def delete_by_file_id(self, *a, **k) -> None: ...
+            async def has_sparse(self, collection) -> bool:
+                return False
             async def upsert_text(self, points, *, collection) -> None:
                 captured.extend(points)
 
@@ -111,6 +113,8 @@ class TestTranscriptPayloadBytes:
 
         class _Q:
             async def delete_by_file_id(self, *a, **k) -> None: ...
+            async def has_sparse(self, collection) -> bool:
+                return False
             async def upsert_text(self, points, *, collection) -> None:
                 captured.extend(points)
 

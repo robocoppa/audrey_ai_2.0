@@ -36,11 +36,29 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 from qdrant_client.http.exceptions import UnexpectedResponse
 
+from audrey.kb import bm25
+
 log = logging.getLogger(__name__)
 
 TEXT_DIM = 768
 IMAGE_DIM = 512
 _NAMESPACE = uuid.NAMESPACE_DNS
+
+# The lexical half of hybrid retrieval (Phase 39). Named, unlike the dense
+# vector, which stays unnamed — verified against Qdrant 1.18.3 on 2026-08-03
+# that the two coexist and that a dense search still works with no `using=`,
+# so nothing about the existing dense path changes.
+#
+# `Modifier.IDF` makes the server compute inverse document frequency from the
+# collection's own statistics. `kb/bm25.py` therefore stores only the term
+# frequency half, and a vector written today stays correct as the corpus grows.
+SPARSE_NAME = "bm25"
+
+# Text collections only. Image points carry a `caption`, and lexical search
+# over captions is a real idea but not this phase's — an unused sparse config
+# on every image collection is clutter that would read as an oversight.
+_SPARSE_CONFIG = {SPARSE_NAME: qmodels.SparseVectorParams(
+    modifier=qmodels.Modifier.IDF)}
 
 
 @dataclass(slots=True)
@@ -71,6 +89,7 @@ class QdrantKB:
         self._client = QdrantClient(host=host, port=port)
         self.text_collection = text_collection
         self.image_collection = image_collection
+        self._sparse_cache: dict[str, bool] = {}
 
     async def ensure_collections(self) -> None:
         await asyncio.to_thread(self._ensure_sync)
@@ -91,11 +110,47 @@ class QdrantKB:
             self._create_collection_sync(name, dim=dim)
 
     def _create_collection_sync(self, name: str, *, dim: int) -> None:
+        # New text collections are born with sparse config, so only the ones
+        # that predate Phase 39 ever need migrating. A user who uploads for the
+        # first time after this ships never enters the migration path at all.
+        sparse = _SPARSE_CONFIG if dim == TEXT_DIM else None
         self._client.create_collection(
             collection_name=name,
             vectors_config=qmodels.VectorParams(size=dim, distance=qmodels.Distance.COSINE),
+            sparse_vectors_config=sparse,
         )
-        log.info("qdrant: created collection %s (dim=%d)", name, dim)
+        log.info(
+            "qdrant: created collection %s (dim=%d%s)",
+            name, dim, ", sparse=bm25" if sparse else "",
+        )
+
+    async def has_sparse(self, collection: str) -> bool:
+        """Whether `collection` can accept BM25 vectors, cached after first look.
+
+        Load-bearing during the migration window. Upserting a sparse vector
+        into a collection that has no sparse config is a hard `400 Not
+        existing vector name`, so ingest has to know — and the honest answer
+        differs per collection while the migration runs.
+
+        Caching is safe in one direction only, which is the direction that
+        happens: a collection gains sparse config once, at creation or
+        migration, and never loses it. A `False` is therefore re-checked on
+        every call and a `True` is remembered.
+        """
+        if self._sparse_cache.get(collection):
+            return True
+        present = await asyncio.to_thread(self._has_sparse_sync, collection)
+        if present:
+            self._sparse_cache[collection] = True
+        return present
+
+    def _has_sparse_sync(self, collection: str) -> bool:
+        try:
+            info = self._client.get_collection(collection)
+        except Exception as e:  # noqa: BLE001 — a missing collection is a legitimate False
+            log.debug("qdrant: has_sparse(%s) could not read config: %s", collection, e)
+            return False
+        return SPARSE_NAME in (info.config.params.sparse_vectors or {})
 
     async def collection_exists(self, name: str) -> bool:
         return await asyncio.to_thread(self._collection_exists_sync, name)
@@ -211,6 +266,35 @@ class QdrantKB:
     ) -> list[KBHit]:
         return await self._search(vector, collection or self.image_collection, top_k=top_k)
 
+    async def search_lexical(
+        self, query: str, *, top_k: int = 5, collection: str | None = None,
+    ) -> list[KBHit]:
+        """BM25 search over `collection`, or an empty list if it has none.
+
+        The empty list is the whole degradation story. A collection that
+        predates the migration, or a query whose terms are all punctuation,
+        returns nothing here and the fused result is simply the dense list —
+        which is exactly the behaviour before this phase. There is no error
+        path for "lexical is unavailable" because there does not need to be.
+        """
+        target = collection or self.text_collection
+        indices, values = bm25.query_vector(query)
+        if not indices or not await self.has_sparse(target):
+            return []
+        return await asyncio.to_thread(self._search_lexical_sync, indices, values, target, top_k)
+
+    def _search_lexical_sync(
+        self, indices: list[int], values: list[float], collection: str, top_k: int,
+    ) -> list[KBHit]:
+        result = self._client.query_points(
+            collection_name=collection,
+            query=qmodels.SparseVector(indices=indices, values=values),
+            using=SPARSE_NAME,
+            limit=top_k,
+            with_payload=True,
+        )
+        return [_to_hit(h) for h in getattr(result, "points", result)]
+
     async def _search(self, vector: list[float], collection: str, *, top_k: int) -> list[KBHit]:
         # qdrant-client 1.12 deprecated `.search()` in favor of `.query_points()`,
         # which returns a `QueryResponse` wrapping the same `ScoredPoint` list.
@@ -221,19 +305,7 @@ class QdrantKB:
             limit=top_k,
             with_payload=True,
         )
-        hits = getattr(result, "points", result)
-        out: list[KBHit] = []
-        for h in hits:
-            p = h.payload or {}
-            out.append(KBHit(
-                score=float(h.score),
-                source=str(p.get("source", "")),
-                kind=str(p.get("kind", "")),
-                chunk_idx=int(p.get("chunk_idx", 0)),
-                text=str(p.get("text") or p.get("caption") or ""),
-                payload=p,
-            ))
-        return out
+        return [_to_hit(h) for h in getattr(result, "points", result)]
 
     async def delete_by_file_id(
         self, file_id: str, *, user: str, collection: str,
@@ -354,6 +426,24 @@ class QdrantKB:
             pass
 
 
+def _to_hit(scored: Any) -> KBHit:
+    """One `ScoredPoint` to one `KBHit`, shared by the dense and lexical paths.
+
+    Both retrievers must produce identically-shaped hits or the fusion in
+    `kb/fusion.py` cannot key them together — it matches on
+    `(source, chunk_idx)`, which comes from here.
+    """
+    p = scored.payload or {}
+    return KBHit(
+        score=float(scored.score),
+        source=str(p.get("source", "")),
+        kind=str(p.get("kind", "")),
+        chunk_idx=int(p.get("chunk_idx", 0)),
+        text=str(p.get("text") or p.get("caption") or ""),
+        payload=p,
+    )
+
+
 _RESERVED_PAYLOAD_KEYS = frozenset({"source", "kind", "text", "caption", "chunk_idx", "mtime"})
 
 
@@ -375,7 +465,19 @@ def build_text_point(
     vector: list[float],
     mtime: float,
     extra: dict[str, Any] | None = None,
+    sparse: bool = False,
 ) -> qmodels.PointStruct:
+    """One text chunk as a Qdrant point.
+
+    `sparse` adds the BM25 vector alongside the dense one. It defaults to
+    False because the caller is the only thing that knows whether the target
+    collection has sparse config — writing a named vector into a collection
+    that lacks it is a hard `400`, and during the migration window some
+    collections have it and some do not. `QdrantKB.has_sparse` is the answer.
+
+    The dense vector stays under `""`, its real name for an unnamed vector, so
+    every existing dense read keeps working with no `using=`.
+    """
     _check_extras(extra)
     payload: dict[str, Any] = {
         "source": source,
@@ -386,9 +488,16 @@ def build_text_point(
     }
     if extra:
         payload.update(extra)
+    vectors: Any = vector
+    if sparse:
+        indices, values = bm25.document_vector(text)
+        vectors = {
+            "": vector,
+            SPARSE_NAME: qmodels.SparseVector(indices=indices, values=values),
+        }
     return qmodels.PointStruct(
         id=point_id(source=source, kind="text", idx=chunk_idx),
-        vector=vector,
+        vector=vectors,
         payload=payload,
     )
 
@@ -424,6 +533,6 @@ def normalize_source(path: str | Path) -> str:
 
 
 __all__ = [
-    "QdrantKB", "KBHit", "TEXT_DIM", "IMAGE_DIM",
+    "QdrantKB", "KBHit", "TEXT_DIM", "IMAGE_DIM", "SPARSE_NAME",
     "build_text_point", "build_image_point", "normalize_source", "point_id",
 ]

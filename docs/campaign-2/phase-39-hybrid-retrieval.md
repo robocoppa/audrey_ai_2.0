@@ -5,7 +5,9 @@ things that *say* what you asked. This phase adds a lexical retriever next to
 the dense one and merges them, so an exact quote and a vague question both
 work.
 
-**Status: PLANNED.**
+**Status: BUILT, NOT YET DEPLOYED.** Off by default (`kb.hybrid.enabled:
+false`) and inert until [`scripts/migrate_bm25.py`](../../scripts/migrate_bm25.py)
+has run.
 
 Not video-specific, despite being found there. Every collection has this
 problem; transcripts just made it obvious, because a transcript is the one
@@ -76,7 +78,52 @@ vectors with BM25 would break the paraphrase queries that already work today
 The failure to design against is a hybrid that is worse than either half — most
 often because the two score scales get averaged as if they were comparable.
 
-### Merge by rank, not by score — and let Qdrant do it
+### Sparse vectors cannot be added to an existing collection (corrected)
+
+**The original plan said the opposite, and it was wrong.** It claimed
+`update_collection(sparse_vectors_config=...)` adds sparse vectors to an
+existing collection, so nothing is recreated. That was checked on 2026-08-03
+against the installed *client*, which proves the method exists — not that a
+server accepts the call. It does not:
+
+```
+400 Wrong input: Not existing vector name error: bm25
+```
+
+Qdrant 1.18.3, confirmed 2026-08-03 by
+[`scripts/bm25_probe.py`](../../scripts/bm25_probe.py). That call only edits
+the params of a sparse vector that already exists. qdrant-client's local mode
+refuses identically, for the same reason, so no amount of hermetic testing
+would have caught it either — this needed a real server.
+
+The same shape of error as the nomic-prefix theory earlier in this campaign:
+a plausible mechanism, confirmed at the wrong layer. It was caught this time
+because the probe ran before anything was built on it.
+
+**What survives is the part that mattered.** Rebuilding is not re-embedding.
+The dense vectors are already in Qdrant and scroll back out with
+`with_vectors=True`, so the migration copies them across verbatim and computes
+the sparse vector from `payload.text`, which is stored on every point. The
+embedder is never called, no GPU is touched, and no source file is re-read —
+which is what makes it affordable, and is load-bearing because for text
+uploads the source bytes are long gone.
+
+Also verified on the real server, because each of these could have forced a
+much larger phase:
+
+| checked | result |
+|---|---|
+| unnamed dense + named sparse in one collection | works |
+| dense search with no `using=` after the change | works |
+| a point with no sparse vector yet | still dense-searchable |
+| the real `document_vector` output | accepted, IDF live |
+
+The second row is why this phase does not touch a single existing dense call
+site. Had Qdrant required the dense vector to be *named* once sparse vectors
+exist, every read and write in `kb/qdrant.py` would have had to change, and
+the collection swap and the code deploy would have had to be simultaneous.
+
+### Merge by rank, not by score — but not in Qdrant (corrected)
 
 BM25 scores are unbounded and corpus-relative; cosine is bounded and absolute.
 There is no correct constant that converts one to the other, and any weighted
@@ -91,13 +138,24 @@ score(d) = Σ  1 / (k + rank_i(d))
 It needs no normalisation, no per-corpus calibration, and degrades gracefully
 when one retriever returns nothing.
 
-**`qdrant-client` 1.17.1 implements this server-side** (verified 2026-08-03,
-against the installed client). `query_points(prefetch=[...],
-query=FusionQuery(fusion=Fusion.RRF))` runs both retrievers and fuses them in
-one round trip. So this phase does *not* write a merge function, does not pull
-two full result sets over the wire, and does not own the `k` constant.
-`Fusion.DBSF` — distribution-based score fusion — is also available and worth
-measuring against RRF once there is a corpus to measure on.
+Qdrant does implement this server-side, and it works —
+`query_points(prefetch=[...], query=FusionQuery(fusion=Fusion.RRF))`, verified
+against 1.18.3. **It is deliberately not used, and that reverses the original
+plan.**
+
+A fused score cannot be audited. Qdrant returns the RRF value and discards
+what each retriever thought, and the junk rule below has to be stated in terms
+of *evidence* rather than magnitude — which needs exactly the numbers fusion
+throws away. A hit scoring 0.0163 might be a passage both retrievers ranked
+second, or the least-irrelevant document in a corpus that cannot answer the
+question at all. Those must be treated differently, and after fusion they are
+indistinguishable.
+
+So the merge lives in [`kb/fusion.py`](../../src/audrey/kb/fusion.py), which
+is twenty lines and testable without a server. The cost is a second Qdrant
+round trip, issued concurrently with the first, on a path that already waits
+on an embedding call. `Fusion.DBSF` remains available and worth measuring once
+there is a corpus to measure on.
 
 ### `kb.min_score` has to be replaced, not ported
 
@@ -140,24 +198,25 @@ documents exist is a worse problem than the one being fixed.
   `ingest_transcript_segments`).
 - **[`routes/kb.py`](../../src/audrey/routes/kb.py)** — the hybrid query path,
   RRF merge, and the junk rule that replaces `min_score`.
-- **A backfill** — much cheaper than first assumed, for three reasons verified
-  against the installed client on 2026-08-03:
+- **[`scripts/migrate_bm25.py`](../../scripts/migrate_bm25.py)** — the
+  collection rebuild, since sparse vectors cannot be added in place. Per
+  collection: build a scratch collection with sparse config, copy every point
+  into it (dense verbatim, sparse computed, payload byte for byte), **verify
+  the counts match**, and only then delete the original, recreate it correctly,
+  and copy back. Two copies rather than one because Qdrant has no rename, and
+  an alias would leave the real collection name pointing somewhere else
+  forever.
 
-  1. `update_collection(sparse_vectors_config=...)` **adds sparse vectors to an
-     existing collection.** No collection is recreated and no dense vector is
-     recomputed, so the embedder is never called and the GPU is never touched.
-  2. `update_vectors` **writes vectors to existing points without touching
-     their payload**, so the backfill cannot corrupt metadata even if it fails
-     midway.
-  3. A BM25 vector is a tokeniser plus corpus statistics — arithmetic, not a
-     model. It is computed from the `payload.text` already stored on every
-     point, so **nothing needs re-reading from source**. The earlier worry that
-     user uploads could not be re-ingested (their source bytes are gone for
-     text files) does not apply.
+  Resumable at the one moment it matters. If it dies before the original is
+  deleted, nothing is lost. If it dies in the window where the scratch is the
+  only copy, a rerun finishes from the scratch instead of rebuilding from an
+  original that no longer exists — the bug that window caused was caught by
+  `tests/test_migrate_bm25.py` before the script ran anywhere.
 
-  What remains is a scroll-and-update pass per collection, resumable, with the
-  corpus statistics computed in a first pass before any write.
-- **`config.yaml`** — `kb.hybrid.enabled`, `rrf_k`, per-retriever `top_k`.
+  A BM25 vector is arithmetic over the `payload.text` already on every point,
+  so **nothing is re-read from source** — which matters because for text
+  uploads the source bytes are long gone.
+- **`config.yaml`** — `kb.hybrid.enabled` (off), `rrf_k`, `min_term_overlap`.
 
 ## What's NOT in scope
 
@@ -170,13 +229,18 @@ documents exist is a worse problem than the one being fixed.
 
 ## The parts that will bite
 
-- **The backfill is still the risky part**, even though it turned out cheap.
-  It touches every point in every collection, and it runs against a live
-  search. Resumability matters more than speed.
-- **Half-indexed is worse than un-indexed.** During backfill, a document present
-  in the dense index and absent from the lexical one ranks in one list only and
-  loses to fully-indexed documents. The merge has to be provably fair to
-  partially-indexed corpora, or the rollout degrades results while it runs.
+- **The migration is the risky part**, even though it turned out cheap. It
+  deletes and rebuilds every text collection, and it runs against a live
+  search. Resumability matters more than speed, and the count check before the
+  delete matters more than either.
+- **A collection is missing for a few seconds mid-rebuild**, between the delete
+  and the recreate. Reads against it return no hits during that window —
+  annoying, not damaging, and the reason to run this when nobody is asking
+  questions.
+- **Half-indexed is fine, and was verified.** A point with no sparse vector
+  stays dense-searchable, so a collection mid-migration behaves exactly as it
+  did before the phase. Ingest asks `has_sparse` per collection so it never
+  writes a sparse vector into a collection that would reject it.
 - **BM25 is tokenizer-dependent.** Stemming, stopwords and casing all change
   what "exact" means. `[00:08:46]` timestamps are already out of transcript
   text (Phase 35) — do not let them back in through the lexical path.
@@ -186,16 +250,35 @@ documents exist is a worse problem than the one being fixed.
   `user` and `file_id` today. A new retrieval path is a new place to forget
   that, and the failure is one user reading another's uploads.
 
-## Deploy on Unraid
+## Deploy
 
-**On the box**, from `/mnt/user/appdata/audrey_ai_2.0`:
+Three steps, in this order. The code ships inert, so steps 1 and 2 are safe to
+separate by as long as you like.
+
+**1. On the box**, from `/mnt/user/appdata/audrey_ai_2.0` — `docker compose up
+-d --build audrey-ai`. Qdrant is unchanged as a container; the index lives
+inside collections it already hosts. Hybrid is off, so nothing about retrieval
+changes yet. New text collections created from here on are born with sparse
+config and never need migrating.
+
+**2. On the laptop**, from the repo root — the migration. Dry run first; it
+lists what would be rebuilt and stops.
 
 ```
-docker compose up -d --build audrey-ai
+.venv/bin/python scripts/migrate_bm25.py --host 192.168.1.11 --dry-run
+.venv/bin/python scripts/migrate_bm25.py --host 192.168.1.11
 ```
 
-Qdrant is unchanged as a container; the index lives inside collections it
-already hosts.
+**3.** Set `kb.hybrid.enabled: true` in `config.yaml`, push, pull, and
+recreate `audrey-ai`.
+
+### Rollback
+
+`kb.hybrid.enabled: false` restores the dense-only path in one setting. The
+sparse vectors stay on disk unused, so re-enabling costs nothing and no
+migration is repeated. Nothing else in the phase changes existing behaviour:
+the dense vectors are byte-identical to what they were, and every dense search
+still runs with no `using=`.
 
 ## Verification (to be written against the built phase)
 
@@ -221,11 +304,6 @@ wrong, since an exact phrase match needs no similarity at all.
 
 **5. Dense-only degradation.** With the lexical index unavailable, queries still
 answer.
-
-### Rollback
-
-`kb.hybrid.enabled: false` restores the dense-only path. The lexical index stays
-on disk unused, so re-enabling costs nothing and no backfill is repeated.
 
 ## What this unblocks
 

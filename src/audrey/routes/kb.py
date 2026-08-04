@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 
 from audrey.auth import AuthedUser, KBCaller, require_admin, resolve_kb_caller
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
+from audrey.kb.fusion import RRF_K, passes_evidence, reciprocal_rank_fusion
 from audrey.kb.ingest import ingest_many
 from audrey.kb.qdrant import KBHit, QdrantKB
 from audrey.kb.user_store import user_image_collection, user_text_collection
@@ -95,6 +96,13 @@ class StatsResponse(BaseModel):
     image_collection: str
 
 
+def _hybrid_cfg(request: Request) -> dict[str, Any]:
+    cfg = getattr(request.app.state, "cfg", None)
+    if cfg is None:
+        return {}
+    return ((cfg.raw.get("kb", {}) or {}).get("hybrid", {}) or {})
+
+
 def _kb_min_score(request: Request) -> float:
     """Cosine-similarity floor for KB text hits, from `kb.min_score` (default 0.0).
 
@@ -128,9 +136,17 @@ async def kb_query(
     effective_user = req.user if caller.is_service else caller.email
     t0 = time.perf_counter()
     vec = await embedder.embed_one(req.query)
-    hits, had_user = await _search_text_merged(
-        qdrant, vec, top_k=req.top_k, user=effective_user, min_score=_kb_min_score(request),
-    )
+    hybrid = _hybrid_cfg(request)
+    if hybrid.get("enabled"):
+        hits, had_user = await _search_text_hybrid(
+            qdrant, vec, query=req.query, top_k=req.top_k, user=effective_user,
+            min_score=_kb_min_score(request), cfg=hybrid,
+        )
+    else:
+        hits, had_user = await _search_text_merged(
+            qdrant, vec, top_k=req.top_k, user=effective_user,
+            min_score=_kb_min_score(request),
+        )
     elapsed = time.perf_counter() - t0
     kb_search_seconds.labels(kind="text", had_user_collection=str(had_user).lower()).observe(elapsed)
     kb_search_hits.labels(kind="text").observe(len(hits))
@@ -179,6 +195,52 @@ async def _search_text_merged(
     merged: list[KBHit] = [h for batch in results for h in batch if h.score >= min_score]
     merged.sort(key=lambda h: h.score, reverse=True)
     return merged[:top_k], had_user
+
+
+async def _search_text_hybrid(
+    qdrant: QdrantKB, vec: list[float], *, query: str, top_k: int, user: str | None,
+    min_score: float, cfg: dict[str, Any],
+) -> tuple[list[KBHit], bool]:
+    """Dense and lexical, merged by rank, filtered by evidence (Phase 39).
+
+    Same two return values as `_search_text_merged` so the caller and its
+    metrics do not care which path ran.
+
+    Both retrievers are asked for more than `top_k`. Fusion reorders, and the
+    evidence rule removes — so fetching exactly `top_k` from each would return
+    fewer than `top_k` real hits whenever anything was dropped. The over-fetch
+    is capped so a large `top_k` cannot turn into an unbounded scan.
+
+    Each retriever searches the global collection and, when the user has one,
+    their private collection too. All four lists are concatenated *within*
+    their own retriever before fusion, because RRF reads rank position and a
+    hit's position only means something relative to the same retriever.
+    """
+    fetch_k = min(max(top_k * 4, 20), 40)
+    dense_coros = [qdrant.search_text(vec, top_k=fetch_k)]
+    lexical_coros = [qdrant.search_lexical(query, top_k=fetch_k)]
+    had_user = False
+    if user:
+        user_col = user_text_collection(user)
+        if await qdrant.collection_exists(user_col):
+            dense_coros.append(qdrant.search_text(vec, top_k=fetch_k, collection=user_col))
+            lexical_coros.append(
+                qdrant.search_lexical(query, top_k=fetch_k, collection=user_col))
+            had_user = True
+
+    batches = await asyncio.gather(*dense_coros, *lexical_coros)
+    dense = [h for b in batches[:len(dense_coros)] for h in b]
+    lexical = [h for b in batches[len(dense_coros):] for h in b]
+    dense.sort(key=lambda h: h.score, reverse=True)
+    lexical.sort(key=lambda h: h.score, reverse=True)
+
+    fused = reciprocal_rank_fusion(
+        dense, lexical, rrf_k=int(cfg.get("rrf_k", RRF_K)), query=query,
+    )
+    min_overlap = float(cfg.get("min_term_overlap", 0.5))
+    kept = [f for f in fused if passes_evidence(
+        f, min_score=min_score, min_overlap=min_overlap)]
+    return [f.hit for f in kept[:top_k]], had_user
 
 
 async def _search_images_merged(

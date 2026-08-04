@@ -442,6 +442,34 @@ kb:
   min_score: 0.53
   chunk_tokens: 1000
   chunk_overlap: 100
+
+  # ─── Hybrid retrieval (Phase 39) ─────────────────────────────────────
+  # A BM25 lexical retriever beside the dense one, merged by rank. The dense
+  # vectors find text that *means* what you asked; this finds text that *says*
+  # it. Measured 2026-08-03: a 10-word paraphrase returned its chunk at 0.796
+  # while a 6-word phrase appearing verbatim in the same transcript returned
+  # nothing at all. No embedder change and no floor setting fixes that — at
+  # 630 characters the correct passage scored 0.460 against an unrelated
+  # decoy's 0.431, so the retriever had stopped discriminating, not merely
+  # become strict.
+  hybrid:
+    # OFF until the collections are migrated. `scripts/migrate_bm25.py` gives
+    # each existing text collection a sparse vector; until it has run, the
+    # lexical half returns nothing and this is dense-only with extra steps.
+    # Turning it on early is pointless rather than harmful.
+    enabled: false
+    # Reciprocal rank fusion's damping constant, from the original paper and
+    # Qdrant's own default. It flattens the gap between top positions — rank 1
+    # scores 1/61, rank 2 scores 1/62 — so a chunk both retrievers liked
+    # outranks one that a single retriever loved. Agreement is the signal.
+    rrf_k: 60
+    # The evidence rule that replaces `min_score` on the lexical side. BM25
+    # scores are unbounded and corpus-relative, so no threshold means the same
+    # thing twice; "the chunk contains at least half the words you asked for"
+    # means the same thing in every corpus at every size. Raise toward 1.0 to
+    # demand near-exact quotes, lower to admit looser keyword matches — and
+    # remember it is the 2026-07-15 junk-results incident this guards.
+    min_term_overlap: 0.5
   dataset_paths:                         # overridden by KB_DATASET_PATHS env var
     - "/datasets/geology"                # container path; host = /mnt/user/knowledge/<topic>
     - "/datasets/botany"
