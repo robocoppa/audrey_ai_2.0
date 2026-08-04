@@ -17,7 +17,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from audrey.config import Config, EnvOverrides, _load_yaml, _validate_deep_panel_pools
+from audrey.config import (
+    Config,
+    EnvOverrides,
+    _load_yaml,
+    _validate_deep_panel_pools,
+    _validate_upload_limits,
+)
 from audrey.pipeline.deep_panel import pick_panel_timeout, pool_key_for
 
 # Repo root holds the real config.yaml the app boots with.
@@ -429,3 +435,80 @@ class TestVideoLeaseEnvOverrides:
         video = raw["kb"]["video"]
         assert video["lease_minutes"] == 30
         assert video["max_attempts"] == 3
+
+
+# ─── _validate_upload_limits ───────────────────────────────────────────
+
+class TestUploadLimitCoherence:
+    """`kb.max_user_bytes` and `kb.chunked.max_upload_mb` are two numbers in
+    two blocks that have to agree, and editing either one prompts you to check
+    the other exactly never.
+
+    Shipped disagreeing: the quota was 1 GiB while the chunked transport
+    advertised a 2 GiB per-file ceiling, so the largest upload the transport
+    accepted could never fit the quota. The refusal is a correct-looking 413
+    naming the quota, so it reads as "you are out of space" — which is why this
+    is a boot failure rather than something to notice in a log.
+    """
+
+    def test_a_quota_below_the_per_file_ceiling_is_refused(self):
+        with pytest.raises(ValueError, match="max_user_bytes"):
+            _validate_upload_limits({
+                "kb": {
+                    "max_user_bytes": 1024 * 1024 * 1024,      # 1 GiB
+                    "chunked": {"max_upload_mb": 2048},         # 2 GiB
+                },
+            })
+
+    def test_the_error_names_both_numbers_and_says_what_to_do(self):
+        """A boot failure that does not say which knob to turn just moves the
+        confusion from request time to start-up."""
+        with pytest.raises(ValueError) as e:
+            _validate_upload_limits({
+                "kb": {
+                    "max_user_bytes": 1024 * 1024 * 1024,
+                    "chunked": {"max_upload_mb": 2048},
+                },
+            })
+        message = str(e.value)
+        assert "max_user_bytes" in message
+        assert "chunked.max_upload_mb" in message
+        assert "Raise" in message
+
+    def test_a_quota_above_the_ceiling_is_fine(self):
+        _validate_upload_limits({
+            "kb": {
+                "max_user_bytes": 10 * 1024 * 1024 * 1024,
+                "chunked": {"max_upload_mb": 2048},
+            },
+        })
+
+    def test_exactly_equal_is_allowed(self):
+        """One max-size upload into an empty account must fit. Anything
+        stricter would make the advertised ceiling unreachable again."""
+        _validate_upload_limits({
+            "kb": {
+                "max_user_bytes": 2048 * 1024 * 1024,
+                "chunked": {"max_upload_mb": 2048},
+            },
+        })
+
+    def test_a_config_missing_either_key_is_not_an_error(self):
+        """Stripped-down configs are used throughout the tests and by the
+        tools sidecar. Absent is not the same as wrong."""
+        _validate_upload_limits({})
+        _validate_upload_limits({"kb": {}})
+        _validate_upload_limits({"kb": {"max_user_bytes": 1}})
+        _validate_upload_limits({"kb": {"chunked": {"max_upload_mb": 2048}}})
+
+    def test_the_committed_config_is_coherent(self):
+        """The one that matters — the file the app actually boots with."""
+        raw = _load_yaml(_REPO_ROOT / "config.yaml")
+        _validate_upload_limits(raw)
+
+    def test_the_committed_quota_clears_the_video_case_that_prompted_it(self):
+        """Three 300 MB videos exhausted the old 1 GiB quota and the fourth was
+        refused with terabytes free on the array."""
+        raw = _load_yaml(_REPO_ROOT / "config.yaml")
+        quota = raw["kb"]["max_user_bytes"]
+        assert quota >= 10 * 300 * 1024 * 1024

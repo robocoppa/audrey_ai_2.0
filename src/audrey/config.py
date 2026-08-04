@@ -238,6 +238,45 @@ def _validate_deep_panel_pools(merged: dict[str, Any]) -> None:
         raise ValueError(f"Invalid deep-panel configuration:{bullets}")
 
 
+def _validate_upload_limits(merged: dict[str, Any]) -> None:
+    """Reject a per-user quota smaller than the largest permitted single upload.
+
+    These are two independent numbers in two separate config blocks that have
+    to agree, and nothing about editing either one prompts you to check the
+    other. `max_user_bytes` was 1 GiB while `chunked.max_upload_mb` was 2048 —
+    so the transport advertised a 2 GiB ceiling that the quota could never
+    accept, and any upload over 1 GiB was refused no matter how empty the
+    user's storage was.
+
+    That failure is quiet in the worst way: the refusal is a correct-looking
+    413 naming the quota, so it reads as "you are out of space" rather than
+    "these limits contradict each other". A user with an empty account would
+    be told to free some up.
+
+    Checked at boot, alongside the deep-panel pools, for the same reason —
+    both are configuration that cannot be wrong at request time without
+    someone having already been told something false.
+    """
+    kb = merged.get("kb") or {}
+    if not isinstance(kb, dict):
+        return
+    quota = kb.get("max_user_bytes")
+    chunked = kb.get("chunked") or {}
+    per_file_mb = chunked.get("max_upload_mb") if isinstance(chunked, dict) else None
+    if not isinstance(quota, int) or not isinstance(per_file_mb, int):
+        return
+
+    per_file = per_file_mb * 1024 * 1024
+    if quota < per_file:
+        raise ValueError(
+            "Invalid upload configuration:\n"
+            f"  - kb.max_user_bytes ({quota} bytes) is below "
+            f"kb.chunked.max_upload_mb ({per_file_mb} MB = {per_file} bytes), "
+            "so the largest upload the transport accepts can never fit the "
+            "quota. Raise max_user_bytes or lower chunked.max_upload_mb."
+        )
+
+
 @lru_cache(maxsize=1)
 def get_config() -> Config:
     """Load config once per process. Tests can call `get_config.cache_clear()`."""
@@ -247,6 +286,7 @@ def get_config() -> Config:
     yaml_cfg = _load_yaml(cfg_path)
     cfg = Config(yaml_cfg, env)
     _validate_deep_panel_pools(cfg.raw)
+    _validate_upload_limits(cfg.raw)
     return cfg
 
 

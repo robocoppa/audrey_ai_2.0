@@ -513,7 +513,17 @@ kb:
   # Per-user uploads (Phase 13). Landing dir is bind-mounted from the host.
   upload_root: "/data/uploads"
   max_upload_mb: 50                      # per-file cap
-  max_user_bytes: 1073741824             # 1 GiB per-user quota
+  # 10 GiB per-user quota. Was 1 GiB, which predated video: three 300 MB
+  # uploads exhausted it and the fourth was refused with terabytes free on the
+  # array. It was also SMALLER THAN `chunked.max_upload_mb` below — the
+  # transport advertised a 2 GiB single-file ceiling that the quota could never
+  # accept, so the largest permitted upload was guaranteed to be rejected.
+  # `_validate_upload_limits` now refuses that combination at boot.
+  #
+  # This bounds one user, not the array. It is not a disk-pressure control and
+  # should not be tuned as if it were — see `kb.video.keep_source` for the
+  # thing that was reaching for that job and should not have been.
+  max_user_bytes: 10737418240
 
   # Phase 15: sqlite index over the per-user upload metadata. Qdrant is
   # still authoritative for the file's content; this is a fast index for
