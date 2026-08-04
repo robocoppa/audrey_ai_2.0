@@ -118,9 +118,10 @@ deployable and verifiable on its own.
   affordable, and where deleting the source video now lives. **Partly built.**
   Cost attribution splits a describe call into queue/load/prefill/generation,
   because the plan's own lever ranking turned out to be four guesses about
-  which of those is large — two of them not on the list. Source reclamation
-  landed with a retention window and a `keep_source` escape hatch. The levers
-  themselves wait on one ingest's worth of numbers.
+  which of those is large — two of them not on the list. Source reclamation is
+  built but **off**: it deletes a file the user uploaded, and the 1 GiB quota
+  that motivated it is a config number on a NAS. The levers themselves wait on
+  one ingest's worth of numbers.
 
 **Retrieval quality**
 

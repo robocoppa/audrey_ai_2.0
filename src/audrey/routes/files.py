@@ -863,7 +863,11 @@ async def _reclaim_sources(request: Request, db) -> int:
     and never wrong about what the user owes.
     """
     video_cfg = _video_cfg(request)
-    if bool(video_cfg.get("keep_source", False)):
+    # Defaults to keeping. An absent config key must not be able to delete a
+    # user's file — this is the only irreversible operation in the pipeline,
+    # and a deployment whose `config.yaml` predates the setting is exactly the
+    # deployment least expecting it.
+    if bool(video_cfg.get("keep_source", True)):
         return 0
 
     hours = float(video_cfg.get("source_retention_hours", 24))

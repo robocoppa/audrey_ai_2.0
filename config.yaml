@@ -632,24 +632,29 @@ kb:
     summary_timeout_s: 180
 
     # ─── Source reclamation (Phase 38) ───────────────────────────────
-    # Planned for phase 35 and deferred to here, because until phase 37
-    # landed something downstream still needed the bytes: 36 read frames from
-    # the source, 37 summarised what 36 produced, and 33's requeue points a
-    # re-run at a path that has to exist. This is the first point at which a
-    # processed video's artifacts stand on their own.
+    # OFF, and off is the right default. This deletes a file the user
+    # uploaded.
     #
-    # The pressure is real — `max_user_bytes` is 1 GiB and three 300 MB
-    # videos exhaust it, at which point the next upload is refused while
-    # every one of those videos is fully searchable and its bytes are doing
-    # nothing. The consequence is equally real and permanent: once the source
-    # is gone the video can never be re-processed, so every later improvement
-    # to the visual or summary stages applies only to videos uploaded after
-    # it.
+    # The phase-35 and phase-38 plans both assumed the opposite, on the
+    # grounds that `max_user_bytes` is 1 GiB and three 300 MB videos exhaust
+    # it. That is a real annoyance and it is not a reason to delete anyone's
+    # video: 1 GiB is a number in this file, on a NAS. **Raise the quota.**
+    # Reclaiming user data to fit a self-imposed limit is solving the wrong
+    # problem, and it is the only irreversible operation in the pipeline.
     #
-    # Set true to keep every source indefinitely. Do that BEFORE deploying
-    # any change you might want to re-run old videos through — turning it
-    # back on afterwards brings nothing back.
-    keep_source: false
+    # The tempting argument for deleting is that nothing can read the bytes
+    # back — there is no download route, so a processed video's source is
+    # write-only storage. That is true today and it is weak: it describes a
+    # feature that does not exist yet rather than a decision that the file is
+    # disposable. Add a download button later and every already-reclaimed
+    # video is permanently broken, with no way to tell which ones.
+    #
+    # Turn this on only for genuine disk pressure on the box — a case where
+    # the alternative is the array filling up, not a case where an accounting
+    # number is inconvenient. Then note what it costs: a reclaimed video can
+    # never be re-processed, so every later improvement to the visual or
+    # summary stages applies only to videos uploaded afterwards.
+    keep_source: true
 
     # How long a processed video's bytes are kept before reclamation, timed
     # from when its ingest finished rather than from when it was uploaded. A

@@ -5,8 +5,11 @@ that makes it fast, driven by the stage timings
 [phase 36](phase-36-video-visual-assessment.md) shipped rather than by estimates.
 
 **Status: PARTLY BUILT, not yet deployed.** The keyframe gate landed early
-(2026-08-02). Cost attribution and source reclamation are built and hermetically
-tested (2026-08-04). The four remaining levers are deliberately unbuilt — see
+(2026-08-02). Cost attribution is built and hermetically tested (2026-08-04).
+Source reclamation is built, tested, and **off by default** — the plan was
+wrong to want it on, see
+[Why the default is `keep_source: true`](#why-the-default-is-keep_source-true).
+The four remaining levers are deliberately unbuilt — see
 [Instrument first](#instrument-first) for why that is the plan working rather
 than the plan stalling.
 
@@ -119,15 +122,44 @@ phase 36 (which reads frames from the source), phase 37 (which summarises what
 36 produced), and phase 33's `requeue` (which points a re-run at a path that
 would no longer exist).
 
-This is the first phase where nothing downstream needs the bytes. The pressure
-is real — `max_user_bytes` is 1 GiB and three 300 MB videos exhaust it, at
-which point the next upload is refused while every one of those videos is fully
-searchable and its bytes are doing nothing. So is the consequence: **once the
-source is gone the video can never be re-processed**, and every later
-improvement to the visual or summary stages applies only to videos uploaded
-after it.
+This is the first phase where nothing downstream needs the bytes. **It is still
+off by default, and the plan was wrong to assume otherwise.**
 
-Built with both hedges the plan asked for rather than either.
+### Why the default is `keep_source: true`
+
+Both the phase-35 and phase-38 plans took reclamation as the goal and treated
+the escape hatch as the concession. That inverts once you say plainly what the
+feature does: **it deletes a file the user uploaded.**
+
+The stated justification is that `max_user_bytes` is 1 GiB and three 300 MB
+videos exhaust it. That is real, and it is not a reason to delete anyone's
+video — 1 GiB is a number in `config.yaml`, on a NAS. The proportionate fix for
+"the quota is too small" is a bigger quota, or excluding video sources from the
+accounting. Reclaiming user data to fit a self-imposed limit is solving the
+wrong problem with the one operation in this pipeline that cannot be undone.
+
+There is a tempting argument the other way, and it is worth writing down
+because it is the one that nearly carried: **nothing can read the bytes back.**
+There is no download route; a processed video's source is write-only storage
+that costs quota and serves the media worker alone. Deleting it appears to lose
+nothing.
+
+That reasoning is weak, and the weakness is instructive. It describes a feature
+that does not exist yet rather than a decision that the file is disposable. Add
+a download button — an obvious, cheap thing to want — and every already-reclaimed
+video is permanently broken, with nothing on the row to say which ones or why.
+An absent feature is not consent.
+
+The file list makes the same point from the other end. It shows filename, size,
+chunk count and a delete button, and reports "Stored: X of 1 GiB". That is the
+vocabulary of a file store. Silently deleting the file while still displaying
+288 MB needed a strikethrough and a tooltip to explain itself — and a UI that
+has to apologise for the model underneath it is usually reporting a design
+problem, not a display problem.
+
+So: the mechanism is built, tested, and **off**. Turn it on for genuine disk
+pressure on the array, which is a different situation from an accounting number
+being inconvenient. What follows describes it under that assumption.
 
 **A retention window, timed from completion.** `source_retention_hours: 24`,
 measured from `completed_at` and not from `uploaded_at` — a video that sat in a
@@ -136,9 +168,15 @@ finished, giving a window of zero to exactly the file whose processing most
 deserved a second look. That meant a new column; there was no completion time
 on the row before this.
 
-**An escape hatch.** `keep_source: true` stops it entirely. Set it before
-deploying any change you might want to re-run old videos through — turning it
-back on afterwards brings nothing back.
+**Decision, 2026-08-04:** the box has plenty of disk, so this stays off and the
+question is deferred until there is a real constraint to answer. Nothing about
+video ingest depends on it.
+
+**The thing that will actually bite first is the quota, not the disk.**
+`max_user_bytes` is 1 GiB, so the fourth 300 MB video is refused while the array
+has terabytes free. That is a one-line config change whenever it becomes
+annoying, and it is the correct fix for the problem reclamation was reaching
+for.
 
 ### Why the quota reads a flag instead of zeroing `bytes`
 
@@ -339,16 +377,20 @@ the stage breakdown is read:
   different vl model all change what the descriptions say. Each needs an output
   comparison, not just a stopwatch.
 - **Reclamation is the only irreversible operation in the whole pipeline.**
-  Every other mistake in phases 32-39 costs a re-run. This one costs the file,
-  and the config that causes it is a single boolean whose default deletes
-  things. Consider it before every deploy that changes a visual or summary
-  stage, because the videos already reclaimed will never see that change.
-- **`keep_source: false` and a short retention window fight each other.** The
-  window exists so a bad ingest can be re-run; the quota pressure exists
-  because bytes sit around. There is no setting that gives both — the honest
-  framing is that 24 hours buys one day of second chances at the cost of one
-  day of allowance, and the right number depends on whether the box is short of
-  disk or short of trust in the pipeline.
+  Every other mistake in phases 32-39 costs a re-run; this one costs the file.
+  It is off by default and should stay off until disk is the actual constraint.
+  If it is ever turned on, consider it before every deploy that changes a
+  visual or summary stage — the videos already reclaimed will never see that
+  change.
+- **"Nothing can read it back" is not consent.** The argument that a source is
+  disposable rests entirely on there being no download route. That is an absent
+  feature, not a decision, and building one later would silently break every
+  video already reclaimed. Watch for the same shape elsewhere: a deletion
+  justified by what the system does not do yet.
+- **`keep_source: false` and a long retention window fight each other.** The
+  window exists so a bad ingest can be re-run; the pressure exists because
+  bytes sit around. No setting gives both — 24 hours buys one day of second
+  chances at the cost of one day of allowance.
 
 ## Deploy on Unraid
 
@@ -402,7 +444,12 @@ curl -s http://192.168.1.11:8000/v1/files -H "Authorization: Bearer $TOKEN" \
 Non-empty after the restart. Before the fix this returned nothing at all, for
 every video, with no error anywhere.
 
-### Part 2 — source reclamation
+### Part 2 — source reclamation (only if it is ever turned on)
+
+**Off by default**, so on the deployed config the check is simply that
+**nothing is deleted**: upload a video, let it process, confirm the `.mp4` is
+still under `/data/uploads/<user>/` afterwards. Everything below applies only
+after someone sets `keep_source: false` deliberately.
 
 **4. Nothing is reclaimed inside the window.** With `source_retention_hours: 24`
 and a video processed minutes ago, the source is still on disk after a worker
@@ -462,11 +509,11 @@ interleaving with chat.
 Each lever is independent and revertible on its own. That is the reason for the
 ordering — nothing here should require reverting the phase as a unit.
 
-The two parts already built revert differently, and only one of them is safe to
-revert casually. Cost attribution is pure instrumentation and can go at any
-time. **Source reclamation cannot be undone by reverting it** — the escape
-hatch is `keep_source: true`, which stops further deletions and brings nothing
-back. Set that before deploying, not after.
+The two parts already built revert differently. Cost attribution is pure
+instrumentation and can go at any time. Source reclamation is inert at its
+default, so reverting it costs nothing — but note that **if it has been turned
+on, reverting the code does not undo it.** Deleted sources stay deleted;
+`keep_source: true` only stops the next one.
 
 ## What this unblocks
 

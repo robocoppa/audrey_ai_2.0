@@ -283,6 +283,28 @@ class TestTheSweepOnClaim:
         assert not source.exists()
         assert (await db.get_upload("vid"))["source_freed_at"]
 
+    async def test_an_absent_config_key_keeps_the_source(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        """The default, and the single most important assertion here.
+
+        This deletes a file the user uploaded. A deployment whose `config.yaml`
+        predates the setting is exactly the one least expecting that, so the
+        absent key must mean keep — not "fall through to the phase plan's
+        preferred behaviour".
+        """
+        await _processed_video(db, completed_hours_ago=48 * 30)
+        root = tmp_path / "uploads"
+        source = root / "a_b_c" / "vid.mp4"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"video bytes")
+
+        client = _client(db, root, {})  # no keep_source key at all
+        _claim(client)
+
+        assert source.exists()
+        assert not (await db.get_upload("vid"))["source_freed_at"]
+
     async def test_keep_source_stops_it_entirely(
         self, db: UploadsDB, tmp_path: Path,
     ):
