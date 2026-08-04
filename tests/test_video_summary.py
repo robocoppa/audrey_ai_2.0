@@ -275,6 +275,77 @@ class TestIngestSummary:
         assert qdrant.points[0].payload["bytes"] == 301936597
 
 
+class TestListReturnsEveryFileRowField:
+    """`list_user` selects an explicit column list, and `FileRow` reads it by
+    name. Those two drifted apart when `summary` was added: the column was in
+    the schema and in the migration, so it existed in the database — and the
+    query never selected it, so the route raised `KeyError` and `GET /v1/files`
+    returned `Internal Server Error` for every user.
+
+    The existing migration test only pins schema against migration. This pins
+    the read path, which is the half that actually 500'd.
+    """
+
+    @pytest.mark.asyncio
+    async def test_every_declared_field_comes_back(self, tmp_path: Path):
+        from audrey.kb.uploads_db import UploadsDB
+        from audrey.routes.files import FileRow
+
+        db = UploadsDB(tmp_path / "uploads.sqlite")
+        await db.record_upload(
+            file_id="f1", user="a@b.c", filename="v.mp4", mime="video/mp4",
+            bytes_=99, kind="video", collection="", chunks=0,
+            uploaded_at="2026-08-04T00:00:00+00:00",
+        )
+
+        rows = await db.list_user("a@b.c")
+
+        missing = set(FileRow.model_fields) - set(rows[0])
+        assert not missing, f"list_user does not return {sorted(missing)}"
+
+    @pytest.mark.asyncio
+    async def test_a_completed_video_reports_its_summary(self, tmp_path: Path):
+        """End to end through the same call the route makes."""
+        from audrey.kb.uploads_db import UploadsDB
+
+        db = UploadsDB(tmp_path / "uploads.sqlite")
+        await db.record_upload(
+            file_id="f1", user="a@b.c", filename="v.mp4", mime="video/mp4",
+            bytes_=99, kind="video", collection="", chunks=0,
+            uploaded_at="2026-08-04T00:00:00+00:00", status="pending",
+        )
+        claimed = await db.claim_job(lease_id="L1", now="t")
+        await db.complete_job(
+            file_id="f1", lease_id=claimed["lease_id"], collection="c",
+            chunks=24, summary="A retirement party for Jason.",
+        )
+
+        assert (await db.list_user("a@b.c"))[0]["summary"] == (
+            "A retirement party for Jason.")
+
+    @pytest.mark.asyncio
+    async def test_a_requeue_clears_the_previous_summary(self, tmp_path: Path):
+        """A row keeping last run's text while re-processing would be
+        describing a video it no longer matches."""
+        from audrey.kb.uploads_db import UploadsDB
+
+        db = UploadsDB(tmp_path / "uploads.sqlite")
+        await db.record_upload(
+            file_id="f1", user="a@b.c", filename="v.mp4", mime="video/mp4",
+            bytes_=99, kind="video", collection="", chunks=0,
+            uploaded_at="2026-08-04T00:00:00+00:00", status="pending",
+        )
+        claimed = await db.claim_job(lease_id="L1", now="t")
+        await db.complete_job(
+            file_id="f1", lease_id=claimed["lease_id"], collection="c",
+            chunks=24, summary="Stale.",
+        )
+
+        await db.requeue_job("f1")
+
+        assert (await db.list_user("a@b.c"))[0]["summary"] == ""
+
+
 class TestConfig:
     def test_the_shipped_summariser_is_a_cloud_model(self):
         """A local default would put a summary in the same queue as the chat

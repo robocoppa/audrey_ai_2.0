@@ -247,8 +247,15 @@ class UploadsDB:
     def _list_user_sync(self, user: str) -> list[dict]:
         with self._lock:
             cur = self._conn.execute(
+                # Every column `FileRow` declares has to be in this list. A
+                # column added to the schema and the migration but not here
+                # exists in the database and still raises on read, which
+                # presents as a 500 on the file list rather than as anything
+                # resembling a missing column. `TestListReturnsEveryFileRowField`
+                # pins the two together.
                 "SELECT file_id, filename, mime, bytes, kind, collection, "
-                "       chunks, uploaded_at, status, failure_reason, duration_s "
+                "       chunks, uploaded_at, status, failure_reason, duration_s, "
+                "       summary "
                 "FROM uploads WHERE user = ? ORDER BY uploaded_at DESC",
                 (user,),
             )
