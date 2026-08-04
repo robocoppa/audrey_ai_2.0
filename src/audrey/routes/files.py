@@ -762,6 +762,19 @@ def _hhmmss(seconds: float) -> str:
     return f"{total // 3600:02d}:{(total % 3600) // 60:02d}:{total % 60:02d}"
 
 
+def _source_path(request: Request, row) -> Path:
+    """Where an uploaded file's bytes live on disk.
+
+    The claim hands this to the worker and the requeue stats it, so the two
+    must agree on the layout — one function rather than two copies of the
+    same three-part join.
+    """
+    ext = Path(str(row["filename"])).suffix.lower()
+    return (
+        _upload_root(request) / sanitize_user(str(row["user"])) / f"{row['file_id']}{ext}"
+    )
+
+
 # `response_model=None`: the return is either a JobClaim or a bare 204
 # Response, and FastAPI cannot build one response model from that union.
 @router.post("/jobs/claim", response_model=None)
@@ -791,8 +804,7 @@ async def claim_job(
     if row is None:
         return Response(status_code=204)
 
-    ext = Path(str(row["filename"])).suffix.lower()
-    path = _upload_root(request) / sanitize_user(str(row["user"])) / f"{row['file_id']}{ext}"
+    path = _source_path(request, row)
     log.info(
         "files: leased job file_id=%s user=%s attempt=%d",
         row["file_id"], row["user"], row["attempts"],
@@ -986,7 +998,30 @@ async def requeue_job(
         file_id, user=user, collection=user_text_collection(user),
     )
 
-    if not await db.requeue_job(file_id):
+    # Re-read the size from the file itself rather than trusting the row.
+    #
+    # A re-run takes its `source_bytes` from this row, so a wrong number here
+    # is copied onto the new points and survives the requeue that was meant to
+    # fix it. Rows can be wrong: until 2026-08-03 transcript points carried the
+    # *sidecar's* size, and `reconcile_with_qdrant` writes payload bytes back
+    # onto the row at every boot — which is how a 288 MB video came to be
+    # billed as 9 KB against a 1 GiB quota. Once that has happened the file on
+    # disk is the only surviving truth.
+    #
+    # A missing source is not fatal here. The claim would hand the worker a
+    # path that does not exist and the job fails with that as its reason,
+    # which says more than a 404 from this route would.
+    source = _source_path(request, row)
+    try:
+        source_bytes = (await asyncio.to_thread(source.stat)).st_size
+    except OSError:
+        log.warning(
+            "files: requeue could not stat %s — leaving bytes=%s as recorded",
+            source, row["bytes"],
+        )
+        source_bytes = None
+
+    if not await db.requeue_job(file_id, bytes_=source_bytes):
         raise HTTPException(status_code=404, detail="No such file.")
 
     log.info(

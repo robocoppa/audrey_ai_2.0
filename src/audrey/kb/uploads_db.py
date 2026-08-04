@@ -392,10 +392,16 @@ class UploadsDB:
             )
             return cur.rowcount > 0
 
-    async def requeue_job(self, file_id: str) -> bool:
+    async def requeue_job(self, file_id: str, *, bytes_: int | None = None) -> bool:
         """Put a row back in the queue as if it had just been uploaded.
 
         False when there is no such row.
+
+        `bytes_` corrects the recorded size when the caller has re-read it
+        from disk; omitted, the stored value stands. It is part of this
+        statement rather than a separate one because a re-run reads its source
+        size from this row — a requeue that left a wrong size in place would
+        stamp it onto the new points and outlive the fix.
 
         `attempts` resets to 0 deliberately. Requeue means "the reason this
         failed is fixed, try it properly" — carrying the old count forward
@@ -411,16 +417,17 @@ class UploadsDB:
         have removed the Qdrant points first. A row that still claimed them
         after they were deleted would read as ingested with nothing behind it.
         """
-        return await asyncio.to_thread(self._requeue_job_sync, file_id)
+        return await asyncio.to_thread(self._requeue_job_sync, file_id, bytes_)
 
-    def _requeue_job_sync(self, file_id: str) -> bool:
+    def _requeue_job_sync(self, file_id: str, bytes_: int | None) -> bool:
         with self._lock:
             cur = self._conn.execute(
                 "UPDATE uploads SET status = 'pending', lease_id = '', "
                 "       leased_at = '', attempts = 0, failure_reason = '', "
-                "       collection = '', chunks = 0, duration_s = 0 "
+                "       collection = '', chunks = 0, duration_s = 0, "
+                "       bytes = COALESCE(?, bytes) "
                 "WHERE file_id = ?",
-                (file_id,),
+                (bytes_, file_id),
             )
             return cur.rowcount > 0
 

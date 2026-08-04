@@ -674,6 +674,69 @@ class TestRequeue:
         assert (await db.get_upload("v1"))["status"] == "pending"
 
 
+class TestRequeueRepairsTheRecordedSize:
+    """A re-run reads its `source_bytes` from the row, so a row with the wrong
+    size stamps that size onto the new points and the requeue that was supposed
+    to fix it makes it permanent instead.
+
+    Not hypothetical: transcript points carried the sidecar's size until
+    2026-08-03, and `reconcile_with_qdrant` copies payload bytes onto the row
+    at every boot — a 288 MB video read as 9 KB against a 1 GiB quota.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_size_is_re_read_from_the_file_on_disk(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        await _add(db, "v1")  # records bytes=1024
+        source = tmp_path / "uploads" / "a_b_c" / "v1.mp4"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"x" * 4096)
+
+        r = TestClient(_app_with_qdrant(db, tmp_path, _RecordingQdrant())).post(
+            "/v1/files/v1/requeue", headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        assert r.status_code == 200
+        assert (await db.get_upload("v1"))["bytes"] == 4096
+
+    @pytest.mark.asyncio
+    async def test_a_missing_source_leaves_the_recorded_size_alone(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        """Still requeued. The claim hands the worker a path that does not
+        exist and the job fails naming it, which is more use than refusing
+        here — and zeroing the size would corrupt the quota to fix nothing."""
+        await _add(db, "v1")
+
+        r = TestClient(_app_with_qdrant(db, tmp_path, _RecordingQdrant())).post(
+            "/v1/files/v1/requeue", headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        assert r.status_code == 200
+        row = await db.get_upload("v1")
+        assert row["bytes"] == 1024
+        assert row["status"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_the_claim_and_the_requeue_agree_on_where_the_file_is(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        """Both go through `_source_path`. If they ever diverged the requeue
+        would stat nothing while the worker read the file fine, and the size
+        would silently stop being repaired."""
+        await _add(db, "v1")
+        source = tmp_path / "uploads" / "a_b_c" / "v1.mp4"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"x" * 77)
+
+        r = TestClient(_app_with_qdrant(db, tmp_path, _RecordingQdrant())).post(
+            "/v1/files/jobs/claim", headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        assert r.json()["path"] == str(source)
+
+
 class TestRequeueForceGuard:
     """Requeueing a live job silently discards its work.
 

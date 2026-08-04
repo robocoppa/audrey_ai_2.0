@@ -105,7 +105,7 @@ deployable and verifiable on its own.
 - [34 media-worker container](campaign-2/phase-34-media-worker-container.md) —
   ffmpeg in a sidecar, no model calls. **Landed, fully verified.**
 - [35 video transcript](campaign-2/phase-35-video-transcript.md) — whisper,
-  baked into the worker image. **Built, not yet deployed.**
+  baked into the worker image. **Landed, verified.**
 - [36 video visual assessment](campaign-2/phase-36-video-visual-assessment.md)
   — keyframes through the `vl` pool.
 - [37 video summary](campaign-2/phase-37-video-summary.md)

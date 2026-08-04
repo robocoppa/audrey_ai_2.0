@@ -5,9 +5,21 @@ worker extracts audio and reports a duration; this one turns that audio into a
 timestamped transcript, ingests it through the existing text path, and flips the
 row to `ready`. The video becomes searchable.
 
-**Status: BUILT.** Hermetic tests pass; unverified on the box — this is the
-first phase whose output quality cannot be checked by a test, only by reading a
-transcript of something you know the contents of.
+**Status: DEPLOYED AND VERIFIED** on the box, 2026-08-03. A 9m25s video
+transcribed in 74s (**7.6x real time**, `small` int8 on 2 CPU cores) into 153
+segments, ingested, and retrievable by its owner. Silent video completes as
+`ready` with an empty transcript. Per-user isolation confirmed: a query that
+returns the transcript at 0.586 for its owner returns nothing when asked as
+another user.
+
+**Step 6 (a worker killed mid-transcription leaves no partial transcript) is
+outstanding** — the budget path is covered hermetically and a partial cannot be
+posted, so this is confirmation rather than discovery.
+
+**This phase produced two findings bigger than itself**: transcripts needed
+their own ingest path rather than the document one (below), and the KB cannot
+retrieve exact quotes at all — see
+[phase 39](phase-39-hybrid-retrieval.md).
 
 **Scope cut: `keep_source: false` is deferred to
 [phase 38](phase-38-video-optimise.md).** The plan below called for unlinking
