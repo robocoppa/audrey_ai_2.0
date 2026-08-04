@@ -196,11 +196,13 @@ class TestComplete:
         await _add(db, "v1")
         claimed = await db.claim_job(lease_id="L1", now="t")
         await db.fail_job(file_id="v1", lease_id=claimed["lease_id"], reason="boom")
-        await db.record_upload(
-            file_id="v1", user="a@b.c", filename="v1.mp4", mime="video/mp4",
-            bytes_=1024, kind="video", collection="", chunks=0,
-            uploaded_at="2026-08-01T00:00:00+00:00", status="pending",
-        )
+        # `requeue_job`, not a second `record_upload`. This used to re-record
+        # the row to push it back to 'pending', which worked only because
+        # `record_upload` was an INSERT OR REPLACE that reset every column it
+        # did not name — the same behaviour that was wiping `summary` and
+        # `duration_s` off every processed video at boot (Phase 38). Requeue is
+        # what actually puts a failed row back in the queue in production.
+        assert await db.requeue_job("v1")
         again = await db.claim_job(lease_id="L2", now="t")
         await db.complete_job(
             file_id="v1", lease_id=again["lease_id"], collection="col", chunks=3,

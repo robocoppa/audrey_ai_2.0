@@ -10,6 +10,8 @@ Each metric is tied to a specific operational question:
   audrey_kb_search_seconds         — KB query latency (text/image; merged or not)
   audrey_kb_search_hits            — hits returned per query (zero = retrieval miss)
   audrey_video_describe_seconds    — per-keyframe vision latency (phase 38 input)
+  audrey_vision_stage_seconds      — where that latency actually goes, by stage
+  audrey_vision_eval_tokens        — description length in tokens, not characters
   audrey_auth_cache_size           — OWUI token cache occupancy
   audrey_user_inflight_blocked_seconds — wait at the per-user concurrency cap
   audrey_inflight_cap_breached_total — soft cap on tracked users exceeded
@@ -133,6 +135,47 @@ video_describe_seconds = Histogram(
     buckets=_DESCRIBE_BUCKETS,
 )
 
+# ─── Vision cost attribution (Phase 38) ───────────────────────────────
+
+# Phase 36 measured the wall clock and stopped there: 62.3s per frame with a
+# 4x spread. That number sizes the problem but does not point at a fix,
+# because every lever phase 38 lists is a bet on which *part* of it is large:
+#
+#   queue        — waiting on FairLocalGate behind chat. Fixed by scheduling,
+#                  or by moving description off the local GPU entirely.
+#   load         — the model being evicted between frames. Fixed by keep_alive.
+#                  Batching and downscaling do nothing for it.
+#   prompt_eval  — the image itself, as tokens. This is the only stage a
+#                  smaller frame makes cheaper, and the only one where
+#                  batching several frames per call could amortise anything.
+#   eval         — the model writing prose. Bounded by how much we asked for,
+#                  so the lever is the prompt and num_predict, neither of
+#                  which appears in the phase-38 plan's ranking at all.
+#
+# The stages are disjoint and sum to the wall clock, so one dashboard answers
+# "which lever is worth building" instead of four A-B deployments answering it
+# one guess at a time.
+_STAGE_BUCKETS = (0.1, 0.5, 1, 2, 5, 10, 20, 30, 60, 120)
+
+vision_stage_seconds = Histogram(
+    "audrey_vision_stage_seconds",
+    "Where a vision call's wall clock goes, by stage.",
+    labelnames=("stage",),  # stage ∈ {queue, load, prompt_eval, eval}
+    buckets=_STAGE_BUCKETS,
+)
+
+# Characters are what the log line reports and what the chunker sees, but
+# tokens are what the model is billed in time for. A description that is long
+# because the prompt asked for verbatim transcription of a photo with no text
+# in it shows up here as tokens spent, and nowhere else.
+_EVAL_TOKEN_BUCKETS = (32, 64, 128, 256, 512, 1024, 2048)
+
+vision_eval_tokens = Histogram(
+    "audrey_vision_eval_tokens",
+    "Tokens generated per vision call.",
+    buckets=_EVAL_TOKEN_BUCKETS,
+)
+
 # ─── Auth cache ───────────────────────────────────────────────────────
 
 auth_cache_size = Gauge(
@@ -214,6 +257,8 @@ __all__ = [
     "kb_search_seconds",
     "kb_search_hits",
     "video_describe_seconds",
+    "vision_stage_seconds",
+    "vision_eval_tokens",
     "auth_cache_size",
     "user_inflight_blocked_seconds",
     "inflight_cap_breached_total",

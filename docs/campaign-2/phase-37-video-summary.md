@@ -5,8 +5,20 @@ One model call over the transcript and frame descriptions that
 [phase 36](phase-36-video-visual-assessment.md) produced, stored on the row and
 shown in `GET /v1/files`.
 
-**Status: BUILT, NOT YET DEPLOYED.** The smallest phase of the video work, and
-the one that makes the rest legible.
+**Status: DEPLOYED AND WORKING** on the box, 2026-08-04. Steps 1, 2 and 5
+verified on a real video; 3, 4 and 6 outstanding.
+
+**It is as cheap as the plan hoped.** The summary call took **3.6 seconds** via
+`glm-5.2:cloud` and produced 1,257 characters from 153 transcript segments and
+6 frame descriptions — against 365s for the six describe calls in the same
+job. Under 1% of video ingest, and no GPU: the model resolves to a cloud
+location, so `FairLocalGate.acquire` is a no-op.
+
+The output kept the two artifacts distinct rather than blending them, which
+was the prompt's main risk — it attributes what people said to the people who
+said it, and does not report anything on screen as a statement.
+
+`chunks=25` for that run: 9 transcript + 15 visual + 1 summary.
 
 ---
 
@@ -129,6 +141,13 @@ curl -s http://192.168.1.11:8000/v1/files -H "Authorization: Bearer $TOKEN" \
 
 **2. The summary is searchable** as its own chunk, attributed to the uploading
 user. A `kb/query` hit whose `source` ends `.summary.txt`.
+
+Verified 2026-08-04 — and it came back at rank 2, behind a PowerApps document
+about a video control. Not a summary problem: "what is this video about"
+reduces to the single content term `video` once function words are removed, so
+the lexical evidence rule cannot discriminate. See the known-limitation note
+in [phase 39](phase-39-hybrid-retrieval.md). Ask a summary a question with
+some content in it and it wins.
 
 **3. A silent video gets a summary** built from frame descriptions alone —
 `silent.mp4` is the fixture, and the budget split means it spends its whole

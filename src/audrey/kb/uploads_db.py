@@ -79,7 +79,20 @@ CREATE TABLE IF NOT EXISTS uploads (
   -- failed — that is a missing field, never a failed row, because by the time
   -- it is written the transcript and descriptions are already ingested and
   -- already useful.
-  summary        TEXT NOT NULL DEFAULT ''
+  summary        TEXT NOT NULL DEFAULT '',
+  -- When `ingest_result` finished with this row (Phase 38). Empty until then.
+  -- Source reclamation measures its retention window from HERE and not from
+  -- `uploaded_at`, because they are only the same number when the queue is
+  -- moving: a video that sat pending for two days while the worker was down
+  -- would, measured from upload, become eligible for deletion the instant it
+  -- finished — a retention window of zero, exactly for the file whose
+  -- processing was most likely to want a second look.
+  completed_at   TEXT NOT NULL DEFAULT '',
+  -- When the uploaded bytes were unlinked (Phase 38). Empty while the source
+  -- is still on disk. `bytes` is deliberately left alone: it is the honest
+  -- record of what was uploaded and what the file list shows, so the quota
+  -- reads this column instead of zeroing that one.
+  source_freed_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_user ON uploads(user);
 -- No index on `status` here. `_SCHEMA` runs before `_migrate`, and on the
@@ -128,6 +141,8 @@ _UPLOADS_ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("failure_reason", "TEXT NOT NULL DEFAULT ''"),
     ("duration_s", "REAL NOT NULL DEFAULT 0"),
     ("summary", "TEXT NOT NULL DEFAULT ''"),
+    ("completed_at", "TEXT NOT NULL DEFAULT ''"),
+    ("source_freed_at", "TEXT NOT NULL DEFAULT ''"),
 )
 
 
@@ -215,12 +230,39 @@ class UploadsDB:
         bytes_: int, kind: str, collection: str, chunks: int, uploaded_at: str,
         status: str,
     ) -> None:
+        # Upsert, not INSERT OR REPLACE. The difference is the whole reason
+        # this is not a one-liner.
+        #
+        # `INSERT OR REPLACE` deletes the conflicting row and inserts a new
+        # one, so every column NOT named here silently reverts to its schema
+        # default. All seven of `_UPLOADS_ADDED_COLUMNS` are absent from this
+        # statement, and `reconcile_with_qdrant` calls this for every user file
+        # on every boot — which meant a processed video lost its `summary` and
+        # its `duration_s` at the next restart of `audrey-ai`, with no error
+        # and nothing in the log. Measured, not theorised: a row completed with
+        # a 1,257-character summary came back empty after one reconcile pass.
+        #
+        # The rule the ON CONFLICT clause encodes: **Qdrant is authoritative
+        # about content, never about job lifecycle.** A payload knows the
+        # filename, the size and the chunk count. It does not know how many
+        # attempts a job took, why it failed, or what its summary said — those
+        # exist only here, so reconcile must leave them alone.
+        #
+        # `status` is deliberately in the second group. It arrives as a default
+        # argument rather than as something read from Qdrant, so honouring it
+        # on conflict would let a boot flip a 'processing' or 'failed' row to
+        # 'ready' on the strength of a value the caller never supplied.
         with self._lock:
             self._conn.execute(
-                "INSERT OR REPLACE INTO uploads "
+                "INSERT INTO uploads "
                 "(file_id, user, filename, mime, bytes, kind, collection, "
                 " chunks, uploaded_at, status) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(file_id) DO UPDATE SET "
+                "  user = excluded.user, filename = excluded.filename, "
+                "  mime = excluded.mime, bytes = excluded.bytes, "
+                "  kind = excluded.kind, collection = excluded.collection, "
+                "  chunks = excluded.chunks, uploaded_at = excluded.uploaded_at",
                 (file_id, user, filename, mime, bytes_, kind, collection,
                  chunks, uploaded_at, status),
             )
@@ -255,7 +297,7 @@ class UploadsDB:
                 # pins the two together.
                 "SELECT file_id, filename, mime, bytes, kind, collection, "
                 "       chunks, uploaded_at, status, failure_reason, duration_s, "
-                "       summary "
+                "       summary, source_freed_at "
                 "FROM uploads WHERE user = ? ORDER BY uploaded_at DESC",
                 (user,),
             )
@@ -266,8 +308,19 @@ class UploadsDB:
 
     def _user_total_sync(self, user: str) -> int:
         with self._lock:
+            # Rows whose source has been reclaimed contribute nothing, because
+            # the quota exists to bound bytes on disk and those bytes are gone.
+            #
+            # Note what is NOT done here: setting `bytes = 0` on reclamation
+            # would be simpler and would be undone at the next boot, because
+            # `reconcile_with_qdrant` refreshes `bytes` from the Qdrant payload
+            # — which still carries the original size and always will. Freed
+            # space that silently un-frees itself on restart is worse than no
+            # reclamation at all, so the flag lives in a column reconcile does
+            # not touch and `bytes` stays true to what was uploaded.
             cur = self._conn.execute(
-                "SELECT COALESCE(SUM(bytes), 0) AS total FROM uploads WHERE user = ?",
+                "SELECT COALESCE(SUM(CASE WHEN source_freed_at = '' THEN bytes END), 0) "
+                "AS total FROM uploads WHERE user = ?",
                 (user,),
             )
             return int(cur.fetchone()["total"])
@@ -363,7 +416,7 @@ class UploadsDB:
 
     async def complete_job(
         self, *, file_id: str, lease_id: str, collection: str, chunks: int,
-        duration_s: float = 0.0, summary: str = "",
+        duration_s: float = 0.0, summary: str = "", completed_at: str = "",
     ) -> bool:
         """Flip a leased row to 'ready'. False if the lease no longer holds.
 
@@ -376,20 +429,21 @@ class UploadsDB:
         """
         return await asyncio.to_thread(
             self._complete_job_sync, file_id, lease_id, collection, chunks,
-            duration_s, summary,
+            duration_s, summary, completed_at,
         )
 
     def _complete_job_sync(
         self, file_id: str, lease_id: str, collection: str, chunks: int,
-        duration_s: float, summary: str,
+        duration_s: float, summary: str, completed_at: str,
     ) -> bool:
         with self._lock:
             cur = self._conn.execute(
                 "UPDATE uploads SET status = 'ready', collection = ?, chunks = ?, "
                 "       lease_id = '', leased_at = '', failure_reason = '', "
-                "       duration_s = ?, summary = ? "
+                "       duration_s = ?, summary = ?, completed_at = ? "
                 "WHERE file_id = ? AND lease_id = ? AND status = 'processing'",
-                (collection, chunks, duration_s, summary, file_id, lease_id),
+                (collection, chunks, duration_s, summary, completed_at,
+                 file_id, lease_id),
             )
             return cur.rowcount > 0
 
@@ -436,13 +490,79 @@ class UploadsDB:
 
     def _requeue_job_sync(self, file_id: str, bytes_: int | None) -> bool:
         with self._lock:
+            # `completed_at` clears with the rest of the previous run's output.
+            # Left behind, a requeued video would carry the *old* completion
+            # time, so its retention window would be measured from a run whose
+            # results have just been thrown away — and a re-run of an old video
+            # would be eligible for reclamation the moment it finished.
             cur = self._conn.execute(
                 "UPDATE uploads SET status = 'pending', lease_id = '', "
                 "       leased_at = '', attempts = 0, failure_reason = '', "
                 "       collection = '', chunks = 0, duration_s = 0, summary = '', "
-                "       bytes = COALESCE(?, bytes) "
+                "       completed_at = '', bytes = COALESCE(?, bytes) "
                 "WHERE file_id = ?",
                 (bytes_, file_id),
+            )
+            return cur.rowcount > 0
+
+    # ── Source reclamation (Phase 38) ─────────────────────────────────
+
+    async def reclaimable_sources(
+        self, *, completed_before: str, limit: int = 50,
+    ) -> list[dict]:
+        """Processed videos whose uploaded bytes are past the retention window.
+
+        Four predicates, each load-bearing:
+
+          - `status = 'ready'` — a pending, processing or failed row still has
+            work that reads the source. Deleting under a running worker turns a
+            job into an unrecoverable failure.
+          - `kind = 'video'` — the source of a text upload is what the chunks
+            were extracted from and there is no worker to re-run; only video
+            has artifacts complete enough to stand without it.
+          - `completed_at` non-empty and older than the window — a row restored
+            by `reconcile_with_qdrant` into a fresh sqlite has no completion
+            time and is never eligible. Withholding it is right: nothing knows
+            when it finished, and the conservative answer to "may I delete this
+            irreversibly?" is no.
+          - `source_freed_at = ''` — do it once. The unlink is idempotent, but
+            re-listing a reclaimed row would keep it in every sweep forever.
+
+        `limit` caps one pass so a backlog is drained over several polls rather
+        than in one blocking burst of unlinks on the claim path.
+        """
+        return await asyncio.to_thread(
+            self._reclaimable_sync, completed_before, limit,
+        )
+
+    def _reclaimable_sync(self, completed_before: str, limit: int) -> list[dict]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT file_id, user, filename, bytes FROM uploads "
+                "WHERE status = 'ready' AND kind = 'video' "
+                "  AND source_freed_at = '' "
+                "  AND completed_at != '' AND completed_at < ? "
+                "ORDER BY completed_at LIMIT ?",
+                (completed_before, limit),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+    async def mark_source_freed(self, file_id: str, *, freed_at: str) -> bool:
+        """Record that the uploaded bytes are gone. False if already recorded.
+
+        The `source_freed_at = ''` predicate makes this the transition, not the
+        assignment — two sweeps racing the same row cannot both count it as
+        freed, and the caller can trust the return value as "I am the one who
+        reclaimed this" rather than merely "the row exists".
+        """
+        return await asyncio.to_thread(self._mark_freed_sync, file_id, freed_at)
+
+    def _mark_freed_sync(self, file_id: str, freed_at: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE uploads SET source_freed_at = ? "
+                "WHERE file_id = ? AND source_freed_at = ''",
+                (freed_at, file_id),
             )
             return cur.rowcount > 0
 

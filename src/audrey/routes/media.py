@@ -50,9 +50,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from audrey.auth import require_service
-from audrey.metrics import video_describe_seconds
+from audrey.metrics import video_describe_seconds, vision_eval_tokens, vision_stage_seconds
 from audrey.models.ollama import OllamaError
-from audrey.pipeline.vision import VisionUnavailableError, describe_one_image
+from audrey.pipeline.vision import VisionTiming, VisionUnavailableError, describe_one_image
 
 log = logging.getLogger(__name__)
 
@@ -98,6 +98,22 @@ class DescribeResponse(BaseModel):
     elapsed_s: float
 
 
+def _record(timing: VisionTiming, wall_s: float) -> None:
+    """Attribute one describe call across its four disjoint stages (Phase 38).
+
+    Phase 36 shipped the wall clock and phase 38 has to spend it, so this is
+    the measurement that decides which lever is worth building. `queue` is
+    observed even at zero — a flat line at zero is the evidence that the gate
+    is *not* the problem, and a stage that is only reported when it is large
+    cannot say that.
+    """
+    vision_stage_seconds.labels(stage="queue").observe(timing.queue_s(wall_s))
+    vision_stage_seconds.labels(stage="load").observe(timing.load_s)
+    vision_stage_seconds.labels(stage="prompt_eval").observe(timing.prompt_eval_s)
+    vision_stage_seconds.labels(stage="eval").observe(timing.eval_s)
+    vision_eval_tokens.observe(timing.eval_tokens)
+
+
 @router.post("/describe", response_model=DescribeResponse)
 async def describe(
     req: DescribeRequest,
@@ -126,7 +142,7 @@ async def describe(
     t0 = time.perf_counter()
     try:
         async with app.state.inflight.slot(req.user):
-            description, model = await describe_one_image(
+            description, model, timing = await describe_one_image(
                 data_url,
                 ollama=app.state.ollama, registry=app.state.registry,
                 health=app.state.health, gate=app.state.gate, cfg=app.state.cfg,
@@ -141,6 +157,7 @@ async def describe(
 
     elapsed = time.perf_counter() - t0
     video_describe_seconds.observe(elapsed)
+    _record(timing, elapsed)
     if not description:
         # An empty description is a failure wearing the shape of a success. It
         # would be ingested as an empty chunk and nobody would ever notice.
@@ -148,9 +165,17 @@ async def describe(
             status_code=502,
             detail=f"{model} returned an empty description",
         )
+    # The breakdown goes in the log line, not only in Prometheus. Tuning this
+    # means reading a handful of consecutive frames from one video and seeing
+    # which number moved — a histogram aggregates exactly the per-frame
+    # variation that phase 36 measured as a 4x spread and could not explain.
     log.info(
-        "media: described a frame for %s via %s in %.1fs (%d chars)",
+        "media: described a frame for %s via %s in %.1fs (%d chars) "
+        "queue=%.1fs load=%.1fs prefill=%.1fs/%dtok gen=%.1fs/%dtok",
         req.user, model, elapsed, len(description),
+        timing.queue_s(elapsed), timing.load_s,
+        timing.prompt_eval_s, timing.prompt_tokens,
+        timing.eval_s, timing.eval_tokens,
     )
     return DescribeResponse(description=description, model=model, elapsed_s=elapsed)
 

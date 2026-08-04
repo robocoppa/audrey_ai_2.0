@@ -34,6 +34,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Any
 
 from audrey.models.health import HealthTracker
@@ -192,6 +193,70 @@ def _pick_vision_model(
     return spec.name, spec.location
 
 
+#: Nanoseconds per second. Ollama reports every duration in nanoseconds, and
+#: a factor of 1e9 read as 1e6 turns 62 seconds into 62 milliseconds — a
+#: mistake that looks like good news rather than like a bug.
+_NS = 1_000_000_000.0
+
+
+@dataclass(frozen=True, slots=True)
+class VisionTiming:
+    """Ollama's own account of where a vision call's time went (Phase 38).
+
+    Every field is optional in the response — a backend that does not report
+    them yields zeros rather than an exception, because a missing timing must
+    never be able to fail a describe that otherwise worked.
+
+    `queue_s` is the one field Ollama does not supply: it is the wall clock the
+    caller measured minus the work Ollama says it did, which is time spent
+    waiting on `FairLocalGate` and `UserInflightRegistry` rather than on the
+    model. Keeping it separate is the whole point — 60 seconds of queue and 60
+    seconds of generation are the same number on a stopwatch and want opposite
+    fixes.
+    """
+
+    total_s: float = 0.0
+    load_s: float = 0.0
+    prompt_eval_s: float = 0.0
+    eval_s: float = 0.0
+    prompt_tokens: int = 0
+    eval_tokens: int = 0
+
+    @classmethod
+    def from_response(cls, resp: dict[str, Any]) -> VisionTiming:
+        def secs(key: str) -> float:
+            try:
+                return max(0.0, float(resp.get(key) or 0) / _NS)
+            except (TypeError, ValueError):
+                return 0.0
+
+        def count(key: str) -> int:
+            try:
+                return max(0, int(resp.get(key) or 0))
+            except (TypeError, ValueError):
+                return 0
+
+        return cls(
+            total_s=secs("total_duration"),
+            load_s=secs("load_duration"),
+            prompt_eval_s=secs("prompt_eval_duration"),
+            eval_s=secs("eval_duration"),
+            prompt_tokens=count("prompt_eval_count"),
+            eval_tokens=count("eval_count"),
+        )
+
+    def queue_s(self, wall_s: float) -> float:
+        """Wall clock not accounted for by Ollama, floored at zero.
+
+        Returns 0.0 when the backend reported no `total_duration` at all:
+        attributing the entire call to queueing because the timing fields were
+        absent would invent the exact signal this exists to detect.
+        """
+        if self.total_s <= 0:
+            return 0.0
+        return max(0.0, wall_s - self.total_s)
+
+
 async def _transcribe_one(
     ollama: OllamaClient,
     gate: FairLocalGate,
@@ -202,7 +267,7 @@ async def _transcribe_one(
     user_question: str,
     timeout_s: float,
     user_id: str | None,
-) -> str:
+) -> tuple[str, VisionTiming]:
     """One vision call. Raises OllamaError; caller decides how to fail."""
     hint = (
         f"\n\nFor context, the question asked about this image was: "
@@ -223,7 +288,8 @@ async def _transcribe_one(
     ]
     async with gate.acquire(model, location=location, user_id=user_id):
         resp = await ollama.chat(model=model, messages=messages, timeout_s=timeout_s)
-    return str((resp.get("message") or {}).get("content") or "").strip()
+    text = str((resp.get("message") or {}).get("content") or "").strip()
+    return text, VisionTiming.from_response(resp)
 
 
 class VisionUnavailableError(RuntimeError):
@@ -240,8 +306,10 @@ async def describe_one_image(
     cfg: Any,
     user_question: str = "",
     user_id: str | None = None,
-) -> tuple[str, str]:
-    """Describe one image through the `vl` pool. Returns `(description, model)`.
+) -> tuple[str, str, VisionTiming]:
+    """Describe one image through the `vl` pool.
+
+    Returns `(description, model, timing)`.
 
     The single-image entry point, for callers that already hold an image and
     want prose back — Phase 36's keyframe pass. `describe_images` stays the
@@ -260,6 +328,11 @@ async def describe_one_image(
     frames a digest cannot. What is left is up to `keyframes_max` unique
     images per video, which would evict the entire 64-entry chat cache on
     every ingest — an interactive path paying for a background one.
+
+    **Returns the timing, rather than recording it here.** This function does
+    not know the wall clock its caller measured, and `queue_s` is defined as
+    the difference between the two — so attributing the call is the caller's
+    job and this only supplies the half Ollama knows.
     """
     picked = _pick_vision_model(cfg, registry, health)
     if picked is None:
@@ -267,14 +340,14 @@ async def describe_one_image(
     model, location = picked
 
     conf = vision_cfg(cfg)
-    description = await _transcribe_one(
+    description, timing = await _transcribe_one(
         ollama, gate,
         url=data_url, model=model, location=location,
         user_question=user_question,
         timeout_s=float(conf.get("timeout_s", _DEFAULT_TIMEOUT_S)),
         user_id=user_id,
     )
-    return description, model
+    return description, model, timing
 
 
 async def describe_images(
@@ -371,7 +444,10 @@ async def describe_images(
                 described += 1
                 continue
             try:
-                text = await _transcribe_one(
+                # The chat path does not attribute its own cost: it is one
+                # call inside a turn a user is waiting on, not a stage of a
+                # background pipeline anyone is going to tune.
+                text, _timing = await _transcribe_one(
                     ollama, gate,
                     url=url, model=vl_model, location=vl_location,
                     user_question=user_question, timeout_s=timeout_s, user_id=user_id,
@@ -430,6 +506,7 @@ async def describe_for_text_model(
 
 __all__ = [
     "DESCRIBE_SYSTEM",
+    "VisionTiming",
     "describe_enabled",
     "describe_for_text_model",
     "describe_images",

@@ -104,6 +104,12 @@ class FileRow(BaseModel):
     # everything else, and for a video whose summary call failed — which is a
     # missing field, never a failed row.
     summary: str = ""
+    # When the uploaded bytes were reclaimed (Phase 38). Empty while the source
+    # is still on disk. Surfaced rather than kept internal because `bytes` goes
+    # on saying 288 MB after the file is gone — without this the file list
+    # cannot explain why that no longer counts against the quota, and a user
+    # would read the difference as an accounting bug.
+    source_freed_at: str = ""
 
 
 class UploadResponse(BaseModel):
@@ -829,6 +835,66 @@ def _source_path(request: Request, row) -> Path:
     )
 
 
+async def _reclaim_sources(request: Request, db) -> int:
+    """Unlink processed videos whose bytes are past the retention window.
+
+    Returns how many were reclaimed. **Never raises** — this runs on the claim
+    path, and a disk error while tidying up must not stop a worker from getting
+    work. A source that could not be unlinked stays eligible and is simply
+    retried on the next poll.
+
+    ## Why here, and not on a timer
+
+    Nothing else in this file has a background task, deliberately: phase 33 put
+    the lease sweep on the claim for the same reason, because a poll every ten
+    seconds is already a heartbeat and a supervised task is one more thing that
+    can silently stop. Reclamation has no deadline — a video freed a minute
+    late costs nothing — so it inherits that heartbeat rather than growing its
+    own.
+
+    ## The order that matters
+
+    sqlite is marked FIRST, and only then is the file unlinked. Both orders
+    lose something if the process dies between the two steps, and they are not
+    the same loss: unlink-then-mark leaves a row that still bills the user for
+    bytes that no longer exist, with nothing left on disk to prove otherwise
+    and no path that would ever correct it. Mark-then-unlink leaves an orphaned
+    file that costs disk and is invisible to the quota — recoverable by hand,
+    and never wrong about what the user owes.
+    """
+    video_cfg = _video_cfg(request)
+    if bool(video_cfg.get("keep_source", False)):
+        return 0
+
+    hours = float(video_cfg.get("source_retention_hours", 24))
+    cutoff = _dt.datetime.now(_dt.UTC) - _dt.timedelta(hours=hours)
+    now = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+
+    try:
+        rows = await db.reclaimable_sources(
+            completed_before=cutoff.isoformat(timespec="seconds"),
+        )
+    except Exception as e:  # noqa: BLE001 — tidying must never break a claim
+        log.warning("files: could not list reclaimable sources: %s", e)
+        return 0
+
+    freed = 0
+    for row in rows:
+        if not await db.mark_source_freed(str(row["file_id"]), freed_at=now):
+            # Another sweep took it first. The transition is the guard.
+            continue
+        path = _source_path(request, row)
+        await asyncio.to_thread(_safe_unlink, path)
+        freed += 1
+        log.info(
+            "files: reclaimed source for %s (%s, %d bytes) — %s retention "
+            "window elapsed; this video can no longer be requeued",
+            row["file_id"], row["filename"], int(row["bytes"] or 0),
+            f"{hours:g}h",
+        )
+    return freed
+
+
 # `response_model=None`: the return is either a JobClaim or a bare 204
 # Response, and FastAPI cannot build one response model from that union.
 @router.post("/jobs/claim", response_model=None)
@@ -851,6 +917,7 @@ async def claim_job(
         expired_before=expiry.isoformat(timespec="seconds"),
         max_attempts=_max_attempts(request),
     )
+    await _reclaim_sources(request, db)
 
     lease_id = str(uuid.uuid4())
     now = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
@@ -1056,6 +1123,7 @@ async def ingest_result(
     if not await db.complete_job(
         file_id=file_id, lease_id=body.lease_id, collection=collection, chunks=chunks,
         duration_s=float(body.duration_s or 0.0), summary=summary,
+        completed_at=stamp,
     ):
         # Valid when checked above and not now, so the sweep ran in between.
         # The chunks are already in Qdrant under this file_id; the newer
@@ -1139,6 +1207,28 @@ async def requeue_job(
                 f"{row['lease_id']}, since {row['leased_at']}). Requeueing "
                 "would discard that work. Retry with ?force=true if that is "
                 "what you want."
+            ),
+        )
+
+    if row["source_freed_at"]:
+        # Phase 38 reclaimed the bytes. `force` deliberately does not override
+        # this — the other guard protects work that is merely in progress, and
+        # can be overruled by someone who means it. There is nothing to
+        # overrule here.
+        #
+        # Refusing costs the caller one clear error. Proceeding would delete
+        # the video's existing chunks (below), queue a job against a path that
+        # no longer exists, and burn all three attempts failing on it — ending
+        # with a video that WAS fully searchable and now is not, and no way
+        # back short of re-uploading the file.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{file_id}'s source was reclaimed on {row['source_freed_at']} "
+                "and cannot be re-processed. Its transcript, descriptions and "
+                "summary are still searchable; re-upload the file to run it "
+                "again. Set kb.video.keep_source to stop this happening to "
+                "videos uploaded from now on."
             ),
         )
 

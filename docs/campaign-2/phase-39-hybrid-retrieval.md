@@ -212,6 +212,29 @@ retriever score, so a cosine of 0.47 sat next to a BM25 score of 13.8, in an
 order explained by neither. The fused RRF value is now what comes back, since
 it is the only number that describes the list it is in.
 
+### The overlap fraction is coarse for short queries (known limitation)
+
+`min_term_overlap` is a fraction of the query's *content* terms, so its
+resolution is set by how many the query has. With three or more it
+discriminates well. With one it is binary — anything containing that word
+scores 1.00.
+
+Observed 2026-08-04: "what is this video about" reduces to the single content
+term `video`, because `what`, `is`, `this` and `about` are all function words.
+A PowerApps document about a video control scored 1.00 and outranked the
+summary of an actual video.
+
+Not treated as a defect. A one-word query *is* a keyword search, which is
+exactly what the lexical retriever is for, and refusing to admit anything on
+one term would break the case the phase exists to serve. The honest fix is to
+weight the overlap by term rarity rather than counting terms equally — which
+needs corpus document-frequency that only Qdrant has, and is the same data
+`Modifier.IDF` already uses server-side for scoring. Worth doing when there is
+a reason; not worth inventing a second corpus-statistics mechanism for now.
+
+The practical read: **a vague query gets vague results, and the floor cannot
+save it.** Both halves of that were true before this phase too.
+
 ### `kb.min_score` has to be replaced, not ported
 
 The floor exists for a real reason — [`routes/kb.py`](../../src/audrey/routes/kb.py)

@@ -631,6 +631,39 @@ kb:
     # out leaves an empty field on a `ready` row.
     summary_timeout_s: 180
 
+    # ─── Source reclamation (Phase 38) ───────────────────────────────
+    # Planned for phase 35 and deferred to here, because until phase 37
+    # landed something downstream still needed the bytes: 36 read frames from
+    # the source, 37 summarised what 36 produced, and 33's requeue points a
+    # re-run at a path that has to exist. This is the first point at which a
+    # processed video's artifacts stand on their own.
+    #
+    # The pressure is real — `max_user_bytes` is 1 GiB and three 300 MB
+    # videos exhaust it, at which point the next upload is refused while
+    # every one of those videos is fully searchable and its bytes are doing
+    # nothing. The consequence is equally real and permanent: once the source
+    # is gone the video can never be re-processed, so every later improvement
+    # to the visual or summary stages applies only to videos uploaded after
+    # it.
+    #
+    # Set true to keep every source indefinitely. Do that BEFORE deploying
+    # any change you might want to re-run old videos through — turning it
+    # back on afterwards brings nothing back.
+    keep_source: false
+
+    # How long a processed video's bytes are kept before reclamation, timed
+    # from when its ingest finished rather than from when it was uploaded. A
+    # video that sat in a stalled queue for two days would otherwise become
+    # eligible the instant it completed — a window of zero, for exactly the
+    # file whose processing most deserved a second look.
+    #
+    # 24 hours is a judgement, not a measurement: it is how long it plausibly
+    # takes to notice that an ingest produced something wrong, which is the
+    # case requeue exists for. Every hour here is quota the user cannot
+    # spend, so a longer window trades directly against the problem the
+    # setting exists to solve.
+    source_retention_hours: 24
+
 # ─── Tools (OpenAPI auto-discovery) ────────────────────────────────────
 tools:
   enabled: true

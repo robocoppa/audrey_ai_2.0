@@ -230,3 +230,82 @@ class TestBackfill:
         await reconcile_with_qdrant(db, qdrant)
 
         assert await db.list_user(USER) == []
+
+
+# ─── Backfill must not clobber what only sqlite knows (Phase 38) ───────
+
+class TestBackfillPreservesJobState:
+    """Step 1 refreshes every user file from its Qdrant payload on every boot.
+    It used to do that with `INSERT OR REPLACE`, which deletes the conflicting
+    row and re-inserts it — so every column the statement did not name reverted
+    to its schema default.
+
+    All seven of `_UPLOADS_ADDED_COLUMNS` were unnamed. The visible cost was
+    phase 37's summary: a video completed with a 1,257-character summary showed
+    it in `GET /v1/files` until `audrey-ai` restarted, and then showed nothing,
+    with no error and no log line. `duration_s` went the same way.
+
+    The rule being pinned: **a Qdrant payload is authoritative about content,
+    never about job lifecycle.** It knows the filename, the size and the chunk
+    count. It does not know how many attempts a job took, why it failed, or
+    what its summary said.
+    """
+
+    async def _completed_video(self, db: UploadsDB) -> None:
+        await db.record_upload(
+            file_id="vid", user=USER, filename="jasonRetirement.mp4",
+            mime="video/mp4", bytes_=301936597, kind="video", collection="",
+            chunks=0, uploaded_at="2026-08-01T00:00:00+00:00", status="pending",
+        )
+        await db.claim_job(lease_id="L1", now="2026-08-01T00:01:00+00:00")
+        assert await db.complete_job(
+            file_id="vid", lease_id="L1", collection=TEXT_COL, chunks=25,
+            duration_s=565.0, summary="Two colleagues mark Jason's retirement.",
+        )
+
+    async def test_a_summary_survives_a_reconcile_pass(self, db: UploadsDB):
+        await self._completed_video(db)
+
+        await reconcile_with_qdrant(db, _FakeQdrant({TEXT_COL: [_point("vid")]}))
+
+        row = await db.get_upload("vid")
+        assert row["summary"] == "Two colleagues mark Jason's retirement."
+
+    async def test_the_audio_duration_survives_a_reconcile_pass(self, db: UploadsDB):
+        await self._completed_video(db)
+
+        await reconcile_with_qdrant(db, _FakeQdrant({TEXT_COL: [_point("vid")]}))
+
+        assert (await db.get_upload("vid"))["duration_s"] == 565.0
+
+    async def test_a_failed_row_is_not_flipped_to_ready(self, db: UploadsDB):
+        """`status` reaches `record_upload` as a default argument, not as
+        something read from Qdrant, so honouring it on conflict would let a
+        boot silently mark a failed video ready — chunkless, summaryless, and
+        indistinguishable from one that worked."""
+        await db.record_upload(
+            file_id="vid", user=USER, filename="broken.mp4", mime="video/mp4",
+            bytes_=99, kind="video", collection="", chunks=0,
+            uploaded_at="2026-08-01T00:00:00+00:00", status="pending",
+        )
+        await db.claim_job(lease_id="L1", now="2026-08-01T00:01:00+00:00")
+        await db.fail_job(file_id="vid", lease_id="L1", reason="ffmpeg said no")
+
+        await reconcile_with_qdrant(db, _FakeQdrant({TEXT_COL: [_point("vid")]}))
+
+        row = await db.get_upload("vid")
+        assert row["status"] == "failed"
+        assert row["failure_reason"] == "ffmpeg said no"
+
+    async def test_qdrant_still_wins_on_the_fields_it_owns(self, db: UploadsDB):
+        """The other half. Preserving job state must not turn the backfill
+        into a no-op — a chunk count that drifted from Qdrant is exactly what
+        reconcile exists to correct."""
+        await self._completed_video(db)
+
+        qdrant = _FakeQdrant({TEXT_COL: [_point("vid"), _point("vid"), _point("vid")]})
+        await reconcile_with_qdrant(db, qdrant)
+
+        row = await db.get_upload("vid")
+        assert row["chunks"] == 3
+        assert row["filename"] == "vid.txt"

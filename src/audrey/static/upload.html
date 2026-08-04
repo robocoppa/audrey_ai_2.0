@@ -418,7 +418,7 @@
         <tr class="${rowClass(f)}">
           <td>${escapeHtml(f.filename)}</td>
           <td>${escapeHtml(f.mime)}</td>
-          <td class="right">${fmtBytes(f.bytes)}</td>
+          <td class="right">${sizeCell(f)}</td>
           <td class="right">${f.status === "ready" ? f.chunks : "—"}</td>
           <td>${statusCell(f)}</td>
           <td><button class="danger" data-id="${escapeAttr(f.file_id)}">delete</button></td>
@@ -454,6 +454,19 @@
             padding-top: 0; border-top: 0; white-space: pre-wrap;"
           >${escapeHtml(f.summary)}</td>
       </tr>`;
+  }
+
+  // Phase 38. A reclaimed video still reports the size it was uploaded at —
+  // that is the honest record, and the quota is what changed, not the file.
+  // Without saying so here the two numbers simply disagree: 288 MB in the
+  // list, nothing against the allowance, and no way to tell that from a bug.
+  function sizeCell(f) {
+    const size = fmtBytes(f.bytes);
+    if (!f.source_freed_at) return size;
+    return `<span title="Source reclaimed ${escapeAttr(f.source_freed_at)} —`
+      + ` the video is still searchable, but cannot be re-processed."`
+      + ` style="text-decoration: line-through; color: var(--muted);"`
+      + `>${size}</span>`;
   }
 
   function statusCell(f) {

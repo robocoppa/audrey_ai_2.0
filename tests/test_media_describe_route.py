@@ -21,7 +21,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from audrey.models.ollama import OllamaError
-from audrey.pipeline.vision import VisionUnavailableError
+from audrey.pipeline.vision import VisionTiming, VisionUnavailableError
 from audrey.routes.media import router
 
 SECRET = "s3cr3t-service-token"  # noqa: S105  (test fixture, not a real secret)
@@ -54,10 +54,11 @@ def _build_app(*, describe=None, service_token: str = SECRET) -> FastAPI:
         setattr(app.state, attr, object())
     app.state.inflight = _Inflight()
     app.state.captured = {}
+    app.state.timing = VisionTiming()
 
     async def _default(data_url, **kwargs):
         app.state.captured = {"data_url": data_url, **kwargs}
-        return "A whiteboard reading DEPLOY FRIDAY.", "qwen3-vl:32b"
+        return "A whiteboard reading DEPLOY FRIDAY.", "qwen3-vl:32b", app.state.timing
 
     app.state.describe_impl = describe or _default
     return app
@@ -188,7 +189,7 @@ class TestFailureModes:
         """It would otherwise be ingested as an empty chunk, and nobody would
         ever notice that a frame had not been described."""
         async def _empty(data_url, **kw):
-            return "", "qwen3-vl:32b"
+            return "", "qwen3-vl:32b", VisionTiming()
 
         r = patched(describe=_empty).post(
             "/v1/media/describe", json=_body(),
@@ -224,3 +225,74 @@ class TestSuccess:
                        headers={"X-Audrey-Service-Token": SECRET})
 
         assert video_describe_seconds._sum.get() >= before
+
+
+class TestCostAttribution:
+    """Phase 38. The wall clock says how much a frame costs; these say where it
+    went, which is what decides between four mutually exclusive levers."""
+
+    def test_every_stage_is_observed(self, patched):
+        from audrey.metrics import vision_stage_seconds
+
+        client = patched()
+        client.app.state.timing = VisionTiming(
+            total_s=62.3, load_s=4.1, prompt_eval_s=2.7, eval_s=55.2,
+            prompt_tokens=312, eval_tokens=486,
+        )
+        before = {
+            stage: vision_stage_seconds.labels(stage=stage)._sum.get()
+            for stage in ("queue", "load", "prompt_eval", "eval")
+        }
+
+        r = client.post("/v1/media/describe", json=_body(),
+                        headers={"X-Audrey-Service-Token": SECRET})
+        assert r.status_code == 200
+
+        after = {
+            stage: vision_stage_seconds.labels(stage=stage)._sum.get()
+            for stage in ("queue", "load", "prompt_eval", "eval")
+        }
+        assert after["load"] - before["load"] == pytest.approx(4.1)
+        assert after["prompt_eval"] - before["prompt_eval"] == pytest.approx(2.7)
+        assert after["eval"] - before["eval"] == pytest.approx(55.2)
+
+    def test_a_fast_call_still_observes_queue_at_zero(self, patched):
+        """A stage only reported when it is large cannot say "the gate is not
+        the problem", which is the answer this is most likely to give."""
+        from audrey.metrics import vision_stage_seconds
+
+        client = patched()
+        client.app.state.timing = VisionTiming(total_s=999.0, eval_s=999.0)
+        queue = vision_stage_seconds.labels(stage="queue")
+        before = sum(b.get() for b in queue._buckets)
+
+        client.post("/v1/media/describe", json=_body(),
+                    headers={"X-Audrey-Service-Token": SECRET})
+
+        assert sum(b.get() for b in queue._buckets) == before + 1
+
+    def test_generated_tokens_are_recorded(self, patched):
+        """Characters are what the log line reports; tokens are what the model
+        was billed in time for. A description that is long because the prompt
+        asked for verbatim transcription of a photo shows up only here."""
+        from audrey.metrics import vision_eval_tokens
+
+        client = patched()
+        client.app.state.timing = VisionTiming(total_s=1.0, eval_tokens=486)
+        before = vision_eval_tokens._sum.get()
+
+        client.post("/v1/media/describe", json=_body(),
+                    headers={"X-Audrey-Service-Token": SECRET})
+
+        assert vision_eval_tokens._sum.get() - before == pytest.approx(486)
+
+    def test_a_backend_with_no_timings_does_not_break_the_route(self, patched):
+        """Instrumentation must never be able to fail a describe that worked."""
+        client = patched()
+        client.app.state.timing = VisionTiming()
+
+        r = client.post("/v1/media/describe", json=_body(),
+                        headers={"X-Audrey-Service-Token": SECRET})
+
+        assert r.status_code == 200
+        assert r.json()["description"] == "A whiteboard reading DEPLOY FRIDAY."

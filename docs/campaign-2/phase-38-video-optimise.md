@@ -4,12 +4,114 @@ By the time this phase starts, video ingest works and is slow. This is the phase
 that makes it fast, driven by the stage timings
 [phase 36](phase-36-video-visual-assessment.md) shipped rather than by estimates.
 
-**Status: PLANNED — except the keyframe gate, which LANDED early.**
+**Status: PARTLY BUILT, not yet deployed.** The keyframe gate landed early
+(2026-08-02). Cost attribution and source reclamation are built and hermetically
+tested (2026-08-04). The four remaining levers are deliberately unbuilt — see
+[Instrument first](#instrument-first) for why that is the plan working rather
+than the plan stalling.
 
 ---
 
+## What the plan got wrong about its own ordering
 
-## Inherited from phase 35: deleting the source
+The lever list below is ranked by expected payoff, and every entry in it is a
+bet on which *part* of a describe call is large. Phase 36 measured the whole
+call — 62.3s per frame, with a 4x spread it could not explain — and that number
+sizes the problem without pointing at any of them:
+
+| If the time is going to… | the fix is… | and these do nothing |
+|---|---|---|
+| waiting on `FairLocalGate` | lever 1 or 3 | batching, downscaling |
+| loading the model | `keep_alive` — **not on the list** | batching, downscaling |
+| the image, as tokens | lever 4, maybe lever 2 | `keep_alive` |
+| writing prose | a shorter prompt and `num_predict` — **not on the list** | all four |
+
+Two of the four plausible answers are not in the ranking at all, and the two
+that are sit at positions 2 and 4. So the ranking is not a plan, it is a list
+of guesses in a confident order — and each one costs a build, a deploy, and a
+full re-ingest to test.
+
+Ollama has been returning the answer on every response the whole time.
+`OllamaClient.chat` hands back the entire response dict, and
+[`pipeline/vision.py`](../../src/audrey/pipeline/vision.py) was discarding
+everything but `message.content`.
+
+**A note on the prompt, which is what prompted the suspicion.** `DESCRIBE_SYSTEM`
+was written in the vision-sidecar phase for *chat screenshots*: "Transcribe
+every piece of visible text VERBATIM… preserve line breaks, code indentation,
+table rows, labels, legends, and axis values." Phase 36 reused it verbatim for
+keyframes. Pointed at a photo of two men in chairs, that is a prompt asking for
+a long answer about a frame with nothing in it to transcribe — which would make
+`eval` the dominant stage, and would make the cheapest available lever one the
+plan never considered. That is a hypothesis, not a finding, and the point of
+the instrumentation is that it no longer has to be argued.
+
+## Cost attribution (landed 2026-08-04)
+
+`VisionTiming` in [`pipeline/vision.py`](../../src/audrey/pipeline/vision.py)
+reads Ollama's own timings off the response and
+[`routes/media.py`](../../src/audrey/routes/media.py) attributes each describe
+call across four disjoint stages that sum to the wall clock:
+
+- **`queue`** — the caller's stopwatch minus what Ollama says it did. Ollama
+  cannot report this because it never sees it; it is time inside
+  `FairLocalGate` and `UserInflightRegistry`.
+- **`load`**, **`prompt_eval`**, **`eval`** — straight from the response.
+
+Both a Prometheus histogram (`audrey_vision_stage_seconds{stage}`) and the
+existing per-frame log line, because tuning this means reading a handful of
+consecutive frames from one video and seeing which number moved — and a
+histogram aggregates away exactly the per-frame variation phase 36 measured and
+could not explain. `audrey_vision_eval_tokens` records how much prose was
+generated, which is the number that turns "the description was long" into "the
+prompt asked for it".
+
+Two traps worth naming, both pinned by tests:
+
+- **Ollama reports nanoseconds.** Reading them as microseconds turns 62 seconds
+  into 62 milliseconds, which looks like the problem solving itself.
+- **A missing `total_duration` must not become queue time.** `queue = wall −
+  total` with `total = 0` attributes the entire call to gate contention, which
+  fabricates the exact signal the metric exists to detect — and points at the
+  most expensive lever in the list.
+
+`describe_images` (the chat path) discards its timing deliberately. It is one
+call inside a turn a user is waiting on, not a stage of a background pipeline
+anyone is going to tune.
+
+## The regression this turned up
+
+Building the above meant reading how `uploads` rows are written, which exposed
+a live defect with nothing to do with phase 38.
+
+`record_upload` was an `INSERT OR REPLACE`. That deletes the conflicting row
+and inserts a new one, so **every column the statement does not name reverts to
+its schema default** — and it named none of the seven in
+`_UPLOADS_ADDED_COLUMNS`. `reconcile_with_qdrant` calls it for every user file
+on every boot.
+
+So a processed video lost its `summary` and its `duration_s` at the next
+restart of `audrey-ai`. Phase 37's summary was verified working on 2026-08-04
+and would have been blank after the next deploy, with no error and no log line.
+Reproduced against a real `UploadsDB` before the fix and after it.
+
+The fix is an upsert whose `ON CONFLICT` clause encodes the rule the old
+statement violated: **a Qdrant payload is authoritative about content, never
+about job lifecycle.** It knows the filename, the size and the chunk count. It
+does not know how many attempts a job took, why it failed, or what its summary
+said. `status` is deliberately in the preserved group — it arrives as a default
+argument rather than as something read from Qdrant, so honouring it on conflict
+would let a boot flip a `failed` row to `ready` on the strength of a value the
+caller never supplied.
+
+This is the third bug in this campaign from the same root: **`reconcile_with_qdrant`
+rebuilds sqlite from Qdrant on every boot, and every additive column is one
+more thing it can quietly undo.** Anything that must survive a restart either
+belongs in the payload or belongs in a column reconcile is explicitly told to
+leave alone. There is no third option, and the failure is always silent.
+
+
+## Inherited from phase 35: deleting the source (landed 2026-08-04)
 
 `keep_source: false` was planned for [phase 35](phase-35-video-transcript.md)
 and deferred here. Unlinking the video after transcription would have broken
@@ -17,14 +119,75 @@ phase 36 (which reads frames from the source), phase 37 (which summarises what
 36 produced), and phase 33's `requeue` (which points a re-run at a path that
 would no longer exist).
 
-This is the first phase where nothing downstream needs the bytes, so it is the
-first place the deletion is safe. The pressure is real — `max_user_bytes` is
-1 GiB and three 300 MB videos exhaust it — but note the consequence that made
-it a phase-38 problem in the first place: once the source is gone, a video can
-never be re-processed. Any change to the visual or summary stages after that
-point applies only to videos uploaded afterwards. A `keep_source: true`
-escape hatch, or deleting only after a retention window, is worth more than
-the quota it saves.
+This is the first phase where nothing downstream needs the bytes. The pressure
+is real — `max_user_bytes` is 1 GiB and three 300 MB videos exhaust it, at
+which point the next upload is refused while every one of those videos is fully
+searchable and its bytes are doing nothing. So is the consequence: **once the
+source is gone the video can never be re-processed**, and every later
+improvement to the visual or summary stages applies only to videos uploaded
+after it.
+
+Built with both hedges the plan asked for rather than either.
+
+**A retention window, timed from completion.** `source_retention_hours: 24`,
+measured from `completed_at` and not from `uploaded_at` — a video that sat in a
+stalled queue for two days would otherwise become eligible the instant it
+finished, giving a window of zero to exactly the file whose processing most
+deserved a second look. That meant a new column; there was no completion time
+on the row before this.
+
+**An escape hatch.** `keep_source: true` stops it entirely. Set it before
+deploying any change you might want to re-run old videos through — turning it
+back on afterwards brings nothing back.
+
+### Why the quota reads a flag instead of zeroing `bytes`
+
+Zeroing `bytes` on reclamation is the obvious implementation and it does not
+survive a restart: `reconcile_with_qdrant` refreshes `bytes` from the Qdrant
+payload, which still carries the original size and always will. Freed space
+that silently un-frees itself at the next boot is worse than no reclamation at
+all — the user would see their allowance come back and go away again with
+nothing to explain either.
+
+So `bytes` stays true to what was uploaded, `source_freed_at` records that the
+file is gone, and the quota sums only rows where that is empty. The file list
+shows the original size struck through, because the two numbers would otherwise
+just disagree — 288 MB in the list, nothing against the allowance, and no way
+to tell that from a bug.
+
+### The order of operations, and which way to lose
+
+sqlite is marked **first**, and only then is the file unlinked. Both orders
+lose something if the process dies between the two steps, and they are not the
+same loss:
+
+- unlink-then-mark leaves a row still billing the user for bytes that do not
+  exist, with nothing on disk to prove otherwise and no path that would ever
+  correct it;
+- mark-then-unlink leaves an orphaned file that costs disk and is invisible to
+  the quota — recoverable by hand, and never wrong about what the user owes.
+
+The sweep runs on the claim path, beside phase 33's lease sweep, for the reason
+that phase gave: a worker polling every ten seconds is already a heartbeat, and
+a supervised background task is one more thing that can stop without telling
+anyone. Reclamation has no deadline, so it inherits that heartbeat rather than
+growing its own. It cannot raise — a disk error while tidying up must not stand
+between a worker and its job.
+
+### What is refused
+
+A requeue of a reclaimed video is a `409`, and **`force` does not override it**.
+The other requeue guard protects work merely in progress and can be overruled
+by someone who means it; there is nothing here to overrule. Proceeding would
+delete the video's existing chunks, queue a job against a path that does not
+exist, and burn all three attempts failing on it — ending with a video that
+*was* fully searchable and now is not.
+
+Only `status = 'ready'`, `kind = 'video'` rows with a recorded completion time
+are ever eligible. A row restored into a fresh sqlite by `reconcile_with_qdrant`
+has no completion time, so it is never reclaimed: nothing knows when it
+finished, and the conservative answer to "may I delete this irreversibly?" is
+no.
 
 ## The keyframe gate (landed 2026-08-02)
 
@@ -68,7 +231,9 @@ The default distance of 8 bits is a starting point, not a finding. Run it
 against a corpus before trusting it:
 
 ```bash
-PYTHONPATH=src python -m audrey.media.framegate /tmp/frames/*.jpg
+# laptop, from the repo root. `.venv/bin/python`, not bare `python` —
+# framegate needs Pillow and the system interpreter does not have it.
+PYTHONPATH=src .venv/bin/python -m audrey.media.framegate /tmp/frames/*.jpg
 ```
 
 ## Instrument first
@@ -78,6 +243,15 @@ ingest gets the same treatment with a `stage` label — `demux`, `stt`,
 `keyframe_select`, `describe`, `summarise`, `embed`, `upsert` — plus a per-frame
 histogram. That lands in phase 36. Without it, "video ingest is slow" is not an
 actionable sentence and every lever below is a guess.
+
+**Phase 36 shipped half of it and that half was not enough** — see [What the
+plan got wrong about its own ordering](#what-the-plan-got-wrong-about-its-own-ordering).
+A per-frame wall clock says how much a frame costs. It does not say which of
+four mutually exclusive fixes would make it cheaper, and four A-B deploys to
+find out is exactly the guesswork this section exists to prevent. The stage
+breakdown is the missing half, and it is why nothing below has been built yet:
+**the next lever gets picked from one ingest's worth of numbers, not from the
+ordering here.**
 
 ## The remaining levers, in the order I would try them
 
@@ -102,10 +276,54 @@ what the instrumentation is for — the gate got promoted to "landed early"
 precisely because real footage moved it from a guess to a measurement, and the
 same should happen to the rest of this list.
 
+**Two candidates the ranking omits**, both cheap, both only justifiable once
+the stage breakdown is read:
+
+6. **`keep_alive` on the vl model for the duration of a visual pass.** Answers
+   a large `load` stage and nothing else. The GPU holds one local model at a
+   time, so a describe call landing between two chat turns pays a full model
+   load — and phase 36's unexplained 4x spread (25.5–102.6s) is the shape that
+   would make. Cheap to try, and it trades directly against chat latency, so it
+   needs the measurement first rather than a hunch.
+7. **A keyframe-specific describe prompt, and a `num_predict` cap.** Answers a
+   large `eval` stage. `DESCRIBE_SYSTEM` is inherited from the vision sidecar
+   and written for screenshots — verbatim transcription of every legible
+   character, table rows, axis values. Against a photo of two men in chairs it
+   is asking for a long answer about a frame with nothing to transcribe. This
+   is the only lever that costs no GPU work to evaluate: the same frames, a
+   different prompt, read side by side.
+
+## What's in scope
+
+- **[`pipeline/vision.py`](../../src/audrey/pipeline/vision.py)** (**done**) —
+  `VisionTiming`, read off the Ollama response `chat()` was already returning.
+  `describe_one_image` hands it back; the chat path discards it.
+- **[`routes/media.py`](../../src/audrey/routes/media.py)** (**done**) — four
+  disjoint stages to Prometheus and to the per-frame log line.
+- **[`metrics.py`](../../src/audrey/metrics.py)** (**done**) —
+  `audrey_vision_stage_seconds{stage}` and `audrey_vision_eval_tokens`.
+- **[`kb/uploads_db.py`](../../src/audrey/kb/uploads_db.py)** (**done**) —
+  `completed_at` and `source_freed_at`, a quota that skips reclaimed rows, and
+  the `record_upload` upsert that stops reconcile eating job state.
+- **[`routes/files.py`](../../src/audrey/routes/files.py)** (**done**) — the
+  reclaim sweep on the claim path, and the requeue refusal.
+- **[`static/upload.html`](../../src/audrey/static/upload.html)** (**done**) —
+  a reclaimed video's size shown struck through, with the date in the tooltip.
+- **`config.yaml`** (**done**) — `kb.video.keep_source`,
+  `source_retention_hours`.
+- **The levers themselves** — deliberately not built. See
+  [Instrument first](#instrument-first).
+
 ## What's NOT in scope
 
 - **No re-encoding or proxy transcodes.** We extract, we don't transform. A
   cheaper decode is not worth a rewritten source.
+- **No reclamation of non-video uploads.** A document's chunks were extracted
+  from its source and there is no worker to re-run; only video has artifacts
+  complete enough to stand without the bytes.
+- **No user-facing "reclaim now" control.** The sweep is policy, not a button.
+  A user who wants their space back has `DELETE /v1/files/{id}`, which is the
+  honest version of that request — it removes the chunks too.
 - **No changes to the fairness model.** Faster ingest, same gate. If a lever
   only works by leaving the round-robin, it is not a lever, it is a regression.
 
@@ -120,6 +338,17 @@ same should happen to the rest of this list.
 - **Every lever changes output, not just speed.** Batching, downscaling and a
   different vl model all change what the descriptions say. Each needs an output
   comparison, not just a stopwatch.
+- **Reclamation is the only irreversible operation in the whole pipeline.**
+  Every other mistake in phases 32-39 costs a re-run. This one costs the file,
+  and the config that causes it is a single boolean whose default deletes
+  things. Consider it before every deploy that changes a visual or summary
+  stage, because the videos already reclaimed will never see that change.
+- **`keep_source: false` and a short retention window fight each other.** The
+  window exists so a bad ingest can be re-run; the quota pressure exists
+  because bytes sit around. There is no setting that gives both — the honest
+  framing is that 24 hours buys one day of second chances at the cost of one
+  day of allowance, and the right number depends on whether the box is short of
+  disk or short of trust in the pipeline.
 
 ## Deploy on Unraid
 
@@ -127,24 +356,117 @@ same should happen to the rest of this list.
 docker compose up -d --build media-worker audrey-ai
 ```
 
-## Verification (to be written against the built phase)
+## Verification
 
-**1. Stage timings before and after**, from `/metrics`, on the same source
-video. A lever with no recorded before is not a measured improvement.
+### Part 1 — cost attribution (do this first; it picks the next lever)
 
-**2. Output comparison per lever.** The same video's descriptions before and
+**1. Requeue one video and read the breakdown.** One line per described frame,
+and the four stages sum to the wall clock. This is the measurement the rest of
+the phase is waiting on, so read it before building anything.
+
+```
+# Unraid box
+docker compose logs --tail=200 audrey-ai | grep "described a frame"
+```
+
+Each line reads `… in 62.3s (1489 chars) queue=0.4s load=4.1s
+prefill=2.7s/312tok gen=55.2s/486tok`. **Whichever stage is largest names the
+lever**, per the table at the top of this document. Watch for the answer being
+different on the first frame than on the rest — a large `load` on frame 1 only
+is a cold start and is not worth optimising; a large `load` on every frame is
+the model being evicted between calls, which is lever 6.
+
+**2. The stages agree with the wall clock.** A breakdown that sums to a third
+of `elapsed` means the fields are being read wrong, and every conclusion drawn
+from it would be wrong in the same direction.
+
+```
+# Unraid box
+curl -s http://192.168.1.11:8000/metrics | grep -E "vision_stage_seconds_sum|vision_eval_tokens_sum"
+```
+
+`sum(vision_stage_seconds_sum)` should be within a few percent of
+`audrey_video_describe_seconds_sum` over the same window.
+
+**3. A summary survives a restart.** The regression this phase found, and the
+one most likely to come back — it is invisible until someone reboots.
+
+```
+# Unraid box
+docker compose restart audrey-ai
+# laptop
+curl -s http://192.168.1.11:8000/v1/files -H "Authorization: Bearer $TOKEN" \
+  | jq -r '.files[] | select(.summary != "") | "\(.filename): \(.summary[0:60])"'
+```
+
+Non-empty after the restart. Before the fix this returned nothing at all, for
+every video, with no error anywhere.
+
+### Part 2 — source reclamation
+
+**4. Nothing is reclaimed inside the window.** With `source_retention_hours: 24`
+and a video processed minutes ago, the source is still on disk after a worker
+poll and `source_freed_at` is empty. The window is the entire escape hatch for
+"that ingest came out wrong, run it again", so this is the one to check before
+trusting the sweep with anything.
+
+**5. A video past the window is reclaimed exactly once**, and the quota moves.
+Force it with `source_retention_hours: 0` on a test video rather than waiting a
+day — that path is otherwise untested until tomorrow.
+
+```
+# laptop — before and after a worker poll
+curl -s http://192.168.1.11:8000/v1/files -H "Authorization: Bearer $TOKEN" \
+  | jq -r '.total_bytes, (.files[] | "\(.filename) \(.bytes) freed=\(.source_freed_at)")'
+```
+
+`total_bytes` drops by the video's size; `bytes` on the row does not change.
+The `.mp4` is gone from disk and **`.frames.txt` and `.summary.txt` are still
+there** — Qdrant payloads point at those, and the delete route's `{file_id}.*`
+glob would have taken all three.
+
+**6. The video is still searchable afterwards.** The whole premise. Its
+transcript, descriptions and summary are unaffected by the source going away.
+
+```
+# laptop
+curl -s http://192.168.1.11:8000/v1/kb/query -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "<a phrase from the transcript>", "top_k": 5}' | jq -r '.hits[].source'
+```
+
+**7. A requeue of a reclaimed video is refused**, with `force=true` too, and
+the row is untouched by the refusal. Proceeding would delete the chunks
+verified in step 6 and then fail three times against a missing file.
+
+**8. `keep_source: true` stops all of it.** The escape hatch has to work from
+config alone, because it is what someone reaches for after realising they want
+old videos re-processed.
+
+### Part 3 — for any lever actually built
+
+**9. Stage timings before and after**, on the same source video. A lever with
+no recorded before is not a measured improvement.
+
+**10. Output comparison per lever.** The same video's descriptions before and
 after, read side by side. Speed that costs accuracy has to be a deliberate
 trade, not an accident.
 
-**3. Fairness is unchanged.** `gate.snapshot()` during an ingest still shows
+**11. Fairness is unchanged.** `gate.snapshot()` during an ingest still shows
 interleaving with chat.
 
-**4. The gate's head-and-tail behaviour survives** any threshold retune.
+**12. The gate's head-and-tail behaviour survives** any threshold retune.
 
 ### Rollback
 
 Each lever is independent and revertible on its own. That is the reason for the
 ordering — nothing here should require reverting the phase as a unit.
+
+The two parts already built revert differently, and only one of them is safe to
+revert casually. Cost attribution is pure instrumentation and can go at any
+time. **Source reclamation cannot be undone by reverting it** — the escape
+hatch is `keep_source: true`, which stops further deletions and brings nothing
+back. Set that before deploying, not after.
 
 ## What this unblocks
 

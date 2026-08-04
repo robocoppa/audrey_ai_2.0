@@ -111,9 +111,16 @@ deployable and verifiable on its own.
   — keyframes through the `vl` pool. **Landed, working** — the gate keeps 6 of
   19 sampled frames and each describe costs ~62s, which is the cost data
   phase 38 was waiting for.
-- [37 video summary](campaign-2/phase-37-video-summary.md)
+- [37 video summary](campaign-2/phase-37-video-summary.md) — one cloud call
+  over the transcript and descriptions. **Landed, working** — 3.6s and no GPU,
+  under 1% of a video ingest.
 - [38 video optimise](campaign-2/phase-38-video-optimise.md) — making it
-  affordable, and where deleting the source video now lives.
+  affordable, and where deleting the source video now lives. **Partly built.**
+  Cost attribution splits a describe call into queue/load/prefill/generation,
+  because the plan's own lever ranking turned out to be four guesses about
+  which of those is large — two of them not on the list. Source reclamation
+  landed with a retention window and a `keep_source` escape hatch. The levers
+  themselves wait on one ingest's worth of numbers.
 
 **Retrieval quality**
 
