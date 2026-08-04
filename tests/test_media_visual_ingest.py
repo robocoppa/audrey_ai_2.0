@@ -138,6 +138,20 @@ class TestDescribeFrames:
 
         assert len(described) == 4
 
+    def test_a_zero_budget_describes_nothing(self, tmp_path: Path):
+        """0.0 means the lease is already spent. Under a truthiness check that
+        reads as "no budget configured" and describes *everything* — the exact
+        failure the caller computed a 0.0 to prevent."""
+        post = _Post()
+
+        described, planned = describe_frames(
+            [_frame(i, tmp_path) for i in range(3)], user="a@b.c", post=post,
+            endpoint="http://x", token=TOKEN, budget_s=0.0)
+
+        assert described == []
+        assert planned == 3
+        assert post.calls == []
+
     def test_an_unreadable_frame_file_is_skipped(self, tmp_path: Path):
         missing = SelectedFrame(path=tmp_path / "gone.jpg", t_start=0.0,
                                 t_end=30.0, represents=1)
@@ -148,6 +162,40 @@ class TestDescribeFrames:
 
         assert planned == 2
         assert len(described) == 1
+
+
+class TestLeaseAwareBudget:
+    """The configured budget is a ceiling, not an entitlement.
+
+    `TRANSCRIBE_BUDGET_S` 1440 plus `FRAME_BUDGET_S` 900 is 39 minutes against
+    a 30-minute lease. Taken at face value, a long video is swept mid-describe,
+    re-claimed, and burns its attempts doing the same thing every time.
+    """
+
+    def _budget(self, *, lease_s, elapsed, configured):
+        import audrey.media.worker as worker
+        now = worker.time.monotonic()
+        return worker._frame_budget(
+            {"lease_seconds": lease_s}, now - elapsed, configured)
+
+    def test_a_fresh_lease_allows_the_configured_budget(self):
+        assert self._budget(lease_s=1800, elapsed=0, configured=900) == 900
+
+    def test_a_mostly_spent_lease_cuts_the_budget(self):
+        """24 minutes of transcription leaves 6, minus the reserve."""
+        got = self._budget(lease_s=1800, elapsed=1440, configured=900)
+        assert got == pytest.approx(1800 - 1440 - 120, abs=1)
+
+    def test_a_spent_lease_yields_zero_not_a_negative(self):
+        """Negative would be worse than useless — `describe_frames` compares
+        elapsed against it, and every elapsed exceeds a negative immediately,
+        which happens to be right for the wrong reason."""
+        assert self._budget(lease_s=1800, elapsed=2000, configured=900) == 0.0
+
+    def test_a_claim_without_a_lease_falls_back_to_the_configured_budget(self):
+        """An audrey-ai that predates this field still hands out jobs."""
+        import audrey.media.worker as worker
+        assert worker._frame_budget({}, worker.time.monotonic(), 900) == 900
 
 
 class _Qdrant:

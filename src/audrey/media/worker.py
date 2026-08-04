@@ -162,6 +162,7 @@ def handle_job(
     file_id = job["file_id"]
     source = Path(job["path"])
     lease_id = job["lease_id"]
+    claimed_at = time.monotonic()
 
     if not source.exists():
         # The mount is wrong, or the file was deleted under us. Either way the
@@ -210,7 +211,8 @@ def handle_job(
         try:
             frames, planned = _visual_pass(
                 source, frame_dir, job,
-                endpoint=endpoint, token=token, budget_s=frame_budget_s,
+                endpoint=endpoint, token=token,
+                budget_s=_frame_budget(job, claimed_at, frame_budget_s),
             )
         except FFmpegFailedError as e:
             # A video stream that will not decode. The transcript may already
@@ -245,6 +247,43 @@ def handle_job(
     )
     if status != 200:
         log.warning("worker: result rejected for %s (%s): %s", file_id, status, body)
+
+
+#: Seconds of lease held back from the visual pass so the result post has time
+#: to land. Posting a transcript and 24 descriptions is a real request, and a
+#: job that spends its last second describing has nowhere to put the answer.
+LEASE_RESERVE_S = 120.0
+
+
+def _frame_budget(
+    job: dict, claimed_at: float, configured: float | None,
+) -> float | None:
+    """How long the visual pass may run, given what the lease has left.
+
+    The configured budget is a ceiling, not an entitlement. Transcription has
+    already spent some of the lease by the time this is called — a long video
+    can spend most of it — so taking `FRAME_BUDGET_S` at face value is how the
+    job gets swept out from under itself and retried until its attempts run
+    out, doing the same thing every time.
+
+    Returns 0.0 rather than a negative number when the lease is already spent;
+    `describe_frames` treats that as "describe nothing", so the transcript
+    still gets posted instead of the whole job being lost.
+    """
+    lease_s = float(job.get("lease_seconds") or 0)
+    if lease_s <= 0:
+        return configured
+
+    remaining = lease_s - (time.monotonic() - claimed_at) - LEASE_RESERVE_S
+    remaining = max(0.0, remaining)
+    if configured is None:
+        return remaining
+    if remaining < configured:
+        log.info(
+            "worker: visual budget cut to %.0fs by the lease (configured %.0fs)",
+            remaining, configured,
+        )
+    return min(configured, remaining)
 
 
 def _visual_pass(

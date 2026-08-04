@@ -725,6 +725,16 @@ class JobClaim(BaseModel):
     lease_id: str
     attempts: int
     frames: FrameSettings = FrameSettings()
+    # Seconds this lease is good for, so the worker can budget against the
+    # clock that will actually reclaim its job.
+    #
+    # Without it the stage budgets are set independently and can exceed the
+    # lease between them: 1440s of transcription plus 900s of frames is 39
+    # minutes against a 30-minute lease, so a long video would be swept
+    # mid-describe, re-claimed, and burn its attempts doing the same thing
+    # again. The worker cannot read `config.yaml`, so the number comes with
+    # the job.
+    lease_seconds: int = 1800
 
 
 class TranscriptSegment(BaseModel):
@@ -853,6 +863,7 @@ async def claim_job(
         filename=str(row["filename"]), mime=str(row["mime"]),
         bytes=int(row["bytes"]), path=str(path),
         lease_id=lease_id, attempts=int(row["attempts"]),
+        lease_seconds=_lease_minutes(request) * 60,
         frames=FrameSettings(
             interval_s=float(video_cfg.get("frame_interval_s", 30)),
             keyframes_max=int(video_cfg.get("keyframes_max", 24)),

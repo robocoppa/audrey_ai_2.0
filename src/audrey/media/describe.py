@@ -85,7 +85,11 @@ def describe_frames(
     started = time.monotonic()
 
     for i, frame in enumerate(frames):
-        if budget_s and (time.monotonic() - started) >= budget_s:
+        # `is not None`, not truthiness. A budget of 0.0 means the lease is
+        # already spent and nothing may be described — under a falsy check
+        # that reads as "no budget configured" and describes *everything*,
+        # which is the exact failure the caller computed a 0.0 to prevent.
+        if budget_s is not None and (time.monotonic() - started) >= budget_s:
             log.warning(
                 "describe: budget of %.0fs spent after %d/%d frames — "
                 "posting what we have", budget_s, len(described), len(frames),

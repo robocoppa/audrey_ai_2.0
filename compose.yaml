@@ -180,6 +180,17 @@ services:
       # at once, until its attempts run out.
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
       TRANSCRIBE_BUDGET_S: ${TRANSCRIBE_BUDGET_S:-1440}
+      # Phase 36. A ceiling on the visual pass, not an entitlement: the worker
+      # cuts it to whatever the lease has left, because 1440s of transcription
+      # plus 900s of frames is 39 minutes against a 30-minute lease. The
+      # remaining lease arrives on the claim as `lease_seconds`, so this stays
+      # a ceiling rather than having to know kb.video.lease_minutes itself.
+      #
+      # The frame *settings* — interval, keyframes_max, width, dedup distance
+      # — deliberately do NOT live here. They ride on the claim from
+      # `kb.video.*`, so calibrating a threshold against real footage takes
+      # effect on the next job instead of needing a container recreate.
+      FRAME_BUDGET_S: ${FRAME_BUDGET_S:-900}
     volumes:
       # Read-only, and the same path audrey-ai uses, so the `path` returned by
       # /v1/files/jobs/claim resolves unchanged inside this container. If these
