@@ -108,7 +108,9 @@ deployable and verifiable on its own.
   baked into the worker image. **Landed, fully verified** (step 5 moved to 38
   with `keep_source`).
 - [36 video visual assessment](campaign-2/phase-36-video-visual-assessment.md)
-  — keyframes through the `vl` pool.
+  — keyframes through the `vl` pool. **Landed, working** — the gate keeps 6 of
+  19 sampled frames and each describe costs ~62s, which is the cost data
+  phase 38 was waiting for.
 - [37 video summary](campaign-2/phase-37-video-summary.md)
 - [38 video optimise](campaign-2/phase-38-video-optimise.md) — making it
   affordable, and where deleting the source video now lives.

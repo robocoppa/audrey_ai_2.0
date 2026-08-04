@@ -423,6 +423,7 @@
           <td>${statusCell(f)}</td>
           <td><button class="danger" data-id="${escapeAttr(f.file_id)}">delete</button></td>
         </tr>
+        ${summaryRow(f)}
       `).join("");
       rows.querySelectorAll("button.danger").forEach(btn =>
         btn.addEventListener("click", () => deleteOne(btn.dataset.id)),
@@ -439,6 +440,20 @@
   function rowClass(f) {
     if (f.status === "failed") return "err";
     return f.status === "ready" ? "" : "pending";
+  }
+
+  // Phase 37. A second row under the file, because "jasonRetirement.mp4 ·
+  // 288 MB · ready" tells you nothing you did not already know. Absent for
+  // everything that is not a processed video, and absent for a video whose
+  // summary call failed — that is a missing field, not an error to surface.
+  function summaryRow(f) {
+    if (!f.summary) return "";
+    return `
+      <tr class="summary">
+        <td colspan="6" style="color: var(--muted); font-size: 0.9em;
+            padding-top: 0; border-top: 0; white-space: pre-wrap;"
+          >${escapeHtml(f.summary)}</td>
+      </tr>`;
   }
 
   function statusCell(f) {

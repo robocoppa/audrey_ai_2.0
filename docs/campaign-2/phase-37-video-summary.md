@@ -5,8 +5,8 @@ One model call over the transcript and frame descriptions that
 [phase 36](phase-36-video-visual-assessment.md) produced, stored on the row and
 shown in `GET /v1/files`.
 
-**Status: PLANNED.** The smallest phase of the video work, and the one that
-makes the rest legible.
+**Status: BUILT, NOT YET DEPLOYED.** The smallest phase of the video work, and
+the one that makes the rest legible.
 
 ---
 
@@ -41,17 +41,57 @@ Stored on the row it answers "what is this video" in the UI. Ingested as a text
 chunk it also answers that question in chat, without retrieving the whole
 transcript. One extra chunk per video is a rounding error against a transcript.
 
+### It runs in `audrey-ai`, not the worker (corrected)
+
+The plan put this in `media/summarise.py`, "acting-as the uploader as in phase
+36". Phase 36 found there is no act-as on `/v1/chat/completions` and answered
+it with a narrow service route; a second route would work here too, and would
+still be the wrong shape.
+
+**A summary is derived from the artifacts, not from the video file.** By the
+time one can be written, `ingest_result` is already holding the segments and
+the descriptions in memory. Asking the worker to do it would mean shipping the
+whole transcript to a summarise endpoint and then shipping it again in the
+result post — to produce something the worker never looks at.
+
+So the worker's job ends where the artifacts end. This runs where they land,
+which also means it needs no new endpoint, no new auth surface, and no second
+copy of a 7,000-character transcript on the wire.
+
+### The input is bounded here, and sampled rather than truncated
+
+A two-hour transcript is ~100k characters. `summary_input_chars` (24k, roughly
+45 minutes of speech) caps what the model sees, and when the cap bites the
+excerpts are sampled **evenly across the video** rather than taken from the
+front — a summary built from the first fifteen minutes is confidently wrong
+about the other forty-five and says nothing to indicate it. Same reasoning as
+the keyframe cap in [phase 36](phase-36-video-visual-assessment.md).
+
+The prompt is also told when it is reading excerpts, because a model that
+believes it has the whole transcript will happily assert what the video
+concluded.
+
+The two artifacts are labelled separately in the prompt — what was **said** and
+what was **on screen**. A summary reporting a whiteboard as something a person
+stated is worse than one that omits it.
+
 ## What's in scope
 
-- **`src/audrey/media/summarise.py`** (new) — one passthrough call over the
-  transcript and descriptions, acting-as the uploader as in phase 36.
-- **[`kb/uploads_db.py`](../../src/audrey/kb/uploads_db.py)** — `summary` on the
-  row.
-- **[`routes/files.py`](../../src/audrey/routes/files.py)** — `ingest-result`
-  accepts the summary; `FileRow` grows `summary`.
-- **[`static/upload.html`](../../src/audrey/static/upload.html)** — show it in
-  the file row.
-- **`config.yaml`** — `kb.video.summarise_model`.
+- **[`pipeline/summarise.py`](../../src/audrey/pipeline/summarise.py)** (new,
+  **done**) — one call over the transcript and descriptions, in `audrey-ai`.
+- **[`kb/uploads_db.py`](../../src/audrey/kb/uploads_db.py)** (**done**) —
+  `summary`, the seventh additive column, written by `complete_job` and
+  cleared by `requeue_job` so a re-run cannot show the previous run's text.
+- **[`routes/files.py`](../../src/audrey/routes/files.py)** (**done**) —
+  `ingest_result` summarises after both other artifacts land; `FileRow` grows
+  `summary`.
+- **[`kb/ingest.py`](../../src/audrey/kb/ingest.py)** (**done**) —
+  `ingest_summary`, deliberately unchunked: a summary that needed splitting
+  would no longer be a summary, and half of one answers nothing.
+- **[`static/upload.html`](../../src/audrey/static/upload.html)** (**done**) —
+  a second row under the file, absent when there is no summary.
+- **`config.yaml`** (**done**) — `kb.video.summarise_model`,
+  `summary_input_chars`, `summary_timeout_s`.
 
 ## What's NOT in scope
 
@@ -77,21 +117,38 @@ transcript. One extra chunk per video is a rounding error against a transcript.
 docker compose up -d --build media-worker audrey-ai
 ```
 
-## Verification (to be written against the built phase)
+## Verification
 
-**1. A processed video shows a summary** in `GET /v1/files` and in the upload
-page's file list.
+**1. A processed video shows a summary** in `GET /v1/files` and as a second
+row in the upload page's file list.
+
+```
+curl -s http://192.168.1.11:8000/v1/files -H "Authorization: Bearer $TOKEN" \
+  | jq -r '.files[] | select(.summary != "") | "\(.filename): \(.summary)"'
+```
 
 **2. The summary is searchable** as its own chunk, attributed to the uploading
-user.
+user. A `kb/query` hit whose `source` ends `.summary.txt`.
 
-**3. A silent video gets a summary** built from frame descriptions alone.
+**3. A silent video gets a summary** built from frame descriptions alone —
+`silent.mp4` is the fixture, and the budget split means it spends its whole
+allowance on descriptions rather than reserving half for a transcript that
+does not exist.
 
-**4. A deliberately failed summary call leaves the row `ready`**, with the
-transcript intact and the summary field empty.
+**4. A failed summary leaves the row `ready`.** The cheapest way to force it
+is `summarise_model: "nope:doesnotexist"` for one run: the transcript and
+descriptions must still ingest, `chunks` must still be right, and the summary
+field must be empty rather than the row `failed`.
 
-**5. The summariser touched no GPU.** Confirm the call went to the cloud model
-and `gate.snapshot()` shows no local occupancy for it.
+**5. The summariser touched no GPU.** `audrey_gpu_gate_wait_seconds` must not
+move across a summary, and the log line names the model. `FairLocalGate` is a
+no-op for a non-local location, so a cloud summariser cannot queue behind
+chat — but the assertion is worth making, because the failure is silent and
+only visible under load.
+
+**6. A requeue does not leave the old summary behind.** `requeue_job` clears
+the field; a row that kept last run's text while re-processing would be
+describing a video it no longer matches.
 
 ### Rollback
 

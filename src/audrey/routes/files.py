@@ -64,6 +64,7 @@ from audrey.kb.extract import (
 )
 from audrey.kb.ingest import (
     ingest_frame_descriptions,
+    ingest_summary,
     ingest_transcript_segments,
     ingest_user_image_file,
     ingest_user_text_file,
@@ -76,6 +77,7 @@ from audrey.kb.user_store import (
     user_image_collection,
     user_text_collection,
 )
+from audrey.pipeline.summarise import summarise_video
 
 log = logging.getLogger(__name__)
 
@@ -98,6 +100,10 @@ class FileRow(BaseModel):
     # Seconds of audio, for video only. 0 everywhere else and for a video with
     # no audio stream, so it is only meaningful read alongside `kind`.
     duration_s: float = 0.0
+    # One-paragraph summary of a processed video (Phase 37). Empty for
+    # everything else, and for a video whose summary call failed — which is a
+    # missing field, never a failed row.
+    summary: str = ""
 
 
 class UploadResponse(BaseModel):
@@ -999,6 +1005,43 @@ async def ingest_result(
             )
             raise HTTPException(status_code=500, detail=f"Ingest failed: {e}") from e
 
+    # Phase 37. Last, because it reads what the other two produced — and
+    # fail-soft, because by now they are ingested and already useful. A
+    # summary that could not be written is a missing field, never a failed
+    # row: the video is still searchable by everything it said and showed.
+    summary = ""
+    if transcript or frames:
+        try:
+            summary = await summarise_video(
+                [s.model_dump() for s in body.segments if s.text.strip()],
+                frames,
+                filename=str(row["filename"]),
+                duration_s=float(body.duration_s or 0.0),
+                ollama=request.app.state.ollama,
+                registry=request.app.state.registry,
+                gate=request.app.state.gate,
+                cfg=request.app.state.cfg,
+                user_id=user,
+            )
+        except Exception as e:  # noqa: BLE001 — every failure here is survivable
+            log.warning("files: summary failed for %s (row stays ready): %s", file_id, e)
+
+    if summary:
+        try:
+            chunks += await ingest_summary(
+                summary,
+                sidecar=(
+                    _upload_root(request) / sanitize_user(user) / f"{file_id}.summary.txt"
+                ),
+                qdrant=qdrant, embedder=text_embedder,
+                collection=collection or user_text_collection(user),
+                user=user, file_id=file_id,
+                filename=str(row["filename"]), mime=str(row["mime"]),
+                source_bytes=int(row["bytes"]), uploaded_at=stamp,
+            )
+        except Exception as e:  # noqa: BLE001 — same reasoning; keep the text on the row
+            log.warning("files: summary ingest failed for %s: %s", file_id, e)
+
     if body.frames_planned is not None and len(frames) < body.frames_planned:
         # Not a failure. Unlike a transcript, frame descriptions are
         # independently timestamped, so an incomplete set is correct about
@@ -1012,7 +1055,7 @@ async def ingest_result(
 
     if not await db.complete_job(
         file_id=file_id, lease_id=body.lease_id, collection=collection, chunks=chunks,
-        duration_s=float(body.duration_s or 0.0),
+        duration_s=float(body.duration_s or 0.0), summary=summary,
     ):
         # Valid when checked above and not now, so the sweep ran in between.
         # The chunks are already in Qdrant under this file_id; the newer
@@ -1157,7 +1200,7 @@ async def list_files(
     rows = await db.list_user(user)
     files = [FileRow(**{k: row[k] for k in (
         "file_id", "filename", "mime", "bytes", "uploaded_at", "chunks",
-        "status", "failure_reason", "duration_s",
+        "status", "failure_reason", "duration_s", "summary",
     )}) for row in rows]
     total = sum(r.bytes for r in files)
     return ListResponse(

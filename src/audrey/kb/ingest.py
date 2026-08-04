@@ -17,6 +17,7 @@ vector for the whole image); no chunking.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import logging
 from dataclasses import dataclass, field
@@ -342,6 +343,66 @@ async def ingest_transcript_segments(
         file_id, len(points), len(segments), chunk_tokens,
     )
     return len(points)
+
+
+async def ingest_summary(
+    summary: str,
+    *,
+    sidecar: Path,
+    qdrant: QdrantKB,
+    embedder: TextEmbedder,
+    collection: str,
+    user: str,
+    file_id: str,
+    filename: str,
+    mime: str,
+    source_bytes: int,
+    uploaded_at: str | None = None,
+) -> int:
+    """Ingest a video's summary as one searchable chunk (Phase 37).
+
+    Stored on the row, it answers "what is this video" in the file list.
+    Ingested here, it answers the same question in chat without pulling two
+    hundred transcript chunks into context. One extra chunk per video is a
+    rounding error against the transcript it summarises.
+
+    Deliberately **not** chunked. A summary that needed splitting would no
+    longer be a summary, and its value in retrieval is that the whole thing
+    fits in one hit — a half-summary answers nothing.
+
+    Its own sidecar name for the same reason as the frames: `point_id` is
+    `(source, kind, chunk_idx)`, so sharing a source with either of the other
+    artifacts would collide on chunk 0.
+    """
+    text = summary.strip()
+    if not text:
+        return 0
+
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(sidecar.write_text, text, "utf-8")
+    source = normalize_source(sidecar)
+    stat = sidecar.stat()
+    stamp = uploaded_at or _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+    vectors = await embedder.embed_many([text])
+
+    point = build_text_point(
+        source=source, chunk_idx=0, text=text, vector=vectors[0],
+        mtime=stat.st_mtime, sparse=await qdrant.has_sparse(collection),
+        extra={
+            "user": user,
+            "file_id": file_id,
+            "filename": filename,
+            "mime": mime,
+            "bytes": int(source_bytes),
+            "uploaded_at": stamp,
+            "t_start": 0.0,
+            "t_end": 0.0,
+            "artifact": "summary",
+        },
+    )
+    await qdrant.upsert_text([point], collection=collection)
+    log.info("ingest: summary %s -> 1 chunk (%d chars)", file_id, len(text))
+    return 1
 
 
 async def ingest_frame_descriptions(

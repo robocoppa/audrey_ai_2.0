@@ -5,15 +5,38 @@ the [keyframe gate](phase-38-video-optimise.md), into
 `audrey_passthrough/qwen3-vl:32b`, and the resulting prose is ingested as
 ordinary searchable text alongside the transcript.
 
-**Status: BUILT, NOT YET DEPLOYED.** The whole path exists and is tested:
-sample → thin → describe → ingest, with descriptions landing beside the
-transcript in the same per-user collection under an `artifact: "visual"`
-discriminator.
+**Status: DEPLOYED AND WORKING** on the box, 2026-08-04. Sample → thin →
+describe → ingest, with descriptions landing beside the transcript in the same
+per-user collection under an `artifact: "visual"` discriminator. Steps 0-4, 6
+and 7 verified; step 5 (fairness under live chat load) outstanding.
 
-The model path was already proved by hand against the deployment — frames
-extracted from a real upload came back correctly described. What is unproved
-is doing it unattended, at volume, without starving chat. That is what the
-verification below is for, and it needs the box.
+## What a video actually costs
+
+Measured over two full runs of the same 9m25s video, 12 describe calls through
+`qwen3-vl:32b`:
+
+| | |
+|---|---|
+| frames sampled at 30s | 19 |
+| keyframes after the gate | **6** — identical to the phase-32 calibration |
+| describe, per frame | mean **62.3s**, range 25.5–102.6s (**4x**) |
+| frame extraction | 34s for 19 frames from a 288 MB source |
+| transcription | 78s |
+| whole job | 458s, of which the visual pass is **77%** |
+
+**`keyframes_max: 24` is not reachable.** 24 frames at 62.3s is nearly 25
+minutes, so against a 30-minute lease `FRAME_BUDGET_S` binds first, at roughly
+14 frames. The cap is not the constraint — the budget is. Phase 38 should
+settle whether the answer is a longer lease, batched frames, or a smaller
+model, but it now has numbers instead of estimates.
+
+The 4x spread matters as much as the mean: frame complexity dominates, so a
+per-video estimate built from an average will be wrong in both directions.
+
+**Description length is non-deterministic.** The same six frames produced
+12,458 chars on one run and 14,608 on the next, so chunk counts differ between
+requeues of an unchanged video — 15 visual chunks, then 17. Expected. A
+*missing* artifact is the failure; a differing count is not.
 
 ---
 
@@ -284,8 +307,11 @@ A short clip is the third case and must yield one frame, not zero.
 
 **7. A described video survives a requeue.** Both artifacts live under one
 `file_id`, and the delete-before-upsert that keeps a re-run from doubling them
-is the same call that could wipe one of them. Requeue a described video and
-confirm both come back.
+is the same call that could wipe one of them. Requeue a video that **already
+has both** and confirm both come back — a requeue of a transcript-only row
+builds descriptions for the first time and proves nothing about coexistence.
+Verified 2026-08-04: one delete, then `transcript -> 9 chunks` and
+`frames -> 17 chunks`, `chunks=26`.
 
 ### Rollback
 

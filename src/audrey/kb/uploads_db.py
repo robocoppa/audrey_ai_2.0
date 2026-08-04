@@ -73,7 +73,13 @@ CREATE TABLE IF NOT EXISTS uploads (
   -- Seconds of audio, reported by the worker (Phase 35). 0 for everything
   -- that is not a video, and for a video with no audio stream — those are
   -- the same number for different reasons, so read it with `kind`.
-  duration_s     REAL NOT NULL DEFAULT 0
+  duration_s     REAL NOT NULL DEFAULT 0,
+  -- One-paragraph summary of a processed video (Phase 37), shown in the file
+  -- list. Empty for everything else, and empty for a video whose summary call
+  -- failed — that is a missing field, never a failed row, because by the time
+  -- it is written the transcript and descriptions are already ingested and
+  -- already useful.
+  summary        TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_user ON uploads(user);
 -- No index on `status` here. `_SCHEMA` runs before `_migrate`, and on the
@@ -121,6 +127,7 @@ _UPLOADS_ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("attempts", "INTEGER NOT NULL DEFAULT 0"),
     ("failure_reason", "TEXT NOT NULL DEFAULT ''"),
     ("duration_s", "REAL NOT NULL DEFAULT 0"),
+    ("summary", "TEXT NOT NULL DEFAULT ''"),
 )
 
 
@@ -349,7 +356,7 @@ class UploadsDB:
 
     async def complete_job(
         self, *, file_id: str, lease_id: str, collection: str, chunks: int,
-        duration_s: float = 0.0,
+        duration_s: float = 0.0, summary: str = "",
     ) -> bool:
         """Flip a leased row to 'ready'. False if the lease no longer holds.
 
@@ -361,20 +368,21 @@ class UploadsDB:
         match its video.
         """
         return await asyncio.to_thread(
-            self._complete_job_sync, file_id, lease_id, collection, chunks, duration_s,
+            self._complete_job_sync, file_id, lease_id, collection, chunks,
+            duration_s, summary,
         )
 
     def _complete_job_sync(
         self, file_id: str, lease_id: str, collection: str, chunks: int,
-        duration_s: float,
+        duration_s: float, summary: str,
     ) -> bool:
         with self._lock:
             cur = self._conn.execute(
                 "UPDATE uploads SET status = 'ready', collection = ?, chunks = ?, "
                 "       lease_id = '', leased_at = '', failure_reason = '', "
-                "       duration_s = ? "
+                "       duration_s = ?, summary = ? "
                 "WHERE file_id = ? AND lease_id = ? AND status = 'processing'",
-                (collection, chunks, duration_s, file_id, lease_id),
+                (collection, chunks, duration_s, summary, file_id, lease_id),
             )
             return cur.rowcount > 0
 
@@ -424,7 +432,7 @@ class UploadsDB:
             cur = self._conn.execute(
                 "UPDATE uploads SET status = 'pending', lease_id = '', "
                 "       leased_at = '', attempts = 0, failure_reason = '', "
-                "       collection = '', chunks = 0, duration_s = 0, "
+                "       collection = '', chunks = 0, duration_s = 0, summary = '', "
                 "       bytes = COALESCE(?, bytes) "
                 "WHERE file_id = ?",
                 (bytes_, file_id),

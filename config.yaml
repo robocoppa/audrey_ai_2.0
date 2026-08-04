@@ -605,6 +605,32 @@ kb:
     # fixture full of solid colours will look like a broken gate.
     frame_dedup_distance: 8
 
+    # ─── Summary (Phase 37) ──────────────────────────────────────────
+    # One call over the transcript and the frame descriptions, stored on the
+    # row for the file list and ingested as one chunk so chat can answer
+    # "what is this video" without pulling 200 transcript chunks into context.
+
+    # A CLOUD model by default, and that is the point: summarising is a text
+    # task over text inputs, so it carries none of the image-capability risk
+    # that made the `vl` pool local-only, and `FairLocalGate` is a no-op for a
+    # non-local location. This is the one stage of video ingest that costs the
+    # box no GPU at all. Naming a local model here works and puts a summary in
+    # the same queue as the chat turn waiting behind it — for a stage nobody
+    # is waiting on.
+    summarise_model: "glm-5.2:cloud"
+
+    # Characters of transcript + descriptions handed to the summariser. A
+    # two-hour transcript is ~100k characters; bounding it here means the cut
+    # is deliberate and evenly sampled across the video, rather than a
+    # truncation partway through a sentence forty minutes in. Roughly 45
+    # minutes of speech.
+    summary_input_chars: 24000
+
+    # Longer than the chat default because a summary reads a lot and is not
+    # streamed to anyone. It also cannot fail the video — a summary that times
+    # out leaves an empty field on a `ready` row.
+    summary_timeout_s: 180
+
 # ─── Tools (OpenAPI auto-discovery) ────────────────────────────────────
 tools:
   enabled: true
