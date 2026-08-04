@@ -68,6 +68,15 @@ class TestCollectionSelection:
         assert not migrate_bm25.is_text_collection("kb_images")
         assert not migrate_bm25.is_text_collection("kb_user_images_bart_proton_me")
 
+    def test_tools_server_collections_are_left_alone(self):
+        """`kb_chat_archive` and `kb_memory` are text, and migrating them would
+        look consistent — but tools-server owns them, creates them itself, and
+        upserts bare-list dense vectors through code this phase does not
+        touch. No query path reads them lexically, so the rebuild would buy
+        nothing and risk another service's storage to do it."""
+        assert not migrate_bm25.is_text_collection("kb_chat_archive")
+        assert not migrate_bm25.is_text_collection("kb_memory")
+
 
 class TestMigration:
     def test_every_point_survives(self, client: QdrantClient):

@@ -60,9 +60,21 @@ from audrey.kb import bm25
 from audrey.kb.qdrant import SPARSE_NAME, TEXT_DIM
 from audrey.kb.user_store import USER_TEXT_PREFIX
 
-# Only text collections. Image points carry a caption, not text, and lexical
-# search over captions is a separate idea from this phase.
-TEXT_COLLECTIONS = ("kb_text", "kb_chat_archive", "kb_memory")
+# Only the collections the hybrid query path actually searches:
+# `_search_text_hybrid` reads `qdrant.text_collection` and the caller's own
+# `kb_user_text_*`, and nothing else.
+#
+# `kb_chat_archive` and `kb_memory` are deliberately NOT here. They are text
+# collections, and migrating them would look consistent — but they belong to
+# `tools-server`, which creates them itself and upserts bare-list dense
+# vectors through code this phase does not touch. No query path reads them
+# lexically, so rebuilding them buys nothing today and takes on the risk of
+# reshaping another service's storage to do it. Add them here when something
+# actually searches them, and test that service's writes first.
+#
+# Image collections are excluded for a different reason: image points carry a
+# `caption`, not `text`, and lexical search over captions is its own idea.
+TEXT_COLLECTIONS = ("kb_text",)
 SCRATCH_SUFFIX = "__bm25"
 PAGE = 256
 

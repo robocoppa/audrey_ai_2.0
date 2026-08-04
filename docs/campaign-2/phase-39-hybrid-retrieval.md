@@ -216,6 +216,15 @@ documents exist is a worse problem than the one being fixed.
   A BM25 vector is arithmetic over the `payload.text` already on every point,
   so **nothing is re-read from source** — which matters because for text
   uploads the source bytes are long gone.
+
+  **Scoped to `kb_text` and `kb_user_text_*`** — exactly what the hybrid query
+  path reads. `kb_chat_archive` and `kb_memory` are text collections too, and
+  migrating them would look consistent, but `tools-server` owns them: it
+  creates them itself and upserts bare-list dense vectors through code this
+  phase does not touch. Nothing searches them lexically, so rebuilding them
+  buys nothing today and takes on the risk of reshaping another service's
+  storage to do it. The rule is worth stating generally — *migrate what a
+  query path reads, not everything that shares a shape.*
 - **`config.yaml`** — `kb.hybrid.enabled` (off), `rrf_k`, `min_term_overlap`.
 
 ## What's NOT in scope
