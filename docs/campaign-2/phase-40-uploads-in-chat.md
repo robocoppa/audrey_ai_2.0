@@ -191,38 +191,62 @@ them restores previous behaviour exactly.
 
 | file | change |
 |---|---|
-| `src/audrey/kb/qdrant.py` | `SearchScope` + `_as_filter`; `scope=` on `search_text`, `search_lexical`, `search_images`; `artifact` added to the payload indexes |
+| `src/audrey/kb/qdrant.py` | `SearchScope` + `_as_filter`; `search_hybrid` fan-out; `scope=` on `search_text`, `search_lexical`, `search_images`; `artifact` added to the payload indexes |
 | `src/audrey/routes/kb.py` | `filename`/`artifact` on `TextQuery`, `_resolve_filename`, scope threaded through **both** search paths; `Hit` gained `filename`/`artifact`; `QueryResponse` gained `notice` |
 | `tools-server/app.py` | `filename`/`artifact` on `kb_search`, `notice` passed back |
-| `tests/test_kb_file_filter.py` | new, 21 tests |
+| `tests/test_kb_file_filter.py` | new, 26 tests |
 
-1325 hermetic tests, ruff clean, cite drift repaired (19 left, all pre-existing).
+1330 hermetic tests, ruff clean, cite drift repaired (19 left, all pre-existing).
 
-**The scope is one object, deliberately.** `SearchScope` is passed by
-reference to both retrievers rather than each side building its own filter,
-so "did the lexical side get the same filter?" is answerable by reading one
-value being threaded through. `test_both_sides_get_the_identical_scope_object`
-asserts identity, not equality — two separately-built filters are how the two
-sides drift apart six months later.
+**The scope reaches both retrievers by construction, not by test.**
+`QdrantKB.search_hybrid(vector, query, …, scope=)` takes the scope **once**
+per collection and fans out to `search_text` and `search_lexical` itself,
+returning `(dense, lexical)` unfused. The route has no argument list in which
+the two sides could disagree.
 
-**`file_ids=[]` is not `file_ids=None`.** `None` means unscoped; `[]` means a
-file was named and does not exist. Collapsing them turns a scoped question
-into a corpus-wide one — the silent widening this step exists to prevent. The
-search methods short-circuit on `matches_nothing` in Python rather than
-building an empty `MatchAny`, because an empty `MatchAny` is not dependably
-"matches nothing" across qdrant-client versions and its local mode, and the
-way it fails is by matching *everything*.
+The first version of this passed `scope=` at both call sites and pinned the
+pairing with a test asserting the two got the identical object. That was the
+wrong instinct and worth naming: **a test proves today's code passes both
+arguments; it does nothing about tomorrow's edit adding a third call site with
+one of them missing.** The hazard the plan called out — a filter on the dense
+side only, producing a confident answer partly drawn from the wrong file, with
+nothing logged — deserved to be made unrepresentable rather than watched.
+Fusion and the evidence rule stayed in the route, because they are retrieval
+policy and the storage wrapper should not own their config.
+
+**`SearchScope(file_ids=[])` raises.** `None` means unscoped; `[]` would mean
+a file was named and does not exist — a state with no safe downstream
+representation, because an empty `MatchAny` is not dependably "matches
+nothing" across qdrant-client versions and its local mode, and **the way it
+fails is by matching everything**. The first version carried it as a sentinel
+and checked `matches_nothing` in each search method. That is a rule enforced
+by every consumer remembering to check it, which is the same shape of problem
+as the one above. Now the illegal state cannot be built: a caller whose lookup
+resolved nothing must not search, and says so itself.
 
 **A file filter skips the global collection entirely.** An upload's chunks
 only ever land in `kb_user_text_<user>`; the global collection has no
 `file_id` payload, so searching it under a file filter is a guaranteed-empty
 round trip.
 
-**A miss is reported, not just empty.** `QueryResponse.notice` carries "no
-uploaded file named X — use list_my_files". Empty results alone are ambiguous
-between "that file says nothing about this" and "there is no such file", and a
-model told the first will confidently report it about a file the user does not
-have.
+**A miss names the alternatives.** `QueryResponse.notice` lists the
+filenames the user *does* have (capped at 20, with an exact "and N more"),
+because `_resolve_filename` already read those rows in order to fail. The
+first version said "use list_my_files", which is a second round trip the data
+was already sitting in hand to avoid — and a model's likelier move than
+calling the tool is guessing another filename. A user with no uploads at all
+is told that specifically, rather than shown an empty list.
+
+**A filename matching two files says so.** Filenames are not unique, and an
+answer stitched from two recordings under one name is wrong in a way the
+caller cannot see. Both are still searched — that is the honest reading of "in
+standup.mp4" — but the notice reports it.
+
+Empty results alone are ambiguous between "that file says nothing about this"
+and "there is no such file"; a model told the first will confidently report it
+about a file the user does not have. That is why the channel is a `notice` on
+a 200 rather than an error: `dispatch.py` already collapses three different
+meanings into one `is_error=True` footer, and this would have been a fourth.
 
 **`file_id` was already a payload index; `artifact` was not.** It is now, in
 the existing idempotent `ensure_user_payload_indexes`, which runs on every

@@ -22,12 +22,14 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from audrey.kb.qdrant import KBHit, SearchScope, _as_filter
+from audrey.kb import qdrant as qdrant_mod
+from audrey.kb.qdrant import KBHit, QdrantKB, SearchScope, _as_filter
 from audrey.kb.uploads_db import UploadsDB
 from audrey.routes.kb import _search_text_hybrid, _search_text_merged
 from audrey.routes.kb import router as kb_router
@@ -63,6 +65,12 @@ class _ScopeRecordingQdrant:
         self.lexical.append((collection or self.text_collection, scope))
         return list(self._user_lexical) if collection else []
 
+    async def search_hybrid(self, vec, query, *, top_k, collection=None, scope=None):
+        return (
+            await self.search_text(vec, top_k=top_k, collection=collection, scope=scope),
+            await self.search_lexical(query, top_k=top_k, collection=collection, scope=scope),
+        )
+
 
 # ─── The filter object ────────────────────────────────────────────────
 
@@ -72,13 +80,21 @@ class TestSearchScope:
         assert _as_filter(None) is None
         assert _as_filter(SearchScope()) is None
 
-    def test_a_scope_that_matched_no_files_is_not_the_same_as_no_scope(self):
-        """The distinction the whole step turns on. `None` means "search
-        everything"; `[]` means "a file was named and it does not exist", and
-        conflating them turns a scoped question into a corpus-wide one."""
-        assert SearchScope(file_ids=[]).matches_nothing is True
-        assert SearchScope(file_ids=["f1"]).matches_nothing is False
-        assert SearchScope().matches_nothing is False
+    def test_a_scope_matching_no_files_cannot_be_constructed(self):
+        """The distinction the whole step turns on, enforced rather than
+        documented.
+
+        `None` means "search everything". `[]` would mean "a file was named
+        and does not exist" — a state with no safe downstream representation,
+        since an empty `MatchAny` can degrade to matching everything. Rather
+        than a sentinel every consumer must remember to check, it is refused
+        at construction: a caller whose lookup found nothing must not search.
+        """
+        with pytest.raises(ValueError, match="must not search"):
+            SearchScope(file_ids=[])
+
+        assert SearchScope(file_ids=["f1"]).file_ids == ["f1"]
+        assert SearchScope().file_ids is None
 
     def test_a_file_scope_filters_on_file_id(self):
         flt = _as_filter(SearchScope(file_ids=["f1", "f2"]))
@@ -99,6 +115,58 @@ class TestSearchScope:
 
 
 # ─── The trap: both retrievers, or neither ────────────────────────────
+
+
+class TestFanOut:
+    """`QdrantKB.search_hybrid` is what makes a dense-only filter impossible
+    to express. These test the real class, not a fake, because the guarantee
+    lives in it rather than in the route that calls it."""
+
+    @pytest.mark.asyncio
+    async def test_one_scope_in_reaches_both_retrievers(self, monkeypatch):
+        fake_client = MagicMock()
+        monkeypatch.setattr(qdrant_mod, "QdrantClient", lambda **_: fake_client)
+        kb = QdrantKB(host="x", port=0)
+        seen: dict[str, object] = {}
+
+        async def _dense(vector, *, top_k, collection=None, scope=None):
+            seen["dense"] = scope
+            return []
+
+        async def _lexical(query, *, top_k, collection=None, scope=None):
+            seen["lexical"] = scope
+            return []
+
+        monkeypatch.setattr(kb, "search_text", _dense)
+        monkeypatch.setattr(kb, "search_lexical", _lexical)
+        scope = SearchScope(file_ids=["f1"], artifact="transcript")
+
+        await kb.search_hybrid([0.1], "handover", top_k=5, scope=scope)
+
+        assert seen["dense"] is scope
+        assert seen["lexical"] is scope
+
+    @pytest.mark.asyncio
+    async def test_it_returns_the_two_lists_unfused(self, monkeypatch):
+        """Fusion and the evidence rule are retrieval policy and stay with the
+        route that owns their config — the storage wrapper only fans out."""
+        fake_client = MagicMock()
+        monkeypatch.setattr(qdrant_mod, "QdrantClient", lambda **_: fake_client)
+        kb = QdrantKB(host="x", port=0)
+
+        async def _dense(vector, *, top_k, collection=None, scope=None):
+            return [_hit("d.txt", "dense", 0.9)]
+
+        async def _lexical(query, *, top_k, collection=None, scope=None):
+            return [_hit("l.txt", "lexical", 12.0)]
+
+        monkeypatch.setattr(kb, "search_text", _dense)
+        monkeypatch.setattr(kb, "search_lexical", _lexical)
+
+        dense, lexical = await kb.search_hybrid([0.1], "q", top_k=5)
+
+        assert [h.source for h in dense] == ["d.txt"]
+        assert [h.source for h in lexical] == ["l.txt"]
 
 
 class TestBothRetrievers:
@@ -308,17 +376,68 @@ class TestUnknownFilename:
         assert "scope" not in captured
 
     @pytest.mark.asyncio
-    async def test_it_says_the_file_is_missing(self, db, monkeypatch):
+    async def test_it_names_the_files_that_do_exist(self, db, monkeypatch):
         """Empty results alone are ambiguous between 'that file says nothing
         about this' and 'there is no such file'. A model told the first will
-        report it, confidently, about a file the user does not have."""
+        report it, confidently, about a file the user does not have.
+
+        Naming the alternatives costs nothing — the lookup already read these
+        rows in order to fail — and closes the loop in one turn. Without it
+        the model's likeliest next move is to guess a second filename.
+        """
+        await _add(db, "f1", user="alice@example.com", filename="standup.mp4")
+        await _add(db, "f2", user="alice@example.com", filename="retro.mp4")
         app, _ = _build_app(db, monkeypatch)
 
         notice = _query(app, {"query": "handover", "user": "alice@example.com",
                               "filename": "nope.mp4"}).json()["notice"]
 
         assert "nope.mp4" in notice
-        assert "list_my_files" in notice
+        assert "standup.mp4" in notice
+        assert "retro.mp4" in notice
+
+    @pytest.mark.asyncio
+    async def test_a_user_with_no_uploads_is_told_that_instead(self, db, monkeypatch):
+        """"Available files are: " followed by nothing reads as a bug. The
+        real reason is worth stating plainly."""
+        app, _ = _build_app(db, monkeypatch)
+
+        notice = _query(app, {"query": "handover", "user": "alice@example.com",
+                              "filename": "nope.mp4"}).json()["notice"]
+
+        assert "has not uploaded any files" in notice
+
+    @pytest.mark.asyncio
+    async def test_the_listing_in_the_notice_is_capped(self, db, monkeypatch):
+        """A prolific user's whole file list does not belong in a tool result,
+        but the count must stay exact so the reply is never misleading about
+        what was left out."""
+        for i in range(25):
+            await _add(db, f"f{i}", user="alice@example.com", filename=f"v{i:02d}.mp4")
+        app, _ = _build_app(db, monkeypatch)
+
+        notice = _query(app, {"query": "handover", "user": "alice@example.com",
+                              "filename": "nope.mp4"}).json()["notice"]
+
+        assert "and 5 more" in notice
+        assert "v00.mp4" in notice
+        assert "v24.mp4" not in notice
+
+    @pytest.mark.asyncio
+    async def test_duplicate_filenames_are_flagged_rather_than_merged_silently(
+        self, db, monkeypatch,
+    ):
+        """The caller asked about one thing. An answer stitched from two
+        recordings sharing that name is wrong in a way it cannot see."""
+        await _add(db, "f1", user="alice@example.com", filename="standup.mp4")
+        await _add(db, "f2", user="alice@example.com", filename="standup.mp4")
+        app, _ = _build_app(db, monkeypatch)
+
+        body = _query(app, {"query": "handover", "user": "alice@example.com",
+                            "filename": "standup.mp4"}).json()
+
+        assert body["results"], "both files should still be searched"
+        assert "2 uploaded files are named" in body["notice"]
 
     @pytest.mark.asyncio
     async def test_an_ordinary_search_carries_no_notice(self, db, monkeypatch):

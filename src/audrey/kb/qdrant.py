@@ -80,10 +80,17 @@ class SearchScope:
     one value being threaded through, not by comparing two argument lists.
 
     `file_ids` is a list because filenames are not unique — two uploads can
-    share one, and "search in standup.mp4" then legitimately means both. An
-    **empty list is not the same as None**: `None` means unscoped, `[]` means
-    a scope was requested and nothing matched it, which must return no hits
-    rather than quietly searching everything. `_as_filter` encodes that.
+    share one, and "search in standup.mp4" then legitimately means both.
+
+    **An empty `file_ids` is refused at construction, not handled.** It would
+    mean "a file was named and nothing matched", and every way of expressing
+    that downstream is a trap: an empty `MatchAny` is not dependably "matches
+    nothing" across qdrant-client versions and its local mode, and the way it
+    fails is by matching *everything* — a scoped question silently answered
+    from the whole corpus. Rather than carry a sentinel every consumer has to
+    remember to check, the state is unrepresentable: a caller whose lookup
+    found nothing must not search, and says so itself. `routes/kb.py` returns
+    early with a notice.
 
     `artifact` selects among a video's derived texts — "transcript" (what was
     said), "visual" (what was on screen) or "summary".
@@ -95,29 +102,19 @@ class SearchScope:
     # today every user-scoped read is already addressed by collection name.
     user: str | None = None
 
+    def __post_init__(self) -> None:
+        if self.file_ids is not None and not self.file_ids:
+            raise ValueError(
+                "SearchScope(file_ids=[]) is not a scope that matches nothing — "
+                "it is a bug. A lookup that resolved no files must not search."
+            )
+
     def is_empty(self) -> bool:
         return self.file_ids is None and self.artifact is None and self.user is None
 
-    @property
-    def matches_nothing(self) -> bool:
-        """A scope was asked for and nothing satisfies it.
-
-        Distinct from `is_empty()` (no scope asked for). Every search method
-        short-circuits on this rather than building a filter, because the
-        alternative — an empty `MatchAny` — is not dependably "matches
-        nothing" across qdrant-client versions and its local mode, and the way
-        it fails is by matching *everything*. Returning `[]` in Python cannot
-        fail that way.
-        """
-        return self.file_ids is not None and not self.file_ids
-
 
 def _as_filter(scope: SearchScope | None) -> qmodels.Filter | None:
-    """`SearchScope` to a Qdrant filter, or None when nothing is scoped.
-
-    Callers must have already short-circuited `scope.matches_nothing`; this
-    never returns a filter intended to match nothing.
-    """
+    """`SearchScope` to a Qdrant filter, or None when nothing is scoped."""
     if scope is None or scope.is_empty():
         return None
     must: list[qmodels.FieldCondition] = []
@@ -337,6 +334,35 @@ class QdrantKB:
             vector, collection or self.image_collection, top_k=top_k, scope=scope,
         )
 
+    async def search_hybrid(
+        self, vector: list[float], query: str, *, top_k: int = 5,
+        collection: str | None = None, scope: SearchScope | None = None,
+    ) -> tuple[list[KBHit], list[KBHit]]:
+        """Both retrievers over one collection under one scope. Returns (dense, lexical).
+
+        **This exists so the scope cannot reach one retriever and not the
+        other.** Phase 39 made the query path hybrid, and phase 40's plan named
+        the resulting hazard precisely: filter the dense side only and BM25
+        goes on returning chunks from every other file, reciprocal-rank fusion
+        interleaves them, and the answer is confident, sourced, and partly
+        drawn from the wrong document. Nothing errors and nothing logs.
+
+        The first version of this took `scope=` at both call sites in
+        `routes/kb.py` and pinned the pairing with a test. A test proves today's
+        code passes both; it does not stop tomorrow's edit from adding a third
+        call site with one argument missing. Taking the scope once, here, is
+        what actually removes the failure — the caller has no way to express
+        the broken state.
+
+        Returning a tuple rather than a fused list is deliberate: fusion and
+        the evidence rule are retrieval *policy* and belong with the route that
+        owns the config for them, not in the storage wrapper.
+        """
+        return await asyncio.gather(
+            self.search_text(vector, top_k=top_k, collection=collection, scope=scope),
+            self.search_lexical(query, top_k=top_k, collection=collection, scope=scope),
+        )
+
     async def search_lexical(
         self, query: str, *, top_k: int = 5, collection: str | None = None,
         scope: SearchScope | None = None,
@@ -349,14 +375,11 @@ class QdrantKB:
         which is exactly the behaviour before this phase. There is no error
         path for "lexical is unavailable" because there does not need to be.
 
-        `scope` narrows to particular files/artifacts and **must be passed here
-        whenever it is passed to `search_text`**. Filtering only the dense side
-        leaves BM25 returning hits from every other file, fusion mixes the two,
-        and the answer looks almost right — the failure mode nobody checks
-        because nothing about it looks wrong.
+        On the hybrid path, prefer `search_hybrid` — it takes the scope once
+        and fans out, so the dense and lexical sides cannot receive different
+        filters. This method stays public for the callers that genuinely want
+        one retriever.
         """
-        if scope is not None and scope.matches_nothing:
-            return []
         target = collection or self.text_collection
         indices, values = bm25.query_vector(query)
         if not indices or not await self.has_sparse(target):
@@ -383,8 +406,6 @@ class QdrantKB:
         self, vector: list[float], collection: str, *, top_k: int,
         scope: SearchScope | None = None,
     ) -> list[KBHit]:
-        if scope is not None and scope.matches_nothing:
-            return []
         # qdrant-client 1.12 deprecated `.search()` in favor of `.query_points()`,
         # which returns a `QueryResponse` wrapping the same `ScoredPoint` list.
         result = await asyncio.to_thread(

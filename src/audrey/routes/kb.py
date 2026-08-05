@@ -154,9 +154,39 @@ def _kb_min_score(request: Request) -> float:
     return float((cfg.raw.get("kb", {}) or {}).get("min_score", 0.0))
 
 
+_NOTICE_MAX_NAMES = 20
+
+
+def _unknown_file_notice(wanted: str, available: list[str]) -> str:
+    """Tell the caller the file is missing, and what does exist.
+
+    Naming the alternatives costs nothing — `_resolve_filename` has already
+    read the user's rows to fail — and it closes the loop in one turn instead
+    of two. Without it the model's only move is to call `list_my_files` and
+    ask again, and its more likely move is to guess a second filename.
+
+    Capped, because a prolific user's whole file list does not belong in a
+    tool result. The count is still exact so the reply is never misleading
+    about how much was left out.
+    """
+    if not available:
+        return (
+            f"No file named {wanted!r} was found, because this user has not "
+            f"uploaded any files yet. Nothing was searched."
+        )
+    shown = sorted(available)[:_NOTICE_MAX_NAMES]
+    more = len(available) - len(shown)
+    listing = ", ".join(repr(n) for n in shown) + (f", and {more} more" if more else "")
+    return (
+        f"No file named {wanted!r} was found for this user, so nothing was "
+        f"searched. Available files are: {listing}. Re-run with one of those "
+        f"exact names, or omit the filename to search everything."
+    )
+
+
 async def _resolve_filename(
     request: Request, *, user: str | None, filename: str,
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
     """Filenames a user typed to the file_ids Qdrant stores. May be empty.
 
     Resolution happens here, in one place, rather than by filtering Qdrant on
@@ -179,13 +209,21 @@ async def _resolve_filename(
 
     Duplicates are kept: two uploads can share a filename, and "in
     standup.mp4" then honestly means both.
+
+    Returns `(matched_file_ids, every_filename_this_user_has)`. The second is
+    a by-product of the lookup rather than a second query, and it is what lets
+    a miss name the alternatives instead of just denying the request.
     """
     db = getattr(request.app.state, "uploads_db", None)
     if db is None or not user:
-        return []
+        return [], []
     wanted = filename.strip().casefold()
     rows = await db.list_user(user)
-    return [str(r["file_id"]) for r in rows if str(r["filename"]).casefold() == wanted]
+    matched = [
+        str(r["file_id"]) for r in rows
+        if str(r["filename"]).strip().casefold() == wanted
+    ]
+    return matched, [str(r["filename"]) for r in rows]
 
 
 @router.post("/query", response_model=QueryResponse)
@@ -201,10 +239,11 @@ async def kb_query(
     effective_user = req.user if caller.is_service else caller.email
 
     scope: SearchScope | None = None
+    notice = ""
     if req.filename or req.artifact:
         file_ids: list[str] | None = None
         if req.filename:
-            file_ids = await _resolve_filename(
+            file_ids, available = await _resolve_filename(
                 request, user=effective_user, filename=req.filename,
             )
             if not file_ids:
@@ -216,11 +255,16 @@ async def kb_query(
                 )
                 return QueryResponse(
                     query=req.query, results=[],
-                    notice=(
-                        f"No uploaded file named {req.filename!r} was found for this "
-                        f"user, so nothing was searched. Use list_my_files to see the "
-                        f"available filenames."
-                    ),
+                    notice=_unknown_file_notice(req.filename, available),
+                )
+            if len(file_ids) > 1:
+                # Say so rather than merging silently. The caller asked about
+                # "standup.mp4" believing it named one thing; an answer
+                # stitched from two different recordings under that name is
+                # wrong in a way it cannot see.
+                notice = (
+                    f"{len(file_ids)} uploaded files are named {req.filename!r}, "
+                    f"and all of them were searched — results may mix them."
                 )
         scope = SearchScope(file_ids=file_ids, artifact=req.artifact)
 
@@ -242,6 +286,7 @@ async def kb_query(
     kb_search_hits.labels(kind="text").observe(len(hits))
     return QueryResponse(
         query=req.query,
+        notice=notice,
         results=[
             Hit(
                 score=h.score, source=h.source, kind=h.kind, chunk_idx=h.chunk_idx,
@@ -326,29 +371,31 @@ async def _search_text_hybrid(
     their own retriever before fusion, because RRF reads rank position and a
     hit's position only means something relative to the same retriever.
 
-    **`scope` goes to both retrievers or neither** (phase 40). Filtering only
-    the dense side leaves BM25 returning hits from every other file; fusion
-    then interleaves them and the result looks plausible, sourced, and wrong.
-    `test_kb_file_filter.py` pins the lexical side specifically for exactly
-    this reason — a dense-only filter passes every other test in the suite.
+    **`scope` reaches both retrievers by construction** (phase 40) — see
+    `QdrantKB.search_hybrid`, which takes it once per collection and fans out.
+    This route cannot express a dense-only filter, which is the point: that
+    bug produces a plausible, sourced, partly-wrong answer and nothing about
+    it looks wrong.
     """
     fetch_k = min(max(top_k * 4, 20), 40)
-    scoped = _scoped_to_one_users_files(scope)
-    dense_coros = [] if scoped else [qdrant.search_text(vec, top_k=fetch_k)]
-    lexical_coros = [] if scoped else [qdrant.search_lexical(query, top_k=fetch_k)]
+    # One call per collection, each handing `search_hybrid` the scope exactly
+    # once — there is no argument list here in which the dense and lexical
+    # sides could disagree.
+    coros = (
+        [] if _scoped_to_one_users_files(scope)
+        else [qdrant.search_hybrid(vec, query, top_k=fetch_k)]
+    )
     had_user = False
     if user:
         user_col = user_text_collection(user)
         if await qdrant.collection_exists(user_col):
-            dense_coros.append(
-                qdrant.search_text(vec, top_k=fetch_k, collection=user_col, scope=scope))
-            lexical_coros.append(
-                qdrant.search_lexical(query, top_k=fetch_k, collection=user_col, scope=scope))
+            coros.append(qdrant.search_hybrid(
+                vec, query, top_k=fetch_k, collection=user_col, scope=scope))
             had_user = True
 
-    batches = await asyncio.gather(*dense_coros, *lexical_coros)
-    dense = [h for b in batches[:len(dense_coros)] for h in b]
-    lexical = [h for b in batches[len(dense_coros):] for h in b]
+    pairs = await asyncio.gather(*coros)
+    dense = [h for d, _ in pairs for h in d]
+    lexical = [h for _, lex in pairs for h in lex]
     dense.sort(key=lambda h: h.score, reverse=True)
     lexical.sort(key=lambda h: h.score, reverse=True)
 

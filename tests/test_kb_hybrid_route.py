@@ -56,6 +56,17 @@ class _FakeQdrant:
         self.lexical_scopes.append(scope)
         return self._user_lexical if collection else list(self._lexical.values())
 
+    async def search_hybrid(self, vec, query, *, top_k, collection=None, scope=None):
+        """Mirrors the real fan-out: one scope in, both retrievers out.
+
+        Delegating rather than reimplementing keeps every `dense_calls` /
+        `lexical_calls` assertion in this file meaningful.
+        """
+        return (
+            await self.search_text(vec, top_k=top_k, collection=collection, scope=scope),
+            await self.search_lexical(query, top_k=top_k, collection=collection, scope=scope),
+        )
+
 
 CFG = {"enabled": True, "rrf_k": 60, "min_term_overlap": 0.7}
 
