@@ -120,6 +120,40 @@ class OllamaClient:
             raise OllamaError(f"/api/tags: expected 'models' list, got {type(models).__name__}")
         return models
 
+    async def show(self, model: str) -> dict[str, Any]:
+        """Model metadata from /api/show — capabilities, template, parameters.
+
+        The field this exists for is `capabilities`, a list of strings such as
+        `["completion", "tools", "thinking", "vision"]`. **`think` cannot be
+        sent blind**: Ollama rejects the field outright for a model that does
+        not declare `thinking`, rather than ignoring it, so anything deciding
+        the flag per model has to ask first.
+
+        Note what this does *not* tell you. A model declaring `thinking` says
+        the field will be accepted, not that setting it `false` reduces
+        anything — measured 2026-08-04, `qwen3-vl:32b` declares the capability
+        and produces the same reasoning either way. Capability is a
+        precondition for the setting mattering, never evidence that it does;
+        `scripts/thinking_probe.py` is what settles the second question.
+        """
+        try:
+            r = await self._client.post("/api/show", json={"model": model})
+        except httpx.HTTPError as e:
+            raise OllamaError(f"POST /api/show transport error: {type(e).__name__}: {e}") from e
+        self._raise_for_status(r, "/api/show")
+        return self._json_object(r, "/api/show")
+
+    async def capabilities(self, model: str) -> list[str]:
+        """Just the capability list from `show`, or `[]` if absent.
+
+        Absent is not the same as empty in principle, but every caller here
+        treats "did not say it can think" as "do not send the flag", which is
+        the safe direction: omitting `think` works on every model, sending it
+        to the wrong one is a hard error.
+        """
+        caps = (await self.show(model)).get("capabilities")
+        return [str(c) for c in caps] if isinstance(caps, list) else []
+
     # ─── Chat ───────────────────────────────────────────────────────────
 
     async def chat(

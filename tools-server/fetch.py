@@ -254,6 +254,54 @@ async def fetch_readable(
         raise FetchError(f"fetch exceeded the {int(_OVERALL_DEADLINE_S)}s deadline") from e
 
 
+async def _send_pinned(
+    client: httpx.AsyncClient, target: httpx.URL, *,
+    ips: list[str], hostname: str, host_header: str,
+) -> httpx.Response:
+    """Send to the first vetted IP that accepts a connection.
+
+    The socket is pinned to an address `_resolve_safe` already vetted, while
+    the real hostname rides in the `Host` header (vhost routing) and the
+    `sni_hostname` extension (TLS SNI + certificate verification). httpx never
+    re-resolves, so the connection cannot be rebound to an internal address
+    after the check — that is the DNS-rebinding TOCTOU this pinning closes,
+    and trying several addresses must not reopen it. **Every candidate here
+    comes from the same vetted list**; this loop widens which vetted address
+    is used, never what counts as vetted.
+
+    Why more than one: pinning replaced anyio's own multi-address behaviour,
+    which tries each result in turn. Taking `ips[0]` alone means a host whose
+    first A record is down is unreachable to us and reachable to every other
+    client — a dual-stack or anycast host with one bad endpoint fails
+    permanently, and the error says "connection failed" with no hint that a
+    working address was sitting in the list.
+
+    **Only connection failures advance to the next address.** Once a server
+    responds, the exchange belongs to that address: a 500, a redirect, or a
+    read error mid-body are all answers, and retrying them elsewhere would
+    turn one request into several and could replay a non-idempotent redirect
+    target. `ConnectError` and `ConnectTimeout` are the only things that mean
+    "this address never spoke to us".
+    """
+    last: Exception | None = None
+    for ip in ips:
+        req = client.build_request(
+            "GET", target.copy_with(host=ip),
+            extensions={"sni_hostname": hostname},
+        )
+        req.headers["Host"] = host_header
+        try:
+            return await client.send(req, stream=True, follow_redirects=False)
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            last = e
+            log.debug("web_fetch: %s did not accept a connection (%s)", ip, e)
+            continue
+    raise FetchError(
+        f"could not connect to {hostname} on any of its "
+        f"{len(ips)} address(es)"
+    ) from last
+
+
 async def _fetch_readable(
     url: str, *, max_chars: int, transport: httpx.AsyncBaseTransport | None = None,
 ) -> tuple[str, str]:
@@ -279,12 +327,9 @@ async def _fetch_readable(
                 # the connection can't be rebound to an internal address after the vet.
                 target = httpx.URL(current)
                 host_header = client.build_request("GET", target).headers["host"]
-                req = client.build_request(
-                    "GET", target.copy_with(host=ips[0]),
-                    extensions={"sni_hostname": hostname},
+                resp = await _send_pinned(
+                    client, target, ips=ips, hostname=hostname, host_header=host_header,
                 )
-                req.headers["Host"] = host_header
-                resp = await client.send(req, stream=True, follow_redirects=False)
                 try:
                     if resp.is_redirect:
                         loc = resp.headers.get("location")

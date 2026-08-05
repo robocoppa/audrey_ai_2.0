@@ -727,9 +727,9 @@ network connection.
 All public methods are `async`:
 
 - [`tags()`](../../src/audrey/models/ollama.py#L110)
-- [`chat()`](../../src/audrey/models/ollama.py#L125)
-- [`chat_stream()`](../../src/audrey/models/ollama.py#L198)
-- [`embed()`](../../src/audrey/models/ollama.py#L249)
+- [`chat()`](../../src/audrey/models/ollama.py#L159)
+- [`chat_stream()`](../../src/audrey/models/ollama.py#L232)
+- [`embed()`](../../src/audrey/models/ollama.py#L283)
 
 That means callers must use `await` or `async for`. Audrey is an async web app;
 while one request waits on Ollama, the event loop can keep serving other work.
@@ -737,7 +737,7 @@ while one request waits on Ollama, the event loop can keep serving other work.
 #### Non-streaming chat
 
 `chat(...)` builds an Ollama `/api/chat` payload at
-[`ollama.py:141`](../../src/audrey/models/ollama.py#L163):
+[`ollama.py:141`](../../src/audrey/models/ollama.py#L197):
 
 ```python
 payload: dict[str, Any] = {
@@ -752,7 +752,7 @@ if tools:
 ```
 
 Then it sends the request at
-[`ollama.py:152`](../../src/audrey/models/ollama.py#L178):
+[`ollama.py:152`](../../src/audrey/models/ollama.py#L140):
 
 ```python
 r = await self._client.post("/api/chat", json=payload, timeout=...)
@@ -768,7 +768,7 @@ There are three broad failure types:
 
 That last one is easy to miss. A "successful" HTTP status is not enough. Audrey
 expects a JSON object from Ollama. `_json_object(...)` enforces that at
-[`ollama.py:270`](../../src/audrey/models/ollama.py#L296):
+[`ollama.py:270`](../../src/audrey/models/ollama.py#L330):
 
 ```python
 def _json_object(r: httpx.Response, op: str) -> dict[str, Any]:
@@ -791,7 +791,7 @@ One exception type keeps the failure contract simple.
 #### Streaming chat
 
 `chat_stream(...)` is different at
-[`ollama.py:172`](../../src/audrey/models/ollama.py#L198):
+[`ollama.py:172`](../../src/audrey/models/ollama.py#L232):
 
 ```python
 async def chat_stream(...) -> AsyncIterator[dict[str, Any]]:

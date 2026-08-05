@@ -192,3 +192,76 @@ async def test_ollama_embed_rejects_vector_count_mismatch():
             await client.embed(model="embedder", texts=["one", "two"])
     finally:
         await client.aclose()
+
+
+# ─── /api/show and capabilities ────────────────────────────────────────
+#
+# `think` cannot be sent blind: Ollama REJECTS the field for a model that does
+# not declare `thinking`, rather than ignoring it, so anything choosing the
+# flag per model has to ask first. These pin the asking.
+
+
+async def test_ollama_show_posts_the_model_name():
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["body"] = httpx.Response(200, content=request.content).json()
+        return httpx.Response(200, json={"capabilities": ["completion", "thinking"]})
+
+    client = _ollama_client(handler)
+    try:
+        body = await client.show("qwen3.6:35b")
+    finally:
+        await client.aclose()
+    assert seen["path"] == "/api/show"
+    assert seen["body"] == {"model": "qwen3.6:35b"}
+    assert body["capabilities"] == ["completion", "thinking"]
+
+
+async def test_ollama_capabilities_returns_the_declared_list():
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"capabilities": ["completion", "tools", "thinking"]})
+
+    client = _ollama_client(handler)
+    try:
+        assert await client.capabilities("m") == ["completion", "tools", "thinking"]
+    finally:
+        await client.aclose()
+
+
+async def test_ollama_capabilities_is_empty_when_the_field_is_absent():
+    """Absent must read as "do not send the flag", which is the safe
+    direction: omitting `think` works on every model, sending it to one that
+    cannot think is a hard error."""
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"model_info": {}})
+
+    client = _ollama_client(handler)
+    try:
+        assert await client.capabilities("m") == []
+    finally:
+        await client.aclose()
+
+
+async def test_ollama_capabilities_is_empty_when_the_field_is_not_a_list():
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"capabilities": "thinking"})
+
+    client = _ollama_client(handler)
+    try:
+        assert await client.capabilities("m") == []
+    finally:
+        await client.aclose()
+
+
+async def test_ollama_show_raises_on_an_error_status():
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, text="model not found")
+
+    client = _ollama_client(handler)
+    try:
+        with pytest.raises(OllamaError):
+            await client.show("no-such-model")
+    finally:
+        await client.aclose()

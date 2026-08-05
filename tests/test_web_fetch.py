@@ -512,3 +512,89 @@ async def test_request_is_pinned_to_validated_ip(monkeypatch):
     assert seen["sni"] == "example.com"             # TLS SNI + cert verification on the real name
     assert final_url == "https://example.com/paper"  # we report the human URL, not the IP
     assert "self-attention" in text
+
+
+# ─── Multi-address failover ───────────────────────────────────────────
+#
+# Pinning the socket to a vetted IP replaced anyio's own behaviour of trying
+# each resolved address in turn. Taking only the first meant a host whose
+# first A record was down was unreachable to us and reachable to everyone
+# else — a permanent failure whose error message named no cause. The retry
+# widens *which vetted address* is used; it never widens what counts as
+# vetted, and every candidate still comes from `_resolve_safe`.
+
+
+async def test_it_falls_over_to_the_second_vetted_address(monkeypatch):
+    monkeypatch.setattr(
+        fetch, "_resolve_safe", lambda _h: ["93.184.216.34", "93.184.216.35"])
+    tried: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        tried.append(request.url.host)
+        if request.url.host == "93.184.216.34":
+            raise httpx.ConnectError("connection refused", request=request)
+        return _resp(200, headers={"content-type": "text/html"}, content=_HTML.encode())
+
+    _final, text = await fetch_readable(
+        "https://example.com/paper", max_chars=6000,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert tried == ["93.184.216.34", "93.184.216.35"]
+    assert "self-attention" in text
+
+
+async def test_every_address_failing_reports_how_many_were_tried(monkeypatch):
+    monkeypatch.setattr(
+        fetch, "_resolve_safe", lambda _h: ["93.184.216.34", "93.184.216.35"])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    with pytest.raises(FetchError, match="2 address"):
+        await fetch_readable(
+            "https://example.com/paper", max_chars=6000,
+            transport=httpx.MockTransport(handler),
+        )
+
+
+async def test_an_http_error_is_not_retried_on_the_next_address(monkeypatch):
+    """A server that answers has answered. Retrying a 500 elsewhere turns one
+    request into several, and on a redirect would re-issue a hop that may not
+    be idempotent. Only a refused connection means 'this address never spoke'.
+    """
+    monkeypatch.setattr(
+        fetch, "_resolve_safe", lambda _h: ["93.184.216.34", "93.184.216.35"])
+    tried: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        tried.append(request.url.host)
+        return httpx.Response(500)
+
+    with pytest.raises(FetchError, match="HTTP 500"):
+        await fetch_readable(
+            "https://example.com/paper", max_chars=6000,
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert tried == ["93.184.216.34"]
+
+
+async def test_failover_still_only_ever_uses_vetted_addresses(monkeypatch):
+    """The security property, restated as a test. Whatever the loop does, it
+    can only connect to something `_resolve_safe` returned — an internal
+    address cannot enter by way of a retry."""
+    monkeypatch.setattr(fetch, "_resolve_safe", lambda _h: ["93.184.216.34"])
+    tried: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        tried.append(request.url.host)
+        raise httpx.ConnectError("connection refused", request=request)
+
+    with pytest.raises(FetchError, match="1 address"):
+        await fetch_readable(
+            "https://example.com/paper", max_chars=6000,
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert tried == ["93.184.216.34"]
