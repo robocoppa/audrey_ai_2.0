@@ -40,6 +40,7 @@ from audrey.routes.media import router as media_router
 from audrey.routes.openai import router as openai_router
 from audrey.routes.upload_ui import router as upload_ui_router
 from audrey.tools.discovery import ToolRegistry, discover_all
+from audrey.tools.dispatch import audit_user_scoping
 
 logging.basicConfig(
     level=logging.INFO,
@@ -70,6 +71,7 @@ async def lifespan(app: FastAPI):
     tools_enabled = bool(cfg.tools.get("enabled", True))
     if tools_enabled and tool_servers:
         tool_registry = await discover_all(tool_servers)
+        audit_user_scoping(tool_registry)
     else:
         tool_registry = ToolRegistry()
         log.info("tools: disabled or no servers configured")
@@ -235,6 +237,7 @@ async def _retry_tool_discovery(
             continue
         registry.by_name.clear()
         registry.by_name.update(fresh.by_name)
+        audit_user_scoping(registry)
         log.info(
             "tools: retry %d/%d succeeded -> %d tool(s): %s",
             attempt, attempts, len(registry.by_name), registry.names(),
@@ -327,6 +330,7 @@ async def rediscover_tools(
     fresh = await discover_all(tool_servers)
     reg.by_name.clear()
     reg.by_name.update(fresh.by_name)
+    audit_user_scoping(reg)
     log.info("tools: rediscover -> %d tool(s): %s", len(reg.by_name), reg.names())
     return {"tools": reg.names(), "count": len(reg.by_name)}
 

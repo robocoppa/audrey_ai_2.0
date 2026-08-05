@@ -230,6 +230,60 @@ YOU` — text that was in those frames all along and was being buried under the
 inventory. That text is the entire reason a visual pass exists beside a
 transcript, and until this change it was absent from the artifact completely.
 
+### The prompt sweep — `KEYFRAME_SYSTEM` is the right prompt (2026-08-04)
+
+Seven prompt variants, the pipeline's four real keyframes, two samples each.
+`scripts/vision_probe.py` runs it. Totals across all four frames, against five
+known on-screen strings taken from the ingest's own `frames.txt`:
+
+| variant | tokens | coverage | |
+|---|---|---|---|
+| `no-ocr` | 1,499 | **3.5/5** | cheapest, and loses the text |
+| `terse` | 2,189 | 4.5/5 | |
+| **`current`** | **2,268** | **5/5** | cheapest with full coverage |
+| `text-only` | 3,044 | 5/5 | 17-50 characters, no scene at all |
+| `no-serials` | 3,514 | 5/5 | +55% for nothing |
+| `strict` | 4,130 | 5/5 | +82% |
+| `screenshot` | 8,070 | 4/5 | 3.6x the cost *and* misses text |
+
+**`KEYFRAME_SYSTEM` as shipped wins.** Nothing to change.
+
+Four things it settles that were previously argued:
+
+- **The "do not strain at unclear text" clause earns its place.** `strict` is
+  that clause removed and nothing else: 4,130 tokens against 2,268 for the same
+  coverage.
+- **The OCR instruction is load-bearing.** `no-ocr` is the cheapest variant of
+  all and misses the on-screen text on two of four frames. The visual pass
+  exists for that text.
+- **`screenshot` is not merely verbose, it is worse.** It missed
+  `ACOM TECHNOLOGIES` on two frames while writing 1,900-2,700 characters,
+  because it defers text to a "Visible Text section below" that trails off.
+- **Adding a clause to fix a description is a regression by default.**
+  `no-serials` — `current` plus "skip reference and serial numbers" — cost 55%
+  more and *misread* a calendar as May where three other variants read July.
+  More instruction bought more reasoning and a wrong answer.
+
+**The trap that nearly invalidated all of it**, worth more than the result:
+the frames must be the ones the pipeline actually described. Extracting with
+`ffmpeg -ss <t> -i` gave completely different frames from the pipeline's
+`fps=1/30` pass — a first attempt "verified" against a frame containing none of
+the expected text, scoring every prompt 0/2 and prompting a fix for a
+serial-number problem that did not exist. Replicate the extraction exactly:
+
+```bash
+# Unraid box — same filter chain as media/frames.py
+ffmpeg -nostdin -y -i "$V" -vf "fps=1/30,scale='min(1280,iw)':-2" \
+  -an -q:v 3 /tmp/pf/frame_%05d.jpg
+```
+
+`frame_00001` is t=0 and each step is `frame_interval_s`, so the keyframe at
+`[00:08:30]` in `frames.txt` is `frame_00018.jpg`.
+
+**Variance is high** — one variant ranged 491 to 2,409 tokens across two runs
+of the same frame. Two samples is the minimum that means anything, and a gap
+under ~20% between variants should not be read as a difference.
+
 ### The loose end
 
 Frames 4-6 generated 648-1,156 tokens for 234-267 characters: **0.23-0.36

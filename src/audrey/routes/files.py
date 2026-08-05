@@ -13,6 +13,8 @@
     POST   /v1/files/jobs/claim               — SERVICE: lease a pending job.
     POST   /v1/files/{file_id}/ingest-result  — SERVICE: worker output.
     POST   /v1/files/{file_id}/ingest-failed  — SERVICE: worker gave up.
+    POST   /v1/files/list                     — SERVICE: a named user's files,
+                                                shaped for a model (phase 40).
 
 Identity: every *user* endpoint depends on `require_user`, which proxies the
 browser's `Authorization: Bearer <jwt>` to OWUI and returns an `AuthedUser`.
@@ -37,6 +39,12 @@ The three `jobs`/`ingest-*` routes are the exception to all of the above: they
 authenticate with `require_service` and carry no user identity of their own,
 because the media worker acts on behalf of whoever uploaded the file. A user
 JWT must never reach them — see `auth.require_service`.
+
+`POST /v1/files/list` is the same exception for the same reason, and one step
+more dangerous: it *names* its user in the body, so it is only safe while the
+sole caller holding the service token — the tools-server — has that argument
+overwritten by `tools/dispatch.py`'s `_USER_SCOPED_TOOLS`. The route and that
+set are one mechanism in two files.
 """
 
 from __future__ import annotations
@@ -152,6 +160,46 @@ class ListResponse(BaseModel):
 class DeleteResponse(BaseModel):
     file_id: str
     deleted: bool
+
+
+class ServiceListRequest(BaseModel):
+    user: str
+
+
+class ModelFileRow(BaseModel):
+    """One file as a *model* should see it — deliberately not `FileRow`.
+
+    `FileRow` answers a browser rendering a management table, so it carries
+    `bytes`, `collection`, `file_id` and `source_freed_at`. None of that helps
+    a language model answer "what videos do I have?", and every extra field is
+    context spent plus one more thing to be wrong about. What is left is what a
+    model can say something true with.
+
+    `file_id` is omitted on purpose. The scoping filter (step 3) resolves a
+    *filename*, because a filename is the only handle a model can carry from a
+    listing into a follow-up question without mangling it — a UUID is exactly
+    the kind of token that comes back one character different.
+    """
+
+    filename: str
+    kind: str                # "text" | "image" | "video"
+    status: str              # "ready" | "pending" | "processing" | "failed"
+    uploaded_at: str
+    # Video only, and 0 for a video with no audio stream — so it is only
+    # meaningful read alongside `kind`.
+    duration_s: float = 0.0
+    # Phase 37's one-paragraph summary. Empty for anything that is not a
+    # processed video, and for a video whose summary call failed.
+    summary: str = ""
+    # Only set on 'failed'. Included for the same reason the upload page shows
+    # it: a row that stopped moving without saying why is the failure this
+    # field exists to prevent, and that is as true in a chat answer as on a page.
+    failure_reason: str = ""
+
+
+class ServiceListResponse(BaseModel):
+    user: str
+    files: list[ModelFileRow]
 
 
 def _upload_root(request: Request) -> Path:
@@ -1320,6 +1368,63 @@ async def list_files(
             part_size=_part_size(request),
         ),
     )
+
+
+@router.post("/list", response_model=ServiceListResponse)
+async def list_files_for_user(
+    body: ServiceListRequest,
+    request: Request,
+    _: None = Depends(require_service),
+) -> ServiceListResponse:
+    """SERVICE: one named user's files, shaped for a model rather than a page.
+
+    Exists because the tools-server holds `KB_SERVICE_TOKEN` and **cannot
+    obtain a user JWT**, so it can never call `GET /v1/files` — that route
+    depends on `require_user`. Four phases in this campaign have now planned
+    around a service-token act-as that does not exist; check what a route
+    actually depends on before designing against it.
+
+    `require_service`, not `resolve_kb_caller`. The latter also accepts a user
+    JWT, and this route names its target user in the body — so a JWT-bearing
+    caller could read anyone's file list by typing a different email. The
+    security property here is the same one the job routes rely on: holding a
+    valid *user* token must not be enough to reach it.
+
+    That property alone is not sufficient, because the tools-server passes the
+    tool's `user` argument through to this body. The other half lives in
+    `tools/dispatch.py`, whose `_USER_SCOPED_TOOLS` set overwrites the
+    model-supplied `user` with the authenticated pipeline user. **Both halves
+    are required.** Without the dispatcher's overwrite, a prompt naming another
+    user's email reaches their file list through this route.
+
+    POST rather than GET because the target is an email address: a query string
+    puts it in every access and proxy log along the way, and the sibling service
+    routes are POST regardless.
+
+    An unknown user gets an empty list, not a 404 — "you have not uploaded
+    anything" is a true and useful answer, and distinguishing an unknown user
+    from an empty one would leak which addresses exist.
+    """
+    user = body.user.strip()
+    if not user:
+        raise HTTPException(status_code=422, detail="user is required.")
+
+    db = _get_uploads_db(request)
+    rows = await db.list_user(user)
+    files = [
+        ModelFileRow(
+            filename=str(row["filename"]),
+            kind=str(row["kind"]),
+            status=str(row["status"]),
+            uploaded_at=str(row["uploaded_at"]),
+            duration_s=float(row["duration_s"]),
+            summary=str(row["summary"]),
+            failure_reason=str(row["failure_reason"]),
+        )
+        for row in rows
+    ]
+    log.info("files: service list user=%s files=%d", user, len(files))
+    return ServiceListResponse(user=user, files=files)
 
 
 @router.delete("/{file_id}", response_model=DeleteResponse)

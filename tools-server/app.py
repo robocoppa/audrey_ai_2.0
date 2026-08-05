@@ -9,6 +9,8 @@ Endpoints, OpenAPI auto-discovered by the Audrey orchestrator:
   POST /memory_recall          — fetch by exact key
   POST /memory_search          — semantic search over a user's memories
   POST /chat_history_search    — semantic search over a user's prior conversations
+  POST /list_my_files          — a user's own uploaded files, via Audrey
+                                 /v1/files/list (service token)
 
 Internal-only (hidden from /openapi.json so the model can't call them):
   POST /chat_history/archive   — write a turn to the chat archive
@@ -643,6 +645,62 @@ async def chat_history_search(req: ChatHistorySearchRequest) -> ChatHistorySearc
             for h in hits
         ],
     )
+
+
+class ListMyFilesRequest(BaseModel):
+    user: Annotated[str, Field(min_length=1, max_length=200, description="User scope. Filled in automatically by Audrey — you don't need to supply it. File lists are per-user.")]
+
+
+class MyFileRow(BaseModel):
+    # Mirrors `ModelFileRow` in `audrey/routes/files.py`. Only `description`
+    # and the *request* schema reach the model (`ToolSpec.to_ollama_tool`), so
+    # nothing documented on these fields is visible to it — anything the model
+    # must know to read the result belongs in the description below.
+    filename: str
+    kind: str
+    status: str
+    uploaded_at: str
+    duration_s: float = 0.0
+    summary: str = ""
+    failure_reason: str = ""
+
+
+class ListMyFilesResponse(BaseModel):
+    files: list[MyFileRow]
+
+
+@app.post(
+    "/list_my_files",
+    operation_id="list_my_files",
+    response_model=ListMyFilesResponse,
+    tags=["tools"],
+    summary="List the files this user has uploaded",
+    description=(
+        "List the files this user has uploaded to Audrey — videos, documents "
+        "and images — returning each one's exact filename, kind, upload time, "
+        "processing status and, for a processed video, its duration and a "
+        "one-paragraph summary. Call this when the user asks what they have "
+        "uploaded, refers to 'my video' or 'that recording' without naming "
+        "it, or when you need a file's exact filename. A status of 'pending' "
+        "or 'processing' means Audrey is still working on that file and its "
+        "contents are not searchable yet — say so rather than reporting it as "
+        "empty; a 'failed' file carries the reason. Returns only this user's "
+        "own files."
+    ),
+)
+async def list_my_files(req: ListMyFilesRequest) -> ListMyFilesResponse:
+    client: httpx.AsyncClient = app.state.audrey
+    try:
+        r = await client.post("/v1/files/list", json={"user": req.user})
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Audrey files unreachable: {e}",
+        ) from e
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=r.text)
+    body = r.json()
+    return ListMyFilesResponse(files=body.get("files", []))
 
 
 # ─── Chat archive: internal write/admin (not in /openapi.json) ────────

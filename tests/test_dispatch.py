@@ -21,11 +21,25 @@ Pure-function tests; httpx via MockTransport.
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
 
 import httpx
 
-from audrey.tools.discovery import ToolRegistry, ToolSpec
-from audrey.tools.dispatch import _force_user_tag, dispatch_one, to_tool_message
+from audrey.tools.discovery import ToolRegistry, ToolSpec, discover_one
+from audrey.tools.dispatch import (
+    _force_user_tag,
+    audit_user_scoping,
+    dispatch_one,
+    to_tool_message,
+)
+
+# Same pattern as test_web_fetch.py: put tools-server on the path at import
+# time so the module itself can be imported lazily inside the one test that
+# needs it, without a `Path` call inside an async function.
+_TOOLS_SERVER = Path(__file__).resolve().parent.parent / "tools-server"
+if str(_TOOLS_SERVER) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_SERVER))
 
 # ─── Fixtures ─────────────────────────────────────────────────────────
 
@@ -155,6 +169,88 @@ async def test_dispatch_one_does_not_overwrite_unscoped_tool():
         )
     # `user` was never in the args and should not have been added.
     assert "user" not in seen["body"]
+
+
+async def test_dispatch_one_overwrites_user_for_list_my_files():
+    """Phase 40's file-listing tool, pinned separately from the others.
+
+    `POST /v1/files/list` on Audrey authenticates with a service token and
+    takes its target user from the request body — there is no second gate on
+    that route. This overwrite is the entire reason a prompt naming another
+    person's address cannot return their file list.
+    """
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"files": []})
+
+    registry = _registry([_spec("list_my_files")])
+    async with _client(handler) as http:
+        await dispatch_one(
+            http, registry,
+            _call("list_my_files", {"user": "victim@example.com"}),
+            max_result_chars=2000, timeout_s=5.0,
+            user_id="alice@example.com",
+        )
+    assert seen["body"]["user"] == "alice@example.com"
+
+
+# ─── Scoping audit (the check the set's own comment asked for) ────────
+
+
+def _user_spec(name: str) -> ToolSpec:
+    """A spec whose request schema declares a `user` property."""
+    return ToolSpec(
+        name=name,
+        description=f"{name} tool",
+        parameters={"type": "object", "properties": {"user": {"type": "string"}}},
+        server_url="http://server.test",
+        path=f"/{name}",
+    )
+
+
+def test_audit_flags_a_user_taking_tool_missing_from_the_set():
+    """The failure this exists to catch: a new tools-server route with a
+    `user` field, shipped without the matching `_USER_SCOPED_TOOLS` entry.
+    Nothing else in the system notices — the dispatcher just forwards
+    whatever the model wrote."""
+    assert audit_user_scoping(_registry([_user_spec("list_their_files")])) == [
+        "list_their_files"
+    ]
+
+
+def test_audit_is_quiet_for_a_tool_already_in_the_set():
+    assert audit_user_scoping(_registry([_user_spec("list_my_files")])) == []
+
+
+def test_audit_ignores_tools_that_take_no_user():
+    assert audit_user_scoping(_registry([_spec("web_search")])) == []
+
+
+async def test_every_user_taking_tool_on_the_real_server_is_scoped():
+    """The one that would actually have caught it.
+
+    The three above audit synthetic specs, which only prove the function
+    works. This runs the **real** tools-server OpenAPI document through the
+    **real** discovery path and asserts the set covers everything it finds —
+    so adding a `user`-taking route to `tools-server/app.py` and forgetting
+    `_USER_SCOPED_TOOLS` fails here, on a laptop, rather than silently in
+    production where the symptom is one user reading another's data.
+    """
+    import app as tools_server  # lazily, so a heavy import can't break collection
+
+    schema = tools_server.app.openapi()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=schema)
+
+    async with _client(handler) as http:
+        specs = await discover_one(http, "http://custom-tools:8000")
+
+    registry = _registry(specs)
+    assert "list_my_files" in registry.by_name, "phase 40's tool is not being discovered"
+    assert audit_user_scoping(registry) == []
 
 
 def test_force_user_tag_replaces_existing_user_token():

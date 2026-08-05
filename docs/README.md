@@ -123,6 +123,14 @@ deployable and verifiable on its own.
   that motivated it is a config number on a NAS. The levers themselves wait on
   one ingest's worth of numbers.
 
+**Using it (40)**
+
+- [40 uploads in chat](campaign-2/phase-40-uploads-in-chat.md) — the surfaces
+  around video ingest rather than the pipeline itself: a link to the upload
+  page, a tool that lists your own files, a filter that scopes a question to
+  one of them, and elapsed time while a job runs. **Planned.** Explains why an
+  `audrey_video` virtual model is the wrong shape, and which model to ask with.
+
 **Retrieval quality**
 
 - [39 hybrid retrieval](campaign-2/phase-39-hybrid-retrieval.md) — BM25

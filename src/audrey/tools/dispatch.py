@@ -60,7 +60,43 @@ _USER_SCOPED_TOOLS: frozenset[str] = frozenset({
     "memory_search",
     "memory_store",
     "chat_history_search",
+    # Reaches `POST /v1/files/list`, which is service-token-authenticated and
+    # names its target user in the request body. That route has no second
+    # defence — this entry is the whole of what stops a prompt naming someone
+    # else's address from returning their file list.
+    "list_my_files",
 })
+
+
+def audit_user_scoping(registry: ToolRegistry) -> list[str]:
+    """Name every discovered tool that takes a `user` argument but isn't scoped.
+
+    The gap this closes: the tools-server and `_USER_SCOPED_TOOLS` are two
+    files that must be edited together, and nothing connected them. Ship the
+    route without the set entry and the dispatcher forwards the *model-supplied*
+    `user` — so a prompt naming another address reads their data, with no error
+    anywhere and nothing in a test suite that would notice.
+
+    A **warning, not a failure**, and deliberately so. `user` is an ordinary
+    word; a tool could legitimately take one that means something else
+    (a GitHub handle, a display name), and refusing to boot over a false
+    positive would make the next person delete the check rather than read it.
+    Returns the offending names so a caller can assert on them.
+    """
+    unscoped = [
+        spec.name
+        for spec in registry.specs()
+        if "user" in (spec.parameters.get("properties") or {})
+        and spec.name not in _USER_SCOPED_TOOLS
+    ]
+    if unscoped:
+        log.warning(
+            "tools: %s take a `user` argument but are NOT in _USER_SCOPED_TOOLS — "
+            "the dispatcher will forward whatever the model supplies. If any of "
+            "these are per-user, add them to that set in tools/dispatch.py.",
+            unscoped,
+        )
+    return unscoped
 
 
 def _truncate(s: str, limit: int) -> str:
@@ -218,4 +254,4 @@ def to_tool_message(result: ToolResult) -> dict[str, Any]:
     return msg
 
 
-__all__ = ["dispatch_one", "to_tool_message", "ToolResult"]
+__all__ = ["dispatch_one", "to_tool_message", "ToolResult", "audit_user_scoping"]

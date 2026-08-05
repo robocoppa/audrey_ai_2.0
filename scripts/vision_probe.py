@@ -178,13 +178,27 @@ _TEXT_ONLY = (
     "there is no clearly legible text, reply with the single word NONE."
 )
 
-#: `current` plus one clause, aimed at a problem only visible by reading the
-#: descriptions. On a cluttered desk, `current` opened with
-#: "92-7 106L-388342 F491587" and `strict` with "92-7 164-385-02 F491387" —
-#: the same frame, and the serials DISAGREE between runs. It is guessing at
-#: unreadable reference codes despite being told not to strain, and shipping
-#: the guesses into a retrieval chunk as noise. Nobody searches a document
-#: serial; everybody searches a company name.
+#: TESTED AND REJECTED 2026-08-04. Do not re-propose without new evidence.
+#:
+#: Proposed after seeing `current` open a description with
+#: "92-7 106L-388342 F491587" — apparently guessing at unreadable reference
+#: codes and writing the guesses into a retrieval chunk.
+#:
+#: Two things were wrong with that. **The problem was an artifact**: those
+#: serials came from a frame extracted with the wrong seek, which the pipeline
+#: had never described. Against the pipeline's real keyframes `current`
+#: produces clean output ("enertec A man in a blue shirt...") and there are no
+#: serials to skip.
+#:
+#: **And the cure was worse.** Over four real keyframes this cost 3,514 tokens
+#: against `current`'s 2,268 — 55% more for identical coverage — and on the
+#: calendar frame it misread "July 2024" as "May 2024" where `current`,
+#: `strict` and `text-only` all read it correctly. One more instruction bought
+#: more reasoning and a wrong answer.
+#:
+#: Kept as a variant because the negative result is worth being able to
+#: reproduce, and because "add a clause to fix a description" is a tempting
+#: move that this measured as a regression.
 _NO_SERIALS = KEYFRAME_SYSTEM + (
     "\n- Skip reference numbers, serial numbers, order codes, phone numbers "
     "and part numbers. They are never what someone is searching for, and they "
@@ -520,6 +534,23 @@ def main() -> int:
     unknown = set(expect) - {p.name for p in paths}
     if unknown:
         print(f"WARNING: EXPECT names images not being probed: {sorted(unknown)}\n")
+
+    # `_STRICT` is built by removing a clause from the DEPLOYED
+    # `KEYFRAME_SYSTEM`. If the image predates that clause the replace is a
+    # no-op, the two variants are the same prompt, and the comparison reports
+    # noise as a result — which is exactly what happened on 2026-08-04, and was
+    # only caught by someone asking whether a rebuild was needed.
+    degenerate = [
+        name for name, system in PROMPTS.items()
+        if name not in ("current",) and system == KEYFRAME_SYSTEM
+    ]
+    if degenerate and any(t.name in degenerate for t in trials):
+        print(
+            f"WARNING: {degenerate} are IDENTICAL to `current` in this image.\n"
+            "         The deployed KEYFRAME_SYSTEM is not the one these "
+            "variants were derived\n         from — rebuild audrey-ai, or "
+            "these comparisons measure nothing.\n"
+        )
 
     total = len(paths) * len(trials) * _SAMPLES
     print(f"model={MODEL} host={HOST} mode={MODE} hint={'yes' if HINT.strip() else 'no'}")
