@@ -178,8 +178,24 @@ _TEXT_ONLY = (
     "there is no clearly legible text, reply with the single word NONE."
 )
 
+#: `current` plus one clause, aimed at a problem only visible by reading the
+#: descriptions. On a cluttered desk, `current` opened with
+#: "92-7 106L-388342 F491587" and `strict` with "92-7 164-385-02 F491387" —
+#: the same frame, and the serials DISAGREE between runs. It is guessing at
+#: unreadable reference codes despite being told not to strain, and shipping
+#: the guesses into a retrieval chunk as noise. Nobody searches a document
+#: serial; everybody searches a company name.
+_NO_SERIALS = KEYFRAME_SYSTEM + (
+    "\n- Skip reference numbers, serial numbers, order codes, phone numbers "
+    "and part numbers. They are never what someone is searching for, and they "
+    "are the text you are most likely to misread. Report names, titles, "
+    "headings, company names, slide text and error messages — text that means "
+    "something to a reader."
+)
+
 PROMPTS: dict[str, str] = {
     "current": KEYFRAME_SYSTEM,
+    "no-serials": _NO_SERIALS,
     "strict": _STRICT,
     "terse": _TERSE,
     "no-ocr": _NO_OCR,
