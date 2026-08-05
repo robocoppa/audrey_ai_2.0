@@ -8,22 +8,28 @@ that makes it fast, driven by the stage timings
 
 - The keyframe gate landed early (2026-08-02).
 - Cost attribution landed and **ran on the box** (2026-08-04).
-- **The measurement: generation is 87% of the visual pass, and two thirds of
-  the generated tokens never reach the output.** `qwen3-vl:32b` declares the
-  `thinking` capability, so the model was reasoning at length about a
-  photograph and the reasoning was being discarded. See
+- **The measurement: generation is 87% of the visual pass**, load is a
+  once-per-job cold start, prefill is 5%, and queue is zero. See
   [The measurement](#the-measurement-on-the-box-2026-08-04).
-- **Lever 7** — `vision.think: false` — is built and hermetically tested, and
-  is the only lever pointed at that 87%. Not yet re-measured on the box.
-- **Levers 1-4 and 6 are all dead on the numbers**, including the two this
-  document added. Together they address at most 13%.
+- **Levers 1-4 and 6 are all dead on the numbers**, including `keep_alive`,
+  which this document added. Together they address at most 13%.
+- **Lever 7 was got wrong once before it was got right.** The first attempt
+  blamed thinking tokens, changed nothing measurable, and lost three of six
+  keyframes to a `num_predict` cap derived from a character count. Recorded in
+  full at [Lever 7, first
+  attempt](#lever-7-first-attempt--wrong-and-it-did-harm-2026-08-04), because
+  the way it was wrong is more useful than the fix.
+- **The real lever is the prompt.** Phase 36 reused the chat-screenshot prompt
+  for video keyframes, so the model writes markdown scaffolding and inventories
+  the furniture. `KEYFRAME_SYSTEM` is built and hermetically tested,
+  **unverified on the box**.
 - Source reclamation is built, tested, and **off by default** — the plan was
   wrong to want it on, see
   [Why the default is `keep_source: true`](#why-the-default-is-keep_source-true).
 
-The short version: the plan ranked five levers by expected payoff, and one
-ingest's worth of instrumentation retired all of them and found a sixth that
-nobody had listed.
+The short version: the plan ranked five levers by expected payoff, one ingest's
+worth of instrumentation retired all of them, and the thing actually costing
+87% was a prompt inherited from a different feature.
 
 ---
 
@@ -92,30 +98,113 @@ measured, so the attribution is complete.
 That is at most 13% between them, and the plan had nothing pointed at the
 other 87%.
 
-### What generation was actually spent on
+### What generation was spent on — and the wrong turn taken here
 
-9,486 tokens produced 12,490 characters of description — **1.3 characters per
-token**, where prose runs at roughly 4. Those descriptions should have cost
-~3,100 tokens. Two thirds of everything generated never reached
-`message.content`.
+9,486 tokens produced 12,490 characters of description: **1.3 characters per
+token**, where English prose runs at roughly 4.
+
+The inference drawn from that number was that the missing two thirds were
+thinking tokens — `ollama show qwen3-vl:32b` does list `thinking` among its
+capabilities, and thinking tokens are counted in `eval_count` without ever
+appearing in `message.content`. It was wrong, and the next section is the
+measurement that says so.
+
+**The mistake is worth naming precisely, because the number was real and only
+the reasoning about it was bad.** 1.3 chars/token is a *derived* quantity, and
+it was compared against an *assumed* constant to reach a confident conclusion
+about a mechanism nobody had looked at. The actual descriptions were sitting in
+`{file_id}.frames.txt` the whole time, and one `head` of that file answered the
+question in seconds — markdown scaffolding and an inventory of the room, at
+~1.9 chars/token, which is simply what this tokenizer does with `**bold**` and
+nested bullets.
+
+Read the artifact before theorising about the metric.
+
+## Lever 7, first attempt — WRONG, and it did harm (2026-08-04)
+
+The diagnosis above was that the missing two thirds were thinking tokens. It
+was not, and the re-measurement says so plainly. Comparing frames 1-3 against
+frames 1-3 of the previous run, with `think: false` in force:
+
+| | before | after |
+|---|---|---|
+| wall | 107.1s | 109.5s |
+| generation | 78.9s | 80.4s |
+| tokens | 2,955 | 3,011 |
+| chars/token, frames 2-3 | 1.90 | 1.91 |
+
+Nothing moved. `num_predict` demonstrably took effect — frame 1 stopped at
+exactly 1024 tokens — so the config was live and `think: false` was sent. It
+simply was not where the time was going.
+
+**And `num_predict: 1024` broke the ingest.** It was set from an estimate of
+440-660 tokens per description, obtained by dividing characters by an assumed
+~4 chars/token. The real ratio is ~1.9, so the cap bit immediately: frame 1
+truncated to 636 characters against neighbours at 2,181, and **frames 4, 5 and
+6 hit the cap before emitting any content at all**, returned empty, were 502'd
+by the describe route, and were dropped. Three of six keyframes lost, `chunks`
+15 against 25.
+
+Three lessons, all cheap to state and none of which were:
+
+- **Do not derive a token budget from a character count.** Measure the ratio.
+  `audrey_vision_eval_tokens` exists precisely to make that a lookup.
+- **A diagnosis from a derived ratio is a hypothesis.** "1.3 chars/token, so
+  two thirds is thinking" reasoned from an assumed constant to a confident
+  conclusion, and one look at an actual description would have settled it
+  before a deploy.
+- **`ingest_result`'s short-frame warning named a cause it could not know.**
+  It said "the visual pass ran out of budget" for any shortfall, and pointed
+  the investigation at a lease that had never been touched — the worker log
+  showed the full 900s budget and three 502s. It now reports the count and
+  defers to the worker's per-frame log.
+
+What did improve: per-frame generation variance collapsed, 23.6-78.6s before
+against 26.4-27.3s after. The 81.4s runaway is gone. The mean did not move.
+
+## Lever 7, second attempt — the prompt (built 2026-08-04)
+
+Reading one actual description answered in seconds what two rounds of
+inference had not:
 
 ```
-Capabilities
-  completion
-  vision
-  tools
-  thinking      ← ollama show qwen3-vl:32b
+**Layout and Key Elements:**
+- **Two individuals** sit on chairs with red cushions and black metal
+  frames... Above the banner, a light beige wall displays a dark
+  brown/bronze metal decorative cross (star-shaped with scrollwork).
 ```
 
-Thinking tokens are counted in `eval_count` and billed in wall clock, and they
-are not in the reply. The worst frame is the clearest: 2,914 tokens and 81.4s —
-three times its neighbours — for a description no longer than theirs.
+Two independent wastes in one output:
 
-**So the model was reasoning at length about a photograph, and then the
-reasoning was discarded.** On a background job with nobody waiting, and on the
-chat path where somebody is.
+- **Markdown.** Headings, bold markers, nested bullets. This text is stored as
+  a retrieval chunk and never rendered, so every marker is tokens spent on
+  formatting nobody sees — and it is most of the gap between 1.9 chars/token
+  and the ~4 that plain prose runs at.
+- **Inventory.** A decorative cross with scrollwork, a polo-shirt logo, two
+  pieces of wood on a stand. Nobody will search for any of it. The first two
+  keyframes opened with a byte-identical sentence about the backdrop.
 
-## Lever 7 — stop paying for discarded reasoning (built 2026-08-04)
+`DESCRIBE_SYSTEM` is doing exactly what it was written to do — verbatim
+transcription of a pasted screenshot — applied to footage with nothing in it
+to transcribe. Phase 36 reused it unchanged, and that reuse is the 87%.
+
+`KEYFRAME_SYSTEM` is the video version: plain prose, no markdown, **lead with
+any text visible in the frame** (the slide, the whiteboard, the document —
+what a transcript cannot capture and what someone will genuinely search),
+then briefly what is happening, and explicitly *do not* inventory furniture,
+clothing or decor. A frame with nothing written in it and nothing happening
+gets one or two sentences.
+
+`describe_one_image` defaults to it, since that entry point exists for the
+keyframe pass. `describe_images` keeps `DESCRIBE_SYSTEM` — a chat turn about
+an error dump wants every legible character, which is the opposite need, and
+the two prompts must not converge.
+
+**Unverified.** The measurement to make is generation time and chars/token on
+the same six frames, and — more important — whether the descriptions still
+carry what matters. See verification step 10.
+
+## The sampling knobs, retained (2026-08-04)
 
 `vision.think: false`, plus `num_predict: 1024` and `temperature: 0.3`, wired
 through a new `think` parameter on `OllamaClient.chat`.
@@ -129,8 +218,10 @@ request exactly; only an explicit setting changes anything. Check
 
 The other two are hedges rather than the lever:
 
-- **`num_predict: 1024`** is a ceiling, not a target. Descriptions measured
-  440-660 tokens, so it only binds on the runaway case.
+- **`num_predict: 2048`** is a ceiling. It was 1024 for one deploy and that
+  was a guillotine, not a ceiling — see the previous section. 2048 clears a
+  normal frame's ~1,150 tokens with headroom while still stopping the observed
+  2,914-token runaway.
 - **`temperature: 0.3`** because the model ships at 1.0 — a creativity setting
   applied to a transcription task, and the likeliest cause of the known
   non-determinism in description length between requeues of an unchanged video
@@ -584,47 +675,57 @@ old videos re-processed.
 
 ### Part 3 — lever 7 (thinking off)
 
-**9. The token/character ratio comes back to normal.** The whole diagnosis in
-one number: the describe log lines should move from ~1.3 chars/token toward
-~4. If they do not, thinking was not what the tokens were being spent on and
-the diagnosis above is wrong.
+**9. All six keyframes come back.** The first thing to check, because the last
+attempt silently lost three of them. `chunks` should be back around 25, and
+the media-worker log should carry no `describe: frame N/M rejected` lines.
 
 ```
-# Unraid box — requeue first, then:
+# Unraid box
+docker compose logs --tail=200 media-worker | grep "describe: frame"
 docker compose logs --tail=200 audrey-ai | grep "described a frame"
 ```
 
-Expect generation roughly a third of its former self, and the per-frame wall
-clock to fall with it. The **before** is recorded here: 254.5s generation,
-9,486 tokens, 12,490 characters, 28.8-81.4s per frame.
+**10. Generation falls, and chars/token rises.** The **before**, for the same
+six frames: 254.5s generation, 9,486 tokens, 12,490 characters, 28.8-81.4s per
+frame, ~1.9 chars/token. Dropping markdown alone should move the ratio toward
+~4; dropping the scene inventory should cut the token count outright.
 
-**10. The descriptions did not get worse.** The lever removes reasoning, and
-the reasoning might have been earning its keep. Read the new
-`{file_id}.frames.txt` beside the old one — same video, same frames. Watch
-specifically for on-screen text: verbatim transcription is what the prompt is
-built around, and it is what a lower temperature is most likely to affect.
+**11. The descriptions still carry what matters — read them.** This is the
+step that decides whether the lever was worth it, and it cannot be done from a
+log line.
 
-Speed that costs accuracy has to be a deliberate trade, not an accident. If
-the descriptions degrade, `temperature` is the first thing to put back, then
-`num_predict`, and `think` last — it is the one carrying the 87%.
+```
+# Unraid box
+docker exec audrey-ai sh -c 'head -c 1200 /data/uploads/*/<file_id>.frames.txt'
+```
 
-**11. No non-thinking model is in the `vl` pool.** `think: false` is rejected
+Shorter is the point. What must NOT be lost is **text visible in the frame** —
+a slide, a whiteboard, a document, a name plate. That is the whole retrieval
+value of the visual pass, and it is the one thing a transcript can never
+supply. Losing the decorative cross is a win; losing a slide title is a
+regression that reverts the prompt.
+
+If quality drops, revert in this order: `temperature` first (cheapest to
+undo, least likely to be carrying anything), then the prompt, and `think`
+last — it is the one that provably changed nothing.
+
+**12. No non-thinking model is in the `vl` pool.** `think: false` is rejected
 outright by a model without the capability, so this breaks vision entirely
 rather than degrading. `docker exec ollama ollama show <model>` for anything
 in the pool; set `think: null` if any lacks it.
 
 ### Part 4 — for any further lever
 
-**12. Stage timings before and after**, on the same source video. A lever with
+**13. Stage timings before and after**, on the same source video. A lever with
 no recorded before is not a measured improvement.
 
-**13. Output comparison per lever.** The same video's descriptions before and
+**14. Output comparison per lever.** The same video's descriptions before and
 after, read side by side.
 
-**14. Fairness is unchanged.** `gate.snapshot()` during an ingest still shows
+**15. Fairness is unchanged.** `gate.snapshot()` during an ingest still shows
 interleaving with chat.
 
-**15. The gate's head-and-tail behaviour survives** any threshold retune.
+**16. The gate's head-and-tail behaviour survives** any threshold retune.
 
 ### Rollback
 

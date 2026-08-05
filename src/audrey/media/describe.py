@@ -54,6 +54,54 @@ DEFAULT_BUDGET_S = 900.0
 #: model.
 FRAME_TIMEOUT_S = 180
 
+#: Characters of surrounding speech sent with a frame (Phase 38). Small on
+#: purpose: this is context for judging what matters in the picture, not
+#: material to describe. Prefill measured 2.3s at 2,249 tokens, so a few
+#: hundred more characters is free next to a ~27s generation — but a long
+#: excerpt invites the model to summarise the speech instead of the frame,
+#: which duplicates a chunk that already exists.
+MAX_HINT_CHARS = 600
+
+
+def spoken_during(
+    segments: list[dict] | None, t_start: float, t_end: float,
+    *, max_chars: int = MAX_HINT_CHARS,
+) -> str:
+    """What was said while this keyframe was on screen.
+
+    A description is written at ingest, so there is no user and no question to
+    steer it — whatever gets asked arrives hours or days later. The speech over
+    a frame is the closest available proxy for what matters in it: the same
+    picture of a person at a lectern is worth different words depending on
+    whether they are reading a slide aloud or telling an anecdote.
+
+    Overlap, not containment. `SelectedFrame` spans everything it stands in
+    for, which after the keyframe gate can be minutes of static footage, while
+    a transcript segment is a few seconds — so a test for segments *inside* the
+    frame window would be right and a test for segments *containing* it would
+    almost always be empty.
+
+    Truncated on a segment boundary rather than mid-word, and from the front:
+    the speech nearest the start of the span is what the frame was chosen for.
+    """
+    if not segments:
+        return ""
+    picked: list[str] = []
+    total = 0
+    for seg in segments:
+        s_start = float(seg.get("t_start") or 0.0)
+        s_end = float(seg.get("t_end") or s_start)
+        if s_end < t_start or s_start > t_end:
+            continue
+        text = str(seg.get("text") or "").strip()
+        if not text:
+            continue
+        if total + len(text) > max_chars:
+            break
+        picked.append(text)
+        total += len(text) + 1
+    return " ".join(picked)
+
 
 class DescribeFailedError(RuntimeError):
     """The describe endpoint refused, in a way that will not fix itself."""
@@ -67,6 +115,7 @@ def describe_frames(
     endpoint: str,
     token: str,
     budget_s: float | None = DEFAULT_BUDGET_S,
+    segments: list[dict] | None = None,
 ) -> tuple[list[dict], int]:
     """Describe each frame. Returns `(descriptions, planned)`.
 
@@ -104,7 +153,10 @@ def describe_frames(
 
         status, body = post(
             endpoint, "/v1/media/describe", token,
-            {"user": user, "image_b64": payload, "mime": "image/jpeg"},
+            {
+                "user": user, "image_b64": payload, "mime": "image/jpeg",
+                "hint": spoken_during(segments, frame.t_start, frame.t_end),
+            },
             timeout=FRAME_TIMEOUT_S,
         )
         if status != 200:
@@ -133,4 +185,9 @@ def _read_b64(path: Path) -> str:
     return base64.b64encode(path.read_bytes()).decode("ascii")
 
 
-__all__ = ["DEFAULT_BUDGET_S", "DescribeFailedError", "describe_frames"]
+__all__ = [
+    "DEFAULT_BUDGET_S",
+    "DescribeFailedError",
+    "describe_frames",
+    "spoken_during",
+]

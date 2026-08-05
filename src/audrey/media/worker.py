@@ -213,6 +213,7 @@ def handle_job(
                 source, frame_dir, job,
                 endpoint=endpoint, token=token,
                 budget_s=_frame_budget(job, claimed_at, frame_budget_s),
+                segments=segments,
             )
         except FFmpegFailedError as e:
             # A video stream that will not decode. The transcript may already
@@ -294,6 +295,7 @@ def _visual_pass(
     endpoint: str,
     token: str,
     budget_s: float | None,
+    segments: list[dict] | None = None,
 ) -> tuple[list[dict], int]:
     """Sample, thin, and describe. Returns `(descriptions, planned)`.
 
@@ -301,6 +303,12 @@ def _visual_pass(
     environment, so `kb.video.*` stays the single source of truth and a
     threshold being calibrated against real footage takes effect on the next
     job instead of the next worker restart.
+
+    `segments` is the transcript, and this is the reason the audio pass runs
+    first even though the two are otherwise independent: a keyframe is
+    described with the speech that was playing over it as context, so the model
+    can tell a slide being read aloud from a backdrop nobody mentions. It is
+    optional — a silent video describes its frames with no hint at all.
     """
     settings = job.get("frames") or {}
     interval_s = float(settings.get("interval_s", 30.0))
@@ -326,6 +334,7 @@ def _visual_pass(
     return describe_frames(
         keyframes, user=str(job["user"]), post=post,
         endpoint=endpoint, token=token, budget_s=budget_s,
+        segments=segments,
     )
 
 

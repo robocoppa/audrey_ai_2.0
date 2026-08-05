@@ -775,8 +775,9 @@ class IngestResultRequest(BaseModel):
     # ordinary successful jobs.
     frames: list[FrameDescription] = []
     # How many keyframes the worker meant to describe. When this exceeds
-    # `len(frames)` the visual pass ran out of budget partway, which is
-    # recorded rather than hidden — see `ingest_frame_descriptions`.
+    # `len(frames)` some were dropped — the budget ran out, a frame could not
+    # be read, or the describe route refused it. The worker's log says which;
+    # this end only carries the count, and must not guess at the reason.
     frames_planned: int | None = None
 
 
@@ -1119,9 +1120,21 @@ async def ingest_result(
         # what it covers rather than silently wrong about the whole. Logged
         # because the alternative is a video that is quietly less searchable
         # than the one next to it, for no visible reason.
+        #
+        # **This must not name a cause.** It used to end "the visual pass ran
+        # out of budget", which is one of three reasons `describe_frames`
+        # returns short — the others being a frame it could not read and a
+        # frame the describe route refused. On 2026-08-04 a `num_predict` cap
+        # made three frames come back empty, the route 502'd them, and this
+        # line reported a budget that had not been touched. It cost a round of
+        # diagnosis pointed at the wrong subsystem.
+        #
+        # The worker knows which frames were dropped and why, and logs it per
+        # frame. This end only knows the count, so the count is all it says.
         log.warning(
-            "files: %s described %d of %d planned keyframes — the visual pass "
-            "ran out of budget", file_id, len(frames), body.frames_planned,
+            "files: %s described %d of %d planned keyframes — see the "
+            "media-worker log for which frames were dropped and why",
+            file_id, len(frames), body.frames_planned,
         )
 
     if not await db.complete_job(

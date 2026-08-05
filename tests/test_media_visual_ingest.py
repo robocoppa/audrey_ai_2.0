@@ -17,7 +17,7 @@ import pytest
 
 from audrey.kb.ingest import ingest_frame_descriptions
 from audrey.kb.qdrant import point_id
-from audrey.media.describe import DescribeFailedError, describe_frames
+from audrey.media.describe import DescribeFailedError, describe_frames, spoken_during
 from audrey.media.frames import SelectedFrame
 
 TOKEN = "svc-token"  # noqa: S105  (test fixture, not a real secret)
@@ -335,3 +335,122 @@ class TestIngestFrameDescriptions:
             {"t_start": 30.0, "t_end": 60.0, "text": "real prose"},
         ])
         assert n == 1
+
+
+# ─── Transcript context for a keyframe (Phase 38) ──────────────────────
+
+class TestSpokenDuring:
+    """A description is written at ingest, so there is no user and no question
+    to steer it — whatever gets asked arrives hours or days later. The speech
+    over a frame is the closest available proxy for what matters in it.
+
+    The `hint` field on `/v1/media/describe` was built for this in phase 36
+    and went unpopulated until now.
+    """
+
+    def test_speech_overlapping_the_frame_window_is_picked_up(self):
+        segments = [
+            {"t_start": 0.0, "t_end": 4.0, "text": "Before the frame."},
+            {"t_start": 30.0, "t_end": 34.0, "text": "This slide shows Q3 revenue."},
+            {"t_start": 300.0, "t_end": 304.0, "text": "Long after."},
+        ]
+
+        assert spoken_during(segments, 28.0, 40.0) == "This slide shows Q3 revenue."
+
+    def test_a_segment_straddling_the_boundary_counts(self):
+        """Overlap, not containment. A keyframe spans everything it stands in
+        for — after the gate that can be minutes — while a segment is a few
+        seconds, so a containment test would almost always come back empty."""
+        segments = [{"t_start": 25.0, "t_end": 35.0, "text": "Straddles the start."}]
+
+        assert spoken_during(segments, 30.0, 60.0) == "Straddles the start."
+
+    def test_several_segments_join_in_order(self):
+        segments = [
+            {"t_start": 30.0, "t_end": 32.0, "text": "First."},
+            {"t_start": 33.0, "t_end": 35.0, "text": "Second."},
+        ]
+
+        assert spoken_during(segments, 30.0, 60.0) == "First. Second."
+
+    def test_no_segments_yields_no_hint(self):
+        """A silent video is an ordinary case, not an error — phase 35. Its
+        frames are described with no context at all."""
+        assert spoken_during(None, 0.0, 30.0) == ""
+        assert spoken_during([], 0.0, 30.0) == ""
+
+    def test_nothing_said_over_this_frame_yields_no_hint(self):
+        segments = [{"t_start": 0.0, "t_end": 4.0, "text": "Elsewhere."}]
+
+        assert spoken_during(segments, 100.0, 130.0) == ""
+
+    def test_the_hint_is_truncated_on_a_segment_boundary(self):
+        """Cut mid-sentence, the context reads as garbled speech rather than
+        as an excerpt — and the model is being asked to judge relevance from
+        it, not to transcribe it."""
+        segments = [
+            {"t_start": 30.0, "t_end": 31.0, "text": "A" * 40},
+            {"t_start": 31.0, "t_end": 32.0, "text": "B" * 40},
+            {"t_start": 32.0, "t_end": 33.0, "text": "C" * 40},
+        ]
+
+        out = spoken_during(segments, 30.0, 60.0, max_chars=90)
+
+        assert out == f"{'A' * 40} {'B' * 40}"
+
+    def test_a_segment_with_no_text_is_skipped(self):
+        segments = [
+            {"t_start": 30.0, "t_end": 31.0, "text": "   "},
+            {"t_start": 31.0, "t_end": 32.0, "text": "Real words."},
+        ]
+
+        assert spoken_during(segments, 30.0, 60.0) == "Real words."
+
+    def test_a_segment_missing_its_end_time_is_treated_as_an_instant(self):
+        """faster-whisper always supplies both, but the payload crosses a
+        network boundary and this must not raise on a partial one."""
+        segments = [{"t_start": 30.0, "text": "No end time."}]
+
+        assert spoken_during(segments, 29.0, 31.0) == "No end time."
+
+
+class TestTheHintReachesTheRoute:
+    def test_describe_frames_sends_the_surrounding_speech(self, monkeypatch):
+        posted: list[dict] = []
+
+        def _post(endpoint, path, token, body, *, timeout=None):
+            posted.append(body)
+            return 200, {"description": "A slide reading Q3 REVENUE.",
+                         "model": "qwen3-vl:32b", "elapsed_s": 1.0}
+
+        monkeypatch.setattr("audrey.media.describe._read_b64", lambda p: "AAAA")
+        frames = [SelectedFrame(
+            path=Path("/nope.jpg"), t_start=30.0, t_end=60.0, represents=1)]
+        segments = [{"t_start": 31.0, "t_end": 34.0, "text": "Q3 revenue is up."}]
+
+        described, planned = describe_frames(
+            frames, user="a@b.c", post=_post,
+            endpoint="http://audrey-ai:8000", token=TOKEN, segments=segments,
+        )
+
+        assert planned == 1
+        assert len(described) == 1
+        assert posted[0]["hint"] == "Q3 revenue is up."
+
+    def test_a_silent_video_sends_an_empty_hint(self, monkeypatch):
+        posted: list[dict] = []
+
+        def _post(endpoint, path, token, body, *, timeout=None):
+            posted.append(body)
+            return 200, {"description": "A title card.", "model": "m", "elapsed_s": 1.0}
+
+        monkeypatch.setattr("audrey.media.describe._read_b64", lambda p: "AAAA")
+        frames = [SelectedFrame(
+            path=Path("/nope.jpg"), t_start=0.0, t_end=30.0, represents=1)]
+
+        describe_frames(
+            frames, user="a@b.c", post=_post,
+            endpoint="http://audrey-ai:8000", token=TOKEN, segments=None,
+        )
+
+        assert posted[0]["hint"] == ""

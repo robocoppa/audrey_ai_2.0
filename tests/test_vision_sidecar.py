@@ -449,4 +449,67 @@ class TestSamplingSettings:
         raw = _load_yaml(Path(__file__).resolve().parent.parent / "config.yaml")
         vision_block = raw["vision"]
         assert vision_block["think"] is False
-        assert vision_block["num_predict"] == 1024
+        assert vision_block["num_predict"] == 2048
+
+
+# ─── The keyframe prompt (Phase 38) ────────────────────────────────────
+
+class TestKeyframePrompt:
+    """Phase 36 reused the chat-screenshot prompt for video keyframes, and
+    against real footage that was the single largest cost in video ingest:
+    generation was 87% of the visual pass, spent on markdown scaffolding and
+    an inventory of the room.
+
+    A frame of a talking-head video came back with `**Layout and Key
+    Elements:**`, nested bullets, and a paragraph on a decorative cross with
+    scrollwork. The first two keyframes opened with a byte-identical sentence
+    about the backdrop.
+    """
+
+    def test_the_keyframe_prompt_forbids_markdown(self):
+        """The description is stored as a retrieval chunk and never rendered,
+        so every `**` and `###` is tokens spent on nothing. Measured at 1.9
+        chars/token against the ~4 plain prose runs at."""
+        assert "PLAIN PROSE" in vision.KEYFRAME_SYSTEM
+        assert "No markdown" in vision.KEYFRAME_SYSTEM
+
+    def test_the_keyframe_prompt_leads_with_on_screen_text(self):
+        """The one thing a transcript cannot capture and someone will really
+        search for. Everything else in a frame is a caption."""
+        assert "transcribed EXACTLY" in vision.KEYFRAME_SYSTEM
+
+    def test_the_keyframe_prompt_forbids_inventorying_the_scene(self):
+        assert "Do NOT inventory the scene" in vision.KEYFRAME_SYSTEM
+
+    def test_the_chat_path_keeps_the_screenshot_prompt(self):
+        """A user pasting an error dump wants every legible character. The two
+        prompts must not converge — they serve opposite cases."""
+        assert vision.DESCRIBE_SYSTEM != vision.KEYFRAME_SYSTEM
+        assert "VERBATIM" in vision.DESCRIBE_SYSTEM
+
+    async def test_describe_images_sends_the_screenshot_prompt(self):
+        ollama = _ScriptedOllama()
+        cfg = _Cfg()
+
+        await describe_images(
+            _image_msgs(), ollama=ollama, registry=_registry(cfg),
+            health=HealthTracker(), gate=FairLocalGate(concurrency=1), cfg=cfg,
+        )
+
+        assert ollama.calls[0]["messages"][0]["content"] == vision.DESCRIBE_SYSTEM
+
+    async def test_describe_one_image_sends_the_keyframe_prompt(self):
+        """The default on that entry point, because it exists for phase 36's
+        keyframe pass — a caller that wanted the screenshot prompt would have
+        to ask for it."""
+        from audrey.pipeline.vision import describe_one_image
+
+        ollama = _ScriptedOllama()
+        cfg = _Cfg()
+
+        await describe_one_image(
+            _PNG, ollama=ollama, registry=_registry(cfg), health=HealthTracker(),
+            gate=FairLocalGate(concurrency=1), cfg=cfg, user_id="a@b.c",
+        )
+
+        assert ollama.calls[0]["messages"][0]["content"] == vision.KEYFRAME_SYSTEM

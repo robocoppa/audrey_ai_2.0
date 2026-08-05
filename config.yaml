@@ -780,11 +780,19 @@ vision:
   # `docker exec ollama ollama show <model>` before adding to the pool.
   think: false
 
-  # A ceiling, not a target. Descriptions measured 1,746-2,633 characters
-  # (~440-660 tokens), so 1024 leaves generous headroom while capping the
-  # runaway case — one frame generated 2,914 tokens and took 81.4s, three
-  # times its neighbours, for a description no longer than theirs.
-  num_predict: 1024
+  # A ceiling, not a target — and 1024 was NOT a ceiling, it was a guillotine.
+  # Set there on 2026-08-04 from an estimate of ~440-660 tokens per
+  # description, derived by dividing characters by an assumed ~4 chars/token.
+  # The real ratio for this model on this content is ~1.9, so a 2,181-character
+  # description costs ~1,150 tokens and the cap bit on the very first frame:
+  # 1024 tokens exactly, 636 characters out, against neighbours at 2,181 and
+  # 1,620. A truncated description is worse than a slow one — it is ingested as
+  # a chunk and nothing downstream says it was cut.
+  #
+  # 2048 still stops the observed runaway (2,914 tokens, 81.4s) with headroom
+  # over a normal frame. **Measure the ratio before trusting a token cap** —
+  # characters are what the log prints and tokens are what the cap counts.
+  num_predict: 2048
 
   # The model ships at temperature 1.0, which is a creativity setting applied
   # to a transcription task. It is also the likeliest cause of the known

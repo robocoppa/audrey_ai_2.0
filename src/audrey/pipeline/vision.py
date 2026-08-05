@@ -65,6 +65,80 @@ DESCRIBE_SYSTEM = (
     "anything you cannot actually see. Describe only."
 )
 
+# The keyframe prompt (Phase 38). `DESCRIBE_SYSTEM` above is written for chat
+# screenshots — error dumps, spreadsheets, diagrams — where "transcribe every
+# legible character" is exactly right. Phase 36 reused it for video keyframes,
+# and against real footage that turned out to be the single largest cost in
+# video ingest.
+#
+# Measured on the box 2026-08-04. Generation was 87% of the visual pass, and
+# the descriptions it produced looked like this:
+#
+#     **Layout and Key Elements:**
+#     - **Two individuals** sit on chairs with red cushions and black metal
+#       frames... Above the banner, a light beige wall displays a dark
+#       brown/bronze metal decorative cross (star-shaped with scrollwork).
+#
+# Two separate wastes in one output. **Markdown**: the headings, bold markers
+# and bullets cost tokens and buy nothing, because this text is stored as a
+# retrieval chunk and never rendered — 1.9 characters per token against the ~4
+# that plain prose runs at. **Inventory**: a decorative cross, a polo-shirt
+# logo, two pieces of wood on a stand. Nobody searches for those, and the
+# first two keyframes of a talking-head video opened with a byte-identical
+# sentence about the backdrop.
+#
+# What a keyframe is actually *for* is the text on screen — the slide, the
+# document, the whiteboard. That is what a transcript cannot capture and what
+# someone will genuinely search. Everything else is a caption.
+KEYFRAME_SYSTEM = (
+    "You are describing one still frame from a video so that it can be found "
+    "later by search. Another model will read your description and cannot see "
+    "the frame.\n"
+    "- Write PLAIN PROSE. No markdown, no headings, no bullet points, no bold "
+    "or italic markers. This text is stored as a search chunk, never "
+    "displayed.\n"
+    "- Lead with any text visible in the frame, transcribed EXACTLY: slides, "
+    "documents, whiteboards, captions, name plates, titles, signs, code, "
+    "error messages. This is the most valuable thing you can record and often "
+    "the only thing anyone will search for.\n"
+    "- Then say briefly what is happening and who is present.\n"
+    "- Do NOT inventory the scene. Furniture, clothing, decor, wall colours "
+    "and background objects deserve a few words only when they identify the "
+    "setting or carry meaning. A frame with no writing in it and nothing "
+    "happening deserves one or two sentences, not a paragraph.\n"
+    "- Describe only what is visible. Do not speculate, do not interpret the "
+    "video's purpose, and do not comment on the footage."
+)
+
+# How a hint is framed to the model. The hint means something different on the
+# two paths, and framing it wrongly is worse than omitting it.
+#
+# On the chat path it is the user's question, and the risk is the model
+# answering it instead of describing.
+QUESTION_HINT = (
+    "\n\nFor context, the question asked about this image was: {hint}\n"
+    "Describe the parts of the image that bear on it in extra detail — but "
+    "still describe, do not answer."
+)
+
+# On the keyframe path there is no question — the description is written at
+# ingest, and whatever anyone eventually asks arrives hours or days later. What
+# *is* available is what was being said while the frame was on screen, which is
+# the next best guide to what in the frame is worth the words.
+#
+# The final clause is load-bearing. Transcript and visual descriptions are
+# ingested as separate chunks into the same collection, so a description that
+# echoes the speech makes one query return the same sentences twice, under two
+# artifacts, competing with each other for the same top_k.
+TRANSCRIPT_HINT = (
+    "\n\nFor context, this is what was being said in the video while this "
+    "frame was on screen:\n{hint}\n"
+    "Use it ONLY to judge what in the frame is worth describing. Do NOT "
+    "repeat it back or summarise it — the spoken words are already stored "
+    "separately, and repeating them here would return the same content twice "
+    "for one search."
+)
+
 _DEFAULT_TIMEOUT_S = 120.0
 _DEFAULT_MAX_IMAGES = 4
 _DEFAULT_CACHE_SIZE = 64
@@ -289,17 +363,17 @@ async def _transcribe_one(
     user_id: str | None,
     options: dict[str, Any] | None = None,
     think: bool | None = None,
+    system: str = DESCRIBE_SYSTEM,
+    hint_template: str = QUESTION_HINT,
 ) -> tuple[str, VisionTiming]:
     """One vision call. Raises OllamaError; caller decides how to fail."""
     hint = (
-        f"\n\nFor context, the question asked about this image was: "
-        f"{user_question.strip()}\nDescribe the parts of the image that bear on "
-        f"it in extra detail — but still describe, do not answer."
+        hint_template.format(hint=user_question.strip())
         if user_question.strip()
         else ""
     )
     messages = [
-        {"role": "system", "content": DESCRIBE_SYSTEM},
+        {"role": "system", "content": system},
         {
             "role": "user",
             "content": [
@@ -331,10 +405,18 @@ async def describe_one_image(
     cfg: Any,
     user_question: str = "",
     user_id: str | None = None,
+    system: str = KEYFRAME_SYSTEM,
+    hint_template: str = TRANSCRIPT_HINT,
 ) -> tuple[str, str, VisionTiming]:
     """Describe one image through the `vl` pool.
 
     Returns `(description, model, timing)`.
+
+    **Defaults to `KEYFRAME_SYSTEM`, not `DESCRIBE_SYSTEM`.** This entry point
+    exists for phase 36's keyframe pass, and a video frame wants a different
+    description from a pasted screenshot — see the comment on that constant.
+    `describe_images` keeps the screenshot prompt, which is what a chat turn
+    about an error dump actually needs.
 
     The single-image entry point, for callers that already hold an image and
     want prose back — Phase 36's keyframe pass. `describe_images` stays the
@@ -371,7 +453,8 @@ async def describe_one_image(
         url=data_url, model=model, location=location,
         user_question=user_question,
         timeout_s=float(conf.get("timeout_s", _DEFAULT_TIMEOUT_S)),
-        user_id=user_id, options=options, think=think,
+        user_id=user_id, options=options, think=think, system=system,
+        hint_template=hint_template,
     )
     return description, model, timing
 
@@ -537,6 +620,7 @@ async def describe_for_text_model(
 
 __all__ = [
     "DESCRIBE_SYSTEM",
+    "KEYFRAME_SYSTEM",
     "VisionTiming",
     "describe_enabled",
     "describe_for_text_model",
