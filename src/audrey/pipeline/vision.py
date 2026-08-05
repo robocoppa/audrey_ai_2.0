@@ -315,6 +315,14 @@ class VisionTiming:
     eval_s: float = 0.0
     prompt_tokens: int = 0
     eval_tokens: int = 0
+    #: Characters of reasoning Ollama returned separately from the reply
+    #: (Phase 38). `eval_count` bills these; `message.content` never shows
+    #: them, so without this the only evidence they exist is a suspicious
+    #: characters-per-token ratio — and reasoning from that ratio to a
+    #: mechanism is exactly the mistake this field was added to stop
+    #: anyone repeating. Zero for a model that does not think, and zero
+    #: when thinking is genuinely off.
+    thinking_chars: int = 0
 
     @classmethod
     def from_response(cls, resp: dict[str, Any]) -> VisionTiming:
@@ -330,6 +338,9 @@ class VisionTiming:
             except (TypeError, ValueError):
                 return 0
 
+        message = resp.get("message")
+        thinking = (message or {}).get("thinking") if isinstance(message, dict) else None
+
         return cls(
             total_s=secs("total_duration"),
             load_s=secs("load_duration"),
@@ -337,6 +348,7 @@ class VisionTiming:
             eval_s=secs("eval_duration"),
             prompt_tokens=count("prompt_eval_count"),
             eval_tokens=count("eval_count"),
+            thinking_chars=len(thinking) if isinstance(thinking, str) else 0,
         )
 
     def queue_s(self, wall_s: float) -> float:

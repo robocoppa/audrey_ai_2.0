@@ -187,3 +187,54 @@ class TestDescribeOneImageReturnsTiming:
 
         assert description == "a whiteboard"
         assert timing == VisionTiming()
+
+
+class TestThinkingIsMeasuredNotInferred:
+    """Phase 38's most expensive mistake, made twice: a describe call generated
+    9,486 tokens to produce 12,490 characters, and that ratio was reasoned from
+    — against an assumed ~4 chars/token — to a confident conclusion about
+    thinking tokens. It was wrong, `think: false` changed nothing measurable,
+    and the `num_predict` sized from the same bad arithmetic dropped three of
+    six keyframes.
+
+    Ollama returns reasoning in `message.thinking`, separate from
+    `message.content`. Reading it is a lookup. There is no longer an excuse for
+    inferring it.
+    """
+
+    def test_thinking_is_read_from_the_message(self):
+        t = VisionTiming.from_response({
+            "message": {"content": "Two men in chairs.", "thinking": "Let me look..."},
+        })
+
+        assert t.thinking_chars == len("Let me look...")
+
+    def test_no_thinking_field_is_zero_not_unknown(self):
+        """Zero has to mean 'the model returned none', because that is the
+        reading that says thinking is genuinely off."""
+        t = VisionTiming.from_response({"message": {"content": "Two men."}})
+
+        assert t.thinking_chars == 0
+
+    def test_a_null_thinking_field_is_zero(self):
+        t = VisionTiming.from_response({
+            "message": {"content": "Two men.", "thinking": None},
+        })
+
+        assert t.thinking_chars == 0
+
+    def test_a_non_string_thinking_field_does_not_raise(self):
+        t = VisionTiming.from_response({"message": {"content": "x", "thinking": 42}})
+
+        assert t.thinking_chars == 0
+
+    def test_a_response_with_no_message_does_not_raise(self):
+        assert VisionTiming.from_response({"eval_count": 10}).thinking_chars == 0
+
+    def test_a_non_dict_message_does_not_raise(self):
+        assert VisionTiming.from_response({"message": "oops"}).thinking_chars == 0
+
+    def test_the_real_response_shape_reports_no_thinking(self):
+        """The fixture at the top of this file has no thinking field, which is
+        what a call with `think: false` honoured looks like."""
+        assert VisionTiming.from_response(_REAL_RESPONSE).thinking_chars == 0

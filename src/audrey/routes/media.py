@@ -169,13 +169,18 @@ async def describe(
     # means reading a handful of consecutive frames from one video and seeing
     # which number moved — a histogram aggregates exactly the per-frame
     # variation that phase 36 measured as a 4x spread and could not explain.
+    # `think=` closes the gap between tokens billed and characters kept. A
+    # describe that generates 1,156 tokens and returns 267 characters is
+    # spending its time somewhere, and the only honest way to find out is to
+    # print what the response actually carried rather than divide one number
+    # by another and reason about the remainder.
     log.info(
         "media: described a frame for %s via %s in %.1fs (%d chars) "
-        "queue=%.1fs load=%.1fs prefill=%.1fs/%dtok gen=%.1fs/%dtok",
+        "queue=%.1fs load=%.1fs prefill=%.1fs/%dtok gen=%.1fs/%dtok think=%dch",
         req.user, model, elapsed, len(description),
         timing.queue_s(elapsed), timing.load_s,
         timing.prompt_eval_s, timing.prompt_tokens,
-        timing.eval_s, timing.eval_tokens,
+        timing.eval_s, timing.eval_tokens, timing.thinking_chars,
     )
     return DescribeResponse(description=description, model=model, elapsed_s=elapsed)
 

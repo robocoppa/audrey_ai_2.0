@@ -19,10 +19,12 @@ that makes it fast, driven by the stage timings
   full at [Lever 7, first
   attempt](#lever-7-first-attempt--wrong-and-it-did-harm-2026-08-04), because
   the way it was wrong is more useful than the fix.
-- **The real lever is the prompt.** Phase 36 reused the chat-screenshot prompt
-  for video keyframes, so the model writes markdown scaffolding and inventories
-  the furniture. `KEYFRAME_SYSTEM` is built and hermetically tested,
-  **unverified on the box**.
+- **The real lever was the prompt, and it is VERIFIED ON THE BOX.** Phase 36
+  reused the chat-screenshot prompt for video keyframes, so the model wrote
+  markdown scaffolding and inventoried the furniture. `KEYFRAME_SYSTEM` plus
+  the transcript hint: **291.1s → 135.7s wall, 254.5s → 98.6s generation**, and
+  the descriptions now surface the on-screen company name that 12,490
+  characters of room inventory had buried.
 - Source reclamation is built, tested, and **off by default** — the plan was
   wrong to want it on, see
   [Why the default is `keep_source: true`](#why-the-default-is-keep_source-true).
@@ -200,9 +202,49 @@ keyframe pass. `describe_images` keeps `DESCRIBE_SYSTEM` — a chat turn about
 an error dump wants every legible character, which is the opposite need, and
 the two prompts must not converge.
 
-**Unverified.** The measurement to make is generation time and chars/token on
-the same six frames, and — more important — whether the descriptions still
-carry what matters. See verification step 10.
+### Verified on the box, 2026-08-04
+
+Same video, same six keyframes:
+
+| | before | after |
+|---|---|---|
+| wall clock | 291.1s | **135.7s** |
+| generation | 254.5s | **98.6s** |
+| tokens | 9,486 | 3,685 |
+| characters | 12,490 | 2,008 |
+
+**2.1x faster overall, 2.6x less generation** — 58% off the non-load work once
+the once-per-job cold start is excluded from both. All six frames described, no
+rejections. `chunks` 16 rather than 25: descriptions now fit one chunk each
+instead of being split into fifteen.
+
+The transcript hint is confirmed arriving by prefill alone. It was exactly
+2,249 tokens on every frame before — prompt plus image, nothing else — and is
+now 2,411-2,479 and varies per frame.
+
+**The descriptions got better, not merely cheaper**, which was not guaranteed
+and is the more important result. The old pass spent 12,490 characters on
+carpet, chair frames and a decorative sunburst, and never once named the
+company. The new ones open with `ACOM TECHNOLOGIES`, `AM enertec`, `THANK
+YOU` — text that was in those frames all along and was being buried under the
+inventory. That text is the entire reason a visual pass exists beside a
+transcript, and until this change it was absent from the artifact completely.
+
+### The loose end
+
+Frames 4-6 generated 648-1,156 tokens for 234-267 characters: **0.23-0.36
+chars/token**, worse than the 1.9 this started from. Frames 1-3 sit at 1.1-1.5.
+
+The difference is content. Frames 1-3 are the same two men in the same chairs;
+4-6 are new scenes with on-screen text to read. So hidden generation is real,
+`think: false` is not suppressing it, and it concentrates where the model has
+something to work out.
+
+Not chased, deliberately. It is no longer the dominant cost, the 2.1x is
+banked, and the honest position is that the earlier thinking diagnosis was
+wrong about the magnitude and the fix rather than wrong about the phenomenon.
+Anyone picking this up should start by capturing `message.thinking` from the
+response rather than inferring from a ratio again.
 
 ## The sampling knobs, retained (2026-08-04)
 
