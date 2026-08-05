@@ -297,7 +297,7 @@ class UploadsDB:
                 # pins the two together.
                 "SELECT file_id, filename, mime, bytes, kind, collection, "
                 "       chunks, uploaded_at, status, failure_reason, duration_s, "
-                "       summary, source_freed_at "
+                "       summary, source_freed_at, leased_at "
                 "FROM uploads WHERE user = ? ORDER BY uploaded_at DESC",
                 (user,),
             )

@@ -701,6 +701,7 @@ class MyFileRow(BaseModel):
     duration_s: float = 0.0
     summary: str = ""
     failure_reason: str = ""
+    waiting_for_s: float = 0.0
 
 
 class ListMyFilesResponse(BaseModel):
@@ -722,8 +723,9 @@ class ListMyFilesResponse(BaseModel):
         "it, or when you need a file's exact filename. A status of 'pending' "
         "or 'processing' means Audrey is still working on that file and its "
         "contents are not searchable yet — say so rather than reporting it as "
-        "empty; a 'failed' file carries the reason. Returns only this user's "
-        "own files."
+        "empty, and use waiting_for_s (seconds so far, and only meaningful "
+        "for those two statuses) if asked how long it has been going. A "
+        "'failed' file carries the reason. Returns only this user's own files."
     ),
 )
 async def list_my_files(req: ListMyFilesRequest) -> ListMyFilesResponse:

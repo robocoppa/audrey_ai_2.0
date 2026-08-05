@@ -395,7 +395,55 @@
     }
   }
 
-  async function refreshList() {
+  // Poll only while something is actually moving. A row goes
+  // pending → processing → ready without the page hearing about it, and the
+  // list otherwise refreshes only when you act on it — so a 458-second ingest
+  // is indistinguishable from a stalled one until you reload by hand.
+  //
+  // Deliberately NOT a progress protocol. Reporting stage transitions would
+  // mean the worker posting over HTTP, a sibling of `ingest_result`, and lease
+  // logic that tolerates partial updates — a lot of surface for "whisper is
+  // done, frames are next". Elapsed time against a known typical duration
+  // answers the question a user actually has, which is whether to wait.
+  const WATCH_INTERVAL_MS = 5000;
+  let watchTimer = null;
+
+  function scheduleWatch(files) {
+    const moving = files.some(
+      f => f.status === "pending" || f.status === "processing");
+    if (moving) {
+      if (watchTimer === null) watchTimer = setInterval(watchTick, WATCH_INTERVAL_MS);
+    } else if (watchTimer !== null) {
+      clearInterval(watchTimer);
+      watchTimer = null;
+    }
+  }
+
+  function watchTick() {
+    // A hidden tab is nobody watching. Browsers throttle background timers
+    // anyway, so the poll would land late and irregularly; skipping it means
+    // a tab left open overnight costs the server nothing, and the
+    // visibilitychange handler catches up the moment it is looked at again.
+    if (document.visibilityState === "visible") refreshList();
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && watchTimer !== null) refreshList();
+  });
+
+  // Single-flight. On a slow link the 5s timer would otherwise stack requests
+  // that each redraw the table underneath the last. Returning the in-flight
+  // promise rather than bailing keeps `await refreshList()` in handleFiles
+  // meaning what it says — it must not resolve before `limits` is populated.
+  let refreshInFlight = null;
+
+  function refreshList() {
+    if (refreshInFlight) return refreshInFlight;
+    refreshInFlight = fetchList().finally(() => { refreshInFlight = null; });
+    return refreshInFlight;
+  }
+
+  async function fetchList() {
     try {
       const r = await authedFetch(`/v1/files`);
       if (!r.ok) {
@@ -403,8 +451,13 @@
         return;
       }
       const body = await r.json();
+      if (body.server_time) {
+        const serverNow = Date.parse(body.server_time);
+        if (!Number.isNaN(serverNow)) serverSkewMs = Date.now() - serverNow;
+      }
       who.textContent = body.user;
       storedBytes = body.total_bytes;
+      scheduleWatch(body.files);
       if (body.limits) applyLimits(body.limits);
       quota.textContent =
         `Stored: ${fmtBytes(body.total_bytes)}`
@@ -469,15 +522,56 @@
       + `>${size}</span>`;
   }
 
+  // Elapsed is measured against the SERVER's clock, not this browser's.
+  //
+  // `serverSkewMs` is the gap between the two, measured when a list lands. A
+  // laptop that slept through a timezone change, or is simply minutes out,
+  // would otherwise render "processing for 47 hours" or a negative — both of
+  // which read as a broken job queue rather than a wrong clock, and send
+  // someone to debug the worker. Null until a response carries `server_time`.
+  let serverSkewMs = null;
+
+  function fmtElapsed(seconds) {
+    const s = Math.max(0, Math.round(seconds));
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ${String(s % 60).padStart(2, "0")}s`;
+    return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+  }
+
+  /** Seconds since `stamp` on the server's clock, or null if unreadable.
+   *
+   * A row cannot have started in the future, so a negative means the clocks
+   * disagree by more than the skew correction covers; fmtElapsed clamps it to
+   * 0, which is the honest degradation.
+   */
+  function elapsedSince(stamp) {
+    if (!stamp) return null;
+    const started = Date.parse(stamp);
+    if (Number.isNaN(started)) return null;
+    return (Date.now() - (serverSkewMs || 0) - started) / 1000;
+  }
+
   function statusCell(f) {
     if (f.status === "ready") return escapeHtml(f.uploaded_at);
-    if (f.status === "processing") return "processing…";
+    if (f.status === "processing") {
+      // `leased_at` is when a worker claimed it. A nine-minute video takes
+      // ~458s, so a bare "processing…" gives no way to tell a job that is
+      // working from one that has hung — which is the question actually
+      // being asked.
+      const secs = elapsedSince(f.leased_at);
+      return secs === null ? "processing…" : `processing — ${fmtElapsed(secs)}`;
+    }
     if (f.status === "failed") {
       return f.failure_reason
         ? `failed — ${escapeHtml(f.failure_reason)}`
         : "failed";
     }
-    return "pending";
+    // Queued but not started: measure from upload instead. "Queued 6m" and
+    // "processing 6m" mean different things — behind other work versus being
+    // worked on — and conflating them makes a backlog look like a stall.
+    const secs = elapsedSince(f.uploaded_at);
+    return secs === null ? "pending" : `queued — ${fmtElapsed(secs)}`;
   }
 
   // Server-published limits drive the copy too, so the page can't advertise

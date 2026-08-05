@@ -5,9 +5,10 @@ worker, the transcript, the visual pass, the summary and the cost work, and
 phase 39 made it all findable. What none of them built is a way to *use* it
 from the place people actually sit, which is an OWUI chat window.
 
-**Status: steps 1-3 done 2026-08-05** (step 1 as a banner, not a sidebar link —
-see below). **Step 2 is deployed and discovered; step 3 is built but not yet
-deployed. Step 4 not built.**
+**Status: ALL FOUR STEPS BUILT 2026-08-05** (step 1 as a banner, not a sidebar
+link — see below). **Step 2 is deployed and discovered; steps 3 and 4 are
+built and not yet deployed.** The behavioural verification in §3b is the one
+thing that still needs the box.
 
 ---
 
@@ -297,7 +298,56 @@ applies wrongly is worse than none — scoping to the wrong video answers
 confidently from the wrong source. Worth testing whether it scopes only when
 the user named a file, or whenever any file is mentioned in the conversation.
 
-## Step 4 — say what is happening during a job
+## Step 4 — say what is happening during a job ✅ BUILT 2026-08-05
+
+| file | change |
+|---|---|
+| `src/audrey/kb/uploads_db.py` | `leased_at` added to the explicit SELECT |
+| `src/audrey/routes/files.py` | `FileRow.leased_at`; `ListResponse.server_time`; `_waiting_for_s`; `ModelFileRow.waiting_for_s`; **projection now driven by `FileRow.model_fields`** |
+| `tools-server/app.py` | `waiting_for_s` on the tool row, named in the description |
+| `src/audrey/static/upload.html` | elapsed in the status cell, skew-corrected; single-flight polling that stops when nothing is moving |
+| `tests/test_files_elapsed.py` | new, 13 tests |
+
+1343 hermetic tests, ruff clean.
+
+**It was four places, not three — and the fourth fails quietly.** The route
+built `FileRow` from its own hand-written key list, a third enumeration beside
+the SELECT and the model. `source_freed_at` was in the schema, the migration,
+the SELECT and `FileRow`, and **missing from that list** — so phase 38's
+reclamation marker has been `""` on every response since it shipped, and the
+page's strikethrough could never render. Nothing errored, because the field
+has a default. Fixed by projecting from `FileRow.model_fields`, which removes
+the place entirely: a field the model declares and the SELECT omits now raises
+`KeyError`, which the existing test already pins.
+
+**Elapsed is measured from a different timestamp per status.** `leased_at`
+once a worker holds the row, `uploaded_at` while it is still queued. A video
+that sat in the queue an hour has not been *processing* for an hour, and
+saying so would make a healthy worker look stuck; equally, "queued 6m" and
+"processing 6m" mean different things to someone deciding whether to wait.
+
+**The server publishes its own clock** (`ListResponse.server_time`), and the
+page measures skew from it. A browser computing `Date.now() - leased_at`
+against a laptop that slept through a timezone renders "processing for 47
+hours" or a negative — which reads as a broken job queue and sends someone to
+debug the worker, not the clock. Negative elapsed clamps to 0 on both sides.
+
+**Polling stops twice over:** when no row is `pending` or `processing`, and
+while the tab is hidden. Browsers throttle background timers anyway, so a
+hidden-tab poll lands late and irregularly; skipping it means a tab left open
+overnight costs nothing, and `visibilitychange` catches up the moment it is
+looked at again. `refreshList` is single-flight and returns the in-flight
+promise rather than bailing, so `await refreshList()` in `handleFiles` still
+means what it says — it must not resolve before `limits` is populated.
+
+**`waiting_for_s` on the chat-facing row too**, computed server-side. "How
+long has my video been processing?" is a question asked in chat, and date
+arithmetic against an unstated now is exactly what a language model should not
+be doing.
+
+---
+
+### Original plan
 
 The cheap, honest version needs no new protocol. The row already records
 `leased_at` when a worker claims it, so the page can render "processing for
@@ -388,11 +438,18 @@ phase 29 established that OpenAPI discovery is enough and that naming a tool in
 a prompt is how you get it called when it should not be. If adoption is poor,
 measure it before prompt-steering, per the A-B-A rule.
 
-**6. The file list still returns 200 after adding `leased_at`.** The
-three-places check, and there is an existing test pinning `FileRow` against
-what `list_user` actually returns.
+**6. The file list still returns 200 after adding `leased_at`.** ✅ Hermetic.
+And the check found more than it was looking for — `source_freed_at` had been
+missing from the route's projection since phase 38, returning `""` silently.
+There are now tests for both, and the projection can no longer drift.
 
 **7. A processing row shows elapsed time and stops polling when done.**
+Hermetic for the server half (`_waiting_for_s`, `server_time`); **the page half
+needs a real upload**, since none of the JS is covered. Worth watching on that
+run: elapsed counts up in 5s steps, "queued" flips to "processing" when the
+worker claims it, both disappear at `ready`, and the network tab goes quiet
+once nothing is in flight. Also switch tabs away and back — polling should
+pause and then catch up immediately.
 
 ### Rollback
 

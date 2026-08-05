@@ -118,6 +118,11 @@ class FileRow(BaseModel):
     # cannot explain why that no longer counts against the quota, and a user
     # would read the difference as an accounting bug.
     source_freed_at: str = ""
+    # When a worker claimed this row (Phase 40). Empty unless `status` is
+    # 'processing'. Surfaced so the page can say how long a job has been
+    # running: a 458-second ingest that reports nothing while it runs is
+    # indistinguishable from one that has hung.
+    leased_at: str = ""
 
 
 class UploadResponse(BaseModel):
@@ -155,6 +160,16 @@ class ListResponse(BaseModel):
     files: list[FileRow]
     total_bytes: int
     limits: Limits
+    # The server's clock at the moment this list was built (Phase 40).
+    #
+    # Elapsed time is the point of `leased_at`, and a browser computing
+    # `Date.now() - leased_at` computes it against the *browser's* clock. A
+    # laptop that slept through a timezone, or is simply minutes out, then
+    # renders "processing for 47 hours" or a negative — which reads as a
+    # broken job queue and sends someone to debug the worker. Anchoring on a
+    # timestamp from the same clock that wrote `leased_at` removes the whole
+    # class of error; the page ticks forward from here locally.
+    server_time: str
 
 
 class DeleteResponse(BaseModel):
@@ -195,6 +210,12 @@ class ModelFileRow(BaseModel):
     # it: a row that stopped moving without saying why is the failure this
     # field exists to prevent, and that is as true in a chat answer as on a page.
     failure_reason: str = ""
+    # Seconds this file has been queued or being worked on, 0 once it is done
+    # (Phase 40). Computed server-side rather than shipping `leased_at` and a
+    # clock: "how long has my video been processing?" is a question a user
+    # asks in chat, and date arithmetic against an unstated now is exactly
+    # what a language model should not be doing.
+    waiting_for_s: float = 0.0
 
 
 class ServiceListResponse(BaseModel):
@@ -242,6 +263,34 @@ async def _stream_to_disk(upload: UploadFile, dest: Path, *, limit_bytes: int) -
             written += len(chunk)
             f.write(chunk)
     return written
+
+
+def _waiting_for_s(row: dict, *, now: _dt.datetime) -> float:
+    """Seconds a row has been queued or in progress. 0 when it is neither.
+
+    Measured from `leased_at` once a worker holds it and from `uploaded_at`
+    before that, because those answer different questions — "it is being
+    worked on and has taken this long" versus "it is still behind other work".
+    A user deciding whether to wait or come back needs to tell those apart.
+
+    Clamped at 0. The timestamps are written by this process's own clock, so
+    a negative should be impossible; if one ever appears — a clock step, an
+    NTP correction, a restored backup — reporting it as 0 is the honest
+    degradation. A file that has been processing for "-3 minutes" reads as a
+    broken queue and sends someone to debug the worker.
+    """
+    if row["status"] not in ("pending", "processing"):
+        return 0.0
+    stamp = str(row["leased_at"] or "") or str(row["uploaded_at"] or "")
+    if not stamp:
+        return 0.0
+    try:
+        started = _dt.datetime.fromisoformat(stamp)
+    except ValueError:
+        return 0.0
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=_dt.UTC)
+    return max(0.0, (now - started).total_seconds())
 
 
 def _get_uploads_db(request: Request) -> UploadsDB:
@@ -1353,13 +1402,23 @@ async def list_files(
     db = _get_uploads_db(request)
 
     rows = await db.list_user(user)
-    files = [FileRow(**{k: row[k] for k in (
-        "file_id", "filename", "mime", "bytes", "uploaded_at", "chunks",
-        "status", "failure_reason", "duration_s", "summary",
-    )}) for row in rows]
+    # Projected straight from what `FileRow` declares, not a third hand-written
+    # column list. There was one here, and it had already drifted: `bytes`,
+    # `status`, `summary` and the rest were listed, `source_freed_at` was not —
+    # so the reclamation marker phase 38 added to `FileRow` and to the SELECT
+    # was silently `""` on every response, and the page's strikethrough could
+    # never render. Nothing errored, because the field has a default.
+    #
+    # "Adding a column means three places" was the lesson from the `summary`
+    # 500; this was the fourth, and it fails *quietly* rather than loudly.
+    # Driving the projection from the model removes it as a place at all —
+    # a field FileRow declares but the SELECT omits now raises `KeyError`
+    # here, which `TestListReturnsEveryFileRowField` already pins.
+    files = [FileRow(**{k: row[k] for k in FileRow.model_fields}) for row in rows]
     total = sum(r.bytes for r in files)
     return ListResponse(
         user=user, files=files, total_bytes=total,
+        server_time=_dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
         limits=Limits(
             max_upload_bytes=_max_upload_bytes(request),
             max_user_bytes=_max_user_bytes(request),
@@ -1411,6 +1470,7 @@ async def list_files_for_user(
 
     db = _get_uploads_db(request)
     rows = await db.list_user(user)
+    now = _dt.datetime.now(_dt.UTC)
     files = [
         ModelFileRow(
             filename=str(row["filename"]),
@@ -1420,6 +1480,7 @@ async def list_files_for_user(
             duration_s=float(row["duration_s"]),
             summary=str(row["summary"]),
             failure_reason=str(row["failure_reason"]),
+            waiting_for_s=_waiting_for_s(row, now=now),
         )
         for row in rows
     ]
