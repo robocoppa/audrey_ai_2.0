@@ -36,18 +36,24 @@ class _FakeQdrant:
         self._has_user = has_user_collection
         self.dense_calls: list[str] = []
         self.lexical_calls: list[tuple[str, str]] = []
+        # Phase 40: the scope each side was handed, recorded separately so a
+        # filter reaching only one retriever is directly observable.
+        self.dense_scopes: list[object] = []
+        self.lexical_scopes: list[object] = []
 
     async def collection_exists(self, name: str) -> bool:
         return self._has_user
 
-    async def search_text(self, vec, *, top_k, collection=None):
+    async def search_text(self, vec, *, top_k, collection=None, scope=None):
         target = collection or self.text_collection
         self.dense_calls.append(target)
+        self.dense_scopes.append(scope)
         return self._user_dense if collection else list(self._dense.values())
 
-    async def search_lexical(self, query, *, top_k, collection=None):
+    async def search_lexical(self, query, *, top_k, collection=None, scope=None):
         target = collection or self.text_collection
         self.lexical_calls.append((target, query))
+        self.lexical_scopes.append(scope)
         return self._user_lexical if collection else list(self._lexical.values())
 
 

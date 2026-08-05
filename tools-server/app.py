@@ -182,6 +182,28 @@ class KBSearchRequest(BaseModel):
         ),
         max_length=200,
     )
+    filename: str | None = Field(
+        default=None,
+        description=(
+            "Optional. Restrict the search to one of the user's own uploaded "
+            "files, by its exact filename as returned by list_my_files. Use "
+            "this only when the user pointed at a particular file — 'in the "
+            "standup video, what did they say about X'. Omit it to search "
+            "everything; a wrong filename here answers confidently from the "
+            "wrong source."
+        ),
+        max_length=500,
+    )
+    artifact: str | None = Field(
+        default=None,
+        description=(
+            "Optional, and only meaningful for a video. 'transcript' searches "
+            "what was said, 'visual' searches what was on screen (slides, "
+            "signs, on-screen text), 'summary' searches the one-paragraph "
+            "summary. Omit to search all three."
+        ),
+        pattern="^(transcript|visual|summary)$",
+    )
 
 
 class KBImageSearchRequest(BaseModel):
@@ -213,6 +235,11 @@ class KBImageSearchRequest(BaseModel):
 class KBSearchResponse(BaseModel):
     query: str | None = None
     results: list[dict[str, Any]]
+    # Carries Audrey's explanation when a request could not be served as
+    # asked — today, a `filename` that matched no file. The model has to see
+    # it: empty results alone read as "that file says nothing about this",
+    # and it would report exactly that about a file the user does not have.
+    notice: str = ""
 
 
 class MemoryStoreRequest(BaseModel):
@@ -452,7 +479,10 @@ async def web_fetch(req: WebFetchRequest) -> WebFetchResponse:
     description=(
         "Search Audrey's knowledge base for matching documents and image "
         "captions. Use this when the user asks about domain-specific "
-        "material (e.g. geology references) or their own ingested docs."
+        "material (e.g. geology references) or their own ingested docs, "
+        "including the transcripts and on-screen text of videos they have "
+        "uploaded. To search inside one particular file, pass its exact "
+        "filename from list_my_files as `filename`."
     ),
 )
 async def kb_search(req: KBSearchRequest) -> KBSearchResponse:
@@ -460,6 +490,10 @@ async def kb_search(req: KBSearchRequest) -> KBSearchResponse:
     payload: dict[str, Any] = {"query": req.query, "top_k": req.top_k}
     if req.user:
         payload["user"] = req.user
+    if req.filename:
+        payload["filename"] = req.filename
+    if req.artifact:
+        payload["artifact"] = req.artifact
     try:
         r = await client.post("/v1/kb/query", json=payload)
     except httpx.RequestError as e:
@@ -470,7 +504,11 @@ async def kb_search(req: KBSearchRequest) -> KBSearchResponse:
     if r.status_code >= 400:
         raise HTTPException(status_code=r.status_code, detail=r.text)
     body = r.json()
-    return KBSearchResponse(query=req.query, results=body.get("results", []))
+    return KBSearchResponse(
+        query=req.query,
+        results=body.get("results", []),
+        notice=body.get("notice", "") or "",
+    )
 
 
 @app.post(

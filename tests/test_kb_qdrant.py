@@ -49,8 +49,12 @@ def test_ensure_user_indexes_swallows_already_exists_4xx(monkeypatch):
 
     kb._ensure_user_indexes_sync("kb_user_text_alice")
 
-    # Both fields ("user", "file_id") still attempted despite the first raising.
-    assert client.create_payload_index.call_count == 2
+    # Every field still attempted despite the first raising — an index that
+    # already exists must not stop the later ones being created, which is how
+    # a collection ends up half-indexed.
+    assert [c.kwargs["field_name"] for c in client.create_payload_index.call_args_list] == [
+        "user", "file_id", "artifact",
+    ]
 
 
 def test_ensure_user_indexes_propagates_5xx(monkeypatch):

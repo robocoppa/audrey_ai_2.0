@@ -275,7 +275,7 @@ Five steps. Read top to bottom:
    ID and write the batch.
 
 **Concept spotlight — deterministic IDs.**
-[`kb/qdrant.py:74-75`](../../src/audrey/kb/qdrant.py#L74):
+[`kb/qdrant.py:139-75`](../../src/audrey/kb/qdrant.py#L139):
 
 ```python
 def point_id(*, source: str, kind: str, idx: int) -> str:
@@ -429,7 +429,7 @@ The interesting part is the constraints that come out of all this:
 ### 2.5 The query path
 
 `/v1/kb/query` is short —
-[`routes/kb.py:99-117`](../../src/audrey/routes/kb.py#L99):
+[`routes/kb.py:191-117`](../../src/audrey/routes/kb.py#L191):
 
 ```python
 @router.post("/query", response_model=QueryResponse)
@@ -460,7 +460,7 @@ The pieces of FastAPI to notice:
   build the `kb_search` tool spec for the model.
 
 The merge logic is in `_search_text_merged` —
-[`routes/kb.py:119-142`](../../src/audrey/routes/kb.py#L119):
+[`routes/kb.py:268-142`](../../src/audrey/routes/kb.py#L268):
 
 ```python
 async def _search_text_merged(qdrant, vec, *, top_k, user):
@@ -527,7 +527,7 @@ within a few cosine degrees of each other.
 `/v1/kb/query/image` (handler at
 [`routes/kb.py:164`](../../src/audrey/routes/kb.py#L164)) picks which
 encoder to call based on which field of the request body was supplied
-([`routes/kb.py:176-181`](../../src/audrey/routes/kb.py#L176)):
+([`routes/kb.py:407-181`](../../src/audrey/routes/kb.py#L407)):
 
 ```python
 if req.image_url:
@@ -578,7 +578,7 @@ The model never talks to Audrey's KB directly. It dispatches
 `kb_search` (or `kb_image_search`) as a tool call (Lesson 9), which
 hits the custom-tools server, which then HTTP-proxies into Audrey's
 `/v1/kb/query`. Closing the loop:
-[`tools-server/app.py:451`](../../tools-server/app.py#L451):
+[`tools-server/app.py:488`](../../tools-server/app.py#L488):
 
 ```python
 async def kb_search(req: KBSearchRequest) -> KBSearchResponse:

@@ -5,8 +5,9 @@ worker, the transcript, the visual pass, the summary and the cost work, and
 phase 39 made it all findable. What none of them built is a way to *use* it
 from the place people actually sit, which is an OWUI chat window.
 
-**Status: steps 1-2 done 2026-08-05 (step 1 as a banner, not a sidebar link —
-see below). Steps 3-4 not built. Nothing deployed yet.**
+**Status: steps 1-3 done 2026-08-05** (step 1 as a banner, not a sidebar link —
+see below). **Step 2 is deployed and discovered; step 3 is built but not yet
+deployed. Step 4 not built.**
 
 ---
 
@@ -183,7 +184,64 @@ its description says. It should say plainly that this lists the caller's own
 uploaded files and returns their filenames — because the next step depends on
 the model having those filenames to hand.
 
-## Step 3 — scope a search to one file
+## Step 3 — scope a search to one file ✅ BUILT 2026-08-05
+
+`TextQuery` gained `filename` and `artifact`; both are optional, so omitting
+them restores previous behaviour exactly.
+
+| file | change |
+|---|---|
+| `src/audrey/kb/qdrant.py` | `SearchScope` + `_as_filter`; `scope=` on `search_text`, `search_lexical`, `search_images`; `artifact` added to the payload indexes |
+| `src/audrey/routes/kb.py` | `filename`/`artifact` on `TextQuery`, `_resolve_filename`, scope threaded through **both** search paths; `Hit` gained `filename`/`artifact`; `QueryResponse` gained `notice` |
+| `tools-server/app.py` | `filename`/`artifact` on `kb_search`, `notice` passed back |
+| `tests/test_kb_file_filter.py` | new, 21 tests |
+
+1325 hermetic tests, ruff clean, cite drift repaired (19 left, all pre-existing).
+
+**The scope is one object, deliberately.** `SearchScope` is passed by
+reference to both retrievers rather than each side building its own filter,
+so "did the lexical side get the same filter?" is answerable by reading one
+value being threaded through. `test_both_sides_get_the_identical_scope_object`
+asserts identity, not equality — two separately-built filters are how the two
+sides drift apart six months later.
+
+**`file_ids=[]` is not `file_ids=None`.** `None` means unscoped; `[]` means a
+file was named and does not exist. Collapsing them turns a scoped question
+into a corpus-wide one — the silent widening this step exists to prevent. The
+search methods short-circuit on `matches_nothing` in Python rather than
+building an empty `MatchAny`, because an empty `MatchAny` is not dependably
+"matches nothing" across qdrant-client versions and its local mode, and the
+way it fails is by matching *everything*.
+
+**A file filter skips the global collection entirely.** An upload's chunks
+only ever land in `kb_user_text_<user>`; the global collection has no
+`file_id` payload, so searching it under a file filter is a guaranteed-empty
+round trip.
+
+**A miss is reported, not just empty.** `QueryResponse.notice` carries "no
+uploaded file named X — use list_my_files". Empty results alone are ambiguous
+between "that file says nothing about this" and "there is no such file", and a
+model told the first will confidently report it about a file the user does not
+have.
+
+**`file_id` was already a payload index; `artifact` was not.** It is now, in
+the existing idempotent `ensure_user_payload_indexes`, which runs on every
+upload and ingest-result — so existing collections pick it up on their next
+write and no migration is needed. (Contrast phase 39's BM25 migration, which
+did need one.)
+
+**Matching is case-insensitive but otherwise exact.** No stemming, no
+prefixes, no closest-match: `standup` does not resolve to `standup.mp4`.
+Scoping to the wrong file answers confidently from the wrong source, which is
+worse than not scoping at all, so a near-miss must miss. Duplicate filenames
+resolve to *all* matches, because two uploads can share a name and the user's
+"in standup.mp4" then honestly means both.
+
+▶ **Still open, and it needs the box:** whether the model scopes only when the
+user named a file, or whenever any file is mentioned. Nothing hermetic can
+answer it. See the verification section.
+
+---
 
 `TextQuery` gains an optional filter. `file_id` is the precise key, but a model
 will only ever have a **filename**, so the filter should accept a filename and
@@ -279,10 +337,27 @@ path.
 two uploaded videos, once unscoped and once scoped, and confirm the sources
 differ. **Check the lexical side specifically** — a quote that appears verbatim
 in the *other* file is the case that catches a filter applied to only one
-retriever.
+retriever. Hermetically covered by `TestBothRetrievers`, but that asserts the
+scope was *passed*; only the box proves Qdrant honours it against real points.
+
+**3b. ▶ THE ONE THAT NEEDS JUDGEMENT: does the model scope when it should?**
+No test can answer this. Three prompts, same two videos uploaded:
+- *"In standup.mp4, what did they say about the handover?"* — must scope.
+- *"What did they say about the handover?"* — must **not** scope, even though
+  a filename appears earlier in the conversation.
+- *"Compare what the two videos said about the handover."* — must not scope,
+  or it answers about one and calls it both.
+
+A filter applied wrongly is worse than no filter, because scoping to the wrong
+video answers confidently from the wrong source and the answer looks sourced.
+If it over-scopes, the fix is the `kb_search` field description, not the
+filter — and per the A-B-A rule, measure before and after rather than trusting
+one run.
 
 **4. A filename that matches nothing returns empty**, not a silent full-corpus
-search.
+search. ✅ Hermetic (`TestUnknownFilename`), including that Qdrant is not
+queried at all and that the reply says the file is missing rather than leaving
+the caller to infer it from zero results.
 
 **5. The model uses the tools unprompted.** No prompt should name them —
 phase 29 established that OpenAPI discovery is enough and that naming a tool in

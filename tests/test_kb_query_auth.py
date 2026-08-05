@@ -166,7 +166,7 @@ def _build_app(monkeypatch, service_token: str = SECRET):
     """Mount the kb router with fakes; capture the user passed into the merge."""
     captured: dict[str, str | None] = {}
 
-    async def _fake_text_merged(qdrant, vec, *, top_k, user, min_score=0.0):
+    async def _fake_text_merged(qdrant, vec, *, top_k, user, min_score=0.0, scope=None):
         captured["user"] = user
         return ([], False)
 

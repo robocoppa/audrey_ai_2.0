@@ -26,7 +26,7 @@ from audrey.auth import AuthedUser, KBCaller, require_admin, resolve_kb_caller
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
 from audrey.kb.fusion import RRF_K, passes_evidence, reciprocal_rank_fusion
 from audrey.kb.ingest import ingest_many
-from audrey.kb.qdrant import KBHit, QdrantKB
+from audrey.kb.qdrant import KBHit, QdrantKB, SearchScope
 from audrey.kb.user_store import user_image_collection, user_text_collection
 from audrey.metrics import kb_search_hits, kb_search_seconds
 
@@ -46,6 +46,26 @@ class TextQuery(BaseModel):
             "are merged by score."
         ),
         max_length=200,
+    )
+    filename: str | None = Field(
+        default=None,
+        description=(
+            "Optional filename of one of the user's own uploads. When set, the "
+            "search covers only that file — the global KB is not searched at "
+            "all, because a user's upload never lives there. Resolved against "
+            "the uploads index, so a name that matches nothing returns no hits "
+            "rather than silently widening to everything."
+        ),
+        max_length=500,
+    )
+    artifact: str | None = Field(
+        default=None,
+        description=(
+            "Optional. For a processed video, which derived text to search: "
+            "'transcript' (what was said), 'visual' (what was on screen) or "
+            "'summary'. Omit to search all of them."
+        ),
+        pattern="^(transcript|visual|summary)$",
     )
 
 
@@ -78,11 +98,21 @@ class Hit(BaseModel):
     kind: str
     chunk_idx: int
     text: str
+    # Phase 40. Empty for global-KB hits, which have no uploader. Without
+    # these a caller cannot say *which* file an answer came from: `source` for
+    # an upload is the sidecar path, which is file_id-derived and unreadable.
+    filename: str = ""
+    artifact: str = ""
 
 
 class QueryResponse(BaseModel):
     query: str | None = None
     results: list[Hit]
+    # Set only when something about the request needs saying — today, a
+    # `filename` that matched no file. Empty results alone are ambiguous
+    # between "that file has nothing about this" and "there is no such file",
+    # and a model told the first will confidently report the wrong one.
+    notice: str = ""
 
 
 class StatsResponse(BaseModel):
@@ -124,6 +154,40 @@ def _kb_min_score(request: Request) -> float:
     return float((cfg.raw.get("kb", {}) or {}).get("min_score", 0.0))
 
 
+async def _resolve_filename(
+    request: Request, *, user: str | None, filename: str,
+) -> list[str]:
+    """Filenames a user typed to the file_ids Qdrant stores. May be empty.
+
+    Resolution happens here, in one place, rather than by filtering Qdrant on
+    the `filename` payload directly. Two reasons, and the second is the real
+    one:
+
+    - **A miss is distinguishable.** Filtering on the payload returns nothing
+      both for "no such file" and "that file says nothing about this", and the
+      caller cannot tell which. Here an empty list means the first, and the
+      route says so.
+    - **The uploads index is the authority on what a user has.** It is what
+      `list_my_files` lists, so a filename the model was just shown resolves
+      by construction. Matching payload strings would drift the moment the two
+      disagree.
+
+    Matching is case-insensitive but otherwise exact — no stemming, no
+    prefixes, no "closest match". Scoping to the wrong file answers
+    confidently from the wrong source, which is worse than not scoping at all,
+    so a near-miss must miss.
+
+    Duplicates are kept: two uploads can share a filename, and "in
+    standup.mp4" then honestly means both.
+    """
+    db = getattr(request.app.state, "uploads_db", None)
+    if db is None or not user:
+        return []
+    wanted = filename.strip().casefold()
+    rows = await db.list_user(user)
+    return [str(r["file_id"]) for r in rows if str(r["filename"]).casefold() == wanted]
+
+
 @router.post("/query", response_model=QueryResponse)
 async def kb_query(
     req: TextQuery,
@@ -135,18 +199,43 @@ async def kb_query(
     if qdrant is None or embedder is None:
         raise HTTPException(status_code=503, detail="KB is not initialized")
     effective_user = req.user if caller.is_service else caller.email
+
+    scope: SearchScope | None = None
+    if req.filename or req.artifact:
+        file_ids: list[str] | None = None
+        if req.filename:
+            file_ids = await _resolve_filename(
+                request, user=effective_user, filename=req.filename,
+            )
+            if not file_ids:
+                # Answer without touching Qdrant. A scoped search that cannot
+                # match must not become an unscoped one, and the caller needs
+                # to know the file is the problem, not the question.
+                log.info(
+                    "kb: filename %r matched no file for user=%s", req.filename, effective_user,
+                )
+                return QueryResponse(
+                    query=req.query, results=[],
+                    notice=(
+                        f"No uploaded file named {req.filename!r} was found for this "
+                        f"user, so nothing was searched. Use list_my_files to see the "
+                        f"available filenames."
+                    ),
+                )
+        scope = SearchScope(file_ids=file_ids, artifact=req.artifact)
+
     t0 = time.perf_counter()
     vec = await embedder.embed_one(req.query)
     hybrid = _hybrid_cfg(request)
     if hybrid.get("enabled"):
         hits, had_user = await _search_text_hybrid(
             qdrant, vec, query=req.query, top_k=req.top_k, user=effective_user,
-            min_score=_kb_min_score(request), cfg=hybrid,
+            min_score=_kb_min_score(request), cfg=hybrid, scope=scope,
         )
     else:
         hits, had_user = await _search_text_merged(
             qdrant, vec, top_k=req.top_k, user=effective_user,
-            min_score=_kb_min_score(request),
+            min_score=_kb_min_score(request), scope=scope,
         )
     elapsed = time.perf_counter() - t0
     kb_search_seconds.labels(kind="text", had_user_collection=str(had_user).lower()).observe(elapsed)
@@ -154,15 +243,31 @@ async def kb_query(
     return QueryResponse(
         query=req.query,
         results=[
-            Hit(score=h.score, source=h.source, kind=h.kind, chunk_idx=h.chunk_idx, text=h.text)
+            Hit(
+                score=h.score, source=h.source, kind=h.kind, chunk_idx=h.chunk_idx,
+                text=h.text,
+                filename=str(h.payload.get("filename") or ""),
+                artifact=str(h.payload.get("artifact") or ""),
+            )
             for h in hits
         ],
     )
 
 
+def _scoped_to_one_users_files(scope: SearchScope | None) -> bool:
+    """True when the request names particular files, so the global KB is moot.
+
+    An upload's chunks only ever land in `kb_user_text_<user>`; the global
+    collection has no `file_id` payload at all. Searching it under a file
+    filter would return nothing, correctly but pointlessly — and would spend
+    an embedding round trip and a Qdrant query to do it.
+    """
+    return scope is not None and scope.file_ids is not None
+
+
 async def _search_text_merged(
     qdrant: QdrantKB, vec: list[float], *, top_k: int, user: str | None,
-    min_score: float = 0.0,
+    min_score: float = 0.0, scope: SearchScope | None = None,
 ) -> tuple[list[KBHit], bool]:
     """Search global kb_text and, if the user has one, their kb_user_text_* too. Merge by score.
 
@@ -185,12 +290,16 @@ async def _search_text_merged(
     # starve real hits ranked just past top_k; cap the fetch so a huge top_k
     # can't balloon the Qdrant scan. No floor → fetch exactly top_k (unchanged).
     fetch_k = min(top_k * 4, 40) if min_score > 0.0 else top_k
-    coros = [qdrant.search_text(vec, top_k=fetch_k)]
+    coros = (
+        [] if _scoped_to_one_users_files(scope)
+        else [qdrant.search_text(vec, top_k=fetch_k)]
+    )
     had_user = False
     if user:
         user_col = user_text_collection(user)
         if await qdrant.collection_exists(user_col):
-            coros.append(qdrant.search_text(vec, top_k=fetch_k, collection=user_col))
+            coros.append(
+                qdrant.search_text(vec, top_k=fetch_k, collection=user_col, scope=scope))
             had_user = True
     results = await asyncio.gather(*coros)
     merged: list[KBHit] = [h for batch in results for h in batch if h.score >= min_score]
@@ -200,7 +309,7 @@ async def _search_text_merged(
 
 async def _search_text_hybrid(
     qdrant: QdrantKB, vec: list[float], *, query: str, top_k: int, user: str | None,
-    min_score: float, cfg: dict[str, Any],
+    min_score: float, cfg: dict[str, Any], scope: SearchScope | None = None,
 ) -> tuple[list[KBHit], bool]:
     """Dense and lexical, merged by rank, filtered by evidence (Phase 39).
 
@@ -216,17 +325,25 @@ async def _search_text_hybrid(
     their private collection too. All four lists are concatenated *within*
     their own retriever before fusion, because RRF reads rank position and a
     hit's position only means something relative to the same retriever.
+
+    **`scope` goes to both retrievers or neither** (phase 40). Filtering only
+    the dense side leaves BM25 returning hits from every other file; fusion
+    then interleaves them and the result looks plausible, sourced, and wrong.
+    `test_kb_file_filter.py` pins the lexical side specifically for exactly
+    this reason — a dense-only filter passes every other test in the suite.
     """
     fetch_k = min(max(top_k * 4, 20), 40)
-    dense_coros = [qdrant.search_text(vec, top_k=fetch_k)]
-    lexical_coros = [qdrant.search_lexical(query, top_k=fetch_k)]
+    scoped = _scoped_to_one_users_files(scope)
+    dense_coros = [] if scoped else [qdrant.search_text(vec, top_k=fetch_k)]
+    lexical_coros = [] if scoped else [qdrant.search_lexical(query, top_k=fetch_k)]
     had_user = False
     if user:
         user_col = user_text_collection(user)
         if await qdrant.collection_exists(user_col):
-            dense_coros.append(qdrant.search_text(vec, top_k=fetch_k, collection=user_col))
+            dense_coros.append(
+                qdrant.search_text(vec, top_k=fetch_k, collection=user_col, scope=scope))
             lexical_coros.append(
-                qdrant.search_lexical(query, top_k=fetch_k, collection=user_col))
+                qdrant.search_lexical(query, top_k=fetch_k, collection=user_col, scope=scope))
             had_user = True
 
     batches = await asyncio.gather(*dense_coros, *lexical_coros)

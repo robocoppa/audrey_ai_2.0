@@ -71,6 +71,71 @@ class KBHit:
     payload: dict[str, Any]
 
 
+@dataclass(slots=True, frozen=True)
+class SearchScope:
+    """Narrows a search to particular files and/or artifact kinds (phase 40).
+
+    One object rather than loose keyword arguments, so that "did the lexical
+    side get the same filter as the dense side?" is answerable by looking at
+    one value being threaded through, not by comparing two argument lists.
+
+    `file_ids` is a list because filenames are not unique — two uploads can
+    share one, and "search in standup.mp4" then legitimately means both. An
+    **empty list is not the same as None**: `None` means unscoped, `[]` means
+    a scope was requested and nothing matched it, which must return no hits
+    rather than quietly searching everything. `_as_filter` encodes that.
+
+    `artifact` selects among a video's derived texts — "transcript" (what was
+    said), "visual" (what was on screen) or "summary".
+    """
+
+    file_ids: list[str] | None = None
+    artifact: str | None = None
+    # Kept so a caller can pin user scope here too if a future path needs it;
+    # today every user-scoped read is already addressed by collection name.
+    user: str | None = None
+
+    def is_empty(self) -> bool:
+        return self.file_ids is None and self.artifact is None and self.user is None
+
+    @property
+    def matches_nothing(self) -> bool:
+        """A scope was asked for and nothing satisfies it.
+
+        Distinct from `is_empty()` (no scope asked for). Every search method
+        short-circuits on this rather than building a filter, because the
+        alternative — an empty `MatchAny` — is not dependably "matches
+        nothing" across qdrant-client versions and its local mode, and the way
+        it fails is by matching *everything*. Returning `[]` in Python cannot
+        fail that way.
+        """
+        return self.file_ids is not None and not self.file_ids
+
+
+def _as_filter(scope: SearchScope | None) -> qmodels.Filter | None:
+    """`SearchScope` to a Qdrant filter, or None when nothing is scoped.
+
+    Callers must have already short-circuited `scope.matches_nothing`; this
+    never returns a filter intended to match nothing.
+    """
+    if scope is None or scope.is_empty():
+        return None
+    must: list[qmodels.FieldCondition] = []
+    if scope.file_ids:
+        must.append(qmodels.FieldCondition(
+            key="file_id", match=qmodels.MatchAny(any=list(scope.file_ids)),
+        ))
+    if scope.artifact:
+        must.append(qmodels.FieldCondition(
+            key="artifact", match=qmodels.MatchValue(value=scope.artifact),
+        ))
+    if scope.user:
+        must.append(qmodels.FieldCondition(
+            key="user", match=qmodels.MatchValue(value=scope.user),
+        ))
+    return qmodels.Filter(must=must)
+
+
 def point_id(*, source: str, kind: str, idx: int) -> str:
     return str(uuid.uuid5(_NAMESPACE, f"{source}:{kind}:{idx}"))
 
@@ -258,16 +323,23 @@ class QdrantKB:
 
     async def search_text(
         self, vector: list[float], *, top_k: int = 5, collection: str | None = None,
+        scope: SearchScope | None = None,
     ) -> list[KBHit]:
-        return await self._search(vector, collection or self.text_collection, top_k=top_k)
+        return await self._search(
+            vector, collection or self.text_collection, top_k=top_k, scope=scope,
+        )
 
     async def search_images(
         self, vector: list[float], *, top_k: int = 5, collection: str | None = None,
+        scope: SearchScope | None = None,
     ) -> list[KBHit]:
-        return await self._search(vector, collection or self.image_collection, top_k=top_k)
+        return await self._search(
+            vector, collection or self.image_collection, top_k=top_k, scope=scope,
+        )
 
     async def search_lexical(
         self, query: str, *, top_k: int = 5, collection: str | None = None,
+        scope: SearchScope | None = None,
     ) -> list[KBHit]:
         """BM25 search over `collection`, or an empty list if it has none.
 
@@ -276,15 +348,26 @@ class QdrantKB:
         returns nothing here and the fused result is simply the dense list —
         which is exactly the behaviour before this phase. There is no error
         path for "lexical is unavailable" because there does not need to be.
+
+        `scope` narrows to particular files/artifacts and **must be passed here
+        whenever it is passed to `search_text`**. Filtering only the dense side
+        leaves BM25 returning hits from every other file, fusion mixes the two,
+        and the answer looks almost right — the failure mode nobody checks
+        because nothing about it looks wrong.
         """
+        if scope is not None and scope.matches_nothing:
+            return []
         target = collection or self.text_collection
         indices, values = bm25.query_vector(query)
         if not indices or not await self.has_sparse(target):
             return []
-        return await asyncio.to_thread(self._search_lexical_sync, indices, values, target, top_k)
+        return await asyncio.to_thread(
+            self._search_lexical_sync, indices, values, target, top_k, _as_filter(scope),
+        )
 
     def _search_lexical_sync(
         self, indices: list[int], values: list[float], collection: str, top_k: int,
+        query_filter: qmodels.Filter | None = None,
     ) -> list[KBHit]:
         result = self._client.query_points(
             collection_name=collection,
@@ -292,10 +375,16 @@ class QdrantKB:
             using=SPARSE_NAME,
             limit=top_k,
             with_payload=True,
+            query_filter=query_filter,
         )
         return [_to_hit(h) for h in getattr(result, "points", result)]
 
-    async def _search(self, vector: list[float], collection: str, *, top_k: int) -> list[KBHit]:
+    async def _search(
+        self, vector: list[float], collection: str, *, top_k: int,
+        scope: SearchScope | None = None,
+    ) -> list[KBHit]:
+        if scope is not None and scope.matches_nothing:
+            return []
         # qdrant-client 1.12 deprecated `.search()` in favor of `.query_points()`,
         # which returns a `QueryResponse` wrapping the same `ScoredPoint` list.
         result = await asyncio.to_thread(
@@ -304,6 +393,7 @@ class QdrantKB:
             query=vector,
             limit=top_k,
             with_payload=True,
+            query_filter=_as_filter(scope),
         )
         return [_to_hit(h) for h in getattr(result, "points", result)]
 
@@ -335,11 +425,17 @@ class QdrantKB:
         )
 
     async def ensure_user_payload_indexes(self, collection: str) -> None:
-        """Create `user` and `file_id` keyword indexes for a user-scoped collection."""
+        """Create `user`, `file_id` and `artifact` keyword indexes.
+
+        `artifact` joined the list in phase 40, when the search filter started
+        using it. Every caller runs this on upload and on ingest-result, and
+        `create_payload_index` is idempotent, so existing collections pick the
+        new index up on their next write rather than needing a migration.
+        """
         await asyncio.to_thread(self._ensure_user_indexes_sync, collection)
 
     def _ensure_user_indexes_sync(self, collection: str) -> None:
-        for field in ("user", "file_id"):
+        for field in ("user", "file_id", "artifact"):
             try:
                 self._client.create_payload_index(
                     collection_name=collection,
@@ -533,6 +629,6 @@ def normalize_source(path: str | Path) -> str:
 
 
 __all__ = [
-    "QdrantKB", "KBHit", "TEXT_DIM", "IMAGE_DIM", "SPARSE_NAME",
+    "QdrantKB", "KBHit", "SearchScope", "TEXT_DIM", "IMAGE_DIM", "SPARSE_NAME",
     "build_text_point", "build_image_point", "normalize_source", "point_id",
 ]
