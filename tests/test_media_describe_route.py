@@ -296,3 +296,45 @@ class TestCostAttribution:
 
         assert r.status_code == 200
         assert r.json()["description"] == "A whiteboard reading DEPLOY FRIDAY."
+
+
+class TestAnEmptyDescriptionExplainsItself:
+    """Phase 38 lost three keyframes to a `num_predict` cap and the error said
+    only "returned an empty description" — indistinguishable from a broken
+    vision model, and the investigation went to the lease instead."""
+
+    def test_hitting_the_cap_names_the_cap(self, patched):
+        client = patched()
+        client.app.state.timing = VisionTiming(
+            total_s=55.0, eval_s=55.0, eval_tokens=2048,
+            thinking_chars=7273, done_reason="length",
+        )
+
+        async def _empty(data_url, **kw):
+            return "", "qwen3-vl:32b", client.app.state.timing
+
+        client.app.state.describe_impl = _empty
+        r = client.post("/v1/media/describe", json=_body(),
+                        headers={"X-Audrey-Service-Token": SECRET})
+
+        assert r.status_code == 502
+        detail = r.json()["detail"]
+        assert "num_predict" in detail
+        assert "2048" in detail
+        assert "7273" in detail
+
+    def test_an_ordinary_empty_reply_does_not_blame_the_cap(self, patched):
+        """The other branch has to stay honest — inventing a cap for a model
+        that simply returned nothing would send the next person the wrong way
+        just as effectively."""
+        client = patched()
+
+        async def _empty(data_url, **kw):
+            return "", "qwen3-vl:32b", VisionTiming(total_s=1.0, done_reason="stop")
+
+        client.app.state.describe_impl = _empty
+        r = client.post("/v1/media/describe", json=_body(),
+                        headers={"X-Audrey-Service-Token": SECRET})
+
+        assert r.status_code == 502
+        assert "num_predict" not in r.json()["detail"]

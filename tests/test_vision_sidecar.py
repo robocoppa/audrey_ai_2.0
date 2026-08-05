@@ -449,7 +449,7 @@ class TestSamplingSettings:
         raw = _load_yaml(Path(__file__).resolve().parent.parent / "config.yaml")
         vision_block = raw["vision"]
         assert vision_block["think"] is False
-        assert vision_block["num_predict"] == 2048
+        assert vision_block["num_predict"] == 4096
 
 
 # ─── The keyframe prompt (Phase 38) ────────────────────────────────────
@@ -476,7 +476,7 @@ class TestKeyframePrompt:
     def test_the_keyframe_prompt_leads_with_on_screen_text(self):
         """The one thing a transcript cannot capture and someone will really
         search for. Everything else in a frame is a caption."""
-        assert "transcribed EXACTLY" in vision.KEYFRAME_SYSTEM
+        assert "CLEARLY LEGIBLE" in vision.KEYFRAME_SYSTEM
 
     def test_the_keyframe_prompt_forbids_inventorying_the_scene(self):
         assert "Do NOT inventory the scene" in vision.KEYFRAME_SYSTEM

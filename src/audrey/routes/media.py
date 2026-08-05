@@ -161,10 +161,25 @@ async def describe(
     if not description:
         # An empty description is a failure wearing the shape of a success. It
         # would be ingested as an empty chunk and nobody would ever notice.
-        raise HTTPException(
-            status_code=502,
-            detail=f"{model} returned an empty description",
-        )
+        #
+        # Name the cause when it is knowable. `done_reason == "length"` means
+        # the model spent its entire `num_predict` budget on reasoning and
+        # never began the description — measured on 2026-08-04, three of six
+        # probe runs on a cluttered frame emitted zero characters after 2,048
+        # tokens. That is a config problem with a one-line fix, and it is
+        # indistinguishable from a broken vision model unless the error says
+        # so. The generic wording sent a previous investigation at the lease.
+        if timing.done_reason == "length":
+            detail = (
+                f"{model} hit the num_predict cap ({timing.eval_tokens} tokens) "
+                f"while reasoning and never produced a description "
+                f"({timing.thinking_chars} chars of thinking). Raise "
+                f"vision.num_predict."
+            )
+        else:
+            detail = f"{model} returned an empty description"
+        log.warning("media: describe produced nothing for %s — %s", req.user, detail)
+        raise HTTPException(status_code=502, detail=detail)
     # The breakdown goes in the log line, not only in Prometheus. Tuning this
     # means reading a handful of consecutive frames from one video and seeing
     # which number moved — a histogram aggregates exactly the per-frame

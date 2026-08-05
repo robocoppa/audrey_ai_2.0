@@ -1,46 +1,50 @@
-"""Show what a keyframe describe call ACTUALLY returns (Phase 38).
+"""Experiment harness for the keyframe describe call (Phase 38).
 
-Phase 38 spent two deploys reasoning about a characters-per-token ratio and
-was wrong both times. A describe call generates ~1,000 tokens and returns
-~250 characters; dividing one by the other and arguing about the remainder
-produced a confident thinking-token diagnosis, a `think: false` that changed
-nothing measurable, and a `num_predict` cap that silently dropped three of six
-keyframes.
+Phase 38 twice reasoned about a characters-per-token ratio and twice got it
+wrong, at the cost of a deploy each time and three silently dropped keyframes.
+This runs the variants side by side and prints what actually came back.
 
-This prints the response instead — and now the thinking text itself, because
-"where did 900 tokens go" is a question with a literal answer sitting in the
-payload.
+## What is already settled (qwen3-vl:32b, 2026-08-04)
 
-## What the first run established (2026-08-04, qwen3-vl:32b)
+**Thinking cannot be turned off.** Neither `think: false` nor Qwen3's
+`/no_think` prompt switch reduces it — 93-101% of baseline either way. Treat
+reasoning as a cost of this model, not a setting. `MODE=think` re-runs that
+check against a different model.
 
-**The tokens are thinking, and `think: false` does not stop it.**
+**Content + thinking accounts for every generated token** (3.4-4.4 chars/tok in
+every variant). There is no third thing to find.
 
-    a.jpg  think-false   325tok  content=478ch   thinking=947ch    both=4.38/tok
-    b.jpg  think-false  2496tok  content=350ch   thinking=8476ch   both=3.54/tok
+**Thinking scales with visual clutter, not with output length.** A static
+two-shot produced ~850 characters of it; an office desk produced ~5,700, and
+the reasoning text shows why — it was hunting for legible text on a coffee cup
+and a stack of paper because the prompt told it to transcribe text exactly.
 
-`content + thinking` came to **3.4-4.4 characters per token in every variant**,
-exactly the ratio prose runs at — so the accounting closes and nothing
-unexplained is left. It also settles the per-frame variance: `b.jpg` (an office
-scene with text on screen) produced **ten times** the thinking of `a.jpg` (a
-static two-shot). Ollama accepted `think: false` without error and the model
-reasoned anyway.
+**The cap is spent on thinking before any description is written.** Three of
+six runs on the cluttered frame hit `num_predict: 2048` and emitted ZERO
+characters, which reaches the worker as a 502 and drops the keyframe. That is
+the failure this harness exists to prevent shipping again.
 
-## What each variant isolates
+## Modes
 
-    think-false     what is deployed
-    think-true      the control. Thinking is present either way, so this is
-                    what says whether the API field does anything at all.
-    no_think-tag    Qwen3's documented `/no_think` prompt-level soft switch, a
-                    different mechanism from the API field — worth trying
-                    precisely because the API field is not landing.
-    no_think+false  both together, in case they are additive
-    screenshot      the old DESCRIBE_SYSTEM, to separate prompt cost from
-                    sampling cost
+    MODE=prompts   (default) every prompt variant, fixed sampling. The main
+                   experiment: which instruction produces a usable description
+                   for the fewest tokens.
+    MODE=sampling  one prompt, num_predict x temperature. Answers "does 4096
+                   rescue the frames that came back empty".
+    MODE=think     think/no_think variants. Settled for qwen3-vl; re-run when
+                   changing model.
 
-Every variant runs at the DEPLOYED sampling settings. The first pass of this
-probe sent neither `temperature` nor `num_predict` and ran at the model default
-of 1.0 — it reported `think: true` as *cheaper* than `think: false`, which is
-backwards and was almost certainly variance. Hence `SAMPLES`.
+## Judging quality, not just cost
+
+A cheap prompt that loses the on-screen text is a regression, and no timing
+column can say so. `EXPECT` names the strings that SHOULD appear, per image:
+
+    EXPECT='a.jpg:ACOM TECHNOLOGIES;b.jpg:enertec,AM'
+
+Matching is case-insensitive substring. The summary then reports `found 2/2`
+beside the cost, so the trade is visible in one table — and the full text of
+every description is printed at the end, because a hit count is a proxy and
+reading them is not.
 
 ## Running it
 
@@ -49,38 +53,40 @@ design), so this runs inside `audrey-ai`, the only container on both networks.
 Fed over stdin so no rebuild is needed:
 
     # Unraid box
-    docker exec -i -e IMAGES=/tmp/a.jpg,/tmp/b.jpg audrey-ai python3 - \
-        < scripts/vision_probe.py
+    docker exec -i -e IMAGES=/tmp/a.jpg,/tmp/b.jpg \
+      -e EXPECT='a.jpg:ACOM TECHNOLOGIES;b.jpg:enertec' \
+      audrey-ai python3 - < scripts/vision_probe.py
 
-Getting real frames in there is two steps, because `audrey-ai` has no ffmpeg
-(that is the whole reason the sidecar exists) and the worker deletes its frames
-when a job ends:
+Extracting frames is two steps, because `audrey-ai` has no ffmpeg (the whole
+reason the sidecar exists) and the worker deletes its frames when a job ends:
 
-    # Unraid box — pull two frames out of a source video
+    # Unraid box
     docker exec media-worker sh -c \
       'ffmpeg -loglevel error -ss 30 -i /data/uploads/<user>/<file_id>.mp4 \
-         -frames:v 1 -vf scale=1280:-2 -q:v 3 /tmp/a.jpg && \
-       ffmpeg -loglevel error -ss 510 -i /data/uploads/<user>/<file_id>.mp4 \
-         -frames:v 1 -vf scale=1280:-2 -q:v 3 /tmp/b.jpg'
-    docker cp media-worker:/tmp/a.jpg /tmp/a.jpg && docker cp /tmp/a.jpg audrey-ai:/tmp/a.jpg
-    docker cp media-worker:/tmp/b.jpg /tmp/b.jpg && docker cp /tmp/b.jpg audrey-ai:/tmp/b.jpg
+         -frames:v 1 -vf scale=1280:-2 -q:v 3 /tmp/a.jpg'
+    docker cp media-worker:/tmp/a.jpg /tmp/a.jpg
+    docker cp /tmp/a.jpg audrey-ai:/tmp/a.jpg
 
-Pick the two deliberately: one from a static stretch, one from a scene with
-text on screen. Thinking differed 10x between those two cases, so a probe of
-only one kind answers half the question.
+**Use more than two images, and make them different in kind.** Thinking varied
+7x between a talking head and a cluttered desk, so a conclusion drawn from one
+kind of frame will not hold. A slide, a whiteboard, a screen recording and a
+dark or motion-blurred frame are each worth one.
 
 Environment:
 
     IMAGES      comma-separated paths inside the container (default /tmp/probe.jpg)
+    EXPECT      'img.jpg:text,text;other.jpg:text' — strings that should appear
+    MODE        prompts | sampling | think        (default prompts)
+    ONLY        comma-separated variant names, to re-run one
+    SAMPLES     runs per variant (default 2) — thinking length is noisy
     MODEL       default qwen3-vl:32b
     OLLAMA_HOST default http://ollama:11434
-    HINT        transcript context to send, as the worker now does
-    TIMEOUT_S   default 180
-    SAMPLES     runs per variant (default 2) — thinking length is noisy
-    NUM_PREDICT default 2048, matching config.yaml
+    HINT        transcript context, as the worker now sends
+    NUM_PREDICT default 4096, matching config.yaml
     TEMPERATURE default 0.3, matching config.yaml
-    ONLY        comma-separated variant names, to re-run just one
-    EXCERPT     characters of thinking/content to print (default 500, 0 = off)
+    TIMEOUT_S   default 240
+    EXCERPT     chars of each description to print (default 700, 0 = off)
+    THINKING    1 to also print the reasoning text (long)
 """
 
 from __future__ import annotations
@@ -100,47 +106,113 @@ from audrey.pipeline.vision import DESCRIBE_SYSTEM, KEYFRAME_SYSTEM, TRANSCRIPT_
 MODEL = os.environ.get("MODEL", "qwen3-vl:32b")
 HOST = os.environ.get("OLLAMA_HOST", "http://ollama:11434").rstrip("/")
 HINT = os.environ.get("HINT", "")
-TIMEOUT_S = float(os.environ.get("TIMEOUT_S", "180"))
+TIMEOUT_S = float(os.environ.get("TIMEOUT_S", "240"))
+MODE = os.environ.get("MODE", "prompts")
 NS = 1_000_000_000.0
 
-#: Path inside the container, not on the host — the probe runs via
-#: `docker exec`, so this is the container's own scratch space.
 _DEFAULT_IMAGE = "/tmp/probe.jpg"  # noqa: S108
-
-#: Match `config.yaml`'s `vision:` block, so a result here transfers to the
-#: deployed path rather than describing a configuration nobody runs.
-_NUM_PREDICT = int(os.environ.get("NUM_PREDICT", "2048"))
+_NUM_PREDICT = int(os.environ.get("NUM_PREDICT", "4096"))
 _TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.3"))
-
-#: Runs per variant. Thinking length is noisy enough that one sample cannot
-#: rank two variants — it can only show a difference of the order seen between
-#: a.jpg (913ch) and b.jpg (9,884ch).
 _SAMPLES = int(os.environ.get("SAMPLES", "2"))
+_EXCERPT = int(os.environ.get("EXCERPT", "700"))
+_SHOW_THINKING = os.environ.get("THINKING", "") == "1"
 
-_EXCERPT = int(os.environ.get("EXCERPT", "500"))
-
-#: A variant that leaves thinking under this fraction of `think-false`'s is
-#: reported as suppressing it. Deliberately loose: the useful answer is "this
-#: mechanism works at all", and a 5x reduction settles that without needing to
-#: distinguish 3% from 8% out of two samples.
+#: A variant leaving thinking under this fraction of baseline counts as
+#: suppressing it. Loose on purpose — the useful answer is "does this mechanism
+#: work at all", and two samples cannot distinguish 3% from 8%.
 _SUPPRESSED_AT = 0.25
 
 
+# ─── Prompt variants ───────────────────────────────────────────────────
+#
+# Each isolates one hypothesis about where the reasoning comes from. The
+# reasoning text on the box showed the model hunting for legible characters on
+# a coffee cup and a stack of paper — so the OCR instruction is the prime
+# suspect, and `no-ocr` is the control that measures its cost directly.
+
+#: What shipped before the "do not strain" clause was added. The A-B for that
+#: change: it demanded every visible character be transcribed exactly, which is
+#: what sent the model looking at cup logos.
+_STRICT = KEYFRAME_SYSTEM.replace(
+    "- Lead with any text that is CLEARLY LEGIBLE: slides, documents, "
+    "whiteboards, captions, name plates, titles, signs, logos, code, error "
+    "messages. Transcribe that exactly — it is usually the only thing anyone "
+    "will search for.\n"
+    "- Do NOT strain to decipher text. If something is small, blurred, angled "
+    "or partly hidden, leave it out — do not guess at it and do not work at "
+    "it. Deciphering unclear text is the most expensive thing you can do here "
+    "and the least reliable.\n",
+    "- Lead with any text visible in the frame, transcribed EXACTLY: slides, "
+    "documents, whiteboards, captions, name plates, titles, signs, code, "
+    "error messages. This is the most valuable thing you can record and often "
+    "the only thing anyone will search for.\n",
+)
+
+#: Minimal instruction. Tests whether the elaborate prompt is earning its cost
+#: at all, or whether a short one gets the same description for fewer tokens.
+_TERSE = (
+    "Describe this still frame from a video in two or three plain sentences, "
+    "so it can be found later by search. Transcribe any text you can read "
+    "easily. Plain prose only — no markdown, no bullet points, no headings."
+)
+
+#: No text instruction whatsoever. If thinking collapses here, the OCR demand
+#: is the cost and the question becomes how to ask for text cheaply. If it does
+#: not, the model reasons about images regardless and the prompt is not the
+#: lever.
+_NO_OCR = (
+    "Describe this still frame from a video in two or three plain sentences, "
+    "so it can be found later by search. Say what is happening and who or what "
+    "is present. Plain prose only — no markdown, no bullet points, no "
+    "headings."
+)
+
+#: Asks for the text and nothing else. The opposite extreme from `no-ocr`, and
+#: a real candidate: if a transcript already covers what was said and a summary
+#: covers the gist, on-screen text may be all the visual pass owes.
+_TEXT_ONLY = (
+    "Look at this still frame from a video and report ONLY the text that is "
+    "clearly legible in it — slides, documents, whiteboards, captions, name "
+    "plates, titles, signs, logos. Transcribe it exactly, in plain prose with "
+    "no markdown. Do not describe people, furniture, rooms or actions. If "
+    "there is no clearly legible text, reply with the single word NONE."
+)
+
+PROMPTS: dict[str, str] = {
+    "current": KEYFRAME_SYSTEM,
+    "strict": _STRICT,
+    "terse": _TERSE,
+    "no-ocr": _NO_OCR,
+    "text-only": _TEXT_ONLY,
+    "screenshot": DESCRIBE_SYSTEM,
+}
+
+
 @dataclass
-class Variant:
+class Trial:
     name: str
     system: str
-    think: bool | None
+    think: bool | None = False
     suffix: str = ""
+    num_predict: int = _NUM_PREDICT
+    temperature: float = _TEMPERATURE
 
 
-VARIANTS: list[Variant] = [
-    Variant("think-false", KEYFRAME_SYSTEM, False),
-    Variant("think-true", KEYFRAME_SYSTEM, True),
-    Variant("no_think-tag", KEYFRAME_SYSTEM, None, " /no_think"),
-    Variant("no_think+false", KEYFRAME_SYSTEM, False, " /no_think"),
-    Variant("screenshot", DESCRIBE_SYSTEM, False),
-]
+def build_trials() -> list[Trial]:
+    if MODE == "think":
+        return [
+            Trial("think-false", KEYFRAME_SYSTEM, think=False),
+            Trial("think-true", KEYFRAME_SYSTEM, think=True),
+            Trial("no_think-tag", KEYFRAME_SYSTEM, think=None, suffix=" /no_think"),
+            Trial("no_think+false", KEYFRAME_SYSTEM, think=False, suffix=" /no_think"),
+        ]
+    if MODE == "sampling":
+        return [
+            Trial(f"np{np}-t{t}", KEYFRAME_SYSTEM, num_predict=np, temperature=t)
+            for np in (2048, 4096)
+            for t in (0.1, 0.3, 0.7)
+        ]
+    return [Trial(name, system) for name, system in PROMPTS.items()]
 
 
 @dataclass
@@ -158,46 +230,73 @@ class Result:
 
     @property
     def both_per_tok(self) -> float:
-        """Characters of content+thinking per generated token.
+        """Content+thinking characters per generated token.
 
-        The number that closes the accounting. Near 4 means every token is
-        explained by text we can see; well under it means something is being
-        generated that neither field carries, and the extra keys are where to
-        look next.
+        Near 4 means every token is explained by text we can see. Well under
+        means something is being generated that neither field carries.
         """
         return (len(self.content) + len(self.thinking)) / self.tokens if self.tokens else 0.0
+
+    @property
+    def lost(self) -> bool:
+        """Truncated before writing anything — a dropped keyframe in production."""
+        return self.done_reason == "length" and not self.content.strip()
+
+
+def parse_expect() -> dict[str, list[str]]:
+    """`'a.jpg:ACOM,fireplace;b.jpg:enertec'` → {'a.jpg': ['ACOM', 'fireplace']}."""
+    out: dict[str, list[str]] = {}
+    for group in os.environ.get("EXPECT", "").split(";"):
+        if ":" not in group:
+            continue
+        name, _, terms = group.partition(":")
+        wanted = [t.strip().lower() for t in terms.split(",") if t.strip()]
+        if wanted:
+            out[name.strip()] = wanted
+    return out
+
+
+def found(result: Result, expect: dict[str, list[str]]) -> tuple[int, int]:
+    wanted = expect.get(result.image, [])
+    if not wanted:
+        return 0, 0
+    body = result.content.lower()
+    return sum(1 for w in wanted if w in body), len(wanted)
 
 
 def load(path: Path) -> str:
     return base64.b64encode(path.read_bytes()).decode("ascii")
 
 
-def call(b64: str, variant: Variant, image: str) -> Result:
+def call(b64: str, trial: Trial, image: str) -> Result:
     """One /api/chat call, built exactly as `_transcribe_one` builds it."""
     hint = TRANSCRIPT_HINT.format(hint=HINT) if HINT.strip() else ""
     payload: dict = {
         "model": MODEL,
         "messages": [
-            {"role": "system", "content": variant.system},
+            {"role": "system", "content": trial.system},
             {
                 "role": "user",
-                "content": f"Describe this image.{hint}{variant.suffix}",
+                "content": f"Describe this image.{hint}{trial.suffix}",
                 "images": [b64],
             },
         ],
         "stream": False,
-        "options": {"num_predict": _NUM_PREDICT, "temperature": _TEMPERATURE},
+        "options": {
+            "num_predict": trial.num_predict,
+            "temperature": trial.temperature,
+        },
     }
-    if variant.think is not None:
-        payload["think"] = variant.think
+    if trial.think is not None:
+        payload["think"] = trial.think
 
     try:
         r = httpx.post(f"{HOST}/api/chat", json=payload, timeout=TIMEOUT_S)
     except httpx.HTTPError as e:
-        # One variant erroring must not lose the other nineteen calls' data.
-        return Result(image, variant.name, ok=False, error=f"{type(e).__name__}: {e}")
+        # One variant erroring must not lose every other call's data.
+        return Result(image, trial.name, ok=False, error=f"{type(e).__name__}: {e}")
     if r.status_code != 200:
-        return Result(image, variant.name, ok=False,
+        return Result(image, trial.name, ok=False,
                       error=f"HTTP {r.status_code}: {r.text[:300]}")
 
     body = r.json()
@@ -205,7 +304,7 @@ def call(b64: str, variant: Variant, image: str) -> Result:
     thinking = message.get("thinking")
     return Result(
         image=image,
-        variant=variant.name,
+        variant=trial.name,
         tokens=int(body.get("eval_count") or 0),
         content=str(message.get("content") or ""),
         thinking=thinking if isinstance(thinking, str) else "",
@@ -219,70 +318,122 @@ def _mean(values: list[float]) -> float:
     return statistics.mean(values) if values else 0.0
 
 
-def summarise(results: list[Result], images: list[str]) -> None:
-    print("\n" + "=" * 78)
-    print("PER-VARIANT MEANS")
-    print("=" * 78)
+def summarise(
+    results: list[Result], images: list[str], trials: list[Trial],
+    expect: dict[str, list[str]],
+) -> None:
+    print("\n" + "=" * 86)
+    print("PER-VARIANT MEANS   (cost on the left, quality on the right)")
+    print("=" * 86)
     for image in images:
         print(f"\n{image}")
-        print(f"  {'variant':<16} {'gen':>7} {'tokens':>8} {'content':>9} "
-              f"{'thinking':>10} {'both/tok':>9}")
-        for variant in VARIANTS:
+        print(f"  {'variant':<16} {'gen':>7} {'tokens':>7} {'content':>9} "
+              f"{'thinking':>10} {'lost':>5}  {'found':>7}")
+        for trial in trials:
             rows = [r for r in results
-                    if r.image == image and r.variant == variant.name and r.ok]
+                    if r.image == image and r.variant == trial.name and r.ok]
             if not rows:
                 failed = [r for r in results
-                          if r.image == image and r.variant == variant.name]
+                          if r.image == image and r.variant == trial.name]
                 if failed:
-                    print(f"  {variant.name:<16} ERROR  {failed[0].error[:50]}")
+                    print(f"  {trial.name:<16} ERROR  {failed[0].error[:52]}")
                 continue
+            hits = [found(r, expect) for r in rows]
+            total_wanted = hits[0][1] if hits else 0
+            hit_txt = (
+                f"{_mean([float(h[0]) for h in hits]):.1f}/{total_wanted}"
+                if total_wanted else "—"
+            )
             print(
-                f"  {variant.name:<16} "
+                f"  {trial.name:<16} "
                 f"{_mean([r.eval_s for r in rows]):6.1f}s "
-                f"{_mean([float(r.tokens) for r in rows]):8.0f} "
+                f"{_mean([float(r.tokens) for r in rows]):7.0f} "
                 f"{_mean([float(len(r.content)) for r in rows]):8.0f}ch "
                 f"{_mean([float(len(r.thinking)) for r in rows]):9.0f}ch "
-                f"{_mean([r.both_per_tok for r in rows]):9.2f}"
+                f"{sum(1 for r in rows if r.lost):3d}/{len(rows):<2} "
+                f"{hit_txt:>8}"
             )
-            truncated = [r for r in rows if r.done_reason == "length"]
-            if truncated:
-                print(f"  {'':<16} ^ {len(truncated)}/{len(rows)} hit num_predict "
-                      f"({_NUM_PREDICT}) — description was CUT")
             extras = {k for r in rows for k in r.extra_keys}
             if extras:
                 print(f"  {'':<16} ^ message also carries: {sorted(extras)}")
 
 
-def verdict(results: list[Result], images: list[str]) -> None:
-    print("\n" + "=" * 78)
+def verdict(
+    results: list[Result], images: list[str], trials: list[Trial],
+    expect: dict[str, list[str]],
+) -> None:
+    print("\n" + "=" * 86)
     print("VERDICT")
-    print("=" * 78)
+    print("=" * 86)
 
     ok = [r for r in results if r.ok]
     if not ok:
         print("Every call failed — nothing to conclude.")
         return
 
-    # Only meaningful on a substantial generation. A 30-token reply swings
-    # this ratio on rounding alone, and reporting that as "unexplained tokens"
-    # would manufacture the exact mystery the probe exists to dispel.
+    lost = [r for r in ok if r.lost]
+    if lost:
+        print(
+            f"\n{len(lost)}/{len(ok)} calls hit num_predict while reasoning and "
+            "returned NOTHING.\nIn production each of those is a 502 and a "
+            "dropped keyframe. Raise vision.num_predict\nor pick a prompt that "
+            "reasons less — this is the failure mode, not a slow frame."
+        )
+        for r in lost:
+            print(f"    {r.image} {r.variant}: {r.tokens}tok, "
+                  f"{len(r.thinking)}ch thinking, 0ch content")
+
     unexplained = [r for r in ok if r.tokens >= 100 and r.both_per_tok < 2.0]
     if unexplained:
         print(
             f"\n{len(unexplained)}/{len(ok)} calls generated tokens that neither "
-            "content nor thinking\naccounts for (both/tok < 2.0). Something else "
-            "is being generated — look at\nthe extra message keys above before "
-            "tuning anything."
-        )
-    else:
-        print(
-            "\nAccounting closes: content + thinking explains every generated "
-            "token in\nevery call. There is no third thing to find."
+            "content nor thinking\naccounts for. Check the extra message keys "
+            "above before tuning anything."
         )
 
+    if MODE == "think":
+        _think_verdict(ok, images, trials)
+        return
+
+    # Cost-per-useful-description, which is the number that should pick a
+    # prompt. A variant that is cheap because it lost the text is not cheap.
+    print("\nRanked by tokens, with what each one cost you in coverage:")
     for image in images:
-        base = [r for r in ok
-                if r.image == image and r.variant == "think-false"]
+        wanted = len(expect.get(image, []))
+        print(f"\n{image}" + (f"  (expecting {wanted} string(s))" if wanted else ""))
+        ranked = []
+        for trial in trials:
+            rows = [r for r in ok if r.image == image and r.variant == trial.name]
+            if not rows:
+                continue
+            hits = [found(r, expect) for r in rows]
+            ranked.append((
+                _mean([float(r.tokens) for r in rows]),
+                trial.name,
+                _mean([float(h[0]) for h in hits]),
+                sum(1 for r in rows if r.lost),
+            ))
+        for tokens, name, hit, n_lost in sorted(ranked):
+            flags = []
+            if wanted and hit < wanted:
+                flags.append(f"MISSED {wanted - hit:.1f} of {wanted}")
+            if n_lost:
+                flags.append(f"{n_lost} LOST")
+            suffix = ("   <- " + ", ".join(flags)) if flags else ""
+            print(f"  {tokens:7.0f}tok  {name:<16}"
+                  + (f"  found {hit:.1f}/{wanted}" if wanted else "")
+                  + suffix)
+
+    print(
+        "\nPick the cheapest variant that misses nothing and loses nothing — "
+        "then READ its\ndescriptions below. A hit count cannot tell you whether "
+        "the prose is any good."
+    )
+
+
+def _think_verdict(ok: list[Result], images: list[str], trials: list[Trial]) -> None:
+    for image in images:
+        base = [r for r in ok if r.image == image and r.variant == "think-false"]
         if not base:
             continue
         baseline = _mean([float(len(r.thinking)) for r in base])
@@ -290,51 +441,43 @@ def verdict(results: list[Result], images: list[str]) -> None:
         if baseline == 0:
             print("  No thinking at all. `think: false` is honoured here.")
             continue
-        for variant in VARIANTS:
-            if variant.name == "think-false":
+        for trial in trials:
+            if trial.name == "think-false":
                 continue
-            rows = [r for r in ok if r.image == image and r.variant == variant.name]
+            rows = [r for r in ok if r.image == image and r.variant == trial.name]
             if not rows:
                 continue
             mean_think = _mean([float(len(r.thinking)) for r in rows])
             ratio = mean_think / baseline
             mark = "  <<< SUPPRESSES IT" if ratio <= _SUPPRESSED_AT else ""
-            print(f"  {variant.name:<16} {mean_think:7.0f}ch  {ratio * 100:5.1f}% "
+            print(f"  {trial.name:<16} {mean_think:7.0f}ch  {ratio * 100:5.1f}% "
                   f"of baseline{mark}")
-
     print(
-        "\nA variant marked SUPPRESSES IT is the mechanism to wire into "
-        "`_transcribe_one`.\nIf none is marked, thinking cannot be turned off "
-        "for this model and the choice\nis to accept the cost or move to a model "
-        "whose `ollama show` omits `thinking`."
+        "\nNothing marked means thinking cannot be turned off for this model. "
+        "Accept the\ncost, or move to one whose `ollama show` omits `thinking`."
     )
 
 
-def excerpts(results: list[Result], images: list[str]) -> None:
-    """Print what the model actually thought and said.
-
-    The point of the whole exercise. A token count says how much was spent; the
-    text says on what — and whether it is something a prompt could prevent.
-    """
+def transcripts(results: list[Result], images: list[str], trials: list[Trial]) -> None:
+    """Print the descriptions. The hit count is a proxy; this is the evidence."""
     if _EXCERPT <= 0:
         return
-    print("\n" + "=" * 78)
-    print(f"WHAT IT ACTUALLY WROTE (first {_EXCERPT} chars)")
-    print("=" * 78)
+    print("\n" + "=" * 86)
+    print(f"THE DESCRIPTIONS (first {_EXCERPT} chars of one run each)")
+    print("=" * 86)
     for image in images:
-        for variant in VARIANTS:
+        for trial in trials:
             row = next((r for r in results
-                        if r.image == image and r.variant == variant.name
-                        and r.ok and r.thinking), None)
+                        if r.image == image and r.variant == trial.name and r.ok), None)
             if row is None:
                 continue
-            print(f"\n── {image} · {variant.name} · thinking "
-                  f"({len(row.thinking)}ch) " + "─" * 20)
-            print(row.thinking[:_EXCERPT].strip())
-            print(f"\n── {image} · {variant.name} · content "
-                  f"({len(row.content)}ch) " + "─" * 21)
-            print(row.content[:_EXCERPT].strip())
-            break  # one variant per image is enough to see the shape
+            note = "  [TRUNCATED, NOTHING WRITTEN]" if row.lost else ""
+            print(f"\n── {image} · {trial.name} · {len(row.content)}ch{note} "
+                  + "─" * 18)
+            print(row.content[:_EXCERPT].strip() or "(empty)")
+            if _SHOW_THINKING and row.thinking:
+                print(f"   ·· thinking ({len(row.thinking)}ch) ··")
+                print(row.thinking[:_EXCERPT].strip())
 
 
 def main() -> int:
@@ -349,41 +492,51 @@ def main() -> int:
         print("See this file's docstring for how to extract frames into the container.")
         return 2
 
+    trials = build_trials()
     only = {v.strip() for v in os.environ.get("ONLY", "").split(",") if v.strip()}
-    variants = [v for v in VARIANTS if not only or v.name in only]
-    if not variants:
-        print(f"ONLY={sorted(only)} matched no variant. "
-              f"Known: {[v.name for v in VARIANTS]}")
+    if only:
+        trials = [t for t in trials if t.name in only]
+    if not trials:
+        print(f"ONLY={sorted(only)} matched nothing in MODE={MODE}.")
         return 2
 
-    total = len(paths) * len(variants) * _SAMPLES
-    print(f"model={MODEL} host={HOST} hint={'yes' if HINT.strip() else 'no'}")
+    expect = parse_expect()
+    unknown = set(expect) - {p.name for p in paths}
+    if unknown:
+        print(f"WARNING: EXPECT names images not being probed: {sorted(unknown)}\n")
+
+    total = len(paths) * len(trials) * _SAMPLES
+    print(f"model={MODEL} host={HOST} mode={MODE} hint={'yes' if HINT.strip() else 'no'}")
     print(f"num_predict={_NUM_PREDICT} temperature={_TEMPERATURE} samples={_SAMPLES}")
-    print(f"{total} calls. At 10-80s each this is roughly "
-          f"{total * 10 // 60}-{total * 80 // 60} minutes.\n")
+    print(f"{len(paths)} image(s) x {len(trials)} variant(s) x {_SAMPLES} = {total} calls")
+    print(f"Roughly {total * 8 // 60}-{total * 60 // 60} minutes.\n")
 
     results: list[Result] = []
     started = time.monotonic()
     for path in paths:
         b64 = load(path)
-        for variant in variants:
+        for trial in trials:
             for run in range(_SAMPLES):
-                res = call(b64, variant, path.name)
+                res = call(b64, trial, path.name)
                 results.append(res)
                 done = len(results)
                 if not res.ok:
-                    print(f"[{done}/{total}] {path.name:<8} {variant.name:<16} "
-                          f"ERROR {res.error[:60]}")
+                    print(f"[{done}/{total}] {path.name:<10} {trial.name:<16} "
+                          f"ERROR {res.error[:56]}")
                     continue
+                hit, want = found(res, expect)
                 print(
-                    f"[{done}/{total}] {path.name:<8} {variant.name:<16} "
-                    f"run{run + 1}  {res.eval_s:6.1f}s {res.tokens:5d}tok  "
-                    f"content={len(res.content):5d}ch thinking={len(res.thinking):6d}ch"
+                    f"[{done}/{total}] {path.name:<10} {trial.name:<16} "
+                    f"run{run + 1} {res.eval_s:6.1f}s {res.tokens:5d}tok "
+                    f"content={len(res.content):5d}ch think={len(res.thinking):6d}ch"
+                    + (f" found={hit}/{want}" if want else "")
+                    + ("  <-- LOST" if res.lost else "")
                 )
 
-    summarise(results, [p.name for p in paths])
-    verdict(results, [p.name for p in paths])
-    excerpts(results, [p.name for p in paths])
+    names = [p.name for p in paths]
+    summarise(results, names, trials, expect)
+    verdict(results, names, trials, expect)
+    transcripts(results, names, trials)
     print(f"\nTotal probe time: {(time.monotonic() - started) / 60:.1f} min")
     return 0
 

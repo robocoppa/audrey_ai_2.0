@@ -238,3 +238,35 @@ class TestThinkingIsMeasuredNotInferred:
         """The fixture at the top of this file has no thinking field, which is
         what a call with `think: false` honoured looks like."""
         assert VisionTiming.from_response(_REAL_RESPONSE).thinking_chars == 0
+
+
+class TestTruncationIsNamed:
+    """A frame lost to `num_predict` and a frame lost to a broken vision model
+    look identical from the worker: both are a 502 with an empty description.
+    They want opposite responses — one is a one-line config change, the other
+    is a deployment problem.
+
+    Measured 2026-08-04: three of six probe runs on a cluttered office frame
+    spent all 2,048 tokens reasoning and emitted zero characters. The cap has
+    now been wrong twice in the same direction because nothing said so.
+    """
+
+    def test_done_reason_is_carried(self):
+        t = VisionTiming.from_response({
+            "message": {"content": ""}, "done_reason": "length", "eval_count": 2048,
+        })
+
+        assert t.done_reason == "length"
+        assert t.eval_tokens == 2048
+
+    def test_a_normal_stop_is_carried_too(self):
+        t = VisionTiming.from_response({
+            "message": {"content": "A slide."}, "done_reason": "stop",
+        })
+
+        assert t.done_reason == "stop"
+
+    def test_a_missing_done_reason_is_empty_not_none(self):
+        """It reaches an f-string in the 502 detail; `None` would render as
+        the word 'None' in an error a human is meant to act on."""
+        assert VisionTiming.from_response({"message": {"content": "x"}}).done_reason == ""

@@ -97,10 +97,14 @@ KEYFRAME_SYSTEM = (
     "- Write PLAIN PROSE. No markdown, no headings, no bullet points, no bold "
     "or italic markers. This text is stored as a search chunk, never "
     "displayed.\n"
-    "- Lead with any text visible in the frame, transcribed EXACTLY: slides, "
-    "documents, whiteboards, captions, name plates, titles, signs, code, "
-    "error messages. This is the most valuable thing you can record and often "
-    "the only thing anyone will search for.\n"
+    "- Lead with any text that is CLEARLY LEGIBLE: slides, documents, "
+    "whiteboards, captions, name plates, titles, signs, logos, code, error "
+    "messages. Transcribe that exactly — it is usually the only thing anyone "
+    "will search for.\n"
+    "- Do NOT strain to decipher text. If something is small, blurred, angled "
+    "or partly hidden, leave it out — do not guess at it and do not work at "
+    "it. Deciphering unclear text is the most expensive thing you can do here "
+    "and the least reliable.\n"
     "- Then say briefly what is happening and who is present.\n"
     "- Do NOT inventory the scene. Furniture, clothing, decor, wall colours "
     "and background objects deserve a few words only when they identify the "
@@ -322,7 +326,19 @@ class VisionTiming:
     #: mechanism is exactly the mistake this field was added to stop
     #: anyone repeating. Zero for a model that does not think, and zero
     #: when thinking is genuinely off.
+    #:
+    #: Measured 2026-08-04 on qwen3-vl:32b: neither `think: false` nor Qwen3's
+    #: `/no_think` prompt switch reduces it (93-101% of baseline either way).
+    #: Treat it as a cost of this model, not a setting.
     thinking_chars: int = 0
+    #: Ollama's reason for stopping. `"length"` means `num_predict` was hit,
+    #: and on this path that is not a slow frame but a LOST one: a model that
+    #: spends its whole budget thinking emits no content at all, the route
+    #: 502s the empty description, and the keyframe is dropped. Three of six
+    #: probe runs on a cluttered frame returned 0 characters after 2,048
+    #: tokens. Without this the log shows a plausible failure with no hint
+    #: that a cap caused it.
+    done_reason: str = ""
 
     @classmethod
     def from_response(cls, resp: dict[str, Any]) -> VisionTiming:
@@ -349,6 +365,7 @@ class VisionTiming:
             prompt_tokens=count("prompt_eval_count"),
             eval_tokens=count("eval_count"),
             thinking_chars=len(thinking) if isinstance(thinking, str) else 0,
+            done_reason=str(resp.get("done_reason") or ""),
         )
 
     def queue_s(self, wall_s: float) -> float:

@@ -780,19 +780,26 @@ vision:
   # `docker exec ollama ollama show <model>` before adding to the pool.
   think: false
 
-  # A ceiling, not a target — and 1024 was NOT a ceiling, it was a guillotine.
-  # Set there on 2026-08-04 from an estimate of ~440-660 tokens per
-  # description, derived by dividing characters by an assumed ~4 chars/token.
-  # The real ratio for this model on this content is ~1.9, so a 2,181-character
-  # description costs ~1,150 tokens and the cap bit on the very first frame:
-  # 1024 tokens exactly, 636 characters out, against neighbours at 2,181 and
-  # 1,620. A truncated description is worse than a slow one — it is ingested as
-  # a chunk and nothing downstream says it was cut.
+  # This cap has been wrong twice, in the same direction, for the same reason:
+  # **it is spent on thinking before any description is written.**
   #
-  # 2048 still stops the observed runaway (2,914 tokens, 81.4s) with headroom
-  # over a normal frame. **Measure the ratio before trusting a token cap** —
-  # characters are what the log prints and tokens are what the cap counts.
-  num_predict: 2048
+  # 1024 first, sized by dividing characters by an assumed ~4 chars/token. The
+  # real content ratio is ~1.9, so it bit on frame one — 636 characters out,
+  # against neighbours at 2,181 — and three later frames hit it before emitting
+  # anything at all, returned empty, were 502'd and dropped.
+  #
+  # 2048 next, and `scripts/vision_probe.py` showed that is still not enough:
+  # on a cluttered office frame, three of six runs spent all 2,048 tokens
+  # reasoning and produced ZERO characters. The reasoning is unavoidable —
+  # neither `think: false` nor Qwen3's `/no_think` reduces it (93-101% of
+  # baseline either way) — so the budget has to cover thinking AND the answer.
+  #
+  # 4096 costs nothing on an easy frame, because this is a ceiling and a frame
+  # that finishes at 300 tokens is billed for 300. It only ever spends more on
+  # the frames that would otherwise be lost entirely. The visual pass is still
+  # bounded by `FRAME_BUDGET_S` and the lease, which is where a runaway is
+  # meant to be caught — not here, where being caught means losing the frame.
+  num_predict: 4096
 
   # The model ships at temperature 1.0, which is a creativity setting applied
   # to a transcription task. It is also the likeliest cause of the known
