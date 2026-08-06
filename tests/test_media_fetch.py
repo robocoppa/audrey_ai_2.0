@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 
 from audrey.media.fetch import (
+    DEFAULT_FORMAT,
     SOURCE_AUTO_CAPTIONS,
     SOURCE_SUBTITLES,
     FetchFailedError,
@@ -305,6 +306,22 @@ class TestDownload:
         # correctly, but with a message that reads as "the download broke".
         assert argv[argv.index("--remux-video") + 1] == "mp4"
         assert argv[argv.index("--merge-output-format") + 1] == "mp4"
+
+    def test_the_resolution_cap_reaches_the_downloader(self, tmp_path):
+        binary = _fake_ytdlp(tmp_path, self.BODY)
+        download(URL, tmp_path / "staging", FILE_ID, timeout_s=30, binary=binary)
+        argv = _argv_of(binary)
+        # The cap is the whole download-size lever: the video track exists only
+        # to feed keyframes to a vision model, so bytes above what a describe
+        # call can read are spent on pixels nothing ever looks at.
+        assert argv[argv.index("-f") + 1] == DEFAULT_FORMAT
+
+    def test_a_source_with_nothing_under_the_cap_still_downloads(self):
+        # Every branch but the last carries a `height<=` filter. If the chain
+        # ever ends on a filtered branch, a source that only publishes 1080p
+        # stops being large and starts being a failed row — the cap is meant to
+        # save bytes, not to refuse videos.
+        assert DEFAULT_FORMAT.split("/")[-1] == "b"
 
     def test_a_stale_part_file_is_never_resumed(self, tmp_path):
         binary = _fake_ytdlp(tmp_path, self.BODY)

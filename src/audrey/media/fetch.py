@@ -41,15 +41,29 @@ log = logging.getLogger(__name__)
 
 DEFAULT_PROBE_TIMEOUT_S = 120
 
-#: Cap the download at 720p rather than taking the best available, and prefer
+#: Cap the download at 480p rather than taking the best available, and prefer
 #: streams that are already mp4.
 #:
-#: **720p** because the visual pass downscales to `kb.video.frame_max_width`
-#: (1280) before a frame ever reaches the vision model, so anything above it is
-#: bytes and download seconds spent on pixels that get thrown away — and the
-#: transcript, which is what most questions are actually about, does not depend
-#: on the video track at all. 1080p roughly doubles the download for no
-#: downstream difference.
+#: **480p** because the video track exists in this pipeline for one purpose:
+#: keyframes handed to a vision model for a scene description. The transcript,
+#: which is what most questions are actually about, comes from the caption
+#: track or from whisper on the audio, and neither cares what the pixels look
+#: like. So the only question resolution answers is "can the describe call
+#: still read this frame", and 854x480 is where that stops being free: 1080p is
+#: roughly four times the bytes of 480p and 720p a bit over twice, for a
+#: description that reads the same.
+#:
+#: The thing 480p does cost is small text burned into the frame — a terminal
+#: session, code on a slide. At 854 wide an 80-column terminal filling the
+#: frame lands near 10px per character, which a vision model usually reads and
+#: sometimes does not. If descriptions start coming back vague about on-screen
+#: text, this cap is the first thing to raise, and 720p was the previous
+#: setting. Note that `kb.video.frame_max_width` (1280) then does nothing:
+#: `frames.py` scales by `min(max_width, iw)`, so a narrower source passes
+#: through untouched and is never upscaled.
+#:
+#: Sources with no rendition at or below the cap still download — the final
+#: unconstrained `b` branch takes whatever exists rather than failing the row.
 #:
 #: **mp4** because `ALLOWED_VIDEO_MIMES` is exactly `{"video/mp4"}`, and a
 #: webm arriving at `fetch/{id}/result` is refused by the same libmagic gate
@@ -61,10 +75,10 @@ DEFAULT_PROBE_TIMEOUT_S = 120
 #: reason the image installs ffmpeg. The single-file fallbacks after it are
 #: what a site without adaptive streams provides.
 DEFAULT_FORMAT = (
-    "bv*[height<=720][ext=mp4]+ba[ext=m4a]/"
-    "b[height<=720][ext=mp4]/"
-    "bv*[height<=720]+ba/"
-    "b[height<=720]/b"
+    "bv*[height<=480][ext=mp4]+ba[ext=m4a]/"
+    "b[height<=480][ext=mp4]/"
+    "bv*[height<=480]+ba/"
+    "b[height<=480]/b"
 )
 
 #: The container everything ends up in. `--merge-output-format` covers the

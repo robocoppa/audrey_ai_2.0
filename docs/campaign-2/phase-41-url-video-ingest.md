@@ -290,8 +290,15 @@ actually has a route to it.
 format selector prefers mp4 streams and `--remux-video mp4` catches the rest.
 Without it a webm download is refused by the same libmagic gate that stops an
 HTML error page — correctly, but with a message that reads as "the download
-broke". This is also why the image carries ffmpeg: the 720p cap needs a merge,
-and the remux needs a container rewrite. Both are stream copies.
+broke". This is also why the image carries ffmpeg: the resolution cap needs a
+merge, and the remux needs a container rewrite. Both are stream copies.
+
+**480p.** The video track feeds keyframes to a vision model and nothing else —
+the transcript comes from captions or from whisper on the audio. So the cap is
+set by what a describe call can still read, not by what the source offers, and
+1080p is roughly four times the bytes for the same description. The cost is
+small text burned into a frame; raise the cap in `fetch.DEFAULT_FORMAT` if
+descriptions go vague about terminals or slides.
 
 ## Step 3 — the upload page field ✅ BUILT
 
