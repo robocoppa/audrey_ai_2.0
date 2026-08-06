@@ -181,14 +181,44 @@ class TestPaging:
 
 
 class TestMissingArtifacts:
-    async def test_a_video_still_processing_says_so(self, client, db, tmp_path):
+    """A missing artifact is DATA — 200 with empty text — not a 404.
+
+    Three rounds of wording failed before the status code was recognised as
+    the problem:
+
+      1. The 404 offered general explanations ("a video with no speech has no
+         transcript, and one whose frames were all near-identical has no visual
+         pass"). A model reported them as measured findings about the file.
+      2. It stated the bare fact and forbade elaboration. The model invented
+         MORE — with less to work from, it filled a bigger gap: silent.mp4's
+         non-existent summary "mentions revenue doubling since the speaker
+         joined in 1988", material belonging to the other video.
+      3. It became fully directive. Asked to compare two videos on 2026-08-06,
+         the model described silent.mp4 — a zero-duration fixture — as a
+         seven-minute atmospheric film following a person "through city
+         streets, suburban areas, entering a building, ending at the top of a
+         staircase", with a tone label and a comparison table.
+
+    **A 404 is an obstacle**: the call failed, so the model routes around it
+    and answers from whatever else it holds — in a two-file comparison, the
+    other file. **A 200 with `text: ""` is a result**: the file was read and it
+    is empty. Emptiness handed over beats emptiness inferred from a failure,
+    and no instruction inside an error changes which of the two arrived.
+    """
+
+    async def test_a_video_still_processing_returns_empty_not_an_error(
+            self, client, db, tmp_path):
         await _ready_video(db, tmp_path, sidecars=(), status="processing")
         r = _read(client)
-        assert r.status_code == 404
+        assert r.status_code == 200
+        body = r.json()
+        assert body["text"] == ""
+        assert body["total_chars"] == 0
+        assert body["next_offset"] is None
         # Not "no transcript" — it does not exist *yet*, which is a different
         # answer and the difference is the whole point.
-        assert "processing" in r.json()["detail"]
-        assert "yet" in r.json()["detail"]
+        assert "processing" in body["note"]
+        assert "yet" in body["note"]
 
     async def test_a_text_file_says_transcripts_are_video_only(
             self, client, db, tmp_path):
@@ -196,32 +226,26 @@ class TestMissingArtifacts:
                            filename="notes.pdf")
         r = client.post("/v1/files/artifact", headers=SVC,
                         json={"user": ME, "filename": "notes.pdf"})
-        assert r.status_code == 404
-        assert "only for video" in r.json()["detail"]
+        assert r.status_code == 200
+        assert r.json()["text"] == ""
+        assert "only for video" in r.json()["note"]
 
-    async def test_a_silent_video_says_it_produced_none(self, client, db, tmp_path):
+    async def test_a_silent_video_reports_empty_and_forbids_describing_it(
+            self, client, db, tmp_path):
         await _ready_video(db, tmp_path, sidecars=())
         r = _read(client)
-        assert r.status_code == 404
-        # The genuinely-empty case: ready, a video, nothing extracted.
-        detail = r.json()["detail"]
-        assert "produced no transcript" in detail
-        # It must NOT speculate. The first version offered two general
-        # explanations ("a video with no speech has no transcript, and one
-        # whose frames were all near-identical has no visual pass") as help. On
-        # 2026-08-06 a model repeated them back as measured findings about the
-        # file. An error message is evidence to whoever receives it.
-        assert "near-identical" not in detail
-        assert "do not guess" in detail
-        # And removing the speculation was not enough. On the re-run the same
-        # model described silent.mp4's contents anyway — "a summary suggests …
-        # revenue doubling since the speaker joined in 1988" — attributing to a
-        # summary that does not exist, material that belongs to the other
-        # video, after BOTH its get_file_text calls had 404'd. A message that
-        # merely withholds a cause leaves the model to fill the gap, so this
-        # one says what not to do.
-        assert "do not describe its contents" in detail
-        assert "another file" in detail
+        assert r.status_code == 200
+        body = r.json()
+        assert body["text"] == ""
+        note = body["note"]
+        # Named as a result, up front, so it cannot be read as a failed call.
+        assert note.startswith("EMPTY:")
+        assert "produced no transcript" in note
+        # No speculation about a cause — round 1's failure.
+        assert "near-identical" not in note
+        # And the explicit prohibition — rounds 2 and 3's failure.
+        assert "do not describe it" in note
+        assert "another file" in note
 
     async def test_an_unknown_filename_names_the_alternatives(
             self, client, db, tmp_path):
@@ -277,3 +301,61 @@ class TestIsolation:
         # confident answer comes from the wrong source.
         assert "2 files are named" in body["note"]
         assert "most recent" in body["note"]
+
+
+# ─── `list_my_files` declares what can be read (2026-08-06) ───────────
+
+
+class TestArtifactsAreDeclaredUpFront:
+    """The layer that fires before the model spends a call.
+
+    Every other field on `ModelFileRow` expresses absence as a blank —
+    `summary: ""`, `duration_s: 0.0` — and a blank reads as "unknown" rather
+    than "none", which is an invitation to fill it. `artifacts: []` is an
+    assertion that there is nothing.
+    """
+
+    def _list(self, client: TestClient):
+        return client.post("/v1/files/list", headers=SVC, json={"user": ME}).json()
+
+    async def test_a_processed_video_declares_what_it_has(
+            self, client, db, tmp_path):
+        await _ready_video(db, tmp_path,
+                           sidecars=("transcript", "frames", "summary"))
+        row = self._list(client)["files"][0]
+        # 'visual' is the payload name; '.frames.txt' is the file. The listing
+        # speaks the name `get_file_text` accepts, not the one on disk.
+        assert row["artifacts"] == ["summary", "transcript", "visual"]
+
+    async def test_a_transcript_only_video_says_so(self, client, db, tmp_path):
+        await _ready_video(db, tmp_path, sidecars=("transcript",))
+        assert self._list(client)["files"][0]["artifacts"] == ["transcript"]
+
+    async def test_a_silent_video_declares_nothing(self, client, db, tmp_path):
+        await _ready_video(db, tmp_path, sidecars=())
+        # THE case. A model that reads this has been told, before it calls
+        # anything, that there is nothing to read — rather than discovering it
+        # from a failure it then routes around.
+        assert self._list(client)["files"][0]["artifacts"] == []
+
+    async def test_it_is_read_from_disk_not_inferred_from_the_row(
+            self, client, db, tmp_path):
+        """`chunks > 0` cannot answer this: it is true for a video with a
+        transcript AND for one with only frame descriptions. The row records
+        that ingest happened; the sidecars are what `get_file_text` reads."""
+        await _ready_video(db, tmp_path, sidecars=("frames",))
+        row = self._list(client)["files"][0]
+        assert row["artifacts"] == ["visual"]
+
+    async def test_a_missing_upload_directory_is_not_fatal(self, client, db):
+        """This decorates a listing that must not fail. A stat error turning
+        `list_my_files` into a 500 trades a small loss of information for the
+        whole feature."""
+        await db.record_upload(
+            file_id="ghost", user=ME, filename="ghost.mp4", mime="video/mp4",
+            bytes_=1, kind="video", collection="c", chunks=0,
+            uploaded_at="2026-08-01T00:00:00+00:00",
+        )
+        body = client.post("/v1/files/list", headers=SVC, json={"user": ME})
+        assert body.status_code == 200
+        assert body.json()["files"][0]["artifacts"] == []

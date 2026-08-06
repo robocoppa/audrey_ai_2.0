@@ -702,6 +702,7 @@ class MyFileRow(BaseModel):
     summary: str = ""
     failure_reason: str = ""
     waiting_for_s: float = 0.0
+    artifacts: list[str] = []
 
 
 class ListMyFilesResponse(BaseModel):
@@ -725,7 +726,13 @@ class ListMyFilesResponse(BaseModel):
         "contents are not searchable yet — say so rather than reporting it as "
         "empty, and use waiting_for_s (seconds so far, and only meaningful "
         "for those two statuses) if asked how long it has been going. A "
-        "'failed' file carries the reason. Returns only this user's own files."
+        "'failed' file carries the reason. "
+        "Each file lists its `artifacts`: which of 'transcript', 'visual' and "
+        "'summary' actually exist and can be read with get_file_text. **An "
+        "empty artifacts list means there is nothing to read and nothing is "
+        "known about that file's contents** — report it as having none, and "
+        "never describe it, compare it, or characterise its style or subject. "
+        "Returns only this user's own files."
     ),
 )
 async def list_my_files(req: ListMyFilesRequest) -> ListMyFilesResponse:

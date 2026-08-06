@@ -250,6 +250,17 @@ class ModelFileRow(BaseModel):
     # asks in chat, and date arithmetic against an unstated now is exactly
     # what a language model should not be doing.
     waiting_for_s: float = 0.0
+    # Which of `transcript` / `visual` / `summary` can actually be read back
+    # with `get_file_text`, checked against the sidecars on disk (2026-08-06).
+    #
+    # **An empty list is the point.** Every other field here expresses absence
+    # as a blank — `summary: ""`, `duration_s: 0.0` — and blanks read as
+    # "unknown" rather than "none", so a model fills them. Asked to compare two
+    # videos, one invented a seven-minute film for a zero-duration fixture.
+    # `artifacts: []` is an assertion that there is nothing, made before the
+    # model spends a call finding out, and it is the same fact the artifact
+    # route reports on the way back.
+    artifacts: list[str] = []
 
 
 class ServiceListResponse(BaseModel):
@@ -329,6 +340,35 @@ def _waiting_for_s(row: dict, *, now: _dt.datetime) -> float:
     if started.tzinfo is None:
         started = started.replace(tzinfo=_dt.UTC)
     return max(0.0, (now - started).total_seconds())
+
+
+def _available_artifacts(user_dir: Path, rows: list[dict]) -> dict[str, list[str]]:
+    """Which sidecars exist on disk, per file_id. Sync — the caller threads it.
+
+    Checked against the filesystem rather than inferred from the row, because
+    the row cannot answer it. `chunks > 0` is true for a video with a
+    transcript AND for one with only frame descriptions; `summary != ''` says
+    the summary is on the row but not whether the sidecar was written. The
+    files are the thing `get_file_text` will actually read, so they are the
+    thing to ask.
+
+    Missing directory, unreadable directory, anything else — every file gets an
+    empty list. This decorates a listing that must not fail: a stat error here
+    turning `list_my_files` into a 500 would trade a small loss of information
+    for the whole feature.
+    """
+    out: dict[str, list[str]] = {}
+    for row in rows:
+        file_id = str(row["file_id"])
+        found = []
+        for name, suffix in _ARTIFACT_SIDECARS.items():
+            try:
+                if (user_dir / f"{file_id}.{suffix}").is_file():
+                    found.append(name)
+            except OSError:  # per-path, so one bad path is not fatal
+                continue
+        out[file_id] = sorted(found)
+    return out
 
 
 def _get_uploads_db(request: Request) -> UploadsDB:
@@ -1921,6 +1961,11 @@ async def list_files_for_user(
     db = _get_uploads_db(request)
     rows = await db.list_user(user)
     now = _dt.datetime.now(_dt.UTC)
+    user_dir = _upload_root(request) / sanitize_user(user)
+    # One thread for the whole listing rather than per row: this is three
+    # `stat` calls per file against one directory, so the hop off the event
+    # loop costs more than the work does.
+    available = await asyncio.to_thread(_available_artifacts, user_dir, rows)
     files = [
         ModelFileRow(
             filename=str(row["filename"]),
@@ -1931,6 +1976,7 @@ async def list_files_for_user(
             summary=str(row["summary"]),
             failure_reason=str(row["failure_reason"]),
             waiting_for_s=_waiting_for_s(row, now=now),
+            artifacts=available.get(str(row["file_id"]), []),
         )
         for row in rows
     ]
@@ -2058,43 +2104,52 @@ async def read_artifact(
     try:
         text = await asyncio.to_thread(path.read_text, "utf-8")
     except OSError:
-        # Distinguish the three reasons this file is absent, because they need
-        # three different answers and a bare 404 gets reported as "the video
-        # has no transcript" for all of them.
+        # ── A missing artifact is DATA, not an error ──────────────────
+        #
+        # This used to raise 404, and the wording went through two rounds of
+        # tightening that both failed. First it offered general explanations
+        # ("a video with no speech has no transcript…") and the model reported
+        # them as measured findings. Then it stated the bare fact and forbade
+        # elaboration — and the model invented *more*, because it now had even
+        # less to work with. On 2026-08-06, asked to compare two videos, it
+        # described silent.mp4 — a zero-duration test fixture — as a
+        # seven-minute atmospheric film following a person "through city
+        # streets, suburban areas, entering a building, ending at the top of a
+        # staircase", complete with a tone label and a comparison table.
+        #
+        # **The status code was the bug, not the prose.** A 404 is an obstacle:
+        # the call failed, so the model routes around it and answers from
+        # whatever else it has — which in a two-file comparison is the other
+        # file. A 200 carrying `text: ""` is a *result*: the file was read and
+        # it is empty. Emptiness the model was handed beats emptiness it has to
+        # infer from a failure, and no amount of instruction inside an error
+        # changes which of those it received.
+        #
+        # 404 is now reserved for the one thing that really is a caller error:
+        # a filename that does not exist. If the file exists, this route
+        # succeeds and `note` says what was found.
         status = str(row["status"])
         if status != "ready":
-            detail = (
-                f"{row['filename']!r} is {status}, so it has no {artifact} yet."
-            )
+            reason = f"is still {status}, so its {artifact} does not exist yet"
         elif str(row["kind"]) != "video":
-            detail = (
-                f"{row['filename']!r} is a {row['kind']} file — {artifact} "
-                "exists only for video."
-            )
+            reason = f"is a {row['kind']} file, and {artifact} exists only for video"
         else:
-            # State the fact and STOP. This used to append "a video with no
-            # speech has no transcript, and one whose frames were all
-            # near-identical has no visual pass" — two general explanations,
-            # offered as help.
-            #
-            # A model repeated them back as findings about the file. Asked to
-            # compare two videos on 2026-08-06, it reported that silent.mp4's
-            # "frames are all near-identical", which nothing had measured — the
-            # sentence was a worked example of why an artifact can be absent,
-            # and it read as a description of this one.
-            #
-            # An error message is evidence to whoever receives it. Anything in
-            # here that sounds like an observation will be reported as one, so
-            # it may only contain things that were actually checked.
-            detail = (
-                f"{row['filename']!r} finished processing and produced no "
-                f"{artifact}. There is nothing to read and nothing is known "
-                f"about what this file contains. Report that it has no "
-                f"{artifact} and stop — do not describe its contents, do not "
-                "guess at a cause, and do not attribute anything to it from "
-                "another file or from its summary."
-            )
-        raise HTTPException(status_code=404, detail=detail) from None
+            reason = f"finished processing and produced no {artifact}"
+        log.info(
+            "files: artifact read user=%s file=%r artifact=%s -> absent (%s)",
+            user, row["filename"], artifact, status,
+        )
+        return ArtifactResponse(
+            filename=str(row["filename"]), artifact=artifact, text="",
+            offset=0, next_offset=None, total_chars=0,
+            note=(
+                f"{note}EMPTY: {row['filename']!r} {reason}. This file's "
+                f"{artifact} is not missing from your view — it does not "
+                f"exist. Nothing whatsoever is known about what this file "
+                f"contains. Say it has no {artifact}; do not describe it, and "
+                "do not carry over anything from another file."
+            ).strip(),
+        )
 
     total = len(text)
     offset = max(0, min(body.offset, total))
