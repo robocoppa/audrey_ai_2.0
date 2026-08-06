@@ -123,13 +123,24 @@ deployable and verifiable on its own.
   that motivated it is a config number on a NAS. The levers themselves wait on
   one ingest's worth of numbers.
 
-**Using it (40)**
+**Using it (40-42)**
 
 - [40 uploads in chat](campaign-2/phase-40-uploads-in-chat.md) — the surfaces
   around video ingest rather than the pipeline itself: a link to the upload
   page, a tool that lists your own files, a filter that scopes a question to
-  one of them, and elapsed time while a job runs. **Planned.** Explains why an
-  `audrey_video` virtual model is the wrong shape, and which model to ask with.
+  one of them, and elapsed time while a job runs. **All four steps built; the
+  listing tool is deployed.** The open question is behavioural and needs a
+  human: does the model scope to a file when it should, and only then.
+- [41 paste a link, get a video](campaign-2/phase-41-url-video-ingest.md) — a
+  URL field on the upload page and a fetcher container that downloads into the
+  same pipeline uploads already use. **Planned.** Explains why the download
+  cannot happen in `media-worker` (no egress, read-only `/data`, both on
+  purpose), and why subtitles beat whisper when a video has them.
+- [42 a virtual model good at videos](campaign-2/phase-42-video-specialist.md)
+  — a specialist that chains "list my files" into a scoped search rather than
+  working it out per conversation. **Planned and gated** on phase 40's
+  behavioural check. Corrects phase 40's flat "no `audrey_video`", which was an
+  argument about ingest being read as one about retrieval.
 
 **Retrieval quality**
 

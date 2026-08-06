@@ -10,9 +10,15 @@
     PUT    .../upload-sessions/{id}/parts/{n}   — one part.
     POST   .../upload-sessions/{id}/complete    — assemble and ingest.
 
+    POST   /v1/files/from-url                 — accept a video URL; the bytes
+                                                are downloaded elsewhere, later.
+
     POST   /v1/files/jobs/claim               — SERVICE: lease a pending job.
     POST   /v1/files/{file_id}/ingest-result  — SERVICE: worker output.
     POST   /v1/files/{file_id}/ingest-failed  — SERVICE: worker gave up.
+    POST   /v1/files/fetch/claim              — SERVICE: lease a download.
+    POST   /v1/files/fetch/{file_id}/result   — SERVICE: download landed.
+    POST   /v1/files/fetch/{file_id}/failed   — SERVICE: download gave up.
     POST   /v1/files/list                     — SERVICE: a named user's files,
                                                 shaped for a model (phase 40).
 
@@ -35,10 +41,16 @@ Safety layers (all mandatory):
     the bytes land at `<upload_root>/<sanitized_user>/<file_id><ext>` —
     the client-supplied name is never used as a path segment.
 
-The three `jobs`/`ingest-*` routes are the exception to all of the above: they
-authenticate with `require_service` and carry no user identity of their own,
-because the media worker acts on behalf of whoever uploaded the file. A user
-JWT must never reach them — see `auth.require_service`.
+The `jobs`/`ingest-*` and `fetch/*` routes are the exception to all of the
+above: they authenticate with `require_service` and carry no user identity of
+their own, because the media worker and the media fetcher act on behalf of
+whoever owns the row. A user JWT must never reach them — see
+`auth.require_service`.
+
+`POST /v1/files/from-url` is a *user* route and keeps every gate above, with
+one addition: a host allowlist, because it is the only route here that makes
+this server originate an outbound request. What it does not do is download
+anything — see the Phase 41 section for why the bytes are somebody else's job.
 
 `POST /v1/files/list` is the same exception for the same reason, and one step
 more dangerous: it *names* its user in the body, so it is only safe while the
@@ -53,6 +65,7 @@ import asyncio
 import datetime as _dt
 import logging
 import shutil
+import urllib.parse
 import uuid
 from pathlib import Path
 
@@ -119,10 +132,16 @@ class FileRow(BaseModel):
     # would read the difference as an accounting bug.
     source_freed_at: str = ""
     # When a worker claimed this row (Phase 40). Empty unless `status` is
-    # 'processing'. Surfaced so the page can say how long a job has been
-    # running: a 458-second ingest that reports nothing while it runs is
-    # indistinguishable from one that has hung.
+    # 'processing' or 'fetching'. Surfaced so the page can say how long a job
+    # has been running: a 458-second ingest that reports nothing while it runs
+    # is indistinguishable from one that has hung.
     leased_at: str = ""
+    # Where a fetched video came from (Phase 41). Empty for an ordinary upload.
+    # Shown rather than kept internal because it is the only thing on the row a
+    # user can act on while it is still downloading — "is it fetching the right
+    # video?" is answerable from the link and from nothing else, since the
+    # filename is a placeholder until yt-dlp reports the real title.
+    source_url: str = ""
 
 
 class UploadResponse(BaseModel):
@@ -175,6 +194,21 @@ class ListResponse(BaseModel):
 class DeleteResponse(BaseModel):
     file_id: str
     deleted: bool
+
+
+class JobResultResponse(BaseModel):
+    """What a stage reports back after taking a row off its queue.
+
+    Up here rather than beside the video-job routes that first used it because
+    the Phase 41 fetch routes are declared earlier in the file and name it as a
+    `response_model` — a decorator argument, so it is evaluated at import time
+    and has to already exist. Shared by both stages, which is honest: they are
+    the same handover with different nouns.
+    """
+
+    file_id: str
+    status: str
+    chunks: int
 
 
 class ServiceListRequest(BaseModel):
@@ -278,8 +312,12 @@ def _waiting_for_s(row: dict, *, now: _dt.datetime) -> float:
     NTP correction, a restored backup — reporting it as 0 is the honest
     degradation. A file that has been processing for "-3 minutes" reads as a
     broken queue and sends someone to debug the worker.
+
+    The two Phase 41 fetch states are in the set for the same reason the ingest
+    ones are: a download is the stage a user is *most* likely to be watching,
+    because it is the one they just started by hand.
     """
-    if row["status"] not in ("pending", "processing"):
+    if row["status"] not in ("fetch_pending", "fetching", "pending", "processing"):
         return 0.0
     stamp = str(row["leased_at"] or "") or str(row["uploaded_at"] or "")
     if not stamp:
@@ -789,6 +827,424 @@ async def _drop_session(db: UploadsDB, session_dir: Path, upload_id: str) -> Non
     await asyncio.to_thread(shutil.rmtree, session_dir, True)
 
 
+# ─── URL fetch lifecycle (Phase 41) ───────────────────────────────────
+#
+# One stage in FRONT of the video job lifecycle below. A user pastes a link,
+# this accepts it and returns; a `media-fetcher` container downloads the bytes
+# and hands the row to the 'pending' queue, from where everything downstream is
+# phases 33-38 unchanged and unaware a URL was ever involved.
+#
+# Declared before the `/{file_id}/...` routes deliberately. FastAPI matches in
+# declaration order, and `/fetch/claim` is a two-segment path like
+# `/{file_id}/ingest-result` — they cannot collide today because the second
+# segments differ, but the ordering makes that a property of the file rather
+# than a coincidence of naming.
+#
+# The download happens in NEITHER `audrey-ai` nor `media-worker`, and both
+# exclusions are load-bearing rather than stylistic — see the phase 41 plan.
+# The short version: `media-worker` is on an `internal: true` network on
+# purpose, and giving it egress would restore its route to the host-published
+# ollama port, undoing phase 34's fairness invariant.
+
+
+class UrlIngestRequest(BaseModel):
+    url: str
+
+
+_FETCH_SCHEMES = frozenset({"http", "https"})
+
+
+def _fetch_cfg(request: Request) -> dict:
+    cfg = request.app.state.cfg
+    kb_cfg = cfg.raw.get("kb", {}) or {}
+    return kb_cfg.get("fetch", {}) or {}
+
+
+def _allowed_fetch_hosts(request: Request) -> frozenset[str]:
+    """Hosts this deployment will download from, from `kb.fetch.allowed_hosts`.
+
+    **An absent or empty list refuses everything**, and that is the safe
+    direction rather than an oversight: this feeds a downloader with write
+    access to every user's upload directory, so a deployment whose config
+    predates the setting must not silently acquire an open one. The failure
+    mode of the safe default is a clear 403 on the first paste; the failure
+    mode of the other default is not visible at all.
+
+    Exact matches only — no suffix logic. `youtube.com` in the list must not
+    admit `youtube.com.evil.test`, and the moment matching becomes "endswith"
+    that is exactly what it admits.
+    """
+    raw = _fetch_cfg(request).get("allowed_hosts") or []
+    return frozenset(str(h).strip().lower() for h in raw if str(h).strip())
+
+
+def _max_fetch_bytes(request: Request) -> int:
+    """Per-URL ceiling. The size is unknown at accept time, so this stands in."""
+    return int(_fetch_cfg(request).get("max_bytes_mb", 2048)) * 1024 * 1024
+
+
+def _fetch_lease_minutes(request: Request) -> int:
+    return int(_fetch_cfg(request).get("lease_minutes", 20))
+
+
+def _fetch_max_attempts(request: Request) -> int:
+    return int(_fetch_cfg(request).get("max_attempts", 3))
+
+
+def _validate_fetch_url(url: str, allowed: frozenset[str]) -> str:
+    """Check scheme and host, or raise the HTTPException the caller should send.
+
+    Returns the URL stripped, not rebuilt. `find_by_source_url` matches on the
+    exact string and the page displays it, so normalising here would mean two
+    spellings of the same paste no longer recognise each other.
+    """
+    cleaned = url.strip()
+    if not cleaned:
+        raise HTTPException(status_code=422, detail="url is required.")
+    try:
+        parsed = urllib.parse.urlparse(cleaned)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=f"Unparseable URL: {e}") from e
+
+    if parsed.scheme.lower() not in _FETCH_SCHEMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Only http and https URLs can be fetched, not {parsed.scheme!r}.",
+        )
+    # `hostname`, never `netloc`. It lowercases, drops the port, and — the part
+    # that matters — drops any `user:pass@` prefix. Matching an exact-host set
+    # against `netloc` would let `https://www.youtube.com@evil.test/x` pass a
+    # membership test while resolving to `evil.test`.
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise HTTPException(status_code=422, detail="URL has no host.")
+    if host not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"{host} is not a site this server downloads from. Allowed: "
+                f"{', '.join(sorted(allowed)) or '(none configured)'}."
+            ),
+        )
+    return cleaned
+
+
+def _url_placeholder_name(url: str) -> str:
+    """A filename to show while the real title is unknown.
+
+    The row is visible the instant it is accepted, and a blank name in the list
+    reads as a broken row. The video id is the best available stand-in: short,
+    stable, and recognisable next to the link it came from. `complete_fetch`
+    replaces it with the real title.
+    """
+    parsed = urllib.parse.urlparse(url)
+    query = urllib.parse.parse_qs(parsed.query or "")
+    candidate = (query.get("v") or [""])[0].strip()
+    if not candidate:
+        candidate = Path(parsed.path or "").name.strip()
+    return (candidate or "video")[:255]
+
+
+@router.post("/from-url", response_model=UploadResponse)
+async def ingest_from_url(
+    body: UrlIngestRequest,
+    request: Request,
+    me: AuthedUser = Depends(require_user),
+) -> UploadResponse:
+    """Accept a video URL and return immediately. The bytes arrive later.
+
+    **Nothing is downloaded in this request.** A 20-minute video is not an HTTP
+    request, and a route that waited for one would hold a worker for the whole
+    download and time out at the tunnel long before finishing.
+
+    The gates, in the order they run and for the reason they are in that order:
+
+      1. **Host allowlist, before anything else.** Not "whatever yt-dlp
+         accepts", which is ~1800 sites including plenty that serve arbitrary
+         files — that would make this a general-purpose file downloader with a
+         video-shaped name.
+      2. **Duplicate URL.** Cheap, and it is the single most likely mistake: a
+         double-clicked button or a link already in the list, each costing a
+         second download of the same 300 MB.
+      3. **Quota.** Against a configured per-URL ceiling, because the real size
+         is not knowable yet. `fetch-result` re-checks it against the bytes that
+         actually landed — this one only stops an account that is already full
+         from starting a download it could never store.
+    """
+    user = me.email
+    db = _get_uploads_db(request)
+
+    source_url = _validate_fetch_url(body.url, _allowed_fetch_hosts(request))
+
+    existing = await db.find_by_source_url(user=user, source_url=source_url)
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"That link is already in your files as {existing['filename']!r} "
+                f"({existing['status']}). Delete it first to fetch it again."
+            ),
+        )
+
+    max_total = _max_user_bytes(request)
+    already = await db.user_total_bytes(user)
+    ceiling = _max_fetch_bytes(request)
+    if already + ceiling > max_total:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Not enough room: a fetch can use up to "
+                f"{ceiling // (1024 * 1024)}MB and you are at "
+                f"{already // (1024 * 1024)}MB of "
+                f"{max_total // (1024 * 1024)}MB."
+            ),
+        )
+
+    file_id = str(uuid.uuid4())
+    stamp = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+    filename = _url_placeholder_name(source_url)
+    await db.record_url_fetch(
+        file_id=file_id, user=user, source_url=source_url,
+        filename=filename, uploaded_at=stamp,
+    )
+    log.info(
+        "files: queued url fetch user=%s file_id=%s url=%r", user, file_id, source_url,
+    )
+    return UploadResponse(
+        file_id=file_id, filename=filename, mime="", bytes=0,
+        kind="video", collection="", chunks=0, status="fetch_pending",
+    )
+
+
+class FetchClaim(BaseModel):
+    """A download job, handed to `media-fetcher` on its poll.
+
+    The caps travel with the job for the same reason `FrameSettings` does: the
+    fetcher does not mount `config.yaml`, and a parallel set of environment
+    variables is a second source of truth that drifts silently. A knob changed
+    here takes effect on the next claim.
+    """
+
+    file_id: str
+    user: str
+    source_url: str
+    lease_id: str
+    attempts: int
+    # Where the finished file must end up. A directory rather than a full path
+    # because the extension is not known until yt-dlp has picked a container —
+    # the fetcher names the file `<file_id><ext>` and reports an extension that
+    # matches, which is what `fetch-result` verifies rather than assumes.
+    dest_dir: str
+    lease_seconds: int = 1200
+    max_bytes: int = 2 * 1024 * 1024 * 1024
+    # Refuse a six-hour stream from the metadata pass, before a byte is
+    # downloaded. 0 disables the check.
+    max_duration_s: float = 0.0
+
+
+class FetchResultRequest(BaseModel):
+    lease_id: str
+    # The real title, with the extension of the file actually written. The
+    # extension is not decoration: `_source_path` rebuilds the on-disk path
+    # from it, so a mismatch means the worker is handed a path to nothing.
+    filename: str
+    duration_s: float = 0.0
+
+
+class FetchFailedRequest(BaseModel):
+    lease_id: str
+    reason: str
+
+
+@router.post("/fetch/claim", response_model=None)
+async def claim_fetch(
+    request: Request, _: None = Depends(require_service),
+) -> FetchClaim | Response:
+    """Lease the oldest accepted URL, or 204 when nothing is waiting.
+
+    Sweeps its own stage's expired leases first, exactly as `/jobs/claim` does:
+    the only thing that needs a dead fetcher's job returned is another fetcher
+    asking for work, so recovery rides the poll and there is still no background
+    task to supervise.
+    """
+    db = _get_uploads_db(request)
+
+    expiry = _dt.datetime.now(_dt.UTC) - _dt.timedelta(
+        minutes=_fetch_lease_minutes(request),
+    )
+    await db.sweep_expired_leases(
+        expired_before=expiry.isoformat(timespec="seconds"),
+        max_attempts=_fetch_max_attempts(request),
+        stage="fetching",
+    )
+
+    lease_id = str(uuid.uuid4())
+    now = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+    row = await db.claim_fetch(lease_id=lease_id, now=now)
+    if row is None:
+        return Response(status_code=204)
+
+    user = str(row["user"])
+    dest_dir = _upload_root(request) / sanitize_user(user)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    log.info(
+        "files: leased fetch file_id=%s user=%s attempt=%d url=%r",
+        row["file_id"], user, row["attempts"], row["source_url"],
+    )
+    cfg = _fetch_cfg(request)
+    return FetchClaim(
+        file_id=str(row["file_id"]), user=user,
+        source_url=str(row["source_url"]), lease_id=lease_id,
+        attempts=int(row["attempts"]), dest_dir=str(dest_dir),
+        lease_seconds=_fetch_lease_minutes(request) * 60,
+        max_bytes=_max_fetch_bytes(request),
+        max_duration_s=float(cfg.get("max_duration_s", 0) or 0),
+    )
+
+
+@router.post("/fetch/{file_id}/result", response_model=JobResultResponse)
+async def fetch_result(
+    file_id: str,
+    body: FetchResultRequest,
+    request: Request,
+    _: None = Depends(require_service),
+) -> JobResultResponse:
+    """Take a completed download and hand the row to the video queue.
+
+    The fetcher reports what it downloaded; this route **verifies it** rather
+    than recording it. Three checks, each of which has to happen here because
+    the fetcher is a separate container that could be wrong, stale, or broken:
+
+      1. **The file is where it says it is.** `_source_path` rebuilds the path
+         from `file_id` plus the reported filename's extension, so a filename
+         whose extension disagrees with the file on disk hands the media worker
+         a path to nothing — a failure that would otherwise surface three
+         attempts later as an unexplained ingest error.
+      2. **The bytes are a video.** The same libmagic gate an upload passes.
+         Without it, a downloader that saved an HTML "video unavailable" page
+         pushes that into the transcription queue.
+      3. **The quota, for real this time.** `from-url` could only check a
+         configured ceiling; this is the first moment the true size exists.
+
+    A failed check fails the *row*, unlinks the bytes, and says why. Leaving a
+    row in 'fetching' with a rejected file on disk would consume quota for
+    something no one can see.
+    """
+    db = _get_uploads_db(request)
+    row = await db.get_upload(file_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such file.")
+    if row["lease_id"] != body.lease_id or row["status"] != "fetching":
+        raise HTTPException(
+            status_code=409,
+            detail="Lease is no longer valid — this fetch was reclaimed.",
+        )
+
+    user = str(row["user"])
+    filename = Path(body.filename or "").name[:255]
+    if not filename:
+        raise HTTPException(status_code=422, detail="filename is required.")
+
+    # Rebuild the path the same way every other reader of this row will.
+    dest = _source_path(request, {**row, "filename": filename})
+
+    async def rejected(status_code: int, detail: str) -> HTTPException:
+        """Fail the row, drop the bytes, and hand back the error to raise.
+
+        Returns rather than raises so every call site reads `raise await
+        rejected(...)` — the rejection is visible as a `raise` at the point it
+        happens, instead of being hidden inside a helper that callers have to
+        know never returns.
+        """
+        await asyncio.to_thread(_safe_unlink, dest)
+        await db.fail_job(
+            file_id=file_id, lease_id=body.lease_id, reason=detail, stage="fetching",
+        )
+        return HTTPException(status_code=status_code, detail=detail)
+
+    try:
+        written = (await asyncio.to_thread(dest.stat)).st_size
+    except OSError:
+        raise await rejected(
+            422,
+            f"the download reported {filename!r} but nothing is at {dest.name} — "
+            "the extension in the reported filename must match the file written",
+        ) from None
+
+    if written == 0:
+        raise await rejected(422, "the download produced an empty file")
+
+    mime = await asyncio.to_thread(sniff_mime, dest)
+    if mime not in ALLOWED_MIMES or not is_video_mime(mime):
+        raise await rejected(
+            415,
+            f"the download is not a video: {mime!r}. This is usually a site "
+            "returning an error page rather than the media",
+        )
+
+    max_total = _max_user_bytes(request)
+    # This row still carries bytes=0, so the sum excludes it — `already` is
+    # genuinely everything else the user is storing.
+    already = await db.user_total_bytes(user)
+    if already + written > max_total:
+        raise await rejected(
+            413,
+            f"the download is {written // (1024 * 1024)}MB and would put you over "
+            f"your {max_total // (1024 * 1024)}MB quota",
+        )
+
+    if not await db.complete_fetch(
+        file_id=file_id, lease_id=body.lease_id, filename=filename,
+        mime=mime, bytes_=written,
+    ):
+        # Swept between the guard above and here. The bytes stay on disk at a
+        # path derived from this file_id, so the re-run overwrites them rather
+        # than orphaning them — deleting here would race the fetcher that has
+        # already been handed the job.
+        raise HTTPException(
+            status_code=409, detail="Lease expired during the handover — fetch reclaimed.",
+        )
+
+    log.info(
+        "files: fetch complete file_id=%s user=%s filename=%r bytes=%d mime=%s "
+        "duration=%.1fs — now pending for the media worker",
+        file_id, user, filename, written, mime, body.duration_s,
+    )
+    return JobResultResponse(file_id=file_id, status="pending", chunks=0)
+
+
+@router.post("/fetch/{file_id}/failed", response_model=JobResultResponse)
+async def fetch_failed(
+    file_id: str,
+    body: FetchFailedRequest,
+    request: Request,
+    _: None = Depends(require_service),
+) -> JobResultResponse:
+    """Record why a download could not be done.
+
+    **The reason is the deliverable here, not the happy path.** Private video,
+    region blocked, members-only, age-gated, live stream, deleted — these are
+    the common cases, not edge cases, and a generic "download failed" is the
+    message that generates the support question this whole field exists to
+    prevent. The fetcher maps what it can and passes the rest through; this end
+    stores it verbatim and does not editorialise, exactly as `ingest-failed`
+    does for the worker.
+    """
+    db = _get_uploads_db(request)
+    row = await db.get_upload(file_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such file.")
+    if not await db.fail_job(
+        file_id=file_id, lease_id=body.lease_id, reason=body.reason, stage="fetching",
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Lease is no longer valid — this fetch was reclaimed.",
+        )
+    log.info("files: fetch failed file_id=%s reason=%r", file_id, body.reason[:200])
+    return JobResultResponse(file_id=file_id, status="failed", chunks=0)
+
+
 # ─── Video job lifecycle (Phase 33) ───────────────────────────────────
 #
 # A video uploads to `status='pending'` and nothing in this process will ever
@@ -881,12 +1337,6 @@ class IngestResultRequest(BaseModel):
 class IngestFailedRequest(BaseModel):
     lease_id: str
     reason: str
-
-
-class JobResultResponse(BaseModel):
-    file_id: str
-    status: str
-    chunks: int
 
 
 def _video_cfg(request: Request) -> dict:

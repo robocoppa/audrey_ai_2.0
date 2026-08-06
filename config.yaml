@@ -679,6 +679,53 @@ kb:
     # setting exists to solve.
     source_retention_hours: 24
 
+  # ─── URL fetch (Phase 41) ────────────────────────────────────────────
+  # Paste a link on the upload page and the box downloads the video into your
+  # KB. One stage in front of the video queue above; everything after the
+  # download is phases 33-38 unchanged and unaware a URL was involved.
+  fetch:
+    # Hosts this deployment will download from. **Exact matches, and an empty
+    # list refuses everything** — see `_allowed_fetch_hosts`. Both properties
+    # matter: suffix matching would admit `youtube.com.evil.test`, and a
+    # permissive default would mean a deployment whose config predates this
+    # setting silently acquires an open downloader with write access to every
+    # user's upload directory.
+    #
+    # Deliberately NOT "whatever yt-dlp accepts", which is ~1800 sites, many of
+    # them generic file hosts. That list would make this a general-purpose
+    # downloader wearing a video-shaped name.
+    allowed_hosts:
+      - "youtube.com"
+      - "www.youtube.com"
+      - "m.youtube.com"
+      - "youtu.be"
+
+    # Per-URL ceiling, and the number the quota is pre-checked against when a
+    # link is accepted — the real size is not knowable until the download
+    # finishes, so this stands in for it. `fetch/{file_id}/result` re-checks
+    # against the bytes that actually landed, which is the check that counts.
+    #
+    # Matches `kb.chunked.max_upload_mb`: a video you could have uploaded by
+    # hand is exactly the video you should be able to fetch by link.
+    max_bytes_mb: 2048
+
+    # Refuse a stream longer than this from the metadata pass, before any bytes
+    # are downloaded. 0 disables it. Two hours is already an hours-long ingest
+    # downstream — phase 38 measured 458s for nine minutes — so this bounds the
+    # download without being the binding constraint on anything reasonable.
+    max_duration_s: 7200
+
+    # Shorter than the ingest lease (30m) because a download is bounded by
+    # bandwidth rather than by GPU, and a fetcher that has not finished a
+    # size-capped file in twenty minutes is stuck rather than slow.
+    lease_minutes: 20
+
+    # Counts leases, not failures, exactly as `kb.video.max_attempts` does. A
+    # private or deleted video fails identically on every attempt, so this only
+    # bounds how long it takes to stop trying — the reason reaches the user on
+    # the first failure either way.
+    max_attempts: 3
+
 # ─── Tools (OpenAPI auto-discovery) ────────────────────────────────────
 tools:
   enabled: true

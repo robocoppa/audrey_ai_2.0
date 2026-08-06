@@ -52,18 +52,30 @@ CREATE TABLE IF NOT EXISTS uploads (
   collection  TEXT NOT NULL,
   chunks      INTEGER NOT NULL,
   uploaded_at TEXT NOT NULL,
-  -- 'ready'      — ingested, searchable now.
-  -- 'pending'    — bytes stored, nothing extracted yet, waiting for a worker.
-  --                Video lands here on upload.
-  -- 'processing' — leased by a media worker (Phase 33). `lease_id` says which
-  --                lease, `leased_at` says when it expires from.
-  -- 'failed'     — gave up. `failure_reason` says why, and it is shown to the
-  --                user: a row that sits at 'pending' forever with no
-  --                explanation is the failure mode this state exists to avoid.
+  -- 'ready'         — ingested, searchable now.
+  -- 'fetch_pending' — a URL was accepted and no bytes exist yet (Phase 41).
+  --                   Waiting for a media fetcher.
+  -- 'fetching'      — leased by a media fetcher, download in progress.
+  -- 'pending'       — bytes stored, nothing extracted yet, waiting for a
+  --                   worker. Video lands here on upload, and a fetched video
+  --                   arrives here from 'fetching'.
+  -- 'processing'    — leased by a media worker (Phase 33). `lease_id` says
+  --                   which lease, `leased_at` says when it expires from.
+  -- 'failed'        — gave up. `failure_reason` says why, and it is shown to
+  --                   the user: a row that sits at 'pending' forever with no
+  --                   explanation is the failure mode this state exists to
+  --                   avoid.
+  --
+  -- The two queues have the same shape and it is deliberate: a *_pending
+  -- status means "this stage's work is waiting", and the claim transitions it
+  -- to the leased status under one lock hold. That transition IS the mutual
+  -- exclusion, which is why neither claim needs a `lease_id = ''` predicate to
+  -- avoid handing one row to two holders.
   status      TEXT NOT NULL DEFAULT 'ready',
-  -- Empty unless status is 'processing'. Presented back on completion and
-  -- checked, so a worker that stalled past its lease and woke up after the job
-  -- was re-leased cannot overwrite the newer run's result.
+  -- Empty unless status is 'processing' or 'fetching' — the two stages share
+  -- these columns because a row is only ever in one of them. Presented back on
+  -- completion and checked, so a holder that stalled past its lease and woke up
+  -- after the job was re-leased cannot overwrite the newer run's result.
   lease_id       TEXT NOT NULL DEFAULT '',
   leased_at      TEXT NOT NULL DEFAULT '',
   -- Counts leases, not failures — a worker that dies without reporting never
@@ -92,7 +104,17 @@ CREATE TABLE IF NOT EXISTS uploads (
   -- is still on disk. `bytes` is deliberately left alone: it is the honest
   -- record of what was uploaded and what the file list shows, so the quota
   -- reads this column instead of zeroing that one.
-  source_freed_at TEXT NOT NULL DEFAULT ''
+  source_freed_at TEXT NOT NULL DEFAULT '',
+  -- Where a fetched video came from (Phase 41). Empty for an ordinary upload,
+  -- and that emptiness is the only thing distinguishing the two afterwards —
+  -- everything downstream of 'pending' treats them identically on purpose.
+  --
+  -- Kept after the fetch succeeds rather than cleared, for three reasons: the
+  -- page links back to it, a duplicate paste is refused against it, and it is
+  -- the answer to "can these bytes be re-obtained?" — for a URL-sourced video
+  -- the source is re-downloadable, which is exactly the argument phase 38 found
+  -- did not hold for an upload.
+  source_url  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_user ON uploads(user);
 -- No index on `status` here. `_SCHEMA` runs before `_migrate`, and on the
@@ -143,7 +165,22 @@ _UPLOADS_ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("summary", "TEXT NOT NULL DEFAULT ''"),
     ("completed_at", "TEXT NOT NULL DEFAULT ''"),
     ("source_freed_at", "TEXT NOT NULL DEFAULT ''"),
+    ("source_url", "TEXT NOT NULL DEFAULT ''"),
 )
+
+
+#: What a lease sweep does per stage: which status is *held* under a lease, the
+#: status a swept row returns to, and who is named when it gives up.
+#:
+#: Two stages hold leases — the media fetcher on 'fetching' and the media
+#: worker on 'processing' — and they are the same problem with different nouns.
+#: One parameterised query rather than two that drift; the phase-41 plan asked
+#: for exactly this check ("prefer extending to duplicating if the shapes turn
+#: out to be the same"), and they do.
+_LEASE_STAGES: dict[str, tuple[str, str]] = {
+    "processing": ("pending", "media worker"),
+    "fetching": ("fetch_pending", "media fetcher"),
+}
 
 
 class UploadsDB:
@@ -235,7 +272,7 @@ class UploadsDB:
         #
         # `INSERT OR REPLACE` deletes the conflicting row and inserts a new
         # one, so every column NOT named here silently reverts to its schema
-        # default. All seven of `_UPLOADS_ADDED_COLUMNS` are absent from this
+        # default. Every one of `_UPLOADS_ADDED_COLUMNS` is absent from this
         # statement, and `reconcile_with_qdrant` calls this for every user file
         # on every boot — which meant a processed video lost its `summary` and
         # its `duration_s` at the next restart of `audrey-ai`, with no error
@@ -252,6 +289,11 @@ class UploadsDB:
         # argument rather than as something read from Qdrant, so honouring it
         # on conflict would let a boot flip a 'processing' or 'failed' row to
         # 'ready' on the strength of a value the caller never supplied.
+        #
+        # `source_url` (Phase 41) is in the same group for the same reason, and
+        # the consequence is worth stating: a fetched video that reconciles at
+        # boot keeps knowing where it came from. Naming it here would clear it
+        # from the payload's silence, which is the `summary` bug again.
         with self._lock:
             self._conn.execute(
                 "INSERT INTO uploads "
@@ -297,7 +339,7 @@ class UploadsDB:
                 # pins the two together.
                 "SELECT file_id, filename, mime, bytes, kind, collection, "
                 "       chunks, uploaded_at, status, failure_reason, duration_s, "
-                "       summary, source_freed_at, leased_at "
+                "       summary, source_freed_at, leased_at, source_url "
                 "FROM uploads WHERE user = ? ORDER BY uploaded_at DESC",
                 (user,),
             )
@@ -363,6 +405,157 @@ class UploadsDB:
                 (user,),
             )
             return {r["file_id"] for r in cur.fetchall()}
+
+    # ── URL fetch lifecycle (Phase 41) ────────────────────────────────
+    #
+    # One stage in front of the video job lifecycle below, with the same
+    # shape: a *_pending status waits, a claim leases it, a result hands it
+    # on. What it hands on to is the existing 'pending' queue, so nothing in
+    # `media/worker.py` learns that a URL was ever involved.
+
+    async def record_url_fetch(
+        self, *, file_id: str, user: str, source_url: str, filename: str,
+        uploaded_at: str,
+    ) -> None:
+        """Insert a row that has a URL and no bytes yet.
+
+        Deliberately not `record_upload` with a different status. That method
+        upserts, and upserting here would let a second paste of the same URL
+        silently reset a row a fetcher is already holding. This is a plain
+        INSERT: a `file_id` collision is a uuid4 collision, which is a bug
+        worth raising on rather than papering over.
+
+        `bytes` is 0 and `mime` is empty because neither is known — the size
+        arrives with the download and the mime is sniffed from the bytes, the
+        same gate an upload passes. Writing a guess into either would make the
+        quota and the mime allowlist read a value nobody measured.
+        """
+        await asyncio.to_thread(
+            self._record_url_fetch_sync, file_id, user, source_url, filename,
+            uploaded_at,
+        )
+
+    def _record_url_fetch_sync(
+        self, file_id: str, user: str, source_url: str, filename: str,
+        uploaded_at: str,
+    ) -> None:
+        with self._lock:
+            # `kind` is 'video' from the start rather than being decided when
+            # the bytes land, because the host allowlist is a video-site
+            # allowlist — there is no other kind this path can produce. The
+            # mime sniff on the result is still the gate, and it fails the row
+            # rather than quietly reclassifying it.
+            self._conn.execute(
+                "INSERT INTO uploads "
+                "(file_id, user, filename, mime, bytes, kind, collection, "
+                " chunks, uploaded_at, status, source_url) "
+                "VALUES (?, ?, ?, '', 0, 'video', '', 0, ?, 'fetch_pending', ?)",
+                (file_id, user, filename, uploaded_at, source_url),
+            )
+
+    async def find_by_source_url(self, *, user: str, source_url: str) -> dict | None:
+        """An existing row for this user and this exact URL, or None.
+
+        Exact string match, and that is the whole promise. `youtu.be/X` and
+        `youtube.com/watch?v=X` are the same video and will not match each
+        other — canonicalising them means knowing the video id, which only
+        yt-dlp knows and only after a metadata call. What this does catch is
+        the double-clicked submit button and the paste of a link already in
+        the list, which is the case that costs a second download of the same
+        300 MB.
+
+        'failed' rows are excluded: a fetch that failed is exactly the one a
+        user would reasonably retry by pasting the link again.
+        """
+        return await asyncio.to_thread(self._find_by_url_sync, user, source_url)
+
+    def _find_by_url_sync(self, user: str, source_url: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT file_id, filename, status FROM uploads "
+                "WHERE user = ? AND source_url = ? AND status != 'failed' "
+                "LIMIT 1",
+                (user, source_url),
+            ).fetchone()
+            return dict(row) if row else None
+
+    async def claim_fetch(self, *, lease_id: str, now: str) -> dict | None:
+        """Lease the oldest row awaiting download, or None when none is."""
+        return await asyncio.to_thread(self._claim_fetch_sync, lease_id, now)
+
+    def _claim_fetch_sync(self, lease_id: str, now: str) -> dict | None:
+        # SELECT and UPDATE under one lock hold, exactly as `_claim_job_sync`
+        # does and for the same reason: the status transition is what stops two
+        # fetchers taking the same row, so the two statements cannot be split.
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM uploads WHERE status = 'fetch_pending' "
+                "ORDER BY uploaded_at ASC LIMIT 1",
+            ).fetchone()
+            if row is None:
+                return None
+            attempts = int(row["attempts"]) + 1
+            self._conn.execute(
+                "UPDATE uploads SET status = 'fetching', lease_id = ?, "
+                "       leased_at = ?, attempts = ? WHERE file_id = ?",
+                (lease_id, now, attempts, row["file_id"]),
+            )
+            claimed = dict(row)
+            claimed.update(
+                status="fetching", lease_id=lease_id, leased_at=now, attempts=attempts,
+            )
+            return claimed
+
+    async def complete_fetch(
+        self, *, file_id: str, lease_id: str, filename: str, mime: str, bytes_: int,
+    ) -> bool:
+        """Hand a downloaded row to the video queue. False if the lease lapsed.
+
+        Everything the fetcher learned lands here at once — the real title, the
+        sniffed mime and the size on disk — and the row becomes indistinguishable
+        from an upload that has been waiting for the worker.
+
+        **`attempts` resets to 0.** The counter is per stage, and carrying a
+        fetch's attempts into the ingest stage would hand a video that took two
+        tries to download only one try to transcribe before `max_attempts`
+        failed it. The two stages fail for unrelated reasons; sharing a budget
+        between them makes a slow network look like a bad video.
+        """
+        return await asyncio.to_thread(
+            self._complete_fetch_sync, file_id, lease_id, filename, mime, bytes_,
+        )
+
+    def _complete_fetch_sync(
+        self, file_id: str, lease_id: str, filename: str, mime: str, bytes_: int,
+    ) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE uploads SET status = 'pending', filename = ?, mime = ?, "
+                "       bytes = ?, lease_id = '', leased_at = '', attempts = 0, "
+                "       failure_reason = '' "
+                "WHERE file_id = ? AND lease_id = ? AND status = 'fetching'",
+                (filename, mime, bytes_, file_id, lease_id),
+            )
+            return cur.rowcount > 0
+
+    async def fetch_stage_file_ids(self) -> set[str]:
+        """Every file_id somewhere in the fetch stage.
+
+        The staging directory is swept against this: a file there whose id is
+        not in this set belongs to no live download and is an orphan. Asking
+        the database which rows are live is the only way to tell a partial
+        download in progress from one abandoned three attempts ago — an age
+        heuristic would eventually delete a slow one.
+        """
+        return await asyncio.to_thread(self._fetch_stage_ids_sync)
+
+    def _fetch_stage_ids_sync(self) -> set[str]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT file_id FROM uploads "
+                "WHERE status IN ('fetch_pending', 'fetching')",
+            )
+            return {str(r["file_id"]) for r in cur.fetchall()}
 
     # ── Video job lifecycle (Phase 33) ────────────────────────────────
 
@@ -447,17 +640,32 @@ class UploadsDB:
             )
             return cur.rowcount > 0
 
-    async def fail_job(self, *, file_id: str, lease_id: str, reason: str) -> bool:
-        """Mark a leased row 'failed' with a reason. Same lease guard as completion."""
-        return await asyncio.to_thread(self._fail_job_sync, file_id, lease_id, reason)
+    async def fail_job(
+        self, *, file_id: str, lease_id: str, reason: str,
+        stage: str = "processing",
+    ) -> bool:
+        """Mark a leased row 'failed' with a reason. Same lease guard as completion.
 
-    def _fail_job_sync(self, file_id: str, lease_id: str, reason: str) -> bool:
+        `stage` names which leased status the caller expects to hold — the
+        media worker's 'processing' or the fetcher's 'fetching'. The lease id
+        is a uuid4 that only the current holder has, so the status predicate is
+        already belt-and-braces; naming it keeps a fetcher from failing a row
+        that has moved on to ingest, which is the one way the two stages could
+        reach across each other.
+        """
+        return await asyncio.to_thread(
+            self._fail_job_sync, file_id, lease_id, reason, stage,
+        )
+
+    def _fail_job_sync(
+        self, file_id: str, lease_id: str, reason: str, stage: str,
+    ) -> bool:
         with self._lock:
             cur = self._conn.execute(
                 "UPDATE uploads SET status = 'failed', failure_reason = ?, "
                 "       lease_id = '', leased_at = '' "
-                "WHERE file_id = ? AND lease_id = ? AND status = 'processing'",
-                (reason[:500], file_id, lease_id),
+                "WHERE file_id = ? AND lease_id = ? AND status = ?",
+                (reason[:500], file_id, lease_id, stage),
             )
             return cur.rowcount > 0
 
@@ -567,7 +775,7 @@ class UploadsDB:
             return cur.rowcount > 0
 
     async def sweep_expired_leases(
-        self, *, expired_before: str, max_attempts: int,
+        self, *, expired_before: str, max_attempts: int, stage: str = "processing",
     ) -> dict[str, int]:
         """Return timed-out jobs to the queue, or fail them once attempts run out.
 
@@ -578,19 +786,31 @@ class UploadsDB:
         The attempts cap is what makes this terminate. A video that crashes the
         worker every time would otherwise cycle forever, taking the worker down
         with it on every pass.
+
+        `stage` picks which leased status to sweep — see `_LEASE_STAGES`. Each
+        stage's claim route sweeps its own, so recovery stays attached to the
+        heartbeat of the subsystem that needs it and there is still no
+        background task to supervise.
         """
         return await asyncio.to_thread(
-            self._sweep_leases_sync, expired_before, max_attempts,
+            self._sweep_leases_sync, expired_before, max_attempts, stage,
         )
 
     def _sweep_leases_sync(
-        self, expired_before: str, max_attempts: int,
+        self, expired_before: str, max_attempts: int, stage: str,
     ) -> dict[str, int]:
+        try:
+            requeue_to, actor = _LEASE_STAGES[stage]
+        except KeyError:
+            raise ValueError(
+                f"unknown lease stage {stage!r}; expected one of "
+                f"{sorted(_LEASE_STAGES)}",
+            ) from None
         with self._lock:
             rows = self._conn.execute(
                 "SELECT file_id, attempts FROM uploads "
-                "WHERE status = 'processing' AND leased_at < ?",
-                (expired_before,),
+                "WHERE status = ? AND leased_at < ?",
+                (stage, expired_before),
             ).fetchall()
             requeued = failed = 0
             for row in rows:
@@ -599,20 +819,21 @@ class UploadsDB:
                     self._conn.execute(
                         "UPDATE uploads SET status = 'failed', lease_id = '', "
                         "       leased_at = '', failure_reason = ? WHERE file_id = ?",
-                        (f"abandoned by the media worker after {attempts} attempt(s)",
+                        (f"abandoned by the {actor} after {attempts} attempt(s)",
                          row["file_id"]),
                     )
                     failed += 1
                 else:
                     self._conn.execute(
-                        "UPDATE uploads SET status = 'pending', lease_id = '', "
+                        "UPDATE uploads SET status = ?, lease_id = '', "
                         "       leased_at = '' WHERE file_id = ?",
-                        (row["file_id"],),
+                        (requeue_to, row["file_id"]),
                     )
                     requeued += 1
             if requeued or failed:
                 log.info(
-                    "uploads_db: lease sweep requeued=%d failed=%d", requeued, failed,
+                    "uploads_db: %s lease sweep requeued=%d failed=%d",
+                    stage, requeued, failed,
                 )
             return {"requeued": requeued, "failed": failed}
 
