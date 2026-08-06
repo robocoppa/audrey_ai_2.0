@@ -92,6 +92,38 @@
       border-radius: 4px; padding: 1px 5px; margin-left: 6px; white-space: nowrap;
     }
     .src { font-size: 0.78rem; }
+
+    /* Phase 37's video summary, collapsed by default (2026-08-06). A full
+       paragraph under every video turned the list into a wall of prose you had
+       to scroll past to find a filename — the opposite of what a file list is
+       for. Collapsed it keeps one line of it, so the list stays scannable
+       without the summary becoming a thing you have to go and look for. */
+    tr.summary td { padding-top: 0; border-top: 0; }
+    details.vsum > summary {
+      cursor: pointer; color: var(--muted); font-size: 0.85rem;
+      /* `display` overrides summary's default `list-item`, which is what
+         removes the native triangle in Firefox; the ::-webkit rule below does
+         the same for older Safari. Both are needed. */
+      display: inline-flex; align-items: baseline; gap: 6px;
+      max-width: 100%; user-select: none;
+    }
+    details.vsum > summary::-webkit-details-marker { display: none; }
+    details.vsum > summary::before {
+      content: "▸"; display: inline-block; transition: transform .12s ease;
+    }
+    details.vsum[open] > summary::before { transform: rotate(90deg); }
+    details.vsum > summary:hover { color: var(--text); }
+    details.vsum .teaser {
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    /* Swap the one-line teaser for a plain label once it is open, so the
+       first sentence is not printed twice directly above itself. */
+    .vsum .label, .vsum[open] .teaser { display: none; }
+    .vsum[open] .label { display: inline; }
+    details.vsum .prose {
+      color: var(--muted); font-size: 0.9em; white-space: pre-wrap;
+      margin-top: 6px; padding-left: 18px;
+    }
   </style>
 </head>
 <body>
@@ -566,6 +598,15 @@
       rows.querySelectorAll("button.danger").forEach(btn =>
         btn.addEventListener("click", () => deleteOne(btn.dataset.id)),
       );
+      // Remember what is open, so the next poll's rebuild reopens it. The
+      // `toggle` event fires for both directions, which is why this is one
+      // listener rather than a click handler that has to guess the new state.
+      rows.querySelectorAll("details.vsum").forEach(d =>
+        d.addEventListener("toggle", () => {
+          if (d.open) expanded.add(d.dataset.id);
+          else expanded.delete(d.dataset.id);
+        }),
+      );
     } catch (e) {
       if (String(e.message) === "unauthorized") return;
       rows.innerHTML = `<tr><td colspan="6">Error: ${e}</td></tr>`;
@@ -580,18 +621,45 @@
     return f.status === "ready" ? "" : "pending";
   }
 
+  // Which summaries the user has opened, by file_id.
+  //
+  // The table is rebuilt from scratch on every poll, so `<details open>` lives
+  // in the DOM only until the next refresh — five seconds, any time something
+  // else on the page is still processing. Without this, expanding one video's
+  // summary while another is being ingested snaps shut under your cursor.
+  const expanded = new Set();
+
   // Phase 37. A second row under the file, because "jasonRetirement.mp4 ·
   // 288 MB · ready" tells you nothing you did not already know. Absent for
   // everything that is not a processed video, and absent for a video whose
   // summary call failed — that is a missing field, not an error to surface.
+  //
+  // Collapsed by default since 2026-08-06, showing one line. The paragraph is
+  // worth having and worth not reading twenty times: what a file list is for
+  // is finding a file, and a wall of prose between every row makes that
+  // harder. A bare "Summary" toggle would have been simpler and worse — it
+  // hides the one thing that distinguishes two videos with unhelpful
+  // filenames, which is the case the summary exists for.
   function summaryRow(f) {
     if (!f.summary) return "";
+    const open = expanded.has(f.file_id) ? " open" : "";
     return `
       <tr class="summary">
-        <td colspan="6" style="color: var(--muted); font-size: 0.9em;
-            padding-top: 0; border-top: 0; white-space: pre-wrap;"
-          >${escapeHtml(f.summary)}</td>
+        <td colspan="6">
+          <details class="vsum"${open} data-id="${escapeAttr(f.file_id)}">
+            <summary
+              ><span class="teaser">${escapeHtml(teaserOf(f.summary))}</span
+              ><span class="label">Summary</span></summary>
+            <div class="prose">${escapeHtml(f.summary)}</div>
+          </details>
+        </td>
       </tr>`;
+  }
+
+  /** The first line's worth of a summary, for the collapsed state. */
+  function teaserOf(text) {
+    const flat = String(text).replace(/\s+/g, " ").trim();
+    return flat.length > 100 ? flat.slice(0, 99).trimEnd() + "…" : flat;
   }
 
   // Phase 41. Two labels, both answering a question you only ask when
