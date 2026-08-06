@@ -226,6 +226,7 @@ def build_graph(
         task, reason, conf = await classify_with_registry(
             ollama,
             user_text=last_user_text(state["messages"]),
+            messages=state["messages"],
             router_cfg=router_cfg,
             cfg=cfg,
             registry=tools,

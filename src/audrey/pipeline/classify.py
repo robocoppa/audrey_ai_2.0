@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from audrey.models.ollama import OllamaClient, OllamaError
+from audrey.pipeline.messages import conversation_has_image
 from audrey.pipeline.prompts import CLASSIFIER_SYSTEM, prompt_from_config
 from audrey.pipeline.state import TaskType
 
@@ -268,11 +269,12 @@ async def classify_with_registry(
     ollama: OllamaClient,
     *,
     user_text: str,
+    messages: list[dict[str, Any]],
     router_cfg: dict[str, Any],
     cfg: Any = None,
     registry: Any = None,
 ) -> tuple[TaskType, str, float]:
-    """Run `classify(...)` with the current tool-registry names threaded in.
+    """Run `classify(...)` with tool names threaded in and a `vl` sanity check.
 
     Both the non-streaming graph node and the streaming route need the same
     setup: read `router.*` config, extract `tool_names` from the live tool
@@ -280,12 +282,19 @@ async def classify_with_registry(
     diverged — the streaming path forgot the `tool_names` argument and lost
     the explicit-tool-mention routing override.
 
+    `messages` is **required, with no default, for that same reason.** It is
+    only used for the `vl` check below, so a default of `None` would work
+    perfectly at every call site that forgot it — and the forgetting would show
+    up as a bad answer on one path months later, which is precisely the bug
+    this function was extracted to prevent. There are three call sites; make it
+    four and the type checker asks you for this argument.
+
     `registry` is duck-typed against `ToolRegistry`: only `.names()` is
     used. `None` is fine — that path just produces an empty tool-name set,
     same as the previous inline code.
     """
     tool_names = set(registry.names()) if registry is not None else set()
-    return await classify(
+    task, reason, conf = await classify(
         ollama,
         router_model=router_cfg.get("model", "qwen3:4b"),
         router_timeout_s=float(router_cfg.get("timeout_s", 20)),
@@ -295,6 +304,31 @@ async def classify_with_registry(
         skip_llm_under_tokens=int(router_cfg.get("skip_llm_under_tokens", 0)),
         cfg=cfg,
     )
+
+    # A `vl` verdict with no image anywhere in the conversation is always
+    # wrong, and wrong in the worst way available: the vl pool is not in
+    # `fast_path.tool_capable_models`, so the chosen model has nothing to look
+    # at AND no tools to find anything with. It cannot do better than refusing
+    # or inventing.
+    #
+    # Measured on the box 2026-08-05. "what did they say about retirement in
+    # jasonRetirement.mp4" classified `vl` — nothing in `_VL_STRONG` matches
+    # that, so it was the router model reading `.mp4` as visual work — and
+    # qwen3-vl:32b replied "no transcript, audio, or visual data of this video
+    # is provided", trailing a `\boxed{}` from its maths training. The
+    # transcript was in the KB the whole time; as `general` it takes one
+    # `get_file_text` call.
+    #
+    # Checked against the WHOLE conversation rather than the latest turn: an
+    # image attached earlier is still in the history a vision model receives,
+    # so a follow-up like "what colour was it" must stay on `vl`.
+    if task == "vl" and not conversation_has_image(messages):
+        log.info(
+            "classify: demoting vl -> general (was %s) — no image in the "
+            "conversation, and the vl pool cannot call tools", reason,
+        )
+        return "general", f"vl_without_image:{reason}", conf
+    return task, reason, conf
 
 
 __all__ = ["classify", "keyword_classify", "router_classify", "classify_with_registry"]

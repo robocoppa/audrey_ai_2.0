@@ -44,6 +44,21 @@ from audrey.pipeline.prompts import (
 
 
 def test_classifier_system_unchanged():
+    """Pinned byte-for-byte. Edited 2026-08-05 — the `vl` rule was too loose.
+
+    It said "anything referencing an image, photo, screenshot, or visual
+    identification", and a router model reading "what did they say about
+    retirement in jasonRetirement.mp4" quite reasonably called that visual
+    work. That routed to `qwen3-vl:32b`, which is NOT in
+    `fast_path.tool_capable_models` — so the model had no image to look at and
+    no tools to find anything with, and replied that no data about the video
+    was provided. The transcript was in the KB the whole time.
+
+    The rule now turns on ATTACHMENT rather than on subject matter, because an
+    attached image is the thing the vl pool actually needs.
+    `classify_with_registry` enforces the same invariant structurally: a prompt
+    is guidance, and this one had already been read the wrong way once.
+    """
     expected = (
         "You are a task classifier. Read the user's message and output a JSON object "
         "with exactly these keys:\n"
@@ -51,8 +66,13 @@ def test_classifier_system_unchanged():
         "Rules:\n"
         "- 'code' = user wants code written, debugged, refactored, explained line-by-line.\n"
         "- 'reasoning' = analysis, comparison, review, multi-step logic, math proofs, explanations.\n"
-        "- 'vl' = anything referencing an image, photo, screenshot, or visual identification.\n"
-        "- 'general' = chitchat, facts, summaries, everything else.\n"
+        "- 'vl' = the user ATTACHED an image for you to look at, or asks about one "
+        "they attached earlier in this conversation.\n"
+        "- 'general' = chitchat, facts, summaries, everything else — including "
+        "every question about a file already in the user's knowledge base. A video "
+        "or image they uploaded earlier is 'general', NOT 'vl': its transcript and "
+        "its on-screen descriptions are stored as text and are fetched with tools. "
+        "Naming a .mp4 does not make a request visual.\n"
         "Output ONLY the JSON object. No prose, no markdown."
     )
     assert CLASSIFIER_SYSTEM == expected

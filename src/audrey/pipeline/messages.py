@@ -58,4 +58,29 @@ def has_image_part(messages: list[dict[str, Any]]) -> bool:
     return False
 
 
-__all__ = ["last_user_text", "has_image_part"]
+def conversation_has_image(messages: list[dict[str, Any]]) -> bool:
+    """True if ANY message in the conversation carries an image part.
+
+    Deliberately wider than `has_image_part`, which asks "is *this* turn a
+    vision turn" in order to force the vl pool. This asks a different question
+    — "could a vision model see anything at all here" — and the answer gates
+    whether a `vl` classification is allowed to stand.
+
+    The width is what keeps a follow-up working. Attach a photo and ask "what
+    is this rock"; then ask "what colour was it". The second turn carries no
+    image part of its own, but the image is still in the history the vision
+    model receives, so `vl` is still right. Narrowing this to the latest turn
+    would send that follow-up to a text model.
+    """
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        content = m.get("content")
+        if isinstance(content, list) and any(
+            isinstance(p, dict) and p.get("type") == "image_url" for p in content
+        ):
+            return True
+    return False
+
+
+__all__ = ["conversation_has_image", "has_image_part", "last_user_text"]

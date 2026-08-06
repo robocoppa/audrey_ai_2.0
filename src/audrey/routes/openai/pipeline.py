@@ -294,7 +294,7 @@ async def _stream_via_pipeline(
                 # pools are task-keyed). Deep emits its own banner stream, so
                 # classify here and hand the task type down.
                 task, reason, conf = await classify_with_registry(
-                    ollama, user_text=user_text, router_cfg=router_cfg,
+                    ollama, user_text=user_text, messages=messages, router_cfg=router_cfg,
                     cfg=cfg, registry=app.state.tools,
                 )
                 log.info(
@@ -364,7 +364,7 @@ async def _stream_via_pipeline(
                 task, reason, conf = "vl", "image_turn", 1.0
             else:
                 task, reason, conf = await classify_with_registry(
-                    ollama, user_text=user_text, router_cfg=router_cfg,
+                    ollama, user_text=user_text, messages=messages, router_cfg=router_cfg,
                     cfg=cfg, registry=app.state.tools,
                 )
             log.info(

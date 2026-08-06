@@ -54,8 +54,13 @@ CLASSIFIER_SYSTEM = (
     "Rules:\n"
     "- 'code' = user wants code written, debugged, refactored, explained line-by-line.\n"
     "- 'reasoning' = analysis, comparison, review, multi-step logic, math proofs, explanations.\n"
-    "- 'vl' = anything referencing an image, photo, screenshot, or visual identification.\n"
-    "- 'general' = chitchat, facts, summaries, everything else.\n"
+    "- 'vl' = the user ATTACHED an image for you to look at, or asks about one "
+    "they attached earlier in this conversation.\n"
+    "- 'general' = chitchat, facts, summaries, everything else — including "
+    "every question about a file already in the user's knowledge base. A video "
+    "or image they uploaded earlier is 'general', NOT 'vl': its transcript and "
+    "its on-screen descriptions are stored as text and are fetched with tools. "
+    "Naming a .mp4 does not make a request visual.\n"
     "Output ONLY the JSON object. No prose, no markdown."
 )
 

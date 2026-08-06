@@ -11,6 +11,7 @@ Pure functions over strings.
 
 from audrey.pipeline.classify import (
     _tool_mention_signal,
+    classify_with_registry,
     keyword_classify,
 )
 
@@ -209,6 +210,7 @@ async def test_classify_with_registry_passes_tool_names_to_keyword_classify():
     task, reason, conf = await classify_with_registry(
         ollama,
         user_text="use kb_image_search to find a rock with banding",
+        messages=[{"role": "user", "content": "use kb_image_search to find a rock with banding"}],
         router_cfg=_ROUTER_CFG,
         cfg=None,
         registry=registry,
@@ -232,6 +234,12 @@ async def test_classify_with_registry_no_registry_means_no_tool_override():
     task, reason, conf = await classify_with_registry(
         ollama,
         user_text="identify the type of image in this attachment",
+        # Carries a real image part, so the `vl` verdict is allowed to stand.
+        # Without one it would be demoted — see TestVlNeedsAnActualImage.
+        messages=[{"role": "user", "content": [
+            {"type": "text", "text": "identify the type of image in this attachment"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBOR"}},
+        ]}],
         router_cfg=_ROUTER_CFG,
         cfg=None,
         registry=None,
@@ -252,6 +260,7 @@ async def test_classify_with_registry_falls_through_to_router_on_plain_prose():
     task, reason, _conf = await classify_with_registry(
         ollama,
         user_text="could you help me think through whether this plan is sensible?",
+        messages=[{"role": "user", "content": "could you help me think through whether this plan is sensible?"}],
         router_cfg=_ROUTER_CFG,
         cfg=None,
         registry=_FakeRegistry(["web_search"]),
@@ -365,3 +374,110 @@ async def test_strong_keyword_still_wins_over_skip():
     assert reason == "keyword:review_override"
     assert conf == 0.95
     assert ollama.chat_calls == []
+
+
+# ─── `vl` requires an actual image (2026-08-05) ───────────────────────
+#
+# Measured on the box, not predicted. "what did they say about retirement in
+# jasonRetirement.mp4" classified `vl` — nothing in `_VL_STRONG` matches that
+# sentence, so it was the router model reading `.mp4` as visual work. It routed
+# to qwen3-vl:32b, which is NOT in `fast_path.tool_capable_models`, so the model
+# had nothing to look at AND no tools to find anything with. It replied that no
+# transcript, audio or visual data of the video was provided, and trailed a
+# `\boxed{}` from its maths training. The transcript was in the KB throughout.
+#
+# The prompt was also loosened to say `vl` means "attached", but a prompt is
+# guidance and this one had already been read the wrong way once. This is the
+# guarantee.
+
+
+class _VlRouter:
+    """A router that always says `vl`, standing in for the misread."""
+
+    def __init__(self) -> None:
+        self.chat_calls: list[dict] = []
+
+    async def chat(self, **kwargs):
+        self.chat_calls.append(kwargs)
+        return {"message": {"content": '{"task": "vl", "confidence": 0.9}'}}
+
+
+def _image_turn(text: str) -> dict:
+    return {"role": "user", "content": [
+        {"type": "text", "text": text},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBOR"}},
+    ]}
+
+
+class TestVlNeedsAnActualImage:
+    async def test_a_video_question_is_not_routed_to_the_vision_model(self):
+        router = _VlRouter()
+        task, reason, _conf = await classify_with_registry(
+            router,
+            user_text="what did they say about retirement in jasonRetirement.mp4",
+            messages=[{"role": "user",
+                       "content": "what did they say about retirement in jasonRetirement.mp4"}],
+            router_cfg=_ROUTER_CFG, cfg=None, registry=None,
+        )
+        assert task == "general"
+        # The reason keeps the original verdict, so a log line still shows what
+        # the router said and why it was overruled.
+        assert reason == "vl_without_image:router:vl"
+
+    async def test_an_attached_image_still_reaches_the_vision_model(self):
+        router = _VlRouter()
+        task, reason, _conf = await classify_with_registry(
+            router, user_text="what is this rock",
+            messages=[_image_turn("what is this rock")],
+            router_cfg=_ROUTER_CFG, cfg=None, registry=None,
+        )
+        assert task == "vl"
+        # `_VL_STRONG` matches "this rock" and short-circuits before the
+        # router, so the reason is the keyword one. Either way it survives.
+        assert reason == "keyword:vl_strong"
+
+    async def test_a_follow_up_about_an_earlier_image_stays_on_vl(self):
+        """The case that decided this checks the whole conversation.
+
+        `has_image_part` looks only at the latest user turn, because its job is
+        "force vl for THIS turn". Reusing it here would send "what colour was
+        it" to a text model, even though the photo is still in the history the
+        vision model receives.
+        """
+        router = _VlRouter()
+        task, _reason, _conf = await classify_with_registry(
+            router, user_text="what colour was it",
+            messages=[
+                _image_turn("what is this rock"),
+                {"role": "assistant", "content": "It looks like banded gneiss."},
+                {"role": "user", "content": "what colour was it"},
+            ],
+            router_cfg=_ROUTER_CFG, cfg=None, registry=None,
+        )
+        assert task == "vl"
+
+    async def test_a_keyword_vl_verdict_is_demoted_too(self):
+        """Not just the router. `_VL_STRONG` matching "image" in a prompt with
+        no attachment produces the same tool-blind dead end."""
+        ollama = _FakeOllama()
+        task, reason, _conf = await classify_with_registry(
+            ollama, user_text="find me an image of banded gneiss in my files",
+            messages=[{"role": "user",
+                       "content": "find me an image of banded gneiss in my files"}],
+            router_cfg=_ROUTER_CFG, cfg=None, registry=None,
+        )
+        assert task == "general"
+        assert reason == "vl_without_image:keyword:vl_strong"
+
+    async def test_a_non_vl_verdict_passes_through_untouched(self):
+        """The demotion must be surgical: only `vl`, and only without an image."""
+        ollama = _FakeOllama()  # its router stub answers "general"
+        task, reason, _conf = await classify_with_registry(
+            ollama, user_text="could you talk me through how photosynthesis works",
+            messages=[{"role": "user",
+                       "content": "could you talk me through how photosynthesis works"}],
+            router_cfg=_ROUTER_CFG, cfg=None, registry=None,
+        )
+        assert task == "general"
+        assert reason == "router:general"
+        assert "vl_without_image" not in reason
