@@ -309,3 +309,105 @@ class TestBackfillPreservesJobState:
         row = await db.get_upload("vid")
         assert row["chunks"] == 3
         assert row["filename"] == "vid.txt"
+
+
+# ─── A video must not be demoted to a text file ────────────────────────
+#
+# Found on the deployed box 2026-08-05, not by a test: a `ready` row carrying
+# a `summary` and a `completed_at` — fields only a video ever gets — sitting
+# under `kind='text'`.
+#
+# The mechanism: a point's `kind` describes that POINT, not the FILE. Every
+# text point is stamped `kind: "text"`, and a video's transcript, frames and
+# summary all go through the text ingest path. `kind` is in `record_upload`'s
+# ON CONFLICT update list, so every boot copied "text" onto the video's row.
+#
+# `artifact` is the signal that survives, because only the three video stages
+# set it.
+
+class TestVideoKindSurvivesReconcile:
+    def _artifact_point(self, file_id: str, artifact: str) -> dict:
+        # Deliberately `kind="text"`: that IS what the deployed payloads say,
+        # and a fixture writing "video" here would test nothing.
+        return {**_point(file_id, kind="text"), "artifact": artifact}
+
+    async def _completed_video(self, db: UploadsDB) -> None:
+        await db.record_upload(
+            file_id="vid", user=USER, filename="jason retirement.mp4",
+            mime="video/mp4", bytes_=288_000_000, kind="video", collection="",
+            chunks=0, uploaded_at="2026-08-01T00:00:00+00:00", status="pending",
+        )
+        await db.claim_job(lease_id="L1", now="2026-08-01T00:01:00+00:00")
+        await db.complete_job(
+            file_id="vid", lease_id="L1", collection=TEXT_COL, chunks=25,
+            duration_s=565.0, summary="Colleagues mark Jason's retirement.",
+            completed_at="2026-08-01T00:10:00+00:00",
+        )
+
+    @pytest.mark.parametrize("artifact", ["transcript", "visual", "summary"])
+    async def test_a_video_stays_a_video(self, db: UploadsDB, artifact: str):
+        await self._completed_video(db)
+
+        await reconcile_with_qdrant(db, _FakeQdrant(
+            {TEXT_COL: [self._artifact_point("vid", artifact)]}))
+
+        assert (await db.get_upload("vid"))["kind"] == "video"
+
+    async def test_a_row_already_demoted_is_repaired(self, db: UploadsDB):
+        await self._completed_video(db)
+        # The deployed state: an earlier boot already wrote "text".
+        await db.record_upload(
+            file_id="vid", user=USER, filename="jason retirement.mp4",
+            mime="video/mp4", bytes_=288_000_000, kind="text",
+            collection=TEXT_COL, chunks=25,
+            uploaded_at="2026-08-01T00:00:00+00:00",
+        )
+        assert (await db.get_upload("vid"))["kind"] == "text"
+
+        await reconcile_with_qdrant(db, _FakeQdrant(
+            {TEXT_COL: [self._artifact_point("vid", "transcript")]}))
+
+        # No migration needed: the mechanism that broke it repairs it once it
+        # is computing the right answer.
+        assert (await db.get_upload("vid"))["kind"] == "video"
+
+    async def test_one_artifact_point_among_many_is_enough(self, db: UploadsDB):
+        """Points come back unordered, and a summary is one point among 25."""
+        await self._completed_video(db)
+
+        points = [_point("vid", kind="text") for _ in range(24)]
+        points.insert(12, self._artifact_point("vid", "summary"))
+        await reconcile_with_qdrant(db, _FakeQdrant({TEXT_COL: points}))
+
+        assert (await db.get_upload("vid"))["kind"] == "video"
+
+    async def test_an_ordinary_text_upload_is_untouched(self, db: UploadsDB):
+        # The other direction: nothing here may promote a document to a video.
+        await _add(db, "doc", kind="text")
+
+        await reconcile_with_qdrant(db, _FakeQdrant({TEXT_COL: [_point("doc")]}))
+
+        assert (await db.get_upload("doc"))["kind"] == "text"
+
+    async def test_an_image_upload_is_untouched(self, db: UploadsDB):
+        await _add(db, "pic", kind="image", collection=IMAGE_COL, chunks=1)
+
+        await reconcile_with_qdrant(db, _FakeQdrant(
+            {IMAGE_COL: [_point("pic", kind="image")]}))
+
+        assert (await db.get_upload("pic"))["kind"] == "image"
+
+    async def test_the_repaired_kind_makes_it_reclaimable_again(self, db: UploadsDB):
+        """Why this matters beyond a cosmetic label.
+
+        `reclaimable_sources` filters on `kind = 'video'`, so a demoted row was
+        silently exempt from source reclamation — the bytes would never be
+        freed and nothing would ever say why.
+        """
+        await self._completed_video(db)
+        await reconcile_with_qdrant(db, _FakeQdrant(
+            {TEXT_COL: [self._artifact_point("vid", "transcript")]}))
+
+        rows = await db.reclaimable_sources(
+            completed_before="2099-01-01T00:00:00+00:00")
+        assert [r["file_id"] for r in rows] == ["vid"]

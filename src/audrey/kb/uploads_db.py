@@ -1049,6 +1049,33 @@ async def _scroll_user_rows(qdrant, collection: str) -> dict[str, list[dict]]:
 
     Reuses the same payload-shape contract as QdrantKB._list_user_files_sync,
     but doesn't pre-filter by user — we don't know the user yet.
+
+    ## `kind` is derived, not copied, and that is a bug fix
+
+    A point's `kind` says what that POINT is, not what the FILE is. Every text
+    point carries `kind: "text"` (`qdrant.py`'s text-point builder sets it, and
+    the value is baked into the deterministic `point_id(source, kind, idx)`, so
+    it cannot be changed without invalidating every stored id). A video's
+    transcript, frame descriptions and summary are all ingested through that
+    same text path.
+
+    So copying it through said `kind = "text"` for a video, and because
+    `record_upload`'s ON CONFLICT updates `kind`, **every boot silently
+    rewrote a processed video's row to `kind='text'`**. Observed on the
+    deployed box 2026-08-05: a `ready` row with a `summary` and a
+    `completed_at` — fields only a video ever gets — sitting under
+    `kind='text'`.
+
+    Nothing crashed and no data was lost; `summary` and `completed_at` are in
+    the second ON CONFLICT group and survived. What broke is everything that
+    trusts `kind`: `list_my_files` told the model a video was a text file, and
+    `reclaimable_sources` filters on `kind = 'video'`.
+
+    **`artifact` is the reliable signal.** Only the three video stages set it
+    (`transcript`, `visual`, `summary`); an ordinary text or image upload never
+    does. Deriving from it repairs existing rows on the next boot with no
+    migration, because reconcile rewrites `kind` anyway — the same mechanism
+    that broke them fixes them once it is computing the right answer.
     """
     by_user_file: dict[tuple[str, str], dict] = {}
     for _point_id, payload in await qdrant.scroll_collection(collection):
@@ -1067,6 +1094,12 @@ async def _scroll_user_rows(qdrant, collection: str) -> dict[str, list[dict]]:
             "chunks": 0,
         })
         row["chunks"] += 1
+        # Checked per point rather than only on the first: a file's points are
+        # not ordered, so the one that created the row above may be any of
+        # them — and only some of a video's points are artifacts if the
+        # summary stage ran and the visual pass did not.
+        if payload.get("artifact"):
+            row["kind"] = "video"
     grouped: dict[str, list[dict]] = {}
     for (user, _fid), row in by_user_file.items():
         grouped.setdefault(user, []).append(row)
