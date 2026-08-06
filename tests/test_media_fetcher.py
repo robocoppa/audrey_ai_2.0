@@ -491,6 +491,40 @@ class TestProgressReporting:
             self._progress(posted)[-1]["total_bytes"],
         )
 
+    def test_a_finished_download_reports_itself_finished(
+        self, job, posted, monkeypatch,
+    ):
+        def fake_download(_url, stage_dir, file_id, *, on_progress=None, **_kw):
+            on_progress(40, 100)        # video
+            on_progress(100, 100)
+            on_progress(10, 10)         # audio, inside one throttle interval
+            path = Path(stage_dir) / f"{file_id}.mp4"
+            path.write_bytes(b"v")
+            return Downloaded(path=path)
+
+        monkeypatch.setattr(fetcher, "probe_url", lambda *_a, **_k: _info())
+        monkeypatch.setattr(fetcher, "download", fake_download)
+        _run(job)
+        last = self._progress(posted)[-1]
+        # The default throttle swallows everything after the first update, so
+        # without a flush the page's last word is "40 of 100" on a download
+        # that finished — which reads as abandoned, not complete.
+        assert last["downloaded_bytes"] == last["total_bytes"] == 110
+
+    def test_a_failed_download_is_left_showing_how_far_it_got(
+        self, job, posted, monkeypatch,
+    ):
+        def fake_download(_url, _stage_dir, _file_id, *, on_progress=None, **_kw):
+            on_progress(40, 100)
+            raise FetchFailedError("the connection dropped")
+
+        monkeypatch.setattr(fetcher, "probe_url", lambda *_a, **_k: _info())
+        monkeypatch.setattr(fetcher, "download", fake_download)
+        _run(job)
+        # Completing the bar over a download that did not complete is the one
+        # lie this display can tell. The last number stays the truth.
+        assert self._progress(posted)[-1]["downloaded_bytes"] == 40
+
     def test_a_failed_progress_post_does_not_fail_the_download(
         self, job, monkeypatch,
     ):
@@ -583,6 +617,42 @@ class TestProgressReporter:
         # will overtake — "100% (60 of 40)", still downloading. Better to have
         # no percentage than one that says the download finished twice.
         assert sent == [(50, 0), (60, 0)]
+
+    def test_the_last_stream_is_not_swallowed_by_the_throttle(self):
+        sent: list[tuple[int, int]] = []
+        r = self._reporter(sent, interval_s=1000.0)
+        r(40, 100)          # video, the only update the throttle lets through
+        r(100, 100)
+        r(5, 10)            # audio: small, fast, entirely inside one interval
+        r(10, 10)
+        assert sent == [(40, 100)]
+        r.finish()
+        # Without the flush the page's last word on this download is "40 of
+        # 100" and then the row flips to processing — a download that looks
+        # abandoned rather than finished.
+        assert sent[-1] == (110, 110)
+
+    def test_a_finish_with_no_known_total_still_completes_the_bar(self):
+        sent: list[tuple[int, int]] = []
+        r = self._reporter(sent, interval_s=0.0)
+        r(50, None)
+        r.finish()
+        # The download is over, so 100% is a fact. Leaving the denominator at
+        # zero here would report the finished size as an unfinished one.
+        assert sent[-1] == (50, 50)
+
+    def test_a_finish_completes_a_bar_that_never_had_a_denominator(self):
+        sent: list[tuple[int, int]] = []
+        r = self._reporter(sent, interval_s=0.0)
+        r(50, None)         # a stream that would not say how big it is
+        r(10, 40)           # a second one that would — the count restarting
+        r.finish()          # is the only signal a new stream began
+        # Mid-download this correctly showed a byte count and no percentage,
+        # because one unknown stream makes the aggregate unknowable. At the end
+        # the bytes on disk are their own denominator. `max` is what stops the
+        # smaller, half-known total (40) being used instead.
+        assert sent[-2] == (60, 0)
+        assert sent[-1] == (60, 60)
 
 
 class TestABugDoesNotBecomeSilence:

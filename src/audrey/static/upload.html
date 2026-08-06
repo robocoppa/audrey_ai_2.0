@@ -811,12 +811,18 @@
       return secs === null ? "queued to download" : `queued to download — ${fmtElapsed(secs)}`;
     }
     if (f.status === "processing") {
+      // "summarizing" rather than "processing" because that is what the wait
+      // is actually made of: describing keyframes and writing the summary are
+      // model calls, and they are nearly all of the time. Only the label
+      // changes — `processing` is the state the worker claims on and the row
+      // stores, and renaming that would be a protocol change for a word.
+      //
       // `leased_at` is when a worker claimed it. A nine-minute video takes
-      // ~458s, so a bare "processing…" gives no way to tell a job that is
+      // ~458s, so a bare "summarizing…" gives no way to tell a job that is
       // working from one that has hung — which is the question actually
       // being asked.
       const secs = elapsedSince(f.leased_at);
-      return secs === null ? "processing…" : `processing — ${fmtElapsed(secs)}`;
+      return secs === null ? "summarizing…" : `summarizing — ${fmtElapsed(secs)}`;
     }
     if (f.status === "failed") {
       return f.failure_reason

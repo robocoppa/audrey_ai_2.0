@@ -201,6 +201,23 @@ class _ProgressReporter:
             return 0
         return self._base_total + total
 
+    def finish(self) -> None:
+        """Post the completed download once, ignoring the throttle.
+
+        **Without this the last thing the page ever shows is a partial number.**
+        Updates are throttled to `interval_s`, and the final stream of an
+        adaptive download is the small one — audio, a few MB, often gone inside
+        a single interval. So the last update that survives the throttle is
+        from mid-video, the row then flips straight to `processing`, and what
+        the user watched was a download apparently abandoned at 80%.
+
+        A complete download is 100% by definition, so when the aggregate total
+        is unknown or has been undercounted the byte count stands in as its own
+        denominator rather than leaving the bar short.
+        """
+        done = self._base_done + self._last_done
+        self.send(done, max(self._aggregate_total(self._last_total), done))
+
     def send(self, downloaded: int, total: int) -> None:
         """Post one update. Failure is logged and swallowed.
 
@@ -435,6 +452,10 @@ def _attempt(
         extractor_args=client,
         on_progress=progress,
     )
+    # Only on the success path. A failed attempt's last number is the truth
+    # about how far it got, and completing the bar over a download that did not
+    # complete would be the one lie this display can tell.
+    progress.finish()
     return got, info, progress
 
 
