@@ -313,6 +313,19 @@ _REASON_MAP: tuple[tuple[str, str], ...] = (
         "it identifies as. Nothing is wrong with this video; media-fetcher "
         "needs its yt-dlp bumped and the image rebuilt",
     ),
+    # Second, and for the same reason: a 403 on the *media* URL after the
+    # metadata pass succeeded is not the video refusing you, it is YouTube
+    # refusing the download client. Observed once the yt-dlp pin was current,
+    # which is the tell — an out-of-date downloader fails earlier, at the
+    # metadata pass, with the message above. The fix is `kb.fetch.extractor_args`
+    # and it is a config edit plus a restart, not a rebuild.
+    (
+        "http error 403",
+        "YouTube refused to serve the video data to the download client. This "
+        "is a server-side setting, not a problem with the link: "
+        "`kb.fetch.extractor_args` needs a player client YouTube currently "
+        "accepts",
+    ),
     ("private video", "this video is private — only its owner can see it"),
     (
         "members-only",
@@ -413,9 +426,26 @@ def friendly_reason(stderr: str, *, limit: int = 300) -> str:
     return line[:limit]
 
 
+def _extractor_argv(extractor_args: str) -> list[str]:
+    """`--extractor-args` if configured, nothing if not.
+
+    Config-driven and empty by default, which leaves yt-dlp's own client
+    selection alone. It exists because **YouTube's answer to "which client may
+    download this" changes on YouTube's schedule**, and the symptom when it
+    changes is a 403 on the media URL *after* a metadata pass that worked
+    perfectly — see `kb.fetch.extractor_args` in `config.yaml` for how to find
+    the value that works today.
+
+    Not hardcoded to a client that looked right at the time: that is the
+    mistake the yt-dlp pin already made once in this phase.
+    """
+    value = (extractor_args or "").strip()
+    return ["--extractor-args", value] if value else []
+
+
 def probe_url(
     url: str, *, timeout_s: float = DEFAULT_PROBE_TIMEOUT_S,
-    binary: str | None = None,
+    binary: str | None = None, extractor_args: str = "",
 ) -> UrlInfo:
     """Read a URL's metadata without downloading the media.
 
@@ -429,6 +459,7 @@ def probe_url(
         "--no-warnings",
         "--skip-download",
         "-J",
+        *_extractor_argv(extractor_args),
         "--",
         url,
     ]
@@ -500,6 +531,7 @@ def download(
     sub_langs: str = DEFAULT_SUB_LANGS,
     fmt: str = DEFAULT_FORMAT,
     binary: str | None = None,
+    extractor_args: str = "",
     on_progress: Callable[[int, int | None], None] | None = None,
 ) -> Downloaded:
     """Download into the staging directory. Returns where it landed.
@@ -528,6 +560,7 @@ def download(
         "-f", fmt,
         "--merge-output-format", OUTPUT_CONTAINER,
         "--remux-video", OUTPUT_CONTAINER,
+        *_extractor_argv(extractor_args),
         "-o", str(stage_dir / f"{file_id}.%(ext)s"),
         # The one line of stdout we read: where the finished file actually is,
         # after any merge and rename. Deriving it from the metadata `ext`

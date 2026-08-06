@@ -705,3 +705,57 @@ class TestProgressStreaming:
             )
         # It got the *last* error line, from the far end of 200 KB.
         assert "and then it failed" in str(e.value)
+
+
+class TestExtractorArgs:
+    """The knob for YouTube's 403 on the media URL.
+
+    Config-driven and empty by default. It exists because *which download
+    client YouTube will serve* changes on YouTube's schedule, and the symptom
+    is a 403 on the media URL after a metadata pass that worked perfectly.
+    """
+
+    def test_nothing_is_passed_when_it_is_unset(self, tmp_path):
+        binary = _fake_ytdlp(tmp_path, TestDownload.BODY)
+        download(URL, tmp_path / "staging", FILE_ID, timeout_s=30, binary=binary)
+        # An empty setting must leave yt-dlp's own client selection alone,
+        # rather than pinning it to whatever looked right when this shipped.
+        assert "--extractor-args" not in _argv_of(binary)
+
+    def test_it_reaches_the_download(self, tmp_path):
+        binary = _fake_ytdlp(tmp_path, TestDownload.BODY)
+        download(
+            URL, tmp_path / "staging", FILE_ID, timeout_s=30, binary=binary,
+            extractor_args="youtube:player_client=tv",
+        )
+        argv = _argv_of(binary)
+        assert argv[argv.index("--extractor-args") + 1] == "youtube:player_client=tv"
+
+    def test_it_reaches_the_metadata_pass_too(self, tmp_path):
+        binary = _fake_ytdlp(tmp_path, _PROBE_OK)
+        probe_url(URL, binary=binary, extractor_args="youtube:player_client=ios")
+        argv = _argv_of(binary)
+        # The client governs which formats are even listed, so a probe run on a
+        # different client than the download would choose formats the download
+        # then cannot fetch — which is this bug wearing a different hat.
+        assert argv[argv.index("--extractor-args") + 1] == "youtube:player_client=ios"
+
+    def test_whitespace_is_treated_as_unset(self, tmp_path):
+        binary = _fake_ytdlp(tmp_path, TestDownload.BODY)
+        download(
+            URL, tmp_path / "staging", FILE_ID, timeout_s=30, binary=binary,
+            extractor_args="   ",
+        )
+        # A key left blank in config.yaml must not become an empty argument
+        # that yt-dlp then rejects.
+        assert "--extractor-args" not in _argv_of(binary)
+
+    def test_a_media_403_points_at_the_setting_not_at_the_video(self):
+        reason = friendly_reason(
+            "ERROR: unable to download video data: HTTP Error 403: Forbidden",
+        )
+        # The raw wording sends whoever reads it to check the link. The cause
+        # is a server-side setting, and saying so is the difference between a
+        # config edit and an afternoon.
+        assert "extractor_args" in reason
+        assert "not a problem with the link" in reason

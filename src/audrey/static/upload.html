@@ -758,17 +758,44 @@
   function fetchingCell(f) {
     const done = f.fetch_downloaded_bytes || 0;
     const total = f.fetch_total_bytes || 0;
-    if (done && total) {
-      // Clamped because the first update carries the metadata pass's
-      // *estimate*, which can undershoot. It is replaced by exact figures
-      // within a couple of seconds; showing 118% in the meantime would look
-      // like a bug in something.
+    // `total` alone, NOT `done && total`.
+    //
+    // The first update carries `downloaded_bytes: 0` with a real size
+    // estimate, and it is sent before the download starts — so on a fast fetch
+    // it can be the only update the page ever sees. Requiring `done` to be
+    // truthy discarded exactly that one and fell through to elapsed seconds,
+    // which is why a working progress channel could still show no bytes at
+    // all. `0/82 MB` is the honest reading of a download about to begin.
+    if (total) {
+      // Clamped because that first figure is an *estimate* and can undershoot.
+      // Exact numbers replace it within a couple of seconds; showing 118% in
+      // the meantime would look like a bug in something.
       const pct = Math.min(100, Math.round((done / total) * 100));
-      return `downloading — ${pct}% (${fmtBytes(done)} of ${fmtBytes(total)})`;
+      return `downloading — ${pct}% (${fmtPair(done, total)})`;
     }
-    if (done) return `downloading — ${fmtBytes(done)}`;
+    if (done) return `downloading — ${fmtBytes(done)} so far`;
     const secs = elapsedSince(f.leased_at);
     return secs === null ? "downloading…" : `downloading — ${fmtElapsed(secs)}`;
+  }
+
+  /** Two byte counts sharing one unit: `10/82 MB`.
+   *
+   * The unit comes from the total, not from each number independently.
+   * `fmtBytes` applied twice gives "980 KB of 1.2 GB", which makes you do
+   * arithmetic to work out that it has barely started — the whole point of
+   * showing both is that the ratio should be readable at a glance.
+   */
+  function fmtPair(done, total) {
+    const units = [["GB", 1024 ** 3], ["MB", 1024 ** 2], ["KB", 1024]];
+    for (const [name, size] of units) {
+      if (total >= size) {
+        const d = done / size;
+        // One decimal below 10 so a download that has just started reads
+        // `0.4/82 MB` rather than rounding to a flat `0`.
+        return `${d < 10 ? d.toFixed(1) : Math.round(d)}/${Math.round(total / size)} ${name}`;
+      }
+    }
+    return `${done}/${total} B`;
   }
 
   function statusCell(f) {

@@ -110,6 +110,9 @@ class _ProgressReporter:
         self._lease_id = job["lease_id"]
         self._title = title
         self._interval = interval_s
+        #: How many updates yt-dlp produced, throttled or not. Distinguishes
+        #: "the progress channel is broken" from "the downloader said nothing".
+        self.calls = 0
         self._last_post = 0.0
         self._last_done = 0
         self._last_total = 0
@@ -121,6 +124,7 @@ class _ProgressReporter:
         self._total_known = True
 
     def __call__(self, downloaded: int, total: int | None) -> None:
+        self.calls += 1
         if downloaded < self._last_done:
             # Counting restarted, so a new stream began. Bank the one that
             # just finished before its numbers are overwritten.
@@ -230,9 +234,12 @@ def handle_job(job: dict, *, endpoint: str, token: str, probe_timeout_s: float) 
     lease_s = float(job.get("lease_seconds") or 0)
     max_bytes = int(job.get("max_bytes") or 0)
     max_duration_s = float(job.get("max_duration_s") or 0)
+    extractor_args = str(job.get("extractor_args") or "")
 
     try:
-        info = probe_url(url, timeout_s=probe_timeout_s)
+        info = probe_url(
+            url, timeout_s=probe_timeout_s, extractor_args=extractor_args,
+        )
         check_limits(info, max_duration_s=max_duration_s, max_bytes=max_bytes)
 
         caption_source = info.caption_choice()
@@ -260,7 +267,17 @@ def handle_job(job: dict, *, endpoint: str, token: str, probe_timeout_s: float) 
             url, stage_dir, file_id,
             timeout_s=budget, max_bytes=max_bytes,
             caption_source=caption_source,
+            extractor_args=extractor_args,
             on_progress=progress,
+        )
+        # How many progress updates the downloader actually produced. Logged
+        # because "no bytes on the page" has two very different causes — the
+        # channel being broken and yt-dlp emitting nothing — and without this
+        # number they look identical from the outside. `send()` only logs
+        # failures, so a working channel is otherwise silent.
+        log.info(
+            "fetcher: %s downloaded, %d progress update(s) from yt-dlp",
+            file_id, progress.calls,
         )
     except (FetchRefusedError, FetchFailedError) as e:
         _report_failure(endpoint, token, file_id, lease_id, str(e))

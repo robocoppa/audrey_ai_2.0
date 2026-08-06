@@ -745,6 +745,42 @@ kb:
     # the first failure either way.
     max_attempts: 3
 
+    # Passed straight to yt-dlp's `--extractor-args`. Empty leaves yt-dlp's own
+    # client selection alone.
+    #
+    # **This is the knob for "HTTP Error 403: Forbidden" on the download.** The
+    # tell is a 403 on the *media* URL after a metadata pass that worked
+    # perfectly: nothing is wrong with the video or the link, YouTube has
+    # decided it will not serve the format URLs to the client yt-dlp identified
+    # as. A failure at the *metadata* stage is a different problem — usually an
+    # out-of-date yt-dlp, which says "not available on this app".
+    #
+    # Deliberately left empty rather than set to a client that looked right the
+    # day this was written. Which clients YouTube accepts changes on YouTube's
+    # schedule, and this phase already shipped one stale-by-assumption value
+    # (the yt-dlp pin, which was thirteen months old on arrival). **Find this
+    # one empirically, on the box:**
+    #
+    #   for C in tv ios mweb android_vr web_safari default; do
+    #     printf '%-12s ' "$C"
+    #     timeout 40 docker exec media-fetcher yt-dlp --no-warnings \
+    #       --extractor-args "youtube:player_client=$C" \
+    #       -f "worst[ext=mp4]/worst" -o "/tmp/probe.%(ext)s" \
+    #       --force-overwrites -- "<a youtube url>" >/dev/null 2>&1 \
+    #       && echo OK || echo FAIL
+    #   done
+    #
+    # `worst` keeps each attempt to a few seconds and a few hundred KB, and it
+    # is a *real* download — `--simulate` never fetches media data, so it
+    # cannot reproduce a 403 that only happens on the media URL.
+    #
+    # Then set the first client that printed OK, e.g.
+    #   extractor_args: "youtube:player_client=tv"
+    #
+    # It rides the claim, so this takes effect on the next claim after
+    # `docker compose restart audrey-ai` — no image rebuild.
+    extractor_args: ""
+
 # ─── Tools (OpenAPI auto-discovery) ────────────────────────────────────
 tools:
   enabled: true

@@ -1205,6 +1205,16 @@ class FetchClaim(BaseModel):
     # Refuse a six-hour stream from the metadata pass, before a byte is
     # downloaded. 0 disables the check.
     max_duration_s: float = 0.0
+    # Passed straight to yt-dlp's `--extractor-args`, empty by default.
+    #
+    # Rides the claim rather than living in the fetcher's environment for the
+    # same reason every other cap here does — but this one earns it hardest.
+    # **YouTube changes which download client it will serve on its own
+    # schedule**, and the symptom is a 403 on the media URL after a metadata
+    # pass that worked. Config-driven means finding the value that works costs
+    # a `config.yaml` edit and an audrey-ai restart, instead of a fetcher
+    # image rebuild per attempt.
+    extractor_args: str = ""
 
 
 #: Transcript provenance values `fetch/{id}/result` will accept (Phase 41
@@ -1296,6 +1306,7 @@ async def claim_fetch(
         lease_seconds=_fetch_lease_minutes(request) * 60,
         max_bytes=_max_fetch_bytes(request),
         max_duration_s=float(cfg.get("max_duration_s", 0) or 0),
+        extractor_args=str(cfg.get("extractor_args", "") or ""),
     )
 
 

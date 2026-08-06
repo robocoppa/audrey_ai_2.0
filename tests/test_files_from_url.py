@@ -811,3 +811,28 @@ class TestProgress:
         )
         # 'fetch_pending', not 'fetching'. Nothing is downloading it.
         assert r.status_code == 409
+
+
+class TestExtractorArgsRideTheClaim:
+    """The 403 knob reaches the fetcher without rebuilding its image.
+
+    Same argument as every other cap on the claim, and this one earns it
+    hardest: which download client YouTube will serve changes on YouTube's
+    schedule, so finding the working value has to cost a config edit and a
+    restart rather than an image build per attempt.
+    """
+
+    def test_it_is_absent_by_default(self, client):
+        client.post("/v1/files/from-url", json={"url": URL})
+        job = client.post("/v1/files/fetch/claim", headers=SVC).json()
+        # Empty leaves yt-dlp's own client selection alone, rather than pinning
+        # it to whatever looked right the day this shipped.
+        assert job["extractor_args"] == ""
+
+    def test_it_travels_with_the_job(self, db, tmp_path):
+        app = _build_app(db, tmp_path)
+        app.state.cfg.raw["kb"]["fetch"]["extractor_args"] = "youtube:player_client=tv"
+        c = TestClient(app)
+        c.post("/v1/files/from-url", json={"url": URL})
+        job = c.post("/v1/files/fetch/claim", headers=SVC).json()
+        assert job["extractor_args"] == "youtube:player_client=tv"
