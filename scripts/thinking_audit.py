@@ -92,9 +92,32 @@ STANCE = {
 
 
 def _find_config() -> Path:
+    """Where `config.yaml` is, from a script that may not know where it is.
+
+    ⚠️ **`__file__` alone is wrong here, and it failed on the box 2026-08-06.**
+    The documented way to run this is
+    `docker exec -i audrey-ai python3 - < scripts/thinking_audit.py`, which
+    feeds the source in on stdin — so `__file__` is the literal string
+    `<stdin>`, `Path("<stdin>").resolve().parent.parent` is `/`, and the script
+    exits with `config not found: /config.yaml`. The invocation in its own
+    docstring could never have worked.
+
+    So: the explicit override first, then the container's mount point
+    (`compose.yaml` maps `./config.yaml:/app/config.yaml:ro`), then the
+    repo-relative guess for a normal `uv run` on a laptop. First one that
+    exists wins; the last is returned regardless so the error names something
+    a human recognises.
+    """
     if CONFIG:
         return CONFIG
-    return Path(__file__).resolve().parent.parent / "config.yaml"
+    candidates = [Path("/app/config.yaml")]
+    if Path(__file__).is_file():        # false under `python3 -`
+        candidates.append(Path(__file__).resolve().parent.parent / "config.yaml")
+    candidates.append(Path.cwd() / "config.yaml")
+    for path in candidates:
+        if path.is_file():
+            return path
+    return candidates[-1]
 
 
 def _load(path: Path) -> dict:
