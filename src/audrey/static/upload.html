@@ -755,7 +755,12 @@
    *      pass runs before any byte moves, so every download spends its first
    *      seconds here.
    */
-  function fetchingCell(f) {
+  /** How far the download has got — `42% (10/82 MB)` — or null if nothing is known.
+   *
+   * Returns the detail only, never a whole label, because the caller decides
+   * whether a download is worth naming at all.
+   */
+  function fetchProgress(f) {
     const done = f.fetch_downloaded_bytes || 0;
     const total = f.fetch_total_bytes || 0;
     // `total` alone, NOT `done && total`.
@@ -771,11 +776,10 @@
       // Exact numbers replace it within a couple of seconds; showing 118% in
       // the meantime would look like a bug in something.
       const pct = Math.min(100, Math.round((done / total) * 100));
-      return `downloading — ${pct}% (${fmtPair(done, total)})`;
+      return `${pct}% (${fmtPair(done, total)})`;
     }
-    if (done) return `downloading — ${fmtBytes(done)} so far`;
-    const secs = elapsedSince(f.leased_at);
-    return secs === null ? "downloading…" : `downloading — ${fmtElapsed(secs)}`;
+    if (done) return `${fmtBytes(done)} so far`;
+    return null;
   }
 
   /** Two byte counts sharing one unit: `10/82 MB`.
@@ -798,42 +802,48 @@
     return `${done}/${total} B`;
   }
 
+  /** Two labels for the whole in-flight span: downloading, then summarizing.
+   *
+   * The row used to walk four — queued to download, downloading, queued,
+   * summarizing. At 480p the download is about a second, shorter than
+   * `WATCH_INTERVAL_MS`, so the queue states flickered past unread. Four names
+   * for one wait is not more information than two; it is the same information
+   * plus churn.
+   *
+   * The pairs that merged are the ones a user cannot act on differently:
+   * `fetch_pending` and `fetching` are both "getting the video", `pending` and
+   * `processing` are both "working on it". Which side of a handover a row sits
+   * on is a fact about the queue, not about the video.
+   *
+   * "summarizing" rather than "processing" because that is what the wait is
+   * made of: describing keyframes and writing the summary are model calls, and
+   * they are nearly all of the time. Only the label changes — `processing` is
+   * the state the worker claims on and the row stores, and renaming that would
+   * be a protocol change for a word.
+   *
+   * Elapsed runs from `uploaded_at` throughout rather than from whichever state
+   * the row is in, so the number climbs continuously instead of resetting to
+   * zero at each handover. It is what makes the label useful at all: a
+   * nine-minute video takes ~458s, so a bare "summarizing…" gives no way to
+   * tell a job that is working from one that has hung.
+   */
   function statusCell(f) {
     if (f.status === "ready") return escapeHtml(f.uploaded_at);
-    // Phase 41. Two states, and keeping them apart is the whole value: one
-    // means no fetcher has picked this up yet, the other means bytes are
-    // moving. Collapsing them into "fetching…" makes a stopped media-fetcher
-    // look exactly like a slow download, which is the support question this
-    // field exists to prevent.
-    if (f.status === "fetching") return fetchingCell(f);
-    if (f.status === "fetch_pending") {
-      const secs = elapsedSince(f.uploaded_at);
-      return secs === null ? "queued to download" : `queued to download — ${fmtElapsed(secs)}`;
-    }
-    if (f.status === "processing") {
-      // "summarizing" rather than "processing" because that is what the wait
-      // is actually made of: describing keyframes and writing the summary are
-      // model calls, and they are nearly all of the time. Only the label
-      // changes — `processing` is the state the worker claims on and the row
-      // stores, and renaming that would be a protocol change for a word.
-      //
-      // `leased_at` is when a worker claimed it. A nine-minute video takes
-      // ~458s, so a bare "summarizing…" gives no way to tell a job that is
-      // working from one that has hung — which is the question actually
-      // being asked.
-      const secs = elapsedSince(f.leased_at);
-      return secs === null ? "summarizing…" : `summarizing — ${fmtElapsed(secs)}`;
-    }
     if (f.status === "failed") {
       return f.failure_reason
         ? `failed — ${escapeHtml(f.failure_reason)}`
         : "failed";
     }
-    // Queued but not started: measure from upload instead. "Queued 6m" and
-    // "processing 6m" mean different things — behind other work versus being
-    // worked on — and conflating them makes a backlog look like a stall.
     const secs = elapsedSince(f.uploaded_at);
-    return secs === null ? "pending" : `queued — ${fmtElapsed(secs)}`;
+    const elapsed = secs === null ? "" : ` — ${fmtElapsed(secs)}`;
+    if (f.status === "fetch_pending" || f.status === "fetching") {
+      // Progress replaces elapsed rather than joining it. On a long download
+      // "42% (10/82 MB)" answers everything elapsed time was standing in for,
+      // and appending both gives a label with two dashes in it.
+      const detail = fetchProgress(f);
+      return detail ? `downloading — ${detail}` : `downloading${elapsed}`;
+    }
+    return secs === null ? "summarizing…" : `summarizing${elapsed}`;
   }
 
   // Server-published limits drive the copy too, so the page can't advertise
