@@ -38,6 +38,18 @@
     #picker { display: none; }
     .hint { font-size: 0.8rem; color: var(--muted); margin-top: 8px; }
 
+    /* Phase 41. Above the drop zone rather than beside it: pasting a link and
+       dropping a file are alternatives, and a row of controls reads as steps. */
+    #urlbar { display: flex; gap: 8px; margin-bottom: 16px; }
+    #url {
+      flex: 1; background: var(--panel); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px 12px; font-size: 0.9rem; font-family: inherit;
+    }
+    #url:focus { outline: none; border-color: var(--accent); }
+    #url::placeholder { color: var(--muted); }
+    #fetch { padding: 0 16px; }
+
     table { width: 100%; border-collapse: collapse; margin-top: 24px; }
     th, td {
       text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border);
@@ -71,6 +83,15 @@
 
     .quota { font-size: 0.85rem; color: var(--muted); margin-top: 4px; }
     a { color: var(--accent); }
+
+    /* Small provenance labels: where a fetched video came from, and what wrote
+       its transcript. Muted because they answer a question you only ask when
+       something looks wrong. */
+    .tag {
+      font-size: 0.72rem; color: var(--muted); border: 1px solid var(--border);
+      border-radius: 4px; padding: 1px 5px; margin-left: 6px; white-space: nowrap;
+    }
+    .src { font-size: 0.78rem; }
   </style>
 </head>
 <body>
@@ -81,6 +102,11 @@
   </p>
 
   <p class="who">Signed in as <strong id="who">…</strong> · <a href="/" id="signout">sign out</a></p>
+
+  <div id="urlbar">
+    <input id="url" type="url" placeholder="Paste a video link — the server downloads it" />
+    <button id="fetch">Fetch</button>
+  </div>
 
   <div id="drop">
     <p><strong>Drop files here</strong> or click to select.</p>
@@ -122,6 +148,8 @@
   const signout = document.getElementById("signout");
   const hint = document.getElementById("hint");
   const supported = document.getElementById("supported");
+  const urlInput = document.getElementById("url");
+  const fetchBtn = document.getElementById("fetch");
 
   // Populated by refreshList() from GET /v1/files. Null until that lands,
   // in which case the pre-check fails OPEN and defers to the server — a
@@ -378,6 +406,58 @@
     );
   }
 
+  // Phase 41. Submitting a link is not an upload: nothing crosses the wire but
+  // the URL, and the server answers before a byte of video has been fetched. So
+  // there is no progress to report here and no pre-check to run — the gates
+  // (host allowlist, duplicate, quota) are all server-side, and the answer to
+  // every one of them is a `detail` worth showing verbatim.
+  async function fetchUrl() {
+    const url = urlInput.value.trim();
+    if (!url) return;
+    clearLog();
+    const line = logLine(`Queueing ${url}…`);
+    fetchBtn.disabled = true;
+    try {
+      const r = await authedFetch(`/v1/files/from-url`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      if (!r.ok) {
+        let detail = null;
+        try {
+          const parsed = JSON.parse(await r.text());
+          detail = parsed && parsed.detail;
+          if (detail && typeof detail !== "string") detail = JSON.stringify(detail);
+        } catch (_) { /* not JSON — fall through */ }
+        setLine(line, detail
+          ? `Not queued (${r.status}): ${detail}`
+          : `Not queued (${r.status}).`, "err");
+        return;
+      }
+      // Deliberately does NOT say "downloading". The row is queued for a
+      // fetcher that may be busy, and the list below distinguishes waiting
+      // from downloading — saying the stronger thing here would contradict it.
+      setLine(line, `Queued — the server will fetch it. Watch the row below.`, "ok");
+      urlInput.value = "";
+      await refreshList();
+    } catch (e) {
+      if (String(e.message) === "unauthorized") return;
+      setLine(line, `Not queued: connection error (${e}).`, "err");
+    } finally {
+      // Not an unconditional re-enable: the refresh above may have just
+      // learned that no hosts are configured, and turning the button back on
+      // would offer a control whose every use is refused.
+      fetchBtn.disabled = Boolean(limits && limits.fetch_hosts
+                                  && limits.fetch_hosts.length === 0);
+    }
+  }
+
+  fetchBtn.addEventListener("click", fetchUrl);
+  urlInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); fetchUrl(); }
+  });
+
   async function deleteOne(fileId) {
     if (!confirm(`Delete ${fileId}? This removes all chunks.`)) return;
     clearLog();
@@ -408,9 +488,14 @@
   const WATCH_INTERVAL_MS = 5000;
   let watchTimer = null;
 
+  // Phase 41's two fetch states join the set for the same reason the other two
+  // are in it: they are states a row leaves on its own, with no user action, so
+  // a page that does not poll shows a stale row indefinitely. A download is
+  // also the longest any of them lasts.
+  const MOVING = ["fetch_pending", "fetching", "pending", "processing"];
+
   function scheduleWatch(files) {
-    const moving = files.some(
-      f => f.status === "pending" || f.status === "processing");
+    const moving = files.some(f => MOVING.includes(f.status));
     if (moving) {
       if (watchTimer === null) watchTimer = setInterval(watchTick, WATCH_INTERVAL_MS);
     } else if (watchTimer !== null) {
@@ -469,7 +554,7 @@
       }
       rows.innerHTML = body.files.map(f => `
         <tr class="${rowClass(f)}">
-          <td>${escapeHtml(f.filename)}</td>
+          <td>${nameCell(f)}</td>
           <td>${escapeHtml(f.mime)}</td>
           <td class="right">${sizeCell(f)}</td>
           <td class="right">${f.status === "ready" ? f.chunks : "—"}</td>
@@ -509,11 +594,46 @@
       </tr>`;
   }
 
+  // Phase 41. Two labels, both answering a question you only ask when
+  // something looks wrong.
+  //
+  // The LINK is the important one while a fetch is in flight: the filename is
+  // a placeholder until yt-dlp reports the real title, so "is it fetching the
+  // video I meant?" is answerable from the link and from nothing else.
+  //
+  // The TRANSCRIPT SOURCE matters afterwards. Auto-captions mishear names and
+  // drop punctuation, whisper invents text over music, human subtitles are
+  // usually right — so "the transcript is wrong" has three different answers
+  // and this is the only thing that says which one applies.
+  const SOURCE_LABELS = {
+    subtitles: "subtitles",
+    auto_captions: "auto-captions",
+    whisper: "whisper",
+  };
+
+  function nameCell(f) {
+    let out = escapeHtml(f.filename);
+    if (f.source_url) {
+      out += ` <a class="src" href="${escapeAttr(f.source_url)}"`
+           + ` target="_blank" rel="noopener noreferrer"`
+           + ` title="${escapeAttr(f.source_url)}">↗</a>`;
+    }
+    const label = SOURCE_LABELS[f.transcript_source];
+    if (label) {
+      out += `<span class="tag" title="What produced this transcript.">${label}</span>`;
+    }
+    return out;
+  }
+
   // Phase 38. A reclaimed video still reports the size it was uploaded at —
   // that is the honest record, and the quota is what changed, not the file.
   // Without saying so here the two numbers simply disagree: 288 MB in the
   // list, nothing against the allowance, and no way to tell that from a bug.
   function sizeCell(f) {
+    // A row that has not been downloaded yet genuinely has no size. "0 B" is a
+    // measurement, and printing one for a number nobody has taken yet is the
+    // kind of small lie that gets read as a failed download.
+    if (!f.bytes && (f.status === "fetch_pending" || f.status === "fetching")) return "—";
     const size = fmtBytes(f.bytes);
     if (!f.source_freed_at) return size;
     return `<span title="Source reclaimed ${escapeAttr(f.source_freed_at)} —`
@@ -554,6 +674,19 @@
 
   function statusCell(f) {
     if (f.status === "ready") return escapeHtml(f.uploaded_at);
+    // Phase 41. Two states, and keeping them apart is the whole value: one
+    // means no fetcher has picked this up yet, the other means bytes are
+    // moving. Collapsing them into "fetching…" makes a stopped media-fetcher
+    // look exactly like a slow download, which is the support question this
+    // field exists to prevent.
+    if (f.status === "fetching") {
+      const secs = elapsedSince(f.leased_at);
+      return secs === null ? "downloading…" : `downloading — ${fmtElapsed(secs)}`;
+    }
+    if (f.status === "fetch_pending") {
+      const secs = elapsedSince(f.uploaded_at);
+      return secs === null ? "queued to download" : `queued to download — ${fmtElapsed(secs)}`;
+    }
     if (f.status === "processing") {
       // `leased_at` is when a worker claimed it. A nine-minute video takes
       // ~458s, so a bare "processing…" gives no way to tell a job that is
@@ -586,6 +719,16 @@
     supported.textContent =
       `Supported: ${limits.allowed_extensions.join(", ")}. `
       + `Video is stored but not searchable until processing lands.`;
+    if (limits.fetch_hosts) {
+      // Named rather than described. "Supported sites" invites a paste of
+      // something that is not one, and the refusal then arrives after the
+      // click instead of before it. An empty list is the configured refuse-all
+      // default, and saying so is better than an input that always fails.
+      urlInput.placeholder = limits.fetch_hosts.length
+        ? `Paste a link from ${limits.fetch_hosts.join(", ")}`
+        : `Link fetching is not enabled on this server`;
+      urlInput.disabled = fetchBtn.disabled = limits.fetch_hosts.length === 0;
+    }
   }
 
   function escapeHtml(s) {

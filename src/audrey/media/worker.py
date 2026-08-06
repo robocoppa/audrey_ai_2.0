@@ -33,21 +33,29 @@ of the orchestrator's settings apply to it.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import signal
 import sys
 import tempfile
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
-from types import FrameType
 
 from audrey.media.audio import FFmpegFailedError, FFmpegMissingError, extract_audio, probe
 from audrey.media.describe import DEFAULT_BUDGET_S, DescribeFailedError, describe_frames
 from audrey.media.frames import extract_frames, select_frames
+
+# `post` and `Stopping` moved to `service.py` in Phase 41, when media-fetcher
+# needed the same two things. Imported by name rather than by module so
+# `audrey.media.worker.post` still resolves — several test modules patch it
+# there, and the sidecars are the one place where the HTTP client being
+# monkeypatchable at a stable path is load-bearing.
+from audrey.media.service import (
+    DEFAULT_ENDPOINT,
+    DEFAULT_POLL_SECONDS,
+    HTTP_TIMEOUT_S,
+    Stopping,
+    post,
+)
 from audrey.media.stt import (
     DEFAULT_MODEL,
     TranscriptionFailedError,
@@ -55,86 +63,30 @@ from audrey.media.stt import (
     transcribe,
 )
 
+__all__ = [
+    "DEFAULT_ENDPOINT",
+    "DEFAULT_POLL_SECONDS",
+    "HTTP_TIMEOUT_S",
+    "Stopping",
+    "handle_job",
+    "main",
+    "post",
+    "run",
+]
+
 log = logging.getLogger("media-worker")
 
-DEFAULT_ENDPOINT = "http://audrey-ai:8000"
-DEFAULT_POLL_SECONDS = 10
-HTTP_TIMEOUT_S = 60
+#: What this container reports as the origin of a transcript it produced
+#: itself. Duplicated from `audrey.media.fetch.SOURCE_WHISPER` rather than
+#: imported: that module lives only in the media-fetcher image, and importing
+#: it here would make the worker fail at start over a three-word constant.
+WHISPER_SOURCE = "whisper"
 
 # A transcript for a long video is a large POST. It goes to audrey-ai directly
 # over the compose network, not through cloudflared, so the 100 MB edge cap
 # that shaped Phase 32 does not apply here — but a slow read on a big body
 # still shouldn't look like a hung worker.
 RESULT_TIMEOUT_S = 300
-
-
-class Stopping:
-    """Flips on SIGTERM so a compose stop finishes the current job first.
-
-    Killing mid-job is safe — Phase 33's lease sweep returns the row to the
-    queue — but it costs a full lease expiry before anything picks it up
-    again. Draining is the cheaper path when we are being asked politely.
-    """
-
-    def __init__(self) -> None:
-        self.requested = False
-
-    def install(self) -> None:
-        signal.signal(signal.SIGTERM, self._handle)
-        signal.signal(signal.SIGINT, self._handle)
-
-    def _handle(self, signum: int, _frame: FrameType | None) -> None:
-        log.info("worker: signal %d received, finishing current job then stopping", signum)
-        self.requested = True
-
-    def wait(self, seconds: float, *, slice_s: float = 0.5) -> None:
-        """Sleep, but notice a stop request while doing it.
-
-        A plain `time.sleep(poll_seconds)` makes an *idle* shutdown take up to
-        a full poll interval, because the flag is only read at the top of the
-        loop. That was measured at 7.3s against a 10s poll — and Docker's
-        default `stop_grace_period` is 10s, so raising POLL_SECONDS to 30
-        would have silently converted every graceful stop into a SIGKILL.
-        Slicing the sleep decouples shutdown latency from poll frequency.
-        """
-        deadline = time.monotonic() + seconds
-        while not self.requested:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return
-            time.sleep(min(slice_s, remaining))
-
-
-def post(
-    endpoint: str, path: str, token: str, body: dict | None,
-    *, timeout: int = HTTP_TIMEOUT_S,
-) -> tuple[int, dict]:
-    """POST JSON, returning `(status, parsed_body)`. Never raises on HTTP status."""
-    if not endpoint.startswith(("http://", "https://")):
-        raise ValueError(f"endpoint must be http:// or https://, got {endpoint!r}")
-
-    request = urllib.request.Request(  # noqa: S310 - scheme checked above
-        endpoint.rstrip("/") + path,
-        data=json.dumps(body or {}).encode(),
-        headers={
-            "Content-Type": "application/json",
-            "X-Audrey-Service-Token": token,
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - scheme checked above
-            raw = response.read()
-            if response.status == 204 or not raw:
-                return response.status, {}
-            return response.status, json.loads(raw)
-    except urllib.error.HTTPError as e:
-        raw = e.read()
-        try:
-            return e.code, json.loads(raw)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            # Anything in front of Audrey answers in HTML, not JSON.
-            return e.code, {"detail": raw.decode("utf-8", "replace")[:400]}
 
 
 def handle_job(
@@ -173,25 +125,50 @@ def handle_job(
         )
         return
 
+    # Phase 41 step 4. A fetched video may arrive with the site's own caption
+    # track already parsed, in which case there is nothing for whisper to do:
+    # the words are written down, by a human in the `subtitles` case, and they
+    # cost seconds against the 74s a nine-minute video takes to transcribe here.
+    #
+    # The audio pass is skipped ENTIRELY — no demux either, since the wav exists
+    # only to feed whisper. `duration` then comes from the container probe
+    # rather than from the extracted audio; they differ only for a file whose
+    # streams disagree with its header, and the transcript is not being timed
+    # against it.
+    handed = job.get("transcript") or {}
+    handed_segments = [
+        s for s in (handed.get("segments") or []) if str(s.get("text", "")).strip()
+    ]
+
     # Extract to the container's own work dir. The uploads mount is read-only
     # on purpose: the worker reads sources and posts results over HTTP, and
     # nothing about that requires write access to another service's data.
     wav = work_dir / f"{file_id}.wav"
     try:
         info = probe(source)
-        duration = extract_audio(source, wav)
-
         segments: list[dict] = []
-        if duration > 0 and wav.exists():
-            segments = [
-                s.as_payload()
-                for s in transcribe(wav, model_size=model_size, budget_s=budget_s)
-            ]
+        if handed_segments:
+            duration = info.container_duration_s
+            segments = handed_segments
+            transcript_source = str(handed.get("source") or "")
+            log.info(
+                "worker: %s came with %d %s segments — skipping whisper",
+                file_id, len(segments), transcript_source or "unattributed",
+            )
         else:
-            # No audio stream at all. Not a failure — the file may still have
-            # visual content Phase 36 will want, and the row completes with an
-            # empty transcript rather than an error nobody can act on.
-            log.info("worker: %s has no audio, nothing to transcribe", file_id)
+            transcript_source = WHISPER_SOURCE
+            duration = extract_audio(source, wav)
+            if duration > 0 and wav.exists():
+                segments = [
+                    s.as_payload()
+                    for s in transcribe(wav, model_size=model_size, budget_s=budget_s)
+                ]
+            else:
+                # No audio stream at all. Not a failure — the file may still
+                # have visual content Phase 36 will want, and the row completes
+                # with an empty transcript rather than an error nobody can act
+                # on.
+                log.info("worker: %s has no audio, nothing to transcribe", file_id)
     except (FFmpegMissingError, WhisperUnavailableError) as e:
         log.error("worker: %s", e)
         raise
@@ -233,9 +210,10 @@ def handle_job(
 
     spoken = sum(len(s["text"]) for s in segments)
     log.info(
-        "worker: %s container=%.1fs audio=%.1fs segments=%d chars=%d frames=%d/%d",
+        "worker: %s container=%.1fs audio=%.1fs segments=%d chars=%d frames=%d/%d "
+        "transcript=%s",
         job.get("filename", file_id), info.container_duration_s, duration,
-        len(segments), spoken, len(frames), planned,
+        len(segments), spoken, len(frames), planned, transcript_source,
     )
 
     status, body = post(
@@ -243,6 +221,9 @@ def handle_job(
         {
             "lease_id": lease_id, "duration_s": duration, "segments": segments,
             "frames": frames, "frames_planned": planned,
+            # What actually produced the text above, which is not always what
+            # the claim offered — see `IngestResultRequest.transcript_source`.
+            "transcript_source": transcript_source,
         },
         timeout=RESULT_TIMEOUT_S,
     )

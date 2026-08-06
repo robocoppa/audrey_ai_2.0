@@ -210,6 +210,81 @@ class TestComplete:
         assert (await db.get_upload("v1"))["failure_reason"] == ""
 
 
+class TestFetchedTranscriptHandover:
+    """Phase 41 step 4. Captions cross from the fetch stage to the ingest stage.
+
+    The two stages are separated by a queue and a container, so there is no
+    moment when both hold the row — which is why the transcript is stored on it
+    rather than posted straight through.
+    """
+
+    TRANSCRIPT = '{"source": "subtitles", "segments": [{"t_start": 0.0, ' \
+                 '"t_end": 3.0, "text": "Hello."}]}'
+
+    @pytest.mark.asyncio
+    async def test_a_completed_fetch_carries_its_captions_to_the_queue(
+        self, db: UploadsDB,
+    ):
+        await db.record_url_fetch(
+            file_id="v1", user="a@b.c", source_url="https://y/v",
+            filename="v", uploaded_at="2026-08-01T00:00:00+00:00",
+        )
+        claimed = await db.claim_fetch(lease_id="F1", now="t")
+        assert await db.complete_fetch(
+            file_id="v1", lease_id=claimed["lease_id"], filename="Real.mp4",
+            mime="video/mp4", bytes_=100, transcript=self.TRANSCRIPT,
+        )
+        row = await db.get_upload("v1")
+        assert row["status"] == "pending"
+        assert row["fetched_transcript"] == self.TRANSCRIPT
+
+    @pytest.mark.asyncio
+    async def test_completing_the_ingest_clears_the_stored_copy(self, db: UploadsDB):
+        await _add(db, "v1")
+        db._conn.execute(
+            "UPDATE uploads SET fetched_transcript = ? WHERE file_id = 'v1'",
+            (self.TRANSCRIPT,),
+        )
+        claimed = await db.claim_job(lease_id="L1", now="t")
+        await db.complete_job(
+            file_id="v1", lease_id=claimed["lease_id"], collection="c", chunks=4,
+            transcript_source="subtitles",
+        )
+        row = await db.get_upload("v1")
+        # By now the text is chunked, indexed and in a `.transcript.txt`
+        # sidecar. Keeping it here would be a third copy on a row that
+        # `SELECT *` reads on every claim — ~120 KB for a two-hour video.
+        assert row["fetched_transcript"] == ""
+        assert row["transcript_source"] == "subtitles"
+
+    @pytest.mark.asyncio
+    async def test_a_failed_ingest_keeps_the_captions_for_the_retry(self, db: UploadsDB):
+        await _add(db, "v1")
+        db._conn.execute(
+            "UPDATE uploads SET fetched_transcript = ? WHERE file_id = 'v1'",
+            (self.TRANSCRIPT,),
+        )
+        claimed = await db.claim_job(lease_id="L1", now="t")
+        await db.fail_job(file_id="v1", lease_id=claimed["lease_id"], reason="vision down")
+        # Deliberately NOT cleared: a retry should reuse the captions it
+        # already has rather than falling back to whisper for a video that
+        # plainly has them.
+        assert (await db.get_upload("v1"))["fetched_transcript"] == self.TRANSCRIPT
+
+    @pytest.mark.asyncio
+    async def test_a_swept_lease_keeps_them_too(self, db: UploadsDB):
+        await _add(db, "v1")
+        db._conn.execute(
+            "UPDATE uploads SET fetched_transcript = ? WHERE file_id = 'v1'",
+            (self.TRANSCRIPT,),
+        )
+        await db.claim_job(lease_id="L1", now="2026-08-01T00:00:00+00:00")
+        await db.sweep_expired_leases(
+            expired_before="2099-01-01T00:00:00+00:00", max_attempts=5,
+        )
+        assert (await db.get_upload("v1"))["fetched_transcript"] == self.TRANSCRIPT
+
+
 class TestFail:
     @pytest.mark.asyncio
     async def test_a_failure_records_its_reason(self, db: UploadsDB):
@@ -405,6 +480,55 @@ class TestRouteBehaviour:
         assert "a@b.c" not in job["path"]
 
     @pytest.mark.asyncio
+    async def test_a_claim_hands_over_a_fetched_caption_track(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        await _add(db, "v1")
+        db._conn.execute(
+            "UPDATE uploads SET fetched_transcript = ? WHERE file_id = 'v1'",
+            ('{"source": "auto_captions", "segments": '
+             '[{"t_start": 0.0, "t_end": 3.0, "text": "Hello."}]}',),
+        )
+        job = TestClient(_build_app(db, tmp_path)).post(
+            "/v1/files/jobs/claim", headers={"X-Audrey-Service-Token": SECRET},
+        ).json()
+        # Non-empty segments here mean "skip whisper". The worker is told
+        # rather than asked.
+        assert job["transcript"]["source"] == "auto_captions"
+        assert job["transcript"]["segments"] == [
+            {"t_start": 0.0, "t_end": 3.0, "text": "Hello."},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_an_ordinary_upload_is_handed_no_transcript(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        await _add(db, "v1")
+        job = TestClient(_build_app(db, tmp_path)).post(
+            "/v1/files/jobs/claim", headers={"X-Audrey-Service-Token": SECRET},
+        ).json()
+        assert job["transcript"] is None
+
+    @pytest.mark.asyncio
+    async def test_an_unreadable_stored_transcript_does_not_break_the_claim(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        await _add(db, "v1")
+        db._conn.execute(
+            "UPDATE uploads SET fetched_transcript = '{{{ not json' "
+            "WHERE file_id = 'v1'",
+        )
+        r = TestClient(_build_app(db, tmp_path)).post(
+            "/v1/files/jobs/claim", headers={"X-Audrey-Service-Token": SECRET},
+        )
+        # An optimisation that cannot be read is not an error. Failing the
+        # claim would take the whole ingest queue down over a field whose
+        # absence just means whisper runs — which is what happened before
+        # step 4 existed.
+        assert r.status_code == 200
+        assert r.json()["transcript"] is None
+
+    @pytest.mark.asyncio
     async def test_a_stale_lease_is_refused_with_409(
         self, db: UploadsDB, tmp_path: Path,
     ):
@@ -473,8 +597,51 @@ class TestRouteBehaviour:
         assert r.json()["chunks"] == 0
         assert (await db.get_upload("v1"))["status"] == "ready"
 
+    @pytest.mark.asyncio
+    async def test_a_silent_video_is_not_attributed_to_whisper(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        """Phase 41 step 4. Nothing was transcribed, so nothing is attributed.
+
+        The worker reports 'whisper' because whisper is what it would have run;
+        recording that against a video with no speech would say whisper
+        produced the empty transcript — which reads, later, as whisper having
+        failed on a video that simply had nothing to say.
+        """
+        await _add(db, "v1")
+        client = TestClient(_build_app(db, tmp_path))
+        job = client.post(
+            "/v1/files/jobs/claim", headers={"X-Audrey-Service-Token": SECRET},
+        ).json()
+        client.post(
+            "/v1/files/v1/ingest-result",
+            headers={"X-Audrey-Service-Token": SECRET},
+            json={"lease_id": job["lease_id"], "segments": [],
+                  "transcript_source": "whisper"},
+        )
+        assert (await db.get_upload("v1"))["transcript_source"] == ""
+
 
 class TestListing:
+    @pytest.mark.asyncio
+    async def test_the_transcript_source_reaches_the_file_list(self, db: UploadsDB):
+        """Phase 41 step 4. "The transcript is wrong" has three answers.
+
+        Auto-captions mishear proper nouns, whisper invents text over music,
+        human subtitles are usually right. Without this on the row nobody can
+        tell afterwards which one they are looking at.
+        """
+        await _add(db, "v1")
+        claimed = await db.claim_job(lease_id="L1", now="t")
+        await db.complete_job(
+            file_id="v1", lease_id=claimed["lease_id"], collection="c", chunks=2,
+            transcript_source="auto_captions",
+        )
+        # `TestListReturnsEveryFileRowField` pins the SELECT to `FileRow`; this
+        # pins the value all the way from the worker's report to the page.
+        assert (await db.list_user("a@b.c"))[0]["transcript_source"] == "auto_captions"
+
+
     @pytest.mark.asyncio
     async def test_the_failure_reason_reaches_the_file_list(self, db: UploadsDB):
         """A row that stops moving without saying why is the failure mode the

@@ -5,9 +5,23 @@ Phase 40 gave the model two tools: `list_my_files` for exact filenames and
 **two-step sequence** — list, then search scoped — and nothing tells a general
 model to do that. It has to work it out per conversation.
 
-**Status: PLANNED, and gated. Do not start before phase 40 §3b has been run.**
-The prompt written here is the fix for whatever §3b finds. Writing it first
-means guessing at the problem.
+**Status: PLANNED. The §3b gate is CLEARED — run 2026-08-06.**
+
+§3b's finding is that **scoping already works unprompted**, so the prompt this
+phase writes must NOT be about scoping. Verified from `kb.query` log lines, not
+from reading answers:
+
+- a named file scopes, and picks the right artifact —
+  `scope=file='jasonRetirement.mp4'(1 id) artifact=transcript`;
+- "what do my videos say about X" stays unscoped and uses `kb_search`;
+- a two-file comparison does not scope to one of them.
+
+What §3b actually surfaced were three bugs, all now fixed and deployed: a `vl`
+misroute to a tool-blind model, a video demoted to `kind='text'` on every boot,
+and a fabricated description of an empty file. **None was a prompt problem**,
+which is the strongest argument this phase has for staying small — the general
+path is now correct on all three prompts, so a specialist has to earn its keep
+against a working baseline rather than against a broken one.
 
 ---
 

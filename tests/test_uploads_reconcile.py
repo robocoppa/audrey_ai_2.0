@@ -261,7 +261,24 @@ class TestBackfillPreservesJobState:
         assert await db.complete_job(
             file_id="vid", lease_id="L1", collection=TEXT_COL, chunks=25,
             duration_s=565.0, summary="Two colleagues mark Jason's retirement.",
+            transcript_source="auto_captions",
         )
+
+    async def test_the_transcript_provenance_survives_a_reconcile_pass(
+        self, db: UploadsDB,
+    ):
+        """Phase 41 step 4, and the `summary` bug's exact shape.
+
+        A Qdrant payload cannot know whether a human wrote the captions or
+        whisper guessed at them. Naming this column in the upsert would clear
+        it from the payload's silence — correct until the next restart, blank
+        afterwards, on rows nobody thinks to re-check.
+        """
+        await self._completed_video(db)
+
+        await reconcile_with_qdrant(db, _FakeQdrant({TEXT_COL: [_point("vid")]}))
+
+        assert (await db.get_upload("vid"))["transcript_source"] == "auto_captions"
 
     async def test_a_summary_survives_a_reconcile_pass(self, db: UploadsDB):
         await self._completed_video(db)

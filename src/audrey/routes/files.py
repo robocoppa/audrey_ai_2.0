@@ -62,7 +62,9 @@ set are one mechanism in two files.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime as _dt
+import json
 import logging
 import shutil
 import urllib.parse
@@ -142,6 +144,18 @@ class FileRow(BaseModel):
     # video?" is answerable from the link and from nothing else, since the
     # filename is a placeholder until yt-dlp reports the real title.
     source_url: str = ""
+    # What produced the transcript (Phase 41 step 4): 'subtitles' for a
+    # human-authored caption track, 'auto_captions' for a machine-generated
+    # one, 'whisper' when we transcribed it here. Empty for anything that is
+    # not a processed video.
+    #
+    # Surfaced because "the transcript is wrong" has three different answers.
+    # Auto-captions mishear proper nouns and drop punctuation; whisper invents
+    # text over music; human subtitles are usually right and occasionally
+    # paraphrase. Without this field nobody can tell afterwards which one they
+    # are looking at, and the first response to a bad transcript would be to
+    # re-run the pipeline that was never involved.
+    transcript_source: str = ""
 
 
 class UploadResponse(BaseModel):
@@ -172,6 +186,15 @@ class Limits(BaseModel):
     # travel together or it cannot make that call.
     chunked_max_bytes: int
     part_size: int
+    # Sites this deployment will fetch from (Phase 41). Published so the page
+    # can NAME them in the URL field rather than describing them: a paste of a
+    # host that is not on the list is refused, and the difference between
+    # learning that before the click and after it is the difference between a
+    # placeholder and a support question.
+    #
+    # An empty list is the configured refuse-everything default, and the page
+    # disables the field rather than offering an input that always fails.
+    fetch_hosts: list[str] = []
 
 
 class ListResponse(BaseModel):
@@ -209,6 +232,26 @@ class JobResultResponse(BaseModel):
     file_id: str
     status: str
     chunks: int
+
+
+class TranscriptSegment(BaseModel):
+    """One span of speech. The unit both transcript sources produce.
+
+    Up here for the same reason `JobResultResponse` is: the Phase 41 fetch
+    routes are declared earlier in this file than the video-job routes that
+    first defined it, and a model named in another model's field annotation has
+    to exist by the time that class body is evaluated.
+
+    That it is shared is the point of step 4, not an accident of layout. A
+    caption track parsed out of a `.vtt` and a whisper transcript are the same
+    object by the time anything downstream sees them, so chunking, the
+    `[HH:MM:SS]` sidecar and the frame-description context did not have to
+    learn about a second shape.
+    """
+
+    t_start: float
+    t_end: float
+    text: str
 
 
 class ServiceListRequest(BaseModel):
@@ -923,6 +966,77 @@ def _max_fetch_bytes(request: Request) -> int:
     return int(_fetch_cfg(request).get("max_bytes_mb", 2048)) * 1024 * 1024
 
 
+def _fetch_stage_dir(request: Request) -> Path:
+    """Where a download lives while it is still a download.
+
+    **The fetcher writes here and nowhere else**, which is a correction to the
+    phase-41 plan — it had the fetcher writing straight into the user's
+    directory and Audrey verifying afterwards. Two reasons the staging
+    directory is better, and the second is the one that forced it:
+
+      1. **A partial file never exists at the path the row implies.** Anything
+         abandoned by a crash or a swept lease is left here, where the only
+         thing that reads it is the sweep below.
+      2. **The fetcher needs write access to exactly one directory.** It is the
+         container with internet egress running a downloader against arbitrary
+         URLs, and the alternative gave it write access to every user's upload
+         directory. This also keeps Audrey the only writer of those
+         directories, which is the same single-writer argument phase 33 made
+         for the upload bytes and phase 34 expressed as a read-only mount on
+         the worker.
+
+    Leading dot so it can never collide with a user directory: `sanitize_user`
+    maps everything outside `[a-z0-9_]` to an underscore and strips the edges,
+    so no sanitized user id can begin with one.
+
+    Mode 0777 because the two containers do not share a uid — audrey-ai runs as
+    root and the fetcher deliberately does not. The directory is inside the
+    uploads volume, reachable only by containers that already have the mount.
+    """
+    stage = _upload_root(request) / ".staging"
+    stage.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(OSError):
+        # Best effort: fails harmlessly if some other uid created it first.
+        stage.chmod(0o777)
+    return stage
+
+
+async def _sweep_fetch_staging(request: Request, db: UploadsDB) -> int:
+    """Delete staged files belonging to no live download. Returns how many.
+
+    **Never raises** — this runs on the claim path, and a disk error while
+    tidying must not stop a fetcher from getting work. Same placement argument
+    as `_reclaim_sources`: a poll every ten seconds is already a heartbeat, and
+    a background task is one more thing that can silently stop.
+
+    Liveness is asked of the *database*, not of the file's age. A download that
+    has been running for eleven minutes and one abandoned three attempts ago
+    look identical on disk, so an age heuristic would eventually delete a slow
+    one mid-write — and it would do it to the largest files, which are the ones
+    that took longest to fetch.
+    """
+    try:
+        stage = _fetch_stage_dir(request)
+        live = await db.fetch_stage_file_ids()
+        names = await asyncio.to_thread(lambda: sorted(p for p in stage.iterdir()))
+    except Exception as e:  # noqa: BLE001 — tidying must never break a claim
+        log.warning("files: could not sweep the fetch staging directory: %s", e)
+        return 0
+
+    removed = 0
+    for path in names:
+        # yt-dlp writes `<file_id>.mp4`, `<file_id>.f137.mp4.part`,
+        # `<file_id>.en.vtt` and more besides. The file_id is a uuid4 and
+        # contains no dot, so the first component identifies the job whatever
+        # the rest turns out to be.
+        if path.name.split(".")[0] in live:
+            continue
+        await asyncio.to_thread(_safe_unlink, path)
+        removed += 1
+        log.info("files: swept orphaned staged download %s", path.name)
+    return removed
+
+
 def _fetch_lease_minutes(request: Request) -> int:
     return int(_fetch_cfg(request).get("lease_minutes", 20))
 
@@ -1070,11 +1184,16 @@ class FetchClaim(BaseModel):
     source_url: str
     lease_id: str
     attempts: int
-    # Where the finished file must end up. A directory rather than a full path
-    # because the extension is not known until yt-dlp has picked a container —
-    # the fetcher names the file `<file_id><ext>` and reports an extension that
-    # matches, which is what `fetch-result` verifies rather than assumes.
-    dest_dir: str
+    # The ONE directory this container may write to. A directory rather than a
+    # full path because the extension is not known until yt-dlp has picked a
+    # container — the fetcher writes `<stage_dir>/<file_id><ext>` and reports a
+    # filename ending in that same `<ext>`, which is what `fetch-result`
+    # rebuilds and verifies rather than assumes.
+    #
+    # Audrey moves the file into the user's directory itself, once it has
+    # checked it. See `_fetch_stage_dir` for why that is the fetcher's job to
+    # not do.
+    stage_dir: str
     lease_seconds: int = 1200
     max_bytes: int = 2 * 1024 * 1024 * 1024
     # Refuse a six-hour stream from the metadata pass, before a byte is
@@ -1082,13 +1201,29 @@ class FetchClaim(BaseModel):
     max_duration_s: float = 0.0
 
 
+#: Transcript provenance values `fetch/{id}/result` will accept (Phase 41
+#: step 4). A closed set, checked on the way in: this string is shown to the
+#: user as an explanation of where their transcript came from, and a sidecar
+#: that could write anything into it could write something untrue there.
+_FETCH_TRANSCRIPT_SOURCES = frozenset({"subtitles", "auto_captions"})
+
+
 class FetchResultRequest(BaseModel):
     lease_id: str
     # The real title, with the extension of the file actually written. The
-    # extension is not decoration: `_source_path` rebuilds the on-disk path
-    # from it, so a mismatch means the worker is handed a path to nothing.
+    # extension is not decoration: the staged and final paths are both rebuilt
+    # from it, so a mismatch means the file is looked for where it is not.
     filename: str
     duration_s: float = 0.0
+    # Phase 41 step 4. A caption track the site already had, parsed into the
+    # same shape whisper produces. Empty means there were none and the worker
+    # should transcribe as usual — which is the pre-step-4 behaviour, so an
+    # older fetcher posting nothing here still works.
+    segments: list[TranscriptSegment] = []
+    # Which kind of caption track that was. Required when `segments` is
+    # non-empty and refused otherwise: a transcript whose provenance is unknown
+    # is the thing this field exists to make impossible.
+    transcript_source: str = ""
 
 
 class FetchFailedRequest(BaseModel):
@@ -1106,6 +1241,10 @@ async def claim_fetch(
     the only thing that needs a dead fetcher's job returned is another fetcher
     asking for work, so recovery rides the poll and there is still no background
     task to supervise.
+
+    The staging sweep rides the same poll, and needs to: a lease sweep returns
+    the *row* to the queue, and the half-downloaded gigabyte the dead fetcher
+    left behind is only garbage once that has happened.
     """
     db = _get_uploads_db(request)
 
@@ -1117,6 +1256,7 @@ async def claim_fetch(
         max_attempts=_fetch_max_attempts(request),
         stage="fetching",
     )
+    await _sweep_fetch_staging(request, db)
 
     lease_id = str(uuid.uuid4())
     now = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
@@ -1125,8 +1265,6 @@ async def claim_fetch(
         return Response(status_code=204)
 
     user = str(row["user"])
-    dest_dir = _upload_root(request) / sanitize_user(user)
-    dest_dir.mkdir(parents=True, exist_ok=True)
     log.info(
         "files: leased fetch file_id=%s user=%s attempt=%d url=%r",
         row["file_id"], user, row["attempts"], row["source_url"],
@@ -1135,7 +1273,8 @@ async def claim_fetch(
     return FetchClaim(
         file_id=str(row["file_id"]), user=user,
         source_url=str(row["source_url"]), lease_id=lease_id,
-        attempts=int(row["attempts"]), dest_dir=str(dest_dir),
+        attempts=int(row["attempts"]),
+        stage_dir=str(_fetch_stage_dir(request)),
         lease_seconds=_fetch_lease_minutes(request) * 60,
         max_bytes=_max_fetch_bytes(request),
         max_duration_s=float(cfg.get("max_duration_s", 0) or 0),
@@ -1149,26 +1288,31 @@ async def fetch_result(
     request: Request,
     _: None = Depends(require_service),
 ) -> JobResultResponse:
-    """Take a completed download and hand the row to the video queue.
+    """Verify a staged download, move it into place, and queue it for the worker.
 
     The fetcher reports what it downloaded; this route **verifies it** rather
-    than recording it. Three checks, each of which has to happen here because
+    than recording it. Four checks, each of which has to happen here because
     the fetcher is a separate container that could be wrong, stale, or broken:
 
-      1. **The file is where it says it is.** `_source_path` rebuilds the path
-         from `file_id` plus the reported filename's extension, so a filename
-         whose extension disagrees with the file on disk hands the media worker
-         a path to nothing — a failure that would otherwise surface three
-         attempts later as an unexplained ingest error.
+      1. **The file is where it says it is.** The staged path is rebuilt from
+         `file_id` plus the reported filename's extension, so a filename whose
+         extension disagrees with the file on disk is caught here — rather than
+         surfacing three attempts later as an unexplained ingest error against
+         a path to nothing.
       2. **The bytes are a video.** The same libmagic gate an upload passes.
          Without it, a downloader that saved an HTML "video unavailable" page
          pushes that into the transcription queue.
       3. **The quota, for real this time.** `from-url` could only check a
          configured ceiling; this is the first moment the true size exists.
+      4. **A transcript says where it came from.** Segments without a known
+         provenance are refused outright rather than stored as an unattributed
+         transcript — see `_FETCH_TRANSCRIPT_SOURCES`.
 
-    A failed check fails the *row*, unlinks the bytes, and says why. Leaving a
-    row in 'fetching' with a rejected file on disk would consume quota for
-    something no one can see.
+    **Only then is the file moved into the user's directory.** Verifying before
+    placing rather than after is what makes the final path mean "a video that
+    passed every gate" at every instant, including the instants in the middle
+    of this function. A failed check fails the *row*, drops the staged bytes,
+    and says why.
     """
     db = _get_uploads_db(request)
     row = await db.get_upload(file_id)
@@ -1185,7 +1329,10 @@ async def fetch_result(
     if not filename:
         raise HTTPException(status_code=422, detail="filename is required.")
 
-    # Rebuild the path the same way every other reader of this row will.
+    ext = Path(filename).suffix.lower()
+    staged = _fetch_stage_dir(request) / f"{file_id}{ext}"
+    # Where it will live once it has earned the right to. Rebuilt the same way
+    # every other reader of this row will rebuild it.
     dest = _source_path(request, {**row, "filename": filename})
 
     async def rejected(status_code: int, detail: str) -> HTTPException:
@@ -1196,25 +1343,26 @@ async def fetch_result(
         happens, instead of being hidden inside a helper that callers have to
         know never returns.
         """
-        await asyncio.to_thread(_safe_unlink, dest)
+        await asyncio.to_thread(_safe_unlink, staged)
         await db.fail_job(
             file_id=file_id, lease_id=body.lease_id, reason=detail, stage="fetching",
         )
         return HTTPException(status_code=status_code, detail=detail)
 
     try:
-        written = (await asyncio.to_thread(dest.stat)).st_size
+        written = (await asyncio.to_thread(staged.stat)).st_size
     except OSError:
         raise await rejected(
             422,
-            f"the download reported {filename!r} but nothing is at {dest.name} — "
-            "the extension in the reported filename must match the file written",
+            f"the download reported {filename!r} but nothing is staged at "
+            f"{staged.name} — the extension in the reported filename must match "
+            "the file written",
         ) from None
 
     if written == 0:
         raise await rejected(422, "the download produced an empty file")
 
-    mime = await asyncio.to_thread(sniff_mime, dest)
+    mime = await asyncio.to_thread(sniff_mime, staged)
     if mime not in ALLOWED_MIMES or not is_video_mime(mime):
         raise await rejected(
             415,
@@ -1233,13 +1381,40 @@ async def fetch_result(
             f"your {max_total // (1024 * 1024)}MB quota",
         )
 
+    segments = [s for s in body.segments if s.text.strip()]
+    source = body.transcript_source.strip().lower()
+    if segments and source not in _FETCH_TRANSCRIPT_SOURCES:
+        raise await rejected(
+            422,
+            f"a fetched transcript must say where it came from, and "
+            f"{body.transcript_source!r} is not one of "
+            f"{sorted(_FETCH_TRANSCRIPT_SOURCES)}",
+        )
+    transcript = (
+        json.dumps({
+            "source": source,
+            "segments": [s.model_dump() for s in segments],
+        })
+        if segments else ""
+    )
+
+    # The move. Last, and after every check, so the path the media worker
+    # derives never names a file that has not passed them.
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        await asyncio.to_thread(staged.replace, dest)
+    except OSError as e:
+        raise await rejected(
+            500, f"the download could not be moved into place: {e}",
+        ) from e
+
     if not await db.complete_fetch(
         file_id=file_id, lease_id=body.lease_id, filename=filename,
-        mime=mime, bytes_=written,
+        mime=mime, bytes_=written, transcript=transcript,
     ):
-        # Swept between the guard above and here. The bytes stay on disk at a
-        # path derived from this file_id, so the re-run overwrites them rather
-        # than orphaning them — deleting here would race the fetcher that has
+        # Swept between the guard above and here. The bytes stay at a path
+        # derived from this file_id, so the re-run overwrites them rather than
+        # orphaning them — deleting here would race the fetcher that has
         # already been handed the job.
         raise HTTPException(
             status_code=409, detail="Lease expired during the handover — fetch reclaimed.",
@@ -1247,8 +1422,9 @@ async def fetch_result(
 
     log.info(
         "files: fetch complete file_id=%s user=%s filename=%r bytes=%d mime=%s "
-        "duration=%.1fs — now pending for the media worker",
+        "duration=%.1fs transcript=%s — now pending for the media worker",
         file_id, user, filename, written, mime, body.duration_s,
+        f"{len(segments)} {source} segments" if segments else "none, whisper will run",
     )
     return JobResultResponse(file_id=file_id, status="pending", chunks=0)
 
@@ -1320,6 +1496,25 @@ class FrameSettings(BaseModel):
     dedup_distance: int = 8
 
 
+class ClaimedTranscript(BaseModel):
+    """A transcript that already exists, handed to the worker with its job.
+
+    Phase 41 step 4. When a fetched video came with a caption track there is
+    nothing for whisper to do — the words are already written down, by a human
+    in the `subtitles` case, and in seconds rather than the 74s a nine-minute
+    video costs on this box.
+
+    The worker is told rather than asked: a non-empty `segments` here means
+    skip the audio pass entirely. It still probes the container for a duration
+    and still runs the visual pass, and it posts these segments back as its own
+    result — so `ingest-result` stays the single place a transcript is chunked,
+    written to a sidecar, and indexed, whoever produced it.
+    """
+
+    source: str
+    segments: list[TranscriptSegment] = []
+
+
 class JobClaim(BaseModel):
     file_id: str
     user: str
@@ -1330,6 +1525,9 @@ class JobClaim(BaseModel):
     lease_id: str
     attempts: int
     frames: FrameSettings = FrameSettings()
+    # Absent for an upload and for a fetched video that had no captions, which
+    # is the ordinary case and means "transcribe it yourself".
+    transcript: ClaimedTranscript | None = None
     # Seconds this lease is good for, so the worker can budget against the
     # clock that will actually reclaim its job.
     #
@@ -1340,12 +1538,6 @@ class JobClaim(BaseModel):
     # again. The worker cannot read `config.yaml`, so the number comes with
     # the job.
     lease_seconds: int = 1800
-
-
-class TranscriptSegment(BaseModel):
-    t_start: float
-    t_end: float
-    text: str
 
 
 class FrameDescription(BaseModel):
@@ -1359,6 +1551,15 @@ class FrameDescription(BaseModel):
 class IngestResultRequest(BaseModel):
     lease_id: str
     duration_s: float | None = None
+    # What produced `segments` (Phase 41 step 4). The worker echoes back what
+    # the claim handed it, or says 'whisper' when it did the work itself.
+    #
+    # Reported by the worker rather than inferred here, because this end knows
+    # what was *offered* and only the worker knows what was *used*. Those come
+    # apart the moment a claim carries captions and the worker transcribes
+    # anyway, and a row that guessed would then be confidently wrong about the
+    # one thing this field exists to be right about.
+    transcript_source: str = ""
     # Phase 33 ships the envelope and the state machine around it. Phase 35
     # fills this with real whisper output; until then a stub worker posts one
     # segment, which is enough to prove the path end to end.
@@ -1487,6 +1688,32 @@ async def _reclaim_sources(request: Request, db) -> int:
     return freed
 
 
+def _claimed_transcript(row) -> ClaimedTranscript | None:
+    """Read a fetched caption track off the row, or None if there is not one.
+
+    **Never raises.** The column holds JSON written by this process, so a blob
+    that will not parse means something is wrong that a claim cannot fix — and
+    the right answer to that is to let whisper transcribe the video, which is
+    what would have happened without step 4 at all. Failing the claim instead
+    would take the whole ingest queue down over a field that is an optimisation.
+    """
+    raw = str(row["fetched_transcript"] or "") if "fetched_transcript" in row else ""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+        segments = [TranscriptSegment(**s) for s in parsed.get("segments") or []]
+    except Exception as e:  # noqa: BLE001 — an unusable optimisation is not an error
+        log.warning(
+            "files: %s has an unreadable fetched transcript (%s) — whisper will run",
+            row["file_id"], e,
+        )
+        return None
+    if not segments:
+        return None
+    return ClaimedTranscript(source=str(parsed.get("source") or ""), segments=segments)
+
+
 # `response_model=None`: the return is either a JobClaim or a bare 204
 # Response, and FastAPI cannot build one response model from that union.
 @router.post("/jobs/claim", response_model=None)
@@ -1518,9 +1745,12 @@ async def claim_job(
         return Response(status_code=204)
 
     path = _source_path(request, row)
+    transcript = _claimed_transcript(row)
     log.info(
-        "files: leased job file_id=%s user=%s attempt=%d",
+        "files: leased job file_id=%s user=%s attempt=%d transcript=%s",
         row["file_id"], row["user"], row["attempts"],
+        f"{len(transcript.segments)} {transcript.source} segments"
+        if transcript else "none, whisper will run",
     )
     video_cfg = _video_cfg(request)
     return JobClaim(
@@ -1529,6 +1759,7 @@ async def claim_job(
         bytes=int(row["bytes"]), path=str(path),
         lease_id=lease_id, attempts=int(row["attempts"]),
         lease_seconds=_lease_minutes(request) * 60,
+        transcript=transcript,
         frames=FrameSettings(
             interval_s=float(video_cfg.get("frame_interval_s", 30)),
             keyframes_max=int(video_cfg.get("keyframes_max", 24)),
@@ -1728,6 +1959,10 @@ async def ingest_result(
         file_id=file_id, lease_id=body.lease_id, collection=collection, chunks=chunks,
         duration_s=float(body.duration_s or 0.0), summary=summary,
         completed_at=stamp,
+        # Only when there is a transcript to attribute. A silent video has no
+        # transcript, and recording 'whisper' against it would say whisper
+        # produced the empty one — which reads, later, as whisper having failed.
+        transcript_source=(body.transcript_source.strip().lower() if transcript else ""),
     ):
         # Valid when checked above and not now, so the sweep ran in between.
         # The chunks are already in Qdrant under this file_id; the newer
@@ -1915,6 +2150,7 @@ async def list_files(
             allowed_extensions=sorted(ALLOWED_EXTENSIONS),
             chunked_max_bytes=_chunked_max_bytes(request),
             part_size=_part_size(request),
+            fetch_hosts=sorted(_allowed_fetch_hosts(request)),
         ),
     )
 

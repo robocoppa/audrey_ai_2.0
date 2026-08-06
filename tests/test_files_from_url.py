@@ -22,6 +22,7 @@ Three groups of case, and the middle one is where the risk is:
 from __future__ import annotations
 
 import datetime as _dt
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -246,7 +247,23 @@ class TestClaim:
         assert job["max_duration_s"] == 7200
         # A directory, not a path: the extension is not known until yt-dlp has
         # picked a container.
-        assert Path(job["dest_dir"]).is_dir()
+        assert Path(job["stage_dir"]).is_dir()
+
+    def test_the_claim_hands_out_staging_and_not_a_user_directory(self, client, tmp_path):
+        client.post("/v1/files/from-url", json={"url": URL})
+        job = client.post("/v1/files/fetch/claim", headers=SVC).json()
+        stage = Path(job["stage_dir"])
+        # The fetcher is the container with internet egress running a
+        # downloader against arbitrary URLs. It writes here and Audrey moves
+        # the file once it has checked it, so a bug in yt-dlp cannot reach
+        # anybody's stored files — and a partial download never exists at the
+        # path the row implies.
+        assert stage == tmp_path / "uploads" / ".staging"
+        assert "dest_dir" not in job
+        # Leading dot so it can never collide with a user directory:
+        # `sanitize_user` strips the edges of what it produces, so no sanitized
+        # user id begins with one.
+        assert stage.name.startswith(".")
 
     async def test_claiming_moves_the_row_out_of_the_queue(self, client, db):
         client.post("/v1/files/from-url", json={"url": URL})
@@ -271,11 +288,16 @@ def _accept_and_claim(client: TestClient) -> dict:
 
 
 def _land(job: dict, payload: bytes = MP4, ext: str = ".mp4") -> Path:
-    """Write bytes where the fetcher would have written them."""
-    path = Path(job["dest_dir"]) / f"{job['file_id']}{ext}"
+    """Write bytes where the fetcher would have written them: staging."""
+    path = Path(job["stage_dir"]) / f"{job['file_id']}{ext}"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(payload)
     return path
+
+
+def _stored(tmp_path: Path, file_id: str, ext: str = ".mp4") -> Path:
+    """Where a verified download ends up — the same path `_source_path` builds."""
+    return tmp_path / "uploads" / "a_b_c" / f"{file_id}{ext}"
 
 
 def _age_out_lease(db: UploadsDB, file_id: str) -> None:
@@ -315,6 +337,19 @@ class TestResult:
         assert row["bytes"] == len(MP4)
         assert row["source_url"] == URL
 
+    async def test_a_verified_download_is_moved_out_of_staging(self, client, tmp_path):
+        job = _accept_and_claim(client)
+        staged = _land(job)
+        client.post(
+            f"/v1/files/fetch/{job['file_id']}/result", headers=SVC,
+            json={"lease_id": job["lease_id"], "filename": "Real Title.mp4"},
+        )
+        # Audrey does the move, not the fetcher, and only after every check has
+        # passed — so the path the media worker derives never names a file that
+        # has not been sniffed, sized and quota-checked.
+        assert not staged.exists()
+        assert _stored(tmp_path, job["file_id"]).read_bytes() == MP4
+
     async def test_the_fetch_attempt_count_does_not_follow_the_row(self, client, db):
         job = _accept_and_claim(client)
         _land(job)
@@ -334,7 +369,7 @@ class TestResult:
             f"/v1/files/fetch/{job['file_id']}/result", headers=SVC,
             json={"lease_id": job["lease_id"], "filename": "Real Title.webm"},
         )
-        # `_source_path` rebuilds from the reported extension, so this would
+        # Both paths are rebuilt from the reported extension, so this would
         # otherwise hand the worker a path to nothing — three attempts later.
         assert r.status_code == 422
         row = await db.get_upload(job["file_id"])
@@ -485,3 +520,176 @@ class TestSweep:
             stage="processing",
         )
         assert (await db.get_upload(job["file_id"]))["status"] == "fetching"
+
+
+# ── The staging sweep ─────────────────────────────────────────────────
+#
+# A killed fetcher leaves a partial gigabyte behind. The lease sweep above
+# returns the row; this returns the disk. Both ride the claim poll, because the
+# only thing that needs either is a fetcher asking for work.
+
+
+class TestStagingSweep:
+    def _stage(self, client: TestClient, tmp_path: Path) -> Path:
+        client.post("/v1/files/fetch/claim", headers=SVC)
+        return tmp_path / "uploads" / ".staging"
+
+    def test_a_file_belonging_to_no_row_is_deleted(self, client, tmp_path):
+        stage = self._stage(client, tmp_path)
+        orphan = stage / "99999999-0000-0000-0000-000000000000.mp4"
+        orphan.write_bytes(b"half a download from a fetcher that died")
+        client.post("/v1/files/fetch/claim", headers=SVC)
+        assert not orphan.exists()
+
+    def test_a_live_downloads_partial_file_is_left_alone(self, client, tmp_path):
+        job = _accept_and_claim(client)
+        stage = tmp_path / "uploads" / ".staging"
+        partial = stage / f"{job['file_id']}.f137.mp4.part"
+        partial.write_bytes(b"still being written to")
+        client.post("/v1/files/fetch/claim", headers=SVC)
+        # Liveness is asked of the database, not of the file's age. An age
+        # heuristic would eventually delete a slow download mid-write — and it
+        # would do it to the largest files, which took longest to fetch.
+        assert partial.exists()
+
+    def test_every_artifact_of_a_dead_job_goes(self, client, tmp_path):
+        stage = self._stage(client, tmp_path)
+        dead = "88888888-0000-0000-0000-000000000000"
+        for suffix in (".mp4", ".f137.mp4.part", ".en.vtt", ".webm.ytdl"):
+            (stage / f"{dead}{suffix}").write_bytes(b"x")
+        client.post("/v1/files/fetch/claim", headers=SVC)
+        # yt-dlp writes fragments, subtitle files and its own resume metadata.
+        # The file_id is a uuid4 and contains no dot, so the first component
+        # identifies the job whatever the rest turns out to be.
+        assert list(stage.iterdir()) == []
+
+    async def test_a_swept_row_keeps_its_staged_file_until_it_is_dead(
+        self, client, db, tmp_path,
+    ):
+        job = _accept_and_claim(client)
+        stage = tmp_path / "uploads" / ".staging"
+        partial = stage / f"{job['file_id']}.mp4"
+        partial.write_bytes(b"partial")
+        _age_out_lease(db, job["file_id"])
+        client.post("/v1/files/fetch/claim", headers=SVC)
+        # The row went back to `fetch_pending` and was re-leased, so it is
+        # still live. Deleting here would take the file out from under the
+        # retry that is about to overwrite it anyway.
+        assert partial.exists()
+
+    async def test_the_file_goes_once_the_row_gives_up(self, client, db, tmp_path):
+        job = _accept_and_claim(client)
+        stage = tmp_path / "uploads" / ".staging"
+        partial = stage / f"{job['file_id']}.mp4"
+        partial.write_bytes(b"partial")
+        await db.sweep_expired_leases(
+            expired_before="2099-01-01T00:00:00+00:00", max_attempts=1,
+            stage="fetching",
+        )
+        assert (await db.get_upload(job["file_id"]))["status"] == "failed"
+        client.post("/v1/files/fetch/claim", headers=SVC)
+        # A 'failed' row is in neither fetch state, so its bytes are garbage —
+        # and they are the largest garbage this system produces.
+        assert not partial.exists()
+
+    def test_an_unreadable_staging_directory_does_not_break_the_claim(
+        self, client, tmp_path, monkeypatch,
+    ):
+        client.post("/v1/files/from-url", json={"url": URL})
+
+        def boom(_self):
+            raise OSError("the disk is having a day")
+
+        monkeypatch.setattr(Path, "iterdir", boom)
+        # Tidying up must never stop a fetcher from getting work.
+        assert client.post("/v1/files/fetch/claim", headers=SVC).status_code == 200
+
+
+# ── Captions arriving with the download (step 4) ───────────────────────
+
+
+SEGMENTS = [
+    {"t_start": 0.0, "t_end": 3.0, "text": "Hello and welcome."},
+    {"t_start": 3.0, "t_end": 9.0, "text": "Today we are talking about retirement."},
+]
+
+
+class TestFetchedTranscript:
+    async def test_a_caption_track_is_stored_for_the_worker(self, client, db):
+        job = _accept_and_claim(client)
+        _land(job)
+        r = client.post(
+            f"/v1/files/fetch/{job['file_id']}/result", headers=SVC,
+            json={"lease_id": job["lease_id"], "filename": "t.mp4",
+                  "segments": SEGMENTS, "transcript_source": "subtitles"},
+        )
+        assert r.status_code == 200, r.text
+        row = await db.get_upload(job["file_id"])
+        stored = json.loads(row["fetched_transcript"])
+        # Stored rather than posted straight through, because the two stages
+        # are separated by a queue and a container: there is no moment when
+        # both are holding the row.
+        assert stored["source"] == "subtitles"
+        assert stored["segments"] == SEGMENTS
+
+    async def test_no_captions_stores_nothing(self, client, db):
+        job = _accept_and_claim(client)
+        _land(job)
+        client.post(
+            f"/v1/files/fetch/{job['file_id']}/result", headers=SVC,
+            json={"lease_id": job["lease_id"], "filename": "t.mp4"},
+        )
+        row = await db.get_upload(job["file_id"])
+        # The pre-step-4 behaviour, and the path an older fetcher takes.
+        assert row["fetched_transcript"] == ""
+
+    async def test_a_transcript_with_no_provenance_is_refused(self, client, db):
+        job = _accept_and_claim(client)
+        _land(job)
+        r = client.post(
+            f"/v1/files/fetch/{job['file_id']}/result", headers=SVC,
+            json={"lease_id": job["lease_id"], "filename": "t.mp4",
+                  "segments": SEGMENTS},
+        )
+        # This string is shown to the user as an explanation of where their
+        # transcript came from. A sidecar that could leave it blank could
+        # leave it blank on a transcript that is wrong.
+        assert r.status_code == 422
+        assert (await db.get_upload(job["file_id"]))["status"] == "failed"
+
+    async def test_an_invented_provenance_is_refused(self, client, db):
+        job = _accept_and_claim(client)
+        _land(job)
+        r = client.post(
+            f"/v1/files/fetch/{job['file_id']}/result", headers=SVC,
+            json={"lease_id": job["lease_id"], "filename": "t.mp4",
+                  "segments": SEGMENTS, "transcript_source": "a human typed it"},
+        )
+        assert r.status_code == 422
+        assert "not one of" in (await db.get_upload(job["file_id"]))["failure_reason"]
+
+    async def test_whisper_is_not_a_thing_the_fetcher_may_claim(self, client, db):
+        job = _accept_and_claim(client)
+        _land(job)
+        r = client.post(
+            f"/v1/files/fetch/{job['file_id']}/result", headers=SVC,
+            json={"lease_id": job["lease_id"], "filename": "t.mp4",
+                  "segments": SEGMENTS, "transcript_source": "whisper"},
+        )
+        # 'whisper' is the media worker's answer, not the fetcher's. Accepting
+        # it here would let a row claim a transcript came from a model that
+        # was never run.
+        assert r.status_code == 422
+
+    async def test_blank_segments_do_not_count_as_a_transcript(self, client, db):
+        job = _accept_and_claim(client)
+        _land(job)
+        r = client.post(
+            f"/v1/files/fetch/{job['file_id']}/result", headers=SVC,
+            json={"lease_id": job["lease_id"], "filename": "t.mp4",
+                  "segments": [{"t_start": 0.0, "t_end": 1.0, "text": "   "}]},
+        )
+        # A caption file of empty cues is a caption file with nothing in it,
+        # and the right answer is whisper — not a 422 about attribution.
+        assert r.status_code == 200
+        assert (await db.get_upload(job["file_id"]))["fetched_transcript"] == ""

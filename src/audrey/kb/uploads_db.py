@@ -114,7 +114,33 @@ CREATE TABLE IF NOT EXISTS uploads (
   -- the answer to "can these bytes be re-obtained?" — for a URL-sourced video
   -- the source is re-downloadable, which is exactly the argument phase 38 found
   -- did not hold for an upload.
-  source_url  TEXT NOT NULL DEFAULT ''
+  source_url  TEXT NOT NULL DEFAULT '',
+  -- A caption track the fetcher got from the site (Phase 41 step 4), as JSON:
+  -- `{"source": ..., "segments": [{t_start, t_end, text}, ...]}`. Handed to the
+  -- media worker on its claim, which is the whole reason it is stored rather
+  -- than posted straight through — the two stages are separated by a queue and
+  -- a container, and there is no moment when both are holding the row.
+  --
+  -- **Cleared by `complete_job`.** By then the transcript is chunked, indexed
+  -- and written to a `.transcript.txt` sidecar, so keeping it would be a third
+  -- copy of the same text living in a metadata table — a two-hour video's
+  -- captions are ~120 KB, and this column is on the row `SELECT *` reads on
+  -- every claim.
+  --
+  -- Deliberately NOT cleared by `fail_job` or the lease sweep: a retry should
+  -- reuse the captions it already has rather than fetching them again or
+  -- falling back to whisper for a video that plainly has them.
+  fetched_transcript TEXT NOT NULL DEFAULT '',
+  -- What produced the transcript that was actually ingested: 'subtitles',
+  -- 'auto_captions', or 'whisper'. Empty for anything that is not a processed
+  -- video, and for a video with no speech at all.
+  --
+  -- Written by `complete_job` from what the worker reports, NOT from what the
+  -- fetch offered. Those differ whenever a claim carries captions and the
+  -- worker transcribes anyway, and the point of the column is to be right
+  -- about which text is on the row — "the transcript is wrong" has a different
+  -- answer for each of the three.
+  transcript_source  TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_user ON uploads(user);
 -- No index on `status` here. `_SCHEMA` runs before `_migrate`, and on the
@@ -166,6 +192,8 @@ _UPLOADS_ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("completed_at", "TEXT NOT NULL DEFAULT ''"),
     ("source_freed_at", "TEXT NOT NULL DEFAULT ''"),
     ("source_url", "TEXT NOT NULL DEFAULT ''"),
+    ("fetched_transcript", "TEXT NOT NULL DEFAULT ''"),
+    ("transcript_source", "TEXT NOT NULL DEFAULT ''"),
 )
 
 
@@ -294,6 +322,12 @@ class UploadsDB:
         # the consequence is worth stating: a fetched video that reconciles at
         # boot keeps knowing where it came from. Naming it here would clear it
         # from the payload's silence, which is the `summary` bug again.
+        #
+        # So are `transcript_source` and `fetched_transcript` (Phase 41 step 4).
+        # A Qdrant payload cannot know whether a human wrote the captions or
+        # whisper guessed at them, and the failure would be the quiet kind: a
+        # provenance label that is correct until the next restart and blank
+        # afterwards, on rows nobody thinks to re-check.
         with self._lock:
             self._conn.execute(
                 "INSERT INTO uploads "
@@ -339,7 +373,8 @@ class UploadsDB:
                 # pins the two together.
                 "SELECT file_id, filename, mime, bytes, kind, collection, "
                 "       chunks, uploaded_at, status, failure_reason, duration_s, "
-                "       summary, source_freed_at, leased_at, source_url "
+                "       summary, source_freed_at, leased_at, source_url, "
+                "       transcript_source "
                 "FROM uploads WHERE user = ? ORDER BY uploaded_at DESC",
                 (user,),
             )
@@ -508,12 +543,14 @@ class UploadsDB:
 
     async def complete_fetch(
         self, *, file_id: str, lease_id: str, filename: str, mime: str, bytes_: int,
+        transcript: str = "",
     ) -> bool:
         """Hand a downloaded row to the video queue. False if the lease lapsed.
 
         Everything the fetcher learned lands here at once — the real title, the
-        sniffed mime and the size on disk — and the row becomes indistinguishable
-        from an upload that has been waiting for the worker.
+        sniffed mime, the size on disk and any caption track the site had — and
+        the row becomes indistinguishable from an upload that has been waiting
+        for the worker, apart from having its transcript already written.
 
         **`attempts` resets to 0.** The counter is per stage, and carrying a
         fetch's attempts into the ingest stage would hand a video that took two
@@ -523,18 +560,20 @@ class UploadsDB:
         """
         return await asyncio.to_thread(
             self._complete_fetch_sync, file_id, lease_id, filename, mime, bytes_,
+            transcript,
         )
 
     def _complete_fetch_sync(
         self, file_id: str, lease_id: str, filename: str, mime: str, bytes_: int,
+        transcript: str,
     ) -> bool:
         with self._lock:
             cur = self._conn.execute(
                 "UPDATE uploads SET status = 'pending', filename = ?, mime = ?, "
                 "       bytes = ?, lease_id = '', leased_at = '', attempts = 0, "
-                "       failure_reason = '' "
+                "       failure_reason = '', fetched_transcript = ? "
                 "WHERE file_id = ? AND lease_id = ? AND status = 'fetching'",
-                (filename, mime, bytes_, file_id, lease_id),
+                (filename, mime, bytes_, transcript, file_id, lease_id),
             )
             return cur.rowcount > 0
 
@@ -610,6 +649,7 @@ class UploadsDB:
     async def complete_job(
         self, *, file_id: str, lease_id: str, collection: str, chunks: int,
         duration_s: float = 0.0, summary: str = "", completed_at: str = "",
+        transcript_source: str = "",
     ) -> bool:
         """Flip a leased row to 'ready'. False if the lease no longer holds.
 
@@ -619,24 +659,30 @@ class UploadsDB:
         result overwrites the newer one and the row looks perfectly healthy
         afterwards — no error, no log line, just a transcript that does not
         match its video.
+
+        This is where `fetched_transcript` is cleared — the transcript it held
+        is now chunked, indexed and on disk as a sidecar, so the column would
+        otherwise be a third copy of the same text sitting on a row that
+        `SELECT *` reads on every claim.
         """
         return await asyncio.to_thread(
             self._complete_job_sync, file_id, lease_id, collection, chunks,
-            duration_s, summary, completed_at,
+            duration_s, summary, completed_at, transcript_source,
         )
 
     def _complete_job_sync(
         self, file_id: str, lease_id: str, collection: str, chunks: int,
-        duration_s: float, summary: str, completed_at: str,
+        duration_s: float, summary: str, completed_at: str, transcript_source: str,
     ) -> bool:
         with self._lock:
             cur = self._conn.execute(
                 "UPDATE uploads SET status = 'ready', collection = ?, chunks = ?, "
                 "       lease_id = '', leased_at = '', failure_reason = '', "
-                "       duration_s = ?, summary = ?, completed_at = ? "
+                "       duration_s = ?, summary = ?, completed_at = ?, "
+                "       transcript_source = ?, fetched_transcript = '' "
                 "WHERE file_id = ? AND lease_id = ? AND status = 'processing'",
                 (collection, chunks, duration_s, summary, completed_at,
-                 file_id, lease_id),
+                 transcript_source, file_id, lease_id),
             )
             return cur.rowcount > 0
 

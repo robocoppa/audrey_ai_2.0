@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -436,3 +437,146 @@ class TestTranscriptStage:
 
         assert seen["model_size"] == "medium"
         assert seen["budget_s"] == 99.0
+
+
+class TestHandedTranscript:
+    """Phase 41 step 4. A fetched video can arrive with its words already written.
+
+    The site had a caption track, the fetcher parsed it, and it reached the
+    worker on the claim. Whisper has nothing to do — and on this box that is
+    74 seconds of CPU for a nine-minute video, against captions that cost
+    seconds and, for `subtitles`, were written by a human.
+
+    What must NOT change is anything downstream. The worker posts the handed
+    segments as its own result, so `ingest-result` stays the single place a
+    transcript is chunked, written to a sidecar and indexed, whatever produced
+    it.
+    """
+
+    HANDED: ClassVar[dict] = {
+        "source": "subtitles",
+        "segments": [
+            {"t_start": 0.0, "t_end": 3.0, "text": "Hello and welcome."},
+            {"t_start": 3.0, "t_end": 9.0, "text": "Today, retirement."},
+        ],
+    }
+
+    def test_whisper_is_not_run_at_all(
+        self, video: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        called = []
+        monkeypatch.setattr(worker, "transcribe", lambda *a, **k: called.append(1) or [])
+        calls = _Calls()
+        monkeypatch.setattr(worker, "post", calls)
+
+        worker.handle_job(
+            _job(video, transcript=self.HANDED),
+            endpoint="http://x", token=TOKEN, work_dir=tmp_path / "w",
+        )
+
+        assert called == []
+        assert calls.body_for("ingest-result")["segments"] == self.HANDED["segments"]
+
+    def test_the_audio_is_not_even_demuxed(
+        self, video: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        work = tmp_path / "w"
+        extracted = []
+        monkeypatch.setattr(
+            worker, "extract_audio", lambda *a, **k: extracted.append(1) or 1.0,
+        )
+        monkeypatch.setattr(worker, "post", _Calls())
+
+        worker.handle_job(
+            _job(video, transcript=self.HANDED),
+            endpoint="http://x", token=TOKEN, work_dir=work,
+        )
+
+        # The wav exists only to feed whisper. Skipping the transcription but
+        # still demuxing would spend ffmpeg on a file nothing reads — on a
+        # 288 MB video that is not free.
+        assert extracted == []
+        assert list(work.glob("*.wav")) == []
+
+    def test_the_duration_comes_from_the_container_instead(
+        self, video: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        calls = _Calls()
+        monkeypatch.setattr(worker, "post", calls)
+
+        worker.handle_job(
+            _job(video, transcript=self.HANDED),
+            endpoint="http://x", token=TOKEN, work_dir=tmp_path / "w",
+        )
+
+        # `extract_audio` normally supplies this. The container probe is the
+        # remaining source, and it is the one the summary and the file list
+        # display — so it must not silently become 0.
+        assert calls.body_for("ingest-result")["duration_s"] == pytest.approx(1.0, abs=0.3)
+
+    def test_the_provenance_is_echoed_back(
+        self, video: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        calls = _Calls()
+        monkeypatch.setattr(worker, "post", calls)
+
+        worker.handle_job(
+            _job(video, transcript=self.HANDED),
+            endpoint="http://x", token=TOKEN, work_dir=tmp_path / "w",
+        )
+
+        assert calls.body_for("ingest-result")["transcript_source"] == "subtitles"
+
+    def test_whisper_says_so_when_it_did_the_work(
+        self, video: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        calls = _Calls()
+        monkeypatch.setattr(worker, "post", calls)
+
+        worker.handle_job(
+            _job(video), endpoint="http://x", token=TOKEN, work_dir=tmp_path / "w",
+        )
+
+        # Reported by the worker rather than inferred by Audrey, because this
+        # end knows what was *used* and that end only knows what was *offered*.
+        assert calls.body_for("ingest-result")["transcript_source"] == "whisper"
+
+    def test_an_empty_handed_transcript_falls_back_to_whisper(
+        self, video: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        calls = _Calls()
+        monkeypatch.setattr(worker, "post", calls)
+
+        worker.handle_job(
+            _job(video, transcript={"source": "subtitles", "segments": []}),
+            endpoint="http://x", token=TOKEN, work_dir=tmp_path / "w",
+        )
+
+        # A caption file of empty cues is a caption file with nothing in it.
+        # Posting an empty transcript attributed to 'subtitles' would record a
+        # silent video that plainly is not one.
+        body = calls.body_for("ingest-result")
+        assert body["transcript_source"] == "whisper"
+        assert body["segments"] == [{"t_start": 0.0, "t_end": 1.0, "text": "spoken words"}]
+
+    def test_the_handed_transcript_still_feeds_the_visual_pass(
+        self, video: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        seen = {}
+
+        def capture(frames, **kwargs):
+            seen.update(kwargs)
+            return [], 0
+
+        monkeypatch.setattr(worker, "describe_frames", capture)
+        monkeypatch.setattr(worker, "post", _Calls())
+
+        worker.handle_job(
+            _job(video, transcript=self.HANDED),
+            endpoint="http://x", token=TOKEN, work_dir=tmp_path / "w",
+        )
+
+        # A keyframe is described with the speech playing over it, so the model
+        # can tell a slide being read aloud from a backdrop nobody mentions.
+        # That context must not disappear just because whisper was skipped.
+        assert seen["segments"] == self.HANDED["segments"]

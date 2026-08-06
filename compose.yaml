@@ -46,6 +46,10 @@ services:
       # on ollama-net, so it cannot resolve or route to `ollama` even if some
       # future edit hands it an address. See the media-worker stanza below.
       - media-net
+      # Phase 41: same job for media-fetcher. A separate network from media-net
+      # because that one is `internal: true` and the fetcher's entire purpose
+      # requires egress — putting it there would be the one thing it cannot do.
+      - fetch-net
     # Published to the host LAN. Safe since Phase 31 (2026-07-27): the KB query
     # routes (`/v1/kb/query`, `/v1/kb/query/image`) are gated by
     # `resolve_kb_caller` — custom-tools' `X-Audrey-Service-Token` may act-as
@@ -205,6 +209,71 @@ services:
     # Phase 35's whisper turns out to be the bottleneck it probably is.
     cpus: 2.0
 
+  # Phase 41: the yt-dlp sidecar. Claims download jobs from audrey-ai over HTTP,
+  # fetches the video into a staging directory, posts the result back. No ports,
+  # no model access, no database — and, unlike the other two, internet egress.
+  media-fetcher:
+    build:
+      context: .
+      dockerfile: docker/media-fetcher.Dockerfile
+    image: media-fetcher:latest
+    container_name: media-fetcher
+    restart: unless-stopped
+    # A download in flight is finished rather than abandoned: `Stopping` is
+    # checked between jobs, so a stop lands after the current one. 300s covers
+    # a normal fetch; anything longer is SIGKILLed, which is safe by design —
+    # the lease expires, Audrey sweeps the row back to `fetch_pending` and the
+    # staging sweep deletes the partial file. Costly, not broken.
+    stop_grace_period: 300s
+    depends_on:
+      audrey-ai:
+        condition: service_healthy
+    # fetch-net is an ordinary bridge, NOT `internal: true`, because a
+    # downloader without egress is a contradiction. It exists so this container
+    # can reach audrey-ai by DNS instead of by the host's published port.
+    #
+    # **Be honest about what this does and does not isolate.** It keeps the
+    # fetcher off ollama-net, so `ollama` does not resolve and no config here
+    # hands it an address. It does NOT remove the route: ollama publishes 11434
+    # on the host, and any container with ordinary egress can reach
+    # 192.168.1.11:11434 — the lesson phase 34 learned on the box. media-worker
+    # is protected by `internal: true` removing the default route entirely, and
+    # that protection is unavailable to a container whose job is to download
+    # things from the internet. What is left is that nothing here knows the
+    # address, which is weaker, and is the price of the feature.
+    networks:
+      - fetch-net
+    # NOT `env_file: .env` — same rule as media-worker, and it bites harder
+    # here. That file carries OLLAMA_HOST, and this is the container that
+    # actually has a route to it.
+    environment:
+      TZ: America/Denver
+      AUDREY_ENDPOINT: http://audrey-ai:8000
+      POLL_SECONDS: ${FETCH_POLL_SECONDS:-10}
+      KB_SERVICE_TOKEN: ${KB_SERVICE_TOKEN:?media-fetcher needs KB_SERVICE_TOKEN in .env}
+      # The metadata pass only. The download's budget is the lease, and arrives
+      # on the claim from `kb.fetch.lease_minutes` — the caps that matter are
+      # config-driven for the same reason the frame settings are.
+      PROBE_TIMEOUT_S: ${FETCH_PROBE_TIMEOUT_S:-120}
+    volumes:
+      # ONE directory, read-write, and that is the point. The fetcher writes
+      # downloads here and audrey-ai moves them into the user's directory after
+      # checking them, so this container never has write access to stored files
+      # — see `_fetch_stage_dir` in routes/files.py.
+      #
+      # The path inside the container must equal the `stage_dir` audrey-ai
+      # reports on the claim, which is `<kb.upload_root>/.staging`.
+      #
+      # Create it before the first `up`, or the daemon makes it root-owned and
+      # the first download fails on permissions until audrey-ai's next claim
+      # chmods it:
+      #   mkdir -p /mnt/user/appdata/runtime/uploads/.staging
+      - /mnt/user/appdata/runtime/uploads/.staging:/data/uploads/.staging
+    # yt-dlp is network-bound; the CPU here is ffmpeg remuxing the merged
+    # streams into mp4, which is a stream copy rather than a re-encode. Capped
+    # anyway so a pathological file cannot starve audrey-ai of cores.
+    cpus: 2.0
+
   # Build-only: the live-eval harness image (see Dockerfile.eval + Phase 27).
   # `profiles: [eval]` keeps it OUT of the default `up`/`up --build` run graph,
   # so it never runs as a phantom service — but `docker compose --profile eval
@@ -244,3 +313,9 @@ networks:
   media-net:
     driver: bridge
     internal: true
+
+  # Phase 41: joins media-fetcher to audrey-ai. An ordinary bridge — see the
+  # media-fetcher stanza for why `internal: true` is not available here and
+  # what is lost by that.
+  fetch-net:
+    driver: bridge

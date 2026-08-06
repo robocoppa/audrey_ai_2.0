@@ -5,8 +5,16 @@ questions about is already on the internet, and uploading it means downloading
 it by hand first, then pushing 300 MB back up a domestic uplink to a box that
 has a better connection than you do.
 
-**Status: STEP 1 BUILT, NOT DEPLOYED.** Steps 2-4 are unbuilt. Nothing has run
-on the box — every claim below about behaviour is a claim about tests.
+**Status: ALL FOUR STEPS BUILT, NOT DEPLOYED.** Nothing has run on the box —
+every claim below about behaviour is a claim about tests. 105 of them, across
+`test_files_from_url.py`, `test_media_fetch.py`, `test_media_fetcher.py`,
+`test_media_worker.py` and `test_video_jobs.py`.
+
+**The one deliberate departure from this plan** is where the fetcher writes.
+The plan had it writing into the user's upload directory and Audrey verifying
+afterwards; it writes into a single staging directory instead, and Audrey moves
+the file into place once it has checked it. Recorded in step 2 below with the
+reason, which turned out to be a uid rather than an aesthetic.
 
 ---
 
@@ -77,11 +85,23 @@ rebuilding the API image. And a multi-minute download has no business
 occupying the API container when a lease-based job queue with crash recovery
 already exists next door.
 
-**So: a third container, `media-fetcher`.** Egress, `/data` read-write, and
+**So: a third container, `media-fetcher`.** Egress, one writable directory, and
 nothing else. Not on `media-net` — it has no reason to reach the worker — and
-not on `ollama-net`, so a bug in a downloader cannot reach the model server.
-It talks to `audrey-ai` over the published host port like any other LAN
-client, with `KB_SERVICE_TOKEN`.
+not on `ollama-net`, so nothing resolves or configures the model server's
+address. It reaches `audrey-ai` over its own bridge, `fetch-net`, with
+`KB_SERVICE_TOKEN`.
+
+**A correction to the sentence above, made while wiring it.** "A bug in a
+downloader cannot reach the model server" is *false as stated*, and the
+compose file now says so. `ollama` publishes 11434 on the host, so any
+container with ordinary egress routes to `192.168.1.11:11434` — which is
+exactly what phase 34 discovered on the first on-box run, and why `media-net`
+is `internal: true` rather than merely separate. That protection is
+**unavailable** to a container whose entire job is downloading things from the
+internet. What is actually true is narrower: the fetcher is not on
+`ollama-net`, so the name does not resolve, and no configuration hands it the
+address. The route exists. That is the price of the feature, and it is worth
+writing down rather than inheriting a claim that was true of the other sidecar.
 
 ---
 
@@ -175,83 +195,163 @@ bad video.
 
 **40 tests** in `tests/test_files_from_url.py`.
 
-## Step 2 — the fetcher container
+## Step 2 — the fetcher container ✅ BUILT
 
 `docker/media-fetcher.Dockerfile`, modelled on `docker/media-worker.Dockerfile`.
 yt-dlp pinned by version, and pinned deliberately: an unpinned downloader that
 auto-updates is a supply-chain path into a container with write access to
-every user's uploads.
+uploads. The cost is real and accepted — YouTube changes something every few
+months and an unpinned yt-dlp would have fixed it before you noticed. Here the
+symptom is fetches failing with a reason from `friendly_reason`, and the fix is
+bumping `YTDLP_VERSION` and rebuilding.
 
-Claim → download → post result. The caps arrive **on the claim**, already built
-in step 1 and config-driven from `kb.fetch`, for the same reason `FrameSettings`
-does: the fetcher does not mount `config.yaml`, and a parallel set of
-environment variables is a second source of truth that drifts silently.
+Claim → download → post result, in `media/fetcher.py`. The judgement lives in
+`media/fetch.py` so it can be tested without a container: `probe_url`,
+`check_limits`, `download`, `friendly_reason`, `parse_vtt`. `post` and
+`Stopping` moved to `media/service.py`, shared with the worker rather than
+copied — `worker.py` re-exports both names so the test modules that patch
+`audrey.media.worker.post` still work.
+
+The caps arrive **on the claim**, config-driven from `kb.fetch`, for the same
+reason `FrameSettings` does: the fetcher does not mount `config.yaml`, and a
+parallel set of environment variables is a second source of truth that drifts
+silently.
 
 - **duration** — `max_duration_s`, refusing a 6-hour stream from a
-  metadata-only `--print duration` pass, before a byte is downloaded.
-- **filesize** — `max_bytes`; `--print filesize_approx` first, then a hard
-  `--max-filesize` so a lying or absent estimate cannot run away.
-- **wall clock** — `lease_seconds`, exactly as the worker has.
+  metadata-only pass, before a byte is downloaded.
+- **filesize** — `max_bytes`; the metadata estimate first, then a hard
+  `--max-filesize`, then a stat of what actually landed. Three checks because
+  the first is frequently absent and the second does not apply to every
+  downloader path.
+- **wall clock** — `lease_seconds` minus a 60s reserve for the result post,
+  exactly as the worker does with its own.
 
-**The naming contract with step 1, which the result route enforces:** the claim
-hands a `dest_dir` and a `file_id`, not a path, because the extension is not
-known until yt-dlp has picked a container. The fetcher must write
-`<dest_dir>/<file_id><ext>` and report a `filename` whose extension is that same
-`<ext>`. Step 1 rebuilds the path from the reported name and fails the row if
-nothing is there, so getting this wrong is loud rather than silent — but it is
-the one place the two containers have to agree.
+**One metadata call, not several.** `-J` rather than a series of `--print`
+passes: it costs the same request and it is the only way to learn what caption
+tracks exist, which step 4 needs *before* it can ask for the right one.
 
-**Write to a temp path and rename into place only on success.** A partial
-download at the final path is a file the worker will happily claim and
-transcribe.
+### The naming contract, and where it moved
 
-**`env_file: .env` is banned here**, as it is for media-worker, and for the
-same reason: that file carries `OLLAMA_HOST`, and handing this container the
-model server's address undoes the isolation the network layout is for. Name
-the variables it needs.
+**The plan said `<dest_dir>/<file_id><ext>`. It is `<stage_dir>/<file_id><ext>`,
+and Audrey does the move.** The claim hands a directory and a `file_id`, not a
+path, because the extension is not known until yt-dlp has picked a container;
+the fetcher reports a `filename` whose extension is that same `<ext>`; the
+result route rebuilds both paths from it and fails the row if nothing is there.
+All of that is unchanged. What changed is which directory, for two reasons:
 
-## Step 3 — the upload page field
+1. **A partial download never exists at the path the row implies.** The plan
+   already asked for temp-then-rename; putting the temp path in its own
+   directory is the same idea with the failure mode removed rather than
+   avoided.
+2. **The uid forced it, and this is the part the plan missed.** `audrey-ai`
+   runs as root, so the user directories it creates are `root:root 0755`. A
+   non-root fetcher cannot write into them — so the plan's layout had exactly
+   two outcomes available: run the container with internet egress and a
+   downloader as root, or give it one directory it owns. One shared
+   `.staging` (mode 0777, leading dot so it can never collide with a
+   `sanitize_user` output) is the second.
+
+The gain is bigger than the fix. **Audrey is now the only writer of the user
+directories** — the same single-writer argument phase 33 made for sqlite and
+phase 34 expressed as a read-only mount on the worker — and verification
+happens *before* placement rather than after, so the final path means "passed
+every gate" at every instant. Compose mounts only that one directory, so the
+container with egress has no route to anybody's stored files at all.
+
+**`env_file: .env` is banned here**, as it is for media-worker, and it bites
+harder: that file carries `OLLAMA_HOST`, and this is the container that
+actually has a route to it.
+
+**mp4 or nothing.** `ALLOWED_VIDEO_MIMES` is exactly `{"video/mp4"}`, so the
+format selector prefers mp4 streams and `--remux-video mp4` catches the rest.
+Without it a webm download is refused by the same libmagic gate that stops an
+HTML error page — correctly, but with a message that reads as "the download
+broke". This is also why the image carries ffmpeg: the 720p cap needs a merge,
+and the remux needs a container rewrite. Both are stream copies.
+
+## Step 3 — the upload page field ✅ BUILT
 
 A URL input above the drop zone. On submit, `POST /v1/files/from-url`, then
 `refreshList()` — phase 40's polling already starts on its own when any row is
-`pending` or `processing`, and `fetching` joins that set.
+`pending` or `processing`, and both fetch states join that set.
 
-`statusCell` gains one case. Elapsed comes from the same `leased_at` /
-`server_time` skew correction already built; a download's elapsed time is the
-one thing a user watching a slow fetch actually wants.
+`statusCell` gains **two** cases, not one, and keeping them apart is the value:
+`queued to download` means no fetcher has picked it up, `downloading — 2m 14s`
+means bytes are moving. Collapsing them makes a stopped `media-fetcher` look
+exactly like a slow download. Elapsed comes from the same `leased_at` /
+`server_time` skew correction already built.
+
+Three smaller things the page needed:
+
+- **The link is shown on the row.** The filename is a placeholder until yt-dlp
+  reports the real title, so "is it fetching the video I meant?" is answerable
+  from the link and from nothing else.
+- **Size reads `—`, not `0 B`, before the download.** "0 B" is a measurement,
+  and printing one for a number nobody has taken yet gets read as a failure.
+- **The allowed hosts are published in `Limits` and named in the placeholder.**
+  Describing them invites a paste of something that is not one, and the refusal
+  then arrives after the click instead of before it. An empty list disables the
+  field rather than offering an input that always fails.
 
 **The failure text is the deliverable here, not the happy path.** Private
-video, region blocked, members-only, age-gated, live stream, deleted, "this
-video is unavailable" — these are the common cases, not edge cases, and they
-must land in `failure_reason` in the user's words. yt-dlp's stderr is close to
-usable; map the frequent ones and pass the rest through truncated rather than
-inventing a generic "download failed", which is the message that generates the
-support question this field exists to prevent.
+video, region blocked, members-only, age-gated, live stream, deleted — these
+are the common cases, and `friendly_reason` maps them to sentences. Unmapped
+output is **passed through truncated, not replaced**: the failure modes are not
+a closed set, and a new one should reach the user as whatever yt-dlp said
+rather than being flattened into a generic message that tells them nothing.
 
-## Step 4 — subtitles before whisper
+## Step 4 — subtitles before whisper ✅ BUILT
 
 The largest quality win in the phase, and it is nearly free.
 
-yt-dlp can fetch the caption track. Prefer **manual subtitles → auto-captions
-→ whisper**. Manual subs are human-authored and routinely better than whisper
-output, and both arrive in seconds against whisper's 74s for a 9-minute video.
+Prefer **manual subtitles → auto-captions → whisper**. Which one to ask for is
+decided from the `-J` metadata, never from what lands on disk: `--write-subs`
+and `--write-auto-subs` produce files with identical names, so asking for both
+and guessing which arrived is how a row ends up claiming a human wrote its
+auto-captions.
 
-The transport already exists: `IngestResultRequest.segments` is a list of
-`{t_start, t_end, text}`, which is exactly what a caption track is after
-parsing. A fetched transcript can be posted on the **fetch** result and the
-worker told to skip transcription — `segments` and `frames` are already
-independent, and a video with speech and no frames is already an ordinary
-successful job.
+The transport already existed. `TranscriptSegment` moved up the file so the
+fetch routes can name it — the same import-order lesson `JobResultResponse`
+taught in step 1 — and a caption track becomes exactly the object whisper
+produces, so chunking, the `[HH:MM:SS]` sidecar and the frame-description
+context did not have to learn a second shape.
 
-**Record which source produced the transcript.** "The transcript is wrong" has
-a completely different answer for auto-captions than for whisper, and without
-this field nobody can tell them apart after the fact.
+The handover needed one thing the plan did not mention: **the two stages never
+hold the row at the same time.** So the transcript is stored on it —
+`fetched_transcript`, JSON — written by `complete_fetch`, handed to the worker
+on its claim, and **cleared by `complete_job`**, by which point the text is
+chunked, indexed and in a sidecar and the column would be a third copy on a row
+that `SELECT *` reads on every claim. Deliberately *not* cleared by `fail_job`
+or the sweep: a retry should reuse the captions rather than fall back to
+whisper for a video that plainly has them.
 
-**Chapters, if present, are a free structural segmentation.** `chunk_segments`
-currently uses fixed token windows; chapter boundaries are authored semantic
-boundaries and are strictly better where they exist. This is worth doing but
-is not load-bearing for the phase — if it complicates step 4, defer it and say
-so.
+**`parse_vtt` is where the win is won or lost.** Two problems, both specific to
+auto-captions:
+
+- **Rolling repetition.** YouTube's captions "paint on" — each cue repeats the
+  tail of the one before so words appear to accumulate on screen. Parsed
+  literally, a ten-minute video says everything two or three times. That does
+  not merely read badly: a chunk of triplicated text matches a query about that
+  phrasing far more strongly than the sentence deserves. Deduplication is per
+  *line* against the previous cue, which is the level the repetition happens at.
+- **Granularity.** Cues arrive per phrase, sometimes per second. Adjacent ones
+  merge up to 5s so a caption track and a whisper transcript are the same kind
+  of object by the time anything else sees them.
+
+**Which source produced the transcript is recorded on the row**, in
+`transcript_source`, and shown in the file list. It is written by
+`complete_job` from what the **worker** reports, not from what the fetch
+offered — those differ the moment a claim carries captions and the worker
+transcribes anyway, and the point of the column is to be right. The fetcher may
+not claim `whisper`; the route refuses it, because that is the worker's answer
+and accepting it would let a row claim a transcript came from a model that was
+never run.
+
+**Chapters are DEFERRED, as the plan allowed.** `probe_url` carries them on
+`UrlInfo` and nothing reads them. Chapter-boundary chunking touches
+`chunk_segments`, which every text ingest path shares — that is a change to the
+retrieval quality of every document in the KB, made for videos, and it belongs
+in its own change with its own before/after rather than riding in on this one.
 
 ---
 
@@ -267,18 +367,33 @@ so.
 5. **The quota is enforced.** Fill an account near its ceiling, then paste a
    large video: it must be refused, and refused *before* the download.
 6. **A killed fetcher mid-download recovers** — the lease expires, the row is
-   swept, and nothing is left at the final path. This is the phase-35 crash
-   test with a different verb.
+   swept, the partial file is deleted from `.staging` on the next claim, and
+   nothing was ever at the final path. This is the phase-35 crash test with a
+   different verb. `docker kill media-fetcher` mid-download, then watch two
+   claim polls.
 7. **`media-worker` still cannot reach the internet.** `docker exec
    media-worker` and try. This phase adds a container with egress next to one
    that must not have it, and the invariant is worth re-proving once.
+8. **The staging directory is writable by the fetcher.** The one thing that is
+   a property of the deployment rather than of the code: `mkdir -p
+   /mnt/user/appdata/runtime/uploads/.staging` before the first `up`, or the
+   daemon creates it root-owned and the first download fails on permissions
+   until audrey-ai's next claim chmods it.
 
 ## Rollback
 
 Additive. The route is new, the container is new, the page field is new, and
 the state is in front of the existing machine rather than inside it. Not
-starting `media-fetcher` leaves rows stuck in `fetching` and nothing else
-broken; the sweep will fail them.
+starting `media-fetcher` leaves rows stuck in `fetch_pending` and nothing else
+broken; nothing is ever claimed, so nothing is ever swept.
+
+The one part that is *not* purely additive is step 4's touch on the ingest
+stage: `JobClaim` gained a `transcript` field and `IngestResultRequest` gained
+`transcript_source`. Both default to absent, and the worker treats an absent
+transcript as "transcribe it yourself" — which is what it did before — so an
+old worker image against a new Audrey degrades to whisper rather than failing.
+Setting `kb.fetch.allowed_hosts: []` disables the whole feature at the route
+without touching anything else.
 
 ---
 
