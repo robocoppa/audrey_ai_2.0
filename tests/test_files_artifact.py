@@ -206,13 +206,22 @@ class TestMissingArtifacts:
         # The genuinely-empty case: ready, a video, nothing extracted.
         detail = r.json()["detail"]
         assert "produced no transcript" in detail
-        # And it must NOT speculate. The first version offered two general
+        # It must NOT speculate. The first version offered two general
         # explanations ("a video with no speech has no transcript, and one
         # whose frames were all near-identical has no visual pass") as help. On
         # 2026-08-06 a model repeated them back as measured findings about the
         # file. An error message is evidence to whoever receives it.
         assert "near-identical" not in detail
         assert "do not guess" in detail
+        # And removing the speculation was not enough. On the re-run the same
+        # model described silent.mp4's contents anyway — "a summary suggests …
+        # revenue doubling since the speaker joined in 1988" — attributing to a
+        # summary that does not exist, material that belongs to the other
+        # video, after BOTH its get_file_text calls had 404'd. A message that
+        # merely withholds a cause leaves the model to fill the gap, so this
+        # one says what not to do.
+        assert "do not describe its contents" in detail
+        assert "another file" in detail
 
     async def test_an_unknown_filename_names_the_alternatives(
             self, client, db, tmp_path):

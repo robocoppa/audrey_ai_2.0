@@ -2088,8 +2088,11 @@ async def read_artifact(
             # it may only contain things that were actually checked.
             detail = (
                 f"{row['filename']!r} finished processing and produced no "
-                f"{artifact}, so there is nothing to read. Why is not recorded "
-                "— do not guess at a cause."
+                f"{artifact}. There is nothing to read and nothing is known "
+                f"about what this file contains. Report that it has no "
+                f"{artifact} and stop — do not describe its contents, do not "
+                "guess at a cause, and do not attribute anything to it from "
+                "another file or from its summary."
             )
         raise HTTPException(status_code=404, detail=detail) from None
 
