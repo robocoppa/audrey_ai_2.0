@@ -822,17 +822,36 @@ class TestExtractorArgsRideTheClaim:
     restart rather than an image build per attempt.
     """
 
-    def test_it_is_absent_by_default(self, client):
+    def test_an_unconfigured_deployment_still_gets_one_attempt(self, client):
         client.post("/v1/files/from-url", json={"url": URL})
         job = client.post("/v1/files/fetch/claim", headers=SVC).json()
-        # Empty leaves yt-dlp's own client selection alone, rather than pinning
-        # it to whatever looked right the day this shipped.
-        assert job["extractor_args"] == ""
+        # `[""]`, not `[]`. One attempt with no `--extractor-args` is yt-dlp's
+        # own behaviour; an empty list would be a downloader configured to try
+        # nothing. Unlike `allowed_hosts`, the safe direction here is to try —
+        # this is a workaround for someone else's rate limiting, not a
+        # security boundary.
+        assert job["extractor_args"] == [""]
 
-    def test_it_travels_with_the_job(self, db, tmp_path):
+    def test_the_whole_list_travels_with_the_job(self, db, tmp_path):
+        app = _build_app(db, tmp_path)
+        app.state.cfg.raw["kb"]["fetch"]["extractor_args"] = [
+            "youtube:player_client=android_vr", "youtube:player_client=tv", "",
+        ]
+        c = TestClient(app)
+        c.post("/v1/files/from-url", json={"url": URL})
+        job = c.post("/v1/files/fetch/claim", headers=SVC).json()
+        # Order is meaningful: the fetcher tries them in this sequence.
+        assert job["extractor_args"] == [
+            "youtube:player_client=android_vr", "youtube:player_client=tv", "",
+        ]
+
+    def test_the_older_single_string_spelling_still_works(self, db, tmp_path):
         app = _build_app(db, tmp_path)
         app.state.cfg.raw["kb"]["fetch"]["extractor_args"] = "youtube:player_client=tv"
         c = TestClient(app)
         c.post("/v1/files/from-url", json={"url": URL})
         job = c.post("/v1/files/fetch/claim", headers=SVC).json()
-        assert job["extractor_args"] == "youtube:player_client=tv"
+        # This setting shipped as a bare string before it was a list. A
+        # deployment whose config still says so must keep downloading rather
+        # than silently trying nothing.
+        assert job["extractor_args"] == ["youtube:player_client=tv"]

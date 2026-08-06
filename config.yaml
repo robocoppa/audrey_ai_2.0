@@ -791,7 +791,52 @@ kb:
     #
     # It rides the claim, so this takes effect on the next claim after
     # `docker compose restart audrey-ai` — no image rebuild.
-    extractor_args: "youtube:player_client=android_vr"
+    #
+    # **A list, tried in order, first success wins.** One client is a single
+    # point of failure with a manual fix: when YouTube stops serving it, every
+    # fetch fails at once and stays failed until someone edits this file.
+    # Walking a list turns that into a slower first download and a log line.
+    #
+    # The fetcher advances to the next entry only on failures another client
+    # could plausibly fix — a private video is private to all of them, and
+    # walking the list would spend a lease learning that six times.
+    #
+    # The final "" is yt-dlp's own default, kept last rather than dropped: it
+    # is the entry most likely to start working again after a yt-dlp bump.
+    extractor_args:
+      - "youtube:player_client=android_vr"
+      - "youtube:player_client=tv"
+      - "youtube:player_client=ios"
+      - "youtube:player_client=mweb"
+      - "youtube:player_client=web_safari"
+      - ""
+
+    # How many of the clients above one job may try before giving up.
+    #
+    # **Low on purpose.** Every extra client is another request made at the
+    # moment something is already wrong, and this deployment's whole risk
+    # posture is not looking like something worth blocking. Two covers the case
+    # that actually happens — one client retired, another still viable — and
+    # stops well short of sweeping the list.
+    #
+    # ⚠️ **Measured 2026-08-06: only `android_vr` works.** `tv`, `ios`, `mweb`
+    # and `web_safari` all failed a real download that day, and `default`
+    # failed on sustained transfers. So the entries below the first are
+    # *insurance against rotation*, not five working options — a client that is
+    # dead today may come back after a yt-dlp bump, which is the case this
+    # setting is buying.
+    #
+    # **Currently 1: fallback is OFF** (user's call, 2026-08-06). One attempt,
+    # a clear reason on the row, and a human edits `extractor_args` when
+    # YouTube moves. For a single-user box where someone notices within hours,
+    # that trade is the right way round — it costs downtime and saves requests
+    # at exactly the moment you least want to be making them.
+    #
+    # The fallback machinery stays in the fetcher and is inert at 1. Raise this
+    # to 2 if downtime starts costing more than the extra requests; nothing
+    # else needs changing, and it takes effect on the next claim after
+    # `docker compose restart audrey-ai`.
+    max_client_attempts: 1
 
 # ─── Tools (OpenAPI auto-discovery) ────────────────────────────────────
 tools:

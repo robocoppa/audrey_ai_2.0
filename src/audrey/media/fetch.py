@@ -100,7 +100,16 @@ class FetchRefusedError(RuntimeError):
 
     Too long, too large, or a site saying no. The message is shown to the user
     verbatim, so it is written for them rather than for a log.
+
+    `client_related` says whether trying a *different* download client could
+    plausibly succeed. It is the difference between a retry that might work and
+    six identical failures: a private video is private to every client, while a
+    403 on the media URL is entirely about which client asked.
     """
+
+    def __init__(self, message: str, *, client_related: bool = False) -> None:
+        super().__init__(message)
+        self.client_related = client_related
 
 
 class FetchFailedError(RuntimeError):
@@ -399,6 +408,36 @@ _REASON_MAP: tuple[tuple[str, str], ...] = (
 )
 
 
+#: Failures where a *different* download client could plausibly succeed.
+#:
+#: The discrimination matters more than the list. Without it, a private video
+#: would be attempted once per configured client — six identical refusals, six
+#: times the requests at YouTube, and a lease spent proving something the first
+#: attempt already knew. Everything here is a property of who asked; everything
+#: absent from it is a property of the video.
+_CLIENT_FAILURE_NEEDLES: tuple[str, ...] = (
+    "http error 403",
+    "not available on this app",
+    "sign in to confirm you're not a bot",
+    "unable to download video data",
+    "failed to extract any player response",
+    "nsig extraction failed",
+    # A client that does not offer the formats we asked for. Not a fact about
+    # the video — the next client lists a different set.
+    "requested format is not available",
+    # Age gates are enforced per client, so this is genuinely worth another
+    # attempt even though it reads like a property of the video.
+    "sign in to confirm your age",
+    "age-restricted",
+)
+
+
+def is_client_failure(stderr: str) -> bool:
+    """Could another download client plausibly get past this?"""
+    lowered = (stderr or "").lower()
+    return any(needle in lowered for needle in _CLIENT_FAILURE_NEEDLES)
+
+
 def friendly_reason(stderr: str, *, limit: int = 300) -> str:
     """Turn yt-dlp's stderr into a sentence the user can act on.
 
@@ -465,7 +504,10 @@ def probe_url(
     ]
     result = _run(argv, timeout=timeout_s)
     if result.returncode != 0:
-        raise FetchRefusedError(friendly_reason(result.stderr))
+        raise FetchRefusedError(
+            friendly_reason(result.stderr),
+            client_related=is_client_failure(result.stderr),
+        )
 
     try:
         meta = json.loads(result.stdout or "{}")
@@ -588,7 +630,9 @@ def download(
         argv, timeout=timeout_s, on_progress=on_progress,
     )
     if returncode != 0:
-        raise FetchRefusedError(friendly_reason(stderr))
+        raise FetchRefusedError(
+            friendly_reason(stderr), client_related=is_client_failure(stderr),
+        )
 
     path = Path(printed[-1]) if printed else None
     if path is None or not path.exists():

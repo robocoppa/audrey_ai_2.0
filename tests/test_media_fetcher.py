@@ -683,3 +683,199 @@ class TestABugDoesNotBecomeSilence:
         # right signal. Failing every queued URL on the way past is not.
         with pytest.raises(YtDlpMissingError):
             fetcher.run(endpoint="http://a", token=TOKEN, poll_seconds=0)
+
+
+CLIENTS = ["youtube:player_client=android_vr", "youtube:player_client=tv", ""]
+
+
+class TestClientFallback:
+    """Walking the client list when YouTube stops serving one.
+
+    The point is not the retry, it is *when* it retries. YouTube decides which
+    download clients it will serve and changes that on its own schedule; when
+    it does, every fetch fails at once and stays failed until someone edits
+    config. A list turns that outage into a slower first download.
+
+    What makes it affordable is the discrimination: a private video is private
+    to every client, and walking the list would spend a lease learning that six
+    times over — six times the requests, from a server that would rather not
+    look like something worth blocking.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_waiting(self, monkeypatch):
+        monkeypatch.setattr(fetcher.time, "sleep", lambda _s: None)
+
+    def _tries(self, monkeypatch, outcomes: dict[str, Exception | None]):
+        """Fail or succeed per client, recording the order they were tried."""
+        tried: list[str] = []
+
+        def fake_probe(_url, *, extractor_args="", **_kw):
+            tried.append(extractor_args)
+            problem = outcomes.get(extractor_args)
+            if problem is not None:
+                raise problem
+            return _info()
+
+        def fake_download(_url, stage_dir, file_id, *, extractor_args="", **_kw):
+            problem = outcomes.get(extractor_args)
+            if problem is not None:
+                raise problem
+            path = Path(stage_dir) / f"{file_id}.mp4"
+            path.write_bytes(b"video bytes")
+            return Downloaded(path=path)
+
+        monkeypatch.setattr(fetcher, "probe_url", fake_probe)
+        monkeypatch.setattr(fetcher, "download", fake_download)
+        return tried
+
+    def test_a_403_moves_on_to_the_next_client(self, job, posted, monkeypatch):
+        job["extractor_args"] = CLIENTS
+        tried = self._tries(monkeypatch, {
+            CLIENTS[0]: FetchRefusedError("403", client_related=True),
+        })
+        _run(job)
+        assert tried == [CLIENTS[0], CLIENTS[1]]
+        assert posted[-1][0].endswith("/result")
+
+    def test_a_private_video_stops_after_one_client(self, job, posted, monkeypatch):
+        job["extractor_args"] = CLIENTS
+        tried = self._tries(monkeypatch, {
+            c: FetchRefusedError("this video is private") for c in CLIENTS
+        })
+        _run(job)
+        # Every other client would say the same thing, more slowly and with
+        # three times the requests.
+        assert tried == [CLIENTS[0]]
+        assert "private" in posted[-1][1]["reason"]
+
+    def test_our_own_failures_do_not_walk_the_list_either(self, job, posted, monkeypatch):
+        job["extractor_args"] = CLIENTS
+        tried = self._tries(monkeypatch, {
+            c: FetchFailedError("the download did not finish in time") for c in CLIENTS
+        })
+        _run(job)
+        # A timeout is ours, not theirs. Another client is not the answer, and
+        # the lease has already been spent once.
+        assert tried == [CLIENTS[0]]
+
+    def test_exhausting_every_client_says_so(self, job, posted, monkeypatch):
+        job["extractor_args"] = CLIENTS
+        job["max_client_attempts"] = len(CLIENTS)
+        self._tries(monkeypatch, {
+            c: FetchRefusedError("403", client_related=True) for c in CLIENTS
+        })
+        _run(job)
+        reason = posted[-1][1]["reason"]
+        # The last client's message alone reads as a fact about the video. The
+        # news is that every way in was refused, which is a different thing to
+        # go and fix.
+        assert "tried 3 download clients" in reason
+        assert "server-side problem" in reason
+
+    def test_staging_is_cleared_between_attempts(self, job, dirs, posted, monkeypatch):
+        stage, _dest = dirs
+        job["extractor_args"] = CLIENTS
+        leftover = stage / f"{FILE_ID}.f137.mp4.part"
+        leftover.write_bytes(b"half a download from the failed client")
+        self._tries(monkeypatch, {
+            CLIENTS[0]: FetchRefusedError("403", client_related=True),
+        })
+        _run(job)
+        # A retry re-downloads from scratch. A stale `.part` under the same
+        # file_id would be picked up by the caption glob or confuse the size
+        # check on the way out.
+        assert not leftover.exists()
+
+    def test_one_client_configured_behaves_as_before(self, job, posted, monkeypatch):
+        job["extractor_args"] = [""]
+        tried = self._tries(monkeypatch, {})
+        _run(job)
+        assert tried == [""]
+        assert posted[-1][0].endswith("/result")
+
+
+class TestClientRing:
+    def test_the_winner_is_tried_first_next_time(self):
+        ring = fetcher.ClientRing(["a", "b", "c"])
+        ring.succeeded("c")
+        assert ring.candidates() == ["c", "a", "b"]
+
+    def test_a_winner_already_first_is_left_alone(self):
+        ring = fetcher.ClientRing(["a", "b"])
+        ring.succeeded("a")
+        assert ring.candidates() == ["a", "b"]
+
+    def test_an_empty_list_still_tries_once(self):
+        # `[""]` is yt-dlp's own default. A downloader configured to try
+        # nothing is not a safe default, it is a broken one.
+        assert fetcher.ClientRing([]).candidates() == [""]
+
+    def test_the_preference_survives_between_jobs(self):
+        # Not between restarts: losing it costs one wasted attempt on the next
+        # download, and persisting it would cost a file, a format, and a way
+        # for it to go stale.
+        assert fetcher._reordered(["a", "b", "c"], "b") == ["b", "a", "c"]
+        assert fetcher._reordered(["a", "b"], "gone") == ["a", "b"]
+        assert fetcher._reordered(["a", "b"], None) == ["a", "b"]
+
+
+class TestFallbackDepthIsBounded:
+    """How many clients one job may try, and why the number is small.
+
+    Every extra client is another request made at the moment something is
+    already wrong. The list exists to survive YouTube retiring a client, not to
+    sweep every option — and most of the configured entries were measured dead
+    the day they were written, so a deep sweep is mostly requests we already
+    know will fail.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_waiting(self, monkeypatch):
+        monkeypatch.setattr(fetcher.time, "sleep", lambda _s: None)
+
+    def _all_refuse(self, monkeypatch):
+        tried: list[str] = []
+
+        def fake_probe(_url, *, extractor_args="", **_kw):
+            tried.append(extractor_args)
+            raise FetchRefusedError("403", client_related=True)
+
+        monkeypatch.setattr(fetcher, "probe_url", fake_probe)
+        return tried
+
+    def test_the_default_depth_stops_at_two(self, job, posted, monkeypatch):
+        job["extractor_args"] = CLIENTS
+        job["max_client_attempts"] = 2
+        tried = self._all_refuse(monkeypatch)
+        _run(job)
+        assert len(tried) == 2
+
+    def test_one_disables_fallback_entirely(self, job, posted, monkeypatch):
+        job["extractor_args"] = CLIENTS
+        job["max_client_attempts"] = 1
+        tried = self._all_refuse(monkeypatch)
+        _run(job)
+        # A reasonable setting, not a degraded one: one attempt, a clear reason
+        # on the row, and a human edits the config when YouTube moves.
+        assert tried == [CLIENTS[0]]
+
+    def test_a_missing_or_zero_depth_never_means_zero_attempts(
+        self, job, posted, monkeypatch,
+    ):
+        job["extractor_args"] = CLIENTS
+        job["max_client_attempts"] = 0
+        tried = self._all_refuse(monkeypatch)
+        _run(job)
+        # A downloader configured to try nothing is not a safe default; it is
+        # a broken one that reports every video as unavailable.
+        assert len(tried) == 1
+
+    def test_the_reason_counts_what_was_actually_tried(self, job, posted, monkeypatch):
+        job["extractor_args"] = CLIENTS
+        job["max_client_attempts"] = 2
+        self._all_refuse(monkeypatch)
+        _run(job)
+        # Not "tried 3" when the depth allowed 2 — the message is the evidence
+        # someone will act on.
+        assert "tried 2 download clients" in posted[-1][1]["reason"]

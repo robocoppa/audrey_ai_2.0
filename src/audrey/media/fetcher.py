@@ -85,6 +85,49 @@ _MAX_TITLE_CHARS = 120
 PROGRESS_INTERVAL_S = 2.0
 
 
+#: Pause between download-client attempts.
+#:
+#: Deliberate rather than incidental. When a client stops working the fetcher
+#: walks the whole list, and doing that back-to-back turns one failed paste
+#: into a burst of near-identical requests — the behaviour most likely to make
+#: an automated client look like one worth blocking. Three seconds costs
+#: nothing on a path that is already minutes long.
+CLIENT_RETRY_DELAY_S = 3.0
+
+
+class ClientRing:
+    """The configured download clients, most-recently-successful first.
+
+    **This is the difference between "broken until someone notices" and
+    "recovered itself".** YouTube decides which clients it will serve, changes
+    that on its own schedule, and the symptom is every fetch failing at once —
+    so a single configured client is a single point of failure with a manual
+    fix. Walking a list turns that into a slower first download and a log line.
+
+    The ordering is remembered for the life of the process, not persisted: the
+    cost of getting it wrong is one wasted attempt on the next job, and a file
+    on disk to avoid that is more moving parts than the saving is worth. A
+    restart falls back to config order, which begins with the client that was
+    known good when it was written.
+    """
+
+    def __init__(self, clients: list[str]) -> None:
+        # An empty entry means "pass no --extractor-args", i.e. yt-dlp's own
+        # default. It is a legitimate candidate and belongs in the list rather
+        # than being a special case, so an empty config still tries once.
+        self._clients = list(clients) or [""]
+
+    def candidates(self) -> list[str]:
+        return list(self._clients)
+
+    def succeeded(self, client: str) -> None:
+        """Promote the client that worked, so the next job starts with it."""
+        if client in self._clients and self._clients[0] != client:
+            self._clients.remove(client)
+            self._clients.insert(0, client)
+            log.info("fetcher: preferring %r for subsequent jobs", client or "yt-dlp default")
+
+
 class _ProgressReporter:
     """Forwards download progress to Audrey, throttled, and keeps it monotonic.
 
@@ -213,7 +256,10 @@ def _clear_staging(stage_dir: Path, file_id: str) -> None:
         log.warning("fetcher: could not tidy staging for %s: %s", file_id, e)
 
 
-def handle_job(job: dict, *, endpoint: str, token: str, probe_timeout_s: float) -> None:
+def handle_job(
+    job: dict, *, endpoint: str, token: str, probe_timeout_s: float,
+    ring: ClientRing | None = None,
+) -> None:
     """Do one download and report it. Any failure is reported, never swallowed.
 
     A fetcher that dies without reporting leaves the row in `fetching` until
@@ -224,9 +270,12 @@ def handle_job(job: dict, *, endpoint: str, token: str, probe_timeout_s: float) 
     `YtDlpMissingError` is the exception, and propagates: it says the *image*
     is broken rather than the link, and failing rows for that would burn every
     queued URL's attempts while the image was being fixed.
+
+    **Each configured download client is tried in turn, but only for failures
+    another client could plausibly fix.** A private video is private to all of
+    them, and walking the list would spend a lease learning that six times.
     """
     file_id = job["file_id"]
-    url = job["source_url"]
     lease_id = job["lease_id"]
     stage_dir = Path(job["stage_dir"])
     started = time.monotonic()
@@ -234,63 +283,159 @@ def handle_job(job: dict, *, endpoint: str, token: str, probe_timeout_s: float) 
     lease_s = float(job.get("lease_seconds") or 0)
     max_bytes = int(job.get("max_bytes") or 0)
     max_duration_s = float(job.get("max_duration_s") or 0)
-    extractor_args = str(job.get("extractor_args") or "")
+    if ring is None:
+        ring = ClientRing(_configured_clients(job))
 
-    try:
-        info = probe_url(
-            url, timeout_s=probe_timeout_s, extractor_args=extractor_args,
-        )
-        check_limits(info, max_duration_s=max_duration_s, max_bytes=max_bytes)
+    # Bounded on purpose, and low. Every extra client is another request made
+    # at the moment something is already wrong, which is the worst time for a
+    # server whose risk posture is "does not look like something worth
+    # blocking". Depth 2 covers the case that actually happens — one client
+    # retired, another still viable — without sweeping a list whose later
+    # entries were already measured dead.
+    depth = max(1, int(job.get("max_client_attempts") or 1))
+    candidates = ring.candidates()[:depth]
+    last: Exception | None = None
 
-        caption_source = info.caption_choice()
-        budget = _remaining(lease_s, started)
-        log.info(
-            "fetcher: %s %r %.0fs captions=%s budget=%.0fs",
-            file_id, info.title or url, info.duration_s, caption_source or "none", budget,
-        )
-        if budget <= 0:
-            raise FetchFailedError(
-                "the lease ran out during the metadata pass — the server is "
-                "slower than this download was given time for",
+    for attempt, client in enumerate(candidates):
+        if attempt:
+            # Staging holds whatever the failed attempt wrote. A retry with a
+            # different client re-downloads from scratch, and a stale `.part`
+            # under the same file_id would be picked up by `_read_captions`
+            # or confuse the size check.
+            _clear_staging(stage_dir, file_id)
+            log.info(
+                "fetcher: %s retrying with client %r (%d of %d)",
+                file_id, client or "yt-dlp default", attempt + 1, len(candidates),
             )
+            time.sleep(CLIENT_RETRY_DELAY_S)
 
-        # Send the title before a byte moves. It is known from the metadata
-        # pass, and until it lands the row shows the video id — so "is it
-        # fetching the one I meant?" is unanswerable for the whole download,
-        # which is exactly when it is worth asking. The estimate goes with it
-        # so the first poll has a denominator; the real totals replace it
-        # within a couple of seconds.
-        progress = _ProgressReporter(endpoint, token, job, info.title)
-        progress.send(0, info.filesize_approx)
+        try:
+            got, info, progress = _attempt(
+                job, client,
+                endpoint=endpoint, token=token, probe_timeout_s=probe_timeout_s,
+                stage_dir=stage_dir, started=started, lease_s=lease_s,
+                max_bytes=max_bytes, max_duration_s=max_duration_s,
+            )
+        except FetchRefusedError as e:
+            last = e
+            if not e.client_related:
+                # A fact about the video. Every other client will say the same
+                # thing, more slowly.
+                break
+            log.info("fetcher: %s client %r refused: %s", file_id, client, e)
+            continue
+        except FetchFailedError as e:
+            # Ours, not theirs — a timeout or an unreadable response. Another
+            # client is not the answer.
+            last = e
+            break
+        except YtDlpMissingError as e:
+            log.error("fetcher: %s", e)
+            raise
 
-        got = download(
-            url, stage_dir, file_id,
-            timeout_s=budget, max_bytes=max_bytes,
-            caption_source=caption_source,
-            extractor_args=extractor_args,
-            on_progress=progress,
-        )
-        # How many progress updates the downloader actually produced. Logged
-        # because "no bytes on the page" has two very different causes — the
-        # channel being broken and yt-dlp emitting nothing — and without this
-        # number they look identical from the outside. `send()` only logs
-        # failures, so a working channel is otherwise silent.
+        ring.succeeded(client)
         log.info(
-            "fetcher: %s downloaded, %d progress update(s) from yt-dlp",
-            file_id, progress.calls,
+            "fetcher: %s downloaded with client %r, %d progress update(s)",
+            file_id, client or "yt-dlp default", progress.calls,
         )
-    except (FetchRefusedError, FetchFailedError) as e:
-        _report_failure(endpoint, token, file_id, lease_id, str(e))
-        _clear_staging(stage_dir, file_id)
+        try:
+            _finish(got, job, info, endpoint=endpoint, token=token, max_bytes=max_bytes)
+        finally:
+            _clear_staging(stage_dir, file_id)
         return
-    except YtDlpMissingError as e:
-        log.error("fetcher: %s", e)
-        raise
 
-    try:
-        _finish(got, job, info, endpoint=endpoint, token=token, max_bytes=max_bytes)
-    finally:
-        _clear_staging(stage_dir, file_id)
+    _report_failure(
+        endpoint, token, file_id, lease_id, _exhausted_reason(last, candidates),
+    )
+    _clear_staging(stage_dir, file_id)
+
+
+def _configured_clients(job: dict) -> list[str]:
+    """The claim's client list, tolerating the single-string spelling.
+
+    `kb.fetch.extractor_args` was a plain string before it was a list, and a
+    deployment whose config still says so must keep working rather than
+    silently trying no clients at all.
+    """
+    raw = job.get("extractor_args")
+    if isinstance(raw, str):
+        return [raw]
+    return [str(c or "") for c in (raw or [])]
+
+
+def _reordered(clients: list[str], preferred: str | None) -> list[str]:
+    """Put the last client that worked first, if it is still configured."""
+    if preferred is None or preferred not in clients:
+        return clients
+    return [preferred, *[c for c in clients if c != preferred]]
+
+
+def _exhausted_reason(last: Exception | None, candidates: list[str]) -> str:
+    """What to put on the row when nothing worked.
+
+    When several clients were tried and all refused, the last one's message is
+    true but misleading on its own — it reads as a fact about the video when
+    the news is that *every* way in was refused. Saying how many were tried is
+    what turns "this video is unavailable" into "YouTube is not serving this
+    server", which is a different thing to go and fix.
+    """
+    detail = str(last) if last else "the download did not produce a file"
+    if len(candidates) > 1 and isinstance(last, FetchRefusedError) and last.client_related:
+        return (
+            f"{detail} — tried {len(candidates)} download clients and YouTube "
+            "refused all of them, so this is very likely a server-side problem "
+            "rather than a problem with this video"
+        )
+    return detail
+
+
+def _attempt(
+    job: dict, client: str, *, endpoint: str, token: str, probe_timeout_s: float,
+    stage_dir: Path, started: float, lease_s: float,
+    max_bytes: int, max_duration_s: float,
+) -> tuple[Downloaded, UrlInfo, _ProgressReporter]:
+    """One probe-and-download pass with a single download client.
+
+    Probe and download use the **same** client deliberately: the client decides
+    which formats are listed, so choosing captions and limits from one client's
+    metadata and then fetching with another means acting on a listing that no
+    longer applies.
+    """
+    file_id = job["file_id"]
+    url = job["source_url"]
+
+    info = probe_url(url, timeout_s=probe_timeout_s, extractor_args=client)
+    check_limits(info, max_duration_s=max_duration_s, max_bytes=max_bytes)
+
+    caption_source = info.caption_choice()
+    budget = _remaining(lease_s, started)
+    log.info(
+        "fetcher: %s %r %.0fs captions=%s client=%s budget=%.0fs",
+        file_id, info.title or url, info.duration_s, caption_source or "none",
+        client or "yt-dlp default", budget,
+    )
+    if budget <= 0:
+        raise FetchFailedError(
+            "the lease ran out before the download could start — the server is "
+            "slower than this download was given time for",
+        )
+
+    # Send the title before a byte moves. It is known from the metadata pass,
+    # and until it lands the row shows the video id — so "is it fetching the
+    # one I meant?" is unanswerable for the whole download, which is exactly
+    # when it is worth asking. The estimate goes with it so the first poll has
+    # a denominator; the real totals replace it within a couple of seconds.
+    progress = _ProgressReporter(endpoint, token, job, info.title)
+    progress.send(0, info.filesize_approx)
+
+    got = download(
+        url, stage_dir, file_id,
+        timeout_s=budget, max_bytes=max_bytes,
+        caption_source=caption_source,
+        extractor_args=client,
+        on_progress=progress,
+    )
+    return got, info, progress
 
 
 def _finish(
@@ -398,6 +543,10 @@ def run(
     log.info("fetcher: polling %s every %ds", endpoint, poll_seconds)
 
     idle_logged = False
+    # Survives between jobs, not between restarts. Losing it costs one wasted
+    # attempt on the next download; persisting it would cost a file, a format
+    # and a way for it to go stale.
+    preferred: str | None = None
     while not stopping.requested:
         try:
             status, job = post(endpoint, "/v1/files/fetch/claim", token, None)
@@ -428,10 +577,17 @@ def run(
             "fetcher: claimed %s (attempt %s) %r",
             job.get("file_id"), job.get("attempts"), job.get("source_url"),
         )
+        # One ring per job, seeded from the claim, but ordered by whatever
+        # worked last time. The claim is the source of truth for *which*
+        # clients exist — config can change under a long-running fetcher — and
+        # the remembered order is only a preference among them.
+        ring = ClientRing(_reordered(_configured_clients(job), preferred))
         try:
             handle_job(
-                job, endpoint=endpoint, token=token, probe_timeout_s=probe_timeout_s,
+                job, endpoint=endpoint, token=token,
+                probe_timeout_s=probe_timeout_s, ring=ring,
             )
+            preferred = ring.candidates()[0]
         except YtDlpMissingError:
             # The image is built wrong. Crash-looping is the right signal for
             # that — it shows in `docker ps` and it is fixed by rebuilding, not

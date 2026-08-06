@@ -38,6 +38,7 @@ from audrey.media.fetch import (
     check_limits,
     download,
     friendly_reason,
+    is_client_failure,
     parse_progress_line,
     parse_vtt,
     probe_url,
@@ -759,3 +760,60 @@ class TestExtractorArgs:
         # config edit and an afternoon.
         assert "extractor_args" in reason
         assert "not a problem with the link" in reason
+
+
+class TestClientFailureDiscrimination:
+    """Which failures are worth trying another download client for.
+
+    The list matters less than the split. Without it, a private video would be
+    attempted once per configured client — identical refusals, several times
+    the requests at YouTube, and a lease spent proving what the first attempt
+    already knew.
+    """
+
+    @pytest.mark.parametrize("stderr", [
+        "ERROR: unable to download video data: HTTP Error 403: Forbidden",
+        "ERROR: [youtube] x: The following content is not available on this app",
+        "ERROR: [youtube] x: Sign in to confirm you're not a bot",
+        "ERROR: [youtube] x: Requested format is not available",
+        "ERROR: [youtube] x: Sign in to confirm your age",
+        "ERROR: [youtube] x: nsig extraction failed",
+    ])
+    def test_these_are_worth_another_client(self, stderr):
+        assert is_client_failure(stderr)
+
+    @pytest.mark.parametrize("stderr", [
+        "ERROR: [youtube] x: Private video",
+        "ERROR: [youtube] x: Video unavailable",
+        "ERROR: [youtube] x: This video has been removed by the uploader",
+        "ERROR: [youtube] x: The uploader has not made this video available in your country",
+        "ERROR: [youtube] x: This live event will begin in 3 hours",
+    ])
+    def test_these_are_facts_about_the_video(self, stderr):
+        # Every client will say the same thing. Retrying is pure cost, paid in
+        # requests to a service that would rather not see them.
+        assert not is_client_failure(stderr)
+
+    def test_a_refusal_carries_the_verdict_with_it(self, tmp_path):
+        binary = _fake_ytdlp(tmp_path, """
+            import sys
+            print("ERROR: unable to download video data: HTTP Error 403: Forbidden",
+                  file=sys.stderr)
+            sys.exit(1)
+        """)
+        with pytest.raises(FetchRefusedError) as e:
+            probe_url(URL, binary=binary)
+        # The fetcher reads this to decide whether to walk the list, so it has
+        # to travel with the exception rather than be re-derived from a message
+        # that has already been rewritten for a human.
+        assert e.value.client_related is True
+
+    def test_a_video_level_refusal_says_not_to_bother(self, tmp_path):
+        binary = _fake_ytdlp(tmp_path, """
+            import sys
+            print("ERROR: [youtube] x: Private video", file=sys.stderr)
+            sys.exit(1)
+        """)
+        with pytest.raises(FetchRefusedError) as e:
+            probe_url(URL, binary=binary)
+        assert e.value.client_related is False

@@ -1043,6 +1043,25 @@ async def _sweep_fetch_staging(request: Request, db: UploadsDB) -> int:
     return removed
 
 
+def _fetch_clients(request: Request) -> list[str]:
+    """Download clients to try, from `kb.fetch.extractor_args`.
+
+    Accepts a list or a bare string — the setting was a single value before it
+    was a list, and a deployment whose `config.yaml` still says so must keep
+    downloading rather than silently trying nothing.
+
+    An empty list yields `[""]`, one attempt with no `--extractor-args` at all,
+    which is yt-dlp's own default behaviour. Unlike `allowed_hosts`, the safe
+    direction here is to try rather than to refuse: this setting is a
+    workaround for someone else's rate limiting, not a security boundary.
+    """
+    raw = _fetch_cfg(request).get("extractor_args") or []
+    if isinstance(raw, str):
+        raw = [raw]
+    clients = [str(c or "").strip() for c in raw]
+    return clients or [""]
+
+
 def _fetch_lease_minutes(request: Request) -> int:
     return int(_fetch_cfg(request).get("lease_minutes", 20))
 
@@ -1205,16 +1224,24 @@ class FetchClaim(BaseModel):
     # Refuse a six-hour stream from the metadata pass, before a byte is
     # downloaded. 0 disables the check.
     max_duration_s: float = 0.0
-    # Passed straight to yt-dlp's `--extractor-args`, empty by default.
+    # Download clients to try, in order, each passed to yt-dlp's
+    # `--extractor-args`. The fetcher moves to the next one only on a failure
+    # another client could plausibly fix — a private video is private to all of
+    # them.
     #
-    # Rides the claim rather than living in the fetcher's environment for the
-    # same reason every other cap here does — but this one earns it hardest.
-    # **YouTube changes which download client it will serve on its own
-    # schedule**, and the symptom is a 403 on the media URL after a metadata
-    # pass that worked. Config-driven means finding the value that works costs
-    # a `config.yaml` edit and an audrey-ai restart, instead of a fetcher
-    # image rebuild per attempt.
-    extractor_args: str = ""
+    # **A list rather than a value, because one client is a single point of
+    # failure with a manual fix.** YouTube decides which clients it will serve
+    # and changes that on its own schedule; when it does, every fetch fails at
+    # once. Walking a list turns that outage into a slower first download.
+    #
+    # Rides the claim for the same reason every other cap here does, and this
+    # one earns it hardest: changing the list costs a `config.yaml` edit and an
+    # audrey-ai restart rather than a fetcher image rebuild per attempt.
+    extractor_args: list[str] = []
+    # How many of them a single job may try. See `kb.fetch.max_client_attempts`
+    # — 1 disables fallback entirely, which is a reasonable setting rather than
+    # a degraded one.
+    max_client_attempts: int = 2
 
 
 #: Transcript provenance values `fetch/{id}/result` will accept (Phase 41
@@ -1306,7 +1333,8 @@ async def claim_fetch(
         lease_seconds=_fetch_lease_minutes(request) * 60,
         max_bytes=_max_fetch_bytes(request),
         max_duration_s=float(cfg.get("max_duration_s", 0) or 0),
-        extractor_args=str(cfg.get("extractor_args", "") or ""),
+        extractor_args=_fetch_clients(request),
+        max_client_attempts=max(1, int(cfg.get("max_client_attempts", 2) or 1)),
     )
 
 
