@@ -154,6 +154,40 @@ def _kb_min_score(request: Request) -> float:
     return float((cfg.raw.get("kb", {}) or {}).get("min_score", 0.0))
 
 
+#: The floors, disabled. `-inf` rather than 0.0 because a cosine can be
+#: negative and `0.0` would still be a filter — a small one, applied for no
+#: reason, in the one case where filtering is what we are trying not to do.
+_NO_FLOOR = float("-inf")
+_NO_OVERLAP = 0.0
+
+
+def _floors_for(scope: SearchScope | None, min_score: float,
+                min_overlap: float) -> tuple[float, float]:
+    """The evidence floors to apply, relaxed when the user named the file.
+
+    `kb.min_score` and `hybrid.min_term_overlap` exist to stop a *global*
+    search returning the least-irrelevant thing in the corpus — the 2026-07-15
+    trace run, where a vaccine query came back with PowerApps and
+    Forest-Service documents that then read as real sources.
+
+    **A search scoped to file_ids has no such corpus to defend against.** Every
+    candidate is a chunk of a file the user named, so the worst hit available
+    is the least relevant part of the right document, which is still about the
+    right document. Applying a global-junk rule there deletes evidence to
+    prevent a failure the scope has already made impossible: 2026-08-06's §3b
+    run asked a retirement question against a video entirely about retirement
+    and got `top_k=5 -> 2 hits`, the other three cut by these floors.
+
+    ⚠️ **`artifact` scoping is deliberately NOT enough.** `artifact=transcript`
+    narrows to a kind of chunk across every file the user has, which is still a
+    corpus-wide search and still needs the floors. Only naming files bounds the
+    candidate set to something the user chose.
+    """
+    if scope is not None and scope.file_ids:
+        return _NO_FLOOR, _NO_OVERLAP
+    return min_score, min_overlap
+
+
 _NOTICE_MAX_NAMES = 20
 
 
@@ -200,6 +234,12 @@ def _scope_label(req: TextQuery, scope: SearchScope | None) -> str:
         parts.append(f"file={req.filename!r}({n} id{'s' if n != 1 else ''})")
     if scope.artifact:
         parts.append(f"artifact={scope.artifact}")
+    # Say when the evidence floors were stood down. A scoped search returning
+    # more than it used to is otherwise indistinguishable from a corpus that
+    # grew, and the whole §3b lesson was that behaviour nothing logs cannot be
+    # argued about afterwards.
+    if scope.file_ids:
+        parts.append("floors=off")
     return "scope=" + (" ".join(parts) if parts else "none")
 
 
@@ -364,6 +404,11 @@ async def _search_text_merged(
     nearest ones are below the floor. `0.0` (the default) keeps every hit and
     fetches exactly `top_k`, so this is a no-op until tuned.
     """
+    # A search the user scoped to named files needs no floor — see
+    # `_floors_for`. It also needs no over-fetch as a result: the over-fetch
+    # exists to survive the floor rejecting near neighbours, and nothing is
+    # being rejected.
+    min_score, _ = _floors_for(scope, min_score, 0.0)
     # Over-fetch when a floor is active so below-floor near-neighbours can't
     # starve real hits ranked just past top_k; cap the fetch so a huge top_k
     # can't balloon the Qdrant scan. No floor → fetch exactly top_k (unchanged).
@@ -435,9 +480,11 @@ async def _search_text_hybrid(
     fused = reciprocal_rank_fusion(
         dense, lexical, rrf_k=int(cfg.get("rrf_k", RRF_K)), query=query,
     )
-    min_overlap = float(cfg.get("min_term_overlap", 0.7))
+    floor, min_overlap = _floors_for(
+        scope, min_score, float(cfg.get("min_term_overlap", 0.7)),
+    )
     kept = [f for f in fused if passes_evidence(
-        f, min_score=min_score, min_overlap=min_overlap)]
+        f, min_score=floor, min_overlap=min_overlap)]
 
     # Report the fused score, not the originating retriever's.
     #

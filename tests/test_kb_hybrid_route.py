@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from audrey.kb.qdrant import KBHit
+from audrey.kb.qdrant import KBHit, SearchScope
 from audrey.routes.kb import _search_text_hybrid
 
 
@@ -304,3 +304,57 @@ class TestConfigWiring:
         assert hybrid["enabled"] is True
         assert hybrid["rrf_k"] == 60
         assert 0.0 < hybrid["min_term_overlap"] <= 1.0
+
+
+class TestTheFloorsStandDownForAScopedSearch:
+    """2026-08-06. Both evidence rules exist to stop a GLOBAL search returning
+    the least-irrelevant thing in the corpus. A search the user scoped to named
+    files has no such corpus — every candidate is a chunk of a file they chose.
+
+    §3b measured the cost of applying them anyway: `top_k=5 -> 2 hits` on a
+    video whose entire subject was the thing being asked about.
+    """
+
+    async def test_a_weak_chunk_of_the_named_file_is_kept(self):
+        q = _FakeQdrant(
+            user_dense=[_hit("vid.mp4", "and then we all went home", 0.21)],
+            user_lexical=[],
+            has_user_collection=True,
+        )
+        hits, _ = await _search_text_hybrid(
+            q, [0.0], query="what did they say about the pension scheme",
+            top_k=5, user="a@b.c", min_score=0.53, cfg=CFG,
+            scope=SearchScope(file_ids=["vid-1"]),
+        )
+        # Neither rule would pass this: the cosine is far below 0.53 and the
+        # chunk shares none of the query's terms. It is still part of the file
+        # the user asked about, which is the only thing on offer.
+        assert [h.source for h in hits] == ["vid.mp4"]
+
+    async def test_the_same_hit_is_still_cut_from_an_unscoped_search(self):
+        q = _FakeQdrant(
+            dense={"a": _hit("random.pdf", "and then we all went home", 0.21)},
+            lexical={},
+        )
+        hits, _ = await _search_text_hybrid(
+            q, [0.0], query="what did they say about the pension scheme",
+            top_k=5, user=None, min_score=0.53, cfg=CFG,
+        )
+        # The 2026-07-15 failure, unchanged: without a scope this is exactly
+        # the least-irrelevant junk the floors were built to withhold.
+        assert hits == []
+
+    async def test_artifact_alone_does_not_relax_anything(self):
+        q = _FakeQdrant(
+            user_dense=[_hit("random.mp4", "and then we all went home", 0.21)],
+            user_lexical=[],
+            has_user_collection=True,
+        )
+        hits, _ = await _search_text_hybrid(
+            q, [0.0], query="what did they say about the pension scheme",
+            top_k=5, user="a@b.c", min_score=0.53, cfg=CFG,
+            scope=SearchScope(artifact="transcript"),
+        )
+        # `artifact=transcript` narrows to a KIND of chunk across every file
+        # the user has. Still corpus-wide, still needs the floors.
+        assert hits == []
