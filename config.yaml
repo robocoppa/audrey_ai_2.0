@@ -280,7 +280,26 @@ agentic:
   react:
     max_rounds: 3
     compress_after_round: 2
-    max_tool_result_chars: 2000
+    # 2000 → 6000 (2026-08-05), and this number had gone stale rather than
+    # been wrong. It was set when every tool returned a snippet: a web_search
+    # result is a title and ~150 chars. Video ingest then started producing
+    # 250-token transcript chunks, and `tests/test_tool_truncation.py`
+    # measures what that does — at 2000 chars a `kb_search` over a transcript
+    # delivers **1 of 20 hits, at every top_k**. A model asked "what did they
+    # say in the video" was answering from 992 characters and correctly
+    # reporting that it could only give a partial excerpt.
+    #
+    # The other roles were each raised after hitting this same wall in their
+    # own way — deep_worker to 4000 (2026-07-21, workers narrating stubs as
+    # "empty results"), research_worker to 6000. **The fast path was left at
+    # the default and it is the one every ordinary chat turn uses.**
+    #
+    # 6000 buys 4 transcript hits instead of 1. The cost is context: worst
+    # case is `compress_keep_last` verbatim tool messages at this size, and
+    # after `compress_after_round` that is 1. ⚠️ Per the A-B-A rule this wants
+    # a before/after/before check rather than being trusted on arithmetic —
+    # the measurement says what fits, not whether answers got better.
+    max_tool_result_chars: 6000
     # How many *most-recent* `role=tool` messages to keep verbatim once
     # compression kicks in. Older tool messages collapse to a one-line
     # stub. Default 1: the model only ever needs the immediately

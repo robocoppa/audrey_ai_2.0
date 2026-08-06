@@ -194,7 +194,7 @@ description matching the user's query.
 
 Audrey runs `dispatch_one` (Lesson 9 §2.6), gets the search results,
 and packages them as a new message via `to_tool_message` —
-[`tools/dispatch.py:245`](../../src/audrey/tools/dispatch.py#L245):
+[`tools/dispatch.py:245`](../../src/audrey/tools/dispatch.py#L334):
 
 ```python
 def to_tool_message(result: ToolResult) -> dict[str, Any]:

@@ -60,20 +60,24 @@ real failure seen or predicted:
 
 ## What this does NOT fix
 
-**"Give me the transcript" — and that turned out to be a real question people
-ask.** Observed 2026-08-05: asked for the transcript of a named video, the
-model returned a partial excerpt and invented a mechanism to excuse it ("system
-limitations … request it again in a new session"). No prompt fixes this,
-because `kb_search` returns at most 20 chunks and **no route serves a whole
-file** — the `.transcript.txt` sidecar is written on ingest and never read
-back. A specialist prompt aimed at this gap would produce a better-worded
-version of the same wrong answer.
+**"Give me the transcript" — and no prompt can fix it.** Observed 2026-08-05:
+asked for the transcript of a named video, the model returned a partial excerpt
+and said it could "only provide a partial excerpt" because of "system
+limitations".
 
-That is a separate build — an artifact-read route plus a `get_file_text` tool,
-whose hard part is the context budget rather than the plumbing — and it is
-tracked in `PROJECT_STATE.md`. Worth knowing here because it is the most
-obvious thing to ask a "video specialist", and shipping one that still cannot
-answer it would look like the specialist is broken.
+**It was telling the truth.** `agentic.react.max_tool_result_chars` is 2000 on
+the fast path, and a transcript chunk is ~992 chars — so a `kb_search` result
+keeps **~1.7 hits regardless of `top_k`**, and the rest becomes a bare
+`…[truncated]` the model has to interpret. Raising `top_k` returns no more
+text. A specialist prompt aimed at this gap would produce a better-worded
+version of the same truncated answer, and telling a specialist to "ask for more
+chunks" would make it strictly worse by burning rounds for nothing.
+
+The fix is a budget and a marker that says what was lost, then an artifact-read
+route — tracked in `PROJECT_STATE.md`, and **it should land before this phase
+is evaluated**, or the eval measures the cap rather than the prompt. Worth
+knowing here because "what did they say" is the most obvious thing to ask a
+video specialist, and one that answers it from 1.7 chunks looks broken.
 
 **`audrey_auto` users get none of it.** If the general path over-scopes or
 fails to chain the two tools, that is a tool-description problem and has to be

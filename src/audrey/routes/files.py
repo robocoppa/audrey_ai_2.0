@@ -1938,6 +1938,177 @@ async def list_files_for_user(
     return ServiceListResponse(user=user, files=files)
 
 
+# ─── Reading an artifact back (2026-08-05) ────────────────────────────
+#
+# Ingest writes three sidecars beside the source and, until this route, nothing
+# ever read any of them back. "Give me the transcript" is the most obvious
+# question to ask of an ingested video and the only answer available was
+# `kb_search`, which returns ranked fragments — at the fast path's cap, one
+# 992-char chunk. A model asked for a transcript reported that it could give
+# only a partial excerpt, which was true, and then invented a way to ask for
+# the rest, which was not.
+#
+# Paged rather than whole, and that is not a limitation to apologise for. A
+# two-hour transcript cannot enter a chat turn at any budget, so the choice is
+# between an honest page with a stated position and a silent truncation. The
+# tool asks for a range and is told where it is in the document.
+
+#: `artifact` names as the Qdrant payload spells them → the sidecar on disk.
+#: **`visual` is written to `.frames.txt`**, and the mismatch is deliberate
+#: history rather than a bug: the payload names what the text *is* (a visual
+#: description) and the file names where it came *from* (keyframes). Anything
+#: reading one by the other's name finds nothing, so the map is explicit.
+_ARTIFACT_SIDECARS: dict[str, str] = {
+    "transcript": "transcript.txt",
+    "visual": "frames.txt",
+    "summary": "summary.txt",
+}
+
+
+class ArtifactRequest(BaseModel):
+    user: str
+    filename: str
+    artifact: str = "transcript"
+    offset: int = 0
+    limit: int = 4000
+
+
+class ArtifactResponse(BaseModel):
+    filename: str
+    artifact: str
+    text: str
+    offset: int
+    # Where a follow-up call should start, or None at the end of the document.
+    # An explicit end marker rather than leaving the caller to compare
+    # `offset + len(text)` against `total_chars`: the whole failure this route
+    # exists to fix was a model reasoning about how much it was missing.
+    next_offset: int | None
+    total_chars: int
+    note: str = ""
+
+
+@router.post("/artifact", response_model=ArtifactResponse)
+async def read_artifact(
+    body: ArtifactRequest,
+    request: Request,
+    _: None = Depends(require_service),
+) -> ArtifactResponse:
+    """SERVICE: one page of a file's transcript, visual descriptions or summary.
+
+    `require_service` and a user named in the body, exactly like
+    `POST /v1/files/list` — and with exactly the same second half: the
+    dispatcher's `_USER_SCOPED_TOOLS` overwrites the model-supplied `user`.
+    **Both halves are required.** This route hands back a user's document
+    contents verbatim, so without the dispatcher's overwrite a prompt naming
+    another address reads their transcripts.
+
+    Pages are snapped to a line boundary. Transcript lines are `[00:04:12]
+    text`, so a page cut mid-line hands the model a fragment with no timestamp
+    and half a sentence — and the model cannot tell that from the real end of
+    the document.
+    """
+    user = body.user.strip()
+    if not user:
+        raise HTTPException(status_code=422, detail="user is required.")
+
+    artifact = body.artifact.strip().lower() or "transcript"
+    if artifact not in _ARTIFACT_SIDECARS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Unknown artifact {artifact!r}. Available: "
+                f"{', '.join(sorted(_ARTIFACT_SIDECARS))}."
+            ),
+        )
+
+    db = _get_uploads_db(request)
+    wanted = body.filename.strip().casefold()
+    rows = [r for r in await db.list_user(user)
+            if str(r["filename"]).strip().casefold() == wanted]
+    if not rows:
+        # Name the alternatives rather than only denying, the same way
+        # `_unknown_file_notice` does for a scoped search. A model that
+        # mistyped a filename can correct itself in one turn; one told only
+        # "not found" reports the file as missing.
+        names = sorted({str(r["filename"]) for r in await db.list_user(user)})
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No file named {body.filename!r}. You have: "
+                f"{', '.join(names) if names else '(nothing uploaded)'}."
+            ),
+        )
+
+    # Newest first — `list_user` orders by `uploaded_at DESC`, so a filename
+    # reused across two uploads resolves to the more recent one. Said out loud
+    # in `note`, because silently picking one of two identically named files is
+    # how a confident answer comes from the wrong source.
+    row = rows[0]
+    note = ""
+    if len(rows) > 1:
+        note = (
+            f"{len(rows)} files are named {body.filename!r}; this is the most "
+            f"recent, uploaded {row['uploaded_at']}. "
+        )
+
+    path = (
+        _upload_root(request) / sanitize_user(user)
+        / f"{row['file_id']}.{_ARTIFACT_SIDECARS[artifact]}"
+    )
+    try:
+        text = await asyncio.to_thread(path.read_text, "utf-8")
+    except OSError:
+        # Distinguish the three reasons this file is absent, because they need
+        # three different answers and a bare 404 gets reported as "the video
+        # has no transcript" for all of them.
+        status = str(row["status"])
+        if status != "ready":
+            detail = (
+                f"{row['filename']!r} is {status}, so it has no {artifact} yet."
+            )
+        elif str(row["kind"]) != "video":
+            detail = (
+                f"{row['filename']!r} is a {row['kind']} file — {artifact} "
+                "exists only for video."
+            )
+        else:
+            detail = (
+                f"{row['filename']!r} finished processing but produced no "
+                f"{artifact}. A video with no speech has no transcript, and one "
+                "whose frames were all near-identical has no visual pass."
+            )
+        raise HTTPException(status_code=404, detail=detail) from None
+
+    total = len(text)
+    offset = max(0, min(body.offset, total))
+    limit = max(1, body.limit)
+    end = min(offset + limit, total)
+    # Snap forward to the end of the line so a page break lands between
+    # transcript lines rather than inside one. Only when there is more to come;
+    # at the end of the document there is nothing to snap to.
+    if end < total:
+        newline = text.find("\n", end)
+        end = total if newline == -1 else newline + 1
+
+    page = text[offset:end]
+    next_offset = end if end < total else None
+    if next_offset is not None:
+        note += (
+            f"This is characters {offset:,}-{end:,} of {total:,}. Call again "
+            f"with offset={end} for the next page."
+        )
+
+    log.info(
+        "files: artifact read user=%s file=%r artifact=%s %d-%d of %d",
+        user, row["filename"], artifact, offset, end, total,
+    )
+    return ArtifactResponse(
+        filename=str(row["filename"]), artifact=artifact, text=page,
+        offset=offset, next_offset=next_offset, total_chars=total,
+        note=note.strip(),
+    )
+
+
 @router.delete("/{file_id}", response_model=DeleteResponse)
 async def delete_file(
     file_id: str, request: Request, me: AuthedUser = Depends(require_user),

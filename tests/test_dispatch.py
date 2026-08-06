@@ -396,8 +396,18 @@ async def test_dispatch_one_http_4xx_returns_error_result():
 
 
 async def test_dispatch_one_truncates_oversize_responses():
-    """Long responses get cut at `max_result_chars` with a visible
-    `…[truncated]` marker so the model knows it didn't see everything."""
+    """Long responses get cut at `max_result_chars`, saying how much was lost.
+
+    This used to assert a bare `…[truncated]`, and that marker turned out to be
+    actively harmful: it said a cut had happened and nothing else, so on
+    2026-08-05 a model reasonably inferred it should ask again with a bigger
+    `top_k` — which returns an identical amount of text, because the cap is on
+    the response and not on the query. `tests/test_tool_truncation.py` owns the
+    behaviour in full; this pins that the dispatcher applies it.
+
+    One item in the list here, so there is nothing to drop and the character
+    path is what runs.
+    """
     big_blob = {"results": ["x" * 5000]}
 
     def handler(_request: httpx.Request) -> httpx.Response:
@@ -411,7 +421,10 @@ async def test_dispatch_one_truncates_oversize_responses():
             max_result_chars=500, timeout_s=5.0,
         )
     assert len(result.content) <= 500
-    assert result.content.endswith("…[truncated]")
+    assert "truncated" in result.content
+    # The size of the hole, and that retrying will not close it.
+    assert "of 5,0" in result.content
+    assert "larger top_k" in result.content
     assert result.is_error is False
 
 

@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     web_fetch_overall_deadline_s: float = Field(default=25.0, alias="WEB_FETCH_OVERALL_DEADLINE_S")
     web_fetch_max_concurrent: int = Field(default=8, alias="WEB_FETCH_MAX_CONCURRENT")
 
+    # One page of `get_file_text`. **Must stay under Audrey's
+    # `agentic.react.max_tool_result_chars`** (raised 2000 → 6000 on
+    # 2026-08-05). The artifact route ends a page on a line boundary precisely
+    # so a transcript is not cut mid-sentence; a page bigger than the
+    # dispatcher's cap is then cut mid-word on arrival regardless, which is the
+    # failure the paging exists to prevent. 4000 leaves room for the JSON
+    # envelope around the text.
+    file_text_page_chars: int = Field(default=4000, alias="FILE_TEXT_PAGE_CHARS")
+
     # Audrey (for kb_search / kb_image_search proxying)
     audrey_url: str = Field(default="http://audrey-ai:8000", alias="AUDREY_URL")
     # Middle rung of the KB timeout ladder. Must sit BELOW Audrey's tool-dispatch

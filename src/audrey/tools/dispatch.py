@@ -4,9 +4,13 @@ Given an Ollama tool_call (`{"function": {"name": "...", "arguments": {...}}}`)
 and a registry, POST the arguments to the originating server and return the
 response body as a JSON-string suitable for inclusion in a `role=tool` message.
 
-Long results are truncated at `agentic.react.max_tool_result_chars` (default
-2000) — model context burns fast otherwise. Truncated payloads end with
-`…[truncated]` so the model knows the cut happened.
+Long results are truncated at `agentic.react.max_tool_result_chars` — model
+context burns fast otherwise. **A truncated result says how much was lost and
+that retrying will not help**, because saying only that a cut happened is worse
+than it sounds: on 2026-08-05 a model read a bare `…[truncated]`, correctly
+reported it could give only a partial excerpt, and then invented a way to ask
+for the rest. Whole list items are dropped in preference to a character cut, so
+the body the model receives is still parseable JSON it can count.
 
 Errors (network, 4xx, 5xx) become tool messages too — the model can decide
 whether to retry, re-prompt the user, or apologize. We never raise out of
@@ -65,6 +69,11 @@ _USER_SCOPED_TOOLS: frozenset[str] = frozenset({
     # defence — this entry is the whole of what stops a prompt naming someone
     # else's address from returning their file list.
     "list_my_files",
+    # `POST /v1/files/artifact`, same arrangement and higher stakes: that route
+    # returns a user's document text verbatim, not a listing. Added in the same
+    # commit as the route, which is the rule `audit_user_scoping` exists to
+    # enforce — it only warns, and a warning is not a gate.
+    "get_file_text",
 })
 
 
@@ -99,10 +108,87 @@ def audit_user_scoping(registry: ToolRegistry) -> list[str]:
     return unscoped
 
 
+# The sentence that exists because a model read `…[truncated]` and concluded it
+# should ask again with a bigger `top_k`. It could not have known better: the
+# old marker said a cut happened and nothing else, so "ask for more" is a
+# perfectly reasonable inference from it — and a completely useless one, since
+# the cap is applied to the *response* after the query has already run.
+#
+# Measured 2026-08-05 against a real transcript search: at 2000 chars a
+# `kb_search` keeps ~1.7 hits whether top_k is 5, 10 or 20. The retry costs a
+# ReAct round out of three and returns an identical amount of text.
+_RETRY_IS_POINTLESS = (
+    "This cap is on the size of THIS RESULT, not on your query — re-running "
+    "with a larger top_k or limit returns the same amount of text. Use what is "
+    "here, or narrow the query so the results you want rank higher."
+)
+
+
 def _truncate(s: str, limit: int) -> str:
+    """Cut a result to `limit` chars, saying how much was lost.
+
+    The bare `…[truncated]` this replaces was the whole problem: a model that
+    cannot see how much it is missing has to guess, and on 2026-08-05 one
+    guessed out loud — "due to system limitations I can only provide a partial
+    excerpt … request it again in a new session". The limitation was real and
+    the model was right to report it; it invented a remedy only because nothing
+    told it the size of the hole or that no remedy exists.
+
+    Prefer `_truncate_payload`, which keeps JSON parseable. This is the
+    fallback for text that has no structure to drop.
+    """
     if len(s) <= limit:
         return s
-    return s[: limit - len("\n…[truncated]")] + "\n…[truncated]"
+    marker = f"\n…[truncated: showing {{shown:,}} of {len(s):,} chars. {_RETRY_IS_POINTLESS}]"
+    # Two passes: the marker's own length depends on the number inside it, so
+    # the first pass sizes it and the second fills in the count that survived.
+    kept = max(0, limit - len(marker.format(shown=limit)))
+    return s[:kept] + marker.format(shown=kept)
+
+
+def _truncate_payload(payload: Any, content: str, limit: int) -> str:
+    """Shrink a tool result to `limit` chars, dropping whole list items first.
+
+    Cutting a JSON body mid-string leaves the model holding **invalid JSON**
+    and a half-word, which it then has to interpret. Dropping whole elements
+    from the longest list keeps the payload parseable and turns the loss into a
+    number the model can report: "showing 2 of 12 results" is something it can
+    say truthfully, where a severed brace is something it has to guess about.
+
+    Falls back to a character cut when there is no list to shrink, or when the
+    payload is so large without one that dropping every item still does not
+    fit.
+    """
+    if len(content) <= limit:
+        return content
+    if not isinstance(payload, dict):
+        return _truncate(content, limit)
+
+    # The list carrying the weight — `results` for kb_search and web_search,
+    # `files` for list_my_files, `hits` for memory. Chosen by serialized size
+    # rather than by name so a tool added later needs no entry here.
+    key = max(
+        (k for k, v in payload.items() if isinstance(v, list) and v),
+        key=lambda k: len(json.dumps(payload[k], ensure_ascii=False, default=str)),
+        default=None,
+    )
+    if key is None:
+        return _truncate(content, limit)
+
+    items = payload[key]
+    for keep in range(len(items) - 1, 0, -1):
+        trial = dict(payload)
+        trial[key] = items[:keep]
+        trial["_truncated"] = (
+            f"showing {keep} of {len(items)} {key} — {len(items) - keep} omitted "
+            f"to fit a {limit:,}-char cap. {_RETRY_IS_POINTLESS}"
+        )
+        rendered = json.dumps(trial, ensure_ascii=False, default=str)
+        if len(rendered) <= limit:
+            return rendered
+    # Even one item does not fit. A character cut is all that is left, and the
+    # marker still reports the real scale of the loss.
+    return _truncate(content, limit)
 
 
 def _force_user_tag(tags: str, user_id: str) -> str:
@@ -225,13 +311,16 @@ async def dispatch_one(
             elapsed_s=elapsed, is_error=True,
         )
 
+    payload: Any = None
     try:
         payload = r.json()
         content = json.dumps(payload, ensure_ascii=False)
     except ValueError:
         content = r.text  # fall back to raw body if not JSON
 
-    truncated = _truncate(content, max_result_chars)
+    # `_truncate_payload` when we have parsed JSON, so the cut drops whole
+    # results and stays parseable; the plain char cut only for a raw body.
+    truncated = _truncate_payload(payload, content, max_result_chars)
     log.info("dispatch: %s ok in %.2fs (%d chars%s)",
              name, elapsed, len(truncated),
              ", truncated" if len(truncated) != len(content) else "")

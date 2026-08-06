@@ -743,6 +743,72 @@ async def list_my_files(req: ListMyFilesRequest) -> ListMyFilesResponse:
     return ListMyFilesResponse(files=body.get("files", []))
 
 
+class GetFileTextRequest(BaseModel):
+    user: Annotated[str, Field(min_length=1, max_length=200, description="User scope. Filled in automatically by Audrey — you don't need to supply it. Files are per-user.")]
+    filename: Annotated[str, Field(min_length=1, max_length=500, description="The file's exact filename, as returned by list_my_files.")]
+    artifact: Annotated[str, Field(description="Which text to read: 'transcript' for what was said, 'visual' for what was on screen, 'summary' for the one-paragraph overview.")] = "transcript"
+    offset: Annotated[int, Field(ge=0, description="Character position to start from. Use 0 for the beginning, then the next_offset from the previous response.")] = 0
+
+
+class GetFileTextResponse(BaseModel):
+    filename: str
+    artifact: str
+    text: str
+    offset: int
+    next_offset: int | None
+    total_chars: int
+    note: str = ""
+
+
+@app.post(
+    "/get_file_text",
+    operation_id="get_file_text",
+    response_model=GetFileTextResponse,
+    tags=["tools"],
+    summary="Read a video's transcript, on-screen text, or summary",
+    description=(
+        "Read the actual text of one of this user's videos, in order, rather "
+        "than searching inside it. Use this when they ask for the transcript "
+        "itself, for what was said from start to finish, or for a long "
+        "verbatim passage — kb_search returns only the few passages best "
+        "matching a query, which is the wrong tool for 'give me the "
+        "transcript'. Set artifact to 'transcript' for speech, 'visual' for "
+        "on-screen text and scene descriptions, or 'summary' for the short "
+        "overview. Long documents come back one page at a time: if next_offset "
+        "is not null there is more, and you get it by calling again with "
+        "offset set to that number. total_chars is the size of the whole "
+        "document, so you can say how much you have read and how much remains "
+        "— do that rather than implying you have all of it. If a transcript is "
+        "far too long to reproduce in full, say so and offer to summarise it "
+        "or find a specific part, instead of paging through the whole thing."
+    ),
+)
+async def get_file_text(req: GetFileTextRequest) -> GetFileTextResponse:
+    """Proxy to Audrey's artifact route.
+
+    `limit` is fixed here rather than exposed to the model. It has to stay
+    under the ReAct dispatcher's `max_tool_result_chars`, or the page this
+    route carefully ended on a line boundary is cut mid-word on arrival — the
+    exact failure the paging exists to prevent, reintroduced one layer up. A
+    model-supplied limit could not respect a cap it cannot see.
+    """
+    client: httpx.AsyncClient = app.state.audrey
+    try:
+        r = await client.post("/v1/files/artifact", json={
+            "user": req.user, "filename": req.filename,
+            "artifact": req.artifact, "offset": req.offset,
+            "limit": settings.file_text_page_chars,
+        })
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Audrey files unreachable: {e}",
+        ) from e
+    if r.status_code >= 400:
+        raise HTTPException(status_code=r.status_code, detail=r.text)
+    return GetFileTextResponse(**r.json())
+
+
 # ─── Chat archive: internal write/admin (not in /openapi.json) ────────
 # `include_in_schema=False` keeps these out of OpenAPI tool discovery.
 # The model never sees them, only Audrey's archive client and ops.
