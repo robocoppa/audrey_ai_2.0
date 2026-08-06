@@ -488,13 +488,22 @@ regardless of purpose. That is a property of the platform, not a legal opinion,
 and it is recorded here so it is a decision that was made rather than a thing
 discovered later. It does not change the engineering.
 
-**Source reclamation should probably default ON for this path, and that is the
-opposite of the decision for uploads.** Phase 38 turned reclamation off because
-it deletes a file the user gave us and there is no download route to get it
-back — "nothing can read the bytes back" described an absent feature, not
-consent. For a URL-sourced video **the URL is how you read it back**. The
-argument that blocked it does not apply. Keep the two defaults separate rather
-than flipping one global.
+**Source reclamation defaults ON for this path, the opposite of the decision
+for uploads. ✅ BUILT 2026-08-06.** Phase 38 turned reclamation off because it
+deletes a file the user gave us and there is no download route to get it back —
+"nothing can read the bytes back" described an absent feature, not consent. For
+a URL-sourced video **the URL is how you read it back**, so the argument that
+blocked it does not apply. `kb.video.keep_fetched_source: false` sits beside
+`keep_source: true`; the two defaults stay separate rather than one global
+flipping.
+
+⚠️ **But "the URL is how you read it back" had to be made true first.**
+`requeue_job` hardcoded `status = 'pending'`, which hands a media worker a path
+that no longer exists — so shipping the flag on its own would have produced
+exactly the irreversible delete phase 38 refused, with a better story attached.
+`requeue_job(refetch=True)` sends a reclaimed URL row to `fetch_pending`
+instead, and the requeue route's 409 is narrowed to rows with no way back
+rather than deleted. The flag depends on that path and says so in `config.yaml`.
 
 **DEFERRED, not rejected: the chat tool.** `ingest_video_url`, a thin
 service-token sibling of `POST /v1/files/from-url`, so "add this and tell me

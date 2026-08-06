@@ -685,6 +685,29 @@ kb:
     # summary stages applies only to videos uploaded afterwards.
     keep_source: true
 
+    # The same decision for URL-sourced videos (Phase 41), and it comes out the
+    # other way — false, meaning their bytes ARE reclaimed.
+    #
+    # Everything above argues from one fact: nothing can read the bytes back,
+    # so deleting them is final. A fetched video breaks that premise. The row
+    # keeps the URL it came from, and requeueing one whose source was reclaimed
+    # now sends it to `fetch_pending` rather than refusing — the fetcher
+    # downloads it again and the video re-processes. **That path is the whole
+    # justification for this line.** If it is ever removed, this goes back to
+    # true with it.
+    #
+    # What it costs is worth stating plainly: the video must still be at that
+    # URL. Removals, takedowns and privacy flips are outside this box's
+    # control, so a reclaimed fetch is recoverable in the ordinary case and not
+    # in the case where the source disappeared — which is also the case where
+    # the local copy would have been worth most. Set this true if that matters
+    # more than the quota; nothing else changes.
+    #
+    # It does NOT touch the transcript, descriptions or summary. Those are the
+    # ingest's output, they live in Qdrant, and the video stays fully
+    # searchable after reclamation either way.
+    keep_fetched_source: false
+
     # How long a processed video's bytes are kept before reclamation, timed
     # from when its ingest finished rather than from when it was uploaded. A
     # video that sat in a stalled queue for two days would otherwise become

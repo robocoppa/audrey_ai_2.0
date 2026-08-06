@@ -1759,11 +1759,15 @@ async def _reclaim_sources(request: Request, db) -> int:
     and never wrong about what the user owes.
     """
     video_cfg = _video_cfg(request)
-    # Defaults to keeping. An absent config key must not be able to delete a
-    # user's file — this is the only irreversible operation in the pipeline,
+    # Both default to keeping. An absent config key must not be able to delete
+    # a user's file — this is the only irreversible operation in the pipeline,
     # and a deployment whose `config.yaml` predates the setting is exactly the
-    # deployment least expecting it.
-    if bool(video_cfg.get("keep_source", True)):
+    # deployment least expecting it. That applies to `keep_fetched_source` too
+    # even though the shipped config sets it false: the guarantee is about what
+    # silence means, not about what this box happens to be configured for.
+    keep_uploaded = bool(video_cfg.get("keep_source", True))
+    keep_fetched = bool(video_cfg.get("keep_fetched_source", True))
+    if keep_uploaded and keep_fetched:
         return 0
 
     hours = float(video_cfg.get("source_retention_hours", 24))
@@ -1773,6 +1777,7 @@ async def _reclaim_sources(request: Request, db) -> int:
     try:
         rows = await db.reclaimable_sources(
             completed_before=cutoff.isoformat(timespec="seconds"),
+            uploaded=not keep_uploaded, fetched=not keep_fetched,
         )
     except Exception as e:  # noqa: BLE001 — tidying must never break a claim
         log.warning("files: could not list reclaimable sources: %s", e)
@@ -1788,9 +1793,11 @@ async def _reclaim_sources(request: Request, db) -> int:
         freed += 1
         log.info(
             "files: reclaimed source for %s (%s, %d bytes) — %s retention "
-            "window elapsed; this video can no longer be requeued",
+            "window elapsed; %s",
             row["file_id"], row["filename"], int(row["bytes"] or 0),
             f"{hours:g}h",
+            "requeue will re-download it" if row.get("source_url")
+            else "this video can no longer be requeued",
         )
     return freed
 
@@ -2156,7 +2163,12 @@ async def requeue_job(
             ),
         )
 
-    if row["source_freed_at"]:
+    # Phase 41. A reclaimed row that kept its URL is not a dead end: the bytes
+    # are reachable again, so this requeue goes back to `fetch_pending` and the
+    # fetcher downloads them a second time. The guard below is about rows with
+    # no way back, and this is not one of them.
+    refetch = bool(row["source_freed_at"]) and bool(row["source_url"])
+    if row["source_freed_at"] and not refetch:
         # Phase 38 reclaimed the bytes. `force` deliberately does not override
         # this — the other guard protects work that is merely in progress, and
         # can be overruled by someone who means it. There is nothing to
@@ -2206,24 +2218,30 @@ async def requeue_job(
     # A missing source is not fatal here. The claim would hand the worker a
     # path that does not exist and the job fails with that as its reason,
     # which says more than a 404 from this route would.
-    source = _source_path(request, row)
-    try:
-        source_bytes = (await asyncio.to_thread(source.stat)).st_size
-    except OSError:
-        log.warning(
-            "files: requeue could not stat %s — leaving bytes=%s as recorded",
-            source, row["bytes"],
-        )
-        source_bytes = None
+    # A re-fetch has no source to measure — that is what makes it a re-fetch —
+    # and `requeue_job` zeroes `bytes` for it rather than carrying a size that
+    # describes a deleted file.
+    source_bytes = None
+    if not refetch:
+        source = _source_path(request, row)
+        try:
+            source_bytes = (await asyncio.to_thread(source.stat)).st_size
+        except OSError:
+            log.warning(
+                "files: requeue could not stat %s — leaving bytes=%s as recorded",
+                source, row["bytes"],
+            )
 
-    if not await db.requeue_job(file_id, bytes_=source_bytes):
+    if not await db.requeue_job(file_id, bytes_=source_bytes, refetch=refetch):
         raise HTTPException(status_code=404, detail="No such file.")
 
+    queued = "fetch_pending" if refetch else "pending"
     log.info(
-        "files: requeued file_id=%s user=%s (was %s%s)",
-        file_id, user, row["status"], ", FORCED over a live lease" if force else "",
+        "files: requeued file_id=%s user=%s to %s (was %s%s)",
+        file_id, user, queued, row["status"],
+        ", FORCED over a live lease" if force else "",
     )
-    return JobResultResponse(file_id=file_id, status="pending", chunks=0)
+    return JobResultResponse(file_id=file_id, status=queued, chunks=0)
 
 
 @router.get("", response_model=ListResponse)

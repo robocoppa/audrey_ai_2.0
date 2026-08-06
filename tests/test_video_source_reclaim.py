@@ -65,6 +65,39 @@ async def _processed_video(
     )
 
 
+async def _fetched_video(
+    db: UploadsDB,
+    file_id: str = "url1",
+    *,
+    user: str = USER,
+    completed_hours_ago: float = 48.0,
+    source_url: str = "https://www.youtube.com/watch?v=abc",
+) -> None:
+    """A video that arrived by URL and finished ingest (Phase 41).
+
+    The only difference that matters downstream is `source_url`: the row
+    remembers where the bytes came from, which is what makes reclaiming them
+    recoverable rather than final.
+    """
+    await db.record_url_fetch(
+        file_id=file_id, user=user, source_url=source_url,
+        filename=f"{file_id}.mp4", uploaded_at=_iso(completed_hours_ago + 2),
+    )
+    claimed = await db.claim_fetch(lease_id=f"F-{file_id}", now=_iso(completed_hours_ago + 1))
+    assert claimed is not None
+    assert await db.complete_fetch(
+        file_id=file_id, lease_id=f"F-{file_id}", filename=f"{file_id}.mp4",
+        mime="video/mp4", bytes_=42_000_000,
+    )
+    await db.claim_job(lease_id=f"L-{file_id}", now=_iso(completed_hours_ago))
+    assert await db.complete_job(
+        file_id=file_id, lease_id=f"L-{file_id}", collection="kb_user_text_a_b_c",
+        chunks=25, duration_s=565.0, summary="A chess opening.",
+        completed_at=_iso(completed_hours_ago),
+        transcript_source="auto_captions",
+    )
+
+
 class TestEligibility:
     """Which rows the sweep will even consider. Every exclusion here is a file
     that would otherwise be deleted while something still needed it."""
@@ -434,3 +467,188 @@ class TestRequeueAfterReclamation:
 
         assert (await db.get_upload("vid"))["completed_at"] == ""
         assert await db.reclaimable_sources(completed_before=_iso(24)) == []
+
+
+class TestFetchedSourcesAreADifferentDecision:
+    """Phase 41. Reclaiming an upload destroys the only copy; reclaiming a
+    fetched video leaves the row holding the address it came from.
+
+    That difference is the entire argument, so it is tested as a difference —
+    the two policies are exercised against each other, not each in isolation.
+    """
+
+    async def test_keeping_uploads_still_reclaims_fetched_videos(self, db: UploadsDB):
+        await _processed_video(db, "uploaded", completed_hours_ago=48)
+        await _fetched_video(db, "fetched", completed_hours_ago=48)
+
+        rows = await db.reclaimable_sources(
+            completed_before=_iso(24), uploaded=False, fetched=True,
+        )
+
+        assert [r["file_id"] for r in rows] == ["fetched"]
+
+    async def test_the_reverse_policy_reclaims_only_uploads(self, db: UploadsDB):
+        await _processed_video(db, "uploaded", completed_hours_ago=48)
+        await _fetched_video(db, "fetched", completed_hours_ago=48)
+
+        rows = await db.reclaimable_sources(
+            completed_before=_iso(24), uploaded=True, fetched=False,
+        )
+
+        assert [r["file_id"] for r in rows] == ["uploaded"]
+
+    async def test_keeping_both_reclaims_nothing(self, db: UploadsDB):
+        await _processed_video(db, "uploaded", completed_hours_ago=48)
+        await _fetched_video(db, "fetched", completed_hours_ago=48)
+
+        assert await db.reclaimable_sources(
+            completed_before=_iso(24), uploaded=False, fetched=False,
+        ) == []
+
+    async def test_the_sweep_reads_both_settings(self, db: UploadsDB, tmp_path: Path):
+        """The shipped combination: keep uploads, reclaim fetches."""
+        await _processed_video(db, "uploaded", completed_hours_ago=48)
+        await _fetched_video(db, "fetched", completed_hours_ago=48)
+        root = tmp_path / "uploads"
+        (root / "a_b_c").mkdir(parents=True)
+        for name in ("uploaded.mp4", "fetched.mp4"):
+            (root / "a_b_c" / name).write_bytes(b"x")
+
+        client = _client(
+            db, root,
+            {"keep_source": True, "keep_fetched_source": False,
+             "source_retention_hours": 24},
+        )
+        _claim(client)
+
+        assert (await db.get_upload("uploaded"))["source_freed_at"] == ""
+        assert (await db.get_upload("fetched"))["source_freed_at"] != ""
+        assert not (root / "a_b_c" / "fetched.mp4").exists()
+        assert (root / "a_b_c" / "uploaded.mp4").exists()
+
+    async def test_an_old_config_reclaims_nothing_at_all(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        """A deployment whose config.yaml predates `keep_fetched_source` is
+        exactly the one least expecting a delete. Silence means keep, for both
+        settings — the guarantee is about what an absent key means, not about
+        what this box happens to be configured for."""
+        await _fetched_video(db, "fetched", completed_hours_ago=48)
+        root = tmp_path / "uploads"
+        (root / "a_b_c").mkdir(parents=True)
+        (root / "a_b_c" / "fetched.mp4").write_bytes(b"x")
+
+        client = _client(db, root, {"source_retention_hours": 24})
+        _claim(client)
+
+        assert (await db.get_upload("fetched"))["source_freed_at"] == ""
+        assert (root / "a_b_c" / "fetched.mp4").exists()
+
+
+class TestRequeueingAReclaimedFetch:
+    """The path that makes reclaiming a fetch recoverable. Without it,
+    `keep_fetched_source: false` would be an irreversible delete wearing a
+    different name."""
+
+    async def test_it_goes_back_to_the_download_queue_not_the_worker(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        await _fetched_video(db, "fetched", completed_hours_ago=48)
+        await db.mark_source_freed("fetched", freed_at=_iso(1))
+
+        client = _client(db, tmp_path / "uploads", {"keep_source": True})
+        r = client.post(
+            "/v1/files/fetched/requeue", headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        assert r.status_code == 200
+        assert r.json()["status"] == "fetch_pending"
+        row = await db.get_upload("fetched")
+        # `pending` would hand a media worker a path that does not exist and
+        # burn all three attempts discovering it.
+        assert row["status"] == "fetch_pending"
+        assert row["source_url"] == "https://www.youtube.com/watch?v=abc"
+
+    async def test_the_reclamation_marker_is_lifted(self, db: UploadsDB, tmp_path: Path):
+        await _fetched_video(db, "fetched", completed_hours_ago=48)
+        await db.mark_source_freed("fetched", freed_at=_iso(1))
+
+        client = _client(db, tmp_path / "uploads", {"keep_source": True})
+        client.post(
+            "/v1/files/fetched/requeue", headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        row = await db.get_upload("fetched")
+        # "The bytes are gone, and that is final" stops being true the moment a
+        # re-fetch is queued. Left set, the row would show a strikethrough size
+        # for a video that is downloading again, and the next sweep would skip
+        # it forever.
+        assert row["source_freed_at"] == ""
+        assert row["bytes"] == 0
+
+    async def test_the_old_transcript_attribution_does_not_ride_along(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        await _fetched_video(db, "fetched", completed_hours_ago=48)
+        assert (await db.get_upload("fetched"))["transcript_source"] == "auto_captions"
+        await db.mark_source_freed("fetched", freed_at=_iso(1))
+
+        client = _client(db, tmp_path / "uploads", {"keep_source": True})
+        client.post(
+            "/v1/files/fetched/requeue", headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        # Of the four fetch columns this is the only one a `ready` row still
+        # holds — `complete_fetch` zeroes the progress pair and `complete_job`
+        # clears the caption blob, so those three are cleared defensively
+        # rather than because a live row carries them. This one is real: the
+        # next download decides its own source, and "auto_captions" left on a
+        # row that is downloading again labels a transcript that does not exist.
+        assert (await db.get_upload("fetched"))["transcript_source"] == ""
+
+    async def test_an_upload_with_no_url_is_still_refused(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        """The 409 is not superseded — it is narrowed to the rows that really
+        have no way back."""
+        await _processed_video(db, "uploaded", completed_hours_ago=48)
+        await db.mark_source_freed("uploaded", freed_at=_iso(1))
+
+        client = _client(db, tmp_path / "uploads", {"keep_source": True})
+        r = client.post(
+            "/v1/files/uploaded/requeue", headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        assert r.status_code == 409
+        assert "reclaimed" in r.json()["detail"]
+
+    async def test_a_fetched_video_that_still_has_its_bytes_reprocesses_normally(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        """Having a URL does not mean re-downloading. The file is right there;
+        a second download would be bandwidth spent to get what we already have —
+        and one more request to a host we would rather not be noticed by."""
+        await _fetched_video(db, "fetched", completed_hours_ago=48)
+        root = tmp_path / "uploads"
+        (root / "a_b_c").mkdir(parents=True)
+        (root / "a_b_c" / "fetched.mp4").write_bytes(b"x" * 7)
+
+        client = _client(db, root, {"keep_source": True})
+        r = client.post(
+            "/v1/files/fetched/requeue", headers={"X-Audrey-Service-Token": SECRET},
+        )
+
+        assert r.json()["status"] == "pending"
+        row = await db.get_upload("fetched")
+        assert row["status"] == "pending"
+        # And the size is re-read from disk, as it always was.
+        assert row["bytes"] == 7
+
+    async def test_the_refetch_branch_cannot_strand_an_upload(self, db: UploadsDB):
+        """Defence in depth against a caller that gets the flag wrong: a row
+        with no URL sent to `fetch_pending` would be claimed by a fetcher with
+        nothing to fetch. The statement refuses instead."""
+        await _processed_video(db, "uploaded", completed_hours_ago=48)
+
+        assert not await db.requeue_job("uploaded", refetch=True)
+        assert (await db.get_upload("uploaded"))["status"] == "ready"

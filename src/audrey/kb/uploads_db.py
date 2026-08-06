@@ -777,10 +777,35 @@ class UploadsDB:
             )
             return cur.rowcount > 0
 
-    async def requeue_job(self, file_id: str, *, bytes_: int | None = None) -> bool:
+    async def requeue_job(
+        self, file_id: str, *, bytes_: int | None = None, refetch: bool = False,
+    ) -> bool:
         """Put a row back in the queue as if it had just been uploaded.
 
         False when there is no such row.
+
+        `refetch` sends it back to `fetch_pending` instead of `pending`, for a
+        URL-sourced video whose bytes were reclaimed: there is nothing on disk
+        for a media worker to open, and the row carries the address of the
+        thing that produced them. This is what makes reclaiming a fetched
+        source recoverable rather than merely cheap, and `kb.video.
+        keep_fetched_source: false` is only defensible because it exists.
+
+        It clears more than the normal path because more is stale. `bytes` goes
+        to 0 — the row is about to have no file, and leaving the old size there
+        bills the user for something reclamation just deleted. `source_freed_at`
+        clears because the statement it makes ("the bytes are gone, and that is
+        final") stops being true the moment a re-fetch is queued.
+        `transcript_source` clears because the next download decides its own,
+        and an attribution left over from the last one labels a transcript that
+        does not exist yet.
+
+        The caption blob and the progress pair are cleared **defensively, not
+        because a live row carries them**: `complete_fetch` zeroes the progress
+        columns and `complete_job` clears `fetched_transcript`, so a row that
+        got far enough to be reclaimed has all three empty already. They are in
+        the statement so that "requeued to fetch" means the same thing from any
+        state, rather than depending on which upstream write happened to run.
 
         `bytes_` corrects the recorded size when the caller has re-read it
         from disk; omitted, the stored value stands. It is part of this
@@ -802,20 +827,41 @@ class UploadsDB:
         have removed the Qdrant points first. A row that still claimed them
         after they were deleted would read as ingested with nothing behind it.
         """
-        return await asyncio.to_thread(self._requeue_job_sync, file_id, bytes_)
+        return await asyncio.to_thread(
+            self._requeue_job_sync, file_id, bytes_, refetch,
+        )
 
-    def _requeue_job_sync(self, file_id: str, bytes_: int | None) -> bool:
+    #: Cleared by every requeue, whichever queue the row goes back to.
+    #:
+    #: `completed_at` is in here for a reason worth keeping: left behind, a
+    #: requeued video would carry the *old* completion time, so its retention
+    #: window would be measured from a run whose results have just been thrown
+    #: away — and a re-run of an old video would be eligible for reclamation
+    #: the moment it finished.
+    _REQUEUE_CLEARS = (
+        "lease_id = '', leased_at = '', attempts = 0, failure_reason = '', "
+        "collection = '', chunks = 0, duration_s = 0, summary = '', "
+        "completed_at = ''"
+    )
+
+    def _requeue_job_sync(
+        self, file_id: str, bytes_: int | None, refetch: bool,
+    ) -> bool:
         with self._lock:
-            # `completed_at` clears with the rest of the previous run's output.
-            # Left behind, a requeued video would carry the *old* completion
-            # time, so its retention window would be measured from a run whose
-            # results have just been thrown away — and a re-run of an old video
-            # would be eligible for reclamation the moment it finished.
+            if refetch:
+                cur = self._conn.execute(
+                    f"UPDATE uploads SET status = 'fetch_pending', "  # noqa: S608
+                    f"       {self._REQUEUE_CLEARS}, "
+                    "       source_freed_at = '', bytes = 0, "
+                    "       fetched_transcript = '', transcript_source = '', "
+                    "       fetch_downloaded_bytes = 0, fetch_total_bytes = 0 "
+                    "WHERE file_id = ? AND source_url != ''",
+                    (file_id,),
+                )
+                return cur.rowcount > 0
             cur = self._conn.execute(
-                "UPDATE uploads SET status = 'pending', lease_id = '', "
-                "       leased_at = '', attempts = 0, failure_reason = '', "
-                "       collection = '', chunks = 0, duration_s = 0, summary = '', "
-                "       completed_at = '', bytes = COALESCE(?, bytes) "
+                f"UPDATE uploads SET status = 'pending', "  # noqa: S608
+                f"       {self._REQUEUE_CLEARS}, bytes = COALESCE(?, bytes) "
                 "WHERE file_id = ?",
                 (bytes_, file_id),
             )
@@ -825,8 +871,18 @@ class UploadsDB:
 
     async def reclaimable_sources(
         self, *, completed_before: str, limit: int = 50,
+        uploaded: bool = True, fetched: bool = True,
     ) -> list[dict]:
         """Processed videos whose uploaded bytes are past the retention window.
+
+        `uploaded` and `fetched` select which *kind of source* is eligible,
+        because the two are not the same decision. Deleting an uploaded video's
+        bytes destroys the only copy. Deleting a fetched one's leaves the row
+        holding the URL it came from, and `requeue_job(refetch=True)` can put it
+        back — so phase 38's argument against reclamation ("nothing can read the
+        bytes back") is simply not an argument about these rows. Both default
+        True so a caller that has already decided cannot silently widen; the
+        route passes what config says.
 
         Four predicates, each load-bearing:
 
@@ -847,17 +903,33 @@ class UploadsDB:
         `limit` caps one pass so a backlog is drained over several polls rather
         than in one blocking burst of unlinks on the claim path.
         """
+        if not uploaded and not fetched:
+            # Nothing is eligible, so ask nothing. The route short-circuits on
+            # this too; belt and braces, because the failure mode of getting it
+            # wrong here is an irreversible delete.
+            return []
         return await asyncio.to_thread(
-            self._reclaimable_sync, completed_before, limit,
+            self._reclaimable_sync, completed_before, limit, uploaded, fetched,
         )
 
-    def _reclaimable_sync(self, completed_before: str, limit: int) -> list[dict]:
+    def _reclaimable_sync(
+        self, completed_before: str, limit: int, uploaded: bool, fetched: bool,
+    ) -> list[dict]:
+        # A row is fetched if it kept the URL it came from. Only phase 41's
+        # `record_url_upload` writes that column, and nothing clears it, so it
+        # survives the ingest that makes the row eligible in the first place.
+        source_clause = ""
+        if not fetched:
+            source_clause = "  AND source_url = '' "
+        elif not uploaded:
+            source_clause = "  AND source_url != '' "
         with self._lock:
             cur = self._conn.execute(
-                "SELECT file_id, user, filename, bytes FROM uploads "
+                "SELECT file_id, user, filename, bytes, source_url FROM uploads "  # noqa: S608
                 "WHERE status = 'ready' AND kind = 'video' "
                 "  AND source_freed_at = '' "
                 "  AND completed_at != '' AND completed_at < ? "
+                f"{source_clause}"
                 "ORDER BY completed_at LIMIT ?",
                 (completed_before, limit),
             )
