@@ -484,3 +484,55 @@ class TestArtifactFilter:
                          "artifact": "subtitles"})
 
         assert r.status_code == 422
+
+
+# ─── The scope is logged, so §3b is answerable (2026-08-06) ───────────
+#
+# The route used to log only the failure path — a filename matching nothing —
+# so a successful scoped search and a deliberately unscoped one left identical
+# traces. Phase 40 §3b asks "does the model scope only when the user pointed at
+# one file", and with a single video in the KB both behaviours produce the same
+# answer prose. Without this line the check cannot be run at all.
+
+
+class TestScopeIsLegibleAfterTheFact:
+    def test_an_unscoped_query_says_so(self):
+        from audrey.routes.kb import TextQuery, _scope_label
+
+        assert _scope_label(TextQuery(query="what did they say"), None) == "scope=none"
+
+    def test_a_filename_scope_names_the_file_and_the_id_count(self):
+        from audrey.kb.qdrant import SearchScope
+        from audrey.routes.kb import TextQuery, _scope_label
+
+        label = _scope_label(
+            TextQuery(query="x", filename="jasonRetirement.mp4"),
+            SearchScope(file_ids=["abc"]),
+        )
+        assert "jasonRetirement.mp4" in label
+        assert "1 id" in label
+
+    def test_a_duplicate_filename_shows_more_than_one_id(self):
+        """The ambiguous case the route already warns about in `notice`.
+        Two ids behind one name is the difference between a scoped answer and
+        a stitched-together one, so the count is the part worth logging."""
+        from audrey.kb.qdrant import SearchScope
+        from audrey.routes.kb import TextQuery, _scope_label
+
+        label = _scope_label(
+            TextQuery(query="x", filename="standup.mp4"),
+            SearchScope(file_ids=["a", "b"]),
+        )
+        assert "2 ids" in label
+
+    def test_an_artifact_only_scope_is_reported(self):
+        """`artifact` narrows without a filename, so reading `req.filename`
+        alone would call this unscoped."""
+        from audrey.kb.qdrant import SearchScope
+        from audrey.routes.kb import TextQuery, _scope_label
+
+        label = _scope_label(
+            TextQuery(query="x", artifact="visual"), SearchScope(artifact="visual"),
+        )
+        assert "artifact=visual" in label
+        assert label != "scope=none"

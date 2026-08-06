@@ -184,6 +184,25 @@ def _unknown_file_notice(wanted: str, available: list[str]) -> str:
     )
 
 
+def _scope_label(req: TextQuery, scope: SearchScope | None) -> str:
+    """One legible field describing how this query was narrowed.
+
+    Reads `scope` rather than only `req` so it reports what was *applied*, not
+    what was asked for. Those can differ — an `artifact` with no `filename`
+    narrows by artifact alone — and a log line that repeated the request would
+    be evidence of nothing.
+    """
+    if scope is None:
+        return "scope=none"
+    parts = []
+    if req.filename:
+        n = len(scope.file_ids or ())
+        parts.append(f"file={req.filename!r}({n} id{'s' if n != 1 else ''})")
+    if scope.artifact:
+        parts.append(f"artifact={scope.artifact}")
+    return "scope=" + (" ".join(parts) if parts else "none")
+
+
 async def _resolve_filename(
     request: Request, *, user: str | None, filename: str,
 ) -> tuple[list[str], list[str]]:
@@ -284,6 +303,20 @@ async def kb_query(
     elapsed = time.perf_counter() - t0
     kb_search_seconds.labels(kind="text", had_user_collection=str(had_user).lower()).observe(elapsed)
     kb_search_hits.labels(kind="text").observe(len(hits))
+    # Every query logs whether it was scoped, and this is the only place that
+    # can say so. Until 2026-08-06 the route logged *only* the failure path — a
+    # filename matching nothing — so a successful scoped search and a
+    # deliberately unscoped one were indistinguishable after the fact.
+    #
+    # That made phase 40 §3b unanswerable. "Does the model scope only when the
+    # user pointed at one file" cannot be read off an answer: with one video in
+    # the KB, a correctly scoped search and a lucky unscoped one produce the
+    # same prose. And §3b decides phase 42's prompt, whose emphasis is either
+    # "scope more" or "scope less" — opposite instructions.
+    log.info(
+        "kb.query: user=%s %s top_k=%d -> %d hit(s) in %.2fs",
+        effective_user, _scope_label(req, scope), req.top_k, len(hits), elapsed,
+    )
     return QueryResponse(
         query=req.query,
         notice=notice,

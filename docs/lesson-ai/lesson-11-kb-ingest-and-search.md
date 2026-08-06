@@ -429,7 +429,7 @@ The interesting part is the constraints that come out of all this:
 ### 2.5 The query path
 
 `/v1/kb/query` is short —
-[`routes/kb.py:229-117`](../../src/audrey/routes/kb.py#L229):
+[`routes/kb.py:229-117`](../../src/audrey/routes/kb.py#L248):
 
 ```python
 @router.post("/query", response_model=QueryResponse)
@@ -460,7 +460,7 @@ The pieces of FastAPI to notice:
   build the `kb_search` tool spec for the model.
 
 The merge logic is in `_search_text_merged` —
-[`routes/kb.py:313-142`](../../src/audrey/routes/kb.py#L313):
+[`routes/kb.py:313-142`](../../src/audrey/routes/kb.py#L346):
 
 ```python
 async def _search_text_merged(qdrant, vec, *, top_k, user):
@@ -527,7 +527,7 @@ within a few cosine degrees of each other.
 `/v1/kb/query/image` (handler at
 [`routes/kb.py:164`](../../src/audrey/routes/kb.py#L164)) picks which
 encoder to call based on which field of the request body was supplied
-([`routes/kb.py:454-181`](../../src/audrey/routes/kb.py#L454)):
+([`routes/kb.py:454-181`](../../src/audrey/routes/kb.py#L487)):
 
 ```python
 if req.image_url:
