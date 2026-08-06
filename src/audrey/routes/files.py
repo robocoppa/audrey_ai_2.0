@@ -2072,10 +2072,24 @@ async def read_artifact(
                 "exists only for video."
             )
         else:
+            # State the fact and STOP. This used to append "a video with no
+            # speech has no transcript, and one whose frames were all
+            # near-identical has no visual pass" — two general explanations,
+            # offered as help.
+            #
+            # A model repeated them back as findings about the file. Asked to
+            # compare two videos on 2026-08-06, it reported that silent.mp4's
+            # "frames are all near-identical", which nothing had measured — the
+            # sentence was a worked example of why an artifact can be absent,
+            # and it read as a description of this one.
+            #
+            # An error message is evidence to whoever receives it. Anything in
+            # here that sounds like an observation will be reported as one, so
+            # it may only contain things that were actually checked.
             detail = (
-                f"{row['filename']!r} finished processing but produced no "
-                f"{artifact}. A video with no speech has no transcript, and one "
-                "whose frames were all near-identical has no visual pass."
+                f"{row['filename']!r} finished processing and produced no "
+                f"{artifact}, so there is nothing to read. Why is not recorded "
+                "— do not guess at a cause."
             )
         raise HTTPException(status_code=404, detail=detail) from None
 

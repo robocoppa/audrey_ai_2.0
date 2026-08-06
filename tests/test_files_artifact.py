@@ -203,8 +203,16 @@ class TestMissingArtifacts:
         await _ready_video(db, tmp_path, sidecars=())
         r = _read(client)
         assert r.status_code == 404
-        # The genuinely-empty case: ready, a video, and no speech in it.
-        assert "no speech" in r.json()["detail"]
+        # The genuinely-empty case: ready, a video, nothing extracted.
+        detail = r.json()["detail"]
+        assert "produced no transcript" in detail
+        # And it must NOT speculate. The first version offered two general
+        # explanations ("a video with no speech has no transcript, and one
+        # whose frames were all near-identical has no visual pass") as help. On
+        # 2026-08-06 a model repeated them back as measured findings about the
+        # file. An error message is evidence to whoever receives it.
+        assert "near-identical" not in detail
+        assert "do not guess" in detail
 
     async def test_an_unknown_filename_names_the_alternatives(
             self, client, db, tmp_path):
