@@ -119,8 +119,10 @@ def audit_user_scoping(registry: ToolRegistry) -> list[str]:
 # ReAct round out of three and returns an identical amount of text.
 _RETRY_IS_POINTLESS = (
     "This cap is on the size of THIS RESULT, not on your query — re-running "
-    "with a larger top_k or limit returns the same amount of text. Use what is "
-    "here, or narrow the query so the results you want rank higher."
+    "with a larger top_k or limit returns the same amount of text, or less. "
+    "A SMALLER top_k can return more, because a response that fits whole is "
+    "not trimmed at all. Otherwise use what is here, or narrow the query so "
+    "the passages you want rank higher."
 )
 
 
