@@ -140,7 +140,18 @@ CREATE TABLE IF NOT EXISTS uploads (
   -- worker transcribes anyway, and the point of the column is to be right
   -- about which text is on the row — "the transcript is wrong" has a different
   -- answer for each of the three.
-  transcript_source  TEXT NOT NULL DEFAULT ''
+  transcript_source  TEXT NOT NULL DEFAULT '',
+  -- How far a download has got, in bytes, and how far it has to go (Phase 41).
+  -- Both 0 outside the 'fetching' state; `fetch_total_bytes` stays 0 for a
+  -- site that will not say how big the file is, which the page renders as a
+  -- running byte count with no percentage rather than as a fake one.
+  --
+  -- `bytes` is deliberately NOT reused for the first of these. That column is
+  -- what the user is billed for and what the file list shows, and a partial
+  -- download is neither — writing progress there would put a growing number
+  -- into the quota for a file that may never exist.
+  fetch_downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+  fetch_total_bytes      INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_user ON uploads(user);
 -- No index on `status` here. `_SCHEMA` runs before `_migrate`, and on the
@@ -194,6 +205,8 @@ _UPLOADS_ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("source_url", "TEXT NOT NULL DEFAULT ''"),
     ("fetched_transcript", "TEXT NOT NULL DEFAULT ''"),
     ("transcript_source", "TEXT NOT NULL DEFAULT ''"),
+    ("fetch_downloaded_bytes", "INTEGER NOT NULL DEFAULT 0"),
+    ("fetch_total_bytes", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 
@@ -374,7 +387,8 @@ class UploadsDB:
                 "SELECT file_id, filename, mime, bytes, kind, collection, "
                 "       chunks, uploaded_at, status, failure_reason, duration_s, "
                 "       summary, source_freed_at, leased_at, source_url, "
-                "       transcript_source "
+                "       transcript_source, fetch_downloaded_bytes, "
+                "       fetch_total_bytes "
                 "FROM uploads WHERE user = ? ORDER BY uploaded_at DESC",
                 (user,),
             )
@@ -541,6 +555,50 @@ class UploadsDB:
             )
             return claimed
 
+    async def record_fetch_progress(
+        self, *, file_id: str, lease_id: str, title: str = "",
+        downloaded_bytes: int = 0, total_bytes: int = 0,
+    ) -> bool:
+        """Note how far a download has got. False if the lease no longer holds.
+
+        The lease guard is the same one every other handover has, and it is
+        doing real work here rather than being belt-and-braces: a fetcher that
+        stalled past its lease and woke up must not paint its stale byte count
+        over the run that replaced it, which would show a download going
+        backwards for no reason anyone could find afterwards.
+
+        **This route cannot change a row's state.** It writes three display
+        fields under a `status = 'fetching'` predicate and nothing else — no
+        transition, no completion, no failure. That is what keeps a progress
+        channel from being one more thing that can strand a row.
+
+        `title` is written into `filename`, replacing the video-id placeholder
+        `record_url_fetch` put there. Safe while fetching *because* the bytes
+        are in staging: nothing derives a path from this column until
+        `complete_fetch` writes the real name with its real extension.
+        """
+        return await asyncio.to_thread(
+            self._record_progress_sync, file_id, lease_id, title,
+            downloaded_bytes, total_bytes,
+        )
+
+    def _record_progress_sync(
+        self, file_id: str, lease_id: str, title: str,
+        downloaded_bytes: int, total_bytes: int,
+    ) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE uploads SET fetch_downloaded_bytes = ?, "
+                "       fetch_total_bytes = ?, "
+                # An empty title leaves the existing name alone rather than
+                # blanking it: a site with no title should not turn a row that
+                # already had a usable placeholder into an unnamed one.
+                "       filename = CASE WHEN ? <> '' THEN ? ELSE filename END "
+                "WHERE file_id = ? AND lease_id = ? AND status = 'fetching'",
+                (downloaded_bytes, total_bytes, title, title, file_id, lease_id),
+            )
+            return cur.rowcount > 0
+
     async def complete_fetch(
         self, *, file_id: str, lease_id: str, filename: str, mime: str, bytes_: int,
         transcript: str = "",
@@ -569,9 +627,13 @@ class UploadsDB:
     ) -> bool:
         with self._lock:
             cur = self._conn.execute(
+                # The two progress columns zero out here: the download is over,
+                # `bytes` is now the real number, and a stale "247 MB of 288 MB"
+                # left on a ready row is a fact about a moment that has passed.
                 "UPDATE uploads SET status = 'pending', filename = ?, mime = ?, "
                 "       bytes = ?, lease_id = '', leased_at = '', attempts = 0, "
-                "       failure_reason = '', fetched_transcript = ? "
+                "       failure_reason = '', fetched_transcript = ?, "
+                "       fetch_downloaded_bytes = 0, fetch_total_bytes = 0 "
                 "WHERE file_id = ? AND lease_id = ? AND status = 'fetching'",
                 (filename, mime, bytes_, transcript, file_id, lease_id),
             )

@@ -34,6 +34,7 @@ from audrey.media.fetch import (
     UrlInfo,
     YtDlpMissingError,
 )
+from audrey.routes.files import FetchClaim
 
 TOKEN = "not-a-real-token"  # noqa: S105  (test fixture)
 FILE_ID = "11111111-2222-3333-4444-555555555555"
@@ -51,19 +52,31 @@ def dirs(tmp_path: Path) -> tuple[Path, Path]:
 
 @pytest.fixture
 def job(dirs: tuple[Path, Path]) -> dict:
-    stage, dest = dirs
-    return {
-        "file_id": FILE_ID,
-        "user": "a@b.c",
-        "source_url": URL,
-        "lease_id": "lease-1",
-        "attempts": 1,
-        "stage_dir": str(stage),
-        "dest_dir": str(dest),
-        "lease_seconds": 1200,
-        "max_bytes": 2 * 1024**3,
-        "max_duration_s": 7200,
-    }
+    """A claim built from `FetchClaim` itself, never hand-written.
+
+    **This is the fix for the bug that shipped.** The fixture used to spell the
+    payload out by hand, and when the claim dropped `dest_dir` for `stage_dir`
+    it kept both — so every test here passed against a job shape the route had
+    stopped sending, while `handle_job` still read the field that no longer
+    existed. On the box that was `KeyError: 'dest_dir'` on the first claim.
+
+    Two test files each testing one end against its own idea of the contract
+    will agree with each other forever and with reality never. Deriving the
+    payload from the model the route actually serialises makes a field that
+    only one side knows about impossible to write down.
+    """
+    stage, _dest = dirs
+    return FetchClaim(
+        file_id=FILE_ID,
+        user="a@b.c",
+        source_url=URL,
+        lease_id="lease-1",
+        attempts=1,
+        stage_dir=str(stage),
+        lease_seconds=1200,
+        max_bytes=2 * 1024**3,
+        max_duration_s=7200,
+    ).model_dump()
 
 
 @pytest.fixture
@@ -115,13 +128,36 @@ def _run(job: dict) -> None:
 
 
 class TestHappyPath:
-    def test_the_file_is_moved_into_the_users_directory(self, job, dirs, posted, monkeypatch):
+    def test_the_file_is_left_in_staging_for_audrey_to_move(
+        self, job, dirs, monkeypatch,
+    ):
         stage, dest = dirs
+        staged_at_post: list[bool] = []
+
+        def fake_post(_endpoint, path, _token, _body, **_kw):
+            if path.endswith("/result"):
+                staged_at_post.append((stage / f"{FILE_ID}.mp4").exists())
+            return 200, {}
+
+        monkeypatch.setattr(fetcher, "post", fake_post)
         _stub(monkeypatch)
         _run(job)
-        assert (dest / f"{FILE_ID}.mp4").read_bytes() == b"video bytes"
-        # Nothing left behind in staging: the rename took the video, and the
-        # tidy-up took everything else this job wrote.
+
+        # **This container never writes outside staging.** Audrey rebuilds the
+        # staged path from the reported filename, re-derives everything it was
+        # told, and does the rename itself — so the file is still here when the
+        # result is posted, and the user's directory is untouched by this end.
+        assert staged_at_post == [True]
+        assert list(dest.iterdir()) == []
+
+    def test_the_tidy_up_runs_after_the_handover(self, job, dirs, posted, monkeypatch):
+        stage, _dest = dirs
+        _stub(monkeypatch)
+        _run(job)
+        # In production the file is gone from staging by now because the result
+        # route moved it. Here the post is faked, so the tidy-up collects it —
+        # which is the correct behaviour for the case that really matters: a
+        # rejected handover leaves bytes nobody owns.
         assert list(stage.iterdir()) == []
 
     def test_the_result_reports_the_title_with_the_real_extension(
@@ -177,8 +213,12 @@ class TestHappyPath:
             result=Downloaded(path=landed),  # … and the format selector fell through
         )
         _run(job)
+        # The reported extension is the one Audrey rebuilds the staged path
+        # from, so it has to follow the file rather than the metadata — they
+        # differ exactly when the format selector fell through, and a wrong
+        # extension makes the result route look for a file that is not there.
         assert posted[-1][1]["filename"].endswith(".mkv")
-        assert (dest / f"{FILE_ID}.mkv").exists()
+        assert list(dest.iterdir()) == []
 
 
 class TestFailuresAreReported:
@@ -387,3 +427,259 @@ def test_the_fetcher_refuses_to_start_without_a_token(monkeypatch):
     # Every claim would 401. Failing at startup says so once, instead of once
     # every ten seconds forever.
     assert fetcher.main() == 2
+
+
+class TestProgressReporting:
+    """What the page learns while a download is running.
+
+    Two things it could not know before: what the video is actually called,
+    and how far along it is. The title is the one that matters — until it
+    arrives the row shows a video id, so "is it fetching the one I meant?" is
+    unanswerable for the whole download.
+    """
+
+    def _progress(self, posted) -> list[dict]:
+        return [b for p, b in posted if p.endswith("/progress")]
+
+    def test_the_title_is_sent_before_a_byte_is_downloaded(
+        self, job, posted, monkeypatch,
+    ):
+        order: list[str] = []
+
+        def fake_post(_endpoint, path, _token, body, **_kw):
+            order.append("progress" if path.endswith("/progress") else "other")
+            posted.append((path, body or {}))
+            return 200, {}
+
+        def fake_download(_url, stage_dir, file_id, **_kw):
+            order.append("download")
+            path = Path(stage_dir) / f"{file_id}.mp4"
+            path.write_bytes(b"v")
+            return Downloaded(path=path)
+
+        monkeypatch.setattr(fetcher, "post", fake_post)
+        monkeypatch.setattr(fetcher, "probe_url", lambda *_a, **_k: _info())
+        monkeypatch.setattr(fetcher, "download", fake_download)
+        _run(job)
+
+        assert order[0] == "progress"
+        assert order[1] == "download"
+        assert self._progress(posted)[0]["title"] == "A Retirement Speech"
+
+    def test_the_first_update_carries_the_size_estimate(self, job, posted, monkeypatch):
+        _stub(monkeypatch)
+        _run(job)
+        first = self._progress(posted)[0]
+        # So the very first poll has a denominator. The exact figures from
+        # yt-dlp replace it a couple of seconds later.
+        assert first["downloaded_bytes"] == 0
+        assert first["total_bytes"] == 100 * 1024 * 1024
+
+    def test_progress_from_the_downloader_is_forwarded(self, job, posted, monkeypatch):
+        def fake_download(_url, stage_dir, file_id, *, on_progress=None, **_kw):
+            on_progress(50, 200)
+            path = Path(stage_dir) / f"{file_id}.mp4"
+            path.write_bytes(b"v")
+            return Downloaded(path=path)
+
+        monkeypatch.setattr(fetcher, "probe_url", lambda *_a, **_k: _info())
+        monkeypatch.setattr(fetcher, "download", fake_download)
+        monkeypatch.setattr(fetcher, "PROGRESS_INTERVAL_S", 0.0)
+        _run(job)
+        assert (50, 200) == (
+            self._progress(posted)[-1]["downloaded_bytes"],
+            self._progress(posted)[-1]["total_bytes"],
+        )
+
+    def test_a_failed_progress_post_does_not_fail_the_download(
+        self, job, monkeypatch,
+    ):
+        calls: list[str] = []
+
+        def fake_post(_endpoint, path, _token, _body, **_kw):
+            calls.append(path)
+            if path.endswith("/progress"):
+                return 409, {"detail": "reclaimed"}
+            return 200, {}
+
+        monkeypatch.setattr(fetcher, "post", fake_post)
+        _stub(monkeypatch)
+        _run(job)
+        # The row keeps showing elapsed time, which is what it did before any
+        # of this existed. Aborting a download over a display field would be
+        # the tail wagging.
+        assert calls[-1].endswith("/result")
+
+
+class TestProgressReporter:
+    """The accounting, tested directly — it is arithmetic with a trap in it."""
+
+    def _reporter(self, sent, **kw):
+        r = fetcher._ProgressReporter(
+            "http://a", TOKEN,
+            {"file_id": FILE_ID, "lease_id": "L1"}, "A Title", **kw,
+        )
+        r.send = lambda done, total: sent.append((done, total))
+        return r
+
+    def test_updates_are_throttled(self):
+        sent: list[tuple[int, int]] = []
+        r = self._reporter(sent, interval_s=1000.0)
+        for i in range(1, 101):
+            r(i, 100)
+        # yt-dlp emits several times a second and the page polls every five, so
+        # forwarding every one is a POST nobody sees and a sqlite write on the
+        # connection every other request shares. The first goes straight
+        # through, though — waiting out the interval before the first real byte
+        # count would leave the row on elapsed time for no reason.
+        assert sent == [(1, 100)]
+
+    def test_an_unthrottled_reporter_sends_everything(self):
+        sent: list[tuple[int, int]] = []
+        r = self._reporter(sent, interval_s=0.0)
+        r(10, 100)
+        r(20, 100)
+        assert sent == [(10, 100), (20, 100)]
+
+    def test_a_second_stream_does_not_restart_the_count(self):
+        sent: list[tuple[int, int]] = []
+        r = self._reporter(sent, interval_s=0.0)
+        r(90, 100)
+        r(100, 100)
+        # Audio begins; yt-dlp counts it from zero again.
+        r(2, 10)
+        r(8, 10)
+        # Naively forwarded this reads 100%, then 20%, then 80% — a download
+        # that appears to have restarted. Folding the finished stream in keeps
+        # the numerator climbing.
+        assert [d for d, _t in sent] == [90, 100, 102, 108]
+
+    def test_the_denominator_grows_rather_than_the_percentage_falling(self):
+        sent: list[tuple[int, int]] = []
+        r = self._reporter(sent, interval_s=0.0)
+        r(100, 100)
+        r(5, 10)
+        # The job really did get bigger when the second stream's size became
+        # known. Showing that in the total is honest; showing it as a
+        # percentage dropping from 100% would not be.
+        assert sent == [(100, 100), (105, 110)]
+
+    def test_a_stream_with_no_total_still_counts_upwards(self):
+        sent: list[tuple[int, int]] = []
+        r = self._reporter(sent, interval_s=0.0)
+        r(50, None)
+        r(120, None)
+        r(10, None)     # a second file, size still unknown
+        assert [d for d, _t in sent] == [50, 120, 130]
+        # No denominator anywhere, so none is invented.
+        assert {t for _d, t in sent} == {0}
+
+    def test_one_unknown_stream_makes_the_whole_total_unknown(self):
+        sent: list[tuple[int, int]] = []
+        r = self._reporter(sent, interval_s=0.0)
+        r(50, None)     # a stream that would not say how big it is
+        r(10, 40)       # a second one that would
+        # Summing only the parts we know gives a denominator the numerator
+        # will overtake — "100% (60 of 40)", still downloading. Better to have
+        # no percentage than one that says the download finished twice.
+        assert sent == [(50, 0), (60, 0)]
+
+
+class TestABugDoesNotBecomeSilence:
+    """What a crash in this container looks like from the outside.
+
+    Written after `KeyError: 'dest_dir'` shipped and cost an afternoon. The
+    KeyError itself is prevented by the `job` fixture now being built from
+    `FetchClaim`; this is about the *second* failure, which was worse and is
+    the general one: an unhandled exception killed the process, so the row sat
+    in 'fetching' with nobody holding it until the lease expired, was
+    re-queued, and crashed identically on the next claim.
+
+    From the upload page that is a download that has been running for an hour,
+    indistinguishable from a slow one, with the only evidence in a container
+    log nobody has reason to open.
+    """
+
+    def _harness(self, monkeypatch, boom, *, jobs: int = 2):
+        """Hand out `jobs` claims, then go idle and stop."""
+        posted: list[tuple[str, dict]] = []
+        claims = [0]
+
+        def fake_post(_endpoint, path, _token, body, **_kw):
+            posted.append((path, body or {}))
+            if path.endswith("/claim"):
+                claims[0] += 1
+                if claims[0] > jobs:
+                    return 204, {}
+                return 200, {"file_id": "x", "lease_id": "L1"}
+            return 200, {}
+
+        monkeypatch.setattr(fetcher, "post", fake_post)
+        monkeypatch.setattr(fetcher, "handle_job", boom)
+        # The idle wait is where this loop ends. Without it the 204 branch
+        # spins, which is what a no-op `wait` turns a poll loop into.
+        monkeypatch.setattr(
+            fetcher.Stopping, "wait",
+            lambda self, _s, **_k: setattr(self, "requested", True),
+        )
+        return posted
+
+    def test_an_unexpected_error_does_not_kill_the_loop(self, monkeypatch):
+        def boom(_job, **_kw):
+            raise KeyError("dest_dir")
+
+        posted = self._harness(monkeypatch, boom, jobs=2)
+        assert fetcher.run(endpoint="http://a", token=TOKEN, poll_seconds=0) == 0
+        # It took the second job too, rather than exiting into a restart that
+        # repeats the same crash twenty minutes later.
+        assert len([p for p, _b in posted if p.endswith("/claim")]) == 3
+
+    def test_the_row_is_told_rather_than_left_to_time_out(self, monkeypatch):
+        def boom(_job, **_kw):
+            raise KeyError("dest_dir")
+
+        posted = self._harness(monkeypatch, boom, jobs=1)
+        fetcher.run(endpoint="http://a", token=TOKEN, poll_seconds=0)
+
+        failed = [b for p, b in posted if p.endswith("/failed")]
+        # A sentence on the row beats an hour of silence. It costs a retry that
+        # was going to fail anyway — max_attempts is 3 — and it is the
+        # difference between "this is broken" and "is this stalled?".
+        assert len(failed) == 1
+        assert "internal error" in failed[0]["reason"]
+
+    def test_a_reporting_failure_does_not_resurrect_the_crash(self, monkeypatch):
+        def boom(_job, **_kw):
+            raise KeyError("dest_dir")
+
+        posted: list[str] = []
+
+        def fake_post(_endpoint, path, _token, _body, **_kw):
+            posted.append(path)
+            if path.endswith("/failed"):
+                raise OSError("audrey is restarting")
+            if path.endswith("/claim"):
+                return (200, {"file_id": "x", "lease_id": "L1"}) \
+                    if len([p for p in posted if p.endswith("/claim")]) == 1 else (204, {})
+            return 200, {}
+
+        monkeypatch.setattr(fetcher, "post", fake_post)
+        monkeypatch.setattr(fetcher, "handle_job", boom)
+        monkeypatch.setattr(
+            fetcher.Stopping, "wait",
+            lambda self, _s, **_k: setattr(self, "requested", True),
+        )
+        # Telling Audrey about the bug can itself fail. Letting that propagate
+        # would put the crash-loop back, one layer out.
+        assert fetcher.run(endpoint="http://a", token=TOKEN, poll_seconds=0) == 0
+
+    def test_a_broken_image_still_crashes_loudly(self, monkeypatch):
+        def missing(_job, **_kw):
+            raise YtDlpMissingError("yt-dlp is not on PATH")
+
+        self._harness(monkeypatch, missing, jobs=1)
+        # Not caught by the blanket handler: an image built wrong is fixed by
+        # rebuilding, and a container restart-looping in `docker ps` is the
+        # right signal. Failing every queued URL on the way past is not.
+        with pytest.raises(YtDlpMissingError):
+            fetcher.run(endpoint="http://a", token=TOKEN, poll_seconds=0)

@@ -693,3 +693,121 @@ class TestFetchedTranscript:
         # and the right answer is whisper — not a 422 about attribution.
         assert r.status_code == 200
         assert (await db.get_upload(job["file_id"]))["fetched_transcript"] == ""
+
+
+# ── Progress while downloading ────────────────────────────────────────
+#
+# Phase 40 declined a progress protocol for the *ingest* stage and that
+# refusal stands. It does not transfer: the ingest stage has no honest
+# denominator ("whisper done, frames next" is three coarse steps), and the
+# surface it was avoiding was a route that could half-complete a row. This one
+# writes three display fields under a `status='fetching'` predicate and cannot
+# transition anything.
+
+
+class TestProgress:
+    async def test_the_real_title_replaces_the_placeholder(self, client, db):
+        job = _accept_and_claim(client)
+        r = client.post(
+            f"/v1/files/fetch/{job['file_id']}/progress", headers=SVC,
+            json={"lease_id": job["lease_id"], "title": "A Retirement Speech",
+                  "downloaded_bytes": 0, "total_bytes": 288 * 1024 * 1024},
+        )
+        assert r.status_code == 200, r.text
+        row = (await db.list_user(ME))[0]
+        # Until this lands the row shows the video id, so "is it fetching the
+        # one I meant?" is unanswerable for the whole download — which is
+        # exactly when someone wants to ask.
+        assert row["filename"] == "A Retirement Speech"
+        assert row["status"] == "fetching"
+
+    async def test_the_byte_counts_reach_the_file_list(self, client, db):
+        job = _accept_and_claim(client)
+        client.post(
+            f"/v1/files/fetch/{job['file_id']}/progress", headers=SVC,
+            json={"lease_id": job["lease_id"], "downloaded_bytes": 1024,
+                  "total_bytes": 4096},
+        )
+        rows = client.get("/v1/files").json()["files"]
+        assert (rows[0]["fetch_downloaded_bytes"], rows[0]["fetch_total_bytes"]) \
+            == (1024, 4096)
+
+    async def test_an_empty_title_leaves_the_name_alone(self, client, db):
+        job = _accept_and_claim(client)
+        before = (await db.get_upload(job["file_id"]))["filename"]
+        client.post(
+            f"/v1/files/fetch/{job['file_id']}/progress", headers=SVC,
+            json={"lease_id": job["lease_id"], "downloaded_bytes": 10},
+        )
+        # A site with no title must not turn a row that had a usable
+        # placeholder into an unnamed one.
+        assert (await db.get_upload(job["file_id"]))["filename"] == before
+
+    async def test_progress_cannot_change_a_rows_state(self, client, db):
+        job = _accept_and_claim(client)
+        client.post(
+            f"/v1/files/fetch/{job['file_id']}/progress", headers=SVC,
+            json={"lease_id": job["lease_id"], "title": "T",
+                  "downloaded_bytes": 999, "total_bytes": 1000},
+        )
+        row = await db.get_upload(job["file_id"])
+        # 99% is not "done". Only `fetch/{id}/result` moves a row on, and only
+        # after it has verified the bytes — this route has no state to strand
+        # anything in, which is the whole reason it is safe to add.
+        assert row["status"] == "fetching"
+        assert row["bytes"] == 0
+        assert row["mime"] == ""
+
+    async def test_a_stale_lease_cannot_paint_over_a_newer_run(self, client, db):
+        job = _accept_and_claim(client)
+        await db.sweep_expired_leases(
+            expired_before="2099-01-01T00:00:00+00:00", max_attempts=3,
+            stage="fetching",
+        )
+        again = client.post("/v1/files/fetch/claim", headers=SVC).json()
+        client.post(
+            f"/v1/files/fetch/{again['file_id']}/progress", headers=SVC,
+            json={"lease_id": again["lease_id"], "downloaded_bytes": 500},
+        )
+        r = client.post(
+            f"/v1/files/fetch/{job['file_id']}/progress", headers=SVC,
+            json={"lease_id": job["lease_id"], "downloaded_bytes": 20},
+        )
+        # Otherwise the download appears to go backwards, for a reason nobody
+        # could reconstruct afterwards.
+        assert r.status_code == 409
+        assert (await db.get_upload(job["file_id"]))["fetch_downloaded_bytes"] == 500
+
+    async def test_the_counters_are_cleared_when_the_download_lands(self, client, db):
+        job = _accept_and_claim(client)
+        client.post(
+            f"/v1/files/fetch/{job['file_id']}/progress", headers=SVC,
+            json={"lease_id": job["lease_id"], "title": "Real Title",
+                  "downloaded_bytes": 40, "total_bytes": 100},
+        )
+        _land(job)
+        client.post(
+            f"/v1/files/fetch/{job['file_id']}/result", headers=SVC,
+            json={"lease_id": job["lease_id"], "filename": "Real Title.mp4"},
+        )
+        row = await db.get_upload(job["file_id"])
+        # "40 of 100 bytes" on a finished row is a fact about a moment that has
+        # passed, and `bytes` is now the real number.
+        assert (row["fetch_downloaded_bytes"], row["fetch_total_bytes"]) == (0, 0)
+        assert row["bytes"] == len(MP4)
+
+    def test_a_user_token_cannot_report_progress(self, client):
+        assert client.post(
+            "/v1/files/fetch/anything/progress",
+            json={"lease_id": "L", "downloaded_bytes": 1},
+        ).status_code == 401
+
+    async def test_a_row_nobody_holds_is_refused(self, client, db):
+        client.post("/v1/files/from-url", json={"url": URL})
+        rows = await db.list_user(ME)
+        r = client.post(
+            f"/v1/files/fetch/{rows[0]['file_id']}/progress", headers=SVC,
+            json={"lease_id": "made-up", "downloaded_bytes": 1},
+        )
+        # 'fetch_pending', not 'fetching'. Nothing is downloading it.
+        assert r.status_code == 409

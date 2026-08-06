@@ -156,6 +156,12 @@ class FileRow(BaseModel):
     # are looking at, and the first response to a bad transcript would be to
     # re-run the pipeline that was never involved.
     transcript_source: str = ""
+    # Download progress (Phase 41), both 0 outside the 'fetching' state.
+    # `fetch_total_bytes` stays 0 when the site will not say how big the file
+    # is, and the page renders that as a running byte count rather than as a
+    # percentage of a number nobody knows.
+    fetch_downloaded_bytes: int = 0
+    fetch_total_bytes: int = 0
 
 
 class UploadResponse(BaseModel):
@@ -1231,6 +1237,18 @@ class FetchFailedRequest(BaseModel):
     reason: str
 
 
+class FetchProgressRequest(BaseModel):
+    lease_id: str
+    # The video's real title, known from the metadata pass before a byte moves.
+    # Empty leaves the existing name alone.
+    title: str = ""
+    downloaded_bytes: int = 0
+    # 0 when the site will not commit to a size. Not an error, and not
+    # something to guess at — a percentage of an invented total is worse than
+    # no percentage.
+    total_bytes: int = 0
+
+
 @router.post("/fetch/claim", response_model=None)
 async def claim_fetch(
     request: Request, _: None = Depends(require_service),
@@ -1279,6 +1297,56 @@ async def claim_fetch(
         max_bytes=_max_fetch_bytes(request),
         max_duration_s=float(cfg.get("max_duration_s", 0) or 0),
     )
+
+
+@router.post("/fetch/{file_id}/progress", response_model=JobResultResponse)
+async def fetch_progress(
+    file_id: str,
+    body: FetchProgressRequest,
+    request: Request,
+    _: None = Depends(require_service),
+) -> JobResultResponse:
+    """Record how far a download has got, and what it turned out to be called.
+
+    ## Why this exists when phase 40 refused one
+
+    Phase 40 declined a progress protocol for the *ingest* stage, and that
+    refusal still stands where it was made. Its reasons do not transfer here,
+    and the difference is worth stating rather than quietly overriding:
+
+      - **The ingest stage has no denominator.** "Whisper done, frames next" is
+        three coarse steps with no honest fraction between them, so the choice
+        there was between elapsed time and a fake percentage. A download has a
+        real numerator and a real denominator, reported by the downloader, and
+        turning that into a percentage invents nothing.
+      - **The surface phase 40 was avoiding was a sibling of `ingest_result`** —
+        a route that could half-complete a row, with lease logic that had to
+        tolerate partial updates. This route writes three display fields under
+        a `status = 'fetching'` predicate and **cannot transition anything**.
+        There is no state for it to leave a row stranded in.
+
+    The title is the part that matters most and is nearly free. The fetcher
+    learns it from the metadata pass before it downloads anything, and until
+    it arrives the row shows a video id — so "is it fetching the one I meant?"
+    is unanswerable for the entire download, which is exactly when someone
+    wants to ask.
+
+    A stale lease gets a 409 rather than being ignored, so a fetcher that woke
+    up after being swept cannot paint its old byte count over the run that
+    replaced it — a download that appears to go backwards, for a reason nobody
+    could reconstruct afterwards.
+    """
+    db = _get_uploads_db(request)
+    if not await db.record_fetch_progress(
+        file_id=file_id, lease_id=body.lease_id, title=body.title.strip()[:255],
+        downloaded_bytes=max(0, body.downloaded_bytes),
+        total_bytes=max(0, body.total_bytes),
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Lease is no longer valid — this fetch was reclaimed.",
+        )
+    return JobResultResponse(file_id=file_id, status="fetching", chunks=0)
 
 
 @router.post("/fetch/{file_id}/result", response_model=JobResultResponse)

@@ -38,6 +38,7 @@ from audrey.media.fetch import (
     check_limits,
     download,
     friendly_reason,
+    parse_progress_line,
     parse_vtt,
     probe_url,
 )
@@ -565,3 +566,129 @@ def test_staging_holds_everything_yt_dlp_writes(tmp_path):
     # `yt-dlp.argv` is the fake recording its own arguments, not something the
     # code under test wrote.
     assert {p.name for p in tmp_path.iterdir()} - before == {"staging", "yt-dlp.argv"}
+
+
+class TestProgressLine:
+    """Parsing what `--progress-template` emits.
+
+    Given a name and a test of its own because it is the one part of the
+    streaming path with a decision in it: a yt-dlp upgrade that changes how a
+    field renders should fail here, loudly, rather than quietly produce a
+    download that reports 0 bytes for its entire run.
+    """
+
+    def test_a_normal_line_yields_bytes_and_total(self):
+        assert parse_progress_line("@AUDREYP 1048576 10485760 NA") == (1048576, 10485760)
+
+    def test_an_unknown_total_falls_back_to_the_estimate(self):
+        # Sites that will not commit to a size still usually offer a guess. A
+        # roughly-right denominator beats none: a counter with no total can
+        # only climb, which does not answer "how much longer".
+        assert parse_progress_line("@AUDREYP 500 NA 9000") == (500, 9000)
+
+    def test_no_total_at_all_is_reported_as_unknown(self):
+        assert parse_progress_line("@AUDREYP 500 NA NA") == (500, None)
+
+    def test_a_float_byte_count_is_accepted(self):
+        # `total_bytes_estimate` is a float in yt-dlp's own data.
+        assert parse_progress_line("@AUDREYP 500 NA 9000.5") == (500, 9000)
+
+    def test_the_filepath_line_is_not_progress(self):
+        # Both share stdout. Mistaking one for the other loses the download's
+        # location, which is the only thing `download` has to return.
+        assert parse_progress_line("/data/uploads/.staging/abc.mp4") is None
+
+    def test_a_malformed_progress_line_is_ignored_rather_than_raising(self):
+        assert parse_progress_line("@AUDREYP") is None
+        assert parse_progress_line("@AUDREYP not-a-number 5") is None
+
+
+class TestProgressStreaming:
+    """Progress arrives *during* the download, not after it."""
+
+    BODY = """
+        import sys, time
+        from pathlib import Path
+        argv = sys.argv[1:]
+        with open(sys.argv[0] + '.argv', 'w') as f:
+            f.write('\\n'.join(argv))
+        for done in (25, 50, 100):
+            print(f"@AUDREYP {done} 100 NA", flush=True)
+        out = Path(argv[argv.index('-o') + 1].replace('%(ext)s', 'mp4'))
+        out.write_bytes(b'video bytes')
+        print(out)
+    """
+
+    def test_every_update_reaches_the_callback(self, tmp_path):
+        binary = _fake_ytdlp(tmp_path, self.BODY)
+        seen = []
+        got = download(
+            URL, tmp_path / "staging", FILE_ID, timeout_s=30, binary=binary,
+            on_progress=lambda d, t: seen.append((d, t)),
+        )
+        assert seen == [(25, 100), (50, 100), (100, 100)]
+        # And the download still returns what it always did — the progress
+        # lines must not be mistaken for the printed filepath.
+        assert got.path.name == f"{FILE_ID}.mp4"
+
+    def test_the_template_and_newline_are_both_passed(self, tmp_path):
+        binary = _fake_ytdlp(tmp_path, self.BODY)
+        download(
+            URL, tmp_path / "staging", FILE_ID, timeout_s=30, binary=binary,
+            on_progress=lambda d, t: None,
+        )
+        argv = _argv_of(binary)
+        # Without `--newline` yt-dlp redraws one line with a carriage return,
+        # so `for line in stdout` yields nothing until the process exits — the
+        # progress would all arrive at once, after the download it describes.
+        assert "--newline" in argv
+        assert "--no-progress" not in argv
+        assert "%(progress.downloaded_bytes)s" in argv[argv.index("--progress-template") + 1]
+
+    def test_progress_is_suppressed_when_nobody_is_listening(self, tmp_path):
+        binary = _fake_ytdlp(tmp_path, TestDownload.BODY)
+        download(URL, tmp_path / "staging", FILE_ID, timeout_s=30, binary=binary)
+        assert "--no-progress" in _argv_of(binary)
+
+    def test_a_throwing_callback_does_not_lose_the_download(self, tmp_path):
+        def boom(_d, _t):
+            raise RuntimeError("the reporting side fell over")
+
+        binary = _fake_ytdlp(tmp_path, self.BODY)
+        got = download(
+            URL, tmp_path / "staging", FILE_ID, timeout_s=30, binary=binary,
+            on_progress=boom,
+        )
+        # Progress is a courtesy; the bytes are the job. Failing the download
+        # because nobody could be told about it would be the tail wagging.
+        assert got.path.exists()
+
+    def test_a_hung_downloader_is_killed_at_the_deadline(self, tmp_path):
+        # The reason the timeout is a watchdog rather than a deadline checked
+        # between lines: `readline` blocks, so a downloader that stalls with no
+        # output would sit past any between-lines check forever.
+        binary = _fake_ytdlp(tmp_path, "import time; time.sleep(30)")
+        with pytest.raises(FetchFailedError) as e:
+            download(
+                URL, tmp_path / "staging", FILE_ID, timeout_s=0.5, binary=binary,
+                on_progress=lambda d, t: None,
+            )
+        assert "did not finish" in str(e.value)
+
+    def test_a_large_stderr_does_not_deadlock_the_stream(self, tmp_path):
+        # The classic pipe deadlock: reading stdout line by line while stderr
+        # fills its own 64 KB buffer. stderr goes to a temp file for exactly
+        # this, and 200 KB of warnings is a real yt-dlp run on a bad day.
+        binary = _fake_ytdlp(tmp_path, """
+            import sys
+            sys.stderr.write("WARNING: something verbose\\n" * 8000)
+            print("ERROR: and then it failed", file=sys.stderr)
+            sys.exit(1)
+        """)
+        with pytest.raises(FetchRefusedError) as e:
+            download(
+                URL, tmp_path / "staging", FILE_ID, timeout_s=20, binary=binary,
+                on_progress=lambda d, t: None,
+            )
+        # It got the *last* error line, from the far end of 200 KB.
+        assert "and then it failed" in str(e.value)

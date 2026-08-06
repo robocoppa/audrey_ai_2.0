@@ -251,6 +251,30 @@ All of that is unchanged. What changed is which directory, for two reasons:
    `.staging` (mode 0777, leading dot so it can never collide with a
    `sanitize_user` output) is the second.
 
+⚠️ **This half-landed, and it cost an afternoon on the box.** `FetchClaim`
+dropped `dest_dir` for `stage_dir` and `files.py` learned to do the move — but
+`fetcher.py` kept both the field read and the rename. First claim on the box:
+`KeyError: 'dest_dir'`, before the metadata pass, so nothing downloaded.
+
+**The tests did not catch it because the fixture invented the contract.**
+`tests/test_media_fetcher.py` hand-wrote a job dict and, through the change,
+carried *both* `stage_dir` and `dest_dir` — so the fetcher's tests passed
+against a payload the route had stopped sending, and two green test files
+agreed with each other about a shape neither end actually used. The fixture now
+builds the job from `FetchClaim(...).model_dump()`, which makes a field only
+one side knows about impossible to write down.
+
+**The second failure was worse than the first.** The `KeyError` escaped
+`handle_job`, killed the process, and the container restarted — leaving the row
+in `fetching` with nobody holding it. Twenty minutes later the lease expired,
+the sweep re-queued it, the next claim crashed identically. From the upload
+page that is a download that has been running for an hour, indistinguishable
+from a slow one, with the only evidence in a container log nobody has reason to
+open. `run()` now catches anything unexpected, reports the row failed with the
+error in `failure_reason`, and keeps polling. `YtDlpMissingError` still
+propagates: a wrongly-built image should crash-loop visibly rather than fail
+every queued URL on the way past.
+
 The gain is bigger than the fix. **Audrey is now the only writer of the user
 directories** — the same single-writer argument phase 33 made for sqlite and
 phase 34 expressed as a read-only mount on the worker — and verification
@@ -280,6 +304,59 @@ A URL input above the drop zone. On submit, `POST /v1/files/from-url`, then
 means bytes are moving. Collapsing them makes a stopped `media-fetcher` look
 exactly like a slow download. Elapsed comes from the same `leased_at` /
 `server_time` skew correction already built.
+
+### The download reports itself — and this overturns a phase-40 decision
+
+Added 2026-08-06, at the user's request: a download shows `downloading — 42%
+(121.4 MB of 288.3 MB)` and the video's **real title**, rather than elapsed
+seconds against a video id.
+
+**Phase 40 explicitly declined a progress protocol**, and that refusal still
+stands where it was made. It does not transfer here, and the difference is
+worth stating rather than quietly overriding:
+
+- **The ingest stage has no denominator.** "Whisper done, frames next" is three
+  coarse steps with no honest fraction between them, so the choice there was
+  between elapsed time and an invented percentage. A download has a real
+  numerator and a real denominator, reported by the downloader — turning that
+  into a percentage invents nothing.
+- **The surface phase 40 was avoiding was a sibling of `ingest_result`**: a
+  route that could half-complete a row, with lease logic that had to tolerate
+  partial updates. `POST /v1/files/fetch/{id}/progress` writes three display
+  fields under a `status = 'fetching'` predicate and **cannot transition
+  anything**. There is no state for it to strand a row in, which is the whole
+  reason it is safe to add.
+
+**The title is the part that matters most and was nearly free.** The fetcher
+learns it from the metadata pass before it downloads anything and simply never
+told anyone until the result post. It now sends it immediately, writing over
+the video-id placeholder in `filename` — safe during `fetching` precisely
+because the bytes are in staging, so nothing derives a path from that column
+until `complete_fetch` writes the real name with its real extension.
+
+Three things this had to get right:
+
+- **Progress must be monotonic.** Above a site's highest pre-muxed quality,
+  video and audio arrive as two separate downloads and yt-dlp counts each from
+  zero — so a naive forward reads 100%, then 3%, then 100%, which looks like a
+  download that restarted. `_ProgressReporter` folds a finished stream into a
+  running total. The denominator can still step *up* once, when the second
+  stream's size becomes known; that is honest, and it shows as the "of 288.3
+  MB" figure changing rather than as a percentage mysteriously falling.
+- **One unknown total makes the whole total unknown.** Summing only the streams
+  that reported a size gives a denominator the numerator will overtake — "100%
+  (130 MB of 120 MB)", still downloading. The page falls back to a bare byte
+  count, and to elapsed time before any bytes move.
+- **Streaming needs `Popen`, not `subprocess.run`.** Progress that arrives
+  after the process exits is not progress. Two traps came with it: stderr goes
+  to a temp file, because reading stdout line by line while stderr fills its
+  own 64 KB pipe deadlocks; and the timeout is a watchdog timer rather than a
+  deadline checked between lines, because `readline` blocks and a downloader
+  that hangs silently would sit past any between-lines check forever.
+
+Updates are throttled to one every 2s — yt-dlp emits several a second, the page
+polls every five, and each POST is a sqlite write on the connection every other
+request shares. The first goes straight through.
 
 Three smaller things the page needed:
 

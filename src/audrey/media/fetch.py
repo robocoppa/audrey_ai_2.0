@@ -31,6 +31,9 @@ import logging
 import re
 import shutil
 import subprocess
+import tempfile
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -159,6 +162,119 @@ def _binary(name: str = "yt-dlp") -> str:
             f"{name} is not on PATH — the media-fetcher image is built wrong",
         )
     return found
+
+
+#: Prefix on the progress lines we ask yt-dlp to emit. Progress and
+#: `--print after_move:filepath` both go to stdout, so one of them has to be
+#: recognisable; tagging the one whose format we control is the cheaper half.
+_PROGRESS_TAG = "@AUDREYP"
+
+#: What a progress line carries. `total_bytes` is exact and present for most
+#: downloads; `total_bytes_estimate` is what a site that will not commit to a
+#: size gives instead. yt-dlp renders an unknown field as the string `NA`.
+_PROGRESS_TEMPLATE = (
+    f"download:{_PROGRESS_TAG} %(progress.downloaded_bytes)s "
+    "%(progress.total_bytes)s %(progress.total_bytes_estimate)s"
+)
+
+
+def _int_or_none(token: str) -> int | None:
+    """yt-dlp writes `NA` for a field it does not know. So does an empty run."""
+    try:
+        value = int(float(token))
+    except (TypeError, ValueError):
+        return None
+    return value if value >= 0 else None
+
+
+def parse_progress_line(line: str) -> tuple[int, int | None] | None:
+    """`(downloaded_bytes, total_or_None)` from one progress line, or None.
+
+    Split out and given a name because it is the only part of the streaming
+    path with a decision in it, and because a yt-dlp upgrade that changes the
+    field rendering should fail a test here rather than silently produce a
+    download that reports 0 bytes forever.
+    """
+    if not line.startswith(_PROGRESS_TAG):
+        return None
+    parts = line.split()[1:]
+    if not parts:
+        return None
+    downloaded = _int_or_none(parts[0])
+    if downloaded is None:
+        return None
+    total = _int_or_none(parts[1]) if len(parts) > 1 else None
+    if total is None and len(parts) > 2:
+        # Fall back to the estimate. A number that is roughly right beats no
+        # denominator at all — a progress display with no total can only count
+        # upwards, which does not answer "how much longer".
+        total = _int_or_none(parts[2])
+    return downloaded, total
+
+
+def _stream(
+    argv: list[str], *, timeout: float,
+    on_progress: Callable[[int, int | None], None] | None,
+) -> tuple[int, list[str], str]:
+    """Run yt-dlp, feeding progress out as it arrives. Returns
+    `(returncode, printed_lines, stderr)`.
+
+    `Popen` rather than `subprocess.run` because progress that arrives after
+    the process exits is not progress. Two things this has to get right that
+    `run` was doing for us:
+
+    **stderr goes to a file, not a pipe.** Reading stdout line by line while
+    stderr fills its own 64 KB pipe buffer deadlocks — the classic one. A
+    temporary file has no buffer to fill.
+
+    **The timeout is a watchdog, not a read deadline.** `readline` blocks, so a
+    yt-dlp that hangs with no output would sit past any deadline checked
+    between lines. A timer that kills the process turns that into an EOF we are
+    already waiting for.
+    """
+    killed = False
+
+    def expire() -> None:
+        nonlocal killed
+        killed = True
+        proc.kill()
+
+    printed: list[str] = []
+    with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as errfile:
+        proc = subprocess.Popen(
+            argv, stdout=subprocess.PIPE, stderr=errfile,
+            text=True, bufsize=1,
+        )
+        watchdog = threading.Timer(timeout, expire)
+        watchdog.start()
+        try:
+            for raw in proc.stdout or ():
+                line = raw.strip()
+                if not line:
+                    continue
+                progress = parse_progress_line(line)
+                if progress is None:
+                    printed.append(line)
+                elif on_progress is not None:
+                    # A reporter that throws must not take the download with
+                    # it. Progress is a courtesy; the bytes are the job.
+                    try:
+                        on_progress(*progress)
+                    except Exception as e:  # noqa: BLE001
+                        log.warning("fetch: progress callback failed: %s", e)
+            proc.wait()
+        finally:
+            watchdog.cancel()
+            if proc.stdout is not None:
+                proc.stdout.close()
+        errfile.seek(0)
+        stderr = errfile.read()
+
+    if killed:
+        raise FetchFailedError(
+            f"the download did not finish within {timeout:.0f}s and was stopped",
+        )
+    return proc.returncode, printed, stderr
 
 
 def _run(argv: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
@@ -371,6 +487,7 @@ def download(
     sub_langs: str = DEFAULT_SUB_LANGS,
     fmt: str = DEFAULT_FORMAT,
     binary: str | None = None,
+    on_progress: Callable[[int, int | None], None] | None = None,
 ) -> Downloaded:
     """Download into the staging directory. Returns where it landed.
 
@@ -382,13 +499,18 @@ def download(
     The extension is yt-dlp's to choose, which is why the caller is handed a
     path rather than told one: the container depends on what the site serves
     and what the format selector merged into.
+
+    `on_progress(downloaded_bytes, total_or_None)` is called as the bytes
+    arrive, several times a second. **Throttling is the caller's job** — this
+    end reports what yt-dlp reports, and how often that is worth forwarding
+    over HTTP is a question about the caller's transport, not about the
+    download.
     """
     stage_dir.mkdir(parents=True, exist_ok=True)
     argv = [
         binary or _binary(),
         "--no-playlist",
         "--no-warnings",
-        "--no-progress",
         "--no-continue",       # a stale .part from a swept attempt must not be resumed
         "-f", fmt,
         "--merge-output-format", OUTPUT_CONTAINER,
@@ -400,6 +522,14 @@ def download(
         # selector fell through to a different container.
         "--print", "after_move:filepath",
     ]
+    if on_progress is None:
+        argv += ["--no-progress"]
+    else:
+        # `--newline` matters as much as the template: yt-dlp redraws progress
+        # with a carriage return by default, so without it the whole download
+        # is one line that never ends and `for line in stdout` yields nothing
+        # until the process exits.
+        argv += ["--newline", "--progress-template", _PROGRESS_TEMPLATE]
     if max_bytes:
         argv += ["--max-filesize", str(max_bytes)]
     if caption_source == SOURCE_SUBTITLES:
@@ -408,23 +538,24 @@ def download(
         argv += ["--write-auto-subs", "--sub-langs", sub_langs, "--sub-format", "vtt/best"]
     argv += ["--", url]
 
-    result = _run(argv, timeout=timeout_s)
-    if result.returncode != 0:
-        raise FetchRefusedError(friendly_reason(result.stderr))
+    returncode, printed, stderr = _stream(
+        argv, timeout=timeout_s, on_progress=on_progress,
+    )
+    if returncode != 0:
+        raise FetchRefusedError(friendly_reason(stderr))
 
-    printed = [ln.strip() for ln in (result.stdout or "").splitlines() if ln.strip()]
     path = Path(printed[-1]) if printed else None
     if path is None or not path.exists():
         # `--max-filesize` aborts with returncode 0 and prints nothing, which
         # is the one success-shaped failure this call has.
-        if max_bytes and "larger than max-filesize" in (result.stderr or "").lower():
+        if max_bytes and "larger than max-filesize" in (stderr or "").lower():
             raise FetchRefusedError(
                 f"the video is larger than this server's "
                 f"{max_bytes // (1024 * 1024)}MB limit",
             )
         raise FetchFailedError(
             "the downloader reported success but wrote no file: "
-            f"{friendly_reason(result.stderr)}",
+            f"{friendly_reason(stderr)}",
         )
 
     segments: list[dict] = []

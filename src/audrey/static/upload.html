@@ -740,6 +740,37 @@
     return (Date.now() - (serverSkewMs || 0) - started) / 1000;
   }
 
+  /** What a download in flight says about itself.
+   *
+   * Three tiers, and which one you get depends entirely on what is actually
+   * known — none of them guesses:
+   *
+   *   1. Both numbers → `42% — 121.4 MB of 288.3 MB`. The percentage answers
+   *      "how much longer", the byte figures make it checkable, and seeing the
+   *      total change is how a two-stream download explains itself.
+   *   2. Bytes but no total → `121.4 MB downloaded`. Some sites will not
+   *      commit to a size. A percentage of an unknown total would be an
+   *      invention, and this is the one number that is still true.
+   *   3. Neither → elapsed time, which is where this started. The metadata
+   *      pass runs before any byte moves, so every download spends its first
+   *      seconds here.
+   */
+  function fetchingCell(f) {
+    const done = f.fetch_downloaded_bytes || 0;
+    const total = f.fetch_total_bytes || 0;
+    if (done && total) {
+      // Clamped because the first update carries the metadata pass's
+      // *estimate*, which can undershoot. It is replaced by exact figures
+      // within a couple of seconds; showing 118% in the meantime would look
+      // like a bug in something.
+      const pct = Math.min(100, Math.round((done / total) * 100));
+      return `downloading — ${pct}% (${fmtBytes(done)} of ${fmtBytes(total)})`;
+    }
+    if (done) return `downloading — ${fmtBytes(done)}`;
+    const secs = elapsedSince(f.leased_at);
+    return secs === null ? "downloading…" : `downloading — ${fmtElapsed(secs)}`;
+  }
+
   function statusCell(f) {
     if (f.status === "ready") return escapeHtml(f.uploaded_at);
     // Phase 41. Two states, and keeping them apart is the whole value: one
@@ -747,10 +778,7 @@
     // moving. Collapsing them into "fetching…" makes a stopped media-fetcher
     // look exactly like a slow download, which is the support question this
     // field exists to prevent.
-    if (f.status === "fetching") {
-      const secs = elapsedSince(f.leased_at);
-      return secs === null ? "downloading…" : `downloading — ${fmtElapsed(secs)}`;
-    }
+    if (f.status === "fetching") return fetchingCell(f);
     if (f.status === "fetch_pending") {
       const secs = elapsedSince(f.uploaded_at);
       return secs === null ? "queued to download" : `queued to download — ${fmtElapsed(secs)}`;
