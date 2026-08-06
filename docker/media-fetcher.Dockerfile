@@ -52,7 +52,20 @@ WORKDIR /app
 # symptom is fetches failing with a reason from `friendly_reason`, and the fix
 # is bumping this line and rebuilding — a deliberate act, on the schedule of
 # whoever runs the box.
-ARG YTDLP_VERSION=2025.06.30
+#
+# **That cost came due on the very first fetch, because the pin was wrong when
+# it was written.** 2025.06.30 was thirteen months old the day it shipped, and
+# YouTube answered every request with "The following content is not available
+# on this app" — its response to a client an obsolete yt-dlp impersonates.
+# Pinning is right; pinning to whatever version you happen to remember is not.
+#
+# **Check before bumping**, rather than picking a plausible-looking date:
+#   curl -s https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest \
+#     | grep '"tag_name"'
+#
+# Expect to do this every few months. A fetch that suddenly fails on every URL,
+# with a reason that sounds like YouTube's opinion of the video, is this.
+ARG YTDLP_VERSION=2026.07.04
 RUN pip install --no-cache-dir "yt-dlp==${YTDLP_VERSION}"
 
 # Just the three modules it imports, and the version marker their parent needs.

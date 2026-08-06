@@ -203,6 +203,19 @@ class TestFriendlyReason:
     def test_the_common_failures_read_as_sentences(self, stderr, expected):
         assert expected in friendly_reason(stderr)
 
+    def test_a_stale_downloader_is_not_reported_as_a_broken_video(self):
+        # Observed on the first real fetch this feature ever did. YouTube's
+        # wording is about the video; the cause is entirely ours, and the
+        # difference decides whether someone goes and checks the link or
+        # rebuilds the image. The one case where passing yt-dlp's own text
+        # through would be actively misleading rather than merely terse.
+        reason = friendly_reason(
+            "ERROR: [youtube] ebfzL_GwiIE: The following content is not "
+            "available on this app. Watch on the latest version of YouTube.",
+        )
+        assert "out of date" in reason
+        assert "Nothing is wrong with this video" in reason
+
     def test_four_different_failures_do_not_produce_one_message(self):
         # The whole point. A generic "download failed" for all of these is the
         # message that generates the support question the field exists to

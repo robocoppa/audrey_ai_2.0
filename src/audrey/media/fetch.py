@@ -300,6 +300,19 @@ def _run(argv: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]
 #: limit and wrong for a deleted video, and "ask the owner" is right for a
 #: private one and useless for a region block.
 _REASON_MAP: tuple[tuple[str, str], ...] = (
+    # First, because it is the one message that is about US and reads as
+    # though it is about the video. YouTube says "not available on this app"
+    # when it rejects the client an out-of-date yt-dlp impersonates — nothing
+    # is wrong with the video, and passing the wording through sends whoever
+    # reads it to check the link instead of the downloader. Observed on the
+    # first real fetch this feature ever did, against a pin thirteen months
+    # stale; see `docker/media-fetcher.Dockerfile`.
+    (
+        "not available on this app",
+        "the server's downloader is out of date — YouTube refused the version "
+        "it identifies as. Nothing is wrong with this video; media-fetcher "
+        "needs its yt-dlp bumped and the image rebuilt",
+    ),
     ("private video", "this video is private — only its owner can see it"),
     (
         "members-only",
