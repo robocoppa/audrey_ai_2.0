@@ -25,6 +25,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from audrey.kb.uploads_db import UploadsDB
+from audrey.kb.user_store import sanitize_user
 from audrey.routes.files import router
 
 SECRET = "s3cr3t-service-token"  # noqa: S105  (test fixture, not a real secret)
@@ -137,8 +138,42 @@ class TestModelShape:
         assert row["kind"] == "video"
         assert row["status"] == "ready"
         assert row["duration_s"] == 565.0
-        assert row["summary"] == "A nine-minute standup about the handover."
         assert row["uploaded_at"] == "2026-08-01T00:00:00+00:00"
+
+    @pytest.mark.asyncio
+    async def test_the_summary_is_not_in_the_listing(self, db: UploadsDB, tmp_path: Path):
+        """Removed 2026-08-06. A listing that carries contents is a listing
+        that gets answered from instead of read from.
+
+        Measured on the box: "compare what jasonRetirement.mp4 and silent.mp4
+        say" was answered with `list_my_files` and **no other call** — a
+        paragraph about one video and a confident "no processable content"
+        about the other, with nothing read either time. Both halves were right;
+        the second was right by luck, because *metadata-shaped absence ⇒
+        content absence* fails for a video with a transcript and no summary.
+        """
+        await _add(db, "v1", user="alice@example.com", filename="standup.mp4",
+                   status="pending")
+        await db.claim_job(lease_id="L1", now="2026-08-01T10:00:00+00:00")
+        await db.complete_job(
+            file_id="v1", lease_id="L1", collection="kb_user_text_alice", chunks=12,
+            duration_s=565.0, summary="A nine-minute standup about the handover.",
+        )
+
+        # The sidecar `get_file_text` would actually read. `artifacts` is
+        # checked against disk, not against the row, so writing it is what
+        # makes this test about the listing rather than about the fixture.
+        user_dir = tmp_path / "uploads" / sanitize_user("alice@example.com")
+        user_dir.mkdir(parents=True, exist_ok=True)
+        (user_dir / "v1.summary.txt").write_text("A nine-minute standup.")
+
+        row = _post(_build_app(db, tmp_path), {"user": "alice@example.com"}).json()["files"][0]
+
+        assert "summary" not in row
+        # Not lost — `artifacts` says a summary exists, and reading it is one
+        # `get_file_text(artifact='summary')` call. The change is that reading
+        # became something the model does rather than something it can skip.
+        assert "summary" in row["artifacts"]
 
     @pytest.mark.asyncio
     async def test_omits_the_fields_a_model_has_no_use_for(

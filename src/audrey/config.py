@@ -47,6 +47,18 @@ class EnvOverrides(BaseSettings):
     # internal ollama-net URL.
     owui_url: str = Field(default="http://open-webui:8080", alias="OWUI_URL")
 
+    # The same Open WebUI, addressed the way a BROWSER can reach it — which is
+    # a different string and must not be conflated with `owui_url` above.
+    # `http://open-webui:8080` resolves inside the docker network and nowhere
+    # else, so emitting it into a page produces a link that fails for everyone.
+    #
+    # Used only for the upload page's Home link. Empty means no link is
+    # rendered: the upload page is opened in a new tab from an OWUI banner
+    # (`target="_blank"`), so there is no history to fall back on, and a Home
+    # button that goes nowhere is worse than none. Set it to whatever you type
+    # in the address bar to reach OWUI, e.g. `https://chat.example.com`.
+    owui_public_url: str = Field(default="", alias="OWUI_PUBLIC_URL")
+
     kb_service_token: str = Field(default="", alias="KB_SERVICE_TOKEN")
 
     # Search

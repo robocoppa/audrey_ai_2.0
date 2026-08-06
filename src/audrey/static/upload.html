@@ -27,6 +27,17 @@
     p.sub { color: var(--muted); margin: 0 0 24px; }
     .who { font-size: 0.85rem; color: var(--muted); margin: 0 0 20px; }
     .who strong { color: var(--text); }
+    /* Deliberately a link that looks like a button rather than a real button.
+       It navigates, so middle-click and open-in-new-tab should both work —
+       which they do for an anchor and do not for anything driven by a click
+       handler. */
+    a.home {
+      display: inline-block; margin: 0 0 16px;
+      padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--panel); color: var(--muted);
+      font-size: 0.85rem; text-decoration: none;
+    }
+    a.home:hover { color: var(--text); border-color: var(--muted); }
     #drop {
       border: 2px dashed var(--border); border-radius: 12px;
       padding: 48px; text-align: center; background: var(--panel);
@@ -132,6 +143,13 @@
     Upload files into your private knowledge collection.
     <span id="supported">Loading supported formats…</span>
   </p>
+
+  <!-- Substituted by routes/upload_ui.py from OWUI_PUBLIC_URL, or removed
+       entirely when that is unset. Not a hidden element toggled by JS: this
+       page is opened in a new tab, so a Home link with nowhere to go cannot be
+       recovered by going back, and shipping the markup only to hide it leaves
+       a button that flashes on slow paints. -->
+  <!--HOME-->
 
   <p class="who">Signed in as <strong id="who">…</strong> · <a href="/" id="signout">sign out</a></p>
 

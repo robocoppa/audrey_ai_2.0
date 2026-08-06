@@ -286,9 +286,27 @@ class ModelFileRow(BaseModel):
     # Video only, and 0 for a video with no audio stream — so it is only
     # meaningful read alongside `kind`.
     duration_s: float = 0.0
-    # Phase 37's one-paragraph summary. Empty for anything that is not a
-    # processed video, and for a video whose summary call failed.
-    summary: str = ""
+    # ⚠️ **`summary` was here and was REMOVED 2026-08-06. Do not put it back.**
+    #
+    # Phase 37's one-paragraph summary is *contents*, and a listing that
+    # carries contents is a listing that gets answered from. Measured on the
+    # box: "compare what jasonRetirement.mp4 and silent.mp4 say" was answered
+    # with `list_my_files` and **no other call** — a paragraph of detail about
+    # one video, and a confident "no processable content" about the other, with
+    # nothing read either time.
+    #
+    # Both halves happened to be right. The second was right by luck: the
+    # inference is *metadata-shaped absence ⇒ content absence*, which holds for
+    # a zero-duration fixture and fails for a video with a transcript but no
+    # summary — a state phase 37 produces whenever `summary_timeout_s` elapses
+    # on a `ready` row.
+    #
+    # The summary has not gone anywhere; it is one `get_file_text(artifact=
+    # 'summary')` away, and `artifacts` says whether that call will find it. The
+    # difference is that reading is now a thing the model does rather than a
+    # thing it can skip. Same shape as the 404 → 200-with-empty-text fix that
+    # actually worked: change what the interface offers, not how it is asked.
+
     # Only set on 'failed'. Included for the same reason the upload page shows
     # it: a row that stopped moving without saying why is the failure this
     # field exists to prevent, and that is as true in a chat answer as on a page.
@@ -2334,7 +2352,6 @@ async def list_files_for_user(
             status=str(row["status"]),
             uploaded_at=str(row["uploaded_at"]),
             duration_s=float(row["duration_s"]),
-            summary=str(row["summary"]),
             failure_reason=str(row["failure_reason"]),
             waiting_for_s=_waiting_for_s(row, now=now),
             artifacts=available.get(str(row["file_id"]), []),

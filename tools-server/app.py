@@ -699,7 +699,11 @@ class MyFileRow(BaseModel):
     status: str
     uploaded_at: str
     duration_s: float = 0.0
-    summary: str = ""
+    # ⚠️ No `summary`, and do not add one. Removed from `ModelFileRow` on
+    # 2026-08-06 for the reason recorded there: a listing that carries contents
+    # is a listing that gets answered from instead of read from. Kept absent
+    # here as well so a stale Audrey still sending the field cannot put it back
+    # in front of the model.
     failure_reason: str = ""
     waiting_for_s: float = 0.0
     artifacts: list[str] = []
@@ -718,8 +722,13 @@ class ListMyFilesResponse(BaseModel):
     description=(
         "List the files this user has uploaded to Audrey — videos, documents "
         "and images — returning each one's exact filename, kind, upload time, "
-        "processing status and, for a processed video, its duration and a "
-        "one-paragraph summary. Call this when the user asks what they have "
+        "processing status and, for a processed video, its duration. "
+        "**This is a catalogue, not contents: it tells you what exists and "
+        "what can be read, never what a file says.** Anything about what is "
+        "in a file — what was said, what was on screen, what it is about, how "
+        "two files compare — requires get_file_text or kb_search, and a file "
+        "listed here with a 'summary' artifact has one waiting to be read. "
+        "Call this when the user asks what they have "
         "uploaded, refers to 'my video' or 'that recording' without naming "
         "it, or when you need a file's exact filename. A status of 'pending' "
         "or 'processing' means Audrey is still working on that file and its "
