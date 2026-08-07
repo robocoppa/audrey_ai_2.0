@@ -239,7 +239,17 @@ def main() -> int:
         # Never report an unasked question as a "no". A capability column that
         # says 0 because Ollama was unreachable would read as "nothing thinks,
         # there is nothing to do here" — the exact wrong conclusion.
-        print(f"   {len(unknown)} could not be asked (Ollama unreachable) — UNKNOWN, not 'no'.")
+        #
+        # ⚠️ **Name the real reason per model, not one blanket cause.** This
+        # said "(Ollama unreachable)" flat, and on 2026-08-06 printed it for 2
+        # models in a run where the other 15 answered — so Ollama was plainly
+        # reachable and the line sent the reader to check the wrong thing. The
+        # reason is already in hand from `_capability`; it just was not shown.
+        # A cloud model that is not pulled locally 404s here, which is a fact
+        # about that model, not about the host.
+        print(f"   {len(unknown)} could not be asked — UNKNOWN, not 'no':")
+        for m in unknown:
+            print(f"     {m:<32} {caps[m][1]}")
     print(f"   {len(thinkers)} declare `thinking`"
           + (f", {len(caps) - len(thinkers) - len(unknown)} do not." if not unknown else "."))
     if thinkers:
