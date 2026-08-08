@@ -105,14 +105,54 @@ problem the phase-40 banner only partly solved.
 
 ## Steps
 
-1. **Run phase 40 §3b first.** Three prompts, two videos. The result decides
-   whether the prompt's emphasis is "scope more" or "scope less", and those are
-   opposite instructions.
+1. ~~**Run phase 40 §3b first.**~~ ✅ **DONE 2026-08-06 — and it removed most
+   of this phase's planned prompt content.** Scoping works unprompted
+   (`scope=file='jasonRetirement.mp4'(1 id)` on a named file, `scope=none` on
+   "what do my videos say"), and artifact selection works unprompted
+   (`artifact=transcript` for "what did they say"). Three of the five
+   behaviours under "The prompt is the whole deliverable" are therefore
+   already true without a prompt, and instructing them again is wording
+   applied to something the code already gets right.
+
+   Also since: the **`list_my_files` summary removal** (2026-08-07) fixed the
+   answer-from-metadata reflex structurally, and the **truncation budget**
+   (6000 + `get_file_text` paging) landed, which the "What this does NOT fix"
+   section says must precede evaluation. Both are deployed.
+
+   ⚠️ **So re-scope the prompt before writing it.** What is left is what
+   nothing has been measured on: reading a long transcript **across pages**
+   (`offset`/`next_offset`, new and uninstructed anywhere), **comparisons now
+   that summaries must be read rather than listed**, and **not reporting a
+   still-processing video as empty** (`waiting_for_s`). Writing the original
+   five-bullet prompt now would mostly re-state solved problems and dilute the
+   two or three instructions that would actually do something.
 2. Add `audrey_video` to `VIRTUAL_MODELS` and route it like `audrey_auto` —
    adaptive, not forced deep. A retrieval question is not a panel question, and
    forcing deep puts an ordinary lookup on paid inference.
 3. Fill the `task_role` slot with `VIDEO_SPECIALIST_SYSTEM` in
    `pipeline/prompts.py`.
+
+   ⚠️ **Two traps, found 2026-08-07 while scoping this. Read before wiring.**
+
+   **(a) `compose_system_messages` is only called from `node_memory_recall`,
+   and that node returns early — twice.** `graph.py:186` returns `{}` when
+   memory is disabled, and `:189` returns `{}` when the user is not
+   identified. Filling `task_role` inside that node means the specialist's
+   entire deliverable — the prompt — **silently does not land** in either
+   case. Not an error, not a log line: a specialist that behaves exactly like
+   `audrey_auto` and looks like the prompt was ineffective. The prompt has to
+   be composed on a path that does not depend on memory being on or the user
+   being known.
+
+   **(b) There is a second, parallel implementation.** `_phase_thinking` in
+   `routes/openai.py` runs the same datetime + memory + planner sequence
+   inline for the streaming deep path, and `graph.py:168-172` already warns
+   that the two must be changed together. Wiring `task_role` in one gives a
+   specialist that works on one path and not the other, split by whether the
+   request streamed — which is not a distinction any user can see.
+
+   `state["virtual_model"]` is available in both, so the routing value itself
+   is not the problem; where the composition happens is.
 4. Confirm the picked model is in `fast_path.tool_capable_models` — a
    specialist that cannot call tools is a model answering from nothing, which
    is exactly what `audrey_passthrough` already does and why phase 40 warned

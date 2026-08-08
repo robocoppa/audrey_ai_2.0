@@ -31,9 +31,22 @@ before drawing conclusions.
 the answer quality with it is not a saving, and no token column will say so —
 the full replies are printed at the end for exactly that reason. Read them.
 
-A verdict line reports whether `true` and `false` actually differ. Treat under
-~20% as noise: reasoning length is highly variable run to run, which is why
-SAMPLES defaults to 3 rather than 1.
+A verdict line reports whether `true` and `false` actually differ, and the
+`omitted`-vs-`true` line compares the gap against the **within-state spread**
+rather than against a percentage of the mean. That correction matters: on
+2026-08-06 it called 14980c vs 19405c "they differ" while `omitted` alone
+ranged 8544c to 18778c across three samples. At SAMPLES=3 the spread inside one
+state routinely exceeds the gap between states.
+
+## `TOOLS=1` — the mode that matches the fast path
+
+⚠️ **The default prompt measures prose, and the fast path's job is tool
+calling.** The 2026-08-06 runs concluded `think=false` was a 5.7x latency win
+at equal quality, which was true for prose and said nothing about whether the
+model still picks the right tool. `TOOLS=1` ships the real tool definitions
+and reports **which tools each run called** — a state that stops calling them,
+or swaps to a weaker one, is the regression that matters and it is invisible
+in the content-length column.
 
 ## Running it
 
@@ -65,6 +78,9 @@ Environment:
     TIMEOUT_S    default 240
     EXCERPT      chars of each reply to print (default 500, 0 = off)
     THINKING     1 to also print the reasoning text itself (long)
+    TOOLS        1 to send real tool definitions and report tool choice
+    EXPECTED_TOOL  tool a correct first move would use (TOOLS mode only;
+                 default get_file_text, empty = just report the names)
 """
 
 from __future__ import annotations
@@ -96,12 +112,102 @@ DEFAULT_PROMPT = (
     "which is more likely and why, and name the one measurement that would "
     "tell them apart."
 )
-PROMPT = os.environ.get("PROMPT", DEFAULT_PROMPT)
+#: `TOOLS=1` swaps the analytical prompt for a tool-calling one and ships tool
+#: definitions with the request.
+#:
+#: ⚠️ **This exists because the first two probe runs measured the wrong thing.**
+#: 2026-08-06 measured `qwen3.6:35b` and `glm-5.2:cloud` on a plain analytical
+#: prompt and concluded `think=false` was a 5.7x latency win at equal quality —
+#: which it was, for prose. But the fast path's actual job is **tool calling**
+#: (`fast_path` → `react`), and a prose prompt says nothing about whether a
+#: model still picks the right tool with reasoning off. A policy set from those
+#: runs would have been set from a benchmark that does not resemble the work.
+#:
+#: The metric here is therefore **which tools were called**, not how good the
+#: prose is. A model that stops calling tools, or reaches for the wrong one, is
+#: the failure that matters — and it is invisible in a content-length column.
+WITH_TOOLS = os.environ.get("TOOLS", "") == "1"
+
+#: Mirrors the three tools a fast-path turn is actually offered, trimmed to the
+#: fields that affect selection. Names and descriptions are copied from
+#: `tools-server/app.py` so the model faces the same choice it faces in
+#: production; a paraphrase here would measure a tool set that does not exist.
+TOOL_DEFS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "list_my_files",
+            "description": (
+                "List the files this user has uploaded — filename, kind, upload "
+                "time, processing status, and for a processed video its duration. "
+                "This is a catalogue, not contents: it tells you what exists and "
+                "what can be read, never what a file says."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_file_text",
+            "description": (
+                "Read a file's transcript, visual description or summary, by its "
+                "exact filename as returned by list_my_files."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "description": "Exact filename."},
+                    "artifact": {
+                        "type": "string",
+                        "description": "'transcript', 'visual' or 'summary'.",
+                    },
+                },
+                "required": ["filename"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "kb_search",
+            "description": (
+                "Semantic search across this user's knowledge base. Optionally "
+                "scoped to one file by filename."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "filename": {"type": "string", "description": "Optional scope."},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+]
+
+#: Unambiguous on purpose. "What did they say about X in Y.mp4" can defensibly
+#: start with either `kb_search` or `get_file_text`, and grading an ambiguous
+#: choice is how a probe starts reporting its author's preference. This one has
+#: a right answer: the contents of a named file cannot come from a catalogue.
+DEFAULT_TOOL_PROMPT = (
+    "Read the transcript of jasonRetirement.mp4 and tell me what the speaker "
+    "said about his father."
+)
+
+PROMPT = os.environ.get(
+    "PROMPT", DEFAULT_TOOL_PROMPT if WITH_TOOLS else DEFAULT_PROMPT,
+)
+#: Optional. Names the tool a correct first move would use, so the summary can
+#: count matches instead of leaving every run to be eyeballed. Empty means
+#: report the names and judge them yourself — the safer default.
+EXPECTED_TOOL = os.environ.get("EXPECTED_TOOL", "get_file_text" if WITH_TOOLS else "")
 STATES = [s.strip() for s in os.environ.get("STATES", "omitted,true,false").split(",") if s.strip()]
 
 
 class Result:
-    __slots__ = ("content", "error", "eval_count", "state", "thinking", "wall_s")
+    __slots__ = ("content", "error", "eval_count", "state", "thinking", "tools", "wall_s")
 
     def __init__(self, state: str) -> None:
         self.state = state
@@ -110,6 +216,10 @@ class Result:
         self.eval_count = 0
         self.wall_s = 0.0
         self.error = ""
+        #: Tool names this run asked for, in order. Empty means it answered
+        #: without calling anything — which, for a question about the contents
+        #: of a named file, is the failure this mode exists to catch.
+        self.tools: list[str] = []
 
 
 def _call(state: str) -> Result:
@@ -120,6 +230,8 @@ def _call(state: str) -> Result:
         "stream": False,
         "options": {"num_predict": NUM_PREDICT, "temperature": TEMPERATURE},
     }
+    if WITH_TOOLS:
+        payload["tools"] = TOOL_DEFS
     # `omitted` sends no field at all. That is the state every non-vision path
     # is in today, and it is not the same as `false` — Ollama rejects the field
     # outright for a model that cannot think, so "no field" is also the only
@@ -152,6 +264,9 @@ def _call(state: str) -> Result:
     out.content = str(message.get("content") or "")
     out.thinking = str(message.get("thinking") or "")
     out.eval_count = int(body.get("eval_count") or 0)
+    for call in message.get("tool_calls") or []:
+        fn = (call or {}).get("function") or {}
+        out.tools.append(str(fn.get("name") or "?"))
     return out
 
 
@@ -172,9 +287,11 @@ def main() -> int:
             res = _call(state)
             runs[state].append(res)
             flag = "!" if res.error else " "
+            tools = ("  tools=" + (",".join(res.tools) or "NONE")) if WITH_TOOLS else ""
             print(f"  {flag} {state:<8} run {i + 1}/{SAMPLES}  "
                   f"{res.wall_s:6.1f}s  think={len(res.thinking):>6}c  "
                   f"content={len(res.content):>6}c  eval={res.eval_count:>6}"
+                  + tools
                   + (f"  {res.error}" if res.error else ""))
     print()
 
@@ -225,10 +342,51 @@ def main() -> int:
 
     if "omitted" in stats and "true" in stats:
         o_think, t_think = stats["omitted"][1], stats["true"][1]
-        near = t_think and abs(o_think - t_think) / t_think < 0.2
+        # ⚠️ Compare the gap against the SPREAD, not against a percentage of
+        # the mean. On 2026-08-06 this line called 14980c vs 19405c "they
+        # differ" — while `omitted` alone ranged 8544c to 18778c across its
+        # three samples. The spread inside one state was wider than the gap
+        # between states, so the distinction was noise being reported as a
+        # finding. At SAMPLES=3 that is the norm, not the exception.
+        spans = []
+        for st in ("omitted", "true"):
+            lens = [len(r.thinking) for r in runs.get(st, []) if not r.error]
+            spans.append(max(lens) - min(lens) if len(lens) > 1 else 0)
+        widest = max(spans) if spans else 0
+        gap = abs(o_think - t_think)
         print(f"\n   Default (no field) reasoning is {o_think:.0f}c against {t_think:.0f}c for"
-              f" think=true — {'the template already thinks' if near else 'they differ'}.")
-        print("   That is what every non-vision path in Audrey is doing right now.")
+              f" think=true — a gap of {gap:.0f}c.")
+        if gap <= widest:
+            print(f"   Within-state spread is {widest:.0f}c, WIDER than the gap. Read these as")
+            print("   the same: omitting the field thinks. Do not build on the difference.")
+        else:
+            print(f"   Within-state spread is {widest:.0f}c, narrower than the gap — so they")
+            print("   do look different. Confirm with more SAMPLES before acting on it.")
+        print("   Either way, omitting the field is NOT `false`: that is what every")
+        print("   non-vision path in Audrey is doing right now.")
+
+    if WITH_TOOLS:
+        print()
+        print("── tool choice " + "─" * 54)
+        print("   The column that matters in this mode. Prose quality is not what the")
+        print("   fast path buys with reasoning — tool selection is.")
+        print()
+        for state in STATES:
+            rs = [r for r in runs.get(state, []) if not r.error]
+            called = sum(1 for r in rs if r.tools)
+            picks: dict[str, int] = {}
+            for r in rs:
+                picks[",".join(r.tools) or "NONE"] = picks.get(",".join(r.tools) or "NONE", 0) + 1
+            detail = "  ".join(f"{k}×{v}" for k, v in sorted(picks.items()))
+            line = f"   {state:<9} called a tool in {called}/{len(rs)} runs   {detail}"
+            if EXPECTED_TOOL:
+                hit = sum(1 for r in rs if EXPECTED_TOOL in r.tools)
+                line += f"   [{EXPECTED_TOOL}: {hit}/{len(rs)}]"
+            print(line)
+        print()
+        print("   A state that stops calling tools, or swaps to a weaker one, is the")
+        print("   regression this mode exists to catch — and it is invisible in the")
+        print("   content-length column the other mode reports.")
     print()
 
     if EXCERPT:
