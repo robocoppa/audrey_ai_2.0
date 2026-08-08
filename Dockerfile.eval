@@ -35,18 +35,15 @@ WORKDIR /eval
 # The harness + all case files. eval_research.py resolves --cases by the path
 # you pass at run time, so reference them as /eval/eval_prompts_*.json.
 COPY scripts/eval_research.py /eval/eval_research.py
-COPY scripts/eval_prompts.json \
-     scripts/eval_prompts_protocol.json \
-     scripts/eval_prompts_deep.json \
-     scripts/eval_prompts_fast.json \
-     scripts/eval_prompts_code.json \
-     scripts/eval_prompts_code_hard.json \
-     scripts/eval_prompts_code_models.json \
-     scripts/eval_prompts_code_hard_models.json \
-     scripts/eval_prompts_topics.json \
-     scripts/eval_prompts_writer_ab.json \
-     scripts/eval_prompts_models_ab.json \
-     /eval/
+
+# ⚠️ A GLOB, deliberately. This was an explicit eleven-file list until
+# 2026-08-08, and a new protocol (`eval_prompts_video.json`) was committed,
+# pulled and rebuilt without being added to it — so the image built clean and
+# the run died on a missing `/eval/eval_prompts_video.json` after the deploy
+# looked correct. Nothing about "rebuild the eval image" prompts you to also
+# edit a COPY list, which is what makes the omission easy and the symptom
+# confusing. Add a case file to scripts/ and it is now simply in.
+COPY scripts/eval_prompts*.json /eval/
 
 # The script IS the entrypoint; append harness flags after the image name at
 # `docker run` (--model / --cases / --save-file / --only …). Base-url + key
