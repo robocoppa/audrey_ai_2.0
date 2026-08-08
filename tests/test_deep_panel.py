@@ -503,7 +503,7 @@ class _FakeOllama:
         self.chat_models: list[str] = []
         self.stream_models: list[str] = []
 
-    async def chat(self, *, model, messages, options=None, timeout_s=0, tools=None, format=None):
+    async def chat(self, *, model, messages, options=None, timeout_s=0, tools=None, format=None, think=None):
         # `tools=` is accepted so the fact-checker's run_react loop can call us;
         # we never return tool_calls, so run_react treats the content as final.
         # `format=` is accepted because the ledger structuring passes pin a schema.
@@ -971,7 +971,7 @@ async def test_structure_factcheck_chunks_and_merges():
         def __init__(self):
             self.batch_calls = 0
 
-        async def chat(self, *, model, messages, options=None, timeout_s=0, tools=None, format=None):
+        async def chat(self, *, model, messages, options=None, timeout_s=0, tools=None, format=None, think=None):
             self.batch_calls += 1
             user = messages[-1]["content"]
             asked = [c.id for c in claims if f"- {c.id} (" in user]
@@ -1188,7 +1188,7 @@ class _LedgerOllama(_FakeOllama):
         self._research_json = research_json
         self._factcheck_json = factcheck_json
 
-    async def chat(self, *, model, messages, options=None, timeout_s=0, tools=None, format=None):
+    async def chat(self, *, model, messages, options=None, timeout_s=0, tools=None, format=None, think=None):
         sys = (messages[0].get("content", "") if messages else "").lower()
         if "claim/source ledger" in sys:  # RESEARCH_STRUCTURE_SYSTEM
             self.chat_models.append(model)

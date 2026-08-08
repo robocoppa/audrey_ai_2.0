@@ -51,7 +51,7 @@ class _ScriptedOllama:
         self._outcomes = outcomes
         self.calls: list[str] = []
 
-    async def chat(self, *, model: str, messages, options=None, tools=None, timeout_s=None):
+    async def chat(self, *, model: str, messages, options=None, tools=None, timeout_s=None, think=None):
         self.calls.append(model)
         outcome = self._outcomes[model]
         if isinstance(outcome, OllamaError):
@@ -241,3 +241,55 @@ async def test_fast_path_tools_branch_does_not_fall_back():
 
     assert ollama.calls == ["a"]   # b (non-tool-capable) never tried
     assert not health.is_healthy("a")
+
+
+class TestThinkingOnTheFastPath:
+    """2026-08-07. Measured with TOOLS=1 on `qwen3.6:35b`: tool selection was
+    3/3 with `think=false`, matching `think=true` and beating the current
+    default (2/3 — with reasoning on it sometimes reached for `list_my_files`
+    on a question about a named file's contents). 45 eval tokens against 277.
+    """
+
+    class _Caps:
+        """An ollama fake that records `think` and answers capability probes."""
+
+        def __init__(self, thinking=True, boom=None):
+            self.thinking = thinking
+            self.boom = boom
+            self.thinks: list[object] = []
+            self.probes: list[str] = []
+
+        async def thinking_flag(self, model, want):
+            self.probes.append(model)
+            if self.boom:
+                return None
+            return want if self.thinking else None
+
+        async def chat(self, *, model, messages, options=None, tools=None,
+                       timeout_s=None, think=None):
+            self.thinks.append(think)
+            return {"message": {"role": "assistant", "content": "hi"}}
+
+
+    async def test_a_thinking_model_is_told_not_to(self):
+        from audrey.pipeline.fast_path import _think
+        o = self._Caps(thinking=True)
+        assert await _think(o, "qwen3.6:35b", True) is False
+
+
+    async def test_a_model_that_cannot_think_is_not_sent_the_field(self):
+        """⚠️ 3 of the 14 tool_capable_models do not declare `thinking`, and
+        sending it to them is a hard error — so a flat False would break every
+        chat turn that landed on granite4.1:30b, qwen2.5-coder:32b or
+        qwen3-coder-next:latest."""
+        from audrey.pipeline.fast_path import _think
+        o = self._Caps(thinking=False)
+        assert await _think(o, "granite4.1:30b", True) is None
+
+
+    async def test_the_setting_off_never_probes_at_all(self):
+        """Default is off, so an untouched config costs no /api/show."""
+        from audrey.pipeline.fast_path import _think
+        o = self._Caps(thinking=True)
+        assert await _think(o, "qwen3.6:35b", False) is None
+        assert o.probes == []

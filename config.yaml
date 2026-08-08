@@ -77,6 +77,37 @@ model_registry:
 fast_path:
   enabled: true
   confidence_threshold: 0.88
+
+  # Tell fast-path models not to think. This is the user-is-waiting role, and
+  # unlike the other thinking decisions it was measured **with tools in the
+  # request** — which is the part that matters, because this path's job is tool
+  # calling and a prose benchmark would have justified it for the wrong reason.
+  #
+  # `qwen3.6:35b`, TOOLS=1, three samples (2026-08-07):
+  #
+  #     omitted    933c thinking   277 eval tok   right tool 2/3
+  #     true      1090c thinking   333 eval tok   right tool 3/3
+  #     false         0c            45 eval tok   right tool 3/3
+  #
+  # **Tool selection did not degrade** — it matched think=true and beat the
+  # current default. `omitted` is what this path does today, and it was the
+  # only state that ever picked the wrong tool: with reasoning on the model
+  # sometimes talked itself into `list_my_files` for a question about a named
+  # file's contents. 6x fewer tokens per round, and a ReAct loop pays that per
+  # round. Every `false` run was 0.6-0.7s and exactly 45 tokens — the
+  # run-to-run variance disappears too.
+  #
+  # ⚠️ Not a flat flag — sending `think` to a model that does not declare
+  # `thinking` is a HARD ERROR, and three models below do not declare it
+  # (`granite4.1:30b`, `qwen2.5-coder:32b`, `qwen3-coder-next:latest`). The
+  # code asks Ollama once per model and omits the field for those, so this is
+  # safe to leave on while the list changes.
+  #
+  # ⚠️ Measured on ONE of the fourteen. The role argument does not depend on
+  # the model — a waiting user pays for reasoning in latency either way — but
+  # if a specific model answers worse, probe it before blaming this line.
+  no_thinking: true
+
   tool_capable_models:
     - "qwen3.6:35b"
     - "kimi-k2.7-code:cloud"

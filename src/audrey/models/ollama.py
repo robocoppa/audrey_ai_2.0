@@ -101,6 +101,10 @@ class OllamaClient:
             headers={"Accept": "application/json"},
             transport=transport,
         )
+        #: model -> declares `thinking`. See `thinking_flag`. Never negatively
+        #: cached on failure, so a probe during an Ollama blip is retried
+        #: rather than remembered as "cannot think".
+        self._thinking_caps: dict[str, bool] = {}
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -153,6 +157,29 @@ class OllamaClient:
         """
         caps = (await self.show(model)).get("capabilities")
         return [str(c) for c in caps] if isinstance(caps, list) else []
+
+    async def thinking_flag(self, model: str, want: bool) -> bool | None:
+        """`want` if the model accepts `think`, else `None` (omit the field).
+
+        Cached per model for the life of the process. Capabilities change only
+        when a model is pulled again, and the alternative is an `/api/show`
+        round trip in front of **every** chat call on the fast path — a request
+        added to the hot path to save tokens on the hot path.
+
+        **Any failure caches nothing and returns `None`.** Omitting the field
+        works everywhere; guessing `False` on an unreachable probe would turn a
+        transient Ollama blip into a hard rejection on the next chat call, so
+        the safe direction is also the one that self-heals.
+        """
+        cached = self._thinking_caps.get(model)
+        if cached is None:
+            try:
+                cached = "thinking" in await self.capabilities(model)
+            except OllamaError as e:
+                log.info("ollama: capability probe for %s failed (%s)", model, e)
+                return None
+            self._thinking_caps[model] = cached
+        return want if cached else None
 
     # ─── Chat ───────────────────────────────────────────────────────────
 

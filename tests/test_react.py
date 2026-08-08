@@ -213,7 +213,7 @@ class _FakeOllama:
         self.responses = list(responses)
         self.calls: list[dict] = []
 
-    async def chat(self, *, model, messages, options=None, tools=None, timeout_s=0):
+    async def chat(self, *, model, messages, options=None, tools=None, timeout_s=0, think=None):
         self.calls.append({"messages": list(messages), "tools": tools})
         return self.responses.pop(0)
 

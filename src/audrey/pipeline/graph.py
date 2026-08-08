@@ -113,6 +113,10 @@ def build_graph(
 
     fast_path_cfg = cfg.raw.get("fast_path", {}) or {}
     tool_capable_models = set(fast_path_cfg.get("tool_capable_models", []) or [])
+    # Default False: a deployment whose config predates this setting keeps the
+    # behaviour it has, and "omit the field" is the only universally safe
+    # request. Opting in is a config edit, not an upgrade side effect.
+    fast_no_thinking = bool(fast_path_cfg.get("no_thinking", False))
     react_cfg = cfg.raw.get("agentic", {}).get("react", {}) or {}
     react_max_rounds = int(react_cfg.get("max_rounds", 3))
     react_compress_after = int(react_cfg.get("compress_after_round", 2))
@@ -317,6 +321,7 @@ def build_graph(
             react_max_web_searches=react_max_web_searches,
             user_id=(state.get("user_id") or None),
             cfg=cfg,
+            no_thinking=fast_no_thinking,
         )
         msg = resp.get("message", {}) or {}
         react_meta = resp.get("_react") or {}

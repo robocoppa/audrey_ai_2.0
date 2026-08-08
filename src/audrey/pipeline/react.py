@@ -195,6 +195,20 @@ async def run_react(
     cfg: Any = None,
     compress_keep_last: int = 1,
     max_web_searches: int = 0,
+    #: Forwarded to every chat call in this loop. `None` omits the field, which
+    #: is the pre-2026-08-07 behaviour and the only universally safe request.
+    #:
+    #: ⚠️ **This loop is NOT fast-path-only.** `deep_panel.py` drives its
+    #: workers through it (`:210`) and its factchecker too (`:1502`), so this
+    #: default is the only thing keeping `think=False` out of two roles where
+    #: it would be wrong: panel workers are **reasoning-is-the-product**, and
+    #: the factchecker runs with `format=`, where thinking has broken JSON
+    #: before (`ledger.py:203-207`). Only `fast_path` passes a value.
+    #:
+    #: **Do not add one to the deep-panel calls without probing those roles.**
+    #: The measurement behind the fast path's setting was `TOOLS=1` on a
+    #: retrieval question, and it says nothing about either of them.
+    think: bool | None = None,
 ) -> ReactResult:
     """Drive the model through up to `max_rounds` of tool use, then return the answer.
 
@@ -240,7 +254,7 @@ async def run_react(
                 async with _gate_ctx(gate, model, location, user_id):
                     last_resp = await ollama.chat(
                         model=model, messages=convo, options=options or None,
-                        tools=tools, timeout_s=timeout_s,
+                        tools=tools, timeout_s=timeout_s, think=think,
                     )
                 health.record_success(model)
             except OllamaError as e:
@@ -339,7 +353,7 @@ async def run_react(
             async with _gate_ctx(gate, model, location, user_id):
                 final = await ollama.chat(
                     model=model, messages=convo, options=options or None,
-                    tools=None, timeout_s=timeout_s,
+                    tools=None, timeout_s=timeout_s, think=think,
                 )
             health.record_success(model)
         except OllamaError as e:

@@ -27,6 +27,43 @@ from audrey.tools.discovery import ToolRegistry
 
 log = logging.getLogger(__name__)
 
+async def _think(ollama: Any, model: str, no_thinking: bool) -> bool | None:
+    """`False` when this model can be told not to think, else `None`.
+
+    ## Why the fast path turns thinking off
+
+    This is the **user-is-waiting** role, and the flag was measured with tools
+    in the request — which is the part that matters, because the fast path's
+    job is tool calling and an earlier prose-only probe would have justified
+    this for the wrong reason. `qwen3.6:35b`, 2026-08-07, three samples:
+
+        omitted   933c thinking   277 eval tok   right tool 2/3
+        true     1090c thinking   333 eval tok   right tool 3/3
+        false        0c            45 eval tok   right tool 3/3
+
+    **Tool selection did not degrade — it matched `think=true` and beat the
+    current default.** `omitted` is what every non-vision path does today, and
+    it was the only state that ever reached for the wrong tool: with reasoning
+    on by default the model sometimes talked itself into `list_my_files` for a
+    question about a named file's contents.
+
+    6x fewer tokens on round 0, and a ReAct loop pays that per round. Latency
+    was 0.6s against ~1.5s steady-state, with the variance gone: every `false`
+    run was 0.6-0.7s and 45 tokens exactly.
+
+    ## Why it asks first
+
+    ⚠️ **Sending `think` to a model that does not declare `thinking` is a hard
+    error**, and **3 of the 14 `fast_path.tool_capable_models` do not declare
+    it** — `granite4.1:30b`, `qwen2.5-coder:32b`, `qwen3-coder-next:latest`. A
+    flat `False` here breaks every chat turn that lands on one of those. The
+    lookup is cached per model in `OllamaClient.thinking_flag`, so it is one
+    `/api/show` per model per process, not one per request.
+    """
+    if not no_thinking:
+        return None
+    return await ollama.thinking_flag(model, False)
+
 
 def pick_fast_model(
     registry: ModelRegistry,
@@ -89,6 +126,7 @@ async def run_fast_path(
     react_max_web_searches: int = 0,
     user_id: str | None = None,
     cfg: Any = None,
+    no_thinking: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Return (concrete_model, response_like_dict).
 
@@ -136,10 +174,12 @@ async def run_fast_path(
                 model=cand.name, task_type=str(task), path="fast",
             ).inc()
             try:
+                think = await _think(ollama, cand.name, no_thinking)
                 async with gate.acquire(cand.name, location=cand.location, user_id=user_id):
                     resp = await ollama.chat(
                         model=cand.name, messages=messages,
                         options=options or None, timeout_s=timeout_s,
+                        think=think,
                     )
                 health.record_success(cand.name)
                 return cand.name, resp
@@ -174,6 +214,7 @@ async def run_fast_path(
         gate=gate,
         location=spec.location,
         cfg=cfg,
+        think=await _think(ollama, spec.name, no_thinking),
     )
     return spec.name, {
         "message": {"role": "assistant", "content": react.content},
