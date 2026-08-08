@@ -89,13 +89,17 @@ class _Ollama:
         self.boom = boom
         self.caps = list(caps)
         self.caps_boom = caps_boom
+        self.thinking = ""
         self.calls: list[dict] = []
 
     async def chat(self, *, model, messages, timeout_s, think=None):
         self.calls.append({"model": model, "messages": messages, "think": think})
         if self.boom:
             raise self.boom
-        return {"message": {"content": self.content}}
+        return {
+            "message": {"content": self.content, "thinking": self.thinking},
+            "eval_count": 1234,
+        }
 
     async def capabilities(self, model):
         if self.caps_boom:
@@ -423,3 +427,23 @@ class TestThinkingIsOffForSummaries:
         # Not `False` — the field is not sent at all, which is what the
         # pre-2026-08-06 behaviour was.
         assert ollama.calls[0]["think"] is None
+
+    @pytest.mark.asyncio
+    async def test_the_log_reports_what_was_asked_and_what_happened(self, caplog):
+        """Two different facts, and one without the other proves nothing.
+
+        `qwen3-vl:32b` declares `thinking` and ignores the flag (phase 38), so
+        a model can be sent `think=False` and reason anyway. Logging only the
+        request would make that indistinguishable from the setting working.
+        """
+        ollama = _Ollama(caps=("thinking",))
+        ollama.thinking = "...a great deal of deliberation..."
+        with caplog.at_level("INFO"):
+            await summarise_video(
+                _segments(3), _frames(2), filename="v.mp4", duration_s=565.0,
+                ollama=ollama, registry=_Registry(), gate=_Gate(), cfg=_cfg())
+
+        line = next(r.getMessage() for r in caplog.records if "summarise:" in r.getMessage())
+        assert "think=False" in line
+        assert "thinking=34c" in line
+        assert "eval=1234" in line

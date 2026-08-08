@@ -189,9 +189,20 @@ async def summarise_video(
     text = str((resp.get("message") or {}).get("content") or "").strip()
     if not text:
         raise SummaryUnavailableError(f"{model} returned an empty summary")
+    # `think=` and `thinking=` are both here on purpose, and they are different
+    # facts: the first is what we asked for, the second is what the model did.
+    # A model that declares `thinking` and ignores the flag — `qwen3-vl:32b`
+    # does exactly this — shows as `think=False thinking=8994c`, and without
+    # both numbers side by side that is indistinguishable from the flag
+    # working. `eval` is the billed total and includes reasoning tokens, which
+    # is the whole reason this setting exists.
+    thinking = str((resp.get("message") or {}).get("thinking") or "")
     log.info(
-        "summarise: %s -> %d chars via %s (%d segments, %d descriptions)",
+        "summarise: %s -> %d chars via %s (%d segments, %d descriptions) "
+        "think=%s thinking=%dc eval=%s",
         filename, len(text), model, len(segments), len(frames),
+        "unset" if think is None else think, len(thinking),
+        resp.get("eval_count", "?"),
     )
     return text
 
