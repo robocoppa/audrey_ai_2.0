@@ -83,16 +83,24 @@ class TestBuildInput:
 
 
 class _Ollama:
-    def __init__(self, content="A retirement party for Jason.", boom=None):
+    def __init__(self, content="A retirement party for Jason.", boom=None,
+                 caps=("thinking",), caps_boom=None):
         self.content = content
         self.boom = boom
+        self.caps = list(caps)
+        self.caps_boom = caps_boom
         self.calls: list[dict] = []
 
-    async def chat(self, *, model, messages, timeout_s):
-        self.calls.append({"model": model, "messages": messages})
+    async def chat(self, *, model, messages, timeout_s, think=None):
+        self.calls.append({"model": model, "messages": messages, "think": think})
         if self.boom:
             raise self.boom
         return {"message": {"content": self.content}}
+
+    async def capabilities(self, model):
+        if self.caps_boom:
+            raise self.caps_boom
+        return list(self.caps)
 
 
 class _Gate:
@@ -357,3 +365,61 @@ class TestConfig:
 
         assert video["summarise_model"].endswith(":cloud")
         assert video["summary_input_chars"] > 0
+
+
+class TestThinkingIsOffForSummaries:
+    """2026-08-06. Summarising is the clearest case in the registry of
+    reasoning that is billed and thrown away: the summary is the product, the
+    reasoning is never shown, and `summarise_model` defaults to a cloud model.
+
+    Measured on `glm-5.2:cloud`, three samples per state — 8994c of thinking
+    and 2683 eval tokens with the field omitted, against 0c and 817 tokens with
+    `think=false`, for a *longer* summary. 3.3x fewer billed tokens.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_thinking_model_is_told_not_to(self):
+        ollama = _Ollama(caps=("completion", "tools", "thinking"))
+        await summarise_video(
+            _segments(3), _frames(2), filename="v.mp4", duration_s=565.0,
+            ollama=ollama, registry=_Registry(), gate=_Gate(), cfg=_cfg())
+
+        assert ollama.calls[0]["think"] is False
+
+    @pytest.mark.asyncio
+    async def test_a_model_that_cannot_think_is_not_sent_the_field(self):
+        """⚠️ The failure this prevents is silent. Sending `think` to a model
+        without the capability is a hard error, `SummaryUnavailableError` is
+        swallowed by design, and `summarise_model` is deployment-configurable —
+        so a flat `think=False` would show up as summaries mysteriously never
+        appearing, on a box whose config looks fine."""
+        ollama = _Ollama(caps=("completion", "tools"))
+        await summarise_video(
+            _segments(3), _frames(2), filename="v.mp4", duration_s=565.0,
+            ollama=ollama, registry=_Registry(), gate=_Gate(), cfg=_cfg())
+
+        assert ollama.calls[0]["think"] is None
+
+    @pytest.mark.asyncio
+    async def test_an_unreadable_capability_list_omits_the_field(self):
+        """Unknown means omit, never assume. Omitting works on every model."""
+        ollama = _Ollama(caps_boom=RuntimeError("ollama down"))
+        got = await summarise_video(
+            _segments(3), _frames(2), filename="v.mp4", duration_s=565.0,
+            ollama=ollama, registry=_Registry(), gate=_Gate(), cfg=_cfg())
+
+        # And the summary still happens — a probe failure must not cost one.
+        assert got == "A retirement party for Jason."
+        assert ollama.calls[0]["think"] is None
+
+    @pytest.mark.asyncio
+    async def test_it_can_be_turned_back_off(self):
+        ollama = _Ollama(caps=("thinking",))
+        await summarise_video(
+            _segments(3), _frames(2), filename="v.mp4", duration_s=565.0,
+            ollama=ollama, registry=_Registry(), gate=_Gate(),
+            cfg=_cfg(summary_no_thinking=False))
+
+        # Not `False` — the field is not sent at all, which is what the
+        # pre-2026-08-06 behaviour was.
+        assert ollama.calls[0]["think"] is None

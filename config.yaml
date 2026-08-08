@@ -660,6 +660,30 @@ kb:
     # out leaves an empty field on a `ready` row.
     summary_timeout_s: 180
 
+    # Tell the summariser not to think. Measured on `glm-5.2:cloud`
+    # 2026-08-06, three samples per state:
+    #
+    #     omitted   27.7s   8994c thinking   2192c summary   2683 eval tok
+    #     false      9.7s      0c            3542c summary    817 eval tok
+    #
+    # **3.3x fewer billed tokens for a longer summary.** This is the clearest
+    # reasoning-is-discarded role in the registry: the summary is the product,
+    # the reasoning is never shown to anyone, and the default model is billed.
+    # Condensing a transcript is not a task that needs deliberation.
+    #
+    # ⚠️ Not a flat flag — sending `think` to a model that does not declare
+    # `thinking` is a HARD ERROR, and `summarise_model` is yours to change.
+    # The code asks Ollama first and omits the field on anything that cannot
+    # think, or when the capability cannot be read. Getting that wrong would be
+    # invisible: `SummaryUnavailableError` is swallowed by design, so it would
+    # surface as summaries silently never appearing.
+    #
+    # Set false to go back to sending nothing, which is what happened before
+    # 2026-08-06 — and note that "sending nothing" is NOT "not thinking": with
+    # the field omitted the template thinks anyway, which is what the 8994c
+    # above is.
+    summary_no_thinking: true
+
     # ─── Source reclamation (Phase 38) ───────────────────────────────
     # OFF, and off is the right default. This deletes a file the user
     # uploaded.

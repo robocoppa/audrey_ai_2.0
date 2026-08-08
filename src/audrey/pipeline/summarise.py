@@ -171,6 +171,8 @@ async def summarise_video(
         f"Length: {minutes:.0f} minutes\n\n" if duration_s else f"Video file: {filename}\n\n"
     )
 
+    think = await _think_flag(ollama, model, cfg)
+
     # A no-op for a cloud location, and correct rather than redundant for a
     # deployment that pins a local summariser: it would then queue behind chat
     # like anything else, in the uploader's own slice.
@@ -182,6 +184,7 @@ async def summarise_video(
                 {"role": "user", "content": header + material},
             ],
             timeout_s=float(_cfg(cfg).get("summary_timeout_s", DEFAULT_TIMEOUT_S)),
+            think=think,
         )
     text = str((resp.get("message") or {}).get("content") or "").strip()
     if not text:
@@ -191,6 +194,49 @@ async def summarise_video(
         filename, len(text), model, len(segments), len(frames),
     )
     return text
+
+
+async def _think_flag(ollama: Any, model: str, cfg: Any) -> bool | None:
+    """Whether to send `think`, and what. `None` means do not send the field.
+
+    ## Why this role turns thinking off
+
+    Summarising is the clearest case in the whole registry of **reasoning that
+    is billed and thrown away**: the summary is the product, the reasoning is
+    never shown to anyone, and `summarise_model` defaults to a cloud model.
+    Measured on `glm-5.2:cloud` 2026-08-06, three samples per state:
+
+        omitted   27.7s   8994c thinking   2192c summary   2683 eval tok
+        false      9.7s*     0c            3542c summary    817 eval tok
+
+    \\* steady-state — the first `false` run was 45s on a cold cloud
+    connection, the next two 9.6s and 9.8s.
+
+    **3.3x fewer billed tokens, and a longer summary.** Quality did not suffer;
+    if anything the non-thinking replies were more complete, and this task is
+    condensation rather than analysis.
+
+    ## Why it asks Ollama first
+
+    ⚠️ **Sending `think` to a model that does not declare `thinking` is a hard
+    error** (`OllamaClient.capabilities`), so this cannot be a flat `False`.
+    `summarise_model` is deployment-configurable and the default may be swapped
+    for a local model that cannot think — which would turn every summary into a
+    failure, and `SummaryUnavailableError` is swallowed by design, so it would
+    show up as summaries silently never appearing.
+
+    A capability lookup that fails for any reason returns `None`: unknown means
+    omit, never assume. That costs one `/api/show` per summary, against a call
+    that already takes tens of seconds.
+    """
+    if not bool(_cfg(cfg).get("summary_no_thinking", True)):
+        return None
+    try:
+        caps = await ollama.capabilities(model)
+    except Exception:  # noqa: BLE001 — a probe failure must not fail a summary
+        log.info("summarise: could not read %s capabilities, leaving think unset", model)
+        return None
+    return False if "thinking" in caps else None
 
 
 def _cfg(cfg: Any) -> dict[str, Any]:
