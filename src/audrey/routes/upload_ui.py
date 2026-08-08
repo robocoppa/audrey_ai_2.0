@@ -36,6 +36,22 @@ _HOME_SLOT = "<!--HOME-->"
 _RENDERED: str | None = None
 
 
+#: Inline rather than an icon font or a sprite: this page is served from the
+#: container with no asset pipeline behind it, and a Home control that depends
+#: on a second request is a Home control that can render as a blank box. The
+#: stroke is `currentColor` so it follows the `a.home` hover/focus states
+#: without a second rule.
+_HOME_ICON = (
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" '
+    'focusable="false">'
+    '<path d="M3 10.5 12 3l9 7.5" />'
+    '<path d="M5.5 9.5V20a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V9.5" />'
+    '<path d="M9.5 21v-6h5v6" />'
+    "</svg>"
+)
+
+
 def _home_link(url: str) -> str:
     """The Home anchor, or empty when there is nowhere to send anyone.
 
@@ -43,11 +59,18 @@ def _home_link(url: str) -> str:
     user-supplied, so this is not a sanitizer standing between an attacker and
     a victim — it is a guard against a typo or a `javascript:` paste becoming a
     live link on a page that holds a bearer token.
+
+    Icon-only, so the name lives in `aria-label` (screen readers) and `title`
+    (a hover tooltip for everyone else). Dropping both would leave a control
+    that announces itself as just a URL.
     """
     url = (url or "").strip()
     if not url or not url.lower().startswith(("http://", "https://")):
         return ""
-    return f'<a class="home" href="{html.escape(url, quote=True)}">← Home</a>'
+    return (
+        f'<a class="home" href="{html.escape(url, quote=True)}"'
+        f' aria-label="Home" title="Home">{_HOME_ICON}</a>'
+    )
 
 
 @router.api_route("/upload", methods=["GET", "HEAD"], response_class=HTMLResponse, include_in_schema=False)

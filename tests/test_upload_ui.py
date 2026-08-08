@@ -44,6 +44,27 @@ class TestTheHomeLink:
         assert 'href="https://chat.example.com"' in body
         assert "Home" in body
 
+    def test_the_icon_button_still_carries_a_name(self):
+        # It is icon-only, so there is no text node to fall back on: strip the
+        # label and the control announces itself as a bare URL. Both are here
+        # because they serve different people — aria-label for screen readers,
+        # title for anyone wondering what the glyph means.
+        link = upload_ui._home_link("https://chat.example.com")
+        assert 'aria-label="Home"' in link
+        assert 'title="Home"' in link
+
+    def test_the_icon_is_inline_and_needs_no_second_request(self):
+        # An icon font or a sprite URL would make this control depend on a
+        # fetch that can fail, leaving a blank box where Home should be.
+        link = upload_ui._home_link("https://chat.example.com")
+        assert "<svg" in link
+        assert "http://" not in link.split("href=", 1)[1].split(">", 1)[1]
+
+    def test_the_icon_is_hidden_from_the_accessibility_tree(self):
+        # Otherwise the glyph is announced alongside the aria-label and the
+        # control reads twice.
+        assert 'aria-hidden="true"' in upload_ui._home_link("https://x.example.com")
+
     def test_an_unset_url_renders_no_link_at_all(self):
         body = _client("").get("/upload").text
         # Not a hidden element. A Home button that goes nowhere is worse than

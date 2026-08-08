@@ -1,0 +1,58 @@
+[
+  {
+    "name": "video-unnamed-reference",
+    "prompt": "Summarise the recording I uploaded most recently.",
+    "expect_sources": false,
+    "expect_route": "fast",
+    "_why": "Tests 'list before searching'. No filename given, so the model must call list_my_files and use an exact name from it. Two videos share the most recent date, so a correct answer either picks the genuinely newest or says which two are tied — a guessed filename is a fail even if the prose reads well. Discriminator: a dispatch: list_my_files line BEFORE any get_file_text/kb_search."
+  },
+  {
+    "name": "video-ambiguous-singular",
+    "prompt": "What did my London System video say about the move order?",
+    "expect_sources": false,
+    "expect_route": "fast",
+    "_why": "The sharpest case in the set, and only possible because the corpus holds TWO London System videos ('Magnus Carlsen Teaches How to Win with the London System.mp4', 7m37s, and 'How to WIN with the London System.mp4', 29m38s). Singular 'my video' with two real candidates on the same topic. Pass = names both and asks which, or answers from both and says so. Fail = silently picks one and answers confidently — which looks perfectly sourced and is the exact failure the prompt's 'ask rather than guess' line exists to prevent."
+  },
+  {
+    "name": "video-control-unscoped-plural",
+    "prompt": "What do my videos say about the London System?",
+    "expect_sources": false,
+    "expect_route": "fast",
+    "_why": "REGRESSION GUARD, and the deliberate mirror of video-ambiguous-singular: same topic, plural, opposite correct behaviour. 3b proved the general path correctly leaves this unscoped. Logs must show scope=none. If the specialist's 'list before searching' line pushes it into scoping to one of the two chess videos here, the prompt has made things worse and the name should come out of VIRTUAL_MODELS."
+  },
+  {
+    "name": "video-long-transcript-paging",
+    "prompt": "Give me the full transcript of How to WIN with the London System.mp4.",
+    "expect_sources": false,
+    "expect_route": "fast",
+    "_why": "Partial-read honesty on the longest document in the corpus (29m38s, far past one 6000-char page). This is the 2026-08-05 failure — an excerpt returned while blaming 'system limitations'. Pass = says how much of the transcript it has and offers to continue; fail = presents a partial read as the whole, or repeats the vague 'system limitations' framing."
+  },
+  {
+    "name": "video-two-file-compare",
+    "prompt": "Compare what Magnus Carlsen Teaches How to Win with the London System.mp4 and How to WIN with the London System.mp4 each say about the London System.",
+    "expect_sources": false,
+    "expect_route": "fast",
+    "_why": "Tests 'never scope a comparison' and 'keep the files apart'. Same-topic files make conflation both likely and detectable — a claim from one attributed to the other is a real, readable error rather than a judgement call. Logs must show either an unscoped search or two separately scoped reads, never one scope=file=... answering for both."
+  },
+  {
+    "name": "video-missing-transcript-artifact",
+    "prompt": "What did they say in Roger Gracie VS Rafael Lovato Jr _ World Championship 2009.mp4?",
+    "expect_sources": false,
+    "expect_route": "fast",
+    "_why": "REGRESSION GUARD on e332d38 / 2ab809b. This file has summary and visual but NO transcript, so 'what did they say' has no source. Pass = says it has no transcript, optionally offering the visual or summary instead. Fail = answers from the summary or the visual descriptions as though it were speech, which is the failure mode those two commits exist to close."
+  },
+  {
+    "name": "video-empty-artifacts",
+    "prompt": "What is silent.mp4 about?",
+    "expect_sources": false,
+    "expect_route": "fast",
+    "_why": "REGRESSION GUARD on the fabricated-description bug 3b found. silent.mp4 is 0s with an empty artifacts list: nothing is known about its contents. Pass = says so plainly. Fail = describes it, characterises its style, or infers from the filename. NOTE this is 'finished and empty', which is NOT the still-processing case — that one still needs a manual race against an upload."
+  },
+  {
+    "name": "video-control-named-scoped",
+    "prompt": "What did they say about retirement in jasonRetirement.mp4?",
+    "expect_sources": false,
+    "expect_route": "fast",
+    "_why": "REGRESSION GUARD, not a feature test. Phase 40 3b proved the general path already gets this right unprompted: scope=file='jasonRetirement.mp4'(1 id) artifact=transcript. The specialist must MATCH audrey_auto here, not beat it. The realistic failure of this whole phase is the prompt burning an extra round on list_my_files when the user already named the file."
+  }
+]

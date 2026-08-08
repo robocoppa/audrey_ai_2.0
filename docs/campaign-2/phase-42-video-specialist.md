@@ -245,7 +245,100 @@ in isolation proves nothing.
 
 Per the A-B-A rule, a prompt edit needs before/after/before — the metric's
 historical spread on this codebase is wide enough that one run cannot separate
-signal from noise.
+signal from noise. A `--models 'audrey_video,audrey_auto'` sweep is stronger
+than sequential A-B-A here: it runs both models per case back to back, so
+stack drift is controlled *within* each case rather than across runs. Run the
+sweep twice anyway to size the noise.
+
+**Cases: `scripts/eval_prompts_video.json`** (8, added 2026-08-08, rewritten
+the same day against the real corpus). Four regression guards, four feature
+tests — that ratio is deliberate, because the realistic failure of this phase
+is the specialist making a working baseline worse, not failing to improve it.
+
+**The corpus, confirmed 2026-08-08 via `list_my_files`:**
+
+| file | length | artifacts |
+|---|---|---|
+| `Magnus Carlsen Teaches How to Win with the London System.mp4` | 7m37s | summary, transcript, visual |
+| `How to WIN with the London System.mp4` | 29m38s | summary, transcript, visual |
+| `Ken McNabb_ How to Correctly Fit Your Saddle and Pad on Your Horse.mp4` | 10m56s | summary, transcript, visual |
+| `Roger Gracie VS Rafael Lovato Jr _ World Championship 2009.mp4` | 4m47s | summary, **visual only — no transcript** |
+| `jasonRetirement.mp4` | 9m25s | summary, transcript, visual |
+| `silent.mp4` | 0s | **none — empty** |
+
+**`standup.mp4` does not exist** and was invented by the first draft of this
+file. Three properties of the real corpus make the eval sharper than planned:
+
+- **Two near-duplicate London System videos.** Singular "my London System
+  video" now has two genuine same-topic candidates, which is a real test of
+  "ask rather than guess" rather than a contrived one — and its plural mirror
+  ("what do my videos say about the London System") must stay unscoped. Same
+  topic, opposite correct behaviour, one word apart.
+- **A video with no transcript.** "What did they say in the Roger Gracie
+  video" has no source, so it is a live regression guard on `e332d38` /
+  `2ab809b` — answering from the summary or the visual track is the failure
+  those commits closed.
+- **A video with no artifacts at all.** `silent.mp4` makes the §3b
+  fabricated-description bug scriptable. ⚠️ This is *finished and empty*,
+  which is **not** the still-processing case — that one still needs a manual
+  race against a live upload.
+
+The 29m38s video is also the right one for the paging case: far past one
+6000-char page, where a 9-minute video might not be.
+
+Sweep cost: 8 cases × 2 models = **16 runs, roughly 25–50 minutes.**
+
+**Run it on the box**, not the laptop — a run this long gets orphaned when the
+laptop sleeps, which is the recorded cause of past eval failures rather than
+anything to do with stale images.
+
+⚠️ **The case files are baked into the `audrey-eval` image.** A new protocol
+that has not been rebuilt in dies on a missing `/eval/<cases>.json`, which from
+the outside looks nothing like a missing case file:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+git pull
+docker compose up -d --build && docker compose --profile eval build audrey-eval && docker image prune -f
+
+nohup env MODEL=audrey_video CASES=eval_prompts_video.json LABEL=video-ab \
+  MODELS='audrey_video,audrey_auto' \
+  scripts/eval-onbox.sh \
+  >/mnt/user/appdata/audrey_ai_2.0/testing-out/last-video-ab-run.log 2>&1 &
+```
+
+`MODELS` makes it a sweep; `MODEL` only keeps the Telegram notification from
+announcing itself as the `audrey_research` default. Output lands in
+`testing-out/` as `<stamp>-video-ab-onbox-{answers.md,results.json}`.
+
+On-box credentials are `${APPDATA}/eval.env` — **not** the laptop's
+`.env.test.local`. The corpus table above must match the account that key
+belongs to.
+
+⚠️ **The harness cannot judge this phase — it is the runner, not the referee.**
+Its checks are structural (reachable, no error marker, answer present, route),
+and all six cases will pass on *both* models. Expect a 6/6 vs 6/6 matrix that
+says nothing. The verdict comes from two other places:
+
+- **The logs, which is what made §3b conclusive.** `dispatch: <tool>` lines
+  (`tools/dispatch.py:326`) give the tool-call *sequence*; `kb.query: … scope=…`
+  (`routes/kb.py:356`) gives what each search was scoped to; `react: round=…`
+  (`pipeline/react.py:266`) gives the round count. "Did it list before it
+  guessed" is a log question, not a prose question.
+- **A read of the paired answers file** for partial-read honesty and
+  file-separation in comparisons.
+
+⚠️ **The eval user must own the test videos.** The harness authenticates as the
+owner of the `sk-` key in `.env.test.local` and goes through OWUI;
+`list_my_files` and `kb_search(filename=)` are user-scoped. A key belonging to
+a different user returns nothing on every case and reads as a failed prompt
+rather than a mis-scoped run. **The corpus table above was read from the OWUI
+session, not from the eval key** — if the two are different users, re-check it
+before running, because six of the eight cases name files literally.
+
+**One case cannot be scripted: still-processing.** It needs a video mid-ingest,
+so it is a manual OWUI check — upload, then immediately ask about it on both
+models. Pass = says it is still processing; fail = reports it as empty.
 
 ## Rollback
 
