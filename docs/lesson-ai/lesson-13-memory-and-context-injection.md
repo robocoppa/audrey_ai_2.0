@@ -110,7 +110,7 @@ Audrey just remembers the answer briefly.*
 **dependency**. A dependency in FastAPI is a function whose return
 value gets injected into a route handler automatically. The chat
 route declares it at
-[`routes/openai/routes.py:87`](../../src/audrey/routes/openai/routes.py#L87):
+[`routes/openai/routes.py:90`](../../src/audrey/routes/openai/routes.py#L90):
 
 ```python
 async def chat_completions(
@@ -213,7 +213,7 @@ Three things happen on the way to `me`:
 
 Once `require_user` returns, the route has a trusted `AuthedUser` and
 uses `me.email` everywhere a `user_id` is needed. Notice this guard
-at [`routes/openai/routes.py:109`](../../src/audrey/routes/openai/routes.py#L109):
+at [`routes/openai/routes.py:112`](../../src/audrey/routes/openai/routes.py#L112):
 
 ```python
 # Identity comes from the Authorization header via require_user, NOT from
@@ -416,7 +416,7 @@ Step 5 only fires when there are no messages and no user — a true
 edge case (anonymous request with empty history).
 
 The route resolves this once before pipeline branching at
-[`routes/openai/routes.py:136`](../../src/audrey/routes/openai/routes.py#L136), then
+[`routes/openai/routes.py:151`](../../src/audrey/routes/openai/routes.py#L151), then
 threads `conversation_id` through both the streaming and non-streaming
 paths so capture and archive write agree.
 

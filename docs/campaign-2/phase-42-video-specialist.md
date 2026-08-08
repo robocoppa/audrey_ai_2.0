@@ -5,7 +5,17 @@ Phase 40 gave the model two tools: `list_my_files` for exact filenames and
 **two-step sequence** — list, then search scoped — and nothing tells a general
 model to do that. It has to work it out per conversation.
 
-**Status: PLANNED. The §3b gate is CLEARED — run 2026-08-06.**
+**Status: BUILT on the laptop 2026-08-08, NOT deployed, NOT evaluated.**
+Tests and ruff pass; nothing about behaviour is known yet. The §3b gate is
+CLEARED — run 2026-08-06.
+
+⚠️ **A third re-scope happened during the build. Read "What the tool
+descriptions already say" below before judging the prompt** — the three
+behaviours step 1 called "unmeasured and instructed nowhere" turned out to be
+instructed, in the `list_my_files` and `get_file_text` descriptions, by commits
+that landed the same day step 1 was written. The prompt that shipped is
+therefore much smaller than step 1 anticipated, and the honest expectation for
+the A-B-A is that it shows little or nothing.
 
 §3b's finding is that **scoping already works unprompted**, so the prompt this
 phase writes must NOT be about scoping. Verified from `kb.query` log lines, not
@@ -126,11 +136,16 @@ problem the phase-40 banner only partly solved.
    still-processing video as empty** (`waiting_for_s`). Writing the original
    five-bullet prompt now would mostly re-state solved problems and dilute the
    two or three instructions that would actually do something.
-2. Add `audrey_video` to `VIRTUAL_MODELS` and route it like `audrey_auto` —
+   ✅ **DONE 2026-08-08 — and re-scoped again on the way.** See "What the tool
+   descriptions already say" above: all three surviving behaviours were
+   already instructed too. The shipped prompt is three paragraphs covering
+   only cross-tool ordering, partial reads, and multi-file answers.
+2. ✅ **DONE.** Add `audrey_video` to `VIRTUAL_MODELS` and route it like `audrey_auto` —
    adaptive, not forced deep. A retrieval question is not a panel question, and
    forcing deep puts an ordinary lookup on paid inference.
-3. Fill the `task_role` slot with `VIDEO_SPECIALIST_SYSTEM` in
-   `pipeline/prompts.py`.
+3. ✅ **DONE, but NOT by filling the `task_role` slot** — see "How it was
+   wired" above. Both traps below are why the injection happens at the route
+   instead. `VIDEO_SPECIALIST_SYSTEM` lives in `pipeline/prompts.py`.
 
    ⚠️ **Two traps, found 2026-08-07 while scoping this. Read before wiring.**
 
@@ -153,10 +168,73 @@ problem the phase-40 banner only partly solved.
 
    `state["virtual_model"]` is available in both, so the routing value itself
    is not the problem; where the composition happens is.
-4. Confirm the picked model is in `fast_path.tool_capable_models` — a
+4. ▶ **OPEN — needs the box.** Confirm the picked model is in `fast_path.tool_capable_models` — a
    specialist that cannot call tools is a model answering from nothing, which
    is exactly what `audrey_passthrough` already does and why phase 40 warned
    against asking it about a video.
+
+## What the tool descriptions already say (found 2026-08-08, during the build)
+
+Step 1 re-scoped the prompt down to three behaviours on the grounds that they
+were "instructed nowhere". Reading `tools-server/app.py` before writing the
+prompt showed all three are instructed — in the tool descriptions, which every
+model sees on every call:
+
+| step 1 said "uninstructed" | where it is actually instructed |
+|---|---|
+| paging a long transcript (`offset`/`next_offset`) | `get_file_text` description — `next_offset`, `total_chars`, "say how much you have read and how much remains" |
+| not reporting a still-processing video as empty | `list_my_files` description — "'pending' or 'processing' … say so rather than reporting it as empty", plus `waiting_for_s` |
+| comparisons now that summaries must be read | `list_my_files` — "how two files compare — requires get_file_text or kb_search"; `get_file_text` — the cross-page warning about details getting "mixed up between files" |
+
+Those came from `ea02933`, `e332d38`, `2ab809b` and `e4ac231` — the same
+2026-08-06/07 cluster as the truncation budget. Step 1 was written on 08-07 and
+did not account for them.
+
+**This is §3b's finding one level deeper, and it is now a pattern worth
+naming:** every time someone sits down to write this specialist prompt, the
+thing it was going to say has already been fixed somewhere that applies to all
+users instead of only the ones who pick the specialist. A tool description
+reaches `audrey_auto` too; a task-role prompt reaches only whoever chose the
+dropdown entry. **When a candidate behaviour can be expressed as a tool
+description, it belongs there, and this phase should keep shrinking.**
+
+What survived into `VIDEO_SPECIALIST_SYSTEM` is only what no single tool
+description owns, because it spans tools or spans a whole answer:
+
+- **the call order** — list before reading when the user did not name a file,
+  and ask rather than guess when several files match;
+- **partial reads** — say which part you read before characterising the whole;
+- **multi-file answers** — keep files apart, and say if you only read one.
+
+Three short paragraphs. If the A-B-A shows nothing, the right conclusion is
+that the tool descriptions were the specialist all along, and the name should
+come back out of `VIRTUAL_MODELS`.
+
+## How it was wired
+
+Both traps in step 3 are avoided by **not** filling the `task_role` slot in
+either composer. The role prompt is injected at the route
+(`routes/openai/routes.py`, right after `messages` is built), which is the one
+place the streaming and non-streaming paths both pass through and which runs
+regardless of whether memory is enabled or the user is identified. Helpers are
+`prompts.task_role_for` (virtual model → prompt, config-overridable under
+`agentic.prompts.video_specialist`) and `prompts.with_task_role` (insert after
+any leading system messages, matching `deep_panel._with_worker_system`).
+
+Routing needed no code: `audrey_video` is absent from the forced-deep and
+forced-fast lists in both gates, so it falls through to the token count exactly
+like `audrey_auto`. `tests/test_virtual_model_routing.py` pins that, and pins
+the two gates against each other — the sync hazard `graph.py` warns about in
+prose is now a test.
+
+One consequence to know: system-message order for this model is
+`[memory, datetime, incoming system, task role, …]`, because datetime and
+memory are *prepended* by later nodes. Order among system messages is not
+otherwise load-bearing here.
+
+Not changed, and pre-existing: a deep run of `audrey_auto` or `audrey_video`
+logs `deep_panel: unknown virtual_model … falling back to default pool` because
+neither is in `_POOL_KEYS`. That warning is noise on both, not new.
 
 ## Verification
 

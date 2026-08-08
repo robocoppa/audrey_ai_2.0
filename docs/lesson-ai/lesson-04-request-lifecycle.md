@@ -45,7 +45,7 @@ every line yet — just *locate* the things we point at.
 ### 2.1 The HTTP entry point
 
 Open [`src/audrey/routes/openai/routes.py`](../../src/audrey/routes/openai/routes.py).
-Scroll to [`routes.py:83`](../../src/audrey/routes/openai/routes.py#L83):
+Scroll to [`routes.py:86`](../../src/audrey/routes/openai/routes.py#L86):
 
 ```python
 @router.post("/chat/completions")
@@ -57,13 +57,13 @@ async def chat_completions(
 ```
 
 This is where every request lands. Read the function starting at
-[`routes.py:84`](../../src/audrey/routes/openai/routes.py#L84)
+[`routes.py:87`](../../src/audrey/routes/openai/routes.py#L87)
 top to bottom. Notice:
 
 - **`@router.post("/chat/completions")`** — a FastAPI decorator. It
   registers this function as the handler for `POST /v1/chat/completions`
   HTTP requests. The `/v1` prefix is set at
-  [`routes.py:35`](../../src/audrey/routes/openai/routes.py#L35)
+  [`routes.py:36`](../../src/audrey/routes/openai/routes.py#L36)
   (`router = APIRouter(prefix="/v1")`).
 - **`payload: ChatCompletionRequest`** — FastAPI parses the incoming
   JSON body into a `ChatCompletionRequest` object (defined in
@@ -77,7 +77,7 @@ top to bottom. Notice:
   gets 401 and `chat_completions` never runs. If it succeeds, `me`
   contains their email + role.
 - **The `if payload.stream:` branch at
-  [`routes.py:141`](../../src/audrey/routes/openai/routes.py#L141)** —
+  [`routes.py:156`](../../src/audrey/routes/openai/routes.py#L156)** —
   OpenAI's API supports two modes: Streaming (server pushes tokens as they're
   generated) and non-streaming (server waits, returns full answer in
   one JSON response). Audrey supports both. Streaming is what OWUI
@@ -223,15 +223,15 @@ follow along in `openai.py`.
    request.
 
 3. **FastAPI runs `require_user`** (the `Depends(...)` we saw in
-   [`routes.py:84`](../../src/audrey/routes/openai/routes.py#L84)).
+   [`routes.py:87`](../../src/audrey/routes/openai/routes.py#L87)).
    This calls Open WebUI's `/api/v1/auths/` endpoint to
    verify the token. On success, `me: AuthedUser` gets populated
    with the user's email + role.
 
 4. **`chat_completions` runs** at
-   [`routes.py:84`](../../src/audrey/routes/openai/routes.py#L84).
+   [`routes.py:87`](../../src/audrey/routes/openai/routes.py#L87).
    It validates the model name against `VIRTUAL_MODELS`
-   ([`routes.py:39`](../../src/audrey/routes/openai/routes.py#L39)),
+   ([`routes.py:41`](../../src/audrey/routes/openai/routes.py#L41)),
    splits messages out of the payload, and — because `stream=true` — calls
    `_stream_via_pipeline()` wrapped in a `StreamingResponse` (a
    FastAPI primitive that holds the HTTP connection open and pushes
@@ -292,7 +292,7 @@ something deeply, here's where to look first.
 
 | If you're asking… | Look in… |
 |---|---|
-| "Where does a request enter Audrey?" | [`routes/openai/routes.py:84`](../../src/audrey/routes/openai/routes.py#L84) (`chat_completions`) |
+| "Where does a request enter Audrey?" | [`routes/openai/routes.py:87`](../../src/audrey/routes/openai/routes.py#L87) (`chat_completions`) |
 | "How does the pipeline decide what to do?" | [`pipeline/graph.py:437`](../../src/audrey/pipeline/graph.py#L437) (the graph topology) |
 | "Why did it pick model X?" | [`pipeline/classify.py`](../../src/audrey/pipeline/classify.py) + [`models/registry.py`](../../src/audrey/models/registry.py) |
 | "Why did the request hang?" | [`pipeline/fair_gate.py`](../../src/audrey/pipeline/fair_gate.py) (GPU queue) + Ollama logs |

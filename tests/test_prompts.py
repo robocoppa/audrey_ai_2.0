@@ -19,6 +19,7 @@ Pure functions over strings/dicts. No model calls, no I/O.
 from __future__ import annotations
 
 import logging
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -35,9 +36,12 @@ from audrey.pipeline.prompts import (
     RESEARCHER_SYSTEM,
     SYNTH_SYSTEM,
     VERIFIER_SYSTEM,
+    VIDEO_SPECIALIST_SYSTEM,
     WRITER_SYSTEM,
     compose_system_messages,
     prompt_from_config,
+    task_role_for,
+    with_task_role,
 )
 
 # ─── Byte-for-byte regression ─────────────────────────────────────────
@@ -660,3 +664,90 @@ def test_compose_skips_blank_default_chat_history_text(flag, monkeypatch):
     monkeypatch.setattr(prompts, "CHAT_HISTORY_SEARCH_SYSTEM", "  ")
     out = compose_system_messages(chat_history_guidance=flag)
     assert out == []
+
+
+# ─── Task role by virtual model (phase 42) ────────────────────────────
+
+
+def test_task_role_for_video_returns_the_specialist_prompt():
+    assert task_role_for("audrey_video") == VIDEO_SPECIALIST_SYSTEM
+
+
+@pytest.mark.parametrize(
+    "vm",
+    ["audrey_auto", "audrey_fast", "audrey_deep", "audrey_cloud",
+     "audrey_local", "audrey_research", "", "nonsense"],
+)
+def test_task_role_for_returns_none_for_non_specialists(vm):
+    """A role prompt on the general path would destroy the A-B comparison
+    the phase exists to make — `audrey_auto` must stay unprompted."""
+    assert task_role_for(vm) is None
+
+
+def test_task_role_for_honours_a_config_override():
+    cfg = SimpleNamespace(
+        raw={"agentic": {"prompts": {"video_specialist": "CUSTOM ROLE"}}}
+    )
+    assert task_role_for("audrey_video", cfg) == "CUSTOM ROLE"
+
+
+def test_video_specialist_does_not_restate_tool_description_guidance():
+    """The re-scope: paging mechanics, pending/processing status and the
+    artifact vocabulary live in the custom-tools descriptions, where they
+    reach every path. Restating them here would dilute the few instructions
+    that are actually this prompt's job."""
+    lowered = VIDEO_SPECIALIST_SYSTEM.lower()
+    for term in ("next_offset", "waiting_for_s", "artifact=", "pending"):
+        assert term not in lowered
+
+
+def test_video_specialist_names_only_registered_tools():
+    """Naming a tool the sidecar does not expose makes models call it and
+    fail as `unknown_tool` — the standing repo rule."""
+    registered = {
+        "web_search", "web_fetch", "kb_search", "kb_image_search",
+        "memory_store", "memory_recall", "memory_search",
+        "chat_history_search", "list_my_files", "get_file_text",
+    }
+    named = set(re.findall(r"`(\w+)`", VIDEO_SPECIALIST_SYSTEM))
+    assert named <= registered, f"unregistered tool(s): {named - registered}"
+
+
+def test_with_task_role_inserts_after_leading_system_messages():
+    """Canonical order: the user's own persona wins on tone, task role next."""
+    msgs = [
+        {"role": "system", "content": "persona"},
+        {"role": "user", "content": "hi"},
+    ]
+    out = with_task_role(msgs, "ROLE")
+    assert [m["content"] for m in out] == ["persona", "ROLE", "hi"]
+
+
+def test_with_task_role_handles_no_leading_system_message():
+    msgs = [{"role": "user", "content": "hi"}]
+    out = with_task_role(msgs, "ROLE")
+    assert [m["content"] for m in out] == ["ROLE", "hi"]
+
+
+def test_with_task_role_only_counts_a_leading_system_run():
+    """A system message appearing after a user turn is not part of the
+    leading run and must not pull the role prompt down past it."""
+    msgs = [
+        {"role": "system", "content": "persona"},
+        {"role": "user", "content": "hi"},
+        {"role": "system", "content": "later"},
+    ]
+    out = with_task_role(msgs, "ROLE")
+    assert [m["content"] for m in out] == ["persona", "ROLE", "hi", "later"]
+
+
+@pytest.mark.parametrize("empty", [None, ""])
+def test_with_task_role_is_a_noop_without_a_prompt(empty):
+    msgs = [{"role": "user", "content": "hi"}]
+    assert with_task_role(msgs, empty) is msgs
+
+
+def test_with_task_role_does_not_mutate_the_input():
+    msgs = [{"role": "user", "content": "hi"}]
+    with_task_role(msgs, "ROLE")
+    assert msgs == [{"role": "user", "content": "hi"}]

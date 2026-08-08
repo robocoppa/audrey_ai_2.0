@@ -73,7 +73,7 @@ custom `X-Audrey-Mode` header — which would fail through any client
 that doesn't expose custom header configuration (most of them).
 
 The five non-passthrough names are listed once in `VIRTUAL_MODELS`
-at [`routes/openai/routes.py:39`](../../src/audrey/routes/openai/routes.py#L39).
+at [`routes/openai/routes.py:41`](../../src/audrey/routes/openai/routes.py#L41).
 Passthrough uses a *prefix* (`audrey_passthrough/`) so one virtual
 model can route to any concrete model in
 `passthrough.allowed_models`; the deploy notes for the passthrough
@@ -150,14 +150,14 @@ Three fields earn special mention:
   identity**. Audrey's user ID comes from the bearer token
   (`require_user → AuthedUser.email`); `payload.user` is logged for
   drift-debugging at
-  [`routes/openai/routes.py:109`](../../src/audrey/routes/openai/routes.py#L109)
+  [`routes/openai/routes.py:112`](../../src/audrey/routes/openai/routes.py#L112)
   and otherwise ignored. The field is in the schema purely for
   client compat.
 
 ### 2.2 The dispatch decision tree
 
 The route entry is
-[`routes/openai/routes.py:84`](../../src/audrey/routes/openai/routes.py#L84).
+[`routes/openai/routes.py:87`](../../src/audrey/routes/openai/routes.py#L87).
 The ordering of checks is load-bearing — getting it wrong would
 either leak identity surface or let invalid passthrough requests
 escape into the pipeline.
@@ -179,7 +179,7 @@ payload.stream?
 ```
 
 Three things to notice in
-[`routes/openai/routes.py:84`](../../src/audrey/routes/openai/routes.py#L84):
+[`routes/openai/routes.py:87`](../../src/audrey/routes/openai/routes.py#L87):
 
   - **Passthrough is checked first** because it owns its own model-string
     space (`audrey_passthrough/<x>`) and isn't in `VIRTUAL_MODELS`. If
@@ -188,12 +188,12 @@ Three things to notice in
   - **`VIRTUAL_MODELS` is validated in the route, not the schema.** A
     Pydantic `Literal[...]` would push this to the 422 layer with
     less-helpful error text. The route check at
-    [`routes/openai/routes.py:101`](../../src/audrey/routes/openai/routes.py#L101)
+    [`routes/openai/routes.py:104`](../../src/audrey/routes/openai/routes.py#L104)
     emits `"Unknown model 'X'. Supported virtual models: [...]"` —
     actionable enough that a developer trying `audrey_deeo` (typo)
     can fix it without grepping the source.
   - **`conversation_id` is resolved once, before the branch** at
-    [`routes/openai/routes.py:136`](../../src/audrey/routes/openai/routes.py#L136).
+    [`routes/openai/routes.py:151`](../../src/audrey/routes/openai/routes.py#L151).
     Both pipeline paths receive the same id, so a stream and a
     non-stream completion of the same conversation thread into the
     archive correctly. Lesson 13 §2.5 covered how
@@ -529,7 +529,7 @@ already-dispatched cloud workers is outside Audrey's control.
 
 ### 2.8 The passthrough fork
 
-[`_handle_passthrough` at routes/openai/routes.py:95](../../src/audrey/routes/openai/routes.py#L95)
+[`_handle_passthrough` at routes/openai/routes.py:95](../../src/audrey/routes/openai/routes.py#L98)
 is a sibling of the pipeline dispatch — same `inflight.slot()` wrap,
 same fair-gate acquisition (inside the helper), but no classifier,
 no complexity gate, no banners. It exists for one specific use case:
@@ -661,7 +661,7 @@ got; the archive records what actually streamed.
 what gets forwarded and what gets reshaped.**
 
 The route hits
-[`routes/openai/routes.py:95`](../../src/audrey/routes/openai/routes.py#L95),
+[`routes/openai/routes.py:98`](../../src/audrey/routes/openai/routes.py#L98),
 recognizes the `audrey_passthrough/` prefix, and dispatches to
 `_handle_passthrough`. There the `tools` array is forwarded
 *verbatim* to Ollama — Audrey doesn't filter, validate, or

@@ -21,6 +21,7 @@ from audrey import __version__
 from audrey.auth import AuthedUser, require_user
 from audrey.pipeline.chat_archive import resolve_conversation_id
 from audrey.pipeline.messages import last_user_text
+from audrey.pipeline.prompts import task_role_for, with_task_role
 from audrey.routes.openai.passthrough import (
     PASSTHROUGH_PREFIX,
     _handle_passthrough,
@@ -34,8 +35,9 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1", tags=["openai"])
 
-# The five virtual models Audrey exposes. Each is a *pipeline mode*, not a
-# real Ollama model. Mapping to concrete models happens inside the pipeline.
+# The virtual models Audrey exposes. Each is a *pipeline mode*, not a real
+# Ollama model. Mapping to concrete models happens inside the pipeline.
+# (The count was stated here and went stale twice — don't reintroduce it.)
 VIRTUAL_MODELS = (
     "audrey_deep",     # always deep (mixed pool)
     "audrey_cloud",    # always deep (cloud-only pool)
@@ -43,6 +45,7 @@ VIRTUAL_MODELS = (
     "audrey_research", # always deep, staged: research → verify → write
     "audrey_auto",     # adaptive: fast for short prompts, deep for long ones
     "audrey_fast",     # always fast (no escalation, even on long prompts)
+    "audrey_video",    # adaptive like audrey_auto, plus the video task role
 )
 
 
@@ -114,6 +117,18 @@ async def chat_completions(
         )
 
     messages = [m.model_dump(exclude_none=True) for m in payload.messages]
+
+    # Specialist task role, injected once here so it reaches the streaming and
+    # non-streaming paths alike and does not depend on memory being enabled or
+    # the user being identified. See `prompts.with_task_role` for why this is
+    # not done inside `node_memory_recall`. No-op for every non-specialist
+    # model, which is what keeps the A-B comparison against `audrey_auto`
+    # honest.
+    role_prompt = task_role_for(payload.model, app.state.cfg)
+    if role_prompt:
+        messages = with_task_role(messages, role_prompt)
+        log.info("task_role: %s (%d chars)", payload.model, len(role_prompt))
+
     debug_cfg = app.state.cfg.raw.get("debug", {}) or {}
     if debug_cfg.get("log_incoming_payload", False):
         shape = [(m.get("role"), len(str(m.get("content") or ""))) for m in messages]

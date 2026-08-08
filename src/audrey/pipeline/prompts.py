@@ -419,6 +419,39 @@ CHAT_HISTORY_SEARCH_SYSTEM = (
 )
 
 
+# Phase 42: the `audrey_video` task role. Deliberately short.
+#
+# ⚠️ Most of what a "video specialist" would say already lives in the
+# custom-tools descriptions, which every model sees on every call and which
+# therefore apply to `audrey_auto` users too: `list_my_files` covers
+# pending/processing vs empty and "a catalogue, not contents", and
+# `get_file_text` covers `next_offset` paging, `total_chars`, and refusing to
+# invent content for a missing artifact. Instructing those again here would
+# only re-state them for the minority of users who pick this model.
+#
+# What is left is the part no single tool description owns: the order to call
+# them in, and what to do when a read came back partial or covers more than
+# one file. Keep this prompt to that. If a behaviour can be fixed in a tool
+# description instead, fix it there — it reaches every path.
+VIDEO_SPECIALIST_SYSTEM = (
+    "You are answering questions about videos and documents this user has "
+    "uploaded. Their own files are the source; reach for them before anything "
+    "else, and never answer about a file's contents from its name alone.\n"
+    "When the user refers to a recording without naming a file — 'that video', "
+    "'my standup' — call `list_my_files` first and use an exact filename from "
+    "it. Never invent a filename. When several files could match, say which "
+    "ones you found and ask, rather than picking one and answering "
+    "confidently from the wrong video.\n"
+    "`get_file_text` returns one page at a time. If you have read only part of "
+    "a document, say which part before you characterise the whole. A summary "
+    "built from the first page but presented as a summary of the video is "
+    "worse than saying you ran out of room and offering to read on.\n"
+    "When the user asks about more than one file, read each one separately "
+    "and keep them apart in your answer. Never let what one file said stand "
+    "in for another, and if you managed to read only one of them, say so."
+)
+
+
 # ─── Override loader ──────────────────────────────────────────────────
 
 _OVERRIDE_SOFT_CAP_CHARS = 4000
@@ -438,6 +471,7 @@ _PROMPT_KEYS = frozenset({
     "react_final_answer",
     "memory_store_hint",
     "chat_history_search",
+    "video_specialist",
 })
 
 
@@ -537,6 +571,69 @@ def compose_system_messages(
     return out
 
 
+# ─── Task role by virtual model ───────────────────────────────────────
+
+# Which virtual models carry a task-role system message, and the config key
+# that overrides each. `audrey_auto` and friends deliberately have no entry:
+# a general model gets no role prompt, which is what makes the specialist a
+# measurable difference rather than a rename.
+_TASK_ROLE_BY_VIRTUAL_MODEL: dict[str, tuple[str, str]] = {
+    "audrey_video": ("video_specialist", VIDEO_SPECIALIST_SYSTEM),
+}
+
+
+def task_role_for(virtual_model: str, cfg: Any = None) -> str | None:
+    """Return the task-role prompt for a virtual model, or None.
+
+    None means "no role prompt" and is the normal case — only specialists
+    have an entry in `_TASK_ROLE_BY_VIRTUAL_MODEL`.
+    """
+    entry = _TASK_ROLE_BY_VIRTUAL_MODEL.get(virtual_model)
+    if entry is None:
+        return None
+    key, default = entry
+    return prompt_from_config(cfg, key, default)
+
+
+def with_task_role(
+    messages: list[dict[str, Any]], role_prompt: str | None
+) -> list[dict[str, Any]]:
+    """Insert a task-role system message AFTER any leading system messages.
+
+    Same placement rule as `compose_system_messages`' `task_role` slot and as
+    `deep_panel._with_worker_system`: whatever the user or OWUI sent at
+    `role=system` stays first so their persona wins on tone, and the task role
+    follows it.
+
+    ⚠️ **Called from the route, not from a pipeline node, and deliberately so.**
+    `compose_system_messages` is reached only from `node_memory_recall`, which
+    returns early when memory is disabled and again when the user is not
+    identified — filling the slot there would make a specialist's entire
+    deliverable vanish in both cases with no error and no log line. The route
+    is the one place both the streaming and non-streaming paths pass through,
+    so injecting here also avoids the split where a specialist works only on
+    requests that happened to stream.
+
+    Consequence worth knowing: the datetime and memory system messages are
+    *prepended* downstream, so they land ahead of this one. Order among system
+    messages is not otherwise load-bearing.
+
+    Returns a new list; `messages` is never mutated.
+    """
+    if not role_prompt:
+        return messages
+    idx = 0
+    for m in messages:
+        if m.get("role") != "system":
+            break
+        idx += 1
+    return [
+        *messages[:idx],
+        {"role": "system", "content": role_prompt},
+        *messages[idx:],
+    ]
+
+
 __all__ = [
     "CLASSIFIER_SYSTEM",
     "PLANNER_SYSTEM",
@@ -549,6 +646,9 @@ __all__ = [
     "REACT_FINAL_ANSWER_USER",
     "MEMORY_STORE_HINT",
     "CHAT_HISTORY_SEARCH_SYSTEM",
+    "VIDEO_SPECIALIST_SYSTEM",
     "prompt_from_config",
     "compose_system_messages",
+    "task_role_for",
+    "with_task_role",
 ]
