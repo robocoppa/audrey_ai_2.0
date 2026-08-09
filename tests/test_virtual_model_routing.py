@@ -81,3 +81,54 @@ def test_exactly_one_virtual_model_carries_a_task_role():
     config-driven `specialists:` block instead of adding a third by hand."""
     with_role = [vm for vm in VIRTUAL_MODELS if task_role_for(vm) is not None]
     assert with_role == ["audrey_video"]
+
+
+# ─── The gate must measure the request, not Audrey's own scaffolding ──
+
+
+_GATE_CALL = re.compile(r"is_complex\(\s*(\w+)\s*,\s*threshold=")
+
+
+@pytest.mark.parametrize("path", [_GRAPH, _STREAM], ids=["graph", "streaming"])
+def test_the_deep_gate_excludes_the_injected_task_role(path):
+    """Both gates must feed `is_complex` a task-role-stripped message list.
+
+    The bug this pins (2026-08-09, caught only from on-box logs): the task role
+    is injected at the route, `count_tokens` sums system messages too, and so a
+    specialist spent ~330 tokens of its own prompt against a 500-token
+    threshold. Turns that should have run fast went to the three-worker panel —
+    which also means an A-B against `audrey_auto` silently compares pipelines
+    rather than prompts.
+
+    Source-level for the same reason as the rest of this file: the gate is
+    inline in both places. Asserting on the variable name passed to
+    `is_complex` is crude, but it fails loudly if either gate is rewritten to
+    pass the raw list again, and that is exactly the regression worth catching.
+    """
+    src = path.read_text()
+    m = _GATE_CALL.search(src)
+    assert m, f"no is_complex(...) gate call found in {path.name} — did it move?"
+    assert m.group(1) == "gate_messages", (
+        f"{path.name} gates on {m.group(1)!r}, not the task-role-stripped list"
+    )
+    assert "without_task_role(" in src, (
+        f"{path.name} never strips the task role before gating"
+    )
+
+
+def test_every_model_that_can_route_deep_has_a_panel_pool():
+    """A virtual model reaching the panel must be registered in `_POOL_KEYS`.
+
+    Not about the pool it lands in — the fallback already picks the right one
+    for the adaptive models. It is about the warning staying meaningful: while
+    `audrey_auto` and `audrey_video` were unregistered, "unknown virtual_model"
+    fired on ordinary correct traffic, so the case it exists to catch (a new
+    specialist shipped without a pool) was indistinguishable from noise.
+
+    `audrey_fast` is excluded because `forced_fast` means it can never arrive.
+    """
+    from audrey.pipeline.deep_panel import _POOL_KEYS
+
+    can_route_deep = set(VIRTUAL_MODELS) - {"audrey_fast"}
+    missing = can_route_deep - set(_POOL_KEYS)
+    assert not missing, f"virtual model(s) can reach the panel unregistered: {missing}"

@@ -599,6 +599,41 @@ def task_role_for(virtual_model: str, cfg: Any = None) -> str | None:
     return prompt_from_config(cfg, key, default)
 
 
+def without_task_role(
+    messages: list[dict[str, Any]], role_prompt: str | None
+) -> list[dict[str, Any]]:
+    """The inverse of `with_task_role`, for the deep-vs-fast token gate ONLY.
+
+    ⚠️ **Why this exists** (found 2026-08-09, from on-box logs):
+    `complexity.count_tokens` sums every message, system ones included — and the
+    task role is injected at the route, upstream of both gates. So a specialist
+    paid ~330 tokens of its own prompt into a 500-token threshold, and turns that
+    would have run fast went to the three-worker deep panel instead. Nothing said
+    so: the log prints the post-injection count, so `576 tokens -> deep` reads as
+    a legitimately large request rather than a 246-token one wearing a prompt.
+
+    The effect is a silent retune. A fixed injection drops the specialist's real
+    threshold to ~170 tokens of user content while `audrey_auto` keeps 500, which
+    also means an A-B between them compares pipelines, not prompts — four of
+    eight phase-42 cases got a panel and a synthesizer their control never saw.
+
+    Only the routing decision is corrected. `prompt_tokens` and
+    `count_tokens_by_role` keep counting the full context, because they report
+    what was actually sent and that number is not wrong.
+
+    Matched by exact content rather than a marker key: these dicts go to Ollama,
+    and an extra field on a message is a wire-format risk for a gate detail.
+
+    Returns a new list; `messages` is never mutated.
+    """
+    if not role_prompt:
+        return messages
+    return [
+        m for m in messages
+        if not (m.get("role") == "system" and m.get("content") == role_prompt)
+    ]
+
+
 def with_task_role(
     messages: list[dict[str, Any]], role_prompt: str | None
 ) -> list[dict[str, Any]]:
@@ -655,4 +690,5 @@ __all__ = [
     "compose_system_messages",
     "task_role_for",
     "with_task_role",
+    "without_task_role",
 ]

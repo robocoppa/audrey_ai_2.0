@@ -75,7 +75,11 @@ from audrey.pipeline.memory import (
 )
 from audrey.pipeline.messages import has_image_part, last_user_text
 from audrey.pipeline.planner import plan as planner_plan
-from audrey.pipeline.prompts import compose_system_messages
+from audrey.pipeline.prompts import (
+    compose_system_messages,
+    task_role_for,
+    without_task_role,
+)
 from audrey.pipeline.reflect import reflect as reflect_fn
 from audrey.pipeline.state import PipelineState
 from audrey.pipeline.synthesize import synthesize as synthesize_fn
@@ -239,9 +243,17 @@ def build_graph(
         return {"task_type": task, "classify_reason": reason, "classify_confidence": conf}
 
     async def node_complexity(state: PipelineState) -> dict[str, Any]:
-        complex_, n = is_complex(state["messages"], threshold=complexity_threshold)
-        deep_intent = has_deep_intent(state["messages"], deep_intent_phrases)
         vm = state.get("virtual_model")
+        # Gate on the request, not on Audrey's own scaffolding. The task role is
+        # injected at the route, so without this a specialist's prompt counts
+        # toward the threshold that decides whether the request is big enough to
+        # deserve the panel — see `without_task_role`. Mirrored in the streaming
+        # gate; `tests/test_virtual_model_routing.py` pins the two together.
+        gate_messages = without_task_role(
+            state["messages"], task_role_for(str(vm or ""), cfg)
+        )
+        complex_, n = is_complex(gate_messages, threshold=complexity_threshold)
+        deep_intent = has_deep_intent(state["messages"], deep_intent_phrases)
         forced_deep = vm in ("audrey_deep", "audrey_cloud", "audrey_local", "audrey_research")
         forced_fast = vm == "audrey_fast"
         owui_task = is_owui_task_request(state["messages"])

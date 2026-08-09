@@ -449,7 +449,7 @@ task family.
 ### 2.7 Virtual models can force the route
 
 Now read the middle of `node_complexity`, starting at
-[`graph.py:236`](../../src/audrey/pipeline/graph.py#L236):
+[`graph.py:255`](../../src/audrey/pipeline/graph.py#L255):
 
 ```python
 complex_, n = is_complex(...)

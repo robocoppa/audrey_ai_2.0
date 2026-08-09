@@ -73,7 +73,11 @@ from audrey.pipeline.memory import (
 )
 from audrey.pipeline.messages import has_image_part, last_user_text
 from audrey.pipeline.planner import plan as planner_plan
-from audrey.pipeline.prompts import compose_system_messages
+from audrey.pipeline.prompts import (
+    compose_system_messages,
+    task_role_for,
+    without_task_role,
+)
 from audrey.pipeline.synthesize import synthesize_stream
 from audrey.pipeline.vision import describe_enabled, describe_for_text_model
 from audrey.routes.openai.responses import _to_openai_response
@@ -248,7 +252,13 @@ async def _stream_via_pipeline(
             # classification, so the user sees an ack immediately instead of
             # staring at nothing while the router model runs under GPU load.
             complexity_cfg = cfg.raw.get("complexity", {}) or {}
-            complex_, n = is_complex(messages, threshold=int(complexity_cfg.get("token_threshold", 500)))
+            # Gate on the request, not on Audrey's own scaffolding — the task
+            # role was injected at the route, upstream of here. Mirrors
+            # `node_complexity`; see `without_task_role` for what this cost.
+            gate_messages = without_task_role(
+                messages, task_role_for(payload.model, cfg)
+            )
+            complex_, n = is_complex(gate_messages, threshold=int(complexity_cfg.get("token_threshold", 500)))
             deep_intent = has_deep_intent(messages, complexity_cfg.get("deep_intent_phrases") or [])
             forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local", "audrey_research")
             forced_fast = payload.model == "audrey_fast"

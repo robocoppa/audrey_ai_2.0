@@ -25,6 +25,7 @@ from types import SimpleNamespace
 import pytest
 
 from audrey.pipeline import prompts
+from audrey.pipeline.complexity import count_tokens
 from audrey.pipeline.prompts import (
     CHAT_HISTORY_SEARCH_SYSTEM,
     CLASSIFIER_SYSTEM,
@@ -42,6 +43,7 @@ from audrey.pipeline.prompts import (
     prompt_from_config,
     task_role_for,
     with_task_role,
+    without_task_role,
 )
 
 # ─── Byte-for-byte regression ─────────────────────────────────────────
@@ -751,3 +753,49 @@ def test_with_task_role_does_not_mutate_the_input():
     msgs = [{"role": "user", "content": "hi"}]
     with_task_role(msgs, "ROLE")
     assert msgs == [{"role": "user", "content": "hi"}]
+
+
+class TestStrippingTheTaskRoleForTheGate:
+    """`without_task_role` — the deep-vs-fast gate's view of the messages.
+
+    Not cosmetic: the task role is ~330 tokens against a 500-token threshold,
+    so leaving it in silently drops a specialist's real threshold to ~170
+    tokens of user content while every other model keeps 500.
+    """
+
+    def test_it_removes_exactly_the_injected_message(self):
+        role = task_role_for("audrey_video")
+        msgs = [{"role": "user", "content": "what did my video say?"}]
+        assert without_task_role(with_task_role(msgs, role), role) == msgs
+
+    def test_a_users_own_system_message_survives(self):
+        role = task_role_for("audrey_video")
+        msgs = [
+            {"role": "system", "content": "You are terse."},
+            {"role": "user", "content": "hi"},
+        ]
+        assert without_task_role(with_task_role(msgs, role), role) == msgs
+
+    def test_no_role_prompt_is_a_passthrough(self):
+        msgs = [{"role": "system", "content": "x"}, {"role": "user", "content": "y"}]
+        # Every non-specialist model takes this branch, so it must not copy or
+        # reorder anything — the gate sees precisely what it saw before.
+        assert without_task_role(msgs, None) is msgs
+        assert without_task_role(msgs, "") is msgs
+
+    def test_the_input_is_not_mutated(self):
+        role = task_role_for("audrey_video")
+        injected = with_task_role([{"role": "user", "content": "hi"}], role)
+        before = len(injected)
+        without_task_role(injected, role)
+        assert len(injected) == before
+
+    def test_stripping_drops_the_gate_below_the_threshold(self):
+        # The actual regression, in numbers: a request that is comfortably
+        # short on its own must not cross 500 tokens just by being asked of a
+        # specialist. The on-box log showed 576 -> deep for a ~246-token ask.
+        role = task_role_for("audrey_video")
+        msgs = [{"role": "user", "content": "what did my london video say? " * 12}]
+        assert count_tokens(msgs) < 500
+        assert count_tokens(with_task_role(msgs, role)) > count_tokens(msgs)
+        assert count_tokens(without_task_role(with_task_role(msgs, role), role)) < 500

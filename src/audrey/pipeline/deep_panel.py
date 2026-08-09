@@ -75,7 +75,17 @@ log = logging.getLogger(__name__)
 
 
 # Map virtual model → pool key in config.yaml
+#
+# The ADAPTIVE models are registered too, not just the forced-deep ones. They
+# reach the panel by the token gate rather than by name, which is easy to forget
+# when reading this map — and until 2026-08-09 they were absent, so every deep
+# turn from `audrey_auto` logged "unknown virtual_model" and fell back to the
+# pool it was going to get anyway. A warning that fires on correct behaviour
+# stops being read, which is the whole cost: the case it exists to catch (a typo
+# here, or a new model shipped without a pool) looks exactly the same.
 _POOL_KEYS = {
+    "audrey_auto": "deep_panel",
+    "audrey_video": "deep_panel",
     "audrey_deep": "deep_panel",
     "audrey_cloud": "deep_panel_cloud",
     "audrey_local": "deep_panel_local",
