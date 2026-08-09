@@ -40,12 +40,33 @@ class TestKbSearchExplainsFileProvenance:
     def test_it_points_at_the_per_result_filename(self):
         assert "`filename`" in _description("kb_search")
 
-    def test_it_forbids_writing_about_an_unread_file(self):
-        # The specific failure: `list_my_files` proves a file exists, which the
-        # model then treats as licence to describe it.
+    def test_it_ties_each_claim_to_the_file_its_hit_came_from(self):
         d = _description("kb_search").lower()
-        assert "no hits from a file" in d
-        assert "say so" in d
+        assert "attribute each claim" in d
+        assert "never let one file's content answer for another" in d
+
+    def test_it_does_not_discourage_searching(self):
+        """⚠️ The regression this exists to prevent, seen on the box 2026-08-09.
+
+        The first version of this guidance said "if you have no hits from a
+        file, say so instead of writing a section about it". Intended as an
+        accuracy rule for AFTER a search; read by the model as a prohibition on
+        writing about unread files, whose cheapest satisfaction is to not search
+        at all. Both `audrey_video` and `audrey_auto` stopped answering the
+        unscoped plural case entirely — `list_my_files` and then a question back
+        to the user. `audrey_auto` moved too, which is what identified the
+        description rather than the specialist prompt as the cause.
+
+        A tool description is read as instructions about when to call the tool,
+        not only about how to use its output. Wording that makes calling it feel
+        risky suppresses the call.
+        """
+        d = _description("kb_search").lower()
+        assert "search first" in d
+        # The exact phrasings that produced the punt. Not a general ban on the
+        # words — a ban on re-deriving this instruction shape.
+        assert "instead of writing a section" not in d
+        assert "no hits from a file" not in d
 
     def test_the_scoping_instruction_survives(self):
         # The pooling guidance was appended to an existing description; this

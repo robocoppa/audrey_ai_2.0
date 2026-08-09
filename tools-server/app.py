@@ -485,10 +485,10 @@ async def web_fetch(req: WebFetchRequest) -> WebFetchResponse:
         "filename from list_my_files as `filename`.\n"
         "Results are POOLED across files and ordered by score, so an unscoped "
         "search of several similar documents can return hits from only one of "
-        "them. Every result carries its own `filename` — read it before "
-        "attributing anything. Knowing a file exists is not the same as having "
-        "read it: if you have no hits from a file, say so instead of writing a "
-        "section about it, and never let one file's content answer for another."
+        "them. Every result carries its own `filename`; attribute each claim to "
+        "the file its hit came from, and never let one file's content answer "
+        "for another. Search first and report what you found — a thin result is "
+        "worth more to the user than a question."
     ),
 )
 async def kb_search(req: KBSearchRequest) -> KBSearchResponse:
