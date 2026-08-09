@@ -482,7 +482,13 @@ async def web_fetch(req: WebFetchRequest) -> WebFetchResponse:
         "material (e.g. geology references) or their own ingested docs, "
         "including the transcripts and on-screen text of videos they have "
         "uploaded. To search inside one particular file, pass its exact "
-        "filename from list_my_files as `filename`."
+        "filename from list_my_files as `filename`.\n"
+        "Results are POOLED across files and ordered by score, so an unscoped "
+        "search of several similar documents can return hits from only one of "
+        "them. Every result carries its own `filename` — read it before "
+        "attributing anything. Knowing a file exists is not the same as having "
+        "read it: if you have no hits from a file, say so instead of writing a "
+        "section about it, and never let one file's content answer for another."
     ),
 )
 async def kb_search(req: KBSearchRequest) -> KBSearchResponse:

@@ -128,7 +128,7 @@ Not every route should be a tool. The chat archive has three routes the
 model must **never** call — writing a turn, pruning old data, reading
 stats. Those are for Audrey's archive client and the admin operator only.
 
-The mechanism is one flag ([app.py:760](../../tools-server/app.py#L842)):
+The mechanism is one flag ([app.py:857](../../tools-server/app.py#L857)):
 
 ```python
 @app.post("/chat_history/archive", include_in_schema=False, tags=["internal"])
