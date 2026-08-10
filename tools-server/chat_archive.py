@@ -214,9 +214,18 @@ class _EmbedError(RuntimeError):
     pass
 
 
-async def _embed(http: httpx.AsyncClient, model: str, text: str) -> list[float]:
+async def _embed(
+    http: httpx.AsyncClient, model: str, text: str, keep_alive: str = "",
+) -> list[float]:
+    payload: dict[str, Any] = {"model": model, "input": [text]}
+    if keep_alive:
+        # Same reasoning as MemoryStore._embed: Ollama's 5-minute default
+        # evicts the embedder between bursts, and the cold reload costs ~70x a
+        # warm call. Both stores share one embedder, so both must pin it —
+        # otherwise whichever ran last decides how long it stays.
+        payload["keep_alive"] = keep_alive
     try:
-        r = await http.post("/api/embed", json={"model": model, "input": [text]})
+        r = await http.post("/api/embed", json=payload)
     except httpx.HTTPError as e:
         raise _EmbedError(f"transport: {type(e).__name__}: {e}") from e
     if r.status_code >= 400:
@@ -298,6 +307,7 @@ class ChatArchiveStore:
         search_threshold: float,
         retention_days: int,
         max_bytes: int,
+        embed_keep_alive: str = "",
     ) -> None:
         self._sqlite_path = sqlite_path
         self._qdrant = AsyncQdrantClient(url=qdrant_url)
@@ -309,6 +319,7 @@ class ChatArchiveStore:
         self._chunk_overlap = chunk_overlap_chars
         self._threshold = search_threshold
         self._retention_days = retention_days
+        self._embed_keep_alive = embed_keep_alive
         self._max_bytes = max_bytes
         self._db: aiosqlite.Connection | None = None
 
@@ -445,7 +456,8 @@ class ChatArchiveStore:
         index_failed = 0
         for chunk in chunks:
             try:
-                vec = await _embed(self._http, self._embed_model, chunk["text"])
+                vec = await _embed(self._http, self._embed_model, chunk["text"],
+                                   self._embed_keep_alive)
                 await self._qdrant.upsert(
                     collection_name=self._collection,
                     points=[
@@ -511,7 +523,7 @@ class ChatArchiveStore:
         if not query.strip():
             return []
         try:
-            qvec = await _embed(self._http, self._embed_model, query)
+            qvec = await _embed(self._http, self._embed_model, query, self._embed_keep_alive)
         except _EmbedError as e:
             log.warning("chat_archive: embed failed for search query: %s", e)
             return []

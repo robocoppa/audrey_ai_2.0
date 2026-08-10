@@ -313,16 +313,26 @@ class OllamaClient:
         model: str,
         texts: list[str],
         timeout_s: float | None = None,
+        keep_alive: str | None = None,
     ) -> list[list[float]]:
         """Return one embedding vector per input text.
 
         Uses `/api/embed` (batch form — `/api/embeddings` is the older
         single-input variant; `/api/embed` accepts `input: [str]` and
         returns `embeddings: [[float, ...]]`).
+
+        `keep_alive` is how long Ollama keeps the embedder resident after the
+        call. Omitted (None) it defaults to Ollama's 5 minutes, which is the
+        wrong default for an embedder every request depends on: measured on the
+        box 2026-08-10, a cold `nomic-embed-text` answered in 4.18s and a warm
+        one in 0.059s — 70x, and the cold path was hit on effectively every
+        turn because chat traffic is bursty and five minutes is short.
         """
         if not texts:
             return []
-        payload = {"model": model, "input": texts}
+        payload: dict[str, Any] = {"model": model, "input": texts}
+        if keep_alive is not None:
+            payload["keep_alive"] = keep_alive
         try:
             r = await self._client.post(
                 "/api/embed",

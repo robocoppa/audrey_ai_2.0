@@ -373,7 +373,7 @@ returned, because it captured that object.
 
 Audrey's graph does the same thing with `tool_registry`. The snippet below is
 the **correct pattern Audrey uses** in
-[`rediscover_tools` (main.py:323)](../../src/audrey/main.py#L323). It refreshes
+[`rediscover_tools` (main.py:323)](../../src/audrey/main.py#L324). It refreshes
 the existing registry object in place:
 
 ```python

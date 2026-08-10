@@ -78,6 +78,7 @@ async def lifespan(app: FastAPI):
         # Its own rung, not the shared 10s — see `memory_embed_timeout_s`.
         embed_timeout_s=settings.memory_embed_timeout_s,
         legacy_sqlite_path=settings.memory_db_path,
+        embed_keep_alive=settings.embed_keep_alive,
     )
     await memory.init()
     audrey = httpx.AsyncClient(
@@ -98,6 +99,7 @@ async def lifespan(app: FastAPI):
         search_threshold=settings.chat_archive_search_threshold,
         retention_days=settings.chat_archive_retention_days,
         max_bytes=settings.chat_archive_max_bytes,
+        embed_keep_alive=settings.embed_keep_alive,
     )
     await chat_archive.init()
 

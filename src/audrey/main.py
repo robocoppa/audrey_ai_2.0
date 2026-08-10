@@ -119,6 +119,7 @@ async def lifespan(app: FastAPI):
     text_embedder = TextEmbedder(
         ollama=ollama,
         model=kb_cfg.get("text_embedder", "nomic-embed-text"),
+        keep_alive=kb_cfg.get("text_embedder_keep_alive", "24h"),
     )
     image_embedder = ImageEmbedder(
         model_name=kb_cfg.get("image_model", "clip-ViT-B-32"),

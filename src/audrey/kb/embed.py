@@ -119,6 +119,13 @@ class TextEmbedder:
     blocking it — 24-42s while a worker model swapped into VRAM. Anything past
     `query_timeout_s` was going to blow the dispatch ceiling regardless, so
     failing here costs no successful queries and buys a legible error.
+
+    `keep_alive` attacks that pathological case at the source rather than
+    timing it out. Ollama's default is 5 minutes, so the embedder is evicted
+    between bursts of chat traffic and re-loaded on the next query; measured
+    2026-08-10 on an otherwise idle box, cold 4.18s vs warm 0.059s. Holding it
+    resident makes the cold path a startup cost instead of a per-request one.
+    Set to None to send no field and take Ollama's default back.
     """
 
     ollama: OllamaClient
@@ -126,6 +133,7 @@ class TextEmbedder:
     timeout_s: float = 60.0
     query_timeout_s: float = 24.0
     batch_size: int = 64
+    keep_alive: str | None = "24h"
 
     async def embed_one(self, text: str) -> list[float]:
         out = await self.embed_many([text], timeout_s=self.query_timeout_s)
@@ -140,7 +148,10 @@ class TextEmbedder:
         vectors: list[list[float]] = []
         for i in range(0, len(texts), self.batch_size):
             batch = texts[i : i + self.batch_size]
-            got = await self.ollama.embed(model=self.model, texts=batch, timeout_s=budget)
+            got = await self.ollama.embed(
+                model=self.model, texts=batch, timeout_s=budget,
+                keep_alive=self.keep_alive,
+            )
             vectors.extend(_normalize(v) for v in got)
         return vectors
 

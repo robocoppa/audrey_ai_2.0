@@ -118,7 +118,7 @@ This is the same closure idea from Lesson 5. The compiled graph keeps
 references to these objects. Every request uses the same `OllamaClient`, the
 same `ModelRegistry`, the same `HealthTracker`, and the same `FairLocalGate`.
 The same objects are also stored on `app.state` starting at
-[`main.py:151`](../../src/audrey/main.py#L151), so routes can reach them too.
+[`main.py:152`](../../src/audrey/main.py#L152), so routes can reach them too.
 
 That matters because health is process-local memory. If a model times out on
 one request, the next request should know to avoid it for a little while. That

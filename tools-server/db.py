@@ -23,9 +23,11 @@ from __future__ import annotations
 
 import datetime as _dt
 import logging
+import time as _time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 import httpx
@@ -83,6 +85,12 @@ class EmbedError(RuntimeError):
     """Raised when Ollama refuses to produce an embedding."""
 
 
+# Startup warm-up budget. Wide because it covers a cold model load (~4.2s
+# measured for nomic-embed-text on the box, and far more if Ollama has to pull
+# the model first) and nobody is waiting on it.
+_WARM_TIMEOUT_S = 120.0
+
+
 class MemoryStore:
     """Async Qdrant-backed memory store scoped by `user:<id>` tag."""
 
@@ -97,6 +105,7 @@ class MemoryStore:
         similarity_threshold: float,
         embed_timeout_s: float,
         legacy_sqlite_path: Path,
+        embed_keep_alive: str = "",
     ) -> None:
         self._qdrant = AsyncQdrantClient(url=qdrant_url)
         self._http = httpx.AsyncClient(base_url=ollama_url, timeout=embed_timeout_s)
@@ -105,6 +114,7 @@ class MemoryStore:
         self._embed_dim = embed_dim
         self._threshold = similarity_threshold
         self._legacy_sqlite_path = legacy_sqlite_path
+        self._embed_keep_alive = embed_keep_alive
 
     async def aclose(self) -> None:
         await self._qdrant.close()
@@ -116,6 +126,31 @@ class MemoryStore:
         """Ensure the collection exists and migrate any legacy SQLite rows."""
         await self._ensure_collection()
         await self._migrate_sqlite_if_present()
+        await self.warm_embedder()
+
+    async def warm_embedder(self) -> None:
+        """Pay the embedder's cold load at startup instead of on a request.
+
+        `keep_alive` keeps the model resident once it is loaded, but a restart
+        starts from nothing — so without this the FIRST recall after every
+        deploy is the one that eats 4.18s and blows its 4s budget. Loading it
+        here moves that cost to a moment when nobody is waiting.
+
+        Never raises: an unreachable Ollama must not stop custom-tools serving
+        the tools that don't need it.
+        """
+        started = _time.monotonic()
+        try:
+            # Generous, and deliberately unrelated to the recall budget — this
+            # call is the cold load, so it must be allowed to take longer than
+            # the deadline that exists to avoid paying for one.
+            await self._embed("warm", timeout_s=_WARM_TIMEOUT_S)
+        except Exception as e:  # noqa: BLE001 — best-effort warm-up
+            log.warning("memory: embedder warm-up failed in %.2fs: %s",
+                        _time.monotonic() - started, e)
+            return
+        log.info("memory: embedder warm in %.2fs (keep_alive=%s)",
+                 _time.monotonic() - started, self._embed_keep_alive or "ollama default")
 
     async def _ensure_collection(self) -> None:
         existing = {c.name for c in (await self._qdrant.get_collections()).collections}
@@ -297,12 +332,27 @@ class MemoryStore:
 
     # ─── Internals ────────────────────────────────────────────────────
 
-    async def _embed(self, text: str) -> list[float]:
-        """Call Ollama /api/embed and return a single 768-d vector."""
+    async def _embed(self, text: str, *, timeout_s: float | None = None) -> list[float]:
+        """Call Ollama /api/embed and return a single 768-d vector.
+
+        `keep_alive` holds the embedder in VRAM between calls. Without it
+        Ollama evicts after 5 minutes and the next recall pays a ~4.2s cold
+        load — which does not fit the 4s budget this call runs under, so recall
+        failed on every turn that followed a quiet spell.
+
+        `timeout_s` overrides the client default. Only the warm-up uses it: a
+        cold load is LONGER than the hot-path budget by design, so a warm-up
+        held to that budget would time out every single time and never warm
+        anything.
+        """
+        payload: dict[str, Any] = {"model": self._embed_model, "input": [text]}
+        if self._embed_keep_alive:
+            payload["keep_alive"] = self._embed_keep_alive
         try:
             r = await self._http.post(
                 "/api/embed",
-                json={"model": self._embed_model, "input": [text]},
+                json=payload,
+                timeout=httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT,
             )
         except httpx.HTTPError as e:
             raise EmbedError(f"transport error: {type(e).__name__}: {e}") from e

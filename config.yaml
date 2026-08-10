@@ -480,6 +480,15 @@ kb:
   text_collection: "kb_text"
   image_collection: "kb_images"
   text_embedder: "nomic-embed-text"      # via Ollama /api/embed, 768-d
+  # How long Ollama holds the embedder in VRAM after a call. Ollama's default
+  # is 5 minutes, which is shorter than the gap between bursts of chat on a
+  # personal box — so the embedder was cold on effectively every query.
+  # Measured 2026-08-10 on an idle box: cold 4.18s, warm 0.059s. It is a 137M
+  # model at 323 MB, so residency is close to free on 48 GB.
+  # ⚠️ It occupies one `OLLAMA_MAX_LOADED_MODELS` slot while resident (that env
+  # var is 2 on this box). Set to null to send no field and take Ollama's
+  # 5-minute default back.
+  text_embedder_keep_alive: "24h"
   image_model: "clip-ViT-B-32"           # via sentence-transformers, 512-d
   # Cosine floor for kb_search text hits. The KB always returns its top_k
   # NEAREST vectors regardless of distance, so an off-domain query (this KB

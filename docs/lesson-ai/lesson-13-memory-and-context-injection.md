@@ -484,7 +484,7 @@ OpenAPI tool surface (it's not model-callable — only Audrey's archive
 client calls it).
 
 Now switch to [`tools-server/chat_archive.py`](../../tools-server/chat_archive.py).
-[`ChatArchiveStore.archive_turn`](../../tools-server/chat_archive.py#L356)
+[`ChatArchiveStore.archive_turn`](../../tools-server/chat_archive.py#L367)
 does three things in order:
 
 1. **SQLite write** — user turn + assistant turn into `messages`, plus

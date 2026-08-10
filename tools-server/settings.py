@@ -93,6 +93,16 @@ class Settings(BaseSettings):
     # short string; warm it is ~100ms, so anything past 4s is an eviction
     # stall, and on the hot path failing fast beats waiting.
     memory_embed_timeout_s: float = Field(default=4.0, alias="MEMORY_EMBED_TIMEOUT_S")
+    # How long Ollama holds the embedder in VRAM after a call. Its default is 5
+    # minutes — shorter than the gap between bursts of chat on a personal box,
+    # so the embedder was cold on effectively every recall and a cold load
+    # (4.18s measured 2026-08-10) does not fit the 4s budget above. It never
+    # could: `nomic-embed-text` is 323 MB and residency is close to free, so
+    # the right fix is to stop it being evicted rather than to widen the
+    # budget. Warm, the same call takes 0.059s.
+    # ⚠️ Occupies one `OLLAMA_MAX_LOADED_MODELS` slot (2 on this box).
+    # Empty string sends no field and restores Ollama's default.
+    embed_keep_alive: str = Field(default="24h", alias="EMBED_KEEP_ALIVE")
 
     # Chat archive (per-user searchable conversation history).
     # SQLite is the source of truth; Qdrant indexes Q+A-pair chunks for

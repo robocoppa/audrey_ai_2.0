@@ -578,7 +578,7 @@ The model never talks to Audrey's KB directly. It dispatches
 `kb_search` (or `kb_image_search`) as a tool call (Lesson 9), which
 hits the custom-tools server, which then HTTP-proxies into Audrey's
 `/v1/kb/query`. Closing the loop:
-[`tools-server/app.py:488`](../../tools-server/app.py#L488):
+[`tools-server/app.py:490`](../../tools-server/app.py#L490):
 
 ```python
 async def kb_search(req: KBSearchRequest) -> KBSearchResponse:
@@ -659,7 +659,7 @@ with the reason. From the model's side this looks like any tool
 failure: it gets the rejection message in the `role: "tool"`
 content, and the right thing is to ask the user for a different URL
 rather than retry. Redirect responses get caught specially
-([`kb/embed.py:197-206`](../../src/audrey/kb/embed.py#L197)) and
+([`kb/embed.py:197-206`](../../src/audrey/kb/embed.py#L208)) and
 name the redirect target so the user can resupply the final URL.
 
 There is also a sixth mode worth knowing: **the KB returns hits but

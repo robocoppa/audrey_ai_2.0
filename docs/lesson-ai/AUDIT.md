@@ -839,7 +839,7 @@ accepted — see Accepted section.
   metric.
 
 - **`nit` — `_IMAGE_FETCH_BYTE_CAP` was enforced post-append.** Resolved
-  2026-05-12. [`kb/embed.py:198-209`](../../src/audrey/kb/embed.py#L198)
+  2026-05-12. [`kb/embed.py:198-209`](../../src/audrey/kb/embed.py#L209)
   now checks `len(buf) + len(chunk) > cap` before extending so a single
   oversized chunk can't overshoot the cap. Pinned by
   `test_fetch_image_rejects_oversized_response_before_appending` in
@@ -856,7 +856,7 @@ accepted — see Accepted section.
   and a non-qdrant `ConnectionError`.
 
 - **`nit` — redirected image fetches surfaced as opaque HTTP errors.**
-  Resolved 2026-05-12. [`kb/embed.py:191-201`](../../src/audrey/kb/embed.py#L191)
+  Resolved 2026-05-12. [`kb/embed.py:191-201`](../../src/audrey/kb/embed.py#L202)
   detects 3xx before `raise_for_status()` and raises a `ValueError`
   naming the redirect target so the user can resupply the final URL.
   Pinned by `test_fetch_image_reports_redirect_clearly` in
