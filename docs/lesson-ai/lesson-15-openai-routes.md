@@ -284,7 +284,7 @@ one return.
 The interesting wrinkle is `is_owui_task_request(messages)`. For the
 non-streaming path you're reading here, that check runs *inside the
 graph* — the complexity node calls it while choosing the mode at
-[`pipeline/graph.py:223`](../../src/audrey/pipeline/graph.py#L223),
+[`pipeline/graph.py:291`](../../src/audrey/pipeline/graph.py#L291),
 so `_generate_via_pipeline` itself never touches it (it just hands the
 graph a state dict and awaits the result). OWUI fires "generate title"
 and "generate tags" utility prompts that bundle the whole conversation

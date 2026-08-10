@@ -370,7 +370,7 @@ accepted — see Accepted section.
     points back.
   - [`routes/openai.py:_phase_thinking`](../../src/audrey/routes/openai.py#L1264)
     documents the parallel structure with the graph nodes.
-  - [`pipeline/graph.py:node_datetime`](../../src/audrey/pipeline/graph.py#L138)
+  - [`pipeline/graph.py:node_datetime`](../../src/audrey/pipeline/graph.py#L206)
     points to `_phase_thinking` so a future contributor changing
     the ordering hits the cross-reference from either side.
 
@@ -436,7 +436,7 @@ accepted — see Accepted section.
   structure**. Fresh-read confirms
   [`routes/openai.py:1264-1313`](../../src/audrey/routes/openai.py#L1264)
   (`_phase_thinking`) and
-  [`pipeline/graph.py:139`](../../src/audrey/pipeline/graph.py#L139)
+  [`pipeline/graph.py:207`](../../src/audrey/pipeline/graph.py#L207)
   (`node_datetime` + `node_memory_recall` + `node_plan`) call the
   same underlying helpers (`datetime_system_message`,
   `recall_for_request`, `memory_system_message`,

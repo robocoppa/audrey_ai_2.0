@@ -45,6 +45,7 @@ class PipelineState(TypedDict, total=False):
     # Complexity gate
     prompt_tokens: int
     complex: bool                    # True → force deep panel
+    owui_task: bool                  # OWUI utility turn (title/tags/follow-ups), not a user question
 
     # Routing decision
     mode: PipelineMode               # "fast" or "deep"

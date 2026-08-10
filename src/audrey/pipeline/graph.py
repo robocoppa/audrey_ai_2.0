@@ -98,6 +98,74 @@ log = logging.getLogger(__name__)
 DEFAULT_DISPATCH_TIMEOUT_S = 30.0
 
 
+def escalation_decision(
+    state: PipelineState,
+    *,
+    enabled: bool,
+    min_chars: int,
+    conf_ceiling: float,
+) -> str:
+    """Decide whether a completed fast turn should be re-run through the panel.
+
+    Returns `"escalate"` or `"end"`. Module-level and pure so the policy can be
+    tested directly — it is six suppression rules now, and the one that was
+    missing (`owui_task`) cost a planner, three deep workers and a synthesis
+    pass every time OWUI named a chat.
+
+    The suppressions all say the same thing in different words: escalation
+    exists to rescue a fast answer that came out THIN, and each of these is a
+    case where a short or low-confidence answer is the right one. Reaching the
+    length and confidence checks below means none of them applied.
+    """
+    if not enabled:
+        return "end"
+    if state.get("virtual_model") == "audrey_fast":
+        # The always-fast virtual model — never escalates, even on long
+        # prompts. Users who want adaptive routing should use audrey_auto;
+        # users who want forced deep should use audrey_deep / audrey_cloud /
+        # audrey_local.
+        return "end"
+    if state.get("escalated_from_fast"):
+        return "end"  # already came from an escalation; don't loop
+    if state.get("owui_task"):
+        # OWUI's own utility turns — chat title, tags, follow-up suggestions.
+        # `node_complexity` already pins these to fast; without this the
+        # escalation router undoes that decision immediately.
+        #
+        # BOTH triggers below misfire here by construction. A title IS short,
+        # so `too_short` fires on a correct answer; and these turns carry
+        # OWUI's template rather than a question, so the router has nothing to
+        # classify and returns a low confidence that trips `low_confidence`
+        # too.
+        #
+        # Observed on the box 2026-08-10: a title request logged
+        # `complexity: 463 tokens -> fast (owui_task)`, answered in 32 chars,
+        # then escalated — planner, three deep workers and a synthesis pass,
+        # all to name a chat. The workers had nothing to work with and returned
+        # drafts of 38, 29 and 39 characters.
+        return "end"
+    if int(state.get("tool_rounds", 0)) > 0:
+        # Fast path used tools — the answer is grounded in real data.
+        # Re-running through tool-blind deep workers can only degrade it.
+        return "end"
+    if state.get("memory_hits"):
+        # Same reasoning as tool_rounds: the answer is grounded in recalled
+        # memory. Deep workers wash out short-but-correct memory answers
+        # ("You're running a Threadripper 7970X" → 93 chars → would escalate on
+        # length alone → deep workers don't know the user and give generic
+        # "I can't see your computer" responses).
+        return "end"
+    content = (state.get("content") or "").strip()
+    conf = float(state.get("classify_confidence", 0.0))
+    too_short = len(content) < min_chars
+    low_confidence = conf < conf_ceiling and conf > 0
+    if too_short or low_confidence:
+        log.info("escalate: fast→deep (chars=%d, conf=%.2f, reason=%s)",
+                 len(content), conf, "too_short" if too_short else "low_conf")
+        return "escalate"
+    return "end"
+
+
 def build_graph(
     cfg: Config,
     ollama: OllamaClient,
@@ -296,7 +364,13 @@ def build_graph(
             last_user = count_last_user_tokens(state["messages"])
             parts = " ".join(f"{r}={by_role[r]}" for r in sorted(by_role))
             log.info("complexity.breakdown: %s last_user=%d", parts, last_user)
-        out: dict[str, Any] = {"prompt_tokens": n, "complex": complex_, "mode": mode}
+        # `owui_task` is carried in state, not just used here, because the
+        # escalation router needs it too — a utility turn that answers briefly
+        # is answering CORRECTLY, and `too_short` reads that as a failure.
+        out: dict[str, Any] = {
+            "prompt_tokens": n, "complex": complex_, "mode": mode,
+            "owui_task": owui_task,
+        }
         if task_override is not None:
             out["task_type"] = task_override
         if describe_first and mode == "deep":
@@ -483,36 +557,12 @@ def build_graph(
         return "fast" if state.get("mode") == "fast" else "deep"
 
     def route_after_fast_path(state: PipelineState) -> str:
-        if not escalation_enabled:
-            return "end"
-        if state.get("virtual_model") == "audrey_fast":
-            # audrey_fast is the always-fast virtual model — never escalates,
-            # even on long prompts. Users who want adaptive routing should
-            # use audrey_auto; users who want forced deep should use
-            # audrey_deep / audrey_cloud / audrey_local.
-            return "end"
-        if state.get("escalated_from_fast"):
-            return "end"  # already came from an escalation; don't loop
-        if int(state.get("tool_rounds", 0)) > 0:
-            # Fast path used tools — the answer is grounded in real data.
-            # Re-running through tool-blind deep workers can only degrade it.
-            return "end"
-        if state.get("memory_hits"):
-            # Same reasoning as tool_rounds: the answer is grounded in recalled
-            # memory. Deep workers wash out short-but-correct memory answers
-            # ("You're running a Threadripper 7970X" → 93 chars → would escalate
-            # on length alone → deep workers don't know the user and give
-            # generic "I can't see your computer" responses).
-            return "end"
-        content = (state.get("content") or "").strip()
-        conf = float(state.get("classify_confidence", 0.0))
-        too_short = len(content) < escalation_min_chars
-        low_confidence = conf < escalation_conf_ceiling and conf > 0
-        if too_short or low_confidence:
-            log.info("escalate: fast→deep (chars=%d, conf=%.2f, reason=%s)",
-                     len(content), conf, "too_short" if too_short else "low_conf")
-            return "escalate"
-        return "end"
+        return escalation_decision(
+            state,
+            enabled=escalation_enabled,
+            min_chars=escalation_min_chars,
+            conf_ceiling=escalation_conf_ceiling,
+        )
 
     def route_after_reflect(state: PipelineState) -> str:
         if state.get("reflect_passed"):

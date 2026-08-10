@@ -48,7 +48,7 @@ this as the present moment." Two functions in
 [`pipeline/context.py`](../../src/audrey/pipeline/context.py), no I/O,
 no skip path; the instruction defuses models that would otherwise
 reason about the timestamp as data. The node wrapper at
-[`graph.py:139`](../../src/audrey/pipeline/graph.py#L139) prepends it
+[`graph.py:207`](../../src/audrey/pipeline/graph.py#L207) prepends it
 to `state["messages"]`. That's the whole subsystem; the rest of the
 lesson is per-user.)
 
@@ -551,7 +551,7 @@ streaming-deep route bypasses the graph and calls them directly at
 
 | | Non-streaming | Streaming-deep |
 |---|---|---|
-| Lives in | [`graph.py:139, 155`](../../src/audrey/pipeline/graph.py#L139) | [`routes/openai/pipeline.py:1161`](../../src/audrey/routes/openai/pipeline.py#L1161) |
+| Lives in | [`graph.py:139, 155`](../../src/audrey/pipeline/graph.py#L207) | [`routes/openai/pipeline.py:1161`](../../src/audrey/routes/openai/pipeline.py#L1161) |
 | Datetime | `node_datetime` | direct `datetime_system_message()` call |
 | Recall | `node_memory_recall` | direct `recall_for_request()` call |
 | Composer | `compose_system_messages(...)` | `compose_system_messages(...)` |

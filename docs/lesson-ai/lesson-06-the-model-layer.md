@@ -849,9 +849,9 @@ Here is what happens after the request reaches the graph:
 1. The classifier labels the request as `general`.
 2. Complexity routing keeps it in fast mode because the prompt is short and the
    user chose `audrey_fast`; the forced-fast check lives at
-   [`graph.py:219`](../../src/audrey/pipeline/graph.py#L219).
+   [`graph.py:287`](../../src/audrey/pipeline/graph.py#L287).
 3. `node_fast_path` calls `run_fast_path(...)` at
-   [`graph.py:266`](../../src/audrey/pipeline/graph.py#L266).
+   [`graph.py:334`](../../src/audrey/pipeline/graph.py#L334).
 4. `run_fast_path(...)` calls `pick_fast_model(...)` at
    [`fast_path.py:114`](../../src/audrey/pipeline/fast_path.py#L114).
 5. `pick_fast_model(...)` asks the registry for the first healthy `general`
