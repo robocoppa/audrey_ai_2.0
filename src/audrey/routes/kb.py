@@ -15,6 +15,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -243,6 +245,47 @@ def _scope_label(req: TextQuery, scope: SearchScope | None) -> str:
     return "scope=" + (" ".join(parts) if parts else "none")
 
 
+# Global-KB hits have no uploader and so no filename. They get one bucket
+# under a name no upload can plausibly carry, rather than N nameless entries
+# — a skew between global and user material is itself worth seeing.
+_GLOBAL_BUCKET = "<global>"
+# Real uploads here are long descriptive titles. Untruncated, three of them
+# push the interesting part of this line past a terminal width and the field
+# stops being readable at a glance, which is the only thing it is for.
+_LOG_NAME_MAX = 40
+
+
+def _file_distribution(hits: Sequence[KBHit]) -> str:
+    """Per-file hit counts for the query log, heaviest file first.
+
+    `kb_search` returns hits pooled across files and ordered by score, so a
+    question spanning two documents can come back with a top-k that is almost
+    entirely one of them. Nothing on the box could say so after the fact, and
+    that is how the gap survived three A-B runs: every answer *read* as though
+    both files had been consulted, because the model had already been told by
+    `list_my_files` that the other one existed and wrote a section for it.
+
+    Ordered by count rather than by name because the only question this field
+    exists to answer is "was it skewed", and the answer is then the first
+    entry. Emitted even when empty — a missing field and a zero look identical
+    to someone scrolling a log.
+    """
+    counts = Counter(
+        str(h.payload.get("filename") or "") or _GLOBAL_BUCKET for h in hits
+    )
+    parts = [
+        f"{_short_name(name)}:{n}"
+        for name, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]
+    return "files=[" + ", ".join(parts) + "]"
+
+
+def _short_name(name: str) -> str:
+    if len(name) <= _LOG_NAME_MAX:
+        return name
+    return name[: _LOG_NAME_MAX - 1] + "…"
+
+
 async def _resolve_filename(
     request: Request, *, user: str | None, filename: str,
 ) -> tuple[list[str], list[str]]:
@@ -353,9 +396,13 @@ async def kb_query(
     # the KB, a correctly scoped search and a lucky unscoped one produce the
     # same prose. And §3b decides phase 42's prompt, whose emphasis is either
     # "scope more" or "scope less" — opposite instructions.
+    #
+    # `files=[…]` is the same argument one level down: the hit COUNT says the
+    # search returned material, not which documents it came from.
     log.info(
-        "kb.query: user=%s %s top_k=%d -> %d hit(s) in %.2fs",
+        "kb.query: user=%s %s top_k=%d -> %d hit(s) in %.2fs  %s",
         effective_user, _scope_label(req, scope), req.top_k, len(hits), elapsed,
+        _file_distribution(hits),
     )
     return QueryResponse(
         query=req.query,
