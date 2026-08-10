@@ -168,14 +168,21 @@ def test_both_sides_default_to_residency():
 async def test_warm_up_is_not_held_to_the_recall_budget():
     """⚠️ The trap this exists to prevent, hit while writing it.
 
-    The warm-up's whole job is to absorb the cold load — 4.18s measured. The
-    recall budget is 4.0s. Running the warm-up on the client default would time
-    it out every single time, warming nothing and logging a failure at every
-    boot, while looking like a working feature.
+    The warm-up's whole job is to absorb the cold load. The recall budget is
+    4.0s; running the warm-up on that would time out every single time, warming
+    nothing and logging a failure at every boot, while looking like a working
+    feature.
+
+    The floor asserted here is the *restart* cost, not the steady-state one.
+    Measured on the box 2026-08-10: 4.18s with the blob in page cache, but
+    **15.71s on the first load after the Ollama container itself restarted**,
+    when it had to come off disk. That is the case the warm-up actually runs
+    in — a deploy — so sizing this off the 4.18s figure would have been wrong
+    by nearly 4x and failed exactly when it mattered.
     """
     from db import _WARM_TIMEOUT_S
 
-    assert _WARM_TIMEOUT_S > 4.18
+    assert _WARM_TIMEOUT_S > 15.71
 
 
 async def test_warm_up_never_raises_when_ollama_is_down():
