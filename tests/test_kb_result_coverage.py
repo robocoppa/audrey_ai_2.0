@@ -20,6 +20,7 @@ dozen nameless files and bury the one line that matters.
 
 from __future__ import annotations
 
+import json
 import logging
 from types import SimpleNamespace
 
@@ -27,9 +28,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from audrey.kb.qdrant import KBHit
-from audrey.routes.kb import _clip, _file_distribution, _search_text_hybrid
+from audrey.kb.fusion import FusedHit
+from audrey.kb.qdrant import KBHit, SearchScope
+from audrey.routes.kb import (
+    _clip,
+    _file_distribution,
+    _one_hit_per_file_first,
+    _search_text_hybrid,
+)
 from audrey.routes.kb import router as kb_router
+from audrey.tools.dispatch import _truncate_payload
 
 SECRET = "s3cr3t-service-token"  # noqa: S105  (test fixture, not a real secret)
 
@@ -142,12 +150,14 @@ class _FakeHybridQdrant:
 
     text_collection = "kb_text"
 
-    def __init__(self, dense: list[KBHit], lexical: list[KBHit]):
+    def __init__(self, dense: list[KBHit], lexical: list[KBHit],
+                 *, has_user: bool = False):
         self._dense = dense
         self._lexical = lexical
+        self._has_user = has_user
 
     async def collection_exists(self, name: str) -> bool:
-        return False
+        return self._has_user
 
     async def search_hybrid(self, vec, query, *, top_k, collection=None, scope=None):
         return (list(self._dense), list(self._lexical))
@@ -252,6 +262,116 @@ async def test_one_chunk_cut_does_not_mean_the_file_left_the_pool(caplog):
     assert "fused=3 -> 2 kept" in line
     assert "carlsen.mp4:1" in line[line.index("kept="):line.index("cut=")]
     assert "cut=[carlsen.mp4:1]" in line
+
+
+# ─── Stage 1: one hit per file in the head ────────────────────────────
+
+
+def _fused(*names: str) -> list[FusedHit]:
+    """Score-ordered, one hit per name, highest first — the shape `kept`
+    arrives in."""
+    return [
+        FusedHit(hit=_hit(n, source=f"/u/{i}.txt"), score=1.0 - i / 100)
+        for i, n in enumerate(names)
+    ]
+
+
+def _names(entries: list[FusedHit]) -> list[str]:
+    return [e.hit.payload["filename"] for e in entries]
+
+
+def test_a_second_file_reaches_the_head_from_deep_in_the_pool():
+    """⚠️ The measurement this exists for. On the box the pool held 37 chunks
+    of one London video and 4 of the other, with every one of the top 20 the
+    first file. Reordering the RETURNED hits — where the plan put it — could
+    not have moved anything, because the second file was not among them."""
+    kept = _fused(*(["how-to-win.mp4"] * 20 + ["carlsen.mp4"] * 4))
+
+    out = _names(_one_hit_per_file_first(kept))
+
+    assert out[:2] == ["how-to-win.mp4", "carlsen.mp4"]
+    # Everything else still earns its place on score.
+    assert out[2:] == ["how-to-win.mp4"] * 19 + ["carlsen.mp4"] * 3
+
+
+def test_the_dominant_file_gives_up_exactly_one_slot():
+    """The cost, stated as a test. NOT a round robin — a 30-minute lesson
+    really does hold more about its topic than a 7-minute commentary, and
+    splitting ten slots evenly would be the wrong answer."""
+    kept = _fused(*(["long.mp4"] * 30 + ["short.mp4"] * 4))
+
+    top_10 = _names(_one_hit_per_file_first(kept))[:10]
+
+    assert top_10.count("short.mp4") == 1
+    assert top_10.count("long.mp4") == 9
+
+
+def test_a_single_file_is_returned_untouched():
+    kept = _fused(*(["only.mp4"] * 5))
+
+    assert _one_hit_per_file_first(kept) == kept
+
+
+def test_global_only_results_are_returned_untouched():
+    """⚠️ The load-bearing rule. Global-KB hits have no filename, so counting
+    them as separate files would reshuffle every ordinary corpus search — one
+    corpus, nothing to balance — to fix a problem only uploads have."""
+    kept = _fused(*([""] * 6))
+
+    assert _one_hit_per_file_first(kept) == kept
+
+
+def test_global_hits_stay_one_bucket_alongside_uploads():
+    """A mixed set gets ONE global slot in the head, not one per global hit."""
+    kept = _fused("", "", "", "upload.mp4", "")
+
+    out = _names(_one_hit_per_file_first(kept))
+
+    assert out[:2] == ["", "upload.mp4"]
+    assert out[2:] == ["", "", ""]
+
+
+async def test_a_scoped_search_is_left_in_score_order():
+    """`filename=` was passed, so the caller already chose what to look at and
+    there is nothing to balance. Without the guard this promotes `other.mp4`
+    into second place — quietly re-ranking a scope the caller asked for."""
+    q = _FakeHybridQdrant(
+        dense=[
+            _hit("standup.mp4", 0.90, source="/u/a.txt", text="handover notes one"),
+            _hit("standup.mp4", 0.80, source="/u/b.txt", text="handover notes two"),
+            _hit("other.mp4", 0.70, source="/u/c.txt", text="handover notes three"),
+        ],
+        lexical=[],
+        has_user=True,
+    )
+
+    hits, _ = await _search_text_hybrid(
+        q, [0.1], query="handover notes", top_k=3, user="alice@example.com",
+        min_score=0.53, cfg=_HYBRID_CFG, scope=SearchScope(file_ids=["f1", "f2"]),
+    )
+
+    assert [h.payload["filename"] for h in hits] == [
+        "standup.mp4", "standup.mp4", "other.mp4",
+    ]
+
+
+def test_a_tail_drop_still_leaves_every_file_represented():
+    """The property the whole phase exists to establish: truncation drops from
+    the tail, so a guaranteed head slot survives it. Checked against the real
+    truncator rather than assumed — that function is tool-agnostic by design
+    and was deliberately left alone."""
+    kept = _one_hit_per_file_first(_fused(*(["long.mp4"] * 30 + ["short.mp4"] * 4)))
+    payload = {"results": [
+        {"filename": e.hit.payload["filename"], "text": "x" * 200}
+        for e in kept
+    ]}
+    content = json.dumps(payload)
+
+    truncated = json.loads(_truncate_payload(payload, content, 2000))
+
+    names = [r["filename"] for r in truncated["results"]]
+    assert len(names) < 34, "nothing was dropped; the test proves nothing"
+    assert "short.mp4" in names
 
 
 # ─── Through the route ────────────────────────────────────────────────

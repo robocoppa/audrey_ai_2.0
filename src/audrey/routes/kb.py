@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 
 from audrey.auth import AuthedUser, KBCaller, require_admin, resolve_kb_caller
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
-from audrey.kb.fusion import RRF_K, passes_evidence, reciprocal_rank_fusion
+from audrey.kb.fusion import RRF_K, FusedHit, passes_evidence, reciprocal_rank_fusion
 from audrey.kb.ingest import ingest_many
 from audrey.kb.qdrant import KBHit, QdrantKB, SearchScope
 from audrey.kb.user_store import user_image_collection, user_text_collection
@@ -576,6 +576,19 @@ async def _search_text_hybrid(
         _file_distribution(cut, label="cut"),
     )
 
+    # ⚠️ Diversity BEFORE the slice, not after.
+    #
+    # Phase 43's plan put this reorder on the returned hits. Measured on the
+    # box 2026-08-10 that is a no-op: the pool held 37 chunks of one London
+    # video and 4 of the other, and every one of the top 20 was the first
+    # file — so there was nothing among the returned hits to promote. The
+    # second file only becomes reachable by reordering the pool.
+    #
+    # This does change WHICH hits are returned, not merely their order. That
+    # is the point and it is the cost: the dominant file gives up one slot.
+    if not _scoped_to_one_users_files(scope):
+        kept = _one_hit_per_file_first(kept)
+
     # Report the fused score, not the originating retriever's.
     #
     # A `KBHit` carries whichever score the retriever that found it produced,
@@ -584,6 +597,42 @@ async def _search_text_hybrid(
     # results unreadable and any downstream comparison meaningless. The fused
     # value is the only number that describes the list it is in.
     return [replace(f.hit, score=f.score) for f in kept[:top_k]], had_user
+
+
+def _one_hit_per_file_first(kept: list[FusedHit]) -> list[FusedHit]:
+    """Every file's best hit, then everything else — both in score order.
+
+    A pooled, score-ordered result set lets one document take every slot. The
+    model has already been told by `list_my_files` that the other files exist,
+    so it writes a section per file and fills the empty ones from whatever it
+    has — correct headings, wrong contents, and nothing anywhere reads as an
+    error.
+
+    Deliberately NOT a round robin. Alternating all the way down would split
+    ten slots evenly between a 30-minute lesson and a 7-minute commentary,
+    which is the wrong answer to "what do my videos say about X" — the long
+    one really does hold more. One guaranteed slot each is what stops a file
+    vanishing; the rest is still earned on score.
+
+    ⚠️ **Global-KB hits share the empty-filename bucket.** They have no
+    uploader (`Hit.filename`), and treating them as N separate files would
+    reshuffle every ordinary global search — where there is one corpus and
+    nothing to balance — to fix a problem only uploads have.
+    """
+    seen: set[str] = set()
+    head: list[FusedHit] = []
+    tail: list[FusedHit] = []
+    for f in kept:
+        name = str(f.hit.payload.get("filename") or "")
+        if name in seen:
+            tail.append(f)
+        else:
+            seen.add(name)
+            head.append(f)
+    # `kept` arrives score-ordered, so first-seen IS best-hit and both halves
+    # stay in score order for free. One file means head==kept and this is the
+    # identity function.
+    return head + tail
 
 
 async def _search_images_merged(

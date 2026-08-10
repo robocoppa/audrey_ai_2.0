@@ -525,9 +525,9 @@ text "a black labrador" and an actual picture of a black lab land
 within a few cosine degrees of each other.
 
 `/v1/kb/query/image` (handler at
-[`routes/kb.py:607`](../../src/audrey/routes/kb.py#L607)) picks which
+[`routes/kb.py:656`](../../src/audrey/routes/kb.py#L656)) picks which
 encoder to call based on which field of the request body was supplied
-([`routes/kb.py:624`](../../src/audrey/routes/kb.py#L624)):
+([`routes/kb.py:673`](../../src/audrey/routes/kb.py#L673)):
 
 ```python
 if req.image_url:
@@ -654,7 +654,7 @@ in Lesson 12 is what cleans these up.
 
 **5. SSRF-rejected image URL.**
 `_validate_image_url` raises `ValueError`; the route catches it
-([`routes/kb.py:630-631`](../../src/audrey/routes/kb.py#L630)) and 422s
+([`routes/kb.py:679-680`](../../src/audrey/routes/kb.py#L679)) and 422s
 with the reason. From the model's side this looks like any tool
 failure: it gets the rejection message in the `role: "tool"`
 content, and the right thing is to ask the user for a different URL
