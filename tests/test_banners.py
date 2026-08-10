@@ -24,6 +24,7 @@ from audrey.pipeline.banners import (
     BANNER_SYNTHESIZING,
     BANNER_THINKING,
     PhaseTicker,
+    _failed_calls,
     _format_calls,
     panel_drafts_block,
     research_trace_block,
@@ -148,11 +149,14 @@ def test_tool_summary_block_multi_worker_drops_empty_rows():
             {"name": "kb_search", "is_error": True},
         ]),
     ])
-    # A failing row is present, so the header carries the decode legend.
+    # A failing row is present, so the block carries the plain-English
+    # disclosure AND the header gains the decode legend.
     expected = (
         "\n"
         "\n"
         "---\n"
+        "> ⚠️ **1 tool call failed** (`kb_search`) — this answer was written "
+        "without what they would have returned, and may be incomplete.\n"
         "> _Tools used:_"
         "  _(✅ = calls succeeded, ❌ = calls failed)_\n"
         "> - **qwen3.6:35b** — `kb_search` ✅2\n"
@@ -170,6 +174,79 @@ def test_tool_summary_block_no_legend_when_all_calls_succeed():
     assert "> _Tools used:_\n" in out
     assert "❌" not in out
     assert "calls failed" not in out
+    assert "⚠️" not in out
+
+
+# ─── The failure disclosure ────────────────────────────────────────────
+#
+# ⚠️ The ❌ notation was NOT enough, and the box proved it 2026-08-10:
+# `kb_search` returned 500 for a whole turn while Qdrant restarted, and the
+# model answered from `list_my_files` + four `get_file_text` pages, writing a
+# confident section about a video it had never read. The only signal anywhere
+# on screen was `❌1` in a footer row. This is the mechanical fix — the
+# renderer already knows, so nothing depends on the model choosing to say it.
+
+
+def test_a_failed_call_is_disclosed_in_words():
+    out = tool_summary_block([
+        ("qwen3.6:35b", [
+            {"name": "list_my_files", "is_error": False},
+            {"name": "kb_search", "is_error": True},
+        ]),
+    ])
+
+    assert "**1 tool call failed** (`kb_search`)" in out
+    assert "may be incomplete" in out
+    # Above the counts, so it is read before the notation it explains.
+    assert out.index("tool call failed") < out.index("_Tools used:_")
+
+
+def test_the_disclosure_names_every_failed_tool_once():
+    """Distinct names, first-seen order — a tool that failed three times is
+    one name, not three, and the count carries the multiplicity."""
+    out = tool_summary_block([
+        ("w1", [{"name": "web_search", "is_error": True},
+                {"name": "web_search", "is_error": True},
+                {"name": "kb_search", "is_error": True}]),
+    ])
+
+    assert "**3 tool calls failed** (`web_search`, `kb_search`)" in out
+
+
+def test_failures_are_counted_across_workers():
+    """The deep panel renders one row per worker; a reader should not have to
+    add up ❌ marks spread over three rows to learn something went wrong."""
+    out = tool_summary_block([
+        ("w1", [{"name": "kb_search", "is_error": True}]),
+        ("w2", [{"name": "kb_search", "is_error": False}]),
+        ("w3", [{"name": "kb_search", "is_error": True}]),
+    ])
+
+    assert "**2 tool calls failed**" in out
+
+
+def test_an_all_green_turn_gets_no_disclosure():
+    """The line must be invisible in the common case or it stops being read."""
+    out = tool_summary_block([
+        ("qwen3.6:35b", [{"name": "kb_search", "is_error": False},
+                         {"name": "get_file_text", "is_error": False}]),
+    ])
+
+    assert "tool call" not in out
+    assert "⚠️" not in out
+
+
+def test_the_disclosure_reads_the_calls_not_the_rendered_marks():
+    """⚠️ Counted off the raw dicts, never by scanning "❌" out of the rendered
+    rows. A view and the record that disagree is how a footer ends up claiming
+    a failure that did not happen, or missing one that did."""
+    n, names = _failed_calls([("w1", [
+        {"name": "kb_search", "is_error": True},
+        {"name": "kb_search"},           # missing key == not an error
+        {"name": "web_search", "is_error": False},
+    ])])
+
+    assert (n, names) == (1, ["kb_search"])
 
 
 def test_tool_summary_block_legend_appears_only_with_a_failure():

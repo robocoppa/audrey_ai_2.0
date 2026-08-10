@@ -110,6 +110,87 @@ def test_contains_ignores_debug_region():
     assert er._contains_all(answer, ["82.8"]) is False
 
 
+# ── expect_names_files ──────────────────────────────────────────────────────
+
+_SHORT = "How to WIN with the London System.mp4"
+_LONG = "Magnus Carlsen Teaches How to Win with the London System.mp4"
+# The shape used by the video suite: alternatives per file.
+_FILES = [
+    [_SHORT, "How to WIN with the London System"],
+    [_LONG, "Magnus Carlsen Teaches How to Win with the London System",
+     "Magnus Carlsen video", "Carlsen video", "Magnus Carlsen"],
+]
+
+
+def test_naming_both_files_passes():
+    answer = f"You have two: {_SHORT} and {_LONG}. Which did you mean?"
+    assert er._names_all_files(answer, _FILES) is True
+
+
+def test_naming_one_file_fails():
+    """The regression this exists for. `video-ambiguous-singular` answered from
+    one of two same-topic candidates, and every other check scored it PASS."""
+    answer = f"Based on {_SHORT}, the move order begins with 1. d4."
+    assert er._names_all_files(answer, _FILES) is False
+
+
+def test_the_longer_filename_alone_does_not_satisfy_both():
+    """⚠️ Why this is not `_contains_all`.
+
+    `_LONG` contains `_SHORT` as a substring, so a plain contains-check on
+    both is satisfied by an answer that named only the longer file — reporting
+    a pass on the exact failure being tested. Resolving most-specific-first
+    and consuming the match forces a second, separate mention.
+    """
+    answer = f"Based on {_LONG}, the move order begins with 1. d4."
+
+    assert er._contains_all(answer, [_SHORT, _LONG]) is True  # the trap
+    assert er._names_all_files(answer, _FILES) is False
+
+
+def test_an_informal_reference_counts():
+    """⚠️ A check that false-fails gets ignored, which is worse than no check.
+
+    Models write "the Magnus Carlsen video" at least as often as the filename,
+    and an answer that clearly distinguishes both files has done the thing
+    being tested. Taken from a real `audrey_auto` answer, 2026-08-10.
+    """
+    answer = (
+        'Based on your two London System videos: in the Magnus Carlsen video, '
+        'Carlsen calls it a "solid choice". Your longer instructional video '
+        '("How to WIN with the London System") emphasises middlegame plans.'
+    )
+    assert er._names_all_files(answer, _FILES) is True
+
+
+def test_a_plain_string_still_works():
+    """One file, one string — the list-of-alternatives form is opt-in."""
+    assert er._names_all_files(f"read {_SHORT}", [_SHORT]) is True
+
+
+def test_naming_is_case_insensitive():
+    answer = "i checked how to win with the london system.mp4 and " + _LONG.lower()
+    assert er._names_all_files(answer, _FILES) is True
+
+
+def test_naming_ignores_the_debug_region():
+    """Same rule as `contains`: a filename mentioned only in the trace is not
+    the model naming it to the user."""
+    answer = f"Based on {_SHORT}.\n\n## Research trace (debug)\n\nread {_LONG}"
+    assert er._names_all_files(answer, _FILES) is False
+
+
+def test_the_suite_case_is_wired_up():
+    """The helper is only worth having if a case actually opts in. Pins that
+    `video-ambiguous-singular` — the case that regressed — carries it."""
+    cases = json.loads(
+        (Path(er.__file__).parent / "eval_prompts_video.json").read_text())
+    by_name = {c["name"]: c for c in cases}
+
+    assert by_name["video-ambiguous-singular"].get("expect_names_files")
+    assert by_name["video-control-unscoped-plural"].get("expect_names_files")
+
+
 # ── sweep expansion ─────────────────────────────────────────────────────────
 
 def test_expand_sweep_crosses_and_groups_by_model():

@@ -11,14 +11,40 @@
     "prompt": "What did my London System video say about the move order?",
     "expect_sources": false,
     "expect_route": "fast",
-    "_why": "The sharpest case in the set, and only possible because the corpus holds TWO London System videos ('Magnus Carlsen Teaches How to Win with the London System.mp4', 7m37s, and 'How to WIN with the London System.mp4', 29m38s). Singular 'my video' with two real candidates on the same topic. Pass = names both and asks which, or answers from both and says so. Fail = silently picks one and answers confidently — which looks perfectly sourced and is the exact failure the prompt's 'ask rather than guess' line exists to prevent."
+    "_why": "The sharpest case in the set, and only possible because the corpus holds TWO London System videos ('Magnus Carlsen Teaches How to Win with the London System.mp4', 7m37s, and 'How to WIN with the London System.mp4', 29m38s). Singular 'my video' with two real candidates on the same topic. Pass = names both and asks which, or answers from both and says so. Fail = silently picks one and answers confidently — which looks perfectly sourced and is the exact failure the prompt's 'ask rather than guess' line exists to prevent. ⚠️ `expect_names_files` was added 2026-08-10 after this case scored PASS while doing exactly what it defines as the failure: every other check here is structural and none can see which file was answered from.",
+    "expect_names_files": [
+      [
+        "How to WIN with the London System.mp4",
+        "How to WIN with the London System"
+      ],
+      [
+        "Magnus Carlsen Teaches How to Win with the London System.mp4",
+        "Magnus Carlsen Teaches How to Win with the London System",
+        "Magnus Carlsen video",
+        "Carlsen video",
+        "Magnus Carlsen"
+      ]
+    ]
   },
   {
     "name": "video-control-unscoped-plural",
     "prompt": "What do my videos say about the London System?",
     "expect_sources": false,
     "expect_route": "fast",
-    "_why": "REGRESSION GUARD, and the deliberate mirror of video-ambiguous-singular: same topic, plural, opposite correct behaviour. 3b proved the general path correctly leaves this unscoped. Logs must show scope=none. If the specialist's 'list before searching' line pushes it into scoping to one of the two chess videos here, the prompt has made things worse and the name should come out of VIRTUAL_MODELS."
+    "_why": "REGRESSION GUARD, and the deliberate mirror of video-ambiguous-singular: same topic, plural, opposite correct behaviour. 3b proved the general path correctly leaves this unscoped. Logs must show scope=none. If the specialist's 'list before searching' line pushes it into scoping to one of the two chess videos here, the prompt has made things worse and the name should come out of VIRTUAL_MODELS. ⚠️ `expect_names_files` was added 2026-08-10 after this case scored PASS while doing exactly what it defines as the failure: every other check here is structural and none can see which file was answered from.",
+    "expect_names_files": [
+      [
+        "How to WIN with the London System.mp4",
+        "How to WIN with the London System"
+      ],
+      [
+        "Magnus Carlsen Teaches How to Win with the London System.mp4",
+        "Magnus Carlsen Teaches How to Win with the London System",
+        "Magnus Carlsen video",
+        "Carlsen video",
+        "Magnus Carlsen"
+      ]
+    ]
   },
   {
     "name": "video-long-transcript-paging",

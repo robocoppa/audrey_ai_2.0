@@ -74,6 +74,12 @@ Per case, against the reassembled streamed answer:
   - contains       : opt-in ("answer_contains": [..]): every listed string
                      appears (case-insensitively) in the answer body — a weak
                      objective signal for reasoning/knowledge cases.
+  - names_files    : opt-in ("expect_names_files": [..]): every listed file is
+                     named DISTINCTLY, matched longest-first so one filename
+                     being a substring of another cannot satisfy both. The
+                     only behavioural check here — for cases whose failure is
+                     "answered from the wrong file", which every structural
+                     check above scores as a pass.
 
 Plus, for every case, latency is recorded: TTFT (first content delta) and
 total wall-clock. The fast path's reason to exist is speed, so these make
@@ -485,6 +491,45 @@ def _contains_all(answer: str, needles: list[str]) -> bool:
     return all(n.lower() in low for n in needles)
 
 
+def _names_all_files(answer: str, groups: list[str | list[str]]) -> bool:
+    """True if the answer identifies every one of these files, DISTINCTLY.
+
+    Each entry is one file, given either as a string or as a list of
+    alternative ways to refer to it — models write "the Magnus Carlsen video"
+    at least as often as the full filename, and a check that only accepts the
+    exact name fails answers that were perfectly clear. A check that
+    false-fails gets ignored, which is worse than not having it.
+
+    ⚠️ Not `_contains_all`, and the difference is the whole point. One
+    filename is often a substring of another — "Magnus Carlsen Teaches How to
+    Win with the London System.mp4" contains "How to Win with the London
+    System.mp4" — so a plain contains-check on both is satisfied by an answer
+    that named only the longer file. That is exactly the failure being tested,
+    and it would report a pass.
+
+    So each match is CONSUMED, and files are resolved most-specific first (by
+    their longest alternative). One mention can never satisfy two files.
+
+    Written for `video-ambiguous-singular`, whose defining failure is silently
+    picking one of two same-topic candidates and answering confidently — which
+    reads perfectly sourced and, until 2026-08-10, scored PASS on every
+    structural check in this file.
+    """
+    alts = [[g] if isinstance(g, str) else list(g) for g in groups]
+    hay = _pre_debug_region(answer).lower()
+    for group in sorted(alts, key=lambda g: max(len(a) for a in g), reverse=True):
+        # Longest alternative first within the group too: prefer the most
+        # specific mention so a vaguer one stays available for another file.
+        for name in sorted(group, key=len, reverse=True):
+            i = hay.find(name.lower())
+            if i >= 0:
+                hay = hay[:i] + hay[i + len(name):]
+                break
+        else:
+            return False
+    return True
+
+
 # --- Source-quality reporting (informational, NOT a pass/fail check) ---------
 #
 # The eval reads the RENDERED answer, which is just `- [title](url)` lines — the
@@ -701,6 +746,14 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     needles = case.get("answer_contains") or []
     checks["contains"] = _contains_all(answer, needles) if needles else None
 
+    # Names-files check (opt-in): every listed file must be named distinctly.
+    # The one check here that is behavioural rather than structural — see
+    # `_names_all_files` for why a plain contains-check cannot do this job.
+    wanted_files = case.get("expect_names_files") or []
+    checks["names_files"] = (
+        _names_all_files(answer, wanted_files) if wanted_files else None
+    )
+
     ok = all(v for v in checks.values() if v is not None)
     return CaseResult(name=name, model=model, ok=ok, checks=checks,
                       answer=answer, banners_seen=banners, route=route,
@@ -728,7 +781,7 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
     print("=" * 70)
     cols = ["reachable", "no_error_marker", "has_answer", "banners",
             "sources", "url_wellformed", "route", "code_block", "code_runs",
-            "contains"]
+            "contains", "names_files"]
     for r in results:
         status = "PASS" if r.ok else "FAIL"
         print(f"\n[{status}] {r.name}   (model={r.model})")

@@ -129,8 +129,10 @@ def tool_summary_block(
     `❌k` = k calls failed, shown only when k > 0. So `web_search ✅10 ❌3` is
     "10 succeeded, 3 failed". When any failure appears anywhere in the footer,
     the header gains a one-line legend so a reader who has never seen this
-    convention (or has forgotten it) can decode it from the artifact alone. The
-    all-green common case stays uncluttered: no failures, no legend.
+    convention (or has forgotten it) can decode it from the artifact alone, and
+    a plain-English disclosure line goes ABOVE the header — see
+    `_failure_disclosure` for why the notation alone is not enough. The
+    all-green common case stays uncluttered: no failures, no legend, no line.
 
     The two leading newlines + horizontal rule give the markdown renderer a
     clean break from the answer body. Skipped silently when nothing to show.
@@ -143,18 +145,61 @@ def tool_summary_block(
     if not rows:
         return ""
     formatted_rows = [(model, _format_calls(calls)) for model, calls in rows]
-    # Only explain the failure notation if a failure actually shows. "❌" with
-    # no following digit = total failure; "❌" + digits = partial (that many of
-    # the call count failed). Detecting it from the rendered text keeps the
-    # legend in lockstep with whatever _format_calls emits.
-    any_failure = any("❌" in formatted for _, formatted in formatted_rows)
+    n_failed, failed_names = _failed_calls(rows)
     header = "> _Tools used:_"
-    if any_failure:
+    if n_failed:
         header += "  _(✅ = calls succeeded, ❌ = calls failed)_"
-    lines = ["", "", "---", header]
+    lines = ["", "", "---"]
+    if n_failed:
+        lines.append(_failure_disclosure(n_failed, failed_names))
+    lines.append(header)
     for model, formatted in formatted_rows:
         lines.append(f"> - **{model}** — {formatted}")
     return "\n".join(lines) + "\n"
+
+
+def _failed_calls(rows: list[tuple[str, list[dict]]]) -> tuple[int, list[str]]:
+    """Total failed calls and the distinct tools they belong to, first-seen.
+
+    Read off the raw call dicts rather than by scanning the rendered "❌" out
+    of `_format_calls` output, so the two can never disagree about what
+    happened — the rendering is a view, not the record.
+    """
+    n = 0
+    names: list[str] = []
+    for _, calls in rows:
+        for c in calls:
+            if not c.get("is_error"):
+                continue
+            n += 1
+            name = str(c.get("name") or "?")
+            if name not in names:
+                names.append(name)
+    return n, names
+
+
+def _failure_disclosure(n_failed: int, names: list[str]) -> str:
+    """One plain-English line saying a tool failed, above the counts.
+
+    ⚠️ The ❌ notation is not enough on its own, and the box proved it on
+    2026-08-10: `kb_search` returned 500 for a whole turn (Qdrant was
+    restarting), and the model answered anyway from `list_my_files` and four
+    `get_file_text` pages — writing a confident section about a video it had
+    never read. The ONLY signal anywhere on screen was `❌1` in a footer row.
+
+    Deliberately mechanical rather than a prompt instruction. The renderer
+    already knows a call failed; asking the model to disclose it depends on
+    the model complying, and this repo has twice watched a well-meant
+    instruction move behaviour somewhere unintended (the `kb_search`
+    description's v1 stopped models searching at all). This reaches every
+    model and every path, and no wording can talk it out of firing.
+    """
+    listed = ", ".join(f"`{n}`" for n in names)
+    noun = "call" if n_failed == 1 else "calls"
+    return (
+        f"> ⚠️ **{n_failed} tool {noun} failed** ({listed}) — this answer was "
+        f"written without what they would have returned, and may be incomplete."
+    )
 
 
 # ─── Panel-drafts debug block (opt-in via agentic.debug_panel_drafts) ─
