@@ -851,9 +851,20 @@ async def _stream_deep_with_banners(
         elapsed = time.perf_counter() - t0
         pipeline_seconds.labels(mode="deep", task_type=task).observe(elapsed)
         pipeline_total.labels(mode="deep", task_type=task, outcome=pipeline_outcome).inc()
+        # `workers/ok/tool_grounded` mirror `graph.py`'s `deep_panel:` line so
+        # one grep covers both pipelines. Without them the streaming path —
+        # the one OWUI actually uses for questions — reported nothing about
+        # the panel at all, and "did the workers use tools" could only be
+        # answered by attributing `react:` lines to turns via
+        # timestamp-minus-elapsed. Count WORKERS, not zero-tool rounds: the
+        # final round of every ReAct loop has `tool_calls=0` by construction.
+        ok = sum(1 for d in drafts if (d.get("content") or "").strip())
+        grounded = sum(1 for d in drafts if int(d.get("tool_rounds", 0) or 0) > 0)
         log.info(
-            "stream deep done model=%s task=%s synth=%s outcome=%s elapsed=%.2fs",
+            "stream deep done model=%s task=%s synth=%s outcome=%s elapsed=%.2fs"
+            " workers=%d ok=%d tool_grounded=%d",
             payload.model, task, synth_model, pipeline_outcome, elapsed,
+            len(drafts), ok, grounded,
         )
         # Archive whatever synth content actually streamed. `final_content`
         # is built only from synth deltas (banner text never lands here),
@@ -1163,9 +1174,15 @@ async def _stream_research_with_banners(
         elapsed = time.perf_counter() - t0
         pipeline_seconds.labels(mode="deep", task_type=task).observe(elapsed)
         pipeline_total.labels(mode="deep", task_type=task, outcome=pipeline_outcome).inc()
+        # Same fields as the deep path — `drafts` here are the Stage-1
+        # researcher notes, which is where research-mode grounding lives.
+        ok = sum(1 for d in drafts if (d.get("content") or "").strip())
+        grounded = sum(1 for d in drafts if int(d.get("tool_rounds", 0) or 0) > 0)
         log.info(
-            "stream research done model=%s task=%s writer=%s outcome=%s elapsed=%.2fs",
+            "stream research done model=%s task=%s writer=%s outcome=%s elapsed=%.2fs"
+            " workers=%d ok=%d tool_grounded=%d",
             payload.model, task, writer_model, pipeline_outcome, elapsed,
+            len(drafts), ok, grounded,
         )
         archive_client: ChatArchiveClient | None = getattr(app.state, "archive_client", None)
         if archive_client is not None and conversation_id:

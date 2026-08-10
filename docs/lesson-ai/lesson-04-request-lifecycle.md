@@ -177,7 +177,7 @@ now is just: **the pipeline is a graph, and each node is a function.**
 
 ### 2.3 What a node looks like
 
-Look at [`graph.py:228`](../../src/audrey/pipeline/graph.py#L228) —
+Look at [`graph.py:248`](../../src/audrey/pipeline/graph.py#L248) —
 the `node_datetime` function:
 
 ```python
@@ -263,7 +263,7 @@ follow along in `openai.py`.
      it knows what BTRFS is.
 
 7. **The model's tokens stream back** through `_stream_openai` at
-   [`pipeline.py:1275`](../../src/audrey/routes/openai/pipeline.py#L1275),
+   [`pipeline.py:1325`](../../src/audrey/routes/openai/pipeline.py#L1325),
    which converts Ollama's chunks into OpenAI-format SSE frames and
    yields them. FastAPI passes each frame through to OWUI as it's
    produced. The user sees the answer typing itself out.

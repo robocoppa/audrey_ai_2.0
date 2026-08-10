@@ -157,8 +157,19 @@ def escalation_decision(
         return "end"
     content = (state.get("content") or "").strip()
     conf = float(state.get("classify_confidence", 0.0))
+    # `classify.py` returns `("general", "fallback:general", 0.25)` when every
+    # routing attempt failed — the SAME 0.25 a genuinely-unsure classification
+    # produces. That is "no signal", not "weak signal", and it is exactly what
+    # the `conf > 0` guard already says about the 0.0 case; the fallback just
+    # says it with a different number. Observed on the box 2026-08-10: two
+    # `ReadTimeout` strikes, `classify fell all the way through`, conf=0.25.
+    #
+    # Only the CONFIDENCE trigger is suppressed. `too_short` is a statement
+    # about the answer, not about the router, and the fast path did produce
+    # one — so a thin answer still earns a rescue here.
+    classify_failed = str(state.get("classify_reason", "")).startswith("fallback:")
     too_short = len(content) < min_chars
-    low_confidence = conf < conf_ceiling and conf > 0
+    low_confidence = conf < conf_ceiling and conf > 0 and not classify_failed
     if too_short or low_confidence:
         log.info("escalate: fast→deep (chars=%d, conf=%.2f, reason=%s)",
                  len(content), conf, "too_short" if too_short else "low_conf")

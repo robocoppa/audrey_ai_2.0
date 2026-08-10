@@ -222,7 +222,7 @@ user's actual ask."
 
 ### 2.3 `node_classify`: the graph asks for a task type
 
-The graph node lives at [`graph.py:287`](../../src/audrey/pipeline/graph.py#L287):
+The graph node lives at [`graph.py:307`](../../src/audrey/pipeline/graph.py#L307):
 
 ```python
 async def node_classify(state: PipelineState) -> dict[str, Any]:
@@ -449,7 +449,7 @@ task family.
 ### 2.7 Virtual models can force the route
 
 Now read the middle of `node_complexity`, starting at
-[`graph.py:323`](../../src/audrey/pipeline/graph.py#L323):
+[`graph.py:334`](../../src/audrey/pipeline/graph.py#L334):
 
 ```python
 complex_, n = is_complex(...)

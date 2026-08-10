@@ -579,7 +579,7 @@ Small helper that maps OpenAI-shape sampling knobs onto Ollama's
 options dict. (That `Sibling:` docstring note — shipped during this
 lesson's own audit — points straight at the near-twin.) There's a
 near-twin in
-[`pipeline/graph.py:474`](../../src/audrey/pipeline/graph.py#L474)
+[`pipeline/graph.py:656`](../../src/audrey/pipeline/graph.py#L656)
 called `_options_from_state` that does the same conceptual mapping
 from the LangGraph state dict instead of a Pydantic object. The
 two functions look like they want to be one, but their input shapes

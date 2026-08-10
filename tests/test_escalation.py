@@ -58,6 +58,42 @@ def test_confidence_of_zero_is_unknown_not_low():
     assert _decide(content=long_enough, classify_confidence=0.0) == "end"
 
 
+def test_a_failed_classify_is_unknown_not_low_either():
+    """⚠️ Same idea as the test above, wearing a different number.
+
+    `classify.py` returns `("general", "fallback:general", 0.25)` when every
+    routing attempt failed — indistinguishable by confidence alone from a
+    router that answered and was merely unsure. Reading it as low confidence
+    escalates on a statement the router never made.
+
+    Found 2026-08-10 by checking whether the streaming path can escalate: it
+    can, via the graph, whenever the fast model is tool-capable — and the same
+    log showed classify falling all the way through after two `ReadTimeout`
+    strikes. Every such turn was buying a planner and three deep workers.
+    """
+    long_enough = "x" * (_MIN_CHARS + 1)
+    assert _decide(content=long_enough, classify_confidence=0.25,
+                   classify_reason="fallback:general") == "end"
+
+
+def test_a_failed_classify_still_escalates_a_thin_answer():
+    """The suppression above is narrow on purpose. `too_short` is a statement
+    about the ANSWER; the router failing says nothing about it, and the fast
+    path did produce one. Widening the guard to cover both triggers would
+    silently retire the length rescue whenever the router had a bad minute."""
+    assert _decide(content="Yes.", classify_confidence=0.25,
+                   classify_reason="fallback:general") == "escalate"
+
+
+def test_a_real_low_confidence_classification_still_escalates():
+    """The guard keys on `classify_reason`, not on the value 0.25 — a router
+    that genuinely returned 0.25 must still escalate, or the fix would have
+    disabled the confidence trigger outright."""
+    long_enough = "x" * (_MIN_CHARS + 1)
+    assert _decide(content=long_enough, classify_confidence=0.25,
+                   classify_reason="router:general") == "escalate"
+
+
 # ─── The suppressions ─────────────────────────────────────────────────
 
 

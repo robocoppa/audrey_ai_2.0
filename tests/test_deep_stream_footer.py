@@ -1,4 +1,5 @@
-"""The deep path's `Tools used:` footer, end to end through the route.
+"""The deep stream's two reports on what its workers did with tools: the
+user-facing `Tools used:` footer, and the operator-facing summary log line.
 
 Phase 42's eval artifacts showed every deep-routed turn arriving without a
 footer while every fast turn had one, and that got written down as "the deep
@@ -8,6 +9,13 @@ tools, the deep stream DOES emit the footer, in the right place. A deep turn
 with no footer therefore means its workers called no tools — which is a
 question about the panel, not about `_stream_deep_with_banners`.
 
+Answering that question then took four rounds of greps against the box,
+because the streaming path logged nothing about the panel at all — the
+`deep_panel: … tool_grounded=N` line lives in `graph.py`, which serves
+non-streaming requests, and OWUI streams questions while NOT streaming title
+generation. So every grep found only utility turns. The summary line now
+carries the same three fields on both paths.
+
 Structured like `test_research_stream.py`: fakes on `app.state` so no real
 model runs.
 """
@@ -15,10 +23,15 @@ model runs.
 from __future__ import annotations
 
 import copy
+import inspect
 import json
+import logging
+import re
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, ClassVar
 
+import audrey.pipeline.graph
 from audrey.config import Config, EnvOverrides, get_config
 from audrey.models.health import HealthTracker
 from audrey.models.registry import ModelRegistry
@@ -26,6 +39,10 @@ from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.routes.openai.pipeline import _stream_deep_with_banners
 from audrey.routes.openai.schemas import ChatCompletionRequest
 from audrey.tools.discovery import ToolRegistry, ToolSpec
+
+# Read at import: the cross-path wording check runs inside an async test, and
+# blocking file IO there trips ASYNC240.
+_GRAPH_SRC = Path(inspect.getfile(audrey.pipeline.graph)).read_text()
 
 
 class _FakeOllama:
@@ -149,3 +166,51 @@ async def test_no_footer_when_workers_called_no_tools():
     joined = _joined_content(await _collect(app))
     assert "_Tools used:_" not in joined
     assert "An answer." in joined
+
+
+# ─── The operator-facing half ─────────────────────────────────────────
+
+
+def _summary_line(caplog) -> str:
+    lines = [r.message for r in caplog.records if r.message.startswith("stream deep done")]
+    assert len(lines) == 1, f"expected one summary line, got {lines}"
+    return lines[0]
+
+
+async def test_the_summary_line_reports_grounding(caplog):
+    caplog.set_level(logging.INFO)
+    app = _fake_app({"w1": "draft one", "w2": "draft two", "s": "An answer."},
+                    tool_capable=["w1", "w2"])
+    await _collect(app)
+
+    assert "workers=2 ok=2 tool_grounded=2" in _summary_line(caplog)
+
+
+async def test_the_summary_line_reports_zero_grounding_rather_than_omitting_it(caplog):
+    """⚠️ The field has to be present even at zero.
+
+    A missing field and a zero are the same thing to a reader scrolling a log,
+    and that ambiguity is what sent the last investigation down the wrong
+    path: `deep_panel:` was genuinely absent from streamed turns, which looked
+    like "no deep turns ran" rather than "this path never logged it".
+    """
+    caplog.set_level(logging.INFO)
+    app = _fake_app({"w1": "draft one", "w2": "draft two", "s": "An answer."})
+    await _collect(app)
+
+    assert "workers=2 ok=2 tool_grounded=0" in _summary_line(caplog)
+
+
+async def test_the_summary_line_matches_the_non_streaming_wording(caplog):
+    """Both pipelines must be greppable with ONE pattern. `graph.py` writes
+    `deep_panel: … workers=%d ok=%d tool_grounded=%d`; drift in either
+    direction quietly re-splits the diagnostic surface that this change
+    exists to merge."""
+    caplog.set_level(logging.INFO)
+    app = _fake_app({"w1": "draft one", "w2": "draft two", "s": "An answer."},
+                    tool_capable=["w1", "w2"])
+    await _collect(app)
+
+    assert re.search(r"workers=\d+ ok=\d+ tool_grounded=\d+", _summary_line(caplog))
+
+    assert "workers=%d ok=%d tool_grounded=%d" in _GRAPH_SRC
