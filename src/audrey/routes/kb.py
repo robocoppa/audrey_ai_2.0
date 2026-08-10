@@ -548,26 +548,31 @@ async def _search_text_hybrid(
     kept = [f for f in fused if passes_evidence(
         f, min_score=floor, min_overlap=min_overlap)]
 
-    # What the evidence floor removed, by file.
+    # The post-floor pool and what the floor removed, both by file.
     #
-    # `files=[…]` on the `kb.query:` line describes the hits that SURVIVED,
-    # and a file missing from it is ambiguous in a way that decides the fix:
-    # cut by the floor (no reordering can recover it — the hit is gone) or
-    # merely outranked (a diversity reorder promotes it). 2026-08-10 hit
-    # exactly that fork — 20 of 20 hits from one of two London videos, with
-    # `top_k` capped at 20 so nothing could see deeper into the same list.
+    # `files=[…]` on the `kb.query:` line describes only the hits that fit in
+    # `top_k`, and a file missing from it is ambiguous in a way that decides
+    # the fix: cut by the floor (no reordering can recover it — the hit is
+    # gone), or in the pool but outranked (a diversity reorder promotes it).
+    # 2026-08-10 hit exactly that fork, with `top_k` capped at 20 so nothing
+    # could see deeper into a 41-entry pool.
+    #
+    # ⚠️ `cut=` alone does NOT resolve it, which is why both are here. "One
+    # chunk of that file was cut" is consistent with "its other six are in the
+    # pool" AND with "that was the only one it had". Only `kept=` says which.
     #
     # INFO, not DEBUG: turning on DEBUG globally to read one field would bury
     # the log under httpx and qdrant chatter, which is the problem the
     # reconcile filter was just written to solve. One extra line per KB query
-    # is affordable, and `fused/kept` is durable operator information — it
-    # says how hard the evidence floor is biting, which is the most
-    # consequential tunable in KB search.
+    # is affordable, and the pool-vs-floor split is durable operator
+    # information — it says how hard the evidence floor is biting, which is
+    # the most consequential tunable in KB search.
     cut = [f.hit for f in fused
            if not passes_evidence(f, min_score=floor, min_overlap=min_overlap)]
     log.info(
-        "kb.hybrid: fused=%d kept=%d floor=%.2f/%.2f  %s",
+        "kb.hybrid: fused=%d -> %d kept (floor=%.2f/%.2f)  %s  %s",
         len(fused), len(kept), floor, min_overlap,
+        _file_distribution([f.hit for f in kept], label="kept"),
         _file_distribution(cut, label="cut"),
     )
 

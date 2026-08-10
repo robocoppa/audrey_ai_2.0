@@ -189,15 +189,21 @@ async def test_the_hybrid_line_names_the_files_the_floor_removed(caplog):
 
     assert [h.payload["filename"] for h in hits] == ["how-to-win.mp4"]
     line = _hybrid_line(caplog)
-    assert "fused=2 kept=1" in line
+    assert "fused=2 -> 1 kept" in line
+    assert "kept=[how-to-win.mp4:1]" in line
     assert "cut=[carlsen.mp4:1]" in line
 
 
-async def test_an_outranked_file_is_not_reported_as_cut(caplog):
-    """The other half, and the reason `cut=` cannot just be inferred from
-    `files=`. Both hits clear the floor; one loses on score alone. It is still
-    in the fused list — which is exactly what makes it recoverable by
-    reordering — so reporting it as cut would point the fix the wrong way."""
+async def test_a_file_outranked_out_of_top_k_shows_in_kept_not_cut(caplog):
+    """⚠️ The case the whole line exists to distinguish, and the one `cut=`
+    alone gets wrong.
+
+    Both hits clear the floor; `top_k=1` drops one from the RESULTS. It is
+    still in the pool — which is exactly what makes it recoverable by
+    reordering — so it must appear in `kept=` and not in `cut=`. Reading only
+    `cut=[]` here would say "nothing was filtered" and leave the real question
+    unanswered.
+    """
     caplog.set_level(logging.INFO)
     q = _FakeHybridQdrant(
         dense=[
@@ -212,10 +218,40 @@ async def test_an_outranked_file_is_not_reported_as_cut(caplog):
         min_score=0.53, cfg=_HYBRID_CFG,
     )
 
-    assert len(hits) == 1
+    assert [h.payload["filename"] for h in hits] == ["how-to-win.mp4"]
     line = _hybrid_line(caplog)
-    assert "fused=2 kept=2" in line
+    assert "fused=2 -> 2 kept" in line
+    # Present in the pool despite being absent from the results.
+    assert "carlsen.mp4:1" in line[line.index("kept="):line.index("cut=")]
     assert "cut=[]" in line
+
+
+async def test_one_chunk_cut_does_not_mean_the_file_left_the_pool(caplog):
+    """The ambiguity that made `cut=` insufficient on its own (2026-08-10).
+
+    A file with one chunk below the floor and others above appears in BOTH
+    lists. Seeing it in `cut=` and concluding "the floor removed that file"
+    points the fix at the floors when the pool still holds it.
+    """
+    caplog.set_level(logging.INFO)
+    q = _FakeHybridQdrant(
+        dense=[
+            _hit("how-to-win.mp4", 0.81, source="/u/a.txt", text="london system d4"),
+            _hit("carlsen.mp4", 0.77, source="/u/b.txt", text="london system blitz"),
+            _hit("carlsen.mp4", 0.41, source="/u/c.txt", text="unrelated chatter"),
+        ],
+        lexical=[],
+    )
+
+    await _search_text_hybrid(
+        q, [0.1], query="london system", top_k=10, user=None,
+        min_score=0.53, cfg=_HYBRID_CFG,
+    )
+
+    line = _hybrid_line(caplog)
+    assert "fused=3 -> 2 kept" in line
+    assert "carlsen.mp4:1" in line[line.index("kept="):line.index("cut=")]
+    assert "cut=[carlsen.mp4:1]" in line
 
 
 # ─── Through the route ────────────────────────────────────────────────
