@@ -28,7 +28,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from audrey.kb.qdrant import KBHit
-from audrey.routes.kb import _file_distribution
+from audrey.routes.kb import _clip, _file_distribution
 from audrey.routes.kb import router as kb_router
 
 SECRET = "s3cr3t-service-token"  # noqa: S105  (test fixture, not a real secret)
@@ -101,6 +101,13 @@ def test_long_filenames_are_shortened():
     assert len(out) < len(name)
 
 
+def test_clipping_leaves_short_text_exactly_as_it_was():
+    """No ellipsis, no padding, no quoting — the common case must survive the
+    helper untouched or every short line grows noise."""
+    assert _clip("carlsen.mp4", 40) == "carlsen.mp4"
+    assert _clip("x" * 40, 40) == "x" * 40
+
+
 def test_shortening_keeps_enough_to_tell_two_files_apart():
     """A prefix-only truncation is the risk: two videos from the same series
     can share thirty characters. This pins the budget as generous enough for
@@ -139,18 +146,49 @@ def app(monkeypatch) -> FastAPI:
     return app
 
 
-def test_the_query_line_carries_the_distribution(app, caplog):
-    """Computing it and forgetting to log it would pass every test above."""
+def _query_line(app, caplog, query: str = "london system") -> str:
     caplog.set_level(logging.INFO)
-
     r = TestClient(app).post(
-        "/v1/kb/query", json={"query": "london system", "user": "alice@example.com"},
+        "/v1/kb/query", json={"query": query, "user": "alice@example.com"},
         headers={"X-Audrey-Service-Token": SECRET},
     )
     assert r.status_code == 200
+    return next(m for m in caplog.messages if m.startswith("kb.query:"))
 
-    line = next(m for m in caplog.messages if m.startswith("kb.query:"))
+
+def test_the_query_line_carries_the_distribution(app, caplog):
+    """Computing it and forgetting to log it would pass every test above."""
+    line = _query_line(app, caplog)
+
     assert "files=[how-to-win.mp4:3, carlsen.mp4:1]" in line
     # The fields it already had must survive the addition.
     assert "scope=none" in line
     assert "4 hit(s)" in line
+
+
+def test_the_query_line_carries_the_text_that_was_searched(app, caplog):
+    """⚠️ The searched text, not the user's question.
+
+    The model writes its own `kb_search` query and nothing else on the box
+    records what it sent — `dispatch:` logs the tool name and result size,
+    `react:` logs counts. Without this field a skewed `files=[…]` is
+    ambiguous between "retrieval missed the file" and "it searched something
+    else entirely", and on 2026-08-10 that ambiguity was the whole difference:
+    the plural London question ranks the second video 4th when asked verbatim,
+    while the model's own turn returned nothing from it.
+    """
+    line = _query_line(app, caplog, "what do my videos say about the london system")
+
+    assert "q='what do my videos say about the london system'" in line
+
+
+def test_a_long_query_is_clipped_out_of_the_way(app, caplog):
+    """A pasted wall of text as the query must not push `files=[…]` off the end
+    of the line — that field is the reason the line is being read. `TextQuery`
+    accepts up to 2,000 characters, so this is a reachable input, not a
+    hypothetical one."""
+    line = _query_line(app, caplog, "london system " * 40)
+
+    field = line[line.index("q="):line.index(" scope=")]
+    assert field.endswith("…'")
+    assert len(field) < 70

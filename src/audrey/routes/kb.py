@@ -253,6 +253,14 @@ _GLOBAL_BUCKET = "<global>"
 # push the interesting part of this line past a terminal width and the field
 # stops being readable at a glance, which is the only thing it is for.
 _LOG_NAME_MAX = 40
+# ⚠️ The searched text, NOT the user's question — the model writes its own
+# `kb_search` query and nothing else on the box records what it sent. Without
+# this, two `kb.query` lines with different `files=[…]` are indistinguishable
+# between "the retrieval skewed" and "it asked something else", which is
+# exactly the ambiguity that made the phase-43 gate unreadable on 2026-08-10:
+# the plural London question ranks the second video 4th when asked verbatim,
+# and the model's own turn returned nothing from it.
+_LOG_QUERY_MAX = 60
 
 
 def _file_distribution(hits: Sequence[KBHit]) -> str:
@@ -274,16 +282,16 @@ def _file_distribution(hits: Sequence[KBHit]) -> str:
         str(h.payload.get("filename") or "") or _GLOBAL_BUCKET for h in hits
     )
     parts = [
-        f"{_short_name(name)}:{n}"
+        f"{_clip(name, _LOG_NAME_MAX)}:{n}"
         for name, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
     ]
     return "files=[" + ", ".join(parts) + "]"
 
 
-def _short_name(name: str) -> str:
-    if len(name) <= _LOG_NAME_MAX:
-        return name
-    return name[: _LOG_NAME_MAX - 1] + "…"
+def _clip(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
 
 
 async def _resolve_filename(
@@ -397,11 +405,14 @@ async def kb_query(
     # same prose. And §3b decides phase 42's prompt, whose emphasis is either
     # "scope more" or "scope less" — opposite instructions.
     #
-    # `files=[…]` is the same argument one level down: the hit COUNT says the
-    # search returned material, not which documents it came from.
+    # `q=` and `files=[…]` are the same argument one level down: the hit COUNT
+    # says the search returned material, not what was asked or which documents
+    # answered. Both are needed together — a skewed `files=[…]` means nothing
+    # until you know whether the model searched what the user actually asked.
     log.info(
-        "kb.query: user=%s %s top_k=%d -> %d hit(s) in %.2fs  %s",
-        effective_user, _scope_label(req, scope), req.top_k, len(hits), elapsed,
+        "kb.query: user=%s q=%r %s top_k=%d -> %d hit(s) in %.2fs  %s",
+        effective_user, _clip(req.query, _LOG_QUERY_MAX),
+        _scope_label(req, scope), req.top_k, len(hits), elapsed,
         _file_distribution(hits),
     )
     return QueryResponse(

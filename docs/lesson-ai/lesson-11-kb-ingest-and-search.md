@@ -429,7 +429,7 @@ The interesting part is the constraints that come out of all this:
 ### 2.5 The query path
 
 `/v1/kb/query` is short —
-[`routes/kb.py:331`](../../src/audrey/routes/kb.py#L331):
+[`routes/kb.py:339`](../../src/audrey/routes/kb.py#L339):
 
 ```python
 @router.post("/query", response_model=QueryResponse)
@@ -460,7 +460,7 @@ The pieces of FastAPI to notice:
   build the `kb_search` tool spec for the model.
 
 The merge logic is in `_search_text_merged` —
-[`routes/kb.py:433`](../../src/audrey/routes/kb.py#L433):
+[`routes/kb.py:444`](../../src/audrey/routes/kb.py#L444):
 
 ```python
 async def _search_text_merged(qdrant, vec, *, top_k, user):
@@ -499,7 +499,7 @@ If we ever spun up a per-user collection on a different embedder, the
 scores would look comparable on paper (both are floats in the same
 range) but mean different things — the merge would produce arbitrary
 ordering. The docstring at
-[`routes/kb.py:443-445`](../../src/audrey/routes/kb.py#L443) pins
+[`routes/kb.py:454-456`](../../src/audrey/routes/kb.py#L454) pins
 that contract:
 
 > If a per-user collection ever ships with a different model, switch
@@ -525,9 +525,9 @@ text "a black labrador" and an actual picture of a black lab land
 within a few cosine degrees of each other.
 
 `/v1/kb/query/image` (handler at
-[`routes/kb.py:564`](../../src/audrey/routes/kb.py#L564)) picks which
+[`routes/kb.py:575`](../../src/audrey/routes/kb.py#L575)) picks which
 encoder to call based on which field of the request body was supplied
-([`routes/kb.py:581`](../../src/audrey/routes/kb.py#L581)):
+([`routes/kb.py:592`](../../src/audrey/routes/kb.py#L592)):
 
 ```python
 if req.image_url:
@@ -654,7 +654,7 @@ in Lesson 12 is what cleans these up.
 
 **5. SSRF-rejected image URL.**
 `_validate_image_url` raises `ValueError`; the route catches it
-([`routes/kb.py:587-588`](../../src/audrey/routes/kb.py#L587)) and 422s
+([`routes/kb.py:598-599`](../../src/audrey/routes/kb.py#L598)) and 422s
 with the reason. From the model's side this looks like any tool
 failure: it gets the rejection message in the `role: "tool"`
 content, and the right thing is to ask the user for a different URL
@@ -715,7 +715,7 @@ of material. Why?"**
 
 `_search_text_merged` pulls top-K from each collection then sorts by
 raw cosine score and slices to `top_k`
-([`routes/kb.py:474-477`](../../src/audrey/routes/kb.py#L474)). If
+([`routes/kb.py:485-488`](../../src/audrey/routes/kb.py#L485)). If
 the user's personal notes are closer matches to the query — likely
 when the notes use their exact phrasing — they can sweep all five
 slots. The global hits *are* in the candidate list; they just rank
