@@ -1,4 +1,7 @@
-"""The KB timeout ladder must nest inner < middle < outer.
+"""Timeout ladders must nest inner < outer, on every path that has one.
+
+Two live here — KB search and memory auto-recall. They are the same bug twice,
+found ten months apart, which is the argument for keeping them in one file.
 
 A `kb_search` traverses three nested HTTP hops, each with its own deadline:
 
@@ -14,6 +17,10 @@ was invisible from the pipeline's side.
 
 These tests pin the ordering so a future timeout tweak can't silently re-invert
 it. If a rung legitimately needs to move, move the others too and update these.
+
+⚠️ The give-away for this class of bug is a failure that ALWAYS reports as the
+outer layer's generic timeout, never as anything specific. If a subsystem only
+ever fails one way, suspect the ladder before suspecting the subsystem.
 """
 
 from __future__ import annotations
@@ -68,3 +75,56 @@ def test_ingest_batches_keep_the_generous_budget():
     # fail on the deadline meant for a single-query lookup.
     embedder = _embedder()
     assert embedder.timeout_s > embedder.query_timeout_s
+
+
+# ─── Memory auto-recall ladder ────────────────────────────────────────
+#
+# The same shape, one hop shorter, and it was inverted until 2026-08-09:
+#
+#     auto-recall ──5s──> custom-tools /memory_search ──4s──> Ollama embed
+#
+# The outer rung is `agentic.memory.timeout_s`, and at 5s it is the tightest
+# deadline anywhere in the system — recall runs on the hot path of every
+# request. The embed shared the general 10s budget, so the outer always won:
+# custom-tools kept embedding for ~5s after Audrey had stopped listening, and
+# the failure reached the logs as a bare `timeout in 5.00s` with the cause
+# stranded on the other side of the hop.
+
+
+def _recall_timeout_s() -> float:
+    from audrey.config import get_config
+    agentic = get_config().raw.get("agentic", {}) or {}
+    return float((agentic.get("memory", {}) or {}).get("timeout_s", 5))
+
+
+def _memory_embed_timeout_s() -> float:
+    return Settings(_env_file=None).memory_embed_timeout_s
+
+
+def test_memory_embed_expires_before_auto_recall_gives_up():
+    assert _memory_embed_timeout_s() < _recall_timeout_s()
+
+
+def test_memory_ladder_leaves_headroom_between_its_rungs():
+    # Tighter than the KB ladder's 2.0s because the whole budget is 5s. Below
+    # this, a slow-but-succeeding embed and a hard stall become the same event.
+    assert _recall_timeout_s() - _memory_embed_timeout_s() >= 0.5
+
+
+def test_memory_recall_is_the_tightest_budget_in_the_system():
+    # Why the memory embed needs its own rung rather than the shared one:
+    # nothing else is on a 5s leash, so a shared embed budget sized for the KB
+    # path (or for a model-called tool at the 30s dispatch ceiling) can only
+    # ever sit above it.
+    assert _recall_timeout_s() < _kb_client_timeout()
+    assert _recall_timeout_s() < DEFAULT_DISPATCH_TIMEOUT_S
+
+
+def test_the_chat_archive_keeps_the_shared_embed_budget():
+    # `chat_history_search` is model-called, so it hangs off the 30s dispatch
+    # ceiling, not the recall deadline. Splitting the memory rung out must not
+    # have dragged the archive down with it — 4s would fail archive queries
+    # that legitimately take longer.
+    settings = Settings(_env_file=None)
+    assert settings.ollama_embed_timeout_s > settings.memory_embed_timeout_s
+    assert settings.ollama_embed_timeout_s < DEFAULT_DISPATCH_TIMEOUT_S

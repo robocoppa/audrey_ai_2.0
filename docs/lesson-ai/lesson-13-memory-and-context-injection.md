@@ -259,7 +259,7 @@ job is to look up durable per-user facts and prepend them as another
 system message.
 
 `recall_for_request` at
-[`memory.py:59`](../../src/audrey/pipeline/memory.py#L59) opens with
+[`memory.py:60`](../../src/audrey/pipeline/memory.py#L60) opens with
 four skip guards before any network call:
 
 ```text

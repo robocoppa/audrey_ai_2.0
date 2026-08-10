@@ -71,7 +71,7 @@ cover the read/maintenance side (search, prune, stats).
 
 Every tool the model can call is one FastAPI route, and they all share the
 same four-part shape. `web_search` is the cleanest example. Its request
-schema is at [app.py:131](../../tools-server/app.py#L131):
+schema is at [app.py:142](../../tools-server/app.py#L142):
 
 ```python
 class WebSearchRequest(BaseModel):                      # ① request schema
@@ -115,7 +115,7 @@ Each part has a job, and most of them are for the model or the discovery machine
    request that advertises this tool*. This is prompt real estate — it's
    where you tell the model *when* to use the tool, not just what it does.
    (Look at `chat_history_search`'s description at
-   [app.py:426](../../tools-server/app.py#L426): half of it is "use only
+   [app.py:679](../../tools-server/app.py#L679): half of it is "use only
    when…" — actively steering the model away from over-calling it.)
 
 That's the contract. Get all five right and the model gains a working tool;
@@ -128,7 +128,7 @@ Not every route should be a tool. The chat archive has three routes the
 model must **never** call — writing a turn, pruning old data, reading
 stats. Those are for Audrey's archive client and the admin operator only.
 
-The mechanism is one flag ([app.py:857](../../tools-server/app.py#L857)):
+The mechanism is one flag ([app.py:870](../../tools-server/app.py#L870)):
 
 ```python
 @app.post("/chat_history/archive", include_in_schema=False, tags=["internal"])
@@ -200,7 +200,7 @@ the model *name* a capability that physically lives in the orchestrator.
 
 The error handling tells you where a failure lives. Two distinct cases:
 
-- **`httpx.RequestError` → 502** ([app.py:277](../../tools-server/app.py#L277)).
+- **`httpx.RequestError` → 502** ([app.py:506](../../tools-server/app.py#L506)).
   The sidecar couldn't *reach* Audrey at all — connection refused, DNS,
   timeout. The bug is Audrey-side or network, not the sidecar.
 - **Audrey answered with `>= 400` → relay that status verbatim.** Audrey's
@@ -284,7 +284,7 @@ concrete.
 
 > **Teaching aside — where the count limit actually binds.** Three layers
 > touch `count`: the request schema caps it at 10
-> ([app.py:119](../../tools-server/app.py#L119)), the cache key clamps to
+> ([app.py:144](../../tools-server/app.py#L144)), the cache key clamps to
 > 20, and `_fetch` passes it straight to Brave. They disagree — but it
 > doesn't matter, because the schema cap is the *real* ceiling: FastAPI
 > rejects `count > 10` with a 422 before any other layer sees it. The
@@ -488,7 +488,7 @@ admin rediscover route or restart Audrey — the `tools=0`-style staleness from
 Audrey?**
 
 Audrey's (or the network between them), not the sidecar. `kb_search` is a
-*proxy* tool ([`app.py:269`](../../tools-server/app.py#L269)): its handler
+*proxy* tool ([`app.py:495`](../../tools-server/app.py#L495)): its handler
 reaches *back into* Audrey's `/v1/kb/query` via the
 `app.state.audrey` httpx client. A 502 means that upstream call failed — the
 sidecar is up and serving, but the Audrey KB endpoint it depends on isn't

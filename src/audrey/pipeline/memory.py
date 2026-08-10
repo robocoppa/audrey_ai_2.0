@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -82,14 +83,22 @@ async def recall_for_request(
             "arguments": {"user": user_id, "query": query, "top_k": top_k},
         }
     }
+    started = time.monotonic()
     async with httpx.AsyncClient() as http:
         result = await dispatch_one(
             http, registry, call,
             max_result_chars=10_000,   # don't truncate the JSON body here
             timeout_s=timeout_s,
         )
+    elapsed = time.monotonic() - started
     if result.is_error:
-        log.info("memory: recall skipped (search error: %s)", result.content[:200])
+        # WARNING, with the cost attached. Recall is best-effort, but a skip
+        # still spends the caller's whole budget on the hot path of a request,
+        # and at INFO with no timing it read as free. `%.2fs` against
+        # `agentic.memory.timeout_s` is what separates "the embedder stalled"
+        # from "custom-tools is down".
+        log.warning("memory: recall skipped in %.2fs (search error: %s)",
+                    elapsed, result.content[:200])
         return []
     try:
         body = json.loads(result.content)

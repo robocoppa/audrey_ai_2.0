@@ -167,6 +167,29 @@ async def test_recall_returns_empty_on_dispatch_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_recall_error_is_logged_at_warning_with_its_cost(monkeypatch, caplog):
+    """A skip is best-effort, not free — it spends the whole 5s recall budget on
+    the hot path of the request. It used to log at INFO with no timing, which is
+    how a stalled embedder went a full eval campaign without being noticed.
+    """
+    async def fake_dispatch(http, registry, call, **kwargs):
+        return _result("timeout in 5.00s", is_error=True)
+
+    monkeypatch.setattr(memory_mod, "dispatch_one", fake_dispatch)
+    with caplog.at_level("WARNING", logger="audrey.pipeline.memory"):
+        out = await recall_for_request(
+            _registry_with_memory_search(),
+            user_id="alice@example.com",
+            messages=[_user_msg("hello")],
+        )
+    assert out == []
+    assert len(caplog.records) == 1
+    msg = caplog.records[0].getMessage()
+    assert "recall skipped in " in msg
+    assert "timeout in 5.00s" in msg
+
+
+@pytest.mark.asyncio
 async def test_recall_returns_empty_on_non_json_body(monkeypatch):
     """Tools-server returned 200 with garbage → degrade silently."""
     async def fake_dispatch(http, registry, call, **kwargs):

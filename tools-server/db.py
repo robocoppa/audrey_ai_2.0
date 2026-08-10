@@ -262,14 +262,17 @@ class MemoryStore:
 
         Embeds `query`, vector-searches with `user == <user>` payload filter,
         drops results below `MEMORY_SIMILARITY_THRESHOLD`.
+
+        Raises `EmbedError` when the query can't be embedded. It used to
+        swallow that and return `[]`, which is a different claim: "you have no
+        memories about this" rather than "I could not look". The caller — the
+        orchestrator's auto-recall, or a model that called `memory_search`
+        itself — has no way back from an empty list, so a stalled embedder read
+        as an empty memory store on every turn it affected.
         """
         if not query.strip():
             return []
-        try:
-            qvec = await self._embed(query)
-        except EmbedError as e:
-            log.warning("memory: embed failed for search query: %s", e)
-            return []
+        qvec = await self._embed(query)
         result = await self._qdrant.query_points(
             collection_name=self._collection,
             query=qvec,

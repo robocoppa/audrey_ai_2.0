@@ -440,7 +440,13 @@ agentic:
   memory:
     enabled: true
     top_k: 3                       # recall hits to inject into the prompt
-    timeout_s: 5                   # short — semantic search through custom-tools is fast and shouldn't block the request hot path
+    # Short — recall runs on the hot path of every request and shouldn't block
+    # it. This is the tightest deadline anywhere in the system, so it is the
+    # OUTER rung of a ladder: custom-tools' MEMORY_EMBED_TIMEOUT_S (4s) must
+    # stay below it. Raising this without raising that one re-inverts the
+    # ladder and every stall reads as a bare timeout again. Pinned by
+    # tests/test_kb_timeout_ladder.py.
+    timeout_s: 5
 
 # ─── Timeouts (seconds) ────────────────────────────────────────────────
 timeouts:

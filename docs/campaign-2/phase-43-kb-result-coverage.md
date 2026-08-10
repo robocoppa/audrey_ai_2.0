@@ -8,12 +8,21 @@ writes a section per file and fills the empty ones from whatever it has.
 **Status: PLANNED. Nothing built.** Stage 0 is a measurement whose result
 decides whether Stage 1 gets built at all.
 
-This is the input half of a problem whose output half already shipped
-(2026-08-09): the `kb_search` tool description now says results are pooled, that
-each result carries its own `filename`, and that knowing a file exists is not
-the same as having read it. That change is **deployed but unmeasured**. If it
-turns out to be sufficient, this phase closes at Stage 0 having added one log
-field — which is a good outcome, not a wasted one.
+This is the input half of a problem whose output half shipped 2026-08-09: the
+`kb_search` description now says results are pooled and that each claim must be
+attributed to its hit's `filename`. **Verified in run 5** — the cross-file bleed
+and `audrey_auto`'s user-misattribution both stopped.
+
+⚠️ **Run 5 also sharpened the case for this phase.** With fabrication closed,
+the coverage gap became visible: `audrey_video` answered the plural case from
+`kb_search ×1` with no file read, and the section it hedged — *"appears to be a
+tutorial… possibly featuring GothamChess"*, plus a garbled *"Bf4 (the
+characteristic bishop fianchetto on f5)"* that reads reconstructed from visual
+descriptions — was the **30-minute instructional video**, which holds by far the
+most matching material in the corpus. The skew is real and does not track
+document length, so the "close at Stage 0" exit below is now unlikely to be
+taken. Measure anyway: an assumption about which file is under-represented is
+exactly what Stage 0 exists to replace.
 
 ---
 

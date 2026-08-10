@@ -42,7 +42,7 @@ from brave import (
     SearchResult,
 )
 from chat_archive import ChatArchiveStore
-from db import MemoryEntry, MemoryStore
+from db import EmbedError, MemoryEntry, MemoryStore
 from fastapi import FastAPI, HTTPException, status
 from fetch import FetchError, fetch_readable
 from pydantic import BaseModel, Field
@@ -75,7 +75,8 @@ async def lifespan(app: FastAPI):
         embed_model=settings.memory_embed_model,
         embed_dim=settings.memory_embed_dim,
         similarity_threshold=settings.memory_similarity_threshold,
-        embed_timeout_s=settings.ollama_embed_timeout_s,
+        # Its own rung, not the shared 10s — see `memory_embed_timeout_s`.
+        embed_timeout_s=settings.memory_embed_timeout_s,
         legacy_sqlite_path=settings.memory_db_path,
     )
     await memory.init()
@@ -619,7 +620,19 @@ async def memory_recall(req: MemoryRecallRequest) -> MemoryEntryResponse:
 )
 async def memory_search(req: MemorySearchRequest) -> MemorySearchResponse:
     memory: MemoryStore = app.state.memory
-    hits = await memory.search(user=req.user, query=req.query, top_k=req.top_k)
+    try:
+        hits = await memory.search(user=req.user, query=req.query, top_k=req.top_k)
+    except EmbedError as e:
+        # 503, not an empty result set. "I could not search" and "you have no
+        # memories about this" are different answers, and the caller can only
+        # act on the difference if we send it. Auto-recall treats any error as
+        # skip-and-continue, so this never breaks a turn — it just stops the
+        # skip being silent.
+        log.warning("memory_search: embed failed for user=%s: %s", req.user, e)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"memory search unavailable (embedder): {e}",
+        ) from e
     return MemorySearchResponse(
         user=req.user,
         query=req.query,

@@ -81,6 +81,18 @@ class Settings(BaseSettings):
     # Ollama URL for nomic-embed-text calls
     ollama_url: str = Field(default="http://ollama:11434", alias="OLLAMA_URL")
     ollama_embed_timeout_s: float = Field(default=10.0, alias="OLLAMA_EMBED_TIMEOUT_S")
+    # Memory auto-recall runs on the hot path of EVERY request, and Audrey
+    # gives it a 5s deadline (`agentic.memory.timeout_s`). That is the tightest
+    # outer budget in the system, so the memory embed needs its own rung BELOW
+    # it — sharing the 10s general embed budget inverted the ladder, and the
+    # outer always won: custom-tools kept embedding for another 5s after Audrey
+    # had given up, and every stall reached the logs as a bare `timeout in
+    # 5.00s` with no cause attached. Same failure shape as the KB ladder
+    # (`test_kb_timeout_ladder.py`), same root cause on this box — the embedder
+    # being evicted from VRAM by a local panel worker. A memory embed is one
+    # short string; warm it is ~100ms, so anything past 4s is an eviction
+    # stall, and on the hot path failing fast beats waiting.
+    memory_embed_timeout_s: float = Field(default=4.0, alias="MEMORY_EMBED_TIMEOUT_S")
 
     # Chat archive (per-user searchable conversation history).
     # SQLite is the source of truth; Qdrant indexes Q+A-pair chunks for
