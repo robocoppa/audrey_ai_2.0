@@ -28,13 +28,24 @@ the admin endpoint `POST /v1/admin/kb/reconcile`. No code path runs
 the reconcile in two places at once — the periodic task and the admin
 trigger share the same qdrant client and serialize naturally through
 qdrant's per-collection locking.
+
+The two callers differ in one respect: the periodic loop suppresses
+httpx's per-request INFO logging for the duration of its own sweep (see
+`_quiet_httpx_during_sweep`), the admin trigger does not. A sweep is one
+`points/scroll` round-trip per 256 points, and httpx logs every one of
+them at INFO — enough to bury an hour of request-path logging every 30
+minutes. The admin endpoint is the "I am debugging a sweep" path, so it
+keeps the traffic visible.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import contextvars
 import logging
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -47,6 +58,45 @@ log = logging.getLogger(__name__)
 # `_list_user_files_sync` — large enough to keep the round-trip count
 # down, small enough to bound memory on a single page.
 _SCROLL_PAGE_SIZE = 256
+
+# Set only inside a sweep that asked to be quiet. A ContextVar rather than
+# a plain flag because the suppression has to be *scoped to this task*:
+# chat requests run concurrently with the sweep and their httpx lines are
+# the ones worth keeping. `asyncio.to_thread` copies the context, so the
+# var is still visible inside `_scroll_collection_sync`, which is where
+# the qdrant round-trips (and therefore the log records) actually happen.
+_sweeping: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "kb_reconcile_sweeping", default=False,
+)
+
+
+class _SweepNoiseFilter(logging.Filter):
+    """Drop httpx's sub-WARNING records, but only for a quiet sweep's own calls.
+
+    Attached to the `httpx` logger, so it sees every record httpx emits —
+    request path included. `_sweeping` is what distinguishes them, and it
+    is false everywhere except inside the periodic sweep. WARNING and above
+    always survive: a sweep that starts failing must still say so.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno >= logging.WARNING or not _sweeping.get()
+
+
+_filter_installed = False
+
+
+@contextlib.contextmanager
+def _quiet_httpx_during_sweep() -> Iterator[None]:
+    global _filter_installed
+    if not _filter_installed:
+        logging.getLogger("httpx").addFilter(_SweepNoiseFilter())
+        _filter_installed = True
+    token = _sweeping.set(True)
+    try:
+        yield
+    finally:
+        _sweeping.reset(token)
 
 
 @dataclass(slots=True)
@@ -144,18 +194,24 @@ async def reconcile_once(
     *,
     text_collection: str = "kb_text",
     image_collection: str = "kb_images",
+    quiet_httpx: bool = False,
 ) -> ReconcileResult:
     """Run one full reconcile pass over both global collections.
 
     Returns a structured summary. Per-user collections are NOT touched —
     they're managed by the sqlite uploads index + startup reconcile.
+
+    `quiet_httpx` suppresses httpx's per-request INFO lines for this
+    sweep's own qdrant traffic (never for concurrent requests). Defaults
+    to off; the periodic loop turns it on.
     """
     result = ReconcileResult()
     start = time.monotonic()
-    for name in (text_collection, image_collection):
-        summary = await reconcile_collection(qdrant, collection=name)
-        result.by_collection[name] = summary
-        result.total_orphans_deleted += summary.orphans_deleted
+    with _quiet_httpx_during_sweep() if quiet_httpx else contextlib.nullcontext():
+        for name in (text_collection, image_collection):
+            summary = await reconcile_collection(qdrant, collection=name)
+            result.by_collection[name] = summary
+            result.total_orphans_deleted += summary.orphans_deleted
     result.total_elapsed_s = time.monotonic() - start
     log.info(
         "kb.reconcile: pass complete; orphans_deleted=%d elapsed=%.2fs (%s)",
@@ -220,6 +276,7 @@ class KBReconciler:
                     self._qdrant,
                     text_collection=self._text_collection,
                     image_collection=self._image_collection,
+                    quiet_httpx=True,
                 )
             except Exception as e:  # noqa: BLE001 — loop must survive a bad sweep
                 log.warning("kb.reconcile: startup sweep raised: %s", e)
@@ -230,6 +287,7 @@ class KBReconciler:
                         self._qdrant,
                         text_collection=self._text_collection,
                         image_collection=self._image_collection,
+                        quiet_httpx=True,
                     )
                 except Exception as e:  # noqa: BLE001 — loop must survive a bad sweep
                     log.warning("kb.reconcile: sweep raised: %s", e)

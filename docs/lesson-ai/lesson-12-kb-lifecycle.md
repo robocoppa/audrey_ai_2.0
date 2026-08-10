@@ -414,7 +414,7 @@ The contract is simple: walk every point in `kb_text` and
 source path still exists on disk, and call `delete_by_source` for
 any that don't.
 
-[`kb/reconcile.py:88`](../../src/audrey/kb/reconcile.py#L88):
+[`kb/reconcile.py:138`](../../src/audrey/kb/reconcile.py#L138):
 
 ```python
 async def _scroll_sources(qdrant: QdrantKB, *, collection: str) -> dict[str, int]:
@@ -436,7 +436,7 @@ we can log "deleted 1 orphan with several dozen chunks" rather than
 just "1 orphan."
 
 The "is this orphan?" check is one line —
-[`kb/reconcile.py:123`](../../src/audrey/kb/reconcile.py#L123):
+[`kb/reconcile.py:173`](../../src/audrey/kb/reconcile.py#L173):
 
 ```python
 if Path(source).exists():
@@ -524,7 +524,7 @@ generator or callback shape.
 long-lived `asyncio.Task` that runs in the background for the life
 of the process.
 
-`KBReconciler` ([`kb/reconcile.py:171`](../../src/audrey/kb/reconcile.py#L171)):
+`KBReconciler` ([`kb/reconcile.py:227`](../../src/audrey/kb/reconcile.py#L227)):
 
 ```python
 class KBReconciler:
