@@ -28,15 +28,16 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from audrey.kb.qdrant import KBHit
-from audrey.routes.kb import _clip, _file_distribution
+from audrey.routes.kb import _clip, _file_distribution, _search_text_hybrid
 from audrey.routes.kb import router as kb_router
 
 SECRET = "s3cr3t-service-token"  # noqa: S105  (test fixture, not a real secret)
 
 
-def _hit(filename: str = "", score: float = 0.9) -> KBHit:
-    return KBHit(score=score, source="/u/f1.txt", kind="text", chunk_idx=0,
-                 text="…", payload={"filename": filename})
+def _hit(filename: str = "", score: float = 0.9, *,
+         source: str = "/u/f1.txt", text: str = "…") -> KBHit:
+    return KBHit(score=score, source=source, kind="text", chunk_idx=0,
+                 text=text, payload={"filename": filename})
 
 
 # ─── The distribution itself ──────────────────────────────────────────
@@ -108,6 +109,21 @@ def test_clipping_leaves_short_text_exactly_as_it_was():
     assert _clip("x" * 40, 40) == "x" * 40
 
 
+def test_the_label_names_which_set_is_being_counted():
+    """⚠️ Two distributions per query, and confusing them inverts the reading.
+
+    `files=` is what survived; `cut=` is what the evidence floor removed. A
+    file absent from `files=` and present in `cut=` was FILTERED — no
+    reordering can recover it, because the hit is gone. Absent from both means
+    it was merely outranked, which a diversity reorder fixes. Same numbers,
+    opposite conclusions.
+    """
+    hits = [_hit("carlsen.mp4")]
+
+    assert _file_distribution(hits) == "files=[carlsen.mp4:1]"
+    assert _file_distribution(hits, label="cut") == "cut=[carlsen.mp4:1]"
+
+
 def test_shortening_keeps_enough_to_tell_two_files_apart():
     """A prefix-only truncation is the risk: two videos from the same series
     can share thirty characters. This pins the budget as generous enough for
@@ -116,6 +132,90 @@ def test_shortening_keeps_enough_to_tell_two_files_apart():
     b = _file_distribution([_hit("London System - Part 1 - middlegame plans.mp4")])
 
     assert a != b
+
+
+# ─── Cut by the floor vs merely outranked ─────────────────────────────
+
+
+class _FakeHybridQdrant:
+    """Global collection only — `user=None` keeps the fan-out to one call."""
+
+    text_collection = "kb_text"
+
+    def __init__(self, dense: list[KBHit], lexical: list[KBHit]):
+        self._dense = dense
+        self._lexical = lexical
+
+    async def collection_exists(self, name: str) -> bool:
+        return False
+
+    async def search_hybrid(self, vec, query, *, top_k, collection=None, scope=None):
+        return (list(self._dense), list(self._lexical))
+
+
+_HYBRID_CFG = {"enabled": True, "rrf_k": 60, "min_term_overlap": 0.7}
+
+
+def _hybrid_line(caplog) -> str:
+    return next(m for m in caplog.messages if m.startswith("kb.hybrid:"))
+
+
+async def test_the_hybrid_line_names_the_files_the_floor_removed(caplog):
+    """⚠️ The fork this line exists to resolve.
+
+    A file missing from `files=[…]` is ambiguous between "filtered out" and
+    "outranked", and those need opposite fixes — a hit the floor removed is
+    gone from the list and no reordering can recover it. On 2026-08-10 an
+    unscoped London query returned 20 of 20 hits from one of two ingested
+    videos, and `top_k` caps at 20, so nothing could see which case it was.
+    """
+    caplog.set_level(logging.INFO)
+    q = _FakeHybridQdrant(
+        dense=[
+            _hit("how-to-win.mp4", 0.81, source="/u/a.txt",
+                 text="the london system chess opening starts with d4"),
+            # Under the 0.53 cosine floor, and in no lexical list, so the
+            # overlap branch cannot rescue it either.
+            _hit("carlsen.mp4", 0.44, source="/u/b.txt",
+                 text="he plays a quick blitz game here"),
+        ],
+        lexical=[],
+    )
+
+    hits, _ = await _search_text_hybrid(
+        q, [0.1], query="london system chess opening", top_k=10, user=None,
+        min_score=0.53, cfg=_HYBRID_CFG,
+    )
+
+    assert [h.payload["filename"] for h in hits] == ["how-to-win.mp4"]
+    line = _hybrid_line(caplog)
+    assert "fused=2 kept=1" in line
+    assert "cut=[carlsen.mp4:1]" in line
+
+
+async def test_an_outranked_file_is_not_reported_as_cut(caplog):
+    """The other half, and the reason `cut=` cannot just be inferred from
+    `files=`. Both hits clear the floor; one loses on score alone. It is still
+    in the fused list — which is exactly what makes it recoverable by
+    reordering — so reporting it as cut would point the fix the wrong way."""
+    caplog.set_level(logging.INFO)
+    q = _FakeHybridQdrant(
+        dense=[
+            _hit("how-to-win.mp4", 0.81, source="/u/a.txt", text="london system d4"),
+            _hit("carlsen.mp4", 0.79, source="/u/b.txt", text="london system blitz"),
+        ],
+        lexical=[],
+    )
+
+    hits, _ = await _search_text_hybrid(
+        q, [0.1], query="london system", top_k=1, user=None,
+        min_score=0.53, cfg=_HYBRID_CFG,
+    )
+
+    assert len(hits) == 1
+    line = _hybrid_line(caplog)
+    assert "fused=2 kept=2" in line
+    assert "cut=[]" in line
 
 
 # ─── Through the route ────────────────────────────────────────────────

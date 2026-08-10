@@ -525,9 +525,9 @@ text "a black labrador" and an actual picture of a black lab land
 within a few cosine degrees of each other.
 
 `/v1/kb/query/image` (handler at
-[`routes/kb.py:575`](../../src/audrey/routes/kb.py#L575)) picks which
+[`routes/kb.py:602`](../../src/audrey/routes/kb.py#L602)) picks which
 encoder to call based on which field of the request body was supplied
-([`routes/kb.py:592`](../../src/audrey/routes/kb.py#L592)):
+([`routes/kb.py:619`](../../src/audrey/routes/kb.py#L619)):
 
 ```python
 if req.image_url:
@@ -654,7 +654,7 @@ in Lesson 12 is what cleans these up.
 
 **5. SSRF-rejected image URL.**
 `_validate_image_url` raises `ValueError`; the route catches it
-([`routes/kb.py:598-599`](../../src/audrey/routes/kb.py#L598)) and 422s
+([`routes/kb.py:625-626`](../../src/audrey/routes/kb.py#L625)) and 422s
 with the reason. From the model's side this looks like any tool
 failure: it gets the rejection message in the `role: "tool"`
 content, and the right thing is to ask the user for a different URL
@@ -715,7 +715,7 @@ of material. Why?"**
 
 `_search_text_merged` pulls top-K from each collection then sorts by
 raw cosine score and slices to `top_k`
-([`routes/kb.py:485-488`](../../src/audrey/routes/kb.py#L485)). If
+([`routes/kb.py:489-492`](../../src/audrey/routes/kb.py#L489)). If
 the user's personal notes are closer matches to the query — likely
 when the notes use their exact phrasing — they can sweep all five
 slots. The global hits *are* in the candidate list; they just rank

@@ -263,7 +263,7 @@ _LOG_NAME_MAX = 40
 _LOG_QUERY_MAX = 60
 
 
-def _file_distribution(hits: Sequence[KBHit]) -> str:
+def _file_distribution(hits: Sequence[KBHit], *, label: str = "files") -> str:
     """Per-file hit counts for the query log, heaviest file first.
 
     `kb_search` returns hits pooled across files and ordered by score, so a
@@ -277,6 +277,10 @@ def _file_distribution(hits: Sequence[KBHit]) -> str:
     exists to answer is "was it skewed", and the answer is then the first
     entry. Emitted even when empty — a missing field and a zero look identical
     to someone scrolling a log.
+
+    `label` names the set being counted. `files=` is what came back; `cut=` is
+    what the evidence floor removed, and reading the two together is what
+    separates "this file was outranked" from "this file was filtered out".
     """
     counts = Counter(
         str(h.payload.get("filename") or "") or _GLOBAL_BUCKET for h in hits
@@ -285,7 +289,7 @@ def _file_distribution(hits: Sequence[KBHit]) -> str:
         f"{_clip(name, _LOG_NAME_MAX)}:{n}"
         for name, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
     ]
-    return "files=[" + ", ".join(parts) + "]"
+    return f"{label}=[" + ", ".join(parts) + "]"
 
 
 def _clip(text: str, limit: int) -> str:
@@ -543,6 +547,29 @@ async def _search_text_hybrid(
     )
     kept = [f for f in fused if passes_evidence(
         f, min_score=floor, min_overlap=min_overlap)]
+
+    # What the evidence floor removed, by file.
+    #
+    # `files=[…]` on the `kb.query:` line describes the hits that SURVIVED,
+    # and a file missing from it is ambiguous in a way that decides the fix:
+    # cut by the floor (no reordering can recover it — the hit is gone) or
+    # merely outranked (a diversity reorder promotes it). 2026-08-10 hit
+    # exactly that fork — 20 of 20 hits from one of two London videos, with
+    # `top_k` capped at 20 so nothing could see deeper into the same list.
+    #
+    # INFO, not DEBUG: turning on DEBUG globally to read one field would bury
+    # the log under httpx and qdrant chatter, which is the problem the
+    # reconcile filter was just written to solve. One extra line per KB query
+    # is affordable, and `fused/kept` is durable operator information — it
+    # says how hard the evidence floor is biting, which is the most
+    # consequential tunable in KB search.
+    cut = [f.hit for f in fused
+           if not passes_evidence(f, min_score=floor, min_overlap=min_overlap)]
+    log.info(
+        "kb.hybrid: fused=%d kept=%d floor=%.2f/%.2f  %s",
+        len(fused), len(kept), floor, min_overlap,
+        _file_distribution(cut, label="cut"),
+    )
 
     # Report the fused score, not the originating retriever's.
     #
