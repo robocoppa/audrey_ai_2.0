@@ -467,6 +467,10 @@ def test_the_wordings_that_false_failed_two_good_answers():
         # the most ordinary phrasing of the same fact.
         "No mentions of the **Sicilian Defence** were found in your videos.",
         "No references to it appear anywhere in your uploads.",
+        # Fifth, run 9. Five widenings is the evidence for the standing rule
+        # that a positive check must be measured every run, not assumed stable.
+        "It looks like **teamOffsite2025.mp4** isn't in your uploaded files.",
+        "That file is not in your uploads.",
     ):
         assert er._disclaims_absence(answer + _FOOTER) is True, answer
 
@@ -650,6 +654,33 @@ def test_the_colour_inversion_told_from_the_other_end():
         "used the London System against him." + _FOOTER
     )
     assert er._corpus_fictions(answer, "video")
+
+
+def test_collapsing_the_two_london_videos_into_one():
+    """A fiction about the SHAPE of the corpus, not its content — and the
+    answer to `video-ambiguous-singular` that looks most like diligence.
+    Verbatim from run 9, where it scored PASS: it named both files, so
+    `names_files` was satisfied by the very sentence denying they are two."""
+    for answer in (
+        '"Magnus Carlsen Teaches How to Win with the London System.mp4" — '
+        "same video, just named slightly differently in your uploads.",
+        "It looks like both of your videos are about Magnus Carlsen playing "
+        "the London System in a 3-minute blitz game.",
+    ):
+        assert er._corpus_fictions(answer + _FOOTER, "video"), answer
+
+
+def test_the_rozman_title_pattern_that_was_rejected_by_measurement():
+    """⚠️ The obvious way to catch the above — the Rozman title followed by
+    "Carlsen" or "blitz" — is the substring trap `_names_all_files` exists to
+    avoid. "How to Win with the London System" sits inside "Magnus Carlsen
+    Teaches How to Win with the London System", so all nine of its hits across
+    the archive were correct descriptions of the CARLSEN file."""
+    correct = (
+        'In "Magnus Carlsen Teaches How to Win with the London System" (7:37), '
+        "this is a livestreamed blitz game." + _FOOTER
+    )
+    assert er._corpus_fictions(correct, "video") == []
 
 
 def test_an_honest_answer_from_the_artifacts_is_clean():

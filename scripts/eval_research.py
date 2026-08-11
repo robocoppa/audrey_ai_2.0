@@ -621,6 +621,9 @@ _DISCLAIMS_ABSENCE = re.compile(
     r"(?:no transcript|no summary|no artifacts|no content|no record|no file"
     r"|no information|no such|no results?|no matches"
     r"|no mentions?|no references?|no discussion|no coverage"
+    r"|(?:is|are|was|were)n'?t in (?:your|the|my)"
+    r"|(?:is|are|was|were) not in (?:your|the|my)"
+    r"|not (?:in|among|part of) (?:your|the|my)|not one of your"
     r"|nothing(?:\s+\w+){0,2}\s+(?:was|is|to|about)"
     r"|none of (?:them|these|those|the|your|my|it)"
     r"|does not (?:have|contain|exist|cover|appear|include|discuss|mention"
@@ -859,6 +862,22 @@ _CORPUS_FICTIONS: dict[str, list[tuple[re.Pattern[str], str]]] = {
                     r"\bagainst\s+(?:him|Carlsen|Magnus)\b",
                     re.I),
          "Carlsen played White and played the London himself"),
+        # ⚠️ A fiction about the SHAPE of the corpus rather than its content.
+        # The two London files are different videos by different people: a
+        # 7m37s Carlsen blitz stream and a 29m38s Rozman lesson. Collapsing
+        # them into one is the answer to `video-ambiguous-singular` that looks
+        # most like diligence and is the furthest from true.
+        #
+        # ⚠️ The obvious pattern for this — the Rozman title followed by
+        # "Carlsen" or "blitz" — was measured and REJECTED: "How to Win with
+        # the London System" is a substring of the Carlsen title, so all nine
+        # of its archive hits were correct descriptions of the Carlsen file.
+        # Same substring trap `_names_all_files` exists to avoid.
+        (re.compile(r"\bsame video\b[^.]{0,60}?\b(?:named|name|upload|title)"
+                    r"|\bboth\b[^.]{0,40}?\byour videos\b[^.]{0,80}?"
+                    r"\b(?:Carlsen|blitz)\b",
+                    re.I),
+         "the two London videos are different videos by different people"),
     ],
 }
 
