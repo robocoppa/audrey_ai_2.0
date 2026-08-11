@@ -75,8 +75,13 @@ Per case, against the reassembled streamed answer:
                      appears (case-insensitively) in the answer body — a weak
                      objective signal for reasoning/knowledge cases.
   - not_contains   : opt-in ("answer_not_contains": [..]): NONE of the listed
-                     strings appears. For failures with a signature wording
-                     ("system limitations") rather than a missing element.
+                     strings appears. ⚠️ Exact substrings only — a model
+                     paraphrases around them for free (proved 2026-08-10).
+                     Use it for wordings that must never appear, not as the
+                     only guard on a behaviour.
+  - continuation   : opt-in ("expect_continuation_offer": true): the answer
+                     does not refuse the full text while offering no way to
+                     continue. Matches on shape, not phrasing.
   - names_files    : opt-in ("expect_names_files": [..]): every listed file is
                      named DISTINCTLY, matched longest-first so one filename
                      being a substring of another cannot satisfy both. The
@@ -500,6 +505,43 @@ def _contains_any(answer: str, needles: list[str]) -> bool:
     return any(n.lower() in low for n in needles)
 
 
+# A refusal to hand over the whole thing, and an offer to keep going. Kept as
+# families rather than exact phrases: a substring blacklist of the observed
+# wordings ("output length constraints") was added 2026-08-10 and defeated by
+# BOTH models on the very next run without either of them trying — "exceeds
+# available context limits", "consult the file directly". A model paraphrases
+# for free, so the check has to describe the shape, not the sentence.
+_DECLINES = re.compile(
+    r"\b(?:cannot|can'?t|can not|unable to)\s+"
+    r"(?:provide|give|show|produce|display|share|output|retrieve|return)\b",
+    re.I,
+)
+_OFFERS_MORE = re.compile(
+    r"(?:would you like|shall i|want me to|let me know if|i can continue"
+    r"|continue reading|keep reading|next page|read on|page by page"
+    r"|specific sections)",
+    re.I,
+)
+
+
+def _declines_without_offering(answer: str) -> bool:
+    """True when the answer refuses the full text and offers no way forward.
+
+    The `video-long-transcript-paging` failure, stated as a property instead
+    of a phrase. `get_file_text` pages a document; the honest answer either
+    keeps paging or says how much it has and offers to continue. The failure
+    is to declare the whole thing unavailable and send the user elsewhere —
+    to "video transcription software", on a file Audrey has already
+    transcribed in full.
+
+    Refusing is not itself wrong: an answer may legitimately decline to dump
+    33,000 characters. What makes it a failure is refusing with no offer, so
+    both halves are required before this fires.
+    """
+    body = _pre_debug_region(answer)
+    return bool(_DECLINES.search(body)) and not _OFFERS_MORE.search(body)
+
+
 def _names_all_files(answer: str, groups: list[str | list[str]]) -> bool:
     """True if the answer identifies every one of these files, DISTINCTLY.
 
@@ -771,6 +813,13 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     banned = case.get("answer_not_contains") or []
     checks["not_contains"] = (not _contains_any(answer, banned)) if banned else None
 
+    # Continuation check (opt-in): a paging case must not dead-end. Shape, not
+    # wording — see `_declines_without_offering`.
+    checks["continuation"] = (
+        (not _declines_without_offering(answer))
+        if case.get("expect_continuation_offer") else None
+    )
+
     ok = all(v for v in checks.values() if v is not None)
     return CaseResult(name=name, model=model, ok=ok, checks=checks,
                       answer=answer, banners_seen=banners, route=route,
@@ -798,7 +847,7 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
     print("=" * 70)
     cols = ["reachable", "no_error_marker", "has_answer", "banners",
             "sources", "url_wellformed", "route", "code_block", "code_runs",
-            "contains", "names_files", "not_contains"]
+            "contains", "names_files", "not_contains", "continuation"]
     for r in results:
         status = "PASS" if r.ok else "FAIL"
         print(f"\n[{status}] {r.name}   (model={r.model})")

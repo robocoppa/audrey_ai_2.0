@@ -218,6 +218,74 @@ def test_banned_phrases_ignore_the_debug_region():
     assert er._contains_any(answer, ["system limitation"]) is False
 
 
+# ── expect_continuation_offer ───────────────────────────────────────────────
+#
+# ⚠️ The second attempt at this case, and the reason the first one was wrong.
+# `answer_not_contains` blacklisted the observed wordings ("output length
+# constraints") on 2026-08-10 and was defeated on the NEXT run by both models
+# paraphrasing without trying — "exceeds available context limits", "exceeds
+# the available context window". A model rewords for free, so the check has to
+# describe the shape of the failure, not the sentence that expressed it.
+#
+# The shape: refusing to hand over the whole thing is fine. Refusing with no
+# way to continue is the failure. Both halves required.
+
+_GOOD_PAGED = (
+    "The transcript is quite long (33,626 characters total). Here's the first "
+    "portion: [00:00:01] ladies and gentlemen... That's the first ~4,005 "
+    "characters. Would you like me to continue reading it page by page?"
+)
+_BAD_CONTEXT_LIMIT = (
+    "I cannot provide the full transcript because it exceeds available context "
+    "limits. To get the full transcript, you would need to request it in "
+    "sections using an offset parameter, or consult the file directly."
+)
+_BAD_GO_ELSEWHERE = (
+    "I cannot provide a full transcript, which exceeds the available context "
+    "window. You would need to use video transcription software."
+)
+
+
+def test_a_paged_answer_with_an_offer_passes():
+    assert er._declines_without_offering(_GOOD_PAGED) is False
+
+
+def test_refusing_with_no_way_forward_fails():
+    assert er._declines_without_offering(_BAD_CONTEXT_LIMIT) is True
+
+
+def test_being_sent_to_another_tool_entirely_fails():
+    """Worst of the family: told to go transcribe a file Audrey has already
+    transcribed in full."""
+    assert er._declines_without_offering(_BAD_GO_ELSEWHERE) is True
+
+
+def test_paraphrase_does_not_escape_it():
+    """⚠️ The exact regression. Both of these slip past a substring blacklist
+    of the previously-observed wordings; neither slips past the shape."""
+    banned = ["system limitation", "output length constraint",
+              "access the file directly"]
+
+    for answer in (_BAD_CONTEXT_LIMIT, _BAD_GO_ELSEWHERE):
+        assert er._contains_any(answer, banned) is False       # blacklist misses
+        assert er._declines_without_offering(answer) is True   # shape catches
+
+
+def test_refusing_but_offering_to_continue_is_allowed():
+    """Declining to dump 33,000 characters is reasonable. The offer is what
+    separates a judgement call from a dead end, so only the pair fails."""
+    answer = ("I cannot provide the whole transcript in one message — it is "
+              "33,626 characters. Would you like me to continue page by page?")
+    assert er._declines_without_offering(answer) is False
+
+
+def test_an_answer_that_never_refuses_is_untouched():
+    """No refusal, no requirement — a case that simply answers must not be
+    dragged into needing an offer."""
+    answer = "Here is the continued transcript (pages 15-24): [00:06:48] ..."
+    assert er._declines_without_offering(answer) is False
+
+
 def test_the_suite_case_is_wired_up():
     """The helper is only worth having if a case actually opts in. Pins that
     `video-ambiguous-singular` — the case that regressed — carries it."""
@@ -228,6 +296,7 @@ def test_the_suite_case_is_wired_up():
     assert by_name["video-ambiguous-singular"].get("expect_names_files")
     assert by_name["video-control-unscoped-plural"].get("expect_names_files")
     assert by_name["video-long-transcript-paging"].get("answer_not_contains")
+    assert by_name["video-long-transcript-paging"].get("expect_continuation_offer")
 
 
 # ── sweep expansion ─────────────────────────────────────────────────────────
