@@ -74,6 +74,9 @@ Per case, against the reassembled streamed answer:
   - contains       : opt-in ("answer_contains": [..]): every listed string
                      appears (case-insensitively) in the answer body — a weak
                      objective signal for reasoning/knowledge cases.
+  - not_contains   : opt-in ("answer_not_contains": [..]): NONE of the listed
+                     strings appears. For failures with a signature wording
+                     ("system limitations") rather than a missing element.
   - names_files    : opt-in ("expect_names_files": [..]): every listed file is
                      named DISTINCTLY, matched longest-first so one filename
                      being a substring of another cannot satisfy both. The
@@ -491,6 +494,12 @@ def _contains_all(answer: str, needles: list[str]) -> bool:
     return all(n.lower() in low for n in needles)
 
 
+def _contains_any(answer: str, needles: list[str]) -> bool:
+    """True if ANY needle appears case-insensitively in the answer body."""
+    low = _pre_debug_region(answer).lower()
+    return any(n.lower() in low for n in needles)
+
+
 def _names_all_files(answer: str, groups: list[str | list[str]]) -> bool:
     """True if the answer identifies every one of these files, DISTINCTLY.
 
@@ -754,6 +763,14 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
         _names_all_files(answer, wanted_files) if wanted_files else None
     )
 
+    # Forbidden-phrase check (opt-in). Some failures have a signature wording
+    # rather than a missing element — "system limitations", "output length
+    # constraints" — and a model doing the right thing never reaches for them.
+    # Cheaper and far more robust than trying to positively detect the good
+    # behaviour, which has a hundred valid phrasings.
+    banned = case.get("answer_not_contains") or []
+    checks["not_contains"] = (not _contains_any(answer, banned)) if banned else None
+
     ok = all(v for v in checks.values() if v is not None)
     return CaseResult(name=name, model=model, ok=ok, checks=checks,
                       answer=answer, banners_seen=banners, route=route,
@@ -781,7 +798,7 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
     print("=" * 70)
     cols = ["reachable", "no_error_marker", "has_answer", "banners",
             "sources", "url_wellformed", "route", "code_block", "code_runs",
-            "contains", "names_files"]
+            "contains", "names_files", "not_contains"]
     for r in results:
         status = "PASS" if r.ok else "FAIL"
         print(f"\n[{status}] {r.name}   (model={r.model})")

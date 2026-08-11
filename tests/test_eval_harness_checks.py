@@ -180,6 +180,44 @@ def test_naming_ignores_the_debug_region():
     assert er._names_all_files(answer, _FILES) is False
 
 
+# ── answer_not_contains ─────────────────────────────────────────────────────
+#
+# ⚠️ Added 2026-08-10 after `video-long-transcript-paging` scored PASS on the
+# exact failure it was written to catch: three `get_file_text` pages in hand,
+# no bounds given, nothing offered to continue, and the user told to "access
+# the file directly". Some failures have a signature WORDING; that is
+# checkable, where the good behaviour has a hundred valid phrasings.
+
+
+def test_a_banned_phrase_fails():
+    answer = ("I cannot provide the full transcript because I only retrieved "
+              "partial sections due to output length constraints.")
+    assert er._contains_any(answer, ["output length constraint"]) is True
+
+
+def test_a_good_answer_trips_nothing():
+    """The real `audrey_auto` answer from the same run — bounds and an offer."""
+    answer = ("The transcript is quite long (33,626 characters total). That's "
+              "the first ~4,005 characters, with about 29,600 remaining. Would "
+              "you like me to continue reading it page by page?")
+    assert er._contains_any(
+        answer, ["system limitation", "output length constraint",
+                 "access the file directly"]) is False
+
+
+def test_any_one_banned_phrase_is_enough():
+    """`_contains_any`, not `_contains_all` — one signature phrase is the
+    failure; requiring all of them would pass every real case."""
+    answer = "You would need to access the file directly."
+    assert er._contains_any(answer, ["system limitation",
+                                     "access the file directly"]) is True
+
+
+def test_banned_phrases_ignore_the_debug_region():
+    answer = "Here is page 1.\n\n## Research trace (debug)\n\nsystem limitation"
+    assert er._contains_any(answer, ["system limitation"]) is False
+
+
 def test_the_suite_case_is_wired_up():
     """The helper is only worth having if a case actually opts in. Pins that
     `video-ambiguous-singular` — the case that regressed — carries it."""
@@ -189,6 +227,7 @@ def test_the_suite_case_is_wired_up():
 
     assert by_name["video-ambiguous-singular"].get("expect_names_files")
     assert by_name["video-control-unscoped-plural"].get("expect_names_files")
+    assert by_name["video-long-transcript-paging"].get("answer_not_contains")
 
 
 # ── sweep expansion ─────────────────────────────────────────────────────────
