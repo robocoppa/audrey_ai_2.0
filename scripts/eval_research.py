@@ -95,6 +95,13 @@ Per case, against the reassembled streamed answer:
                      video. Content correct, source wrong, every other check
                      green. Opt out only for a prompt that itself makes a
                      claim the model may reflect back.
+  - no_fiction     : ON for every case in a suite whose cases declare
+                     "corpus" (today: "video"). The answer makes no claim the
+                     corpus contradicts — a submission finish in a clip whose
+                     artifacts show only pinning, a weight class, the wrong
+                     tournament, Carlsen playing Black. Per-corpus rather than
+                     per-case on purpose: invention had a blacklist on two of
+                     the twelve video cases and was turning up on six.
   - names_files    : opt-in ("expect_names_files": [..]): every listed file is
                      named DISTINCTLY, matched longest-first so one filename
                      being a substring of another cannot satisfy both. The
@@ -248,6 +255,7 @@ class CaseResult:
     error: str = ""
     route: str = "unknown"            # inferred path: fast | deep | research
     code_detail: str = ""             # code_runs outcome detail (informational)
+    fiction_detail: str = ""          # which corpus fictions no_fiction found
     ttft_s: float | None = None
     total_s: float | None = None
     # Informational domain-based source breakdown (never a pass/fail check).
@@ -677,7 +685,11 @@ def _names_all_files(answer: str, groups: list[str | list[str]]) -> bool:
     structural check in this file.
     """
     alts = [[g] if isinstance(g, str) else list(g) for g in groups]
-    hay = _pre_debug_region(answer).lower()
+    # `_prose_region`, not `_pre_debug_region`: models write curly quotes, and
+    # an alias like '"How to WIN" video' would never match `“How to WIN” video`
+    # without the normalisation. Re-measured over the whole answers archive when
+    # this changed — zero verdicts moved on the region change alone.
+    hay = _prose_region(answer).lower()
     for group in sorted(alts, key=lambda g: max(len(a) for a in g), reverse=True):
         # Longest alternative first within the group too: prefer the most
         # specific mention so a vaguer one stays available for another file.
@@ -720,6 +732,29 @@ _MISATTRIBUTION = re.compile(
     re.I,
 )
 
+# The same failure with no verb of authorship in it: the SPEAKER's possessions
+# handed to the user. "Both videos mention that you have additional London
+# System courses available on your website" — the courses and the site are the
+# video author's, and `you have` is far too common a phrase to put in the verb
+# list. The nouns are what give it away. Every one here belongs to whoever MADE
+# the content; "your videos", "your uploads", "your files" belong to whoever
+# uploaded it and are deliberately absent.
+# Adjectives may sit in between — "your four-hour London System course" is the
+# same sentence. Measured at every gap from 0 to 3 over the archive; the hit
+# count never moves off the one true positive, so the wider form is free. The
+# function words are excluded so the gap cannot bridge a prepositional phrase:
+# "your question about the course" is about the user's question, not the
+# speaker's course.
+_SPEAKER_POSSESSIONS = re.compile(
+    r"\byour\s+(?:(?!(?:of|about|in|on|for|to|the|a|an|with|from|and|or)\s)"
+    r"[\w-]+\s+){0,3}"
+    r"(?:web ?sites?|channels?|courses?|subscribers?|viewers?|students?"
+    r"|audiences?|video descriptions?|patreon|discord|newsletters?|podcasts?"
+    r"|books?|substack|lessons?|tutorials?|streams?|followers?"
+    r"|communit(?:y|ies))\b",
+    re.I,
+)
+
 
 def _misattributes_to_user(answer: str) -> bool:
     """True when the answer credits the USER with a file's content.
@@ -741,8 +776,95 @@ def _misattributes_to_user(answer: str) -> bool:
     (research, deep, code, topics and video suites): 6 true positives — the
     four above plus the 2026-08-09 "You comment that…" pair — and zero false
     positives. Worth re-running that scan if the verb list is ever widened.
+
+    ⚠️ 2026-08-11: The verb pattern alone missed a live one. "Both videos
+    mention that you have additional London System courses available on your
+    website" is the same failure — the user credited with what a speaker said
+    and owns — with no verb of authorship anywhere in it. `_SPEAKER_POSSESSIONS`
+    covers that half. Re-measured over the archive as it stood: one hit, the
+    real one, in 1,403 sections.
     """
-    return bool(_MISATTRIBUTION.search(_prose_region(answer)))
+    body = _prose_region(answer)
+    return bool(_MISATTRIBUTION.search(body) or _SPEAKER_POSSESSIONS.search(body))
+
+
+# --- Corpus fictions --------------------------------------------------------
+#
+# ⚠️ The blind spot that has moved FIVE times. Every guard against invention so
+# far has been a per-case `answer_not_contains`, and every time, the next run's
+# fabrication landed on a different case — one that happened not to carry a
+# blacklist, and therefore scored a clean PASS. Listing the cases where it was
+# last seen is always one run behind it.
+#
+# These are claims that are FALSE about the fixed video corpus, checked on every
+# case that declares `"corpus": "video"`. That inverts the maintenance: a new
+# case is covered the day it is added, and only a new KIND of invention needs a
+# new entry.
+#
+# Ground truth is the artifact summaries the model is actually given, taken from
+# the upload page on 2026-08-11. Two of them matter here:
+#
+#   • Roger Gracie vs Lovato — VISUAL ONLY, no transcript. Grappling on a mat,
+#     one competitor pinning the other, a scoreboard, IBJJF signage, a
+#     thank-you-for-watching screen. No result. No winner. No finish. No weight
+#     class. No tournament beyond that signage.
+#   • Magnus Carlsen — Carlsen plays WHITE and plays the London himself, rated
+#     3272, against CM Shuvalov (2707) in a 3-minute blitz game he wins.
+#
+# Each entry below is an invention observed in a real answer, not a guess about
+# what a model might say.
+_NEGATORS = re.compile(
+    r"\b(?:no|not|n't|never|without|unclear|unknown|unspecified|doesn't|does "
+    r"not|isn't|is not|cannot|can't|don't|do not|lacks?|absent|silent on)\b",
+    re.I,
+)
+
+_CORPUS_FICTIONS: dict[str, list[tuple[re.Pattern[str], str]]] = {
+    "video": [
+        (re.compile(r"\b(?:submission|choke|armbar|arm[- ]triangle|kimura"
+                    r"|tap(?:ped|s)? out)\b", re.I),
+         "a finish the Gracie artifacts never mention"),
+        # ⚠️ Bound to a grappling word in the same sentence. Unbound, this
+        # matched "Victory in this system relies on…" in a London System answer.
+        # A bare `\d-\d` scoreline was tried and dropped: it read transcript
+        # timestamps ([00:06:47]) and chess notation (1-0) as match results.
+        (re.compile(r"\b(?:Gracie|Lovato|match|bout|fight)\b[^.]{0,120}?"
+                    r"\b(?:won|wins|winning|victory|defeated|beat)\b"
+                    r"[^.]{0,40}?\b(?:by|via|on)\b", re.I),
+         "a result the Gracie artifacts never state"),
+        (re.compile(r"ultra[- ]?heavy ?weight|\+?\s*97\.8|absolute division"
+                    r"|Gabriel Aranha|\bADCC\b|Abu Dhabi", re.I),
+         "a division, opponent or tournament not in the corpus"),
+        # ⚠️ Carlsen's name must be in it. A bare "against the London" is how
+        # anyone describes Black's side of the opening and is perfectly correct.
+        (re.compile(r"\bCarlsen\b[^.]{0,80}?\b(?:playing|plays|as|has)\s+Black\b",
+                    re.I),
+         "Carlsen played White and played the London himself"),
+    ],
+}
+
+
+def _corpus_fictions(answer: str, corpus: str) -> list[str]:
+    """Claims in this answer that the corpus contradicts, as reasons.
+
+    A match inside a NEGATED clause is not a fiction: "the summary does not say
+    whether it ended by submission" is the honest answer, and a check that
+    failed it would be punishing the behaviour it exists to encourage. The
+    negator only has to be somewhere in the same sentence — crude, and
+    deliberately biased towards letting an answer through, because a false fail
+    here would discredit the whole check.
+    """
+    body = _prose_region(answer)
+    found = []
+    for pattern, why in _CORPUS_FICTIONS.get(corpus, []):
+        for m in pattern.finditer(body):
+            start = body.rfind(".", 0, m.start()) + 1
+            end = body.find(".", m.end())
+            sentence = body[start:end if end >= 0 else len(body)]
+            if not _NEGATORS.search(sentence):
+                found.append(f"{why}: {m.group(0)!r}")
+                break
+    return found
 
 
 # --- Source-quality reporting (informational, NOT a pass/fail check) ---------
@@ -903,6 +1025,11 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
         None if case.get("allow_user_attribution")
         else not _misattributes_to_user(answer)
     )
+    # On for every case in a suite that declares a corpus — the same reasoning
+    # one step further. Invention had a per-case blacklist on two of the twelve
+    # video cases and turned up on six of them; see `_CORPUS_FICTIONS`.
+    fictions = _corpus_fictions(answer, case.get("corpus", ""))
+    checks["no_fiction"] = None if not case.get("corpus") else not fictions
 
     # Banner expectation: explicit per-case, else inferred from the model.
     expect_banners = case.get("expect_banners")
@@ -1009,7 +1136,8 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     return CaseResult(name=name, model=model, ok=ok, checks=checks,
                       answer=answer, banners_seen=banners, route=route,
                       ttft_s=timing.ttft_s, total_s=timing.total_s,
-                      source_stats=stats, code_detail=code_detail)
+                      source_stats=stats, code_detail=code_detail,
+                      fiction_detail="; ".join(fictions))
 
 
 def _fmt_check(v: bool | None) -> str:
@@ -1033,7 +1161,7 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
     cols = ["reachable", "no_error_marker", "has_answer", "banners",
             "sources", "url_wellformed", "route", "code_block", "code_runs",
             "contains", "names_files", "not_contains", "continuation",
-            "disclaims", "not_truncated", "not_misattributed"]
+            "disclaims", "not_truncated", "not_misattributed", "no_fiction"]
     for r in results:
         status = "PASS" if r.ok else "FAIL"
         print(f"\n[{status}] {r.name}   (model={r.model})")
@@ -1041,6 +1169,8 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
             print(f"   error: {r.error}")
         if r.code_detail:
             print(f"   code: {r.code_detail}")
+        if r.fiction_detail:
+            print(f"   fiction: {r.fiction_detail}")
         line = "   " + "  ".join(f"{c}:{_fmt_check(r.checks.get(c))}" for c in cols)
         print(line)
         print(f"   {_fmt_latency(r)}")
@@ -1093,6 +1223,8 @@ def save_results(results: list[CaseResult], save_file: Path) -> None:
             section += f"- {r.source_stats.line()}\n"
         if r.code_detail:
             section += f"- code: {r.code_detail}\n"
+        if r.fiction_detail:
+            section += f"- fiction: {r.fiction_detail}\n"
         if r.error:
             section += f"- error: {r.error}\n"
         section += f"\n{r.answer or '(no answer body)'}\n"
@@ -1123,6 +1255,7 @@ def save_json(results: list[CaseResult], save_json_file: Path) -> None:
             "banners": r.banners_seen,
             "error": r.error,
             "code_detail": r.code_detail,
+            "fiction_detail": r.fiction_detail,
             # Grounding-quality numbers (research/sourced cases). None when the
             # case computed no source stats (e.g. a code case) — kept as an
             # explicit null so the record shape is stable for eval_compare.py.

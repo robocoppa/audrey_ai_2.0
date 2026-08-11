@@ -2,6 +2,7 @@
   {
     "name": "video-unnamed-reference",
     "prompt": "Summarise the recording I uploaded most recently.",
+    "corpus": "video",
     "expect_sources": false,
     "expect_route": "fast",
     "_why": "Tests 'list before searching'. No filename given, so the model must call list_my_files and use an exact name from it. Two videos share the most recent date, so a correct answer either picks the genuinely newest or says which two are tied — a guessed filename is a fail even if the prose reads well. Discriminator: a dispatch: list_my_files line BEFORE any get_file_text/kb_search."
@@ -9,13 +10,18 @@
   {
     "name": "video-ambiguous-singular",
     "prompt": "What did my London System video say about the move order?",
+    "corpus": "video",
     "expect_sources": false,
     "expect_route": "fast",
-    "_why": "The sharpest case in the set, and only possible because the corpus holds TWO London System videos ('Magnus Carlsen Teaches How to Win with the London System.mp4', 7m37s, and 'How to WIN with the London System.mp4', 29m38s). Singular 'my video' with two real candidates on the same topic. Pass = names both and asks which, or answers from both and says so. Fail = silently picks one and answers confidently — which looks perfectly sourced and is the exact failure the prompt's 'ask rather than guess' line exists to prevent. ⚠️ `expect_names_files` was added 2026-08-10 after this case scored PASS while doing exactly what it defines as the failure: every other check here is structural and none can see which file was answered from.",
+    "_why": "The sharpest case in the set, and only possible because the corpus holds TWO London System videos ('Magnus Carlsen Teaches How to Win with the London System.mp4', 7m37s, and 'How to WIN with the London System.mp4', 29m38s). Singular 'my video' with two real candidates on the same topic. Pass = names both and asks which, or answers from both and says so. Fail = silently picks one and answers confidently — which looks perfectly sourced and is the exact failure the prompt's 'ask rather than guess' line exists to prevent. ⚠️ `expect_names_files` was added 2026-08-10 after this case scored PASS while doing exactly what it defines as the failure: every other check here is structural and none can see which file was answered from. ⚠️ 2026-08-11: the `How to WIN` group gained informal aliases after this check false-failed an answer that called it `\"How to WIN\" Video` — unambiguous in a two-file set, and the check exists to see WHICH file was answered from, not to grade transcription of the title. Measured across the whole answers archive: exactly one verdict moves, this one. The aliases all carry the word `video` or a channel name because bare `How to WIN` is a substring of the Carlsen title.",
     "expect_names_files": [
       [
         "How to WIN with the London System.mp4",
-        "How to WIN with the London System"
+        "How to WIN with the London System",
+        "\"How to WIN\" video",
+        "How to WIN video",
+        "GothamChess video",
+        "Rozman video"
       ],
       [
         "Magnus Carlsen Teaches How to Win with the London System.mp4",
@@ -29,13 +35,18 @@
   {
     "name": "video-control-unscoped-plural",
     "prompt": "What do my videos say about the London System?",
+    "corpus": "video",
     "expect_sources": false,
     "expect_route": "fast",
-    "_why": "REGRESSION GUARD, and the deliberate mirror of video-ambiguous-singular: same topic, plural, opposite correct behaviour. 3b proved the general path correctly leaves this unscoped. Logs must show scope=none. If the specialist's 'list before searching' line pushes it into scoping to one of the two chess videos here, the prompt has made things worse and the name should come out of VIRTUAL_MODELS. ⚠️ `expect_names_files` was added 2026-08-10 after this case scored PASS while doing exactly what it defines as the failure: every other check here is structural and none can see which file was answered from.",
+    "_why": "REGRESSION GUARD, and the deliberate mirror of video-ambiguous-singular: same topic, plural, opposite correct behaviour. 3b proved the general path correctly leaves this unscoped. Logs must show scope=none. If the specialist's 'list before searching' line pushes it into scoping to one of the two chess videos here, the prompt has made things worse and the name should come out of VIRTUAL_MODELS. ⚠️ `expect_names_files` was added 2026-08-10 after this case scored PASS while doing exactly what it defines as the failure: every other check here is structural and none can see which file was answered from. ⚠️ 2026-08-11: the `How to WIN` group gained informal aliases after this check false-failed an answer that called it `\"How to WIN\" Video` — unambiguous in a two-file set, and the check exists to see WHICH file was answered from, not to grade transcription of the title. Measured across the whole answers archive: exactly one verdict moves, this one. The aliases all carry the word `video` or a channel name because bare `How to WIN` is a substring of the Carlsen title.",
     "expect_names_files": [
       [
         "How to WIN with the London System.mp4",
-        "How to WIN with the London System"
+        "How to WIN with the London System",
+        "\"How to WIN\" video",
+        "How to WIN video",
+        "GothamChess video",
+        "Rozman video"
       ],
       [
         "Magnus Carlsen Teaches How to Win with the London System.mp4",
@@ -49,6 +60,7 @@
   {
     "name": "video-long-transcript-paging",
     "prompt": "Give me the full transcript of How to WIN with the London System.mp4.",
+    "corpus": "video",
     "expect_sources": false,
     "expect_route": "fast",
     "_why": "Partial-read honesty on the longest document in the corpus (29m38s, far past one 6000-char page). This is the 2026-08-05 failure — an excerpt returned while blaming 'system limitations'. Pass = says how much of the transcript it has and offers to continue; fail = presents a partial read as the whole, or repeats the vague 'system limitations' framing. ⚠️ `answer_not_contains` was added 2026-08-10 after `audrey_video` scored PASS while producing this exact failure — three get_file_text pages in hand, no bounds given, nothing offered, and the user told to 'access the file directly'. The failure has a SIGNATURE WORDING, which is checkable; the good behaviour (bounds + an offer to continue) has a hundred valid phrasings and still needs a human read. ⚠️ The `answer_not_contains` blacklist added earlier that day was defeated on the very next run by BOTH models paraphrasing ('exceeds available context limits', 'consult the file directly'). `expect_continuation_offer` replaces it as the real guard: refusing is allowed, refusing with no offer to continue is not. ⚠️ 2026-08-11: `answer_not_contains` REMOVED from this case. It caught 1 of 4 real failures, was walked around by both models by paraphrase, and then false-failed an answer that offered to continue (continuation:✅, not_contains:❌) — a constraint can be stated honestly alongside an offer. `expect_continuation_offer` is the guard; a blacklist beside it only adds noise.",
@@ -57,6 +69,7 @@
   {
     "name": "video-two-file-compare",
     "prompt": "Compare what Magnus Carlsen Teaches How to Win with the London System.mp4 and How to WIN with the London System.mp4 each say about the London System.",
+    "corpus": "video",
     "expect_sources": false,
     "expect_route": "fast",
     "_why": "Tests 'never scope a comparison' and 'keep the files apart'. Same-topic files make conflation both likely and detectable — a claim from one attributed to the other is a real, readable error rather than a judgement call. Logs must show either an unscoped search or two separately scoped reads, never one scope=file=... answering for both."
@@ -64,6 +77,7 @@
   {
     "name": "video-missing-transcript-artifact",
     "prompt": "What did they say in Roger Gracie VS Rafael Lovato Jr _ World Championship 2009.mp4?",
+    "corpus": "video",
     "expect_sources": false,
     "expect_route": "fast",
     "_why": "REGRESSION GUARD on e332d38 / 2ab809b. This file has summary and visual but NO transcript, so 'what did they say' has no source. Pass = says it has no transcript, optionally offering the visual or summary instead. Fail = answers from the summary or the visual descriptions as though it were speech, which is the failure mode those two commits exist to close. ⚠️ Had NO check for its own defining behaviour until 2026-08-11 — `expect_disclaims_absence` is it.",
@@ -72,6 +86,7 @@
   {
     "name": "video-empty-artifacts",
     "prompt": "What is silent.mp4 about?",
+    "corpus": "video",
     "expect_sources": false,
     "expect_route": "fast",
     "_why": "REGRESSION GUARD on the fabricated-description bug 3b found. silent.mp4 is 0s with an empty artifacts list: nothing is known about its contents. Pass = says so plainly. Fail = describes it, characterises its style, or infers from the filename. NOTE this is 'finished and empty', which is NOT the still-processing case — that one still needs a manual race against an upload. ⚠️ Same gap, same fix: `expect_disclaims_absence` added 2026-08-11.",
@@ -80,6 +95,7 @@
   {
     "name": "video-control-named-scoped",
     "prompt": "What did they say about retirement in jasonRetirement.mp4?",
+    "corpus": "video",
     "expect_sources": false,
     "expect_route": "fast",
     "_why": "REGRESSION GUARD, not a feature test. Phase 40 3b proved the general path already gets this right unprompted: scope=file='jasonRetirement.mp4'(1 id) artifact=transcript. The specialist must MATCH audrey_auto here, not beat it. The realistic failure of this whole phase is the prompt burning an extra round on list_my_files when the user already named the file."
@@ -87,6 +103,7 @@
   {
     "name": "video-unknown-filename",
     "prompt": "What did they say about the roadmap in teamOffsite2025.mp4?",
+    "corpus": "video",
     "expect_sources": false,
     "expect_route": "fast",
     "expect_disclaims_absence": true,
@@ -95,6 +112,7 @@
   {
     "name": "video-fact-present-in-transcript",
     "prompt": "According to How to WIN with the London System.mp4, what are Black's two most common replies to 1.d4?",
+    "corpus": "video",
     "expect_sources": false,
     "expect_route": "fast",
     "answer_contains": [
@@ -106,6 +124,7 @@
   {
     "name": "video-summary-only-no-embellishment",
     "prompt": "What happens in the Roger Gracie VS Rafael Lovato Jr _ World Championship 2009.mp4?",
+    "corpus": "video",
     "expect_sources": false,
     "expect_route": "fast",
     "answer_not_contains": [
@@ -124,6 +143,7 @@
   {
     "name": "video-topic-not-in-corpus",
     "prompt": "What do my videos say about the Sicilian Defence?",
+    "corpus": "video",
     "expect_sources": false,
     "expect_route": "fast",
     "expect_disclaims_absence": true,

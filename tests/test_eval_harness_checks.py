@@ -120,6 +120,12 @@ _FILES = [
     [_LONG, "Magnus Carlsen Teaches How to Win with the London System",
      "Magnus Carlsen video", "Carlsen video", "Magnus Carlsen"],
 ]
+# The suite's own group as of 2026-08-11, informal aliases included.
+_WIDE_FILES = [
+    [_SHORT, "How to WIN with the London System", '"How to WIN" video',
+     "How to WIN video", "GothamChess video", "Rozman video"],
+    _FILES[1],
+]
 
 
 def test_naming_both_files_passes():
@@ -171,6 +177,41 @@ def test_a_plain_string_still_works():
 def test_naming_is_case_insensitive():
     answer = "i checked how to win with the london system.mp4 and " + _LONG.lower()
     assert er._names_all_files(answer, _FILES) is True
+
+
+def test_a_shortened_title_in_quotes_counts():
+    """⚠️ The false fail of 2026-08-11. `audrey_video` wrote its two section
+    headers as "The Magnus Carlsen Video" and 'The "How to WIN" Video' — which
+    is exactly what this check is for, since it says which file each section
+    came from. It scored ❌ because the alias list only held the full title.
+
+    The check exists to see WHICH file was answered from, not to grade
+    transcription of a filename.
+    """
+    answer = (
+        'Based on both: **The Magnus Carlsen Video (~7:37)** covers his opinion '
+        'of the opening. **The "How to WIN" Video (~29:38)** is a full lesson.'
+    )
+    assert er._names_all_files(answer, _WIDE_FILES) is True
+
+
+def test_curly_quotes_do_not_defeat_an_alias():
+    """Models emit typographic quotes; the alias list is written in ASCII.
+    `_names_all_files` reads the normalised prose region for this reason."""
+    answer = (
+        "The Magnus Carlsen video is a blitz game. The “How to WIN” "
+        "video is a structured lesson."
+    )
+    assert er._names_all_files(answer, _WIDE_FILES) is True
+
+
+def test_the_short_aliases_still_cannot_be_satisfied_by_the_carlsen_title():
+    """⚠️ Why every alias carries `video` or a channel name. Bare `How to WIN`
+    is a substring of `Magnus Carlsen Teaches How to Win with the London
+    System`, so an alias that short would let one mention answer for both files
+    — reinstating the exact defect `_names_all_files` was written to close."""
+    answer = f"Based on {_LONG}, the move order begins with 1. d4."
+    assert er._names_all_files(answer, _WIDE_FILES) is False
 
 
 def test_naming_ignores_the_debug_region():
@@ -486,6 +527,114 @@ def test_it_reads_prose_not_the_footer():
     assert er._misattributes_to_user(answer) is False
 
 
+def test_the_speakers_possessions_are_not_the_users():
+    """⚠️ The half the verb pattern missed, verbatim from
+    `video-control-unscoped-plural` [audrey_video] on 2026-08-11.
+
+    Same failure, no verb of authorship in it. The courses and the site belong
+    to whoever made the video; `you have` is far too ordinary a phrase to put
+    in the verb list, so the NOUN is what identifies it.
+    """
+    assert er._misattributes_to_user(
+        "Both videos mention that you have additional London System courses "
+        "available on your website for those wanting to take their knowledge "
+        "further." + _FOOTER) is True
+
+    for answer in (
+        "It closes by plugging your four-hour London System course.",
+        "Your channel has grown a lot this year.",
+        "That video points viewers at your Patreon.",
+    ):
+        assert er._misattributes_to_user(answer + _FOOTER) is True, answer
+
+
+def test_what_the_user_really_does_own_is_left_alone():
+    """The uploader owns the files; the speaker owns everything else. A check
+    that fired on "your videos" would fire on nearly every video answer in the
+    suite and be worth nothing."""
+    for answer in (
+        "Your videos cover the London System from two angles.",
+        "None of your uploads mention the Sicilian Defence.",
+        "The file you uploaded has no transcript artifact.",
+        "I searched your files and found two chess videos.",
+    ):
+        assert er._misattributes_to_user(answer + _FOOTER) is False, answer
+
+
+# ── no_fiction ──────────────────────────────────────────────────────────────
+#
+# ⚠️ The blind spot that moved FIVE times. Every guard against invention was a
+# per-case `answer_not_contains`, and each run's fabrication landed on a case
+# that happened not to carry one. Swept over every archived video answer when
+# this was written: 15 fabrications across SIX of the twelve cases, only two of
+# which had a blacklist. Per-corpus instead of per-case is the fix.
+#
+# Ground truth is the artifact summaries the model is given (upload page,
+# 2026-08-11): the Gracie clip is visual-only — grappling, a pin, a scoreboard,
+# IBJJF signage — with no result of any kind; Carlsen plays White and plays the
+# London himself.
+
+
+def test_the_inventions_that_scored_pass():
+    """Verbatim from archived answers that every check passed."""
+    for answer in (
+        "Roger ultimately dominates the fight, securing a decisive victory "
+        "via submission, highlighting his technical mastery.",
+        "Roger Gracie won this particular match by **points (4-1)** in the "
+        "absolute division.",
+        "This video captures highlights from the 2009 Abu Dhabi World "
+        "Professional Jiu-Jitsu Championship final.",
+        "It's a 3-minute blitz game in which Magnus Carlsen plays against "
+        "the London as Black.",
+        "This video is a livestreamed blitz game in which Magnus Carlsen "
+        "(playing Black, rated 3272) faces Evgenij Shuvalov.",
+    ):
+        assert er._corpus_fictions(answer + _FOOTER, "video"), answer
+
+
+def test_an_honest_answer_from_the_artifacts_is_clean():
+    for answer in (
+        "The footage shows two competitors in blue gis grappling on a mat, "
+        "with one pinning the other while referees observe.",
+        "Carlsen plays the London as White and wins after going three pawns up.",
+        "The video identifies ...c5 as Black's most challenging reply.",
+        "Victory in this system relies on controlling the centre.",
+    ):
+        assert er._corpus_fictions(answer + _FOOTER, "video") == [], answer
+
+
+def test_saying_the_corpus_does_not_say_is_not_a_fiction():
+    """⚠️ The behaviour this check exists to ENCOURAGE must not trip it. A
+    negator anywhere in the sentence is enough — deliberately biased towards
+    letting answers through, because one false fail would discredit it."""
+    for answer in (
+        "The artifacts do not say whether the match ended by submission.",
+        "There is no record of who won or by what score.",
+        "It isn't clear from the summary whether there was a choke.",
+    ):
+        assert er._corpus_fictions(answer + _FOOTER, "video") == [], answer
+
+
+def test_transcript_timestamps_are_not_scorelines():
+    """⚠️ A bare `\\d-\\d` scoreline pattern was measured and dropped: across the
+    archive it read paging timestamps and chess notation as match results, on
+    the paging and ambiguous-singular cases where nothing was invented."""
+    for answer in (
+        "Here is the rest: [00:06:47] squares in the centre you don't have to "
+        "castle short.",
+        "The game finished 1-0 after Black resigned.",
+    ):
+        assert er._corpus_fictions(answer + _FOOTER, "video") == [], answer
+
+
+def test_a_suite_with_no_corpus_is_untouched():
+    """The fictions are claims about specific files. Nothing outside that
+    corpus should ever be measured against them."""
+    answer = "Gracie won the match by submission." + _FOOTER
+    assert er._corpus_fictions(answer, "") == []
+    assert er._corpus_fictions(answer, "research") == []
+
+
 def _canned_run(monkeypatch, answer: str, case: dict) -> dict:
     """Drive the real `run_case` over a fixed answer — no network."""
     monkeypatch.setattr(
@@ -516,6 +665,32 @@ def test_a_case_can_opt_out(monkeypatch):
     assert checks["not_misattributed"] is None
 
 
+def test_declaring_a_corpus_turns_the_fiction_check_on(monkeypatch):
+    invented = "Gracie won the match by submission in the absolute division."
+
+    bare = {"name": "x", "prompt": "what happens in the video"}
+    assert _canned_run(monkeypatch, invented, bare)["no_fiction"] is None
+
+    scoped = dict(bare, corpus="video")
+    assert _canned_run(monkeypatch, invented, scoped)["no_fiction"] is False
+    assert _canned_run(
+        monkeypatch, "Two competitors grapple on a mat.", scoped
+    )["no_fiction"] is True
+
+
+def test_the_reason_reaches_the_report(monkeypatch):
+    """A bare ❌ on a fabrication check is close to useless — the whole point is
+    to say WHICH claim the corpus contradicts, so a human can confirm it."""
+    monkeypatch.setattr(
+        er, "_post_stream",
+        lambda *a, **k: ("Gracie won the match by submission.", [], None,
+                         er.StreamTiming(0.1, 1.0)))
+    r = er.run_case("http://x", "k",
+                    {"name": "x", "prompt": "p", "corpus": "video"},
+                    "audrey_auto", 10.0)
+    assert "submission" in r.fiction_detail
+
+
 def test_the_suite_case_is_wired_up():
     """The helper is only worth having if a case actually opts in. Pins that
     `video-ambiguous-singular` — the case that regressed — carries it."""
@@ -529,6 +704,16 @@ def test_the_suite_case_is_wired_up():
     assert by_name["video-missing-transcript-artifact"].get("expect_disclaims_absence")
     assert by_name["video-empty-artifacts"].get("expect_disclaims_absence")
     assert by_name["video-fact-present-in-transcript"].get("answer_contains")
+
+    # `_WIDE_FILES` above is only meaningful if it is the suite's real group.
+    for name in ("video-ambiguous-singular", "video-control-unscoped-plural"):
+        assert by_name[name]["expect_names_files"] == _WIDE_FILES, name
+
+    # ⚠️ EVERY case, not some. A video case without `corpus` is a case the
+    # fabrication check cannot see — which is precisely how the blind spot kept
+    # moving. This assertion is what makes a new case covered by default.
+    for c in cases:
+        assert c.get("corpus") == "video", c["name"]
 
 
 def test_every_video_case_is_checked_for_something_behavioural():
@@ -593,7 +778,8 @@ def test_save_json_round_trips(tmp_path):
         "checks": {"reachable": True, "code_runs": False, "banners": None},
         "route": "unknown", "ttft_s": 1.5, "total_s": 12.0,
         "answer_len": 40, "banners": [], "error": "",
-        "code_detail": "exit 1: AssertionError", "sources": None,
+        "code_detail": "exit 1: AssertionError", "fiction_detail": "",
+        "sources": None,
     }]
 
 
