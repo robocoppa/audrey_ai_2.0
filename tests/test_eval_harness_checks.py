@@ -471,6 +471,11 @@ def test_the_wordings_that_false_failed_two_good_answers():
         # that a positive check must be measured every run, not assumed stable.
         "It looks like **teamOffsite2025.mp4** isn't in your uploaded files.",
         "That file is not in your uploads.",
+        # Sixth, run 10 — and the archive scan found this one had also been
+        # false-failing since the 07:06 run, so it cost more than the one run
+        # that surfaced it. Same story as the second widening.
+        "No videos in your library appear to contain any mention of the "
+        "Sicilian Defence. I checked all of them and didn't find anything.",
     ):
         assert er._disclaims_absence(answer + _FOOTER) is True, answer
 
@@ -681,6 +686,35 @@ def test_the_rozman_title_pattern_that_was_rejected_by_measurement():
         "this is a livestreamed blitz game." + _FOOTER
     )
     assert er._corpus_fictions(correct, "video") == []
+
+
+def test_the_invented_filename_check_that_was_rejected_by_measurement():
+    """⚠️ Kept as a decision record. Run 10 produced the cleanest-looking case
+    for a new check and it does not survive measurement.
+
+    `video-summary-only-no-embellishment` [audrey_video] PASSED while offering
+    to read two files that do not exist — "What Happened During The Roger
+    Gracie VS Rafael Lovato Jr Match?_ World Championship 2009.mp4" and
+    "Rafael Lovato Jr _ World Championship 2009.mp4". The corpus is a fixed
+    list of ten files, so comparing every filename in an answer against it
+    looks obviously right.
+
+    Swept over every archived video answer, it is not. **Every invented name so
+    far is a MUTATION of a real one** — one inserts a word into the Gracie
+    title, the other is a substring of it — so no similarity threshold
+    separates invention from sloppy transcription. At a threshold loose enough
+    to catch the first, en-dashes and doubled words ("Rafael Rafael Lovato")
+    flag too; the second is a strict substring and is missed at every setting.
+
+    The failure is real and stays on the open list. What is rejected is this
+    way of checking it.
+    """
+    invented = (
+        "I do have other files relevant to this match: **`What Happened During "
+        "The Roger Gracie VS Rafael Lovato Jr Match?_ World Championship "
+        "2009.mp4`** and **`Rafael Lovato Jr _ World Championship 2009.mp4`**."
+    )
+    assert er._corpus_fictions(invented + _FOOTER, "video") == []
 
 
 def test_an_honest_answer_from_the_artifacts_is_clean():

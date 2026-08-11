@@ -624,6 +624,7 @@ _DISCLAIMS_ABSENCE = re.compile(
     r"|(?:is|are|was|were)n'?t in (?:your|the|my)"
     r"|(?:is|are|was|were) not in (?:your|the|my)"
     r"|not (?:in|among|part of) (?:your|the|my)|not one of your"
+    r"|did(?:n'?t| not) find|no (?:videos?|files?|uploads?|documents?)\b"
     r"|nothing(?:\s+\w+){0,2}\s+(?:was|is|to|about)"
     r"|none of (?:them|these|those|the|your|my|it)"
     r"|does not (?:have|contain|exist|cover|appear|include|discuss|mention"
