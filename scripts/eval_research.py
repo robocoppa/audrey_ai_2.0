@@ -546,10 +546,18 @@ _DECLINES = re.compile(
     r"(?:provide|give|show|produce|display|share|output|retrieve|return)\b",
     re.I,
 )
+# ⚠️ Every phrase here has AUDREY doing the next page. Widening this by shape
+# ("remaining part", "next section") was tried and REJECTED by measurement: of
+# its three flips across the archived paging answers, two were genuine
+# dead-ends wearing an offer's vocabulary — "you would need to continue
+# retrieving the remaining parts", "you would need to download the video file
+# and use a speech-to-text service". The distinction is not whether more text
+# is mentioned, it is WHO fetches it. Only invitations to ask belong here.
 _OFFERS_MORE = re.compile(
     r"(?:would you like|shall i|want me to|let me know if|i can continue"
     r"|continue reading|keep reading|next page|read on|page by page"
-    r"|specific sections)",
+    r"|specific sections|ask (?:me )?for (?:the )?(?:next|subsequent|more)"
+    r"|(?:give|send|show) me the next|just ask|say the word)",
     re.I,
 )
 
@@ -612,6 +620,7 @@ def _looks_truncated(answer: str) -> bool:
 _DISCLAIMS_ABSENCE = re.compile(
     r"(?:no transcript|no summary|no artifacts|no content|no record|no file"
     r"|no information|no such|no results?|no matches"
+    r"|no mentions?|no references?|no discussion|no coverage"
     r"|nothing(?:\s+\w+){0,2}\s+(?:was|is|to|about)"
     r"|none of (?:them|these|those|the|your|my|it)"
     r"|does not (?:have|contain|exist|cover|appear|include|discuss|mention"
@@ -813,6 +822,9 @@ def _misattributes_to_user(answer: str) -> bool:
 #
 # Each entry below is an invention observed in a real answer, not a guess about
 # what a model might say.
+_ABBREVIATED = re.compile(
+    r"\b(?:Jr|Sr|Dr|Mr|Mrs|Ms|St|vs|etc|approx|no)\.|\b(?:e\.g|i\.e)\.", re.I)
+
 _NEGATORS = re.compile(
     r"\b(?:no|not|n't|never|without|unclear|unknown|unspecified|doesn't|does "
     r"not|isn't|is not|cannot|can't|don't|do not|lacks?|absent|silent on)\b",
@@ -832,12 +844,19 @@ _CORPUS_FICTIONS: dict[str, list[tuple[re.Pattern[str], str]]] = {
                     r"\b(?:won|wins|winning|victory|defeated|beat)\b"
                     r"[^.]{0,40}?\b(?:by|via|on)\b", re.I),
          "a result the Gracie artifacts never state"),
-        (re.compile(r"ultra[- ]?heavy ?weight|\+?\s*97\.8|absolute division"
+        # The artifacts state no division at all, so any weight class is
+        # invented — "heavyweight final", "ultra-heavyweight (+97.8 kg)".
+        (re.compile(r"(?:ultra[- ]?)?heavy ?weight|\+?\s*97\.8|absolute division"
                     r"|Gabriel Aranha|\bADCC\b|Abu Dhabi", re.I),
          "a division, opponent or tournament not in the corpus"),
         # ⚠️ Carlsen's name must be in it. A bare "against the London" is how
         # anyone describes Black's side of the opening and is perfectly correct.
-        (re.compile(r"\bCarlsen\b[^.]{0,80}?\b(?:playing|plays|as|has)\s+Black\b",
+        # The second half is the same inversion told from the other end — "a
+        # game where his opponent used the London System against him" — which
+        # the colour wording alone missed.
+        (re.compile(r"\bCarlsen\b[^.]{0,80}?\b(?:playing|plays|as|has)\s+Black\b"
+                    r"|\bopponent\b[^.]{0,60}?\bLondon\b[^.]{0,40}?"
+                    r"\bagainst\s+(?:him|Carlsen|Magnus)\b",
                     re.I),
          "Carlsen played White and played the London himself"),
     ],
@@ -854,7 +873,12 @@ def _corpus_fictions(answer: str, corpus: str) -> list[str]:
     deliberately biased towards letting an answer through, because a false fail
     here would discredit the whole check.
     """
-    body = _prose_region(answer)
+    # ⚠️ `Jr.` is a full stop. Both the spans below and the sentence window that
+    # guards them are bounded by `.`, so "Roger Gracie defeated Rafael Lovato
+    # Jr. by points" fell in the gap and scored a clean PASS. Flattening the
+    # abbreviations first is cheaper than teaching every pattern about them.
+    body = _ABBREVIATED.sub(lambda m: m.group(0).replace(".", ""),
+                            _prose_region(answer))
     found = []
     for pattern, why in _CORPUS_FICTIONS.get(corpus, []):
         for m in pattern.finditer(body):

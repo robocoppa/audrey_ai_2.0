@@ -327,6 +327,39 @@ def test_an_answer_that_never_refuses_is_untouched():
     assert er._declines_without_offering(answer) is False
 
 
+def test_inviting_the_user_to_ask_for_the_next_part_is_an_offer():
+    """The false fail of 2026-08-11 run 8. `audrey_video` gave the exact
+    character count, four sections of transcript, and closed with this — a
+    perfectly good paged answer scored ❌."""
+    answer = (
+        "I cannot provide the full transcript because it contains "
+        "approximately 33,626 characters. Here is what was retrieved. "
+        "To receive more of the transcript, please ask for subsequent "
+        'sections (e.g., "Give me the next part of the transcript").'
+    )
+    assert er._declines_without_offering(answer) is False
+
+
+def test_the_offer_widening_that_was_rejected_by_measurement():
+    """⚠️ Fixing the above by matching "remaining part"/"next section" was
+    measured over every archived paging answer and REJECTED: three flips, and
+    two of them were dead-ends wearing an offer's vocabulary.
+
+    The distinction is not whether more text is mentioned — it is WHO fetches
+    it. `_OFFERS_MORE` only holds invitations for the user to ASK.
+    """
+    for dead_end in (
+        "I cannot provide the whole transcript here. To obtain the full text, "
+        "you would need to continue retrieving the remaining parts of the file "
+        "using an offset starting at 4005.",
+        "To get the full transcript, you would need to download the video file "
+        "and use a speech-to-text service, as I cannot provide the complete "
+        "text in this interaction.",
+    ):
+        assert er._OFFERS_MORE.search(dead_end) is None
+        assert er._declines_without_offering(dead_end) is True
+
+
 # ── not_truncated (always on) ───────────────────────────────────────────────
 #
 # ⚠️ `has_answer` counts characters. On 2026-08-10 `video-unnamed-reference`
@@ -430,6 +463,10 @@ def test_the_wordings_that_false_failed_two_good_answers():
         # Third widening, 2026-08-11 run 6 — same check, same shape, again.
         "There don’t appear to be any references to it in your files.",
         "Nothing specifically about the Sicilian Defence was found.",
+        # Fourth, run 8. The family had `no results` and `no matches` but not
+        # the most ordinary phrasing of the same fact.
+        "No mentions of the **Sicilian Defence** were found in your videos.",
+        "No references to it appear anywhere in your uploads.",
     ):
         assert er._disclaims_absence(answer + _FOOTER) is True, answer
 
@@ -590,6 +627,29 @@ def test_the_inventions_that_scored_pass():
         "(playing Black, rated 3272) faces Evgenij Shuvalov.",
     ):
         assert er._corpus_fictions(answer + _FOOTER, "video"), answer
+
+
+def test_an_abbreviation_is_not_the_end_of_a_sentence():
+    """⚠️ `Jr.` is a full stop. Both the fiction spans and the negator window
+    that guards them are bounded by `.`, so this sentence — a plain invention
+    of a result and a division — fell in the gap and scored a clean PASS on
+    2026-08-11 run 8."""
+    answer = (
+        "This was the heavyweight final at the 2009 IBJJF World Championships, "
+        "where Roger Gracie defeated Rafael Lovato Jr. by points to claim his "
+        "third world title." + _FOOTER
+    )
+    assert er._corpus_fictions(answer, "video")
+
+
+def test_the_colour_inversion_told_from_the_other_end():
+    """Same false fact, no colour word in it: Carlsen plays the London himself,
+    as White. Matching only "Carlsen … as Black" missed this on run 8."""
+    answer = (
+        "It is a commentary by Magnus Carlsen on a game where his opponent "
+        "used the London System against him." + _FOOTER
+    )
+    assert er._corpus_fictions(answer, "video")
 
 
 def test_an_honest_answer_from_the_artifacts_is_clean():
