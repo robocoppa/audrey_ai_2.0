@@ -19,6 +19,11 @@
 # One-shot "rebuild everything" (services + eval image, then dangling prune):
 #   docker compose up -d --build && docker compose --profile eval build audrey-eval && docker image prune -f
 #
+# ⚠️ `prune -f`, NEVER `prune -a -f`. `-a` deletes every image without a
+# RUNNING container, and audrey-eval is build-only — so `-a` deletes the image
+# in the same breath that built it, and the next eval run dies with "image
+# audrey-eval:latest not built". Cost an hour on 2026-08-10/11.
+#
 # The `ollama-net` network is declared `external: true` because it was
 # created out-of-band by the Unraid-managed `ollama` container. Don't let
 # compose try to recreate it.

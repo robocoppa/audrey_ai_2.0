@@ -33,9 +33,16 @@
 #     MODELS='audrey_passthrough/qwen3-coder-next:latest,audrey_passthrough/kimi-k2.7-code:cloud' \
 #     scripts/eval-onbox.sh
 #
-# NOTE: the case files are BAKED into the audrey-eval image — after pulling new
-# protocols (or harness changes), rebuild once:
+# NOTE: harness + case files are MOUNTED from ./scripts at run time, so editing
+# or pulling them needs no rebuild. Rebuild only when the image's own contents
+# change (the httpx pin, the base image):
 #   docker compose --profile eval build audrey-eval
+#
+# ⚠️ NEVER `docker image prune -a` on this box. `-a` removes every image with
+# no RUNNING container, and audrey-eval is build-only — so it is always
+# "unused" and is always deleted, leaving `ERROR: image audrey-eval:latest not
+# built` on the next run. Plain `docker image prune -f` (dangling only) is
+# safe and is what compose.yaml's one-shot recipe uses.
 #
 # Run it detached so it survives a disconnect and still notifies:
 #   nohup scripts/eval-onbox.sh >/mnt/user/appdata/audrey_ai_2.0/testing-out/last-run.log 2>&1 &
@@ -90,10 +97,39 @@ mkdir -p "${OUT_DIR}"; chmod 700 "${OUT_DIR}"
 # Fixed container name → remove any stopped prior one so re-runs don't collide.
 docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
 
+# ── the harness comes from the REPO, not the image ──────────────────────────
+#
+# `Dockerfile.eval` still COPYs the harness and case files in, so the image
+# stays self-contained and runnable on its own. But mounting `scripts/` over
+# `/eval` means an edit to `eval_research.py` or a case file is live on the
+# next run with no rebuild — which is the whole reason `LIVE_SCRIPTS` exists.
+#
+# ⚠️ The failure this removes was SILENT. Case files are baked, so a pulled
+# change that was not followed by `docker compose --profile eval build` ran
+# the OLD suite and reported a clean pass — the new checks simply were not
+# there. Same trap in a different coat as the 2026-08-08 COPY-list omission.
+# A stale image now cannot happen; a missing repo dir fails loudly instead.
+#
+# LIVE_SCRIPTS=0 falls back to the baked copy — for reproducing an older run
+# against the image as it was built.
+SCRIPT_DIR="${SCRIPT_DIR:-${APPDATA}/scripts}"
+SCRIPT_MOUNT=()
+if [[ "${LIVE_SCRIPTS:-1}" == "1" ]]; then
+  [[ -f "${SCRIPT_DIR}/eval_research.py" ]] \
+    || die "LIVE_SCRIPTS=1 but ${SCRIPT_DIR}/eval_research.py is missing (set SCRIPT_DIR, or LIVE_SCRIPTS=0 to use the baked copy)."
+  [[ -f "${SCRIPT_DIR}/${CASES}" ]] \
+    || die "case file ${SCRIPT_DIR}/${CASES} not found — pulled it yet?"
+  SCRIPT_MOUNT=(-v "${SCRIPT_DIR}:/eval:ro")
+  echo ">> harness: ${SCRIPT_DIR} (live; LIVE_SCRIPTS=0 for the baked copy)"
+else
+  echo ">> harness: baked into ${IMAGE}"
+fi
+
 echo ">> running ${MODEL} (${CASES}) on the box → ${OUT_DIR}/${SAVE_FILE}"
 docker run -d --name "${CONTAINER}" --network "${NETWORK}" \
   --env-file "${EVAL_ENV}" \
   -v "${OUT_DIR}:/out" \
+  "${SCRIPT_MOUNT[@]}" \
   "${IMAGE}" \
     --model "${MODEL}" \
     --cases "/eval/${CASES}" \

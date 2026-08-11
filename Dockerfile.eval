@@ -45,6 +45,17 @@ COPY scripts/eval_research.py /eval/eval_research.py
 # confusing. Add a case file to scripts/ and it is now simply in.
 COPY scripts/eval_prompts*.json /eval/
 
+# ⚠️ These COPYs are the FALLBACK, not the normal path. `scripts/eval-onbox.sh`
+# mounts the repo's `scripts/` over `/eval` at run time (LIVE_SCRIPTS=1,
+# default), so an edited harness or case file is live on the next run with no
+# rebuild. They stay because a self-contained image is worth having — `docker
+# run audrey-eval:latest` works with no repo — and because LIVE_SCRIPTS=0
+# reproduces an old run against the image exactly as it was built.
+#
+# The bake alone was a silent failure: a pulled case file that nobody rebuilt
+# ran the OLD suite and reported a clean pass, with the new checks simply
+# absent. Rebuilt-or-not is invisible in the output; a missing mount is not.
+
 # The script IS the entrypoint; append harness flags after the image name at
 # `docker run` (--model / --cases / --save-file / --only …). Base-url + key
 # come from the mounted --env-file (AUDREY_EVAL_BASE_URL / AUDREY_EVAL_API_KEY).
