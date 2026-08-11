@@ -286,6 +286,88 @@ def test_an_answer_that_never_refuses_is_untouched():
     assert er._declines_without_offering(answer) is False
 
 
+# ── not_truncated (always on) ───────────────────────────────────────────────
+#
+# ⚠️ `has_answer` counts characters. On 2026-08-10 `video-unnamed-reference`
+# returned a preamble ending "Here's a summary of it:" and nothing else — well
+# over the 20-char floor, announcing content that never arrived, scored PASS.
+
+_FOOTER = "\n\n---\n> _Tools used:_\n> - **qwen3.6:35b** — `list_my_files` ✅1\n"
+
+
+def test_an_answer_ending_on_a_colon_is_truncated():
+    answer = "The most recent recording is X. Here's a summary of it:" + _FOOTER
+    assert er._looks_truncated(answer) is True
+
+
+def test_a_complete_answer_is_not_flagged():
+    answer = "The most recent recording is X. Let me know if you want more." + _FOOTER
+    assert er._looks_truncated(answer) is False
+
+
+def test_an_unclosed_code_fence_is_truncated():
+    assert er._looks_truncated("Here you go:\n\n```python\ndef f():\n") is True
+    assert er._looks_truncated("Here:\n\n```python\ndef f():\n    pass\n```\n") is False
+
+
+def test_the_tools_footer_is_not_mistaken_for_the_end_of_the_answer():
+    """⚠️ The footer lives INSIDE the answer body — it opens `\\n\\n---\\n>`,
+    which is deliberately not the banner separator, so `_answer_body` keeps it.
+    Any check reading the END of an answer must cut it first or it inspects a
+    footer row instead of the last thing the model said."""
+    answer = "Complete sentence." + _FOOTER
+
+    assert er._prose_region(answer) == "Complete sentence."
+    assert er._looks_truncated(answer) is False
+
+
+def test_an_empty_body_is_left_to_has_answer():
+    """Two checks reporting the same defect makes a run harder to read, not
+    easier — emptiness is `has_answer`'s job."""
+    assert er._looks_truncated("") is False
+
+
+# ── expect_disclaims_absence ────────────────────────────────────────────────
+#
+# The cases whose whole point is a gap — no transcript, no artifacts, no such
+# file, a topic the corpus does not cover. In every one the failure is to
+# answer anyway, from a summary or a filename or world knowledge, and that
+# failure reads as a perfectly good answer. Two of these cases shipped with no
+# check for their own defining behaviour until 2026-08-11.
+
+
+def test_admitting_a_missing_transcript_passes():
+    answer = ("This file **does not have a transcript** — there is nothing "
+              "available to quote." + _FOOTER)
+    assert er._disclaims_absence(answer) is True
+
+
+def test_admitting_empty_artifacts_passes():
+    answer = ("**silent.mp4** has **no accessible content** — its processing "
+              "completed with an empty artifacts list." + _FOOTER)
+    assert er._disclaims_absence(answer) is True
+
+
+def test_answering_anyway_fails():
+    """The failure mode: describing the match from the visual summary when the
+    question was what was SAID."""
+    answer = ("The video shows Roger Gracie passing guard into side control "
+              "and finishing with a choke." + _FOOTER)
+    assert er._disclaims_absence(answer) is False
+
+
+def test_disclaiming_survives_rewording():
+    """Same lesson as the paging check — a family, not a phrase list. All four
+    of these are real wordings from the 08-10 runs."""
+    for answer in (
+        "There is no transcript for this file.",
+        "No summary, transcript, or visual data was generated from it.",
+        "I could not find a file by that name.",
+        "The uploaded videos do not cover the Sicilian Defence.",
+    ):
+        assert er._disclaims_absence(answer + _FOOTER) is True, answer
+
+
 def test_the_suite_case_is_wired_up():
     """The helper is only worth having if a case actually opts in. Pins that
     `video-ambiguous-singular` — the case that regressed — carries it."""
@@ -297,6 +379,30 @@ def test_the_suite_case_is_wired_up():
     assert by_name["video-control-unscoped-plural"].get("expect_names_files")
     assert by_name["video-long-transcript-paging"].get("answer_not_contains")
     assert by_name["video-long-transcript-paging"].get("expect_continuation_offer")
+    assert by_name["video-missing-transcript-artifact"].get("expect_disclaims_absence")
+    assert by_name["video-empty-artifacts"].get("expect_disclaims_absence")
+    assert by_name["video-fact-present-in-transcript"].get("answer_contains")
+
+
+def test_every_video_case_is_checked_for_something_behavioural():
+    """⚠️ The standing lesson of 2026-08-10: three behavioural cases in three
+    runs turned out to be gated only by structural checks, so each reported
+    PASS on its own defining failure. A case with no behavioural expectation
+    proves the stack is alive and nothing else — which is fine, but must be a
+    DECISION rather than an oversight, so new ones land here on purpose."""
+    cases = json.loads(
+        (Path(er.__file__).parent / "eval_prompts_video.json").read_text())
+    behavioural = ("answer_contains", "answer_not_contains", "expect_names_files",
+                   "expect_continuation_offer", "expect_disclaims_absence")
+    structural_only = {
+        c["name"] for c in cases if not any(c.get(k) for k in behavioural)
+    }
+
+    # Both are judgement cases whose quality genuinely needs a human read; see
+    # each one's `_why`. Anything NEW appearing here is an oversight.
+    assert structural_only == {"video-unnamed-reference",
+                               "video-two-file-compare",
+                               "video-control-named-scoped"}
 
 
 # ── sweep expansion ─────────────────────────────────────────────────────────

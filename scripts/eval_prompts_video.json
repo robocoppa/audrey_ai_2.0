@@ -72,14 +72,16 @@
     "prompt": "What did they say in Roger Gracie VS Rafael Lovato Jr _ World Championship 2009.mp4?",
     "expect_sources": false,
     "expect_route": "fast",
-    "_why": "REGRESSION GUARD on e332d38 / 2ab809b. This file has summary and visual but NO transcript, so 'what did they say' has no source. Pass = says it has no transcript, optionally offering the visual or summary instead. Fail = answers from the summary or the visual descriptions as though it were speech, which is the failure mode those two commits exist to close."
+    "_why": "REGRESSION GUARD on e332d38 / 2ab809b. This file has summary and visual but NO transcript, so 'what did they say' has no source. Pass = says it has no transcript, optionally offering the visual or summary instead. Fail = answers from the summary or the visual descriptions as though it were speech, which is the failure mode those two commits exist to close. ⚠️ Had NO check for its own defining behaviour until 2026-08-11 — `expect_disclaims_absence` is it.",
+    "expect_disclaims_absence": true
   },
   {
     "name": "video-empty-artifacts",
     "prompt": "What is silent.mp4 about?",
     "expect_sources": false,
     "expect_route": "fast",
-    "_why": "REGRESSION GUARD on the fabricated-description bug 3b found. silent.mp4 is 0s with an empty artifacts list: nothing is known about its contents. Pass = says so plainly. Fail = describes it, characterises its style, or infers from the filename. NOTE this is 'finished and empty', which is NOT the still-processing case — that one still needs a manual race against an upload."
+    "_why": "REGRESSION GUARD on the fabricated-description bug 3b found. silent.mp4 is 0s with an empty artifacts list: nothing is known about its contents. Pass = says so plainly. Fail = describes it, characterises its style, or infers from the filename. NOTE this is 'finished and empty', which is NOT the still-processing case — that one still needs a manual race against an upload. ⚠️ Same gap, same fix: `expect_disclaims_absence` added 2026-08-11.",
+    "expect_disclaims_absence": true
   },
   {
     "name": "video-control-named-scoped",
@@ -87,5 +89,46 @@
     "expect_sources": false,
     "expect_route": "fast",
     "_why": "REGRESSION GUARD, not a feature test. Phase 40 3b proved the general path already gets this right unprompted: scope=file='jasonRetirement.mp4'(1 id) artifact=transcript. The specialist must MATCH audrey_auto here, not beat it. The realistic failure of this whole phase is the prompt burning an extra round on list_my_files when the user already named the file."
+  },
+  {
+    "name": "video-unknown-filename",
+    "prompt": "What did they say about the roadmap in teamOffsite2025.mp4?",
+    "expect_sources": false,
+    "expect_route": "fast",
+    "expect_disclaims_absence": true,
+    "_why": "Guards `_resolve_filename` + `_unknown_file_notice` (routes/kb.py) from the ANSWER side. The route already refuses to turn a scoped search that cannot match into an unscoped one, and hands back a notice naming the files that do exist — but nothing checked that the model reads it. Pass = says no such file, ideally listing real ones. Fail = searches everything and answers about some other video, which reads as a perfectly good answer to a question the user never asked."
+  },
+  {
+    "name": "video-fact-present-in-transcript",
+    "prompt": "According to How to WIN with the London System.mp4, what are Black's two most common replies to 1.d4?",
+    "expect_sources": false,
+    "expect_route": "fast",
+    "answer_contains": [
+      "d5",
+      "f6"
+    ],
+    "_why": "The only OBJECTIVELY checkable case in this suite: the transcript's first page says it outright — 'the two most common responses are just the mirror image d5 uh and knight to f6'. Needles are 'd5' and 'f6' so any notation passes (Nf6, ...Nf6, 'knight to f6'). ⚠️ Written 2026-08-11 after `audrey_video` claimed the videos 'do not contain specific instructions on the London System move order' — asserting absence of content that is in the opening minute. Every other case here can be passed by a well-shaped answer; this one cannot."
+  },
+  {
+    "name": "video-summary-only-no-embellishment",
+    "prompt": "What happens in the Roger Gracie VS Rafael Lovato Jr _ World Championship 2009.mp4?",
+    "expect_sources": false,
+    "expect_route": "fast",
+    "answer_not_contains": [
+      "Abu Dhabi",
+      "ADCC",
+      "ultra-heavyweight",
+      " kg",
+      " lbs"
+    ],
+    "_why": "The complement of video-missing-transcript-artifact: asking what HAPPENS is legitimately answerable from the summary and visual artifacts, where 'what did they say' is not. The risk is embellishment. Observed twice: 'the 2009 ADCC World Championship' (it is IBJJF) and 'the 2009 Abu Dhabi World Professional Jiu-Jitsu Championship final' with an invented weight class (+97.8 kg) and finish ('victory via submission (likely a choke)'). ⚠️ The blacklist here targets FACTS that are not in any artifact, not phrasing — unlike the paging case, a model cannot paraphrase its way to a different wrong tournament and still be right. It is still partial: a new invention needs a new entry, so read the answer."
+  },
+  {
+    "name": "video-topic-not-in-corpus",
+    "prompt": "What do my videos say about the Sicilian Defence?",
+    "expect_sources": false,
+    "expect_route": "fast",
+    "expect_disclaims_absence": true,
+    "_why": "The corpus is two London System videos, a BJJ match and a retirement recording — nothing covers the Sicilian. Pass = says so. Fail = answers from world knowledge, which the model has plenty of, and presents it as what the user's videos say. This is the failure that grounding checks cannot see: the prose is correct chess and completely unsourced. Deliberately phrased 'my videos' so the plural path (unscoped search) is the one under test."
   }
 ]

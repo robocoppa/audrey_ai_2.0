@@ -82,6 +82,13 @@ Per case, against the reassembled streamed answer:
   - continuation   : opt-in ("expect_continuation_offer": true): the answer
                      does not refuse the full text while offering no way to
                      continue. Matches on shape, not phrasing.
+  - disclaims      : opt-in ("expect_disclaims_absence": true): the answer
+                     admits the thing asked for is missing, rather than
+                     filling the gap from a summary, a filename, or world
+                     knowledge. For cases where "I don't have that" is right.
+  - not_truncated  : ALWAYS ON. The prose does not end on a colon (announcing
+                     content that never arrived) or leave a code fence open.
+                     `has_answer` counts characters and cannot see either.
   - names_files    : opt-in ("expect_names_files": [..]): every listed file is
                      named DISTINCTLY, matched longest-first so one filename
                      being a substring of another cannot satisfy both. The
@@ -524,6 +531,63 @@ _OFFERS_MORE = re.compile(
 )
 
 
+def _prose_region(answer: str) -> str:
+    """The model's prose alone — no debug blocks, no tools footer.
+
+    `_answer_body` splits on the FIRST banner separator, so the `_Tools used:_`
+    footer (which opens `\\n\\n---\\n>`, deliberately not a separator) stays in
+    the body. Fine for most checks; fatal for anything reading the END of the
+    answer, which would see a footer row instead of the last thing said.
+    """
+    body = _pre_debug_region(answer)
+    idx = body.find("\n\n---\n>")
+    return (body[:idx] if idx >= 0 else body).strip()
+
+
+def _looks_truncated(answer: str) -> bool:
+    """True when the answer stops mid-promise or mid-block.
+
+    ⚠️ `has_answer` only counts characters, and that is not enough. 2026-08-10:
+    `video-unnamed-reference` returned "The most recent recording is X. Here's
+    a summary of it:" and then nothing at all — a preamble comfortably over the
+    20-char floor, announcing content that never arrived, scored PASS.
+
+    Two signals, both unambiguous in prose: ending on a colon (announcing
+    something that never came) and an odd number of code fences (a block that
+    was opened and never closed).
+    """
+    prose = _prose_region(answer)
+    if not prose:
+        return False  # empty is `has_answer`'s job, not this one's
+    return prose.rstrip().endswith(":") or prose.count("```") % 2 == 1
+
+
+# Admitting that something is not there. Like `_DECLINES`, a family rather
+# than a phrase list — the paging blacklist proved that models reword freely.
+_DISCLAIMS_ABSENCE = re.compile(
+    r"(?:no transcript|no summary|no artifacts|no content|no record|no file"
+    r"|no information|no such|nothing (?:was|is|to)|does not (?:have|contain"
+    r"|exist|cover|appear|include)|doesn'?t (?:have|contain|exist|cover|appear"
+    r"|include)|do not (?:have|contain|cover)|don'?t (?:have|contain|cover)"
+    r"|has no|there is no|there's no|was not|wasn'?t|is not available"
+    r"|isn'?t available|not available|could not find|couldn'?t find"
+    r"|unable to find|cannot find|can'?t find|not found|empty)",
+    re.I,
+)
+
+
+def _disclaims_absence(answer: str) -> bool:
+    """True when the answer admits the thing asked for is not there.
+
+    For cases whose whole point is a gap: a video with no transcript, an
+    upload that produced no artifacts, a filename that matches nothing, a
+    topic the corpus does not cover. In every one, the failure is to answer
+    anyway — from the summary, from the filename, or from world knowledge —
+    and that failure reads as a perfectly good answer.
+    """
+    return bool(_DISCLAIMS_ABSENCE.search(_prose_region(answer)))
+
+
 def _declines_without_offering(answer: str) -> bool:
     """True when the answer refuses the full text and offers no way forward.
 
@@ -725,6 +789,9 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     answer = _answer_body(content)
     checks["no_error_marker"] = not any(m in content for m in _ERROR_MARKERS)
     checks["has_answer"] = len(answer) >= 20
+    # Always on, like has_answer: no case ever wants an answer that stops
+    # mid-promise, and the character floor cannot see one. See _looks_truncated.
+    checks["not_truncated"] = not _looks_truncated(answer)
 
     # Banner expectation: explicit per-case, else inferred from the model.
     expect_banners = case.get("expect_banners")
@@ -820,6 +887,13 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
         if case.get("expect_continuation_offer") else None
     )
 
+    # Absence check (opt-in): the answer must admit the gap rather than fill
+    # it. For the cases where the CORRECT answer is "I don't have that".
+    checks["disclaims"] = (
+        _disclaims_absence(answer)
+        if case.get("expect_disclaims_absence") else None
+    )
+
     ok = all(v for v in checks.values() if v is not None)
     return CaseResult(name=name, model=model, ok=ok, checks=checks,
                       answer=answer, banners_seen=banners, route=route,
@@ -847,7 +921,8 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
     print("=" * 70)
     cols = ["reachable", "no_error_marker", "has_answer", "banners",
             "sources", "url_wellformed", "route", "code_block", "code_runs",
-            "contains", "names_files", "not_contains", "continuation"]
+            "contains", "names_files", "not_contains", "continuation",
+            "disclaims", "not_truncated"]
     for r in results:
         status = "PASS" if r.ok else "FAIL"
         print(f"\n[{status}] {r.name}   (model={r.model})")
