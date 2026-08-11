@@ -69,7 +69,21 @@ LABEL="${LABEL:-${MODEL}}"
 # date-only stamp collided — e.g. three writer-glm-hedgefix runs in one day all
 # wrote the same filename). Still date-first, so files sort chronologically and
 # the paired <date>-<desc>-report.md convention still matches on the date prefix.
-STAMP="$(date +%F-%H%M%S)"
+#
+# ⚠️ Taken from the CONTAINER's clock, not the host's. There are three clocks
+# on this box: the Unraid host is PDT, the containers log MDT, and `docker
+# inspect` reports UTC. A host-stamped filename therefore read about an hour
+# EARLIER than the log lines from its own run, so correlating an answers file
+# against `docker logs` meant doing the arithmetic every time. Asking the
+# container what time it is needs no hardcoded zone and cannot drift if either
+# clock is changed later. Falls back to the host clock, loudly, if it is down.
+STAMP_FROM="${STAMP_FROM:-audrey-ai}"
+STAMP="$(docker exec "${STAMP_FROM}" date +%F-%H%M%S 2>/dev/null || true)"
+if [[ -z "${STAMP}" ]]; then
+  STAMP="$(date +%F-%H%M%S)"
+  echo "WARN: could not read ${STAMP_FROM}'s clock; stamping with the host's" \
+       "(PDT — reads ~1h early against container logs)." >&2
+fi
 SAVE_FILE="${STAMP}-${LABEL}-onbox-answers.md"
 
 # The per-case results JSON (machine-readable: checks, latency, source stats) is
@@ -153,7 +167,18 @@ if [[ -f "${WATCHDOG_ENV}" ]]; then
   # shellcheck disable=SC1090
   set -a; . "${WATCHDOG_ENV}"; set +a
   if [[ -n "${WATCHDOG_TOKEN:-}" && -n "${WATCHDOG_CHAT_ID:-}" ]]; then
-    verdict="✅"; [[ "${rc}" != "0" ]] && verdict="⚠️"
+    # ⚠️ Exit 1 is NOT an error — it is the harness reporting that a case
+    # failed a check, which is the normal result of a suite that measures
+    # something. Flattening every non-zero code to one ⚠️ made "the eval keeps
+    # exiting 1" read as a broken run for two days. Codes: 0 clean, 1 failed
+    # checks, 2 setup, 3 crashed (see eval_research.py's EXIT CODES).
+    case "${rc}" in
+      0) verdict="✅ all checks passed" ;;
+      1) verdict="⚠️ completed — some checks FAILED (read the [FAIL] blocks)" ;;
+      2) verdict="❌ SETUP ERROR (exit 2) — nothing ran" ;;
+      3) verdict="❌ HARNESS CRASHED (exit 3) — traceback in docker logs" ;;
+      *) verdict="❌ exit ${rc}" ;;
+    esac
     # Pull the harness's own pass/fail summary line from the container logs.
     summary="$(docker logs "${CONTAINER}" 2>&1 | grep -E 'cases passed' | tail -1)"
     api="https://api.telegram.org/bot${WATCHDOG_TOKEN}"

@@ -387,6 +387,90 @@ def test_typographic_apostrophes_do_not_defeat_the_checks():
         "I can’t provide it in one go. Would you like me to continue?") is False
 
 
+# ── not_misattributed (always on) ──────────────────────────────────────────
+#
+# Crediting the USER with a file's content. The content is RIGHT, which is what
+# makes it invisible: the summary is accurate, every structural check is green,
+# and the only thing wrong is who said it. Seen twice — 2026-08-09 and again on
+# 2026-08-11 after a tool-description fix had been verified to close it.
+
+
+def test_the_real_regression_is_caught():
+    """All four sentences verbatim from `video-ambiguous-singular` at 07:16 on
+    2026-08-11, about a chess video the model had just read."""
+    for answer in (
+        "You note that the two most common responses are ...d5 and ...Nf6.",
+        "Regarding your specific setup, you advocate for playing **Bf4** early.",
+        "However, you caution that this requires advanced understanding.",
+        "You mention that playing Nf3 early might not be ideal.",
+        # And the 2026-08-09 pair, which the same check would have caught.
+        "In this context, you mention facing a \"notorious\" system.",
+        "You comment that it hasn't been popular in competitive chess.",
+    ):
+        assert er._misattributes_to_user(answer + _FOOTER) is True, answer
+
+
+def test_ordinary_second_person_is_left_alone():
+    """Second person is not the defect and an answer avoiding it would be
+    worse. Only the user as SUBJECT of a verb of authorship is."""
+    for answer in (
+        "You asked about the London System, so here is what the video says.",
+        "The file you uploaded runs about 12 minutes.",
+        "You may want to watch the second half for the Bf4 lines.",
+        "You can see the move order in the transcript below.",
+        "You should note that the video never covers the Sicilian.",
+        "Your video recommends playing d4 first.",
+        "If you want the full text, say so and I'll continue.",
+    ):
+        assert er._misattributes_to_user(answer + _FOOTER) is False, answer
+
+
+def test_a_conditional_clause_is_not_an_attribution():
+    """⚠️ The one false positive in the entire answers archive, from a deep
+    answer about correlation — teaching a method, addressed to the reader. A
+    subordinating conjunction ahead of the pronoun is what separates the two,
+    and a check that fails good answers gets ignored."""
+    assert er._misattributes_to_user(
+        "When you observe that A and B move together, there are always at "
+        "least three possibilities." + _FOOTER) is False
+
+
+def test_it_reads_prose_not_the_footer():
+    """Same trap as `not_truncated`: the tools footer lives inside the body."""
+    answer = "The video recommends d4." + _FOOTER
+    assert er._misattributes_to_user(answer) is False
+
+
+def _canned_run(monkeypatch, answer: str, case: dict) -> dict:
+    """Drive the real `run_case` over a fixed answer — no network."""
+    monkeypatch.setattr(
+        er, "_post_stream",
+        lambda *a, **k: (answer, [], None, er.StreamTiming(0.1, 1.0)))
+    return er.run_case("http://x", "k", case, "audrey_auto", 10.0).checks
+
+
+def test_the_check_is_on_without_being_asked_for(monkeypatch):
+    """⚠️ The point of making this one always-on. The 08-11 regression landed
+    on a case that happened to carry `expect_names_files`; on any of the other
+    eleven it would have scored a clean PASS. An opt-in check only ever covers
+    the case you predicted, and this blind spot has already moved once."""
+    bare = {"name": "anything", "prompt": "summarise the video"}
+
+    clean = _canned_run(monkeypatch, "The video recommends d4 first.", bare)
+    assert clean["not_misattributed"] is True
+
+    bad = _canned_run(monkeypatch, "You advocate for playing Bf4 early.", bare)
+    assert bad["not_misattributed"] is False
+
+
+def test_a_case_can_opt_out(monkeypatch):
+    """For a prompt that itself makes a claim the model may reflect back."""
+    case = {"name": "x", "prompt": "I think d4 is best",
+            "allow_user_attribution": True}
+    checks = _canned_run(monkeypatch, "You argue that d4 is best.", case)
+    assert checks["not_misattributed"] is None
+
+
 def test_the_suite_case_is_wired_up():
     """The helper is only worth having if a case actually opts in. Pins that
     `video-ambiguous-singular` — the case that regressed — carries it."""

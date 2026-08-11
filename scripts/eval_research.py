@@ -89,6 +89,12 @@ Per case, against the reassembled streamed answer:
   - not_truncated  : ALWAYS ON. The prose does not end on a colon (announcing
                      content that never arrived) or leave a code fence open.
                      `has_answer` counts characters and cannot see either.
+  - not_misattributed : ALWAYS ON (opt out with "allow_user_attribution").
+                     The answer does not credit the USER with a file's content
+                     — "You note that…", "you advocate for…" about an uploaded
+                     video. Content correct, source wrong, every other check
+                     green. Opt out only for a prompt that itself makes a
+                     claim the model may reflect back.
   - names_files    : opt-in ("expect_names_files": [..]): every listed file is
                      named DISTINCTLY, matched longest-first so one filename
                      being a substring of another cannot satisfy both. The
@@ -141,9 +147,17 @@ USAGE
         --models 'audrey_passthrough/qwen3.6:35b,audrey_passthrough/kimi-k2.7-code:cloud' \\
         --save-json docs/testing/2026-07-10-code-sweep-results.json
 
-EXIT CODE
+EXIT CODES
 
-  0 if every case passed every check; 1 otherwise (so it can gate a script).
+  0   every case passed every applicable check
+  1   the run COMPLETED and at least one check failed. This is the normal
+      result of a suite that measures something — not an error. Read the
+      [FAIL] blocks, not the exit code.
+  2   setup problem: no base-url/key, missing or empty case file
+  3   the harness itself crashed; traceback is printed. ⚠️ Kept distinct from
+      1 on purpose — Python exits 1 on an uncaught exception by default, and
+      that collision made "it exited 1" unreadable.
+  130 interrupted
 """
 from __future__ import annotations
 
@@ -155,6 +169,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
@@ -657,6 +672,60 @@ def _names_all_files(answer: str, groups: list[str | list[str]]) -> bool:
     return True
 
 
+# Verbs of AUTHORSHIP — asserting, advocating, teaching. "You note that X" puts
+# the user forward as the source of X. Deliberately excludes the conversational
+# verbs ("you asked", "you wanted", "you uploaded"), which refer back to the
+# prompt and are perfectly correct.
+_ATTRIBUTION_VERBS = (
+    r"note|advocate|argue|explain|caution|mention|describe|recommend"
+    r"|emphasi[sz]e|demonstrate|discuss|highlight|point out|comment|state"
+    r"|cover|suggest|claim|observe|stress|warn|teach|illustrate|show|say"
+)
+# An adverb may sit between the pronoun and the verb ("you also note that").
+_ATTRIBUTION_ADVERBS = (
+    r"(?:also|further|then|even|clearly|correctly|explicitly|specifically"
+    r"|repeatedly)\s+"
+)
+# ⚠️ A subordinating conjunction ahead of it makes the clause conditional or
+# instructional, addressed TO the reader, and those are legitimate: "when you
+# observe that A and B move together, there are three possibilities" is a deep
+# answer teaching a method, not attributing anything to anyone. That single
+# sentence was the only false positive in the whole answers archive, and this
+# guard is what removes it. Modals need no guard — "you should note", "you can
+# see", "you may notice" all put a word between the pronoun and the verb, and
+# the pattern requires them adjacent.
+_MISATTRIBUTION = re.compile(
+    r"(?<!\bif )(?<!\bwhen )(?<!\bunless )(?<!\bwhenever )(?<!\bonce )"
+    r"(?<!\bwhether )(?<!\bbefore )(?<!\bafter )(?<!\bas )"
+    rf"\byou\s+(?:{_ATTRIBUTION_ADVERBS})?(?:{_ATTRIBUTION_VERBS})\b",
+    re.I,
+)
+
+
+def _misattributes_to_user(answer: str) -> bool:
+    """True when the answer credits the USER with a file's content.
+
+    The failure: "**You** note that the two most common responses are …d5 and
+    …Nf6", "**you** advocate for playing Bf4" — written about a chess video the
+    user uploaded and the model had just read. The user did not say any of it;
+    a video did. It is worse than a wrong answer because the content is
+    RIGHT — every structural check passes, the summary is accurate, and the
+    only thing broken is who said it. Nothing else in this file can see that.
+
+    Second person is not itself the problem. "You asked about X", "the file you
+    uploaded", "you may want to" are all correct, and an answer that avoided
+    them would be worse. What makes it misattribution is the user appearing as
+    the SUBJECT of a verb of authorship — hence the narrow verb list and the
+    requirement that the pronoun and verb be adjacent.
+
+    Measured before shipping, against all 55 saved answers files in the archive
+    (research, deep, code, topics and video suites): 6 true positives — the
+    four above plus the 2026-08-09 "You comment that…" pair — and zero false
+    positives. Worth re-running that scan if the verb list is ever widened.
+    """
+    return bool(_MISATTRIBUTION.search(_prose_region(answer)))
+
+
 # --- Source-quality reporting (informational, NOT a pass/fail check) ---------
 #
 # The eval reads the RENDERED answer, which is just `- [title](url)` lines — the
@@ -804,6 +873,17 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     # Always on, like has_answer: no case ever wants an answer that stops
     # mid-promise, and the character floor cannot see one. See _looks_truncated.
     checks["not_truncated"] = not _looks_truncated(answer)
+    # Also always on, and deliberately so. The 2026-08-11 regression appeared on
+    # a case that happened to have `expect_names_files`; had it landed on any of
+    # the other eleven it would have scored a clean PASS. An opt-in check only
+    # ever covers the case you predicted, and this blind spot has already moved
+    # once — from `video-ambiguous-singular` to the paging case — while nobody
+    # was looking. `allow_user_attribution` opts out a case whose own prompt
+    # makes a claim the model may legitimately reflect back.
+    checks["not_misattributed"] = (
+        None if case.get("allow_user_attribution")
+        else not _misattributes_to_user(answer)
+    )
 
     # Banner expectation: explicit per-case, else inferred from the model.
     expect_banners = case.get("expect_banners")
@@ -934,7 +1014,7 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
     cols = ["reachable", "no_error_marker", "has_answer", "banners",
             "sources", "url_wellformed", "route", "code_block", "code_runs",
             "contains", "names_files", "not_contains", "continuation",
-            "disclaims", "not_truncated"]
+            "disclaims", "not_truncated", "not_misattributed"]
     for r in results:
         status = "PASS" if r.ok else "FAIL"
         print(f"\n[{status}] {r.name}   (model={r.model})")
@@ -956,6 +1036,11 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
     passed = sum(1 for r in results if r.ok)
     print("\n" + "=" * 70)
     print(f"{passed}/{len(results)} cases passed all applicable checks")
+    if passed != len(results):
+        # Say it here, where the number is, so nobody has to go looking for
+        # what the process exit code meant.
+        print("→ exit 1: checks failed. The run itself was fine; read the "
+              "[FAIL] blocks above. (A crash is exit 3.)")
     print("=" * 70)
 
 
@@ -1132,4 +1217,16 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except Exception:  # noqa: BLE001 — a top-level catch-all is the point
+        # ⚠️ Exit 1 must mean "the suite found failures" and nothing else.
+        # Python exits 1 on an uncaught exception too, which collided with the
+        # one code anybody reads: "the eval keeps exiting 1" was ambiguous
+        # between a run working exactly as designed and a crash (2026-08-11).
+        traceback.print_exc()
+        print("\nCRASHED — exit 3. This is NOT a failed check; see the "
+              "traceback above.", file=sys.stderr)
+        sys.exit(3)
