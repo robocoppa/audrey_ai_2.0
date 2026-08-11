@@ -591,14 +591,30 @@ def _looks_truncated(answer: str) -> bool:
 
 # Admitting that something is not there. Like `_DECLINES`, a family rather
 # than a phrase list — the paging blacklist proved that models reword freely.
+#
+# ⚠️ Widened 2026-08-11 after it false-failed two good answers in one run, and
+# had been doing so since 07:06 that morning: "I don't see a file named X" and
+# "none of them appear to discuss the Sicilian Defence" are both textbook, and
+# neither matched. `don't have` did, `don't see` did not — the family was built
+# from the wordings that happened to show up first. Widened by measuring
+# against the archive rather than by guessing: +19 matches in 1350 case
+# sections, 8 of them the gap cases across three runs. It stays OPT-IN — the
+# other 11 are ordinary research prose ("none of them", "does not mention"),
+# harmless here but the reason this one must never go always-on.
 _DISCLAIMS_ABSENCE = re.compile(
     r"(?:no transcript|no summary|no artifacts|no content|no record|no file"
-    r"|no information|no such|nothing (?:was|is|to)|does not (?:have|contain"
-    r"|exist|cover|appear|include)|doesn'?t (?:have|contain|exist|cover|appear"
-    r"|include)|do not (?:have|contain|cover)|don'?t (?:have|contain|cover)"
+    r"|no information|no such|no results?|no matches|nothing (?:was|is|to)"
+    r"|none of (?:them|these|those|the|your|my|it)"
+    r"|does not (?:have|contain|exist|cover|appear|include|discuss|mention"
+    r"|reference|address|show|say)"
+    r"|doesn'?t (?:have|contain|exist|cover|appear|include|discuss|mention"
+    r"|reference|address|show|say)"
+    r"|do not (?:have|contain|cover|discuss|mention|reference|address|see|show)"
+    r"|don'?t (?:have|contain|cover|discuss|mention|reference|address|see|show)"
     r"|has no|there is no|there's no|was not|wasn'?t|is not available"
     r"|isn'?t available|not available|could not find|couldn'?t find"
-    r"|unable to find|cannot find|can'?t find|not found|empty)",
+    r"|unable to find|cannot find|can'?t find|cannot see|can'?t see"
+    r"|not found|empty)",
     re.I,
 )
 

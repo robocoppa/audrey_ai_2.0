@@ -368,6 +368,28 @@ def test_disclaiming_survives_rewording():
         assert er._disclaims_absence(answer + _FOOTER) is True, answer
 
 
+def test_the_wordings_that_false_failed_two_good_answers():
+    """⚠️ Both verbatim from `audrey_video`, both textbook, both scored
+    `disclaims:❌` — and had been since 07:06 the same morning.
+
+    `don't have` was in the family and `don't see` was not, which is what a
+    family assembled from whichever wordings turned up first looks like when
+    it meets a new one. Same defect as the ASCII apostrophe: the check matched
+    the text I had read rather than the behaviour I meant.
+    """
+    for answer in (
+        "I don't see a file named teamOffsite2025.mp4 in your uploaded files.",
+        "I’ve checked all your uploaded videos, and none of them appear to "
+        "discuss the Sicilian Defence.",
+        # Sibling forms the same gap would have swallowed.
+        "The search returned no results.",
+        "None of your videos mention it.",
+        "I cannot see any file by that name.",
+        "That video does not discuss the Sicilian Defence at all.",
+    ):
+        assert er._disclaims_absence(answer + _FOOTER) is True, answer
+
+
 def test_typographic_apostrophes_do_not_defeat_the_checks():
     """⚠️ Models write `don’t`, not `don't`, and a regex spelled `don'?t`
     matches only the ASCII form.
