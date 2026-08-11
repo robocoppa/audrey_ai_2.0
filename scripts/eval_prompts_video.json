@@ -113,9 +113,13 @@
       "ADCC",
       "ultra-heavyweight",
       " kg",
-      " lbs"
+      " lbs",
+      "Gabriel Aranha",
+      "absolute division",
+      "4-1",
+      "4–1"
     ],
-    "_why": "The complement of video-missing-transcript-artifact: asking what HAPPENS is legitimately answerable from the summary and visual artifacts, where 'what did they say' is not. The risk is embellishment. Observed twice: 'the 2009 ADCC World Championship' (it is IBJJF) and 'the 2009 Abu Dhabi World Professional Jiu-Jitsu Championship final' with an invented weight class (+97.8 kg) and finish ('victory via submission (likely a choke)'). ⚠️ The blacklist here targets FACTS that are not in any artifact, not phrasing — unlike the paging case, a model cannot paraphrase its way to a different wrong tournament and still be right. It is still partial: a new invention needs a new entry, so read the answer."
+    "_why": "The complement of video-missing-transcript-artifact: asking what HAPPENS is legitimately answerable from the summary and visual artifacts, where 'what did they say' is not. The risk is embellishment. Observed twice: 'the 2009 ADCC World Championship' (it is IBJJF) and 'the 2009 Abu Dhabi World Professional Jiu-Jitsu Championship final' with an invented weight class (+97.8 kg) and finish ('victory via submission (likely a choke)'). ⚠️ The blacklist here targets FACTS that are not in any artifact, not phrasing — unlike the paging case, a model cannot paraphrase its way to a different wrong tournament and still be right. It is still partial: a new invention needs a new entry, so read the answer. ⚠️ 2026-08-11 — the distinction that makes a blacklist LEGITIMATE here where it failed on the paging case: that one blacklisted PHRASINGS, and paraphrase space is infinite, so both models walked around it in one run. This one blacklists FALSE FACTS ABOUT A FIXED CORPUS. The four files do not change, so the set of specific untruths about them is bounded and each entry is a real observed invention. Entries added after `audrey_auto` passed this check while inventing a scoreline (4-1), an 'absolute division' and a finals opponent ('Gabriel Aranha') for a 45-second highlight clip — i.e. the check passed the WORSE answer and failed the milder one. Still partial: a new invention needs a new entry, so read it."
   },
   {
     "name": "video-topic-not-in-corpus",
