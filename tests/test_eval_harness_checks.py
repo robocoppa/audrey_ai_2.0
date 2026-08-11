@@ -386,8 +386,31 @@ def test_the_wordings_that_false_failed_two_good_answers():
         "None of your videos mention it.",
         "I cannot see any file by that name.",
         "That video does not discuss the Sicilian Defence at all.",
+        # Third widening, 2026-08-11 run 6 — same check, same shape, again.
+        "There don’t appear to be any references to it in your files.",
+        "Nothing specifically about the Sicilian Defence was found.",
     ):
         assert er._disclaims_absence(answer + _FOOTER) is True, answer
+
+
+def test_the_structural_rewrite_that_was_rejected_by_measurement():
+    """⚠️ Kept as a decision record, because the third patch to one regex is
+    exactly when rewriting it looks obviously right.
+
+    The candidate was a NEGATOR near a content noun within a window — properly
+    shape-based, and the natural conclusion from "stop matching phrases". It
+    scored 503 of 1377 archived sections against the phrase family's 318,
+    firing on nearly every video answer including the ones that must FAIL. A
+    check that passes everything is not a check.
+
+    The lesson is not "shape-matching is wrong" — `continuation` and
+    `not_misattributed` are both shape-based and both measured clean. It is
+    that a POSITIVE check (the answer must say something) goes vacuous when
+    widened, where a NEGATIVE one (the answer must not) goes noisy, which is
+    the far louder failure. Measure before believing either.
+    """
+    good = "The video shows Roger Gracie passing guard and finishing with a choke."
+    assert er._disclaims_absence(good + _FOOTER) is False
 
 
 def test_typographic_apostrophes_do_not_defeat_the_checks():
