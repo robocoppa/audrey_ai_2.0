@@ -688,33 +688,68 @@ def test_the_rozman_title_pattern_that_was_rejected_by_measurement():
     assert er._corpus_fictions(correct, "video") == []
 
 
-def test_the_invented_filename_check_that_was_rejected_by_measurement():
-    """⚠️ Kept as a decision record. Run 10 produced the cleanest-looking case
-    for a new check and it does not survive measurement.
+def test_a_file_the_corpus_does_not_have():
+    """Run 11: `video-topic-not-in-corpus` [audrey_video] PASSED while telling
+    the user "You have two video files available" and naming two recordings
+    that are not in the corpus — while every other answer in the same run
+    listed the real ten."""
+    answer = (
+        "You have two video files available:\n"
+        "1. **_20260811_164547.webm** (36 min 36 sec) — processing pending\n"
+        "2. **_20260811_165259.webm** (21 min 2 sec) — processing pending"
+    )
+    assert er._invented_filenames(answer + _FOOTER, "video")
+    assert er._corpus_fictions(answer + _FOOTER, "video")
 
-    `video-summary-only-no-embellishment` [audrey_video] PASSED while offering
-    to read two files that do not exist — "What Happened During The Roger
-    Gracie VS Rafael Lovato Jr Match?_ World Championship 2009.mp4" and
-    "Rafael Lovato Jr _ World Championship 2009.mp4". The corpus is a fixed
-    list of ten files, so comparing every filename in an answer against it
-    looks obviously right.
 
-    Swept over every archived video answer, it is not. **Every invented name so
-    far is a MUTATION of a real one** — one inserts a word into the Gracie
-    title, the other is a substring of it — so no similarity threshold
-    separates invention from sloppy transcription. At a threshold loose enough
-    to catch the first, en-dashes and doubled words ("Rafael Rafael Lovato")
-    flag too; the second is a strict substring and is missed at every setting.
+def test_the_real_uploads_are_not_inventions():
+    answer = (
+        "Your files are:\n"
+        "- How to WIN with the London System.mp4\n"
+        "- `Ken McNabb_ How to Correctly Fit Your Saddle and Pad on Your "
+        "Horse.mp4`\n"
+        "- **Roger Gracie VS Rafael Lovato Jr _ World Championship 2009.mp4**\n"
+        "- jasonRetirement.mp4\n- silent.mp4\n- p14.txt\n- audrey.png"
+    )
+    assert er._invented_filenames(answer + _FOOTER, "video") == []
 
-    The failure is real and stays on the open list. What is rejected is this
-    way of checking it.
+
+def test_a_filename_from_the_question_is_the_model_quoting_it_back():
+    """`video-unknown-filename` asks about a file that deliberately does not
+    exist. Every correct answer repeats the name, and flagging that would fail
+    the case for doing exactly what it is testing."""
+    prompt = "What did teamOffsite2025.mp4 say about the roadmap?"
+    answer = "I don't have a file named `teamOffsite2025.mp4` in your uploads."
+    assert er._invented_filenames(answer + _FOOTER, "video", prompt) == []
+    assert er._invented_filenames(answer + _FOOTER, "video") != []   # without it
+
+
+def test_the_mutation_half_stays_out_of_reach_by_design():
+    """⚠️ A decision record, not a wish. Run 10 invented two files by MUTATING
+    a real name — inserting a word into the Gracie title, and taking a
+    substring of it. Both score ~0.79 against the original, which is where a
+    model that fumbled an en-dash or doubled a word also lands, so no threshold
+    separates them. Measured and rejected; the loose end is deliberate.
+
+    If this ever starts passing, check what the threshold was moved to and what
+    it now false-fails.
     """
     invented = (
         "I do have other files relevant to this match: **`What Happened During "
         "The Roger Gracie VS Rafael Lovato Jr Match?_ World Championship "
         "2009.mp4`** and **`Rafael Lovato Jr _ World Championship 2009.mp4`**."
     )
-    assert er._corpus_fictions(invented + _FOOTER, "video") == []
+    assert er._invented_filenames(invented + _FOOTER, "video") == []
+
+
+def test_prose_that_merely_contains_an_extension_is_not_a_filename():
+    """The extraction walks backwards from the extension to a delimiter.
+    Undelimited prose produces a sentence fragment, not a name, and one such
+    fragment was the only false positive in the whole archive sweep."""
+    answer = ("To get the full transcript you would need to use video "
+              "transcription software or a service capable of processing "
+              "the entire recording.mp4")
+    assert er._invented_filenames(answer + _FOOTER, "video") == []
 
 
 def test_an_honest_answer_from_the_artifacts_is_clean():

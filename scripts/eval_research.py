@@ -99,9 +99,11 @@ Per case, against the reassembled streamed answer:
                      "corpus" (today: "video"). The answer makes no claim the
                      corpus contradicts — a submission finish in a clip whose
                      artifacts show only pinning, a weight class, the wrong
-                     tournament, Carlsen playing Black. Per-corpus rather than
-                     per-case on purpose: invention had a blacklist on two of
-                     the twelve video cases and was turning up on six.
+                     tournament, Carlsen playing Black, a file the corpus does
+                     not have. Per-corpus rather than per-case on purpose:
+                     invention had a blacklist on two of the twelve video
+                     cases and was turning up on six. ⚠️ `_KNOWN_UPLOADS` must
+                     be updated when the box's uploads change.
   - names_files    : opt-in ("expect_names_files": [..]): every listed file is
                      named DISTINCTLY, matched longest-first so one filename
                      being a substring of another cannot satisfy both. The
@@ -178,6 +180,7 @@ import tempfile
 import time
 import traceback
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -883,7 +886,85 @@ _CORPUS_FICTIONS: dict[str, list[tuple[re.Pattern[str], str]]] = {
 }
 
 
-def _corpus_fictions(answer: str, corpus: str) -> list[str]:
+# The corpus's actual uploads. ⚠️ Update this when the box's uploads change, or
+# a correct answer naming a new file will be scored as an invention.
+_KNOWN_UPLOADS: dict[str, tuple[str, ...]] = {
+    "video": (
+        "How to WIN with the London System.mp4",
+        "Ken McNabb_ How to Correctly Fit Your Saddle and Pad on Your Horse.mp4",
+        "Magnus Carlsen Teaches How to Win with the London System.mp4",
+        "Roger Gracie VS Rafael Lovato Jr _ World Championship 2009.mp4",
+        "jasonRetirement.mp4",
+        "silent.mp4",
+        "DHS_Stop_the_Bleed_Applying_a_Tourniquet.pdf",
+        "p14.txt",
+        "audrey.png",
+        "tyson.jpg",
+    ),
+}
+
+_FILE_EXT = re.compile(
+    r"\.(?:mp4|webm|mov|mkv|pdf|txt|png|jpe?g|docx?|csv)\b", re.I)
+# Models wrap filenames in backticks, bold, quotes or list bullets. A name with
+# none of those around it is prose that happens to contain a dot-extension, and
+# reading backwards through it produces a sentence fragment, not a filename.
+_FILENAME_EDGE = set('`*"“”\n|,;:()[]!?')
+_FILENAME_LEAD = re.compile(
+    r"^(?:\d+\s+)?(?:the|a|an|file|video|named|called|in|is|of|and|or|titled)\s+",
+    re.I)
+
+
+def _normalise_filename(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9.]+", " ", text.lower())).strip()
+
+
+def _filenames_named(body: str) -> list[str]:
+    """Every filename the answer puts in front of the user, normalised."""
+    found = []
+    for m in _FILE_EXT.finditer(body):
+        start = m.start()
+        while start > 0 and body[start - 1] not in _FILENAME_EDGE:
+            if m.start() - start >= 80:
+                break
+            start -= 1
+        if m.start() - start >= 80:
+            continue
+        name = _FILENAME_LEAD.sub("", _normalise_filename(body[start:m.end()]))
+        if len(name) >= 5:
+            found.append(name)
+    return found
+
+
+def _invented_filenames(answer: str, corpus: str, prompt: str = "") -> list[str]:
+    """Files the answer says exist that the corpus does not have.
+
+    ⚠️ DELIBERATELY PARTIAL, and the limit is the whole design. Run 10 invented
+    two files by MUTATING a real name — inserting a word into the Gracie title,
+    and taking a substring of it — and those score ~0.79 against the original,
+    indistinguishable from a model that fumbled an en-dash or doubled a word.
+    Catching them needs a threshold that also fails correct answers, which was
+    measured and rejected.
+
+    This catches the other kind: a name with no relation to anything in the
+    corpus, like run 11's `_20260811_164547.webm`, which scores 0.22. Over 477
+    filename mentions in the archive it flags exactly those two, and nothing a
+    model got merely sloppy about.
+    """
+    known = [_normalise_filename(k) for k in _KNOWN_UPLOADS.get(corpus, ())]
+    if not known:
+        return []
+    asked = _normalise_filename(prompt)
+    out = []
+    for name in _filenames_named(_prose_region(answer)):
+        # A filename from the question itself is the model quoting it back.
+        if name in asked:
+            continue
+        if max(SequenceMatcher(None, name, k).ratio() for k in known) < 0.55:
+            out.append(name)
+    return out
+
+
+def _corpus_fictions(answer: str, corpus: str, prompt: str = "") -> list[str]:
     """Claims in this answer that the corpus contradicts, as reasons.
 
     A match inside a NEGATED clause is not a fiction: "the summary does not say
@@ -908,6 +989,8 @@ def _corpus_fictions(answer: str, corpus: str) -> list[str]:
             if not _NEGATORS.search(sentence):
                 found.append(f"{why}: {m.group(0)!r}")
                 break
+    found += [f"a file the corpus does not have: {n!r}"
+              for n in _invented_filenames(answer, corpus, prompt)]
     return found
 
 
@@ -1072,7 +1155,7 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     # On for every case in a suite that declares a corpus — the same reasoning
     # one step further. Invention had a per-case blacklist on two of the twelve
     # video cases and turned up on six of them; see `_CORPUS_FICTIONS`.
-    fictions = _corpus_fictions(answer, case.get("corpus", ""))
+    fictions = _corpus_fictions(answer, case.get("corpus", ""), case.get("prompt", ""))
     checks["no_fiction"] = None if not case.get("corpus") else not fictions
 
     # Banner expectation: explicit per-case, else inferred from the model.
