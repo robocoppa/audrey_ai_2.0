@@ -531,8 +531,20 @@ _OFFERS_MORE = re.compile(
 )
 
 
+# ⚠️ Models write `don’t`, not `don't`. A regex spelled `don'?t` matches only
+# the ASCII form and silently fails the typographic one — which is what models
+# actually emit. Cost a false FAIL on 2026-08-11: a textbook "I don’t have any
+# references to that in your uploaded videos" scored `disclaims:❌`.
+#
+# Normalised for PROSE matching only, never inside `_pre_debug_region` — code
+# extraction reads that, and rewriting quotes inside a code block would corrupt
+# the very thing `code_runs` then executes.
+_SMART_QUOTES = str.maketrans({"’": "'", "‘": "'",
+                               "“": '"', "”": '"'})
+
+
 def _prose_region(answer: str) -> str:
-    """The model's prose alone — no debug blocks, no tools footer.
+    """The model's prose alone — no debug blocks, no tools footer, ASCII quotes.
 
     `_answer_body` splits on the FIRST banner separator, so the `_Tools used:_`
     footer (which opens `\\n\\n---\\n>`, deliberately not a separator) stays in
@@ -541,7 +553,7 @@ def _prose_region(answer: str) -> str:
     """
     body = _pre_debug_region(answer)
     idx = body.find("\n\n---\n>")
-    return (body[:idx] if idx >= 0 else body).strip()
+    return (body[:idx] if idx >= 0 else body).strip().translate(_SMART_QUOTES)
 
 
 def _looks_truncated(answer: str) -> bool:
@@ -602,7 +614,7 @@ def _declines_without_offering(answer: str) -> bool:
     33,000 characters. What makes it a failure is refusing with no offer, so
     both halves are required before this fires.
     """
-    body = _pre_debug_region(answer)
+    body = _prose_region(answer)   # normalises `can’t` → `can't`
     return bool(_DECLINES.search(body)) and not _OFFERS_MORE.search(body)
 
 

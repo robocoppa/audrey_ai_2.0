@@ -368,6 +368,25 @@ def test_disclaiming_survives_rewording():
         assert er._disclaims_absence(answer + _FOOTER) is True, answer
 
 
+def test_typographic_apostrophes_do_not_defeat_the_checks():
+    """⚠️ Models write `don’t`, not `don't`, and a regex spelled `don'?t`
+    matches only the ASCII form.
+
+    Cost a false FAIL on 2026-08-11: `video-topic-not-in-corpus` answered "I
+    don’t have any references to the Sicilian Defence in your uploaded
+    videos" — textbook — and scored `disclaims:❌`. A check that fails good
+    answers gets deleted, so this is as damaging as one that misses bad ones.
+    """
+    assert er._disclaims_absence("I don’t have any references to that." + _FOOTER) is True
+    assert er._disclaims_absence("There’s no transcript for it." + _FOOTER) is True
+
+    # Same normalisation reaches the paging check's `can’t`.
+    assert er._declines_without_offering(
+        "I can’t provide the full transcript. Use other software.") is True
+    assert er._declines_without_offering(
+        "I can’t provide it in one go. Would you like me to continue?") is False
+
+
 def test_the_suite_case_is_wired_up():
     """The helper is only worth having if a case actually opts in. Pins that
     `video-ambiguous-singular` — the case that regressed — carries it."""
@@ -377,7 +396,6 @@ def test_the_suite_case_is_wired_up():
 
     assert by_name["video-ambiguous-singular"].get("expect_names_files")
     assert by_name["video-control-unscoped-plural"].get("expect_names_files")
-    assert by_name["video-long-transcript-paging"].get("answer_not_contains")
     assert by_name["video-long-transcript-paging"].get("expect_continuation_offer")
     assert by_name["video-missing-transcript-artifact"].get("expect_disclaims_absence")
     assert by_name["video-empty-artifacts"].get("expect_disclaims_absence")
