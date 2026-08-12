@@ -17,6 +17,8 @@ What this file covers:
 from __future__ import annotations
 
 import json
+import logging
+from types import SimpleNamespace
 
 import pytest
 
@@ -203,6 +205,59 @@ def test_the_stub_is_what_the_census_counts():
     assert stub.startswith("[history compacted:")
     assert "compacted_out=1" in _context_census(
         [{"role": "system", "content": stub}])
+
+
+async def test_the_trace_fires_on_the_path_almost_every_turn_takes(
+        fake_dispatch, caplog):
+    """⚠️ The placement bug, caught live on 2026-08-12: the first census went
+    only after the loop, on the `max_rounds`-exhausted path. That path is RARE
+    — the normal exit is the model stopping tool calls and returning from
+    INSIDE the loop — so a correctly instrumented run produced no `FINAL` line
+    at all and looked broken.
+
+    The `ANSWERED` census sits on that normal return, and its `convo` is
+    exactly what produced the prose: compaction ran at the top of the
+    iteration and nothing was appended after it.
+    """
+    ollama = _FakeOllama([
+        {"message": {"tool_calls": [_call("kb_search", "a")]}},
+        {"message": {"content": "done"}, "prompt_eval_count": 1, "eval_count": 1},
+    ])
+    with caplog.at_level(logging.INFO, logger="audrey.pipeline.react"):
+        out = await run_react(
+            ollama, _FakeHealth(), _registry_ws_kb(),
+            model="m", messages=[{"role": "user", "content": "q"}],
+            options={}, timeout_s=5, max_rounds=3, compress_after_round=99,
+            max_tool_result_chars=1000, tool_dispatch_timeout_s=5,
+            location="cloud", max_web_searches=3,
+            cfg=SimpleNamespace(raw={"agentic": {"debug_context_trace": True}}),
+        )
+    assert out.content == "done"
+    answered = [r.message for r in caplog.records if "ANSWERED" in r.message]
+    assert len(answered) == 1, [r.message for r in caplog.records]
+    # It reports the tool result that was live when the answer was written.
+    assert "kb_search:" in answered[0]
+    assert "compacted_out=0" in answered[0]
+    # And no FINAL line, because max_rounds was never exhausted — the exact
+    # shape that made the first version look like it had failed.
+    assert not [r for r in caplog.records if "FINAL" in r.message]
+
+
+async def test_the_trace_stays_silent_when_the_flag_is_off(fake_dispatch, caplog):
+    """It ships dark. A diagnostic that logs unconditionally becomes noise
+    nobody greps."""
+    ollama = _FakeOllama([
+        {"message": {"content": "done"}, "prompt_eval_count": 1, "eval_count": 1},
+    ])
+    with caplog.at_level(logging.INFO, logger="audrey.pipeline.react"):
+        await run_react(
+            ollama, _FakeHealth(), _registry_ws_kb(),
+            model="m", messages=[{"role": "user", "content": "q"}],
+            options={}, timeout_s=5, max_rounds=3, compress_after_round=99,
+            max_tool_result_chars=1000, tool_dispatch_timeout_s=5,
+            location="cloud", max_web_searches=3,
+        )
+    assert not [r for r in caplog.records if "context-trace" in r.message]
 
 
 def test_summarize_tool_message_names_the_tool():

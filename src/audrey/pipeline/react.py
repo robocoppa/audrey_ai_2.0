@@ -322,6 +322,21 @@ async def run_react(
                      round_idx, model, len(tool_calls), time.monotonic() - start)
 
             if not tool_calls:
+                # ⚠️ THE line that matters, and it is here rather than after the
+                # loop. This `return` is the NORMAL exit — the model stopped
+                # calling tools and wrote its answer — so it is the path almost
+                # every turn takes. The `FINAL` census below only fires when
+                # `max_rounds` is exhausted with the model still asking for
+                # tools, which is rare; grepping for FINAL alone therefore
+                # comes back empty on a perfectly instrumented run (2026-08-12).
+                #
+                # `convo` here is exactly what produced the answer: compaction
+                # ran at the top of this iteration and nothing has been appended
+                # since, so this census is the context the prose was written
+                # from.
+                if _debug_context_trace(cfg):
+                    log.info("context-trace: model=%s ANSWERED round=%d %s",
+                             model, round_idx, _context_census(convo))
                 return ReactResult(
                     content=msg.get("content", "") or "",
                     tool_rounds=rounds_used,
