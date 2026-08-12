@@ -340,6 +340,35 @@ def test_inviting_the_user_to_ask_for_the_next_part_is_an_offer():
     assert er._declines_without_offering(answer) is False
 
 
+def test_inviting_the_user_to_say_the_word():
+    """Run 12's false fail, plus a historical one the same scan turned up.
+    Both are textbook offers built from words the family did not hold."""
+    for answer in (
+        "I cannot provide the full transcript in a single response because it "
+        "is approximately 33,626 characters long. If you would like me to "
+        "continue providing it in subsequent messages, please let me know, "
+        "and I will retrieve the next section for you.",
+        "I cannot provide the whole thing here. If you need specific details "
+        "from later parts of the video, please let me know which section you "
+        "are interested in, and I can retrieve that segment for you.",
+    ):
+        assert er._declines_without_offering(answer) is False, answer
+
+
+def test_a_capability_statement_about_something_else_is_not_an_offer():
+    """⚠️ The second rejected widening. Matching first-person "I can provide"
+    or "I will retrieve" flips one more archived answer than the two above —
+    and that one offers a SUMMARY while sending the user away for the
+    transcript. The offer has to be about continuing."""
+    answer = (
+        "I cannot provide the full transcript because I only have access to "
+        "the first segment. However, I can provide the summary and key points "
+        "from the available portion. For the remaining 20+ minutes, you would "
+        "need to view the video directly."
+    )
+    assert er._declines_without_offering(answer) is True
+
+
 def test_the_offer_widening_that_was_rejected_by_measurement():
     """⚠️ Fixing the above by matching "remaining part"/"next section" was
     measured over every archived paging answer and REJECTED: three flips, and

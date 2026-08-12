@@ -549,15 +549,21 @@ _DECLINES = re.compile(
     r"(?:provide|give|show|produce|display|share|output|retrieve|return)\b",
     re.I,
 )
-# ⚠️ Every phrase here has AUDREY doing the next page. Widening this by shape
-# ("remaining part", "next section") was tried and REJECTED by measurement: of
-# its three flips across the archived paging answers, two were genuine
-# dead-ends wearing an offer's vocabulary — "you would need to continue
-# retrieving the remaining parts", "you would need to download the video file
-# and use a speech-to-text service". The distinction is not whether more text
-# is mentioned, it is WHO fetches it. Only invitations to ask belong here.
+# ⚠️ Every phrase here is a SECOND-PERSON invitation to ask, which can only be
+# about the next step. Two widenings have been rejected by measurement:
+#
+#   • by shape ("remaining part", "next section") — of its three flips, two
+#     were dead-ends wearing an offer's vocabulary: "you would need to continue
+#     retrieving the remaining parts", "you would need to download the video
+#     file and use a speech-to-text service". The distinction is not whether
+#     more text is mentioned, it is WHO fetches it.
+#   • by first-person capability ("I can provide", "I will retrieve") — an
+#     answer can say "I can provide the summary and key points" and then send
+#     the user away for the transcript itself. A capability statement about
+#     SOMETHING ELSE is not an offer to continue.
 _OFFERS_MORE = re.compile(
-    r"(?:would you like|shall i|want me to|let me know if|i can continue"
+    r"(?:would you like|shall i|want me to|let me know|i can continue"
+    r"|you(?:'d| would) like me to"
     r"|continue reading|keep reading|next page|read on|page by page"
     r"|specific sections|ask (?:me )?for (?:the )?(?:next|subsequent|more)"
     r"|(?:give|send|show) me the next|just ask|say the word)",
