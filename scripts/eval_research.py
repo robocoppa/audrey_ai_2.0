@@ -847,14 +847,26 @@ _DISCLAIMS_ABSENCE = re.compile(
     r"|did(?:n'?t| not) find|no (?:videos?|files?|uploads?|documents?)\b"
     r"|nothing(?:\s+\w+){0,2}\s+(?:was|is|to|about)"
     r"|none of (?:them|these|those|the|your|my|it)"
+    # ⚠️ The verb list was built against the video corpus, where a gap is
+    # phrased "does not mention / contain / cover". `eval_prompts_local_models`
+    # asks about a PASSAGE, and the natural phrasing there is "the passage does
+    # not provide / specify / state / report" — so `ground-fact-absent` failed
+    # on 2026-08-12 for an answer that disclaimed correctly and then cited what
+    # the passage did say. Widening a POSITIVE check makes it more vacuous, so
+    # this was measured: 406 → 414 matches over 1,116 archived sections, eight
+    # flips, and six of the eight land on cases where `disclaims` is not
+    # applicable at all. Exactly two verdicts move, both of them this false
+    # fail. Add a verb here only with the same measurement.
     r"|does not (?:have|contain|exist|cover|appear|include|discuss|mention"
-    r"|reference|address|show|say)"
+    r"|reference|address|show|say|provide|specify|state|report|list|give"
+    r"|indicate|disclose)"
     r"|doesn'?t (?:have|contain|exist|cover|appear|include|discuss|mention"
-    r"|reference|address|show|say)"
+    r"|reference|address|show|say|provide|specify|state|report|list|give"
+    r"|indicate|disclose)"
     r"|do not (?:have|contain|cover|discuss|mention|reference|address|see|show"
-    r"|appear)"
+    r"|appear|provide|specify|state|report|list|give|indicate|disclose)"
     r"|don'?t (?:have|contain|cover|discuss|mention|reference|address|see|show"
-    r"|appear)"
+    r"|appear|provide|specify|state|report|list|give|indicate|disclose)"
     r"|has no|there is no|there's no|was not|wasn'?t|is not available"
     r"|isn'?t available|not available|could not find|couldn'?t find"
     r"|unable to find|cannot find|can'?t find|cannot see|can'?t see"

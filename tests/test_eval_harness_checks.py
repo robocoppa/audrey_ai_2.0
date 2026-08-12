@@ -1466,3 +1466,32 @@ def test_ungrounded_catches_a_narrated_body_with_no_summary_word():
 def test_grounded_check_is_not_applicable_when_a_file_was_read():
     checks = {"grounded": er._ungrounded_content("x" + _FOOTER_READ)}
     assert checks["grounded"] is None
+
+
+# ── disclaims: passage-QA phrasing (2026-08-12) ─────────────────────────────
+
+def test_disclaims_accepts_the_passage_phrasing():
+    """`ground-fact-absent` in the local-model bake-off. Correct answer, and
+    the verb list — built on the video corpus — had no "provide"."""
+    answer = (
+        "The passage does not provide the p99 latency for the vault-sync "
+        "worker. It only reports median latencies (31 ms for warm "
+        "invocations and 2,140 ms for cold starts)."
+    )
+    assert er._disclaims_absence(answer)
+
+
+def test_disclaims_accepts_the_other_passage_verbs():
+    for verb in ("specify", "state", "report", "list", "indicate", "disclose"):
+        assert er._disclaims_absence(f"The passage does not {verb} that."), verb
+        assert er._disclaims_absence(f"The notes do not {verb} that."), verb
+
+
+def test_disclaims_still_rejects_an_answer_that_just_answers():
+    """The widening must not make the check vacuous — an answer that fills the
+    gap instead of admitting it still fails."""
+    answer = (
+        "The p99 latency for the vault-sync worker is approximately 3,400 ms, "
+        "which is typical for a cold-start-dominated workload."
+    )
+    assert not er._disclaims_absence(answer)
