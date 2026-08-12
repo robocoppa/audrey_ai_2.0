@@ -79,6 +79,16 @@ class EnvOverrides(BaseSettings):
     # that gets forgotten and silently leaves production on a 1-minute lease.
     # Put VIDEO_LEASE_MINUTES=1 in `.env` (gitignored) instead, and delete the
     # line when the run is over.
+    # Diagnostic traces. ⚠️ Here rather than only in `config.yaml` because they
+    # are TEMPORARY toggles on a TRACKED file that is under active development:
+    # flipping one in the yaml leaves a working-tree diff that every subsequent
+    # `git pull` has to be worked around, and on 2026-08-12 an on-box `sed`
+    # aimed at one of them overwrote the other and produced a duplicate key
+    # (YAML keeps the LAST, so the flag read `false` while looking `true`).
+    # `.env` is gitignored, so setting them there survives every pull untouched.
+    debug_context_trace: bool | None = Field(default=None, alias="DEBUG_CONTEXT_TRACE")
+    debug_research_trace: bool | None = Field(default=None, alias="DEBUG_RESEARCH_TRACE")
+
     video_lease_minutes: int | None = Field(default=None, alias="VIDEO_LEASE_MINUTES")
     video_max_attempts: int | None = Field(default=None, alias="VIDEO_MAX_ATTEMPTS")
 
@@ -115,6 +125,10 @@ class Config:
             self._merged.setdefault("kb", {})["dataset_paths"] = [
                 p.strip() for p in v.split(",") if p.strip()
             ]
+        if (v := self.env.debug_context_trace) is not None:
+            self._merged.setdefault("agentic", {})["debug_context_trace"] = v
+        if (v := self.env.debug_research_trace) is not None:
+            self._merged.setdefault("agentic", {})["debug_research_trace"] = v
         if (v := self.env.video_lease_minutes) is not None:
             self._merged.setdefault("kb", {}).setdefault("video", {})["lease_minutes"] = v
         if (v := self.env.video_max_attempts) is not None:

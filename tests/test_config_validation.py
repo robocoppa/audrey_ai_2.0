@@ -391,6 +391,62 @@ def test_pick_panel_timeout_defaults_when_keys_missing():
     assert pick_panel_timeout(cfg, "deep_panel") == 240.0
 
 
+class TestDiagnosticTraceEnvOverrides:
+    """⚠️ The diagnostic traces are env-overridable for the same reason the
+    video lease is, and the cost was paid on 2026-08-12.
+
+    Both flags live in `config.yaml`, which is TRACKED and under active
+    development. Turning one on for a run therefore leaves a working-tree diff
+    that every later `git pull` has to be worked around. Worse, the on-box
+    `sed` that flipped one of them matched the OTHER flag's line and replaced
+    it — leaving two `debug_context_trace` keys under `agentic`. YAML keeps the
+    last, so the flag read `false` while looking `true` in the file, and the
+    diagnostic run it was turned on for would have produced no trace lines at
+    all.
+
+    `.env` is gitignored. Setting them there survives every pull untouched and
+    needs no edit to a tracked file.
+    """
+
+    def test_yaml_wins_when_the_env_var_is_absent(self):
+        """Unset must mean unset, or the committed `false` becomes a lie."""
+        cfg = Config({"agentic": {"debug_context_trace": False,
+                                  "debug_research_trace": False}},
+                     EnvOverrides(DEBUG_CONTEXT_TRACE=None,
+                                  DEBUG_RESEARCH_TRACE=None))
+        assert cfg.raw["agentic"]["debug_context_trace"] is False
+        assert cfg.raw["agentic"]["debug_research_trace"] is False
+
+    def test_the_env_var_turns_a_trace_on_without_touching_the_file(self):
+        cfg = Config({"agentic": {"debug_context_trace": False}},
+                     EnvOverrides(DEBUG_CONTEXT_TRACE=True))
+        assert cfg.raw["agentic"]["debug_context_trace"] is True
+
+    def test_each_flag_is_independent(self):
+        """The sed that started this conflated the two. They must not."""
+        cfg = Config({"agentic": {"debug_context_trace": False,
+                                  "debug_research_trace": False}},
+                     EnvOverrides(DEBUG_CONTEXT_TRACE=True))
+        assert cfg.raw["agentic"]["debug_context_trace"] is True
+        assert cfg.raw["agentic"]["debug_research_trace"] is False
+
+    def test_the_env_var_can_also_force_a_trace_off(self):
+        """Not symmetry for its own sake: it is how a flag left `true` in a
+        pulled config gets silenced without editing the file back."""
+        cfg = Config({"agentic": {"debug_context_trace": True}},
+                     EnvOverrides(DEBUG_CONTEXT_TRACE=False))
+        assert cfg.raw["agentic"]["debug_context_trace"] is False
+
+    def test_it_works_when_yaml_has_no_agentic_block(self):
+        cfg = Config({}, EnvOverrides(DEBUG_CONTEXT_TRACE=True))
+        assert cfg.raw["agentic"]["debug_context_trace"] is True
+
+    def test_the_override_does_not_disturb_the_rest_of_agentic(self):
+        cfg = Config({"agentic": {"react": {"compress_keep_last": 4}}},
+                     EnvOverrides(DEBUG_CONTEXT_TRACE=True))
+        assert cfg.raw["agentic"]["react"]["compress_keep_last"] == 4
+
+
 class TestVideoLeaseEnvOverrides:
     """`kb.video` is env-overridable so the lease verification never needs an
     edit to `config.yaml` on the box.
