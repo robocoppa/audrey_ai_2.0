@@ -120,6 +120,14 @@ class EnvOverrides(BaseSettings):
     react_max_tool_result_chars: int | None = Field(
         default=None, alias="REACT_MAX_TOOL_RESULT_CHARS")
 
+    # Thinking for passthrough turns — an A-B knob for the eval sweeps, which
+    # reach their models only through that route. Tri-state on purpose: unset
+    # means "leave config alone", and config's own default is null, which
+    # sends no `think` field. `bool | None` rather than `bool` so that
+    # PASSTHROUGH_THINK=0 is a real "off" and not indistinguishable from
+    # absence — the whole point is comparing off against the default.
+    passthrough_think: bool | None = Field(default=None, alias="PASSTHROUGH_THINK")
+
     video_lease_minutes: int | None = Field(default=None, alias="VIDEO_LEASE_MINUTES")
     video_max_attempts: int | None = Field(default=None, alias="VIDEO_MAX_ATTEMPTS")
 
@@ -187,6 +195,8 @@ class Config:
             self._set("REACT_COMPRESS_AFTER_ROUND", v, "agentic", "react", "compress_after_round")
         if (v := self.env.react_max_tool_result_chars) is not None:
             self._set("REACT_MAX_TOOL_RESULT_CHARS", v, "agentic", "react", "max_tool_result_chars")
+        if (v := self.env.passthrough_think) is not None:
+            self._set("PASSTHROUGH_THINK", v, "passthrough", "think")
         if (v := self.env.video_lease_minutes) is not None:
             self._set("VIDEO_LEASE_MINUTES", v, "kb", "video", "lease_minutes")
         if (v := self.env.video_max_attempts) is not None:

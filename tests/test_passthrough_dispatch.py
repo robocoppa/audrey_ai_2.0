@@ -54,13 +54,16 @@ class _FakeOllama:
         self.chat_calls.append({
             "model": model, "messages": messages,
             "options": options, "tools": tools, "timeout_s": timeout_s,
+            "think": think,
         })
         return self.chat_response
 
-    async def chat_stream(self, *, model, messages, options=None, tools=None, timeout_s=None):
+    async def chat_stream(self, *, model, messages, options=None, tools=None,
+                          timeout_s=None, think=None):
         self.stream_calls.append({
             "model": model, "messages": messages,
             "options": options, "tools": tools, "timeout_s": timeout_s,
+            "think": think,
         })
         for chunk in self.stream_chunks:
             yield chunk
@@ -673,3 +676,81 @@ async def test_sidecar_off_restores_the_old_verbatim_forward():
 
     assert [c["model"] for c in ollama.chat_calls] == ["qwen3.6:35b-64k"]
     assert ollama.chat_calls[0]["messages"][0]["content"] == _IMAGE_TURN
+
+
+# ── passthrough.think (2026-08-12) ──────────────────────────────────────────
+#
+# Passthrough forwarded every turn in Ollama's `omitted` state, because the
+# OpenAI schema has no thinking knob. Fine for serving; useless for comparing.
+# The local bake-off reaches its models only through this route, and all three
+# of its candidates declare `thinking` — so their scores were being read off
+# three different, unchosen reasoning budgets.
+
+class _ThinkingAwareOllama(_FakeOllama):
+    """Adds the capability lookup `_passthrough_think` routes through."""
+
+    def __init__(self, *, declares: bool = True, **kw) -> None:
+        super().__init__(**kw)
+        self.declares = declares
+        self.flag_calls: list[tuple[str, bool]] = []
+
+    async def thinking_flag(self, model: str, want: bool) -> bool | None:
+        self.flag_calls.append((model, want))
+        return want if self.declares else None
+
+
+def _think_app(ollama, think):
+    return _stub_app(
+        ollama=ollama, gate=_RecordingGate(),
+        inflight=UserInflightRegistry(max_inflight_per_user=3),
+        passthrough_block={
+            "enabled": True,
+            "allowed_models": ["qwen3.6:35b-64k"],
+            "require_role": None,
+            "think": think,
+        },
+    )
+
+
+async def _run(app):
+    return await _handle_passthrough(
+        app, request=SimpleNamespace(app=app),
+        payload=_payload(model=f"{PASSTHROUGH_PREFIX}qwen3.6:35b-64k"),
+        me=_stub_user(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_think_is_omitted_by_default():
+    """Config ships `think: null`, so serving clients keep today's behaviour
+    and the capability lookup is never even made."""
+    ollama = _ThinkingAwareOllama()
+    await _run(_think_app(ollama, None))
+    assert ollama.chat_calls[0]["think"] is None
+    assert ollama.flag_calls == []
+
+
+@pytest.mark.asyncio
+async def test_think_false_reaches_a_model_that_declares_it():
+    ollama = _ThinkingAwareOllama()
+    await _run(_think_app(ollama, False))
+    assert ollama.chat_calls[0]["think"] is False
+    assert ollama.flag_calls == [("qwen3.6:35b-64k", False)]
+
+
+@pytest.mark.asyncio
+async def test_think_true_reaches_a_model_that_declares_it():
+    ollama = _ThinkingAwareOllama()
+    await _run(_think_app(ollama, True))
+    assert ollama.chat_calls[0]["think"] is True
+
+
+@pytest.mark.asyncio
+async def test_think_is_dropped_for_a_model_that_does_not_declare_it():
+    """⚠️ Why this never sends a raw bool. Ollama HARD ERRORS on `think` for a
+    model without the capability rather than ignoring it, and several entries
+    in `allowed_models` do not declare it — a bare False would break every one
+    of them in a single config edit."""
+    ollama = _ThinkingAwareOllama(declares=False)
+    await _run(_think_app(ollama, False))
+    assert ollama.chat_calls[0]["think"] is None

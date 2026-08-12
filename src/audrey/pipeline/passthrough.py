@@ -44,6 +44,7 @@ async def passthrough_chat(
     user_id: str,
     tools: list[dict[str, Any]] | None = None,
     timeout_s: float | None = None,
+    think: bool | None = None,
 ) -> dict[str, Any]:
     """Non-streaming passthrough: gate-guarded `ollama.chat` forward.
 
@@ -62,7 +63,7 @@ async def passthrough_chat(
     async with gate.acquire(concrete, location=location, user_id=user_id):
         resp = await ollama.chat(
             model=concrete, messages=messages, options=options,
-            tools=tools, timeout_s=timeout_s,
+            tools=tools, timeout_s=timeout_s, think=think,
         )
     msg = resp.get("message") or {}
     log.info(
@@ -89,6 +90,7 @@ async def passthrough_stream(
     user_id: str,
     tools: list[dict[str, Any]] | None = None,
     timeout_s: float | None = None,
+    think: bool | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Streaming passthrough: yield raw Ollama chunks, gate held across all.
 
@@ -128,7 +130,7 @@ async def passthrough_stream(
     async with gate.acquire(concrete, location=location, user_id=user_id):
         async for chunk in ollama.chat_stream(
             model=concrete, messages=messages, options=options,
-            tools=tools, timeout_s=timeout_s,
+            tools=tools, timeout_s=timeout_s, think=think,
         ):
             chunks_received += 1
             cmsg = chunk.get("message") or {}

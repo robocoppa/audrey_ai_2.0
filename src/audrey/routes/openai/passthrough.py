@@ -99,6 +99,38 @@ def _resolve_passthrough_model(
 
 
 
+async def _passthrough_think(
+    ollama: OllamaClient, cfg, concrete: str,
+) -> bool | None:
+    """Resolve `passthrough.think` for one model. `None` = omit the field.
+
+    Passthrough forwards a client's request verbatim and the OpenAI schema has
+    no thinking knob, so every passthrough turn ran in Ollama's `omitted`
+    state — whatever each model's template decides. That is defensible for
+    serving and useless for comparing: the local bake-off
+    (`scripts/eval_prompts_local_models.json`) reaches its models only through
+    this route, and on 2026-08-12 all three of its candidates declared
+    `thinking`, so their scores were being compared at three different and
+    unchosen reasoning budgets.
+
+    ⚠️ Routed through `ollama.thinking_flag`, never sent raw. Ollama HARD
+    ERRORS on `think` for a model that does not declare the capability, so a
+    bare `False` here would break every non-thinking model in
+    `allowed_models` — of which there are several. `thinking_flag` returns
+    None for those, which omits the field.
+
+    ⚠️ Default is None (omit), which is exactly today's behaviour. This is an
+    experiment knob: set it in `.env` as `PASSTHROUGH_THINK`, run the sweep,
+    unset it. It is deliberately NOT wired to a per-request field — a client
+    that could ask for thinking would make the eval's model column mean
+    something different per caller.
+    """
+    want = (cfg.raw.get("passthrough") or {}).get("think")
+    if want is None:
+        return None
+    return await ollama.thinking_flag(concrete, bool(want))
+
+
 async def _handle_passthrough(
     app, request: Request, payload: ChatCompletionRequest, me: AuthedUser,
 ):
@@ -119,6 +151,7 @@ async def _handle_passthrough(
     inflight = app.state.inflight
     ollama: OllamaClient = app.state.ollama
     gate: FairLocalGate = app.state.gate
+    think = await _passthrough_think(ollama, cfg, concrete)
 
     # Passthrough forwards verbatim, so an attached image reaches the
     # concrete model as Ollama's `images: [...]`. Text-only targets — most
@@ -147,6 +180,7 @@ async def _handle_passthrough(
                         virtual=payload.model, concrete=concrete, location=location,
                         messages=messages, options=options,
                         user_id=me.email, tools=payload.tools, timeout_s=timeout_s,
+                        think=think,
                     ):
                         yield frame
             except OllamaError:
@@ -173,6 +207,7 @@ async def _handle_passthrough(
                 concrete=concrete, location=location,
                 messages=messages, options=options,
                 user_id=me.email, tools=payload.tools, timeout_s=timeout_s,
+                think=think,
             )
     except OllamaError as e:
         outcome = "error"
@@ -214,6 +249,7 @@ async def _passthrough_stream_sse(
     user_id: str,
     tools: list[dict[str, Any]] | None,
     timeout_s: float | None,
+    think: bool | None = None,
 ):
     """Stream Ollama chunks as OpenAI-shaped SSE frames.
 
@@ -248,7 +284,7 @@ async def _passthrough_stream_sse(
             ollama, gate,
             concrete=concrete, location=location,
             messages=messages, options=options,
-            user_id=user_id, tools=tools, timeout_s=timeout_s,
+            user_id=user_id, tools=tools, timeout_s=timeout_s, think=think,
         ):
             msg = chunk.get("message", {}) or {}
             content = msg.get("content", "") or ""

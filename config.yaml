@@ -1117,6 +1117,35 @@ vision:
 # request. /v1/models lists one entry per allowed concrete.
 passthrough:
   enabled: true
+
+  # Thinking for passthrough turns. `null` sends no `think` field at all,
+  # which is today's behaviour and what serving clients should get: their
+  # request is forwarded verbatim and the OpenAI schema has no thinking knob.
+  #
+  # It exists for the eval sweeps, which reach their models only through this
+  # route. Probed 2026-08-12, three samples each, NUM_PREDICT=2048:
+  #
+  #     model                     omitted           true              false
+  #     qwen3.6:35b               8985c think, 0c   8928c think, 0c   —
+  #     nemotron-3.5-lightning    9149c think, 0c   8941c think, 0c   0c, 3135c
+  #     muse-glimmer              8548c think, 661c 8437c think, 743c 0c, 2398c
+  #
+  # Two things in that table. **`omitted` is not `off`** — the gap to `true`
+  # is smaller than the within-state spread on all three, so the default is
+  # thinking, nobody chose it, and a bake-off run this way compares three
+  # unchosen reasoning budgets. And **thinking can consume the whole reply**:
+  # the `0c` content cells are answers that spent all 2,048 tokens reasoning
+  # and emitted nothing. That is the same failure `routes/media.py` already
+  # names for the vision path.
+  #
+  # ⚠️ Set this in `.env` as `PASSTHROUGH_THINK`, not here — it is an
+  # experiment, and a forgotten `false` in a tracked file silently changes
+  # what every passthrough client (Claudette, Hermes, OpenClaw) gets.
+  # ⚠️ Never sent raw: `ollama.thinking_flag` drops it for models that do not
+  # declare `thinking`, because Ollama hard-errors on the field rather than
+  # ignoring it.
+  think: null
+
   allowed_models:                        # concrete models clients may target
     - qwen3.6:35b-64k
     - qwen3-coder-next-64k:latest
