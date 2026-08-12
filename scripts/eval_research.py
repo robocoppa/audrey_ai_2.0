@@ -110,6 +110,15 @@ Per case, against the reassembled streamed answer:
                      only behavioural check here — for cases whose failure is
                      "answered from the wrong file", which every structural
                      check above scores as a pass.
+  - grounded       : AUTOMATIC, and applicable only when the tools footer shows
+                     `list_my_files` as the ONLY tool that succeeded. That
+                     listing carries no file contents by construction, so an
+                     account of what a file SAYS after it alone was invented.
+                     Not applicable — never a failure — when the footer did not
+                     parse or any other tool ran. The only check gated on the
+                     footer rather than on the prose, and the only one that can
+                     catch an answer whose every sentence is well-formed and
+                     whose every fact is made up.
 
 Plus, for every case, latency is recorded: TTFT (first content delta) and
 total wall-clock. The fast path's reason to exist is speed, so these make
@@ -260,6 +269,7 @@ class CaseResult:
     code_detail: str = ""             # code_runs outcome detail (informational)
     fiction_detail: str = ""          # which corpus fictions no_fiction found
     context_detail: str = ""          # INFORMATIONAL: degraded-context report
+    ungrounded_detail: str = ""       # which phrase failed `grounded`
     ttft_s: float | None = None
     total_s: float | None = None
     # Informational domain-based source breakdown (never a pass/fail check).
@@ -654,6 +664,70 @@ _TOOL_OK = re.compile(r"`(\w+)`\s*✅(\d+)")
 def _tools_that_succeeded(answer: str) -> dict[str, int]:
     return {t: int(n) for t, n in _TOOL_OK.findall(_footer_region(answer))
             if int(n) > 0}
+
+
+# ─── Content claimed with nothing behind it ───────────────────────────
+#
+# The one check here that rests on an architectural invariant rather than on a
+# judgement about prose, which is why it can gate where the phrase families
+# cannot. `MyFileRow` (tools-server/app.py:718) carries filename, kind, status,
+# uploaded_at, duration_s, failure_reason, waiting_for_s and `artifacts` — a
+# list of WHICH sidecars exist, never a word of what any of them says. The
+# `summary` field was deleted from it on 2026-08-06 with the reason recorded
+# in place: "a listing that carries contents is a listing that gets answered
+# from instead of read from."
+#
+# So summary or transcript text cannot reach the model except through
+# `get_file_text` or `kb_search`. If the footer shows `list_my_files` as the
+# ONLY tool that succeeded, an account of what the file SAYS did not come from
+# the file. There is no honest reading — unlike a report of thinned context,
+# which turned out to be true and cost a retracted check to learn.
+#
+# Measured over the archive: 30 hits in 1,080 sections, every one of them
+# `video-unnamed-reference` inventing a different match from the same filename
+# — a rear-naked choke, a guillotine, a mounted triangle, an eye-gouging
+# disqualification, John Danaher recast as Lovato's father. The same case
+# passes 12 times when it calls `get_file_text`, and those 12 agree with each
+# other and with the corpus: a sub-5-minute clip, two black belts, a red and
+# blue mat. Fabrication and grounding are cleanly separable here.
+_CATALOGUE_ONLY = {"list_my_files"}
+
+_UNGROUNDED_CLAIM = re.compile(
+    # Announcing a summary the catalogue cannot have supplied. The adjective
+    # slot catches "here's a quick summary"; `\b` keeps it out of "there's no
+    # summary, transcript or visual", which is an honest report of absence and
+    # matched "here's ... summary" as a substring before the anchor went in.
+    r"\bhere(?:'s| is| are)?\s+(?:the|a|its|his|her|their)?\s*"
+    r"(?:(?!no\b|not\b)\w+\s+){0,2}summar(?:y|ies)"
+    r"|\bsummary of (?:that|the|this|it|your|his|her)\b"
+    r"|^\s*(?:\*\*)?summary(?:\s+of\b[^\n]*)?:?(?:\*\*)?\s*$"
+    # Narrating the contents outright.
+    r"|\b(?:the|this)\s+(?:video|footage|recording|clip|match|documentary)\s+"
+    r"(?:captures?|shows?|covers?|features?|depicts?|highlights?|portrays?"
+    r"|presents?|centers?|combines?|begins?|opens?)\b",
+    re.I | re.M,
+)
+
+
+def _ungrounded_content(answer: str) -> str | None:
+    """The offending phrase, "" if grounded, None if not applicable.
+
+    ⚠️ Returns None — not applicable, never a failure — whenever the footer
+    did not parse or any tool beyond the catalogue succeeded. A harness that
+    cannot see what the model was handed must not call the output a lie; that
+    rule was learned the expensive way and applies with full force here.
+
+    ⚠️ Not a bare "did a content tool run" test. The first draft listed the
+    content tools by name, left `web_search` off, and failed two research
+    answers built on fourteen and three successful searches. The gate is
+    inverted for that reason: the catalogue is a closed set of one, and a
+    closed set cannot be under-specified the way an open one can.
+    """
+    tools = _tools_that_succeeded(answer)
+    if not tools or set(tools) != _CATALOGUE_ONLY:
+        return None
+    m = _UNGROUNDED_CLAIM.search(_prose_region(answer))
+    return m.group(0).strip() if m else ""
 
 
 # An answer reporting that content it asked for is not in front of it, while
@@ -1438,13 +1512,20 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
         if case.get("expect_disclaims_absence") else None
     )
 
+    # Grounding check (automatic, and applicable only when the footer says it
+    # can be). Not opt-in per case: the precondition IS the opt-in, and it is
+    # a state no correct answer can reach — see `_ungrounded_content`.
+    ungrounded = _ungrounded_content(answer)
+    checks["grounded"] = None if ungrounded is None else not ungrounded
+
     ok = all(v for v in checks.values() if v is not None)
     return CaseResult(name=name, model=model, ok=ok, checks=checks,
                       answer=answer, banners_seen=banners, route=route,
                       ttft_s=timing.ttft_s, total_s=timing.total_s,
                       source_stats=stats, code_detail=code_detail,
                       fiction_detail="; ".join(fictions),
-                      context_detail=degraded)
+                      context_detail=degraded,
+                      ungrounded_detail=ungrounded or "")
 
 
 def _fmt_check(v: bool | None) -> str:
@@ -1468,7 +1549,8 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
     cols = ["reachable", "no_error_marker", "has_answer", "banners",
             "sources", "url_wellformed", "route", "code_block", "code_runs",
             "contains", "names_files", "not_contains", "continuation",
-            "disclaims", "not_truncated", "not_misattributed", "no_fiction"]
+            "disclaims", "not_truncated", "not_misattributed", "no_fiction",
+            "grounded"]
     for r in results:
         status = "PASS" if r.ok else "FAIL"
         print(f"\n[{status}] {r.name}   (model={r.model})")
@@ -1480,6 +1562,9 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
             print(f"   fiction: {r.fiction_detail}")
         if r.context_detail:
             print(f"   context (informational): {r.context_detail}")
+        if r.ungrounded_detail:
+            print(f"   ungrounded: {r.ungrounded_detail!r} "
+                  f"(only list_my_files succeeded)")
         line = "   " + "  ".join(f"{c}:{_fmt_check(r.checks.get(c))}" for c in cols)
         print(line)
         print(f"   {_fmt_latency(r)}")
@@ -1536,6 +1621,10 @@ def save_results(results: list[CaseResult], save_file: Path) -> None:
             section += f"- fiction: {r.fiction_detail}\n"
         if r.context_detail:
             section += f"- context (informational): {r.context_detail}\n"
+        if r.ungrounded_detail:
+            section += (f"- ungrounded: {r.ungrounded_detail!r} — only "
+                        f"list_my_files succeeded, so no file contents were "
+                        f"read\n")
         if r.error:
             section += f"- error: {r.error}\n"
         section += f"\n{r.answer or '(no answer body)'}\n"
@@ -1568,6 +1657,7 @@ def save_json(results: list[CaseResult], save_json_file: Path) -> None:
             "code_detail": r.code_detail,
             "fiction_detail": r.fiction_detail,
             "context_detail": r.context_detail,
+            "ungrounded_detail": r.ungrounded_detail,
             # Grounding-quality numbers (research/sourced cases). None when the
             # case computed no source stats (e.g. a code case) — kept as an
             # explicit null so the record shape is stable for eval_compare.py.

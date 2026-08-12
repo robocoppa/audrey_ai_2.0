@@ -732,7 +732,29 @@ class MyFileRow(BaseModel):
     # in front of the model.
     failure_reason: str = ""
     waiting_for_s: float = 0.0
-    artifacts: list[str] = []
+    # Named for the model's benefit, not ours. Deleting `summary` (above) in
+    # 2026-08-06 stopped the listing from carrying contents, but it did not
+    # stop the listing from being answered from: over the archived eval runs,
+    # "summarise my most recent upload" was answered with `list_my_files` as
+    # the only successful call in 30 of 42 judgeable turns, each one inventing
+    # a different match from the same evocative filename. A bare `artifacts:
+    # ["summary", "visual"]` reads as an inventory of what the model HAS. The
+    # name is the only part of a row the model sees before it decides whether
+    # it has enough, so the name is where the "you have not read this yet"
+    # belongs — the two places that already say it in prose (this endpoint's
+    # description, and VIDEO_SPECIALIST_SYSTEM's "never answer about a file's
+    # contents from its name alone") are both deployed and both ignored.
+    #
+    # ⚠️ `validation_alias` keeps the WIRE name `artifacts`, which is what
+    # Audrey's `ModelFileRow` sends. Renaming the field outright would make a
+    # tools-server newer than Audrey read every row as having no artifacts —
+    # reported to the user as "that file has no content", which is worse than
+    # the defect being fixed. Missing on the wire still degrades to [].
+    unread_artifacts: list[str] = Field(
+        default=[],
+        validation_alias="artifacts",
+        serialization_alias="unread_artifacts",
+    )
 
 
 class ListMyFilesResponse(BaseModel):
@@ -762,10 +784,16 @@ class ListMyFilesResponse(BaseModel):
         "empty, and use waiting_for_s (seconds so far, and only meaningful "
         "for those two statuses) if asked how long it has been going. A "
         "'failed' file carries the reason. "
-        "Each file lists its `artifacts`: which of 'transcript', 'visual' and "
-        "'summary' actually exist and can be read with get_file_text. **An "
-        "empty artifacts list means there is nothing to read and nothing is "
-        "known about that file's contents** — report it as having none, and "
+        "Each file lists `unread_artifacts`: which of 'transcript', 'visual' "
+        "and 'summary' exist on disk and have NOT been read. They are names, "
+        "not contents — seeing 'summary' listed tells you a summary is "
+        "available to fetch, never what it says. To use one, call "
+        "get_file_text with that artifact; until you do, you have not read "
+        "it. **If the user asked what a file says, is about, or covers, and "
+        "you have called only list_my_files, you do not yet have the answer "
+        "— fetch it rather than filling it in from the filename.** An empty "
+        "unread_artifacts list means there is nothing to read and nothing is "
+        "known about that file's contents — report it as having none, and "
         "never describe it, compare it, or characterise its style or subject. "
         "Returns only this user's own files."
     ),
