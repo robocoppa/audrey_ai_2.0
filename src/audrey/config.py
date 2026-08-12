@@ -88,6 +88,37 @@ class EnvOverrides(BaseSettings):
     # `.env` is gitignored, so setting them there survives every pull untouched.
     debug_context_trace: bool | None = Field(default=None, alias="DEBUG_CONTEXT_TRACE")
     debug_research_trace: bool | None = Field(default=None, alias="DEBUG_RESEARCH_TRACE")
+    debug_panel_drafts: bool | None = Field(default=None, alias="DEBUG_PANEL_DRAFTS")
+    complexity_log_breakdown: bool | None = Field(
+        default=None, alias="COMPLEXITY_LOG_BREAKDOWN")
+    log_incoming_payload: bool | None = Field(
+        default=None, alias="LOG_INCOMING_PAYLOAD")
+    # ⚠️ PII-BEARING — logs the first 500 chars of every incoming message, and
+    # `config.yaml` says to leave it off in normal operation. That makes it the
+    # single toggle most worth having here rather than in a tracked file: it is
+    # turned on for one debugging session and MUST come off again, and leaving
+    # it as a yaml diff is how it survives a deploy unnoticed. Being an env
+    # override also means it shows up in the startup ENV OVERRIDE warning.
+    log_incoming_payload_content: bool | None = Field(
+        default=None, alias="LOG_INCOMING_PAYLOAD_CONTENT")
+
+    # The ReAct compaction dials. ⚠️ Env-overridable because the A-B-A rule
+    # this repo runs on makes them THREE config edits per experiment (set,
+    # revert, set again), each on a tracked file, each needing a
+    # force-recreate. `compress_keep_last` alone was the subject of the
+    # 2026-08-12 investigation into why paged answers lose their earlier
+    # pages; running that A-B-A by editing `config.yaml` on the box is how the
+    # working tree ends up dirty for days.
+    #
+    # ⚠️ NOT env-overridable, and deliberately: model pools, prompts, and the
+    # registry. Those are settings rather than experiments, several are
+    # cross-validated at load (`_validate_deep_panel_pools`), and every
+    # override makes the committed config less true. `active_env_overrides` is
+    # the mitigation, not a licence to override everything.
+    react_compress_keep_last: int | None = Field(default=None, alias="REACT_COMPRESS_KEEP_LAST")
+    react_compress_after_round: int | None = Field(default=None, alias="REACT_COMPRESS_AFTER_ROUND")
+    react_max_tool_result_chars: int | None = Field(
+        default=None, alias="REACT_MAX_TOOL_RESULT_CHARS")
 
     video_lease_minutes: int | None = Field(default=None, alias="VIDEO_LEASE_MINUTES")
     video_max_attempts: int | None = Field(default=None, alias="VIDEO_MAX_ATTEMPTS")
@@ -102,37 +133,77 @@ class Config:
     def __init__(self, yaml_cfg: dict[str, Any], env: EnvOverrides) -> None:
         self._merged = yaml_cfg
         self.env = env
+        # Which env vars actually displaced a YAML value this boot, as
+        # {"ENV_NAME": value}. See `active_env_overrides`.
+        self._applied: dict[str, Any] = {}
         self._apply_env_overrides()
+
+    def _set(self, env_name: str, value: Any, *path: str) -> None:
+        """Write `value` at `path` in the merged config and record that it was
+        an override. Nested keys are created as needed."""
+        node = self._merged
+        for key in path[:-1]:
+            node = node.setdefault(key, {})
+        node[path[-1]] = value
+        self._applied[env_name] = value
 
     def _apply_env_overrides(self) -> None:
         if (v := self.env.complexity_token_threshold) is not None:
-            self._merged.setdefault("complexity", {})["token_threshold"] = v
+            self._set("COMPLEXITY_TOKEN_THRESHOLD", v, "complexity", "token_threshold")
         if (v := self.env.gpu_concurrency) is not None:
-            self._merged.setdefault("gpu", {})["concurrency"] = v
+            self._set("GPU_CONCURRENCY", v, "gpu", "concurrency")
         if (v := self.env.tool_max_rounds) is not None:
-            self._merged.setdefault("tools", {})["max_rounds"] = v
+            self._set("TOOL_MAX_ROUNDS", v, "tools", "max_rounds")
         if (v := self.env.planning_min_tokens) is not None:
-            self._merged.setdefault("agentic", {}).setdefault("planning", {})["min_prompt_tokens"] = v
+            self._set("PLANNING_MIN_TOKENS", v, "agentic", "planning", "min_prompt_tokens")
         if (v := self.env.max_deep_workers_cloud) is not None:
-            self._merged.setdefault("agentic", {})["max_deep_workers_cloud"] = v
+            self._set("MAX_DEEP_WORKERS_CLOUD", v, "agentic", "max_deep_workers_cloud")
         if (v := self.env.max_inflight_per_user) is not None:
-            self._merged.setdefault("fairness", {})["max_inflight_per_user"] = v
+            self._set("MAX_INFLIGHT_PER_USER", v, "fairness", "max_inflight_per_user")
         if (v := self.env.tool_servers) is not None:
-            self._merged.setdefault("tools", {})["servers"] = [
-                s.strip() for s in v.split(",") if s.strip()
-            ]
+            self._set("TOOL_SERVERS",
+                      [s.strip() for s in v.split(",") if s.strip()],
+                      "tools", "servers")
         if (v := self.env.kb_dataset_paths) is not None:
-            self._merged.setdefault("kb", {})["dataset_paths"] = [
-                p.strip() for p in v.split(",") if p.strip()
-            ]
+            self._set("KB_DATASET_PATHS",
+                      [p.strip() for p in v.split(",") if p.strip()],
+                      "kb", "dataset_paths")
         if (v := self.env.debug_context_trace) is not None:
-            self._merged.setdefault("agentic", {})["debug_context_trace"] = v
+            self._set("DEBUG_CONTEXT_TRACE", v, "agentic", "debug_context_trace")
         if (v := self.env.debug_research_trace) is not None:
-            self._merged.setdefault("agentic", {})["debug_research_trace"] = v
+            self._set("DEBUG_RESEARCH_TRACE", v, "agentic", "debug_research_trace")
+        if (v := self.env.debug_panel_drafts) is not None:
+            self._set("DEBUG_PANEL_DRAFTS", v, "agentic", "debug_panel_drafts")
+        if (v := self.env.complexity_log_breakdown) is not None:
+            self._set("COMPLEXITY_LOG_BREAKDOWN", v, "complexity", "log_breakdown")
+        if (v := self.env.log_incoming_payload) is not None:
+            self._set("LOG_INCOMING_PAYLOAD", v, "debug", "log_incoming_payload")
+        if (v := self.env.log_incoming_payload_content) is not None:
+            self._set("LOG_INCOMING_PAYLOAD_CONTENT", v,
+                      "debug", "log_incoming_payload_content")
+        if (v := self.env.react_compress_keep_last) is not None:
+            self._set("REACT_COMPRESS_KEEP_LAST", v, "agentic", "react", "compress_keep_last")
+        if (v := self.env.react_compress_after_round) is not None:
+            self._set("REACT_COMPRESS_AFTER_ROUND", v, "agentic", "react", "compress_after_round")
+        if (v := self.env.react_max_tool_result_chars) is not None:
+            self._set("REACT_MAX_TOOL_RESULT_CHARS", v, "agentic", "react", "max_tool_result_chars")
         if (v := self.env.video_lease_minutes) is not None:
-            self._merged.setdefault("kb", {}).setdefault("video", {})["lease_minutes"] = v
+            self._set("VIDEO_LEASE_MINUTES", v, "kb", "video", "lease_minutes")
         if (v := self.env.video_max_attempts) is not None:
-            self._merged.setdefault("kb", {}).setdefault("video", {})["max_attempts"] = v
+            self._set("VIDEO_MAX_ATTEMPTS", v, "kb", "video", "max_attempts")
+
+    @property
+    def active_env_overrides(self) -> dict[str, Any]:
+        """Every env var that displaced a YAML value this boot.
+
+        ⚠️ This exists because env overrides have a real cost, and it is the
+        one `config.yaml` already warns about for `VIDEO_LEASE_MINUTES`: "a
+        forgotten override is invisible". The committed config stops describing
+        what is running, and nothing in the file says so. Logged at startup so
+        the answer to "what is this box actually doing" is one grep away
+        instead of a deduction.
+        """
+        return dict(self._applied)
 
     # Convenient typed accessors — add more as needed in later phases.
     @property

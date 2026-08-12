@@ -54,6 +54,17 @@ async def lifespan(app: FastAPI):
     cfg = get_config()
     log.info("audrey starting; version=%s", __version__)
     log.info("config loaded: %d model types, tools=%s", len(cfg.model_registry), cfg.tools.get("servers"))
+    # ⚠️ Always logged, including the empty case. An env override silently
+    # displaces a committed YAML value, so `config.yaml` stops describing what
+    # is running and nothing in the file admits it — the exact trap the
+    # `VIDEO_LEASE_MINUTES` comment warns about. Printing "none" when there are
+    # none is what makes the line trustworthy on the runs that do have some.
+    if overrides := cfg.active_env_overrides:
+        log.warning("config: %d ENV OVERRIDE(S) active, config.yaml is not the "
+                    "whole truth: %s", len(overrides),
+                    ", ".join(f"{k}={v!r}" for k, v in sorted(overrides.items())))
+    else:
+        log.info("config: no env overrides; config.yaml is authoritative")
 
     default_timeout = float(cfg.timeouts.get("medium", 180))
     ollama = OllamaClient(cfg.env.ollama_host, default_timeout_s=default_timeout)

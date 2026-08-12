@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 
@@ -445,6 +446,129 @@ class TestDiagnosticTraceEnvOverrides:
         cfg = Config({"agentic": {"react": {"compress_keep_last": 4}}},
                      EnvOverrides(DEBUG_CONTEXT_TRACE=True))
         assert cfg.raw["agentic"]["react"]["compress_keep_last"] == 4
+
+
+class TestTheReactDialsAreEnvOverridable:
+    """⚠️ These three are overridable because of the A-B-A rule, not for
+    convenience. "Set, revert, set again" is three edits to a TRACKED file on a
+    live box, each needing a force-recreate — which is how `config.yaml` ends
+    up dirty for days and how a pull turns into a merge.
+    """
+
+    def test_the_compaction_dials_override_yaml(self):
+        cfg = Config({"agentic": {"react": {"compress_keep_last": 4,
+                                            "compress_after_round": 2,
+                                            "max_tool_result_chars": 6000}}},
+                     EnvOverrides(REACT_COMPRESS_KEEP_LAST=1,
+                                  REACT_COMPRESS_AFTER_ROUND=1,
+                                  REACT_MAX_TOOL_RESULT_CHARS=2000))
+        react = cfg.raw["agentic"]["react"]
+        assert react["compress_keep_last"] == 1
+        assert react["compress_after_round"] == 1
+        assert react["max_tool_result_chars"] == 2000
+
+    def test_yaml_wins_when_unset(self):
+        cfg = Config({"agentic": {"react": {"compress_keep_last": 4}}},
+                     EnvOverrides())
+        assert cfg.raw["agentic"]["react"]["compress_keep_last"] == 4
+
+    def test_one_dial_does_not_disturb_its_siblings(self):
+        cfg = Config({"agentic": {"react": {"compress_keep_last": 4,
+                                            "max_rounds": 3}}},
+                     EnvOverrides(REACT_COMPRESS_KEEP_LAST=1))
+        assert cfg.raw["agentic"]["react"]["max_rounds"] == 3
+        assert cfg.raw["agentic"]["react"]["compress_keep_last"] == 1
+
+
+class TestEveryTemporaryToggleIsEnvOverridable:
+    """⚠️ The rule, stated as a test so a new toggle cannot quietly break it:
+    a flag that exists to be flipped for a run and flipped back must be
+    settable from `.env`, because `config.yaml` is tracked and every temporary
+    edit to it becomes a `git pull` problem on the box.
+
+    This is the WHOLE class as of 2026-08-12. Settings — pools, prompts, the
+    registry — deliberately stay yaml-only.
+    """
+
+    _TOGGLES: ClassVar[dict[str, tuple[str, ...]]] = {
+        "DEBUG_PANEL_DRAFTS": ("agentic", "debug_panel_drafts"),
+        "DEBUG_RESEARCH_TRACE": ("agentic", "debug_research_trace"),
+        "DEBUG_CONTEXT_TRACE": ("agentic", "debug_context_trace"),
+        "COMPLEXITY_LOG_BREAKDOWN": ("complexity", "log_breakdown"),
+        "LOG_INCOMING_PAYLOAD": ("debug", "log_incoming_payload"),
+        "LOG_INCOMING_PAYLOAD_CONTENT": ("debug", "log_incoming_payload_content"),
+    }
+
+    def test_each_one_reaches_its_config_path(self):
+        for env_name, path in self._TOGGLES.items():
+            cfg = Config({}, EnvOverrides(**{env_name: True}))
+            node = cfg.raw
+            for key in path:
+                node = node[key]
+            assert node is True, env_name
+            assert cfg.active_env_overrides == {env_name: True}, env_name
+
+    def test_the_pii_toggle_is_covered(self):
+        """⚠️ `log_incoming_payload_content` logs the first 500 chars of every
+        incoming message. It is turned on for one session and MUST come off;
+        left as a yaml diff it survives a deploy unnoticed. As an env override
+        it also lands in the startup ENV OVERRIDE warning."""
+        cfg = Config({"debug": {"log_incoming_payload_content": False}},
+                     EnvOverrides(LOG_INCOMING_PAYLOAD_CONTENT=True))
+        assert cfg.raw["debug"]["log_incoming_payload_content"] is True
+        assert "LOG_INCOMING_PAYLOAD_CONTENT" in cfg.active_env_overrides
+
+    def test_the_real_config_declares_every_one_of_them(self):
+        """Guards the other direction: a toggle renamed in `config.yaml` while
+        the override still points at the old path would silently stop working
+        and the startup line would report a change that did nothing."""
+        raw = _load_yaml(_REPO_ROOT / "config.yaml")
+        for env_name, path in self._TOGGLES.items():
+            node = raw
+            for key in path:
+                assert key in node, f"{env_name} -> {'.'.join(path)} missing"
+                node = node[key]
+            assert isinstance(node, bool), env_name
+
+
+class TestActiveEnvOverridesAreVisible:
+    """⚠️ The cost of every override on this class: the committed config stops
+    describing what is running, and `config.yaml` says so for exactly one
+    setting ("a forgotten override is invisible"). This makes it visible for
+    all of them, which is what keeps the pattern safe to extend.
+    """
+
+    def test_nothing_set_reports_nothing(self):
+        """Must be empty rather than absent — the startup line distinguishes
+        'no overrides' from 'never checked'."""
+        assert Config({"agentic": {}}, EnvOverrides()).active_env_overrides == {}
+
+    def test_it_names_the_env_var_and_the_value(self):
+        cfg = Config({}, EnvOverrides(DEBUG_CONTEXT_TRACE=True,
+                                      REACT_COMPRESS_KEEP_LAST=1))
+        assert cfg.active_env_overrides == {
+            "DEBUG_CONTEXT_TRACE": True, "REACT_COMPRESS_KEEP_LAST": 1}
+
+    def test_a_list_valued_override_is_reported_parsed(self):
+        """`TOOL_SERVERS` is a comma string in the env and a list in the config.
+        Reporting the raw string would misdescribe what took effect."""
+        cfg = Config({}, EnvOverrides(TOOL_SERVERS="http://a:1, http://b:2"))
+        assert cfg.active_env_overrides["TOOL_SERVERS"] == [
+            "http://a:1", "http://b:2"]
+
+    def test_an_override_that_matches_the_yaml_is_still_reported(self):
+        """It displaced the YAML even if the value is identical — and the point
+        is to show what the env is controlling, not what changed."""
+        cfg = Config({"agentic": {"react": {"compress_keep_last": 4}}},
+                     EnvOverrides(REACT_COMPRESS_KEEP_LAST=4))
+        assert cfg.active_env_overrides == {"REACT_COMPRESS_KEEP_LAST": 4}
+
+    def test_the_report_is_a_copy(self):
+        """Callers log it; a live handle on internal state would let a caller
+        corrupt the record of what is running."""
+        cfg = Config({}, EnvOverrides(DEBUG_CONTEXT_TRACE=True))
+        cfg.active_env_overrides["DEBUG_CONTEXT_TRACE"] = False
+        assert cfg.active_env_overrides["DEBUG_CONTEXT_TRACE"] is True
 
 
 class TestVideoLeaseEnvOverrides:
