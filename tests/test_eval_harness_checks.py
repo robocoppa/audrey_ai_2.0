@@ -342,7 +342,12 @@ def test_inviting_the_user_to_ask_for_the_next_part_is_an_offer():
 
 def test_inviting_the_user_to_say_the_word():
     """Run 12's false fail, plus a historical one the same scan turned up.
-    Both are textbook offers built from words the family did not hold."""
+    Both are textbook offers built from words the family did not hold.
+
+    ⚠️ Both close on "please let me know", which is what carries them. The
+    same change also added "you would like me to", and run 13 showed that half
+    was wrong — see the test below.
+    """
     for answer in (
         "I cannot provide the full transcript in a single response because it "
         "is approximately 33,626 characters long. If you would like me to "
@@ -353,6 +358,29 @@ def test_inviting_the_user_to_say_the_word():
         "are interested in, and I can retrieve that segment for you.",
     ):
         assert er._declines_without_offering(answer) is False, answer
+
+
+def test_asking_the_user_to_supply_the_text_is_not_an_offer():
+    """⚠️ A widening ACCEPTED one run and REMOVED the next — the clearest
+    evidence in this file that one clean flip is not enough to justify one.
+
+    Run 12 added "you would like me to" on a single archived flip that looked
+    genuine. Run 13 met it live: `video-long-transcript-paging` [audrey_auto]
+    declared it had no access to the file, told the user to look on YouTube,
+    and offered to analyse a transcript the USER pastes — after three
+    SUCCESSFUL `get_file_text` calls. The phrase is second person but it is not
+    an invitation to ask for the next page; the direction of the work is
+    backwards. Across the archive it was the sole match in four sections and
+    carried a real offer in none.
+    """
+    answer = (
+        "I cannot provide the full transcript because I do not have access to "
+        "that specific video file or its contents. If you have a transcript "
+        "text you would like me to analyze, summarize, or format, please paste "
+        "it here. Alternatively, you may be able to find the transcript via "
+        "the platform's automatic captioning features."
+    )
+    assert er._declines_without_offering(answer) is True
 
 
 def test_a_capability_statement_about_something_else_is_not_an_offer():
@@ -548,6 +576,43 @@ def test_typographic_apostrophes_do_not_defeat_the_checks():
         "I can’t provide it in one go. Would you like me to continue?") is False
 
 
+def test_markdown_emphasis_does_not_hide_a_phrase():
+    """⚠️ The same defect as the apostrophe, found the same way and one run
+    apart: which words a model happens to BOLD is not a property any check
+    should depend on.
+
+    Verbatim from run 13, `video-missing-transcript-artifact` [audrey_auto],
+    scored `disclaims:❌`: "The file has **no audio transcript**". `has no`
+    needs its two words adjacent, and two asterisks had been put between them.
+    Every phrase family in the harness had the same hole.
+    """
+    assert er._disclaims_absence(
+        "The file has **no audio transcript** — only a visual description "
+        "and a one-paragraph summary." + _FOOTER) is True
+    # The same hole in the two always-on checks, where it hides a real failure
+    # rather than a real pass.
+    assert er._corpus_fictions(
+        "It is a blitz game with Carlsen playing **as Black**." + _FOOTER,
+        "video")
+    assert er._misattributes_to_user(
+        "The video mentions **your** London System **course**." + _FOOTER) is True
+
+
+def test_the_emphasis_strip_is_kept_away_from_two_checks_on_purpose():
+    """⚠️ Both exclusions were measured over the archive, not assumed.
+
+    `_FILENAME_EDGE` contains `*` **as a delimiter**: strip it and the
+    backward walk from an extension runs on into the sentence, turning three
+    honest answers into invented-filename hits on an always-on check.
+    `_looks_truncated` fires on a trailing colon, which a heading like
+    "**Summary:**" supplies the moment the asterisks come off.
+    """
+    honest = "In short: I don't have any information about what's in " \
+             "*silent.mp4* because nothing could be read from it."
+    assert er._invented_filenames(honest + _FOOTER, "video") == []
+    assert er._looks_truncated("Here is the transcript.\n\n**Summary:**") is False
+
+
 # ── not_misattributed (always on) ──────────────────────────────────────────
 #
 # Crediting the USER with a file's content. The content is RIGHT, which is what
@@ -688,6 +753,49 @@ def test_the_colour_inversion_told_from_the_other_end():
         "used the London System against him." + _FOOTER
     )
     assert er._corpus_fictions(answer, "video")
+
+
+def test_the_colour_inversion_told_a_third_way():
+    """⚠️ Two patterns for one false fact, and run 13 found a third phrasing
+    that neither held: Carlsen as the subject of playing AGAINST the London.
+    Three hits across the archive, all three the real thing, two of which had
+    scored a clean PASS while the check was believed to be closed.
+    """
+    for answer in (
+        "A key detail: Carlsen is playing White against the London System, "
+        "which his opponent, Candidate Master Evgenij Shuvalov, is employing "
+        "as Black.",
+        "This is a livestreamed 3-minute blitz game in which Carlsen (White, "
+        "rated ~3272) plays against the London System, used by his opponent.",
+    ):
+        assert er._corpus_fictions(answer + _FOOTER, "video"), answer
+
+
+def test_the_beat_the_london_pattern_that_was_rejected_by_measurement():
+    """⚠️ The obvious widening from the above — anything about beating,
+    fighting or countering the London — was measured at six archive hits, and
+    the majority were correct. One was a verbatim quotation OF the transcript:
+    "[00:10:48] When playing against the London as black, you have several
+    options". The corpus's own words look like the fiction, which is the
+    substring trap wearing a different coat. Carlsen must be the subject.
+    """
+    quoted = (
+        "[00:10:48] When playing against the London as black, you have "
+        "several options, and here is what I recommend." + _FOOTER
+    )
+    assert er._corpus_fictions(quoted, "video") == []
+
+
+def test_one_creator_for_a_two_creator_set():
+    """The corpus-shape fiction about AUTHORSHIP rather than titles. A Carlsen
+    livestream and a Rozman lesson do not share a maker, so a singular creator
+    spanning both is invented — run 13, verbatim, on a case whose whole subject
+    is the plural "my videos"."""
+    answer = (
+        "**Course promotion:** The creator of these videos specifically "
+        "mentions they have a dedicated, in-depth course on the London System."
+    )
+    assert er._corpus_fictions(answer + _FOOTER, "video")
 
 
 def test_collapsing_the_two_london_videos_into_one():

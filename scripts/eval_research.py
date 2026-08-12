@@ -561,9 +561,19 @@ _DECLINES = re.compile(
 #     answer can say "I can provide the summary and key points" and then send
 #     the user away for the transcript itself. A capability statement about
 #     SOMETHING ELSE is not an offer to continue.
+#   • ⚠️ "you would like me to" — ACCEPTED on run 12 and REMOVED on run 13,
+#     because it is the second failure wearing the first one's clothes. Second
+#     person, but not an invitation to ask for the next page: "if you have a
+#     transcript text you would like me to analyze, please paste it here" is
+#     the dead-end asking the USER to supply what the tool already returned.
+#     It passed exactly that answer, on a case whose `get_file_text` had
+#     succeeded three times. Across the archive it is the sole match in four
+#     sections and carried a genuine offer in none of them — the run-12 answer
+#     it was added for also says "please let me know", which already matched.
+#     A widening that is redundant where it looks right is only doing work
+#     where it is wrong.
 _OFFERS_MORE = re.compile(
     r"(?:would you like|shall i|want me to|let me know|i can continue"
-    r"|you(?:'d| would) like me to"
     r"|continue reading|keep reading|next page|read on|page by page"
     r"|specific sections|ask (?:me )?for (?:the )?(?:next|subsequent|more)"
     r"|(?:give|send|show) me the next|just ask|say the word)",
@@ -594,6 +604,35 @@ def _prose_region(answer: str) -> str:
     body = _pre_debug_region(answer)
     idx = body.find("\n\n---\n>")
     return (body[:idx] if idx >= 0 else body).strip().translate(_SMART_QUOTES)
+
+
+# Markdown emphasis, removed for PHRASE matching only. Same class of bug as
+# `_SMART_QUOTES` and found the same way: 2026-08-11 20:52, a textbook "The file
+# has **no audio transcript**" scored `disclaims:❌`, because `has no` needs the
+# two words adjacent and the model had put two asterisks between them. Every
+# phrase family in this file has the same hole — `as **Black**` hides a fiction
+# from `no_fiction`, `**your** channel` hides a misattribution — and which
+# phrases a model happens to bold is not a property any check should depend on.
+_EMPHASIS = re.compile(r"\*+")
+
+
+def _unemphasised(answer: str) -> str:
+    """Prose with the emphasis markers taken out, for the phrase families.
+
+    ⚠️ Deliberately NOT used by `_filenames_named` or `_looks_truncated`, and
+    both exclusions were measured, not assumed:
+
+    • `_FILENAME_EDGE` contains `*` **as a delimiter**. Strip it and the
+      backward walk from `.mp4` runs on into the sentence: over the archive,
+      "I don't have any information about what's in silent.mp4" becomes an
+      invented filename. Three new false positives on an always-on check.
+    • `_looks_truncated` fires on a trailing colon. An answer ending
+      "**Summary:**" ends on an asterisk raw and on a colon stripped.
+
+    For the four families that do use it, the archive moves exactly one verdict
+    (the false fail above) and five fiction spans stop carrying stray asterisks.
+    """
+    return _EMPHASIS.sub("", _prose_region(answer))
 
 
 def _looks_truncated(answer: str) -> bool:
@@ -661,7 +700,7 @@ def _disclaims_absence(answer: str) -> bool:
     anyway — from the summary, from the filename, or from world knowledge —
     and that failure reads as a perfectly good answer.
     """
-    return bool(_DISCLAIMS_ABSENCE.search(_prose_region(answer)))
+    return bool(_DISCLAIMS_ABSENCE.search(_unemphasised(answer)))
 
 
 def _declines_without_offering(answer: str) -> bool:
@@ -678,7 +717,7 @@ def _declines_without_offering(answer: str) -> bool:
     33,000 characters. What makes it a failure is refusing with no offer, so
     both halves are required before this fires.
     """
-    body = _prose_region(answer)   # normalises `can’t` → `can't`
+    body = _unemphasised(answer)   # normalises `can’t` → `can't`, drops `**`
     return bool(_DECLINES.search(body)) and not _OFFERS_MORE.search(body)
 
 
@@ -711,7 +750,7 @@ def _names_all_files(answer: str, groups: list[str | list[str]]) -> bool:
     # an alias like '"How to WIN" video' would never match `“How to WIN” video`
     # without the normalisation. Re-measured over the whole answers archive when
     # this changed — zero verdicts moved on the region change alone.
-    hay = _prose_region(answer).lower()
+    hay = _unemphasised(answer).lower()
     for group in sorted(alts, key=lambda g: max(len(a) for a in g), reverse=True):
         # Longest alternative first within the group too: prefer the most
         # specific mention so a vaguer one stays available for another file.
@@ -806,7 +845,7 @@ def _misattributes_to_user(answer: str) -> bool:
     covers that half. Re-measured over the archive as it stood: one hit, the
     real one, in 1,403 sections.
     """
-    body = _prose_region(answer)
+    body = _unemphasised(answer)
     return bool(_MISATTRIBUTION.search(body) or _SPEAKER_POSSESSIONS.search(body))
 
 
@@ -872,6 +911,34 @@ _CORPUS_FICTIONS: dict[str, list[tuple[re.Pattern[str], str]]] = {
                     r"\bagainst\s+(?:him|Carlsen|Magnus)\b",
                     re.I),
          "Carlsen played White and played the London himself"),
+        # ⚠️ The same inversion a third way, and the one the colour wording and
+        # the opponent wording both missed: "Carlsen is playing White against
+        # the London System, which his opponent is employing as Black". Three
+        # archive hits, all three the real thing, two of which had scored a
+        # clean PASS. Carlsen must be the SUBJECT of playing against it —
+        # "against the London" on its own is how the Rozman transcript itself
+        # talks, see the rejected pattern below.
+        (re.compile(r"\bCarlsen\b[^.]{0,40}?"
+                    r"\b(?:play(?:s|ing|ed)?|faces?|facing|counter(?:s|ing)?"
+                    r"|combat(?:s|ing)?|defend(?:s|ing)?)\b[^.]{0,25}?"
+                    r"\bagainst\b[^.]{0,25}?\bLondon\b",
+                    re.I),
+         "Carlsen played White and played the London himself"),
+        # ⚠️ REJECTED, recorded so it is not re-derived: a pattern for the
+        # video that teaches "how to beat/fight it". Six archive hits, and the
+        # majority were correct — one of them a verbatim transcript quotation,
+        # "[00:10:48] When playing against the London as black, you have
+        # several options". The corpus's own words look like the fiction, which
+        # is the substring trap wearing a different coat.
+        #
+        # One creator for a two-creator set — the corpus-shape fiction again,
+        # this time about authorship rather than titles. A Carlsen livestream
+        # and a Rozman lesson do not share a maker, so anything singular
+        # spanning both is invented. One archive hit, the real one.
+        (re.compile(r"\b(?:creator|author|instructor|presenter|speaker"
+                    r"|narrator|host|channel)\s+of\s+"
+                    r"(?:these|both|the two|your two)\s+videos?\b", re.I),
+         "the two London videos are different videos by different people"),
         # ⚠️ A fiction about the SHAPE of the corpus rather than its content.
         # The two London files are different videos by different people: a
         # 7m37s Carlsen blitz stream and a 29m38s Rozman lesson. Collapsing
@@ -985,7 +1052,7 @@ def _corpus_fictions(answer: str, corpus: str, prompt: str = "") -> list[str]:
     # Jr. by points" fell in the gap and scored a clean PASS. Flattening the
     # abbreviations first is cheaper than teaching every pattern about them.
     body = _ABBREVIATED.sub(lambda m: m.group(0).replace(".", ""),
-                            _prose_region(answer))
+                            _unemphasised(answer))
     found = []
     for pattern, why in _CORPUS_FICTIONS.get(corpus, []):
         for m in pattern.finditer(body):
