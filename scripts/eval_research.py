@@ -683,6 +683,38 @@ def _unemphasised(answer: str) -> str:
     return _EMPHASIS.sub("", _prose_region(answer))
 
 
+def _flattened(text: str) -> str:
+    """Text with abbreviation periods removed, so `.` means end-of-sentence.
+
+    ⚠️ `Jr.` is a full stop to `str.find`. `_ABBREVIATED` is defined far below
+    with the corpus facts, but it belongs to the normalisation ladder, and this
+    wrapper is where the ladder ends: `_pre_debug_region` → `_prose_region`
+    (+quotes) → `_unemphasised` (+markup) → `_flattened` (+abbreviations).
+
+    Applied per-check rather than folded into `_prose_region`, and deliberately:
+    `_looks_truncated` fires on trailing punctuation, so an answer ending
+    "…Rafael Lovato Jr." would read as unterminated once the period is gone.
+    """
+    return _ABBREVIATED.sub(lambda m: m.group(0).replace(".", ""), text)
+
+
+def _sentence_around(text: str, start: int, end: int) -> str:
+    """The sentence containing `text[start:end]`.
+
+    ⚠️ THE ONE COPY. There were two, and only one of them flattened
+    abbreviations first — so the same `Jr.` bug that `_corpus_fictions` was
+    taught about in 2026-08-11 stayed live in `_reports_degraded_context`,
+    which had its own hand-rolled `rfind(".")`. Every sentence window in this
+    file goes through here now, so teaching the extractor once is enough.
+
+    Callers pass offsets into ALREADY-`_flattened` text — the offsets have to
+    be from the same string the window is cut from.
+    """
+    left = text.rfind(".", 0, start) + 1
+    right = text.find(".", end)
+    return text[left:right if right >= 0 else len(text)].strip()
+
+
 def _footer_region(answer: str) -> str:
     """The tools footer alone — the counterpart to `_prose_region`.
 
@@ -737,7 +769,12 @@ _UNGROUNDED_CLAIM = re.compile(
     r"\bhere(?:'s| is| are)?\s+(?:the|a|its|his|her|their)?\s*"
     r"(?:(?!no\b|not\b)\w+\s+){0,2}summar(?:y|ies)"
     r"|\bsummary of (?:that|the|this|it|your|his|her)\b"
-    r"|^\s*(?:\*\*)?summary(?:\s+of\b[^\n]*)?:?(?:\*\*)?\s*$"
+    # ⚠️ This line used to carry `(?:\*\*)?` on both ends — a pattern working
+    # around markup instead of the text being normalised. That is the shape of
+    # the bug this file kept re-finding (`Jr.`, smart quotes, `as **Black**`),
+    # so the workaround is gone and the input is `_unemphasised` below. Zero
+    # verdicts move archive-wide; it now also survives `*Summary*`.
+    r"|^\s*summary(?:\s+of\b[^\n]*)?:?\s*$"
     # Narrating the contents outright.
     r"|\b(?:the|this)\s+(?:video|footage|recording|clip|match|documentary)\s+"
     r"(?:captures?|shows?|covers?|features?|depicts?|highlights?|portrays?"
@@ -763,7 +800,7 @@ def _ungrounded_content(answer: str) -> str | None:
     tools = _tools_that_succeeded(answer)
     if not tools or set(tools) != _CATALOGUE_ONLY:
         return None
-    m = _UNGROUNDED_CLAIM.search(_prose_region(answer))
+    m = _UNGROUNDED_CLAIM.search(_unemphasised(answer))
     return m.group(0).strip() if m else ""
 
 
@@ -830,11 +867,9 @@ def _reports_degraded_context(answer: str) -> str:
     ok = _tools_that_succeeded(answer)
     if not ok:
         return ""
-    prose = _unemphasised(answer)
+    prose = _flattened(_unemphasised(answer))
     for m in _LIMIT_EXCUSE.finditer(prose):
-        start = prose.rfind(".", 0, m.start()) + 1
-        end = prose.find(".", m.end())
-        sentence = prose[start:end if end >= 0 else len(prose)].strip()
+        sentence = _sentence_around(prose, m.start(), m.end())
         if _NEGATORS.search(sentence) or _ABOUT_THE_REPLY.search(sentence):
             continue
         if not _UNREACHABLE.search(sentence):
@@ -1311,14 +1346,11 @@ def _corpus_fictions(answer: str, corpus: str, prompt: str = "") -> list[str]:
     # guards them are bounded by `.`, so "Roger Gracie defeated Rafael Lovato
     # Jr. by points" fell in the gap and scored a clean PASS. Flattening the
     # abbreviations first is cheaper than teaching every pattern about them.
-    body = _ABBREVIATED.sub(lambda m: m.group(0).replace(".", ""),
-                            _unemphasised(answer))
+    body = _flattened(_unemphasised(answer))
     found = []
     for pattern, why in _CORPUS_FICTIONS.get(corpus, []):
         for m in pattern.finditer(body):
-            start = body.rfind(".", 0, m.start()) + 1
-            end = body.find(".", m.end())
-            sentence = body[start:end if end >= 0 else len(body)]
+            sentence = _sentence_around(body, m.start(), m.end())
             if not _NEGATORS.search(sentence):
                 found.append(f"{why}: {m.group(0)!r}")
                 break

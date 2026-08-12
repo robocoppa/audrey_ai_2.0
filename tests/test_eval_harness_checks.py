@@ -16,6 +16,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 _SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
@@ -1616,3 +1618,65 @@ def test_prose_about_thinking_is_not_a_leak():
     ordinary content."""
     assert er._leaks_reasoning("I was thinking about the retention window.") == ""
     assert er._leaks_reasoning("Call think() before reading the buffer.") == ""
+
+
+# ─── The normalisation ladder ─────────────────────────────────────────
+#
+# ⚠️ WHY THESE EXIST AT ALL. Four separate bugs in this file were the same
+# bug: a character sitting between two words a pattern assumed were adjacent.
+# `Jr.` read as end-of-sentence; `**bold**` split "has no"; a typographic
+# apostrophe broke `don't`; `Black's` read as the colour Black. Each was fixed
+# in the ONE check that happened to expose it, so the same hole stayed open in
+# the others — `_reports_degraded_context` still had the `Jr.` bug on
+# 2026-08-12, months after `_corpus_fictions` was taught about it.
+#
+# The ladder is `_pre_debug_region` → `_prose_region` (+quotes) →
+# `_unemphasised` (+markup) → `_flattened` (+abbreviations), and there is now
+# exactly one sentence-window extractor. These tests pin the RUNGS, so the
+# fifth bug of this family fails once here instead of nine times in the field.
+
+
+def test_the_ladder_composes():
+    """Each rung must include the one below it. If a rung stops composing,
+    a check that asked for markup-stripping silently loses quote-stripping."""
+    answer = 'He said “**it is not** available”, per Lovato Jr. — done.'
+    assert "“" not in er._prose_region(answer)
+    assert "*" not in er._unemphasised(answer)
+    assert "“" not in er._unemphasised(answer)            # rung below still applied
+    flat = er._flattened(er._unemphasised(answer))
+    assert "Jr." not in flat and "Jr" in flat
+    assert "*" not in flat and "“" not in flat            # both rungs below
+
+
+def test_one_sentence_window_and_it_knows_about_abbreviations():
+    """⚠️ There were two copies of this logic and only one flattened
+    abbreviations. "Roger Gracie defeated Rafael Lovato Jr. by points" split at
+    the `Jr.`, so the negator guarding the span was in a different 'sentence'."""
+    text = er._flattened("No result is shown. Roger Gracie defeated Lovato Jr. by points. End.")
+    at = text.index("defeated")
+    assert er._sentence_around(text, at, at + 8) == "Roger Gracie defeated Lovato Jr by points"
+
+
+def test_the_sentence_window_handles_both_edges():
+    """No leading period, and no trailing period, must not walk off the text."""
+    assert er._sentence_around("only one clause here", 5, 8) == "only one clause here"
+
+
+@pytest.mark.parametrize("answer", [
+    "Here is a **summary** of your most recent upload.",
+    "Here is a *summary* of your most recent upload.",
+    "The **video** captures a championship match.",
+    "The *video* shows a championship match.",
+])
+def test_markup_cannot_hide_an_ungrounded_claim(answer):
+    """The pattern used to carry `(?:\\*\\*)?` on one branch — a workaround for
+    exactly two asterisks, in one of four branches. Normalising the input
+    covers every branch and single asterisks too."""
+    assert er._ungrounded_content(answer + _FOOTER_CATALOGUE)
+
+
+def test_an_honest_absence_report_still_passes_with_markup():
+    """The counterpart. Stripping markup must not turn a correct answer into
+    a fabrication — "there's **no** summary" is the behaviour to encourage."""
+    answer = "There's **no summary**, transcript or visual for that file yet."
+    assert er._ungrounded_content(answer + _FOOTER_CATALOGUE) == ""

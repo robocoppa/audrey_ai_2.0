@@ -473,11 +473,43 @@ async def _stream_via_pipeline(
                 # Per-worker tool-usage footer. Fast path is one worker —
                 # `tool_calls_log` is its full call list. Skipped when the ReAct
                 # loop ran zero tool calls.
-                footer = tool_summary_block([
-                    (concrete, list(final.get("tool_calls_log") or []))
-                ])
+                #
+                # ⚠️ …AND the deep workers', because THIS BRANCH CAN GO DEEP.
+                # `route_after_fast_path` escalates fast→deep INSIDE the graph,
+                # so `final` here may be a synthesized panel answer. It escalates
+                # only when `tool_rounds == 0` (graph.py:146), which means
+                # `tool_calls_log` is empty by construction on exactly those
+                # turns — while the workers that produced the answer did call
+                # tools, into `drafts`. Reading only the fast log therefore
+                # rendered NO footer at all for every escalated turn:
+                # `video-two-file-compare` lost it 53 times out of 53 across the
+                # archive, taking `grounded`, `_ungrounded_content` and
+                # `no_reasoning_leak` blind with it — all three parse the footer,
+                # on the one case built to catch two files being conflated.
+                footer = tool_summary_block(
+                    [(concrete, list(final.get("tool_calls_log") or []))]
+                    + [(str(d.get("model") or "?"), list(d.get("tool_calls") or []))
+                       for d in (final.get("drafts") or [])]
+                )
                 if footer:
                     content = content + footer
+                # Debug/eval: an ESCALATED turn was answered by the panel, not
+                # by the fast model — `node_mark_escalated` sets `mode: deep`.
+                # Both other paths already append the drafts block behind
+                # `agentic.debug_panel_drafts`; this branch never checked, so a
+                # fast→deep turn produced NO trace of the panel anywhere on the
+                # wire. Parity, not a new surface: same existing flag, off by
+                # default, nothing user-facing added.
+                #
+                # ⚠️ Appended to `content` AFTER `collector.feed_text` below
+                # takes the raw answer, so the chat archive never carries it —
+                # same contract as the footer above and as the deep branch.
+                if final.get("mode") == "deep":
+                    agentic_cfg = cfg.raw.get("agentic", {}) or {}
+                    if bool(agentic_cfg.get("debug_panel_drafts", False)):
+                        drafts_debug = panel_drafts_block(list(final.get("drafts") or []))
+                        if drafts_debug:
+                            content = content + drafts_debug
                 # Separator between banner and answer body — matches deep.
                 yield _fast_delta(BANNER_SEPARATOR)
                 # Tool-capable fast path emits the answer in one chunk under the
