@@ -844,6 +844,36 @@ def _reports_degraded_context(answer: str) -> str:
     return ""
 
 
+# A reasoning delimiter that reached the user. Structural and unambiguous —
+# these tags belong in Ollama's separate `message.thinking` field, never in
+# `content`, so one appearing in an answer means the split failed and the user
+# is reading the model's deliberation.
+#
+# Found 2026-08-12 in the `PASSTHROUGH_THINK=0` bake-off arm: nemotron answered
+# `ground-fact-absent` with three paragraphs of visible working — "Wait, is
+# there any chance…", "Let me re-read carefully" — terminated by a literal
+# `</think>` and then the real answer. It passed all eighteen checks, because
+# the answer underneath was correct and every check was reading the whole blob.
+#
+# ⚠️ Note which arm it came from. With thinking ON the reasoning is separated
+# cleanly and the field never appears; `think=false` is what made this model
+# emit the tag inline. A latency win measured without this check would have
+# scored that answer a pass.
+_REASONING_TAG = re.compile(r"</?think(?:ing)?>|</?reasoning>", re.I)
+
+
+def _leaks_reasoning(answer: str) -> str:
+    """The leaked tag, or "" — always on, and never legitimately non-empty.
+
+    Measured over the archive: 1 hit in 1,369 sections, no false positives.
+    Cheap because it is a fact about the transport, not a judgement about
+    prose: no phrasing a model chooses can make `</think>` in `content`
+    correct.
+    """
+    m = _REASONING_TAG.search(_pre_debug_region(answer))
+    return m.group(0) if m else ""
+
+
 def _looks_truncated(answer: str) -> bool:
     """True when the answer stops mid-promise or mid-block.
 
@@ -1567,6 +1597,11 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     ungrounded = _ungrounded_content(answer)
     checks["grounded"] = None if ungrounded is None else not ungrounded
 
+    # Leaked-reasoning check (ALWAYS ON). A `<think>` delimiter in the visible
+    # answer is never right — see `_leaks_reasoning`.
+    leaked = _leaks_reasoning(answer)
+    checks["no_reasoning_leak"] = not leaked
+
     ok = all(v for v in checks.values() if v is not None)
     return CaseResult(name=name, model=model, ok=ok, checks=checks,
                       answer=answer, banners_seen=banners, route=route,
@@ -1599,7 +1634,7 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
             "sources", "url_wellformed", "route", "code_block", "code_runs",
             "contains", "names_files", "not_contains", "continuation",
             "disclaims", "not_truncated", "not_misattributed", "no_fiction",
-            "grounded"]
+            "grounded", "no_reasoning_leak"]
     for r in results:
         status = "PASS" if r.ok else "FAIL"
         print(f"\n[{status}] {r.name}   (model={r.model})")

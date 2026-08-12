@@ -1560,3 +1560,39 @@ def test_a_tagged_fence_still_wins():
     answer = "```python\n" + _MERGE + "\n```"
     assert er._has_tagged_code_block(answer)
     assert er._extract_code_block(answer).strip().startswith("def merge")
+
+
+# ── no_reasoning_leak: deliberation that reached the user (2026-08-12) ──────
+
+def test_a_leaked_think_tag_is_caught():
+    """nemotron on `ground-fact-absent`, PASSTHROUGH_THINK=0 arm. Three
+    paragraphs of visible working, a literal `</think>`, then the answer — and
+    18 green checks, because the answer underneath was correct."""
+    answer = (
+        "No p99 mentioned. I will answer that it's not provided.\n\n"
+        "Wait, is there any chance \"median of\" implies something about the "
+        "distribution? No.\n\nI'll output that the information is not present "
+        "in the passage.</think>The vault-sync worker's p99 latency is "
+        "**not provided** in the passage."
+    )
+    assert er._leaks_reasoning(answer) == "</think>"
+
+
+def test_an_opening_tag_is_caught_too():
+    assert er._leaks_reasoning("<think>Let me work through this.") == "<think>"
+
+
+def test_a_clean_answer_leaks_nothing():
+    answer = (
+        "The passage does not provide the vault-sync worker's p99 latency. "
+        "It only reports median latencies (31 ms warm, 2,140 ms cold)."
+    )
+    assert er._leaks_reasoning(answer) == ""
+
+
+def test_prose_about_thinking_is_not_a_leak():
+    """⚠️ The check is the literal DELIMITER, not the word. An answer that
+    discusses thinking, or a code answer mentioning a think() function, is
+    ordinary content."""
+    assert er._leaks_reasoning("I was thinking about the retention window.") == ""
+    assert er._leaks_reasoning("Call think() before reading the buffer.") == ""

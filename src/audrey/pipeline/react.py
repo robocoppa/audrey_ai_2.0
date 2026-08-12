@@ -33,6 +33,7 @@ the whole-worker level (one acquire across all rounds, by design — see
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -206,6 +207,102 @@ def _compress_history(messages: list[dict[str, Any]], *, keep_last_round: int) -
     return out
 
 
+# ─── The catalogue-only guard ─────────────────────────────────────────
+#
+# `list_my_files` returns filenames and WHICH artifacts exist — never a word of
+# what any of them says (`tools-server/app.py:718`, and the `summary` field was
+# deleted from that row on 2026-08-06 to keep it that way). So a turn that
+# stops with `list_my_files` as its only successful call and then describes
+# what a file CONTAINS is describing something it was never shown.
+#
+# ⚠️ **This is the fourth lever, and it is in code because the first three were
+# words.** The tool description says "a catalogue, not contents" in bold;
+# `VIDEO_SPECIALIST_SYSTEM` says "never answer about a file's contents from its
+# name alone"; the row field was renamed `artifacts` → `unread_artifacts`. All
+# three deployed. The third moved fabrication from ~71% of these turns to ~17%
+# and the residue is not reachable by a fourth, because on 2026-08-12 two turns
+# of the same case, holding **the same 3,762 bytes of context**, produced one
+# invented championship result and one correct "I have not read it yet, shall
+# I?". Identical input, opposite output: the divergence is sampling. Every text
+# lever changes bytes that were already right.
+#
+# So the guard does not ask the model again — it fetches the file and lets the
+# model answer with the content actually in front of it.
+#
+# **Each clause below earns its place against a real group**, measured over
+# 4,358 archived answers (109 catalogue-only, guard fires on 35):
+#
+#   - unread artifacts must be non-empty → 44 `silent.mp4` turns skipped, where
+#     the honest answer IS "no transcript" and there is nothing to fetch.
+#   - exactly ONE named file → 18 "I found two London videos, which did you
+#     mean?" turns skipped. Those are correct, and fetching would push a model
+#     that rightly asked into guessing.
+#   - naming is an EXACT match against filenames we just returned, not a phrase
+#     family — which is why this can gate where the frozen prose checks cannot.
+#
+# Of the 35 it does fire on, 34 are the defect case and 31 of those are
+# confirmed fabrications. ⚠️ The archive is all video cases, so non-video
+# turns are unmeasured — though a turn where `list_my_files` is the ONLY
+# success is close to video-specific by construction.
+_CATALOGUE_TOOL = "list_my_files"
+#: Summary first: the turns that trip this guard are overwhelmingly "what is
+#: this file about", and a summary answers that in one page where a transcript
+#: needs several. `visual` last — it is on-screen text, a poor substitute for
+#: either.
+_ARTIFACT_PREFERENCE = ("summary", "transcript", "visual")
+
+
+def _catalogue_rows(results: list[ToolResult]) -> list[dict[str, Any]]:
+    """Rows from the most recent successful `list_my_files`, `[]` if unreadable.
+
+    ⚠️ Returns `[]` rather than raising when the body will not parse. A listing
+    long enough to be cut at `max_tool_result_chars` arrives as invalid JSON,
+    and a guard that cannot read the catalogue must let the answer stand — the
+    alternative is fetching a file chosen from half a row.
+    """
+    for r in reversed(results):
+        if r.name != _CATALOGUE_TOOL or r.is_error:
+            continue
+        try:
+            body = json.loads(r.content)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            log.info("catalogue-guard: %s result did not parse; standing down",
+                     _CATALOGUE_TOOL)
+            return []
+        rows = body.get("files") if isinstance(body, dict) else body
+        return [x for x in rows if isinstance(x, dict)] if isinstance(rows, list) else []
+    return []
+
+
+def _unread_fetch(answer: str, results: list[ToolResult]) -> tuple[str, str] | None:
+    """`(filename, artifact)` the answer needed and did not read, else None."""
+    succeeded = {r.name for r in results if not r.is_error}
+    if succeeded != {_CATALOGUE_TOOL}:
+        return None
+    low = (answer or "").lower()
+    named = [
+        row for row in _catalogue_rows(results)
+        if isinstance(row.get("filename"), str)
+        and row["filename"]
+        and row["filename"].lower() in low
+    ]
+    if len(named) != 1:
+        return None
+    unread = [a for a in named[0].get("unread_artifacts") or [] if isinstance(a, str)]
+    if not unread:
+        return None
+    best = next((a for a in _ARTIFACT_PREFERENCE if a in unread), unread[0])
+    return named[0]["filename"], best
+
+
+def _guard_enabled(cfg: Any) -> bool:
+    try:
+        return bool(cfg.raw.get("agentic", {}).get("react", {})
+                    .get("catalogue_guard", True))
+    except AttributeError:
+        return True
+
+
 @asynccontextmanager
 async def _noop_gate():
     yield
@@ -278,6 +375,7 @@ async def run_react(
     last_resp: dict[str, Any] = {}
     web_searches_used = 0
     web_search_chars = 0  # chars of successful web_search bodies reaching context
+    guard_used = False    # the catalogue guard fires at most once per turn
 
     async with httpx.AsyncClient() as http:
         for round_idx in range(max_rounds):
@@ -322,6 +420,48 @@ async def run_react(
                      round_idx, model, len(tool_calls), time.monotonic() - start)
 
             if not tool_calls:
+                # The model wants to stop. Before letting it, check whether it
+                # is about to describe a file it only ever saw the NAME of —
+                # see `_unread_fetch`. Fires on ~0.8% of turns.
+                fetch = (
+                    _unread_fetch(msg.get("content", "") or "", all_results)
+                    if not guard_used and _guard_enabled(cfg) else None
+                )
+                if fetch:
+                    guard_used = True   # once per turn: this cannot re-loop
+                    filename, artifact = fetch
+                    log.info("catalogue-guard: %s answered from the catalogue "
+                             "alone about %r; fetching %s", model, filename, artifact)
+                    forced = await dispatch_one(
+                        http, registry,
+                        {"function": {"name": "get_file_text", "arguments": {
+                            "filename": filename, "artifact": artifact,
+                        }}},
+                        max_result_chars=max_tool_result_chars,
+                        timeout_s=tool_dispatch_timeout_s,
+                        user_id=user_id,
+                    )
+                    if not forced.is_error:
+                        # ⚠️ A `role=tool` message must follow an assistant turn
+                        # carrying the matching `tool_calls`, and the model made
+                        # no such call — writing one would put words in its
+                        # mouth. The content goes in as a user turn instead,
+                        # labelled for what it is.
+                        convo.append({"role": "user", "content": (
+                            f"System note: you have not read {filename} yet — "
+                            f"`list_my_files` lists only which artifacts exist. "
+                            f"Here is its {artifact}. Answer from this text, and "
+                            f"if it does not cover the question, say so.\n\n"
+                            f"{forced.content}"
+                        )})
+                        # Recorded so the tools footer stays TRUE: this content
+                        # really was dispatched and really is in context.
+                        all_results.append(forced)
+                        rounds_used += 1
+                        continue
+                    log.warning("catalogue-guard: forced get_file_text failed (%s); "
+                                "letting the answer stand", forced.content[:200])
+
                 # ⚠️ THE line that matters, and it is here rather than after the
                 # loop. This `return` is the NORMAL exit — the model stopped
                 # calling tools and wrote its answer — so it is the path almost

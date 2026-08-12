@@ -325,6 +325,22 @@ agentic:
   # the FINAL lines against that run's answers, flip back.
   debug_context_trace: false
   react:
+    # When a turn stops with `list_my_files` as its only successful call and
+    # names exactly ONE listed file that still has unread artifacts, fetch that
+    # artifact and make the model answer again with the text in front of it.
+    # Full rationale, and what each clause is there to skip, in
+    # `pipeline/react.py` above `_unread_fetch`.
+    #
+    # ⚠️ This is deliberately NOT another sentence of instruction. Three text
+    # levers were tried first (tool description, task-role prompt, the
+    # `artifacts` → `unread_artifacts` rename); the third cut fabrication on
+    # these turns from ~71% to ~17%, and the residue is a sampling coin-flip —
+    # two turns holding byte-identical context produced an invented result and
+    # a correct refusal. More words cannot reach that.
+    #
+    # Costs one tool call + one generation, on ~0.8% of turns measured over
+    # 4,358 archived answers. Set false to A-B it.
+    catalogue_guard: true
     max_rounds: 3
     compress_after_round: 2
     # 2000 → 6000 (2026-08-05), and this number had gone stale rather than
