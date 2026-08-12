@@ -417,6 +417,66 @@ def test_the_offer_widening_that_was_rejected_by_measurement():
         assert er._declines_without_offering(dead_end) is True
 
 
+# ── no_false_limit (always on) ──────────────────────────────────────────────
+#
+# ⚠️ The first check that reads the tools FOOTER. Run 14 put the paging give-up
+# on `video-control-unscoped-plural`, which carries no `continuation` check, and
+# it scored a clean PASS — the third time an opt-in check has covered only the
+# case it was written for. The prose alone cannot tell "the file is
+# inaccessible" (a fact) from "the file is inaccessible" (a fiction). The
+# footer can, and it is already in the answer.
+
+_READ_OK = ("\n\n---\n> _Tools used:_\n> - **qwen3.6:35b** — "
+            "`list_my_files` ✅1, `get_file_text` ✅2\n")
+_READ_FAILED = ("\n\n---\n> _Tools used:_\n> - **qwen3.6:35b** — "
+                "`get_file_text` ✅0 ❌1\n")
+
+
+def test_a_limit_the_tools_did_not_hit():
+    """Both verbatim, both scored PASS at the time. `get_file_text` PAGES a
+    document, so the rest of it is always one more call — never a limit."""
+    for answer in (
+        "Based on the available information, only partial transcripts for your "
+        "videos are accessible due to file size limitations, which prevents a "
+        "complete analysis of both files.",
+        "I have retrieved the beginning and some later sections, but I am "
+        "missing the middle portion due to technical limits.",
+    ):
+        assert er._blames_a_limit_the_tools_did_not_hit(answer + _READ_OK), answer
+
+
+def test_a_limit_on_the_reply_itself_is_real():
+    """⚠️ Two of the four archive hits were exactly this, in answers that then
+    paged and offered to continue. Declining to dump 33,000 characters into one
+    reply is legitimate; declaring them unreachable is not. The check reads
+    which of the two the limit is blamed for."""
+    for fine in (
+        "I cannot give the full transcript in this response because the file "
+        "contains 33,626 characters, which exceeds the length limits for a "
+        "single reply. Would you like the next section?",
+        "I have only retrieved partial sections of the file in this answer due "
+        "to output length constraints. Let me know if you want more.",
+    ):
+        assert er._blames_a_limit_the_tools_did_not_hit(fine + _READ_OK) == "", fine
+
+
+def test_a_genuine_tool_failure_is_never_this():
+    """The check fires only when some call SUCCEEDED, so an answer written
+    after a real failure — the case `video-unknown-filename` exists to
+    produce — can never trip it however it words the excuse."""
+    answer = ("I could not retrieve that file; it is not accessible due to a "
+              "processing limitation.")
+    assert er._blames_a_limit_the_tools_did_not_hit(answer + _READ_FAILED) == ""
+    assert er._blames_a_limit_the_tools_did_not_hit(answer) == ""   # no footer
+
+
+def test_the_reason_names_the_contradiction():
+    """The report has to show both halves or the reader cannot judge it."""
+    detail = er._blames_a_limit_the_tools_did_not_hit(
+        "The middle is missing due to technical limits." + _READ_OK)
+    assert "technical limits" in detail and "get_file_text ✅2" in detail
+
+
 # ── not_truncated (always on) ───────────────────────────────────────────────
 #
 # ⚠️ `has_answer` counts characters. On 2026-08-10 `video-unnamed-reference`
@@ -1076,7 +1136,7 @@ def test_save_json_round_trips(tmp_path):
         "route": "unknown", "ttft_s": 1.5, "total_s": 12.0,
         "answer_len": 40, "banners": [], "error": "",
         "code_detail": "exit 1: AssertionError", "fiction_detail": "",
-        "sources": None,
+        "excuse_detail": "", "sources": None,
     }]
 
 

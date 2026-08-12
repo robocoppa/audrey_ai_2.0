@@ -259,6 +259,7 @@ class CaseResult:
     route: str = "unknown"            # inferred path: fast | deep | research
     code_detail: str = ""             # code_runs outcome detail (informational)
     fiction_detail: str = ""          # which corpus fictions no_fiction found
+    excuse_detail: str = ""           # the limit the answer blamed, and the footer
     ttft_s: float | None = None
     total_s: float | None = None
     # Informational domain-based source breakdown (never a pass/fail check).
@@ -633,6 +634,85 @@ def _unemphasised(answer: str) -> str:
     (the false fail above) and five fiction spans stop carrying stray asterisks.
     """
     return _EMPHASIS.sub("", _prose_region(answer))
+
+
+def _footer_region(answer: str) -> str:
+    """The tools footer alone — the counterpart to `_prose_region`.
+
+    Everything else in this file reads the prose and throws the footer away.
+    This is the one check that needs both, because it compares what the answer
+    SAYS against what the answer's own footer REPORTS.
+    """
+    body = _pre_debug_region(answer)
+    idx = body.find("\n\n---\n>")
+    return body[idx:] if idx >= 0 else ""
+
+
+_TOOL_OK = re.compile(r"`(\w+)`\s*✅(\d+)")
+
+
+def _tools_that_succeeded(answer: str) -> dict[str, int]:
+    return {t: int(n) for t, n in _TOOL_OK.findall(_footer_region(answer))
+            if int(n) > 0}
+
+
+# Blaming a size/technical limit for content the tools reached. `get_file_text`
+# PAGES a document, so the rest of it is always one more call — never a limit.
+_LIMIT_EXCUSE = re.compile(
+    r"(?:file ?size|size|length|token|character|tool|system|technical|processing)"
+    r"[- ]?(?:limit|limitation|constraint|restriction)s?"
+    r"|(?:do(?:es)? not|don'?t|doesn'?t) have access to (?:that|the|this|your)",
+    re.I,
+)
+# The limit must be offered as the reason the CONTENT cannot be had.
+_UNREACHABLE = re.compile(
+    r"\b(?:not |in)accessible\b|\bmissing\b|\bunavailable\b|\bprevents?\b"
+    r"|(?:could|can) ?not (?:\w+ ){0,2}(?:retrieve|access|read|obtain|fetch)"
+    r"|(?:couldn'?t|cannot|can'?t|unable to) (?:\w+ ){0,2}"
+    r"(?:retrieve|access|read|obtain|fetch)",
+    re.I,
+)
+# ⚠️ A limit on the ANSWER's own size is real and must not be flagged. Two of
+# the four archive hits were exactly that — "exceeds the length limits for a
+# single reply", "only retrieved partial sections due to output length
+# constraints" — in answers that then paged and offered to continue. Declining
+# to dump 33,000 characters is legitimate; declaring them unreachable is not.
+_ABOUT_THE_REPLY = re.compile(
+    r"\b(?:repl(?:y|ies)|response|message|answer|output|here)\b", re.I)
+
+
+def _blames_a_limit_the_tools_did_not_hit(answer: str) -> str:
+    """The reason string when an answer contradicts its own tools footer.
+
+    ⚠️ The first check here that reads the FOOTER, and it exists because the
+    recurring failure of this suite is a model fabricating tool OUTPUT while
+    the tool reports success — invented file listings, invented transcript
+    bodies, invented reasons for not having read. The prose alone cannot tell
+    "the file is inaccessible" (a fact) from "the file is inaccessible" (a
+    fiction); the footer can, and it is already in the answer.
+
+    Fires only when some tool call SUCCEEDED, so an answer written after a
+    genuine tool failure can never trip it. Measured over the whole answers
+    archive — all suites, 1,008 sections — at two hits, both real: "I am
+    missing the middle portion due to technical limits" (`get_file_text` ✅3)
+    and "only partial transcripts are accessible due to file size limitations"
+    (`get_file_text` ✅2).
+    """
+    ok = _tools_that_succeeded(answer)
+    if not ok:
+        return ""
+    prose = _unemphasised(answer)
+    for m in _LIMIT_EXCUSE.finditer(prose):
+        start = prose.rfind(".", 0, m.start()) + 1
+        end = prose.find(".", m.end())
+        sentence = prose[start:end if end >= 0 else len(prose)].strip()
+        if _NEGATORS.search(sentence) or _ABOUT_THE_REPLY.search(sentence):
+            continue
+        if not _UNREACHABLE.search(sentence):
+            continue
+        calls = ", ".join(f"{t} ✅{n}" for t, n in ok.items())
+        return f"blamed {m.group(0)!r} while the footer shows {calls}"
+    return ""
 
 
 def _looks_truncated(answer: str) -> bool:
@@ -1230,6 +1310,14 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     # video cases and turned up on six of them; see `_CORPUS_FICTIONS`.
     fictions = _corpus_fictions(answer, case.get("corpus", ""), case.get("prompt", ""))
     checks["no_fiction"] = None if not case.get("corpus") else not fictions
+    # Always on, and it needs no corpus: it reads the answer against its OWN
+    # footer. 2026-08-11 run 14 put the paging give-up on `unscoped-plural`,
+    # which carries no `continuation` check, and it scored a clean PASS — the
+    # third time an opt-in check has covered only the case it was written for.
+    excuse = _blames_a_limit_the_tools_did_not_hit(answer)
+    checks["no_false_limit"] = (
+        None if case.get("allow_limit_excuse") else not excuse
+    )
 
     # Banner expectation: explicit per-case, else inferred from the model.
     expect_banners = case.get("expect_banners")
@@ -1337,7 +1425,8 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
                       answer=answer, banners_seen=banners, route=route,
                       ttft_s=timing.ttft_s, total_s=timing.total_s,
                       source_stats=stats, code_detail=code_detail,
-                      fiction_detail="; ".join(fictions))
+                      fiction_detail="; ".join(fictions),
+                      excuse_detail=excuse)
 
 
 def _fmt_check(v: bool | None) -> str:
@@ -1361,7 +1450,8 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
     cols = ["reachable", "no_error_marker", "has_answer", "banners",
             "sources", "url_wellformed", "route", "code_block", "code_runs",
             "contains", "names_files", "not_contains", "continuation",
-            "disclaims", "not_truncated", "not_misattributed", "no_fiction"]
+            "disclaims", "not_truncated", "not_misattributed", "no_fiction",
+            "no_false_limit"]
     for r in results:
         status = "PASS" if r.ok else "FAIL"
         print(f"\n[{status}] {r.name}   (model={r.model})")
@@ -1371,6 +1461,8 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
             print(f"   code: {r.code_detail}")
         if r.fiction_detail:
             print(f"   fiction: {r.fiction_detail}")
+        if r.excuse_detail:
+            print(f"   false limit: {r.excuse_detail}")
         line = "   " + "  ".join(f"{c}:{_fmt_check(r.checks.get(c))}" for c in cols)
         print(line)
         print(f"   {_fmt_latency(r)}")
@@ -1425,6 +1517,8 @@ def save_results(results: list[CaseResult], save_file: Path) -> None:
             section += f"- code: {r.code_detail}\n"
         if r.fiction_detail:
             section += f"- fiction: {r.fiction_detail}\n"
+        if r.excuse_detail:
+            section += f"- false limit: {r.excuse_detail}\n"
         if r.error:
             section += f"- error: {r.error}\n"
         section += f"\n{r.answer or '(no answer body)'}\n"
@@ -1456,6 +1550,7 @@ def save_json(results: list[CaseResult], save_json_file: Path) -> None:
             "error": r.error,
             "code_detail": r.code_detail,
             "fiction_detail": r.fiction_detail,
+            "excuse_detail": r.excuse_detail,
             # Grounding-quality numbers (research/sourced cases). None when the
             # case computed no source stats (e.g. a code case) — kept as an
             # explicit null so the record shape is stable for eval_compare.py.
