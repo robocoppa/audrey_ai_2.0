@@ -23,6 +23,7 @@ import pytest
 from audrey.pipeline.react import (
     _WEB_SEARCH_BUDGET_STUB,
     _compress_history,
+    _context_census,
     _summarize_tool_message,
     _without_web_search,
     run_react,
@@ -155,6 +156,53 @@ def test_compress_history_preserves_message_order():
 
 
 # ─── _summarize_tool_message ──────────────────────────────────────────
+
+
+# ─── _context_census (the diagnostic, 2026-08-12) ──────────────────────
+#
+# ⚠️ Written because fourteen A-B runs were diagnosed entirely from ANSWERS,
+# and an answer cannot distinguish a model inventing "I only have a partial
+# excerpt" from a model correctly describing a context compaction had already
+# thinned. This line settles that in one run.
+
+
+def test_context_census_counts_live_results_and_stubs():
+    """The shape a paging turn actually arrives in: three `get_file_text`
+    calls, one surviving. That is what the model writes its answer from."""
+    convo = [
+        {"role": "user", "content": "give me the transcript"},
+        _tool_msg("get_file_text", "page one"),
+        _tool_msg("get_file_text", "page two"),
+        _tool_msg("get_file_text", "page three"),
+    ]
+    census = _context_census(_compress_history(convo, keep_last_round=1))
+    assert "compacted_out=2" in census
+    assert census.count("get_file_text:") == 1     # one live result left
+    assert "get_file_text:10" in census            # len("page three")
+
+
+def test_context_census_reports_total_conversation_size():
+    """⚠️ Nothing in this repo sets `num_ctx`, so Ollama's per-model default
+    applies and an over-long conversation is truncated FROM THE FRONT, taking
+    the system prompt with it. Raising `compress_keep_last` trades one failure
+    for that one, so the census has to make the size visible."""
+    convo = [{"role": "system", "content": "x" * 100},
+             _tool_msg("kb_search", "y" * 250)]
+    assert "convo_chars=350" in _context_census(convo)
+
+
+def test_context_census_survives_an_empty_conversation():
+    census = _context_census([])
+    assert "live_tool_results=[-]" in census and "compacted_out=0" in census
+
+
+def test_the_stub_is_what_the_census_counts():
+    """Coupled on purpose: the census identifies a compacted message by the
+    stub's opening text, so a reworded stub must not silently zero the count."""
+    stub = _summarize_tool_message(_tool_msg("get_file_text", "x"))
+    assert stub.startswith("[history compacted:")
+    assert "compacted_out=1" in _context_census(
+        [{"role": "system", "content": stub}])
 
 
 def test_summarize_tool_message_names_the_tool():

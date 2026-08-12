@@ -417,14 +417,28 @@ def test_the_offer_widening_that_was_rejected_by_measurement():
         assert er._declines_without_offering(dead_end) is True
 
 
-# ── no_false_limit (always on) ──────────────────────────────────────────────
+# ── degraded-context report (INFORMATIONAL, never a gate) ───────────────────
 #
-# ⚠️ The first check that reads the tools FOOTER. Run 14 put the paging give-up
-# on `video-control-unscoped-plural`, which carries no `continuation` check, and
-# it scored a clean PASS — the third time an opt-in check has covered only the
-# case it was written for. The prose alone cannot tell "the file is
-# inaccessible" (a fact) from "the file is inaccessible" (a fiction). The
-# footer can, and it is already in the answer.
+# ⚠️⚠️ THE MOST EXPENSIVE LESSON IN THIS FILE, and it lasted one day.
+#
+# Shipped 2026-08-11 as the always-on check `no_false_limit`, on the theory
+# that a limit blamed for content the tools reached must be invented. The next
+# morning a correlation over every archived answer killed that theory:
+#
+#   successful tool calls in a turn  →  fail rate
+#     0: 16.9% (n=83)   1: 14.2% (n=155)   2: 6.9% (n=101)
+#     3: 41.1% (n=95)   4–5: ~31% (n=38)
+#
+# A cliff at three, which is exactly where the fast path's
+# `compress_after_round: 2` + `compress_keep_last: 1` leaves ONE tool message
+# verbatim and stubs the rest. `video-long-transcript-paging` fails 0 of 14
+# turns below three calls and 20 of 32 at three, while the cases needing only
+# the LAST result are untouched (`control-named-scoped`, 0 of 23 at three).
+#
+# So "I am missing the middle portion" is most likely TRUE, and the check was
+# failing answers for honestly describing a context they really were handed.
+# **A harness that cannot see the input must not call the output a lie.**
+# The detector survives because the signal is good; it reports and never gates.
 
 _READ_OK = ("\n\n---\n> _Tools used:_\n> - **qwen3.6:35b** — "
             "`list_my_files` ✅1, `get_file_text` ✅2\n")
@@ -432,9 +446,10 @@ _READ_FAILED = ("\n\n---\n> _Tools used:_\n> - **qwen3.6:35b** — "
                 "`get_file_text` ✅0 ❌1\n")
 
 
-def test_a_limit_the_tools_did_not_hit():
-    """Both verbatim, both scored PASS at the time. `get_file_text` PAGES a
-    document, so the rest of it is always one more call — never a limit."""
+def test_it_flags_a_turn_worth_reading_the_context_trace_for():
+    """Both verbatim from real runs. Both are now read as REPORTS of a thinned
+    context, not as inventions — the answer that says it is missing the middle
+    of a paged file made three calls and was handed one page."""
     for answer in (
         "Based on the available information, only partial transcripts for your "
         "videos are accessible due to file size limitations, which prevents a "
@@ -442,14 +457,26 @@ def test_a_limit_the_tools_did_not_hit():
         "I have retrieved the beginning and some later sections, but I am "
         "missing the middle portion due to technical limits.",
     ):
-        assert er._blames_a_limit_the_tools_did_not_hit(answer + _READ_OK), answer
+        assert er._reports_degraded_context(answer + _READ_OK), answer
 
 
-def test_a_limit_on_the_reply_itself_is_real():
-    """⚠️ Two of the four archive hits were exactly this, in answers that then
-    paged and offered to continue. Declining to dump 33,000 characters into one
-    reply is legitimate; declaring them unreachable is not. The check reads
-    which of the two the limit is blamed for."""
+def test_it_never_reaches_the_pass_fail_verdict(monkeypatch):
+    """⚠️ The guard that matters. An answer this fires on must still PASS every
+    check, or the retraction was cosmetic."""
+    answer = ("I am missing the middle portion due to technical limits."
+              + _READ_OK)
+    monkeypatch.setattr(er, "_post_stream",
+                        lambda *a, **k: (answer, [], "", er.StreamTiming()))
+    r = er.run_case("u", "k", {"name": "c", "prompt": "p"}, "m", 5.0)
+    assert "no_false_limit" not in r.checks
+    assert r.context_detail                     # reported…
+    assert r.ok                                 # …and not held against it
+
+
+def test_a_limit_on_the_reply_itself_is_not_reported():
+    """Two of the four raw archive hits were this, in answers that then paged
+    and offered to continue. Declining to dump 33,000 characters into one reply
+    says nothing about the context the model holds."""
     for fine in (
         "I cannot give the full transcript in this response because the file "
         "contains 33,626 characters, which exceeds the length limits for a "
@@ -457,22 +484,21 @@ def test_a_limit_on_the_reply_itself_is_real():
         "I have only retrieved partial sections of the file in this answer due "
         "to output length constraints. Let me know if you want more.",
     ):
-        assert er._blames_a_limit_the_tools_did_not_hit(fine + _READ_OK) == "", fine
+        assert er._reports_degraded_context(fine + _READ_OK) == "", fine
 
 
-def test_a_genuine_tool_failure_is_never_this():
-    """The check fires only when some call SUCCEEDED, so an answer written
-    after a real failure — the case `video-unknown-filename` exists to
-    produce — can never trip it however it words the excuse."""
+def test_a_genuine_tool_failure_is_never_reported():
+    """It needs a ✅ to fire, so an answer written after a real failure — what
+    `video-unknown-filename` exists to produce — is never flagged."""
     answer = ("I could not retrieve that file; it is not accessible due to a "
               "processing limitation.")
-    assert er._blames_a_limit_the_tools_did_not_hit(answer + _READ_FAILED) == ""
-    assert er._blames_a_limit_the_tools_did_not_hit(answer) == ""   # no footer
+    assert er._reports_degraded_context(answer + _READ_FAILED) == ""
+    assert er._reports_degraded_context(answer) == ""   # no footer
 
 
-def test_the_reason_names_the_contradiction():
-    """The report has to show both halves or the reader cannot judge it."""
-    detail = er._blames_a_limit_the_tools_did_not_hit(
+def test_the_report_names_both_halves():
+    """Useless without both: the claim, and the calls that contradict it."""
+    detail = er._reports_degraded_context(
         "The middle is missing due to technical limits." + _READ_OK)
     assert "technical limits" in detail and "get_file_text ✅2" in detail
 
@@ -1111,6 +1137,30 @@ def test_expand_sweep_crosses_and_groups_by_model():
     assert "model" not in cases[0]
 
 
+def test_expand_repeats_appends_whole_passes():
+    """⚠️ Repeats are whole passes, not adjacent duplicates. The same prompt
+    twice in a row to a warm model is the shape most likely to correlate the
+    two samples, which defeats the point of sampling."""
+    cases = [{"name": "a", "prompt": "p"}, {"name": "b", "prompt": "q"}]
+    out = er._expand_repeats(cases, 3)
+    assert [c["name"] for c in out] == ["a", "b", "a#2", "b#2", "a#3", "b#3"]
+
+
+def test_expand_repeats_is_a_no_op_by_default():
+    cases = [{"name": "a", "prompt": "p"}]
+    assert er._expand_repeats(cases, 1) == cases
+    assert er._expand_repeats(cases, 0) == cases
+
+
+def test_a_repeat_marker_survives_the_sweep_suffix_strip():
+    """`eval_compare` keys rows by the name with ` [<model>]` removed, so the
+    `#N` has to sit inside that, or every repeat collapses onto one row."""
+    out = er._expand_sweep(er._expand_repeats([{"name": "a", "prompt": "p"}], 2),
+                           ["m1"])
+    assert [c["name"] for c in out] == ["a [m1]", "a#2 [m1]"]
+    assert [eval_compare._case_key(c["name"]) for c in out] == ["a", "a#2"]
+
+
 def test_expand_sweep_name_falls_back_to_prompt():
     out = er._expand_sweep([{"prompt": "what is love"}], ["m1"])
     assert out[0]["name"] == "what is love [m1]"
@@ -1136,7 +1186,7 @@ def test_save_json_round_trips(tmp_path):
         "route": "unknown", "ttft_s": 1.5, "total_s": 12.0,
         "answer_len": 40, "banners": [], "error": "",
         "code_detail": "exit 1: AssertionError", "fiction_detail": "",
-        "excuse_detail": "", "sources": None,
+        "context_detail": "", "sources": None,
     }]
 
 

@@ -76,6 +76,53 @@ def _debug_research_trace(cfg: Any) -> bool:
         return False
 
 
+def _debug_context_trace(cfg: Any) -> bool:
+    """True when `agentic.debug_context_trace` is on.
+
+    Separate flag from the research trace, and deliberately so: this one is
+    about EVERY tool, on every path, and its whole point is to be turned on
+    for one diagnostic run and off again.
+    """
+    try:
+        return bool(cfg.raw.get("agentic", {}).get("debug_context_trace", False))
+    except AttributeError:
+        return False
+
+
+def _context_census(messages: list[dict[str, Any]]) -> str:
+    """One line describing what the model is about to be shown.
+
+    ⚠️ Written 2026-08-12 because fourteen A-B runs were diagnosed entirely
+    from OUTPUT, and the output cannot distinguish the two things that matter:
+    a model that invented "I only have a partial excerpt", and a model
+    accurately describing a context that `_compress_history` had already
+    thinned to one tool result.
+
+    The correlation that prompted it, over every archived video answer:
+    failures run 7–17% at 0–2 successful tool calls and **41% at three** —
+    which is exactly where `compress_after_round: 2` and `compress_keep_last:
+    1` leave a single tool message verbatim. That is a hypothesis this line
+    settles in one run, and no amount of answer-reading ever could.
+
+    Reports live tool results, compaction stubs, and the total character count
+    of the whole conversation — the last because nothing in this repo sets
+    `num_ctx`, so Ollama's default applies and over-long contexts are
+    truncated from the FRONT, silently taking the system prompt with them.
+    """
+    live: list[str] = []
+    stubbed = 0
+    total = 0
+    for m in messages:
+        content = str(m.get("content") or "")
+        total += len(content)
+        if m.get("role") == "tool":
+            live.append(f"{m.get('name', '?')}:{len(content)}")
+        elif m.get("role") == "system" and content.startswith("[history compacted:"):
+            stubbed += 1
+    return (f"live_tool_results=[{', '.join(live) or '-'}] "
+            f"compacted_out={stubbed} convo_chars={total}")
+
+
 def _summarize_tool_message(msg: dict[str, Any]) -> str:
     # Replaces an older tool result during history compaction (see
     # _compress_history). Wording is deliberate: a model that quotes its own
@@ -237,6 +284,14 @@ async def run_react(
             if round_idx >= compress_after_round:
                 convo = _compress_history(convo, keep_last_round=compress_keep_last)
 
+            # What the model is about to see, AFTER compaction — see
+            # `_context_census`. Logged every round so an answer that reports
+            # missing content can be checked against the context it was given
+            # instead of guessed at from the prose.
+            if _debug_context_trace(cfg):
+                log.info("context-trace: model=%s round=%d %s",
+                         model, round_idx, _context_census(convo))
+
             # When the research-trace debug flag is on, log the web_search tool
             # content actually in the model's context this round — so a thin
             # ledger can be diagnosed as "grounding never reached the model"
@@ -342,6 +397,13 @@ async def run_react(
         log.warning("react: max_rounds=%d reached for %s; forcing final answer without tools",
                     max_rounds, model)
         convo = _compress_history(convo, keep_last_round=compress_keep_last)
+        # ⚠️ THE line that matters. This is the context the final answer is
+        # actually written from — after a SECOND compaction pass — and it is
+        # the one the paging cases have been failing out of. A turn that made
+        # three `get_file_text` calls arrives here holding one of them.
+        if _debug_context_trace(cfg):
+            log.info("context-trace: model=%s FINAL %s",
+                     model, _context_census(convo))
         # Final-answer instruction lives in pipeline/prompts.py; this is
         # the load-bearing flip from tool-using mode to prose mode. Kept
         # as a user turn rather than a system message because it's a

@@ -308,6 +308,22 @@ agentic:
   # alone. Client-visible only, never written to the chat archive.
   # Off by default; flip for an eval window (restart, no rebuild), flip back.
   debug_research_trace: false
+  # Debug/eval: what the model is actually LOOKING AT. Logs one
+  # `context-trace:` line per ReAct round and one marked FINAL immediately
+  # before the forced final answer, carrying the live tool results with their
+  # sizes, how many were replaced by compaction stubs, and the total
+  # conversation length. Log-only — never client-visible.
+  #
+  # ⚠️ Added 2026-08-12 after fourteen A-B runs were diagnosed purely from
+  # answers. The answers cannot separate the two explanations that matter —
+  # a model INVENTING "I only have a partial excerpt", and a model correctly
+  # describing a context `compress_keep_last` had already thinned to one tool
+  # result. Failures run 7–17% at 0–2 successful tool calls and 41% at three,
+  # which is precisely where the second compaction pass bites.
+  #
+  # Off by default; flip for one diagnostic run (restart, no rebuild), read
+  # the FINAL lines against that run's answers, flip back.
+  debug_context_trace: false
   react:
     max_rounds: 3
     compress_after_round: 2
@@ -333,12 +349,43 @@ agentic:
     max_tool_result_chars: 6000
     # How many *most-recent* `role=tool` messages to keep verbatim once
     # compression kicks in. Older tool messages collapse to a one-line
-    # stub. Default 1: the model only ever needs the immediately
-    # preceding tool round to keep reasoning. Sensible values are ≥1;
-    # setting 0 happens to be a no-op under the current helper (no
-    # compression) — to wipe history aggressively, lower
+    # stub. Sensible values are ≥1; setting 0 happens to be a no-op under the
+    # current helper (no compression) — to wipe history aggressively, lower
     # `compress_after_round` instead.
-    compress_keep_last: 1
+    #
+    # ⚠️⚠️ 1 → 4 (2026-08-12). The old comment said "the model only ever needs
+    # the immediately preceding tool round to keep reasoning". That is FALSE
+    # for a paging tool and for any multi-file question, and it is the leading
+    # explanation for fourteen A-B runs of video failures.
+    #
+    # With `max_rounds: 3` and `compress_after_round: 2`, compaction runs at
+    # round 2 AND again before the forced final answer, so a turn that made
+    # three `get_file_text` calls writes its answer holding ONE page and three
+    # stubs. Measured over every archived video answer:
+    #
+    #   successful tool calls in a turn  →  fail rate
+    #     0: 16.9% (n=83)   1: 14.2% (n=155)   2: 6.9% (n=101)
+    #     3: 41.1% (n=95)   4–5: ~31% (n=38)
+    #
+    # A cliff at three, not a gradient. `video-long-transcript-paging` fails 0
+    # of 14 turns below three calls and 20 of 32 at three; the cases that need
+    # only the LAST result (`control-named-scoped`, 0 of 23 at three calls) are
+    # untouched. That split is what `keep_last: 1` predicts exactly.
+    #
+    # ⚠️ FALSIFIABLE, and that is the point: if the three-call cliff survives
+    # this change, compaction is NOT the cause and the failures really are
+    # model behaviour. Run it with `agentic.debug_context_trace: true` and read
+    # the `context-trace: … FINAL` lines, and with `--repeat` — a single 24-case
+    # run cannot resolve a ±5 swing.
+    #
+    # ⚠️ THE RISK IS CONTEXT OVERFLOW, and it is not hypothetical: nothing in
+    # this repo sets `num_ctx`, so Ollama's per-model default applies and an
+    # over-long conversation is truncated FROM THE FRONT — taking the system
+    # prompt with it. 4 × `max_tool_result_chars` is ~24k chars ≈ 6k tokens
+    # before anything else. That is why this is 4 and not 8. `convo_chars` in
+    # the context trace is there to watch it; if it climbs near the model's
+    # window, lower this or set `num_ctx` explicitly before blaming the answer.
+    compress_keep_last: 4
     # Per-worker cap on dispatched `web_search` calls (0 = unlimited).
     # Every dispatched search spends real provider quota (Brave), and panel
     # modes multiply it by worker count — pre-cap research requests burned

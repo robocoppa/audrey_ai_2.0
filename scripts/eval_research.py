@@ -259,7 +259,7 @@ class CaseResult:
     route: str = "unknown"            # inferred path: fast | deep | research
     code_detail: str = ""             # code_runs outcome detail (informational)
     fiction_detail: str = ""          # which corpus fictions no_fiction found
-    excuse_detail: str = ""           # the limit the answer blamed, and the footer
+    context_detail: str = ""          # INFORMATIONAL: degraded-context report
     ttft_s: float | None = None
     total_s: float | None = None
     # Informational domain-based source breakdown (never a pass/fail check).
@@ -656,8 +656,28 @@ def _tools_that_succeeded(answer: str) -> dict[str, int]:
             if int(n) > 0}
 
 
-# Blaming a size/technical limit for content the tools reached. `get_file_text`
-# PAGES a document, so the rest of it is always one more call — never a limit.
+# An answer reporting that content it asked for is not in front of it, while
+# its own footer shows the tool call succeeded.
+#
+# ⚠️⚠️ THIS IS NOT A PASS/FAIL CHECK, AND THE REASON IS THE MOST EXPENSIVE
+# LESSON IN THIS FILE. It shipped on 2026-08-11 as `no_false_limit`, on the
+# theory that a limit blamed for content the tools reached must be invented.
+# One day later the correlation below killed that theory:
+#
+#   successful tool calls in a turn  →  fail rate over every archived answer
+#     0: 16.9% (n=83)   1: 14.2% (n=155)   2: 6.9% (n=101)
+#     3: 41.1% (n=95)   4–5: ~31% (n=38)
+#
+# A cliff at three, not a gradient — and three is where the fast path's
+# `compress_after_round: 2` + `compress_keep_last: 1` leaves exactly ONE tool
+# message verbatim and stubs the rest. `video-long-transcript-paging` fails 0
+# of 14 turns below three calls and 20 of 32 at three. So "I am missing the
+# middle portion" is very likely TRUE: the middle was compacted out of the
+# model's context before it wrote. A check that fails an answer for honestly
+# reporting its own degraded context is worse than no check at all.
+#
+# The detector is kept because the SIGNAL is good — it just means the opposite
+# of what it was built to mean. It now reports, and never gates.
 _LIMIT_EXCUSE = re.compile(
     r"(?:file ?size|size|length|token|character|tool|system|technical|processing)"
     r"[- ]?(?:limit|limitation|constraint|restriction)s?"
@@ -681,22 +701,20 @@ _ABOUT_THE_REPLY = re.compile(
     r"\b(?:repl(?:y|ies)|response|message|answer|output|here)\b", re.I)
 
 
-def _blames_a_limit_the_tools_did_not_hit(answer: str) -> str:
-    """The reason string when an answer contradicts its own tools footer.
+def _reports_degraded_context(answer: str) -> str:
+    """INFORMATIONAL. The answer says it could not reach content its own footer
+    says a tool returned — the signature of history compaction, not of lying.
 
-    ⚠️ The first check here that reads the FOOTER, and it exists because the
-    recurring failure of this suite is a model fabricating tool OUTPUT while
-    the tool reports success — invented file listings, invented transcript
-    bodies, invented reasons for not having read. The prose alone cannot tell
-    "the file is inaccessible" (a fact) from "the file is inaccessible" (a
-    fiction); the footer can, and it is already in the answer.
-
-    Fires only when some tool call SUCCEEDED, so an answer written after a
-    genuine tool failure can never trip it. Measured over the whole answers
-    archive — all suites, 1,008 sections — at two hits, both real: "I am
+    Reads the FOOTER, which nothing else here does. Fires only when some call
+    SUCCEEDED, so an answer written after a genuine tool failure never trips
+    it. Two hits over the whole archive (all suites, 1,008 sections): "I am
     missing the middle portion due to technical limits" (`get_file_text` ✅3)
     and "only partial transcripts are accessible due to file size limitations"
-    (`get_file_text` ✅2).
+    (`get_file_text` ✅2) — both at the three-call cliff, both consistent with
+    the model describing a context it really was handed.
+
+    ⚠️ Never gate on this. See the block above `_LIMIT_EXCUSE`. Its job is to
+    mark the turns worth reading `context-trace` lines for.
     """
     ok = _tools_that_succeeded(answer)
     if not ok:
@@ -1314,10 +1332,10 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     # footer. 2026-08-11 run 14 put the paging give-up on `unscoped-plural`,
     # which carries no `continuation` check, and it scored a clean PASS — the
     # third time an opt-in check has covered only the case it was written for.
-    excuse = _blames_a_limit_the_tools_did_not_hit(answer)
-    checks["no_false_limit"] = (
-        None if case.get("allow_limit_excuse") else not excuse
-    )
+    # ⚠️ REPORTED, NEVER GATED — see `_reports_degraded_context`. Gating this
+    # was wrong for exactly one day: the answers it flags are most likely
+    # telling the truth about a context that compaction had already thinned.
+    degraded = _reports_degraded_context(answer)
 
     # Banner expectation: explicit per-case, else inferred from the model.
     expect_banners = case.get("expect_banners")
@@ -1426,7 +1444,7 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
                       ttft_s=timing.ttft_s, total_s=timing.total_s,
                       source_stats=stats, code_detail=code_detail,
                       fiction_detail="; ".join(fictions),
-                      excuse_detail=excuse)
+                      context_detail=degraded)
 
 
 def _fmt_check(v: bool | None) -> str:
@@ -1450,8 +1468,7 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
     cols = ["reachable", "no_error_marker", "has_answer", "banners",
             "sources", "url_wellformed", "route", "code_block", "code_runs",
             "contains", "names_files", "not_contains", "continuation",
-            "disclaims", "not_truncated", "not_misattributed", "no_fiction",
-            "no_false_limit"]
+            "disclaims", "not_truncated", "not_misattributed", "no_fiction"]
     for r in results:
         status = "PASS" if r.ok else "FAIL"
         print(f"\n[{status}] {r.name}   (model={r.model})")
@@ -1461,8 +1478,8 @@ def render(results: list[CaseResult], *, show_answers: bool, verbose: bool) -> N
             print(f"   code: {r.code_detail}")
         if r.fiction_detail:
             print(f"   fiction: {r.fiction_detail}")
-        if r.excuse_detail:
-            print(f"   false limit: {r.excuse_detail}")
+        if r.context_detail:
+            print(f"   context (informational): {r.context_detail}")
         line = "   " + "  ".join(f"{c}:{_fmt_check(r.checks.get(c))}" for c in cols)
         print(line)
         print(f"   {_fmt_latency(r)}")
@@ -1517,8 +1534,8 @@ def save_results(results: list[CaseResult], save_file: Path) -> None:
             section += f"- code: {r.code_detail}\n"
         if r.fiction_detail:
             section += f"- fiction: {r.fiction_detail}\n"
-        if r.excuse_detail:
-            section += f"- false limit: {r.excuse_detail}\n"
+        if r.context_detail:
+            section += f"- context (informational): {r.context_detail}\n"
         if r.error:
             section += f"- error: {r.error}\n"
         section += f"\n{r.answer or '(no answer body)'}\n"
@@ -1550,7 +1567,7 @@ def save_json(results: list[CaseResult], save_json_file: Path) -> None:
             "error": r.error,
             "code_detail": r.code_detail,
             "fiction_detail": r.fiction_detail,
-            "excuse_detail": r.excuse_detail,
+            "context_detail": r.context_detail,
             # Grounding-quality numbers (research/sourced cases). None when the
             # case computed no source stats (e.g. a code case) — kept as an
             # explicit null so the record shape is stable for eval_compare.py.
@@ -1589,6 +1606,32 @@ def _expand_sweep(cases: list[dict], models: list[str]) -> list[dict]:
     ]
 
 
+def _expand_repeats(cases: list[dict], repeats: int) -> list[dict]:
+    """Run the whole case list `repeats` times, names suffixed `#2`, `#3`, ….
+
+    ⚠️ The reason this exists is written all over `PROJECT_STATE.md`: "n=1 says
+    nothing here". Fourteen A-B runs were each 24 single samples, and single
+    samples cannot answer "did that change help?" for a behaviour whose per-run
+    swing is ±5 of 24. Three diagnostic cases at five repeats decides in one
+    run what twelve cases at n=1 never decides at all. Pair it with `--only`.
+
+    Repeats are appended as whole passes rather than interleaved, so the same
+    case is never sampled twice in a row — consecutive identical prompts to a
+    warm model are the one shape most likely to correlate the samples.
+
+    The `#N` marker goes BEFORE any sweep suffix, so `eval_compare.py`'s
+    `[<model>]` strip still yields a stable key per case+repeat.
+    """
+    if repeats <= 1:
+        return cases
+    out: list[dict] = []
+    for n in range(1, repeats + 1):
+        for c in cases:
+            name = c.get("name") or c["prompt"][:48]
+            out.append(c if n == 1 else {**c, "name": f"{name}#{n}"})
+    return out
+
+
 def main() -> int:
     # Load the gitignored .env.test.local first, so the env-var defaults below
     # see AUDREY_EVAL_*. A real export or an explicit --flag still overrides it.
@@ -1615,6 +1658,10 @@ def main() -> int:
     p.add_argument("--no-answers", action="store_true",
                    help="don't print the full answer bodies (checks only)")
     p.add_argument("--verbose", action="store_true", help="extra detail on failures")
+    p.add_argument("--repeat", type=int, default=1,
+                   help="run the whole case list N times (names suffixed #2, #3, …). "
+                        "Use with --only to sample a few diagnostic cases enough "
+                        "times to tell a real change from run-to-run variance."),
     p.add_argument("--only", default="",
                    help="run only cases whose name contains this substring")
     p.add_argument("--save-file", type=Path, default=None,
@@ -1643,6 +1690,9 @@ def main() -> int:
         print("error: no cases to run (check --only filter)", file=sys.stderr)
         return 2
 
+    # Repeats first, so each repeat is then crossed with every sweep model and
+    # the model grouping that keeps Ollama from reloading weights survives.
+    cases = _expand_repeats(cases, args.repeat)
     sweep = [m.strip() for m in args.models.split(",") if m.strip()]
     if sweep:
         cases = _expand_sweep(cases, sweep)
