@@ -1157,7 +1157,16 @@ _CORPUS_FICTIONS: dict[str, list[tuple[re.Pattern[str], str]]] = {
         # The second half is the same inversion told from the other end — "a
         # game where his opponent used the London System against him" — which
         # the colour wording alone missed.
-        (re.compile(r"\bCarlsen\b[^.]{0,80}?\b(?:playing|plays|as|has)\s+Black\b"
+        # ⚠️ `(?!['’]s)` — POSSESSIVE "Black's" is not a colour assignment, and
+        # `\b` matches happily before an apostrophe. 2026-08-12 16:25: "Carlsen
+        # gradually outplays Shuvalov, eventually picking up multiple pawns and
+        # winning as Black's position collapses" scored `no_fiction:❌` on the
+        # span `as Black`. That sentence has Carlsen as White and the OPPONENT
+        # as Black — it is the correct reading, failed. One flip archive-wide
+        # (250 sections mention Carlsen, 9 fires → 8); the other 8 are
+        # untouched. Same family of hole as `_SMART_QUOTES` and `_unemphasised`:
+        # a character between the words the pattern assumes are adjacent.
+        (re.compile(r"\bCarlsen\b[^.]{0,80}?\b(?:playing|plays|as|has)\s+Black\b(?!['’]s)"
                     r"|\bopponent\b[^.]{0,60}?\bLondon\b[^.]{0,40}?"
                     r"\bagainst\s+(?:him|Carlsen|Magnus)\b",
                     re.I),

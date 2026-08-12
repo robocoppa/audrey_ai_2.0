@@ -857,6 +857,26 @@ def test_the_colour_inversion_told_a_third_way():
         assert er._corpus_fictions(answer + _FOOTER, "video"), answer
 
 
+def test_possessive_black_is_not_a_colour_assignment():
+    """⚠️ `\\b` matches before an apostrophe, so "Black's position" read as
+    "as Black". 2026-08-12 16:25: a correct sentence — Carlsen is White, the
+    OPPONENT is Black, and it is Black's position that collapses — scored
+    `no_fiction:❌` on the span `as Black`.
+
+    Same family as `_SMART_QUOTES` and `_unemphasised`: a character sitting
+    between two words a pattern assumed were adjacent. One flip archive-wide
+    (9 fires → 8 across 250 Carlsen sections); the genuine eight are pinned by
+    the tests above and below this one.
+    """
+    for answer in (
+        "Carlsen gradually outplays Shuvalov, eventually picking up multiple "
+        "pawns and winning as Black's position collapses.",
+        "Carlsen doubles rooks on the e-file and infiltrates as Black’s "
+        "position falls apart.",
+    ):
+        assert not er._corpus_fictions(answer + _FOOTER, "video"), answer
+
+
 def test_the_beat_the_london_pattern_that_was_rejected_by_measurement():
     """⚠️ The obvious widening from the above — anything about beating,
     fighting or countering the London — was measured at six archive hits, and
