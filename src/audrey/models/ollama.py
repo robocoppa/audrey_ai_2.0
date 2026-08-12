@@ -264,6 +264,7 @@ class OllamaClient:
         options: dict[str, Any] | None = None,
         tools: list[dict[str, Any]] | None = None,
         timeout_s: float | None = None,
+        think: bool | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Streaming chat completion. Yields each Ollama chunk as a dict.
 
@@ -273,6 +274,19 @@ class OllamaClient:
         When `tools` is supplied, Ollama may populate `message.tool_calls`
         in chunks (typically the final one); the caller is responsible for
         executing them and feeding results back as `role=tool` messages.
+
+        `think` behaves exactly as in `chat` — see there for why `None` must
+        stay the default. ⚠️ It was missing here until 2026-08-12 while `chat`
+        had it, and the asymmetry is worth naming: a caller that threads
+        `think` through both paths raises `TypeError` on the streaming one
+        only. Because the exception fires INSIDE the generator, after the
+        response headers have gone out, FastAPI cannot turn it into a 500 —
+        the socket just closes and the client reports
+        `RemoteProtocolError: peer closed connection without sending complete
+        message body`. Every passthrough turn failed that way for half an
+        hour, and the error names neither the model, the parameter, nor this
+        file. Keep the two signatures in step; `test_ollama_think_parity.py`
+        now fails if they drift.
         """
         payload: dict[str, Any] = {
             "model": model,
@@ -283,6 +297,8 @@ class OllamaClient:
             payload["options"] = options
         if tools:
             payload["tools"] = tools
+        if think is not None:
+            payload["think"] = think
         timeout = httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT
         t0 = time.perf_counter()
         outcome = "ok"
