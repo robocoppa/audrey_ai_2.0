@@ -492,9 +492,42 @@ def _pre_debug_region(answer: str) -> str:
     return answer[:cut]
 
 
+def _bare_code(answer: str) -> str | None:
+    """The whole answer as code, when the answer IS nothing but code.
+
+    ⚠️ Added 2026-08-12 because the harness was failing obedience. Every
+    `code_*` prompt ends **"Return only the code."** Two of the three bake-off
+    models took that literally on `code-merge-intervals` and returned an
+    unfenced function — correct code, no prose — and scored
+    `code_block:❌ code: no ```python block to run`. A check that fails an
+    answer for following the instruction is worse than no check.
+
+    Three guards keep this from swallowing prose, because "does it compile"
+    alone is far too weak — a single bare word like `Hello` is a valid Python
+    expression statement and compiles clean:
+
+      • no fence anywhere, so a mis-tagged or untagged block still fails
+        rather than being silently rescued here;
+      • `def ` present, which every `expect_code` prompt asks for;
+      • the WHOLE body compiles, so any sentence of prose alongside the code
+        is a SyntaxError and disqualifies it.
+    """
+    body = _pre_debug_region(answer).strip()
+    if not body or "```" in body or "def " not in body:
+        return None
+    try:
+        compile(body, "<answer>", "exec")
+    except (SyntaxError, ValueError):
+        return None
+    return body
+
+
 def _has_tagged_code_block(answer: str) -> bool:
-    """True if any fenced code block with a non-empty language tag exists."""
-    return any(m.group(1) for m in _CODE_FENCE.finditer(_pre_debug_region(answer)))
+    """True if the answer delivered runnable code: a tagged fence, or nothing
+    but code. See `_bare_code` for why the second form counts."""
+    if any(m.group(1) for m in _CODE_FENCE.finditer(_pre_debug_region(answer))):
+        return True
+    return _bare_code(answer) is not None
 
 
 def _extract_code_block(answer: str, lang: str = "python") -> str | None:
@@ -508,7 +541,11 @@ def _extract_code_block(answer: str, lang: str = "python") -> str | None:
     tags = _PY_TAGS if lang == "python" else {lang}
     blocks = [m.group(2) for m in _CODE_FENCE.finditer(_pre_debug_region(answer))
               if m.group(1).lower() in tags]
-    return max(blocks, key=len) if blocks else None
+    if blocks:
+        return max(blocks, key=len)
+    # An unfenced answer that is nothing but code still has code to run, and
+    # the prompts ask for exactly that. Python only — `_bare_code` compiles.
+    return _bare_code(answer) if lang == "python" else None
 
 
 def _run_code_check(code: str, test: str, timeout_s: float) -> tuple[bool, str]:

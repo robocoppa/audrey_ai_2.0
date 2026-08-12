@@ -1495,3 +1495,68 @@ def test_disclaims_still_rejects_an_answer_that_just_answers():
         "which is typical for a cold-start-dominated workload."
     )
     assert not er._disclaims_absence(answer)
+
+
+# ── bare code: obeying "Return only the code" (2026-08-12) ──────────────────
+
+_MERGE = '''def merge(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    if not intervals:
+        return []
+    intervals = sorted(intervals)
+    merged = [intervals[0]]
+    for start, end in intervals[1:]:
+        last_start, last_end = merged[-1]
+        if start <= last_end:
+            merged[-1] = (last_start, max(last_end, end))
+        else:
+            merged.append((start, end))
+    return merged'''
+
+
+def test_an_unfenced_answer_that_is_only_code_counts_as_code():
+    """nemotron and muse on `code-merge-intervals`, 2026-08-12. The prompt ends
+    "Return only the code"; both obeyed and the harness failed them for it."""
+    assert er._bare_code(_MERGE) is not None
+    assert er._has_tagged_code_block(_MERGE)
+
+
+def test_bare_code_is_extracted_and_runnable():
+    code = er._extract_code_block(_MERGE)
+    assert code is not None
+    ok, detail = er._run_code_check(
+        code, "assert merge([(1,2),(2,3)]) == [(1,3)]\nassert merge([]) == []", 10)
+    assert ok, detail
+
+
+def test_prose_is_never_mistaken_for_code():
+    answer = (
+        "The video captures a Brazilian Jiu-Jitsu match from 2009. It shows "
+        "two black belts grappling on a red and blue mat."
+    )
+    assert er._bare_code(answer) is None
+    assert not er._has_tagged_code_block(answer)
+
+
+def test_a_single_word_does_not_count_even_though_it_compiles():
+    """⚠️ `compile()` alone is far too weak — a bare identifier is a valid
+    expression statement. The `def ` guard is what makes this safe."""
+    assert er._bare_code("Hello") is None
+
+
+def test_prose_alongside_code_is_not_bare_code():
+    """A sentence next to a function is a SyntaxError over the whole body, so
+    it falls through to the fence rule rather than being rescued."""
+    answer = "Here is the function you asked for:\n\n" + _MERGE
+    assert er._bare_code(answer) is None
+
+
+def test_an_untagged_fence_still_fails_rather_than_being_rescued():
+    answer = "```\n" + _MERGE + "\n```"
+    assert er._bare_code(answer) is None
+    assert not er._has_tagged_code_block(answer)
+
+
+def test_a_tagged_fence_still_wins():
+    answer = "```python\n" + _MERGE + "\n```"
+    assert er._has_tagged_code_block(answer)
+    assert er._extract_code_block(answer).strip().startswith("def merge")
