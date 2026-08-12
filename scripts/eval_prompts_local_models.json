@@ -1,0 +1,145 @@
+[
+  {
+    "name": "synth-merge-three-drafts",
+    "prompt": "Below are three independent research notes on the Kessler-7 telemetry pipeline. Merge them into one briefing for an engineer who has read none of them. Do not add anything the notes do not contain.\n\nNOTE A:\nKessler-7 ingests telemetry over a single AMQP queue. Sustained throughput measured at 420 events per second. The ingest stage writes to a ring buffer named `kbuf`.\n\nNOTE B:\nThe pipeline's second stage, `fanout`, replicates each event to between two and five downstream consumers. Fanout was rewritten in release 4.2 after a deadlock traced to its lock ordering.\n\nNOTE C:\nRetention is 96 hours, after which events are dropped rather than archived. There is no replay capability; a consumer that misses a window has permanently missed it.",
+    "expect_sources": false,
+    "answer_contains": [
+      "420",
+      "kbuf",
+      "fanout",
+      "4.2",
+      "96"
+    ],
+    "answer_not_contains": [
+      "Kafka",
+      "S3",
+      "replay is supported"
+    ],
+    "_why": "THE headline case: this is the deep panel's synthesize job in miniature. Every distinctive token is invented, so `answer_contains` cannot be satisfied from a model's priors — it only passes if the fact was actually carried through from the note. One unique fact per note means a model that reads two and skims the third fails visibly rather than producing a plausible-looking merge. `answer_not_contains` is the fabrication trap: Kafka/S3 are what a model reaches for when it pattern-matches 'telemetry pipeline' instead of reading, and 'replay is supported' contradicts NOTE C outright. ⚠️ A fourth trap (\"archived to\") was drafted and cut: NOTE C says events are \"dropped rather than archived\", so a correct paraphrase mentioning what does NOT happen to them would have tripped it. A check that false-fails the right answer poisons the comparison it exists to inform."
+  },
+  {
+    "name": "synth-conflicting-drafts",
+    "prompt": "Two reviewers measured the same system and disagree. Write the summary paragraph a lead engineer would send to the team.\n\nREVIEWER 1:\nUnder the standard soak test, median request latency was 180 ms. I ran it three times on the staging cluster.\n\nREVIEWER 2:\nMedian request latency was 640 ms under the soak test. Single run, on my workstation with the debug build.",
+    "expect_sources": false,
+    "answer_contains": [
+      "180",
+      "640"
+    ],
+    "_why": "Synthesis is not averaging. The failure mode is silently picking one number, or splitting the difference into a figure neither reviewer reported — both read as confident, well-written summaries. Requiring BOTH figures is the objective floor. ⚠️ It cannot check the better behaviour on top of that (noting that one run was a debug build on a workstation and is therefore the weaker measurement), so read the winner's actual paragraph before trusting the score."
+  },
+  {
+    "name": "synth-absent-subtopic",
+    "prompt": "Using only the notes below, what does the Kessler-7 pipeline do about back-pressure when a downstream consumer stalls?\n\nNOTE A:\nKessler-7 ingests telemetry over a single AMQP queue. Sustained throughput measured at 420 events per second.\n\nNOTE B:\nThe `fanout` stage replicates each event to between two and five downstream consumers. Rewritten in release 4.2 after a lock-ordering deadlock.",
+    "expect_sources": false,
+    "expect_disclaims_absence": true,
+    "answer_not_contains": [
+      "back-pressure is handled",
+      "applies back-pressure",
+      "the pipeline blocks"
+    ],
+    "_why": "The gap case, and the one that separates a synthesiser from a plausible-prose generator. Back-pressure is absent from both notes, so the only correct answer says so. A model that knows how pipelines usually work will describe how THIS one usually would. Reuses `_disclaims_absence`, the check hardened over seven false fails in the video suite, so its phrasing coverage is already broad."
+  },
+  {
+    "name": "synth-compress-the-padding",
+    "prompt": "Compress the three notes below into at most four sentences of plain prose. Keep every concrete fact. Drop the hedging and the repetition.\n\nNOTE A:\nIt is perhaps worth noting, at least in some sense, that the retention window appears to be roughly 96 hours in most cases. It is worth noting this.\n\nNOTE B:\nThe `fanout` stage, which as noted is the second stage, replicates events. It replicates each event to between two and five consumers, that is, somewhere in the range of two to five.\n\nNOTE C:\nThroughput was measured, and the measurement showed 420 events per second sustained. This was a sustained measurement.",
+    "expect_sources": false,
+    "answer_contains": [
+      "96",
+      "420",
+      "fanout"
+    ],
+    "answer_not_contains": [
+      "it is worth noting",
+      "as noted",
+      "in some sense"
+    ],
+    "_why": "Compression with a fact floor. The two halves pull against each other: keeping every figure is easy if you copy the notes verbatim, and dropping the padding is easy if you drop the content with it. Only doing both passes. The banned phrases are lifted verbatim from the input, so this also catches a model that quotes its source material instead of rewriting it."
+  },
+  {
+    "name": "ground-fact-present",
+    "prompt": "From the passage below, what was the measured cold-start latency of the `vault-sync` worker?\n\nPASSAGE:\nThe vault-sync worker was profiled across 40 invocations. Warm invocations completed in a median of 31 ms. Cold starts, which occur after roughly nine minutes of idleness, took a median of 2,140 ms. The team considered pre-warming but rejected it on cost.",
+    "expect_sources": false,
+    "answer_contains": [
+      "2,140"
+    ],
+    "answer_not_contains": [
+      "31 ms cold",
+      "pre-warming was adopted"
+    ],
+    "_why": "The floor case. A passage with two latency figures, one of which is the answer and one of which is a near-miss distractor sitting right next to it. Any model that fails this is not a candidate for anything in this stack, and it is worth having a case where a failure means the sweep itself is misconfigured rather than the model being weak."
+  },
+  {
+    "name": "ground-fact-absent",
+    "prompt": "From the passage below, what is the vault-sync worker's p99 latency?\n\nPASSAGE:\nThe vault-sync worker was profiled across 40 invocations. Warm invocations completed in a median of 31 ms. Cold starts took a median of 2,140 ms.",
+    "expect_sources": false,
+    "expect_disclaims_absence": true,
+    "_why": "Medians are given, p99 is not, and the two are adjacent enough that a model reaching for 'roughly 2,140 ms' feels helpful. The paired form of the case above: same passage, same shape of question, opposite correct answer. Run them together — a model that passes both is reading, and a model that passes only the first is pattern-matching on the question."
+  },
+  {
+    "name": "instruction-strict-json",
+    "prompt": "Reply with a single JSON object and nothing else — no prose, no code fence, no explanation. It must have exactly the keys \"stage\", \"replicas\", and \"retention_hours\", describing: the fanout stage replicates each event to between two and five downstream consumers, and retention is 96 hours.",
+    "expect_sources": false,
+    "answer_contains": [
+      "\"stage\"",
+      "\"replicas\"",
+      "\"retention_hours\"",
+      "96"
+    ],
+    "answer_not_contains": [
+      "```",
+      "Here is",
+      "Here's"
+    ],
+    "_why": "Format adherence, which matters here beyond neatness: `deep_panel`'s factchecker runs with `format=` and has had JSON broken by a model that would not stop narrating. The banned tokens are the three ways models decline to obey 'nothing else' — a fence, a preamble, an acknowledgement. ⚠️ \"Sure\" was drafted as a fourth banned token and cut: the check is a case-insensitive SUBSTRING match, so it also fires on \"ensure\" and \"measure\"."
+  },
+  {
+    "name": "instruction-negative-constraint",
+    "prompt": "Explain what a ring buffer is, in two or three sentences, for a working programmer. Do not use the words \"circular\", \"queue\", or \"FIFO\" anywhere in your answer.",
+    "expect_sources": false,
+    "answer_not_contains": [
+      "circular",
+      "queue",
+      "FIFO"
+    ],
+    "answer_contains": [
+      "buffer"
+    ],
+    "_why": "A negative constraint on the most natural vocabulary for the subject. Models that pattern-match hard on the topic emit the banned word in the first sentence; models that track the instruction while generating route around it. Cheap, fully objective, and it correlates with the behaviour every prompt in this repo depends on — following a rule that fights the obvious completion."
+  },
+  {
+    "name": "reasoning-markup-discount",
+    "prompt": "A jacket costs $80. The store marks it up 15%, then runs a 10%-off sale on the new price. What is the final price? Show the arithmetic.",
+    "expect_sources": false,
+    "answer_contains": [
+      "82.8"
+    ],
+    "_why": "Carried over from `eval_prompts_models_ab.json` deliberately, so this suite's numbers can be read against every historical model sweep. Two-step percentage arithmetic where the wrong method (netting +15% and -10% to +5%, giving 84) produces a confident, clean-looking answer."
+  },
+  {
+    "name": "reasoning-race-order",
+    "prompt": "Three friends — Ada, Ben, and Cal — finished a race. Ada wasn't last. Cal finished before Ada. Ben didn't win. In what order did they finish? Lay out the deduction, not just the answer.",
+    "expect_sources": false,
+    "answer_contains": [
+      "Cal",
+      "Ada",
+      "Ben"
+    ],
+    "_why": "Also carried over for comparability. ⚠️ `answer_contains` can only assert all three names appear, which any answer does — the ORDER (Cal, Ada, Ben) needs eyes. Kept anyway because the deduction it forces is a good read on how a model lays out constrained reasoning, and because the historical sweeps ran it."
+  },
+  {
+    "name": "code-rle-roundtrip",
+    "prompt": "Write a Python function `rle(s: str) -> str` that run-length-encodes a string as character-count pairs (\"aaab\" -> \"a3b1\"), and `unrle(s: str) -> str` that reverses it exactly. Counts can exceed 9. Handle the empty string. Return only the code.",
+    "expect_sources": false,
+    "code_test": "assert rle('') == ''\nassert unrle('') == ''\nassert rle('aaab') == 'a3b1'\nassert unrle('a3b1') == 'aaab'\nassert unrle(rle('a' * 12 + 'bc')) == 'a' * 12 + 'bc'\nfor s in ('', 'x', 'zzzzzzzzzzzzzzzzzzzzzz', 'abcabc'):\n    assert unrle(rle(s)) == s, s\n",
+    "code_timeout": 15,
+    "_why": "Objectively scored: extracted and executed. The multi-digit count is the trap — the obvious `unrle` reads one character as the count and silently corrupts any run of ten or more, which passes a hand-written 'aaab' test. Round-tripping over several shapes is what catches it."
+  },
+  {
+    "name": "code-merge-intervals",
+    "prompt": "Write a Python function `merge(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]` that merges overlapping closed intervals and returns them sorted. Touching intervals like (1,2) and (2,3) count as overlapping. Handle the empty list. Return only the code.",
+    "expect_sources": false,
+    "code_test": "assert merge([]) == []\nassert merge([(1, 3)]) == [(1, 3)]\nassert merge([(1, 3), (2, 6), (8, 10)]) == [(1, 6), (8, 10)]\nassert merge([(1, 2), (2, 3)]) == [(1, 3)]\nassert merge([(5, 6), (1, 2)]) == [(1, 2), (5, 6)]\nassert merge([(1, 10), (2, 3)]) == [(1, 10)]\n",
+    "code_timeout": 15,
+    "_why": "The second objective coding case, chosen because its edges are the ones models actually miss: unsorted input, a fully-contained interval, and the touching-endpoints rule stated explicitly in the prompt so ignoring it is an instruction failure as well as a logic one."
+  }
+]

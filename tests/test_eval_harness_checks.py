@@ -1137,6 +1137,132 @@ def test_expand_sweep_crosses_and_groups_by_model():
     assert "model" not in cases[0]
 
 
+# ── the local-model bake-off suite ──────────────────────────────────────────
+#
+# `eval_prompts_local_models.json` compares nemotron / muse-glimmer / qwen3.6
+# head-to-head through `audrey_passthrough/`. Everything below guards the case
+# FILE rather than the harness, because a bad case file fails silently: a
+# mistyped key is not an error, it is a check that quietly never runs, and the
+# sweep still prints a confident table.
+
+_LOCAL_CASES = json.loads(
+    (_SCRIPTS / "eval_prompts_local_models.json").read_text())
+
+# Every key `run_case` actually reads. A case key outside this set does nothing.
+_CASE_KEYS = {
+    "name", "prompt", "_why", "model", "corpus",
+    "expect_sources", "expect_route", "expect_banners",
+    "answer_contains", "answer_not_contains", "expect_names_files",
+    "expect_continuation_offer", "expect_disclaims_absence",
+    "allow_user_attribution", "expect_code", "code_test", "code_timeout",
+}
+
+
+def test_no_case_key_is_silently_ignored():
+    """⚠️ The bug class this whole suite is most exposed to. `answer_contain`
+    instead of `answer_contains` raises nothing, disables the only objective
+    check on that case, and reports PASS — so the bake-off would rank three
+    models on a check that never ran."""
+    for c in _LOCAL_CASES:
+        assert not set(c) - _CASE_KEYS, (c.get("name"), set(c) - _CASE_KEYS)
+
+
+def test_every_case_is_objectively_checked_or_says_why_not():
+    """A case with no check is a case that always passes. Two here are
+    deliberately eyes-only (`synth-conflicting-drafts` beyond both figures,
+    `reasoning-race-order` beyond the three names) and both say so in `_why`
+    with a ⚠️; anything else must carry a real check."""
+    checked = {"answer_contains", "answer_not_contains", "code_test",
+               "expect_disclaims_absence"}
+    for c in _LOCAL_CASES:
+        assert c.get("_why"), c["name"]
+        if not (set(c) & checked):
+            assert "⚠️" in c["_why"], f"{c['name']} has no check and no caveat"
+
+
+def test_the_synthesis_cases_cannot_be_passed_from_priors():
+    """The point of inventing `Kessler-7`, `kbuf` and `vault-sync`: a real
+    system's numbers can be recalled, so `answer_contains` would measure
+    training data instead of whether the note was read."""
+    merge = next(c for c in _LOCAL_CASES if c["name"] == "synth-merge-three-drafts")
+    for needle in merge["answer_contains"]:
+        assert needle in merge["prompt"], needle
+
+
+def test_no_fabrication_trap_fires_on_its_own_source_text():
+    """⚠️ A banned phrase that appears in the PROMPT is one a faithful answer
+    may legitimately echo. Two traps were cut for exactly this — "archived to"
+    (the notes say events are "dropped rather than archived") and "Sure" (a
+    substring of "ensure").
+
+    Two cases are deliberate exceptions, and both invert the rule rather than
+    bending it — echoing the prompt IS the failure they test:
+      • `synth-compress-the-padding` — the banned phrases are the padding it
+        was asked to strip.
+      • `instruction-negative-constraint` — a prompt banning a word has to
+        name it, and using it anyway is the whole failure.
+    """
+    inverted = {"synth-compress-the-padding", "instruction-negative-constraint"}
+    for c in _LOCAL_CASES:
+        if c["name"] in inverted:
+            # Guard the exception itself: these must still ban something, or
+            # the opt-out silently turns into no check at all.
+            assert c.get("answer_not_contains"), c["name"]
+            continue
+        for banned in c.get("answer_not_contains", []):
+            assert banned.lower() not in c["prompt"].lower(), (c["name"], banned)
+
+
+def test_the_code_tests_pass_against_a_correct_implementation():
+    """⚠️ An unsatisfiable `code_test` fails all three models identically and
+    looks like a hard question. Both are pinned against reference solutions so
+    a red `code_runs` is always the model, never the case."""
+    impls = {
+        "code-rle-roundtrip": (
+            "import re\n"
+            "def rle(s):\n"
+            "    out, i = [], 0\n"
+            "    while i < len(s):\n"
+            "        j = i\n"
+            "        while j < len(s) and s[j] == s[i]:\n"
+            "            j += 1\n"
+            "        out.append(f'{s[i]}{j - i}')\n"
+            "        i = j\n"
+            "    return ''.join(out)\n"
+            "def unrle(s):\n"
+            "    return ''.join(c * int(n) for c, n in re.findall(r'(\\D)(\\d+)', s))\n"
+        ),
+        "code-merge-intervals": (
+            "def merge(intervals):\n"
+            "    out = []\n"
+            "    for a, b in sorted(intervals):\n"
+            "        if out and a <= out[-1][1]:\n"
+            "            out[-1] = (out[-1][0], max(out[-1][1], b))\n"
+            "        else:\n"
+            "            out.append((a, b))\n"
+            "    return out\n"
+        ),
+    }
+    for c in _LOCAL_CASES:
+        if not c.get("code_test"):
+            continue
+        ok, detail = er._run_code_check(impls[c["name"]], c["code_test"], 15.0)
+        assert ok, f"{c['name']}: {detail}"
+
+
+def test_the_paired_grounding_cases_stay_paired():
+    """`ground-fact-present` and `ground-fact-absent` share a passage and ask
+    the same shape of question with opposite correct answers. Read together
+    they separate reading from question-shaped pattern matching — which only
+    works while both exist."""
+    names = {c["name"] for c in _LOCAL_CASES}
+    assert {"ground-fact-present", "ground-fact-absent"} <= names
+    present = next(c for c in _LOCAL_CASES if c["name"] == "ground-fact-present")
+    absent = next(c for c in _LOCAL_CASES if c["name"] == "ground-fact-absent")
+    assert "2,140" in present["prompt"] and "2,140" in absent["prompt"]
+    assert "p99" not in absent["prompt"].split("PASSAGE:")[1]
+
+
 def test_expand_repeats_appends_whole_passes():
     """⚠️ Repeats are whole passes, not adjacent duplicates. The same prompt
     twice in a row to a warm model is the shape most likely to correlate the

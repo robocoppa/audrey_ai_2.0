@@ -1125,6 +1125,13 @@ passthrough:
     # 'audrey_passthrough/<name>,…'): testing panel candidates in isolation is
     # how lineups get compared before editing the deep_panel* workers lists.
     # Keep in sync with model_registry when models are added/retired.
+    # 2026-08-12 arrivals, added for the local bake-off
+    # (scripts/eval_prompts_local_models.json). ⚠️ Local weights: nemotron
+    # 25 GB + muse 18 GB + qwen3.6 23 GB is 66 GB against 48 GB of VRAM, so a
+    # sweep across all three WILL swap models. `_expand_sweep` groups by model
+    # so each loads once; do not reorder it into per-case grouping.
+    - nemotron-3.5-lightning:latest
+    - muse-glimmer:latest
     - qwen3-coder-next:latest
     - minimax-m3:cloud
     - qwen2.5-coder:32b
