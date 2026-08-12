@@ -38,6 +38,14 @@ is not uniform:
                              exactly where `pipeline/ledger.py` already records
                              glm-5.2 returning unusable JSON. Change with care
                              and re-read that note first.
+  candidate-not-in-a-role    in `passthrough.allowed_models` and nowhere else:
+                             reachable for `--models` eval sweeps, running no
+                             production traffic. Listed because the capability
+                             is an INPUT to the promotion decision — before
+                             2026-08-12 a candidate had to be promoted before
+                             this report could see it, which is backwards. A
+                             model holding any role is reported under that
+                             role instead, never here.
 
 `$` marks a cloud model. Thinking tokens are billed in wall clock locally and
 in credits on cloud models, and Ollama cloud credits are a hard budget
@@ -88,6 +96,12 @@ STANCE = {
     "reasoning-is-discarded": "reasoning is DISCARDED — thinking is billed and thrown away",
     "user-is-waiting": "a user is WAITING — thinking is latency, decide deliberately",
     "structured-output": "STRUCTURED output — thinking + format= has broken JSON here before",
+    # Last on purpose: these hold no production role, so they belong under the
+    # models that do. They are here because they are the ones being DECIDED
+    # about — a bake-off candidate's thinking capability is exactly what you
+    # want before you read its scores, and on 2026-08-12 this report answered
+    # for one model out of three because the other two were passthrough-only.
+    "candidate-not-in-a-role": "EVAL CANDIDATES — no production role yet; scores are being compared",
 }
 
 
@@ -174,6 +188,25 @@ def _collect(cfg: dict) -> dict[str, list[tuple[str, str]]]:
     video = ((cfg.get("kb") or {}).get("video") or {})
     add(video.get("summarise_model"), "reasoning-is-discarded", "kb.video.summarise_model")
 
+    # `passthrough.allowed_models` is the eval surface — `--models` sweeps and
+    # the local bake-off can only target what is listed there. A model can sit
+    # in it for days with no production role while its scores are compared,
+    # and until 2026-08-12 this report could not see those models at all:
+    # every group above reads a ROLE, so a candidate had to be promoted before
+    # anyone could ask whether it thinks. That is backwards — the capability
+    # is an input to the promotion decision, not a consequence of it.
+    #
+    # ⚠️ Only models with NO role, and this runs LAST so `uses` is complete
+    # when it checks. Most of `allowed_models` is the role-holding pool
+    # re-listed for `--models` sweeps, so adding all of it would print ~24
+    # rows, duplicate most of the report, and cost an `/api/show` per entry at
+    # a 10s timeout. What is worth surfacing is the residue: models being
+    # measured that nothing runs yet.
+    pt = cfg.get("passthrough") or {}
+    for m in (pt.get("allowed_models") or []):
+        if isinstance(m, str) and m and m not in uses:
+            add(m, "candidate-not-in-a-role", "passthrough.allowed_models")
+
     return uses
 
 
@@ -234,7 +267,14 @@ def main() -> int:
     thinkers = sorted(m for m, (t, _) in caps.items() if t == "yes")
     unknown = sorted(m for m, (t, _) in caps.items() if t == "?")
     print("── summary " + "─" * 58)
-    print(f"   {len(uses)} distinct models in use.")
+    # Candidates are counted separately because they are NOT in use, and a
+    # single total that quietly folded them in would overstate the deployed
+    # surface every time a bake-off list grew.
+    candidates = {m for m, places in uses.items()
+                  if all(s == "candidate-not-in-a-role" for s, _ in places)}
+    print(f"   {len(uses) - len(candidates)} distinct models in use"
+          + (f", plus {len(candidates)} eval candidate(s) in no role."
+             if candidates else "."))
     if unknown:
         # Never report an unasked question as a "no". A capability column that
         # says 0 because Ollama was unreachable would read as "nothing thinks,
