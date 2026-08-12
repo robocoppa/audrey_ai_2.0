@@ -27,6 +27,13 @@
 #   MODEL=audrey_deep CASES=eval_prompts_code.json LABEL=code scripts/eval-onbox.sh
 #   MODEL=audrey_deep CASES=eval_prompts_topics.json LABEL=topics scripts/eval-onbox.sh
 #
+#   # ARGS= forwards any extra harness flag. Sampling ONE case many times is
+#   # how a real change gets told apart from run-to-run variance — a 24-case
+#   # run at n=1 cannot resolve the ±5 swing this suite has:
+#   MODEL=audrey_auto CASES=eval_prompts_video.json LABEL=paging \
+#     ARGS='--only video-long-transcript-paging --repeat 5' \
+#     scripts/eval-onbox.sh
+#
 #   # Per-model sweep (MODELS= adds --models + a results JSON next to the
 #   # answers file; feed that JSON to scripts/eval_compare.py afterwards):
 #   CASES=eval_prompts_code_models.json LABEL=code-sweep \
@@ -101,6 +108,18 @@ if [[ -n "${MODELS}" ]]; then
   SWEEP_ARGS=(--models "${MODELS}")
 fi
 
+# ARGS forwards extra harness flags verbatim. Added 2026-08-12: without it
+# `--only` and `--repeat` were unreachable through this runner, so the
+# diagnostic protocol they exist for (sample ONE case enough times to tell a
+# real change from run-to-run variance) could not actually be run on the box.
+#   ARGS='--only video-long-transcript-paging --repeat 5'
+# Word-splitting is intentional — this is a flag list, not a single argument.
+EXTRA_ARGS=()
+if [[ -n "${ARGS:-}" ]]; then
+  # shellcheck disable=SC2206
+  EXTRA_ARGS=(${ARGS})
+fi
+
 # ── preflight ───────────────────────────────────────────────────────────────
 die() { echo "ERROR: $*" >&2; exit 2; }
 command -v docker >/dev/null || die "docker not found — run this on the box, not the laptop."
@@ -150,6 +169,7 @@ docker run -d --name "${CONTAINER}" --network "${NETWORK}" \
     --save-file "/out/${SAVE_FILE}" \
     --save-json "/out/${RESULTS_FILE}" \
     "${SWEEP_ARGS[@]}" \
+    "${EXTRA_ARGS[@]}" \
   || die "docker run failed."
 
 # ── wait, then notify (always) ──────────────────────────────────────────────
