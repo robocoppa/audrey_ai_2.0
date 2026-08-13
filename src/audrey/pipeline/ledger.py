@@ -206,6 +206,66 @@ class FactCheckResult(BaseModel):
     fatal_errors: Annotated[list[str], BeforeValidator(_norm_fatal_errors)] = []
 
 
+# Fields the DECODER must emit, keyed by the schema object they belong to.
+#
+# This is deliberately NOT the same thing as the Pydantic model's required
+# fields, and the two must not be merged. Parsing stays maximally tolerant —
+# every field defaulted, so one `url: null` or one missing `id` can never
+# discard a whole worker's ledger (the 2/3-drop bug). Generation is the
+# opposite problem: `model_json_schema()` emits a field WITH a default as
+# optional, so the schema we hand Ollama `format` carried no `required` list at
+# any level, and a constrained decoder is free to close a `Claim` object right
+# after `text`.
+#
+# 2026-08-13, `current-rust-async`: one worker (deepseek) returned ~41 claims
+# and 5 real cited URLs with `source_ids` empty on essentially all of them,
+# while its sibling workers linked theirs normally. That all-or-nothing shape is
+# the signature of a decode path, not of per-claim judgement — once a model
+# settles on the shorter object shape early in a long array it keeps emitting
+# it, because the grammar allows it. The structuring prompt has said "LINK EACH
+# CLAIM" in capitals for weeks; prompt prose does not outrank the grammar.
+#
+# What this buys and what it does NOT: requiring the key forces the model to
+# emit `"source_ids": [` and make the linkage decision explicitly, per claim,
+# with the sources array in context. It cannot force a NON-empty array — an
+# honestly unsourced claim can still emit `[]`, which is correct behaviour.
+# Judge it by `UNLINKED-LEDGER` in the structuring log (claims and sources both
+# present, zero links), which is a presence/absence reading, not a rate.
+#
+# `id` is deliberately NOT required anywhere: models routinely omit it and
+# `_backfill_ids` assigns positional ids, so requiring it only invites a
+# fabricated or duplicated one. `supports` is derived by `_backfill_supports`.
+_REQUIRED_FOR_DECODE: dict[str, tuple[str, ...]] = {
+    "ResearchResult": ("claims", "sources"),
+    "Claim": ("text", "source_ids", "risk"),
+    "Source": ("title", "url", "source_type"),
+    "FactCheckResult": ("checks",),
+    "ClaimCheck": ("claim_id", "verdict"),
+}
+
+
+def _require_for_decode(obj: Any, name: str) -> Any:
+    """Stamp `required` onto one inlined schema object, per `_REQUIRED_FOR_DECODE`.
+
+    Also drops `default` from the properties it requires: a property that says
+    both "you must emit me" and "here is my value if you don't" hands the
+    decoder two different stories, and the default is the one we're trying to
+    stop the model taking."""
+    fields = _REQUIRED_FOR_DECODE.get(name)
+    if not fields or not isinstance(obj, dict):
+        return obj
+    props = obj.get("properties")
+    if not isinstance(props, dict):
+        return obj
+    present = [f for f in fields if f in props]
+    if not present:
+        return obj
+    obj["required"] = present
+    for f in present:
+        props[f] = {k: v for k, v in props[f].items() if k != "default"}
+    return obj
+
+
 def _inline_refs(node: Any, defs: dict[str, Any]) -> Any:
     """Recursively replace every {"$ref": "#/$defs/X"} with a copy of defs[X].
 
@@ -220,7 +280,9 @@ def _inline_refs(node: Any, defs: dict[str, Any]) -> Any:
         if isinstance(ref, str) and ref.startswith("#/$defs/"):
             name = ref.split("/")[-1]
             target = defs.get(name, {})
-            return _inline_refs(dict(target), defs)
+            # Stamp `required` here, where the $defs name is still known — the
+            # inlined copy loses every other trace of which model it came from.
+            return _require_for_decode(_inline_refs(dict(target), defs), name)
         return {k: _inline_refs(v, defs) for k, v in node.items() if k != "$defs"}
     if isinstance(node, list):
         return [_inline_refs(v, defs) for v in node]
@@ -228,10 +290,15 @@ def _inline_refs(node: Any, defs: dict[str, Any]) -> Any:
 
 
 def inlined_schema(model: type[BaseModel]) -> dict[str, Any]:
-    """A `$ref`-free JSON schema for `model`, safe to pass to Ollama `format`."""
+    """A `$ref`-free JSON schema for `model`, safe to pass to Ollama `format`.
+
+    Nested objects get their `required` list stamped on during inlining; the
+    root is not a `$ref`, so it is stamped here by model name. See
+    `_REQUIRED_FOR_DECODE` for why generation is constrained where parsing
+    is not."""
     schema = model.model_json_schema()
     defs = schema.get("$defs", {})
-    return _inline_refs(schema, defs)
+    return _require_for_decode(_inline_refs(schema, defs), model.__name__)
 
 
 def _strip_fence(s: str) -> str:

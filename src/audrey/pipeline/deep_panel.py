@@ -721,6 +721,18 @@ async def _structure_one_draft(
             "(claims=0, len=%d, head=%r)",
             model, len(raw), raw[:300],
         )
+    # Linkage shape, read AFTER the parser's repair chain so it reflects what
+    # downstream actually gets. `UNLINKED-LEDGER` marks the one pathology worth
+    # grepping for: the worker found sources AND wrote claims, but linked none
+    # of them, so every claim reads as unsourced and the hedge policy soft-pedals
+    # work that was in fact grounded. It is a presence/absence reading — a run
+    # with zero of these is a clean instrument, not a favourable rate.
+    n_linked = sum(1 for c in result.claims if c.source_ids)
+    log.info(
+        "research: structured %s — claims=%d linked=%d sources=%d%s",
+        model, len(result.claims), n_linked, len(result.sources),
+        "  UNLINKED-LEDGER" if (result.claims and result.sources and not n_linked) else "",
+    )
     # Namespace ids per worker so cross-worker merge can't collide.
     prefix = f"w{worker_idx}_"
     return _prefix_ledger_ids(result, prefix)

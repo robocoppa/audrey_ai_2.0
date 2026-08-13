@@ -55,6 +55,51 @@ class TestInlinedSchema:
             {"id": "c1", "text": "x", "risk": "low"}], "sources": []})
         assert parse_research_result(raw) is not None
 
+    def test_decoder_is_told_source_ids_is_mandatory(self):
+        # The whole point of the required stamp. `model_json_schema()` emits a
+        # field WITH a default as optional, so the schema we hand Ollama
+        # `format` let a constrained decoder close a Claim right after `text` —
+        # which is how one worker returned ~41 claims and 5 cited URLs with
+        # `source_ids` empty on all of them while its siblings linked fine.
+        claim = inlined_schema(ResearchResult)["properties"]["claims"]["items"]
+        assert "source_ids" in claim["required"]
+        # And it must not simultaneously advertise a default to fall back on.
+        assert "default" not in claim["properties"]["source_ids"]
+
+    def test_id_stays_optional_for_the_decoder(self):
+        # Deliberate: models routinely omit `id` and `_backfill_ids` assigns
+        # positional ones. Requiring it would only invite a fabricated or
+        # duplicated id, which poisons every downstream linkage at once.
+        s = inlined_schema(ResearchResult)
+        for obj in ("claims", "sources"):
+            item = s["properties"][obj]["items"]
+            assert "id" not in item["required"]
+            assert item["properties"]["id"]["default"] == ""
+
+    def test_required_stamp_does_not_make_parsing_stricter(self):
+        # THE invariant. Generation is constrained; validation is not, and the
+        # two must never be merged — a required field with no default once
+        # discarded a whole worker's ledger (the 2/3-drop bug). A payload
+        # omitting every field the decoder is now told to emit must still parse.
+        raw = json.dumps({"claims": [{"text": "x"}], "sources": [{"title": "t"}]})
+        r = parse_research_result(raw)
+        assert r is not None
+        assert len(r.claims) == 1 and len(r.sources) == 1
+        assert r.claims[0].source_ids == []
+        assert r.claims[0].risk == "medium"
+        assert r.sources[0].source_type == "unknown"
+
+    def test_required_stamp_survives_ref_inlining(self):
+        # The stamp is applied where the $defs name is still known; a later
+        # change to _inline_refs that drops the name would silently un-require
+        # everything nested, leaving only the root stamped.
+        s = inlined_schema(ResearchResult)
+        txt = json.dumps(s)
+        assert "$ref" not in txt and "$defs" not in txt
+        assert s["required"] == ["claims", "sources"]
+        assert s["properties"]["sources"]["items"]["required"] == [
+            "title", "url", "source_type"]
+
 
 def _client_capturing(captured: dict) -> OllamaClient:
     """An OllamaClient whose transport records the request payload and returns

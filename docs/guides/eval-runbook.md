@@ -259,6 +259,18 @@ docker compose logs audrey-ai | grep catalogue-guard
 docker compose logs audrey-ai | grep -c "ledger: demoting url-less"
 docker compose logs audrey-ai | grep "ledger: demoting url-less" | tail -20
 
+# a worker that found sources AND wrote claims but linked NONE of them, so
+# every claim reads as unsourced and gets soft-pedalled despite being grounded.
+# ⚠️ This one wants ZERO. Any hit is the real defect; read the whole line for
+# which model did it.
+docker compose logs audrey-ai | grep -c "UNLINKED-LEDGER"
+docker compose logs audrey-ai | grep "UNLINKED-LEDGER"
+
+# the linkage shape of every structuring call, whether or not it went wrong —
+# `claims=41 linked=0 sources=5` is the pathology, `linked` near `claims` is
+# healthy, and `sources=0` is a grounding problem, not a linkage one.
+docker compose logs audrey-ai | grep "research: structured" | tail -30
+
 # which env overrides are actually live
 docker compose logs audrey-ai | grep "ENV OVERRIDE"
 
