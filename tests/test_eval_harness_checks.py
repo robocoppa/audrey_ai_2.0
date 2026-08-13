@@ -1680,3 +1680,61 @@ def test_an_honest_absence_report_still_passes_with_markup():
     a fabrication — "there's **no** summary" is the behaviour to encourage."""
     answer = "There's **no summary**, transcript or visual for that file yet."
     assert er._ungrounded_content(answer + _FOOTER_CATALOGUE) == ""
+
+
+# ─── infer_route: the escalated path ──────────────────────────────────
+#
+# ⚠️ `route_after_fast_path` re-runs a thin fast answer through the deep panel
+# from inside the graph — after the fast banners are already on the wire. So an
+# escalated turn keeps the fast identity while a planner, three workers and a
+# synthesis pass write the answer. Across every archived run that recorded a
+# route, `video-two-file-compare` reported `fast` 51 times out of 51 and passed
+# `expect_route: "fast"` every time, at a 62s median against 15–20s for its
+# siblings. One word was answering two questions: which path was ENTERED, and
+# what actually ANSWERED.
+
+_FAST_BANNERS = ["Thinking"]
+_PANEL_FOOTER = (
+    "\n\n---\n> _Tools used:_\n"
+    "> - **deepseek-v4-pro:cloud** — `kb_search` ✅2\n"
+    "> - **qwen3.6:35b** — `get_file_text` ✅1\n"
+)
+
+
+def test_a_plain_fast_turn_is_still_fast():
+    assert er.infer_route(_FAST_BANNERS, "An answer." + _FOOTER) == "fast"
+    assert er.infer_route(_FAST_BANNERS, "An answer.") == "fast"
+
+
+def test_the_drafts_block_reveals_an_escalated_turn():
+    answer = "An answer.\n\n## Panel drafts (debug)\n\n### deepseek-v4-pro:cloud\n…"
+    assert er.infer_route(_FAST_BANNERS, answer) == "escalated"
+
+
+def test_a_multi_worker_footer_reveals_an_escalated_turn():
+    """The mark that needs no debug flag: one fast model cannot produce two
+    model rows."""
+    assert er.infer_route(_FAST_BANNERS, "An answer." + _PANEL_FOOTER) == "escalated"
+
+
+def test_deep_and_research_are_unaffected():
+    """Banner family wins first — a real deep turn was never ambiguous."""
+    assert er.infer_route(["Planning", "Dispatching panel"], _PANEL_FOOTER) == "deep"
+    assert er.infer_route(["Planning", "Researching"], _PANEL_FOOTER) == "research"
+
+
+def test_the_error_path_can_still_classify_without_a_body():
+    """`run_case` infers a route before the answer is parsed, so the error
+    branch can report one. Escalation just isn't detectable there."""
+    assert er.infer_route(_FAST_BANNERS) == "fast"
+    assert er.infer_route([]) == "unknown"
+
+
+def test_no_archived_fast_turn_would_be_reclassified():
+    """⚠️ The safety property, stated as code. Measured over every archived
+    answer before shipping: no fast-bannered turn carries either mark, because
+    before the 2026-08-12 footer fix an escalated turn rendered nothing at all.
+    A fast answer with a single-model footer must stay `fast`."""
+    for answer in ("Short answer." + _FOOTER,
+                   "Answer with its own --- rule.\n\n---\n\nMore." + _FOOTER):
+        assert er.infer_route(_FAST_BANNERS, answer) == "fast", answer

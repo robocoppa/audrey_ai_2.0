@@ -58,9 +58,13 @@ Per case, against the reassembled streamed answer:
                      (skipped when the case sets "expect_sources": false)
   - url_wellformed : every URL in the Sources block parses as http(s)://…
   - route          : for adaptive (audrey_auto) cases, the inferred path
-                     (fast | deep | research, from the banner family) matches
-                     the case's "expect_route" — this is how we test the
-                     fast/deep gate. Opt-in; skipped when no expect_route set.
+                     (fast | escalated | deep | research) matches the case's
+                     "expect_route" — this is how we test the fast/deep gate.
+                     Opt-in; skipped when no expect_route set. Accepts a list
+                     when a case tolerates more than one. ⚠️ "escalated" is a
+                     turn that entered FAST and was re-run through the deep
+                     panel mid-graph; its banners still say fast, so "fast"
+                     alone would pass on a full panel run. See infer_route.
   - code_block     : opt-in ("expect_code": true, implied by "code_test"): a
                      language-tagged fenced code block exists in the answer.
   - code_runs      : opt-in ("code_test": "<python asserts>"): the largest
@@ -1463,7 +1467,26 @@ def source_stats(answer: str, *, expected: bool) -> SourceStats:
     )
 
 
-def infer_route(banners: list[str]) -> str:
+def _escalation_evidence(answer: str) -> bool:
+    """True when a FAST-bannered answer shows a deep panel behind it.
+
+    Two independent marks, both server-produced:
+      • the `## Panel drafts (debug)` block (present when
+        `agentic.debug_panel_drafts` is on — turn it on for measurement runs);
+      • a tools footer with more than one model row, which only a multi-worker
+        panel produces.
+
+    ⚠️ Measured over every archived answer: NO turn with the fast banner has
+    either mark, so this cannot reclassify anything historical. That is also
+    the tell — before 2026-08-12 an escalated turn rendered no footer at all
+    (`tool_calls_log` is empty by construction when `route_after_fast_path`
+    fires), so there was nothing to see. The evidence exists only going forward.
+    """
+    return ("## Panel drafts (debug)" in answer
+            or _footer_region(answer).count("> - ") > 1)
+
+
+def infer_route(banners: list[str], answer: str = "") -> str:
     """Infer which Audrey path served the turn, from the banner FAMILY seen.
 
     Audrey emits a different banner set per path (see routes/openai/pipeline.py):
@@ -1473,16 +1496,31 @@ def infer_route(banners: list[str]) -> str:
     So route is observable, not just inferred-from-absence: a fast turn DOES emit
     a banner, it's just a different one. We classify by the most specific family
     present. Research and deep share 'Planning', so research's unique banners
-    (Researching/Verifying/Writing) are checked first. Returns
-    'fast' | 'deep' | 'research' | 'unknown' (no recognised banner — e.g. an
-    error turn before any banner, or an OWUI-utility-task turn).
+    (Researching/Verifying/Writing) are checked first.
+
+    ⚠️ **'escalated' exists because the banners LIE on one path.**
+    `route_after_fast_path` re-runs a thin fast answer through the deep panel
+    from INSIDE the graph, long after the fast banners went out — so the turn
+    keeps the fast identity while a planner, three workers and a synthesis pass
+    produce the answer. `video-two-file-compare` did this on all 51 archived
+    turns that recorded a route: every one said `fast`, every one passed
+    `expect_route: "fast"`, at a 62s median against 15–20s for its siblings.
+    Two questions were being answered with one word — WHICH PATH WAS ENTERED
+    (banners) and WHAT ACTUALLY ANSWERED (fast model or panel) — and they only
+    agree until a turn escalates. `expect_route: "fast"` now means what it
+    reads as: fast, and it stayed fast.
+
+    Returns 'fast' | 'escalated' | 'deep' | 'research' | 'unknown' (no
+    recognised banner — e.g. an error turn before any banner, or an
+    OWUI-utility-task turn). `answer` is optional so the error path, which has
+    no body yet, can still classify by banner alone.
     """
     if any(b in banners for b in ("Researching", "Verifying", "Writing")):
         return "research"
     if any(b in banners for b in ("Dispatching panel", "Synthesizing", "Planning")):
         return "deep"
     if _FAST_BANNER in banners:
-        return "fast"
+        return "escalated" if _escalation_evidence(answer) else "fast"
     return "unknown"
 
 
@@ -1501,6 +1539,10 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
 
     checks["reachable"] = True
     answer = _answer_body(content)
+    # Re-infer now that there IS a body. The call above runs before the answer
+    # is parsed so the error path can still report a route; only escalation
+    # needs the body, and an error turn never has one.
+    route = infer_route(banners, answer)
     checks["no_error_marker"] = not any(m in content for m in _ERROR_MARKERS)
     checks["has_answer"] = len(answer) >= 20
     # Always on, like has_answer: no case ever wants an answer that stops
@@ -1568,9 +1610,15 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     # path matches the intended one — this is how we test the fast/deep gate
     # (token_threshold + deep_intent_phrases). Inferred from the banner family
     # (see infer_route); honest about being inference, not a server-truth signal.
+    # ⚠️ "fast" is STRICT: an escalated turn is not a fast turn, and reporting
+    # it as one is what hid a deep panel behind `expect_route: "fast"` on every
+    # `video-two-file-compare` run ever recorded. A case that legitimately
+    # expects the rescue says `expect_route: "escalated"`. A case that starts
+    # fast and does not care which says `["fast", "escalated"]`.
     expect_route = case.get("expect_route")
     if expect_route:
-        checks["route"] = route == expect_route
+        wanted = expect_route if isinstance(expect_route, list) else [expect_route]
+        checks["route"] = route in wanted
     else:
         checks["route"] = None
 
