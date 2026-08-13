@@ -474,7 +474,29 @@ agentic:
       max_rounds: 3
       compress_after_round: 2
       max_tool_result_chars: 6000
-      compress_keep_last: 1
+      # ⚠ COUNTS TOOL MESSAGES, NOT ROUNDS — the same defect the two blocks
+      # above were fixed for, and the last place it survived (found 2026-08-12
+      # while confirming the fast-path paging fix). At 1, a fact-checker that
+      # dispatched four searches arrived at its final answer holding ONE of
+      # them, with `compress_after_round: 2` and the pre-final pass both
+      # compacting. That is exactly how `research_worker` came to narrate its
+      # own compaction as "searches returned elided results".
+      #
+      # Budgeted against the tool-call ceiling like its siblings:
+      # `max_web_searches: 4` + headroom for a kb/memory/web_fetch call ≈ 6.
+      # ⚠ NOT 8 (deep_worker's number): this block keeps 6000-char results
+      # where deep_worker keeps 4000, so 8 here would be ~48k chars of tool
+      # output alone. Nothing in this repo sets `num_ctx`, so an over-long
+      # conversation is truncated FROM THE FRONT, taking the system prompt —
+      # and this worker runs with `format=`, where losing the schema
+      # instruction breaks the JSON rather than thinning the prose. 6 × 6000
+      # ≈ 36k chars ≈ 9k tokens, which the `context-trace:` line will show as
+      # `convo_chars` if it needs revisiting.
+      #
+      # ▶ UNMEASURED in the factcheck path — the evidence behind this is the
+      # rule, not a fact-check A-B. Watch a research run's corrections stage
+      # before trusting it.
+      compress_keep_last: 6
       # Raised 3→4 (2026-07-08) alongside the research_worker bump.
       max_web_searches: 4
   planning:

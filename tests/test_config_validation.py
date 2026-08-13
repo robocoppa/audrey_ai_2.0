@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from typing import ClassVar
 
 import pytest
+import yaml
 
 from audrey.config import (
     Config,
@@ -692,3 +693,56 @@ class TestUploadLimitCoherence:
         raw = _load_yaml(_REPO_ROOT / "config.yaml")
         quota = raw["kb"]["max_user_bytes"]
         assert quota >= 10 * 300 * 1024 * 1024
+
+
+# ─── compress_keep_last, budgeted against TOOL MESSAGES ───────────────
+#
+# ⚠️ `_compress_history` keeps the N most recent tool MESSAGES, not the last N
+# rounds — one round can dispatch several tools at once. Every regression this
+# repo has had here came from reasoning in rounds against code that counts
+# messages, so the invariant is arithmetic: a worker allowed `max_web_searches`
+# dispatches needs at least that many kept, plus headroom, or its own grounding
+# is stubbed out before it writes. It then narrates the stub ("searches
+# returned elided results") and reads as a model failure.
+#
+# Pinned against the REAL config.yaml, because that is the file that ships and
+# the value drifted unnoticed in `factcheck_worker` long after the two blocks
+# above it were fixed.
+
+
+def _react_blocks() -> dict:
+    cfg = yaml.safe_load((_REPO_ROOT / "config.yaml").read_text())
+    return ((cfg.get("agentic") or {}).get("react") or {})
+
+
+@pytest.mark.parametrize("role", ["deep_worker", "research_worker", "factcheck_worker"])
+def test_every_worker_keeps_at_least_its_search_budget(role):
+    """The invariant, stated once for all three roles.
+
+    `factcheck_worker` failed this at `compress_keep_last: 1` against
+    `max_web_searches: 4` until 2026-08-12 — found while confirming the
+    fast-path paging fix, which was the same defect one level up.
+    """
+    block = _react_blocks().get(role) or {}
+    keep = int(block["compress_keep_last"])
+    searches = int(block["max_web_searches"])
+    assert keep >= searches, (
+        f"{role}: keep_last={keep} < max_web_searches={searches} — a worker "
+        f"that spends its whole search budget loses grounding before it writes"
+    )
+
+
+@pytest.mark.parametrize("role", ["deep_worker", "research_worker", "factcheck_worker"])
+def test_kept_tool_output_stays_inside_a_sane_context(role):
+    """The opposing constraint, and why `factcheck_worker` is 6 and not 8.
+
+    Nothing in this repo sets `num_ctx`, so an over-long conversation is
+    truncated FROM THE FRONT — taking the system prompt with it. For the
+    fact-checker that prompt carries a `format=` schema, so overflow breaks the
+    JSON rather than merely thinning prose. Ceiling chosen to catch a careless
+    bump, not to be tight: 12 × 6000 (research_worker, deliberately the
+    largest) is the top of the current range.
+    """
+    block = _react_blocks().get(role) or {}
+    chars = int(block["compress_keep_last"]) * int(block["max_tool_result_chars"])
+    assert chars <= 72_000, f"{role}: {chars} chars of kept tool output"
