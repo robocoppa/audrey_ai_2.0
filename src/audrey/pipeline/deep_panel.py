@@ -661,6 +661,31 @@ def _hedge_policy_enabled(cfg: Config) -> bool:
     return bool(rl.get("hedge_policy", False))
 
 
+def _linkage_lost(n_linked: int, n_sources: int) -> bool:
+    """Did the structuring pass DROP linkage the researcher actually supplied?
+
+    Distinguishes the pathology from the honest case, which the first version of
+    this marker could not. 2026-08-13, `current-rust-async`: qwen3.6 returned
+    `claims=16 linked=1 sources=1` and the marker stayed silent, because it
+    tested `not n_linked` and one linked claim defeats a strict-equality cliff —
+    the same shape as the over-hedge suppression guard. But widening it to catch
+    that shape would have been wrong too: qwen3.6's notes for that case carried
+    **no `SOURCES:` block at all**, so fifteen empty `source_ids` were correct.
+    The same model on the sibling case, with a SOURCES block, linked 22 of 22.
+
+    So the signal is not "few claims are linked" — it is "the ledger holds
+    several sources and almost no claim uses any of them", which is the
+    `claims=41 linked=0 sources=5` shape that started this. A ledger with one
+    source and one link is a thin researcher, not lost linkage; chase that
+    upstream in the researcher prompt, not here.
+
+    Deliberately not a ratio: the linked/claims ratio swings run to run on an
+    unchanged config, and a threshold on it would make the marker blink. This is
+    a diagnostic and not a behaviour gate, so a looser rule is safe here in a way
+    it is not for the hedge-suppression guard."""
+    return n_sources >= 2 and n_linked <= 1
+
+
 async def _structure_one_draft(
     ollama: OllamaClient,
     health: HealthTracker,
@@ -722,16 +747,13 @@ async def _structure_one_draft(
             model, len(raw), raw[:300],
         )
     # Linkage shape, read AFTER the parser's repair chain so it reflects what
-    # downstream actually gets. `UNLINKED-LEDGER` marks the one pathology worth
-    # grepping for: the worker found sources AND wrote claims, but linked none
-    # of them, so every claim reads as unsourced and the hedge policy soft-pedals
-    # work that was in fact grounded. It is a presence/absence reading — a run
-    # with zero of these is a clean instrument, not a favourable rate.
+    # downstream actually gets. Read the triple directly — it separates the two
+    # very different reasons a claim ends up unsourced.
     n_linked = sum(1 for c in result.claims if c.source_ids)
     log.info(
         "research: structured %s — claims=%d linked=%d sources=%d%s",
         model, len(result.claims), n_linked, len(result.sources),
-        "  UNLINKED-LEDGER" if (result.claims and result.sources and not n_linked) else "",
+        "  UNLINKED-LEDGER" if _linkage_lost(n_linked, len(result.sources)) else "",
     )
     # Namespace ids per worker so cross-worker merge can't collide.
     prefix = f"w{worker_idx}_"

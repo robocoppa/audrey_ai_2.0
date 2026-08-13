@@ -259,17 +259,21 @@ docker compose logs audrey-ai | grep catalogue-guard
 docker compose logs audrey-ai | grep -c "ledger: demoting url-less"
 docker compose logs audrey-ai | grep "ledger: demoting url-less" | tail -20
 
-# a worker that found sources AND wrote claims but linked NONE of them, so
-# every claim reads as unsourced and gets soft-pedalled despite being grounded.
-# ⚠️ This one wants ZERO. Any hit is the real defect; read the whole line for
-# which model did it.
-docker compose logs audrey-ai | grep -c "UNLINKED-LEDGER"
-docker compose logs audrey-ai | grep "UNLINKED-LEDGER"
+# the linkage shape of every structuring call. READ THE TRIPLE — it separates
+# two different faults that both end in unsourced claims:
+#   claims=48 linked=46 sources=11  healthy
+#   claims=41 linked=0  sources=5   linkage LOST — cited URLs never reached the
+#                                   claims, so grounded work gets soft-pedalled
+#   claims=16 linked=1  sources=1   the RESEARCHER wrote no `SOURCES:` block.
+#                                   The empty source_ids are correct; the fix is
+#                                   upstream in the researcher prompt.
+#   claims=N  linked=0  sources=0   found nothing — a grounding problem
+docker compose logs audrey-ai | grep "research: structured"
 
-# the linkage shape of every structuring call, whether or not it went wrong —
-# `claims=41 linked=0 sources=5` is the pathology, `linked` near `claims` is
-# healthy, and `sources=0` is a grounding problem, not a linkage one.
-docker compose logs audrey-ai | grep "research: structured" | tail -30
+# only the middle case above. ⚠️ Wants ZERO, and unlike the demotion grep a zero
+# here is meaningful on its own — the `research: structured` lines prove the
+# instrument is live.
+docker compose logs audrey-ai | grep -c "UNLINKED-LEDGER"
 
 # which env overrides are actually live
 docker compose logs audrey-ai | grep "ENV OVERRIDE"

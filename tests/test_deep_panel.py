@@ -1528,3 +1528,38 @@ async def test_dispositions_absent_when_flag_off():
         pass
 
     assert "CLAIM DISPOSITIONS" not in ollama.writer_user_msg
+
+
+class TestLinkageLostMarker:
+    """`UNLINKED-LEDGER` in the structuring log. It exists so one grep can answer
+    "did a worker's citations get dropped", and the counts below are the real
+    lines from the 2026-08-13 `--only current-` run."""
+
+    def test_many_sources_none_linked_is_the_pathology(self):
+        # The shape that started this: a worker cited five URLs in its notes and
+        # the ledger linked none of them, so every claim read as unsourced.
+        assert dpmod._linkage_lost(n_linked=0, n_sources=5)
+
+    def test_one_stray_link_does_not_defeat_the_marker(self):
+        # The first version tested `not n_linked`, so a single linked claim
+        # silenced it — a strict-equality cliff, the same shape as the
+        # over-hedge suppression guard.
+        assert dpmod._linkage_lost(n_linked=1, n_sources=11)
+
+    def test_thin_researcher_is_not_flagged(self):
+        # `claims=16 linked=1 sources=1` (qwen3.6, `current-rust-async`). Its
+        # notes carried NO `SOURCES:` block at all, so the empty `source_ids`
+        # were correct. That is a researcher-prompt problem upstream, not lost
+        # linkage, and flagging it here would send the next reader to the wrong
+        # file.
+        assert not dpmod._linkage_lost(n_linked=1, n_sources=1)
+
+    def test_healthy_ledgers_are_not_flagged(self):
+        # The other five calls from the same run.
+        for n_linked, n_sources in [(20, 7), (46, 11), (40, 16), (22, 7), (53, 17)]:
+            assert not dpmod._linkage_lost(n_linked=n_linked, n_sources=n_sources)
+
+    def test_sourceless_ledger_is_not_flagged(self):
+        # Nothing to lose: a researcher that found nothing is a grounding
+        # problem, and the `sources=0` in the same log line already says so.
+        assert not dpmod._linkage_lost(n_linked=0, n_sources=0)
