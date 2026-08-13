@@ -355,6 +355,21 @@ def _upgrade_source_types(r: ResearchResult) -> ResearchResult:
     return r
 
 
+def usable_url(url: str) -> bool:
+    """A URL we're willing to act on: http(s) with a host.
+
+    Shared by the renderer (which will not show the user an unusable URL) and by
+    `_demote_urlless_authority` (which will not let one confer authority). One
+    predicate on purpose: a first version of the demotion tested `url.strip()`
+    and let `(reference) Aristoxenus … — null` through, because the model emitted
+    the four-character STRING "null" rather than a JSON null. `_to_str_or_empty`
+    converts a real `null` to "", so the tolerant-parse path never sees it, and a
+    non-empty-but-meaningless string satisfies any emptiness test. Requiring a
+    scheme and host rejects that, bare titles, and fragments alike."""
+    u = (url or "").strip()
+    return u.startswith(("http://", "https://")) and len(u) > len("https://")
+
+
 def _demote_urlless_authority(r: ResearchResult) -> ResearchResult:
     """Strip authoritative status from a source with no URL — it was never
     retrieved, so it cannot ground anything.
@@ -394,7 +409,7 @@ def _demote_urlless_authority(r: ResearchResult) -> ResearchResult:
     which is the better shape anyway. Pure; runs after `_upgrade_source_types`
     so a promotable URL has already been promoted."""
     for s in r.sources:
-        if s.source_type in _AUTHORITATIVE_SOURCES and not s.url.strip():
+        if s.source_type in _AUTHORITATIVE_SOURCES and not usable_url(s.url):
             log.info(
                 "ledger: demoting url-less %s source %r to unknown",
                 s.source_type, (s.title or s.id)[:60],
@@ -584,6 +599,7 @@ __all__ = [
     "Verdict",
     "HedgeDisposition",
     "hedge_policy",
+    "usable_url",
     "inlined_schema",
     "parse_research_result",
     "parse_factcheck_result",

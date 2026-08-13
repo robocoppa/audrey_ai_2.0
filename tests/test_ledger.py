@@ -345,6 +345,30 @@ class TestParseResearchResult:
         r = parse_research_result(raw)
         assert [s.source_type for s in r.sources] == ["unknown"] * 3
 
+    def test_placeholder_url_string_does_not_confer_authority(self):
+        # 2026-08-13 protocol run, `bio-pythagoras`: the demotion cleared every
+        # url-less authoritative row in all ten cases EXCEPT one, which rendered
+        # as `(reference) Aristoxenus and Dicaearchus Fragments — null`. The
+        # model emitted the four-character STRING "null", not a JSON null, so
+        # `_to_str_or_empty` never converted it and the first version's
+        # `url.strip()` test saw a non-empty string. A bare title and a fragment
+        # fail the same way.
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "x", "risk": "low"}],
+            "sources": [
+                {"id": "s1", "title": "Aristoxenus fragments", "url": "null",
+                 "source_type": "reference"},
+                {"id": "s2", "title": "bare title", "url": "Herodotus, Histories",
+                 "source_type": "official"},
+                {"id": "s3", "title": "fragment", "url": "/entries/pythagoras/",
+                 "source_type": "scholarly"},
+                {"id": "s4", "title": "scheme only", "url": "https://",
+                 "source_type": "primary_paper"},
+            ],
+        })
+        r = parse_research_result(raw)
+        assert [s.source_type for s in r.sources] == ["unknown"] * 4
+
     def test_urlless_non_authoritative_types_untouched(self):
         # Only membership of the authoritative set is at stake. `company_claim`
         # in particular must survive — it is not authoritative, and its job is to
@@ -478,7 +502,11 @@ class TestParseResearchResult:
             assert r is not None and r.claims[0].risk == want, f"{bad!r} → {want}"
 
     def test_capitalized_source_type_normalized(self):
-        raw = '{"sources": [{"id": "s1", "title": "t", "url": "u", "source_type": "Reference"}]}'
+        # Needs a REAL url: this asserts case-normalization only, and a stub like
+        # "u" would now be demoted to `unknown` by `_demote_urlless_authority`,
+        # failing the assertion for an unrelated reason.
+        raw = ('{"sources": [{"id": "s1", "title": "t",'
+               ' "url": "https://plato.stanford.edu/", "source_type": "Reference"}]}')
         r = parse_research_result(raw)
         assert r.sources[0].source_type == "reference"
 

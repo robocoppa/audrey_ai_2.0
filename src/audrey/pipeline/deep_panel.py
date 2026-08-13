@@ -55,6 +55,7 @@ from audrey.pipeline.ledger import (
     inlined_schema,
     parse_factcheck_result,
     parse_research_result,
+    usable_url,
 )
 from audrey.pipeline.messages import last_user_text
 from audrey.pipeline.prompts import (
@@ -1059,12 +1060,12 @@ def _source_rank(source_type: str) -> int:
     return _SOURCE_RANK.get(source_type, 0)
 
 
-def _usable_url(url: str) -> bool:
-    """A URL we're willing to show the user: http(s) and has a host. Models emit
-    bare titles, fragments, and "" for sources they couldn't link — those get a
-    backfilled id but no usable URL, and we don't list them."""
-    u = (url or "").strip()
-    return u.startswith(("http://", "https://")) and len(u) > len("https://")
+# A URL we're willing to show the user: http(s) with a host. Models emit bare
+# titles, fragments, "", and the literal string "null" for sources they could
+# not link — those get a backfilled id but no usable URL, and we don't list
+# them. Shared with `_demote_urlless_authority`, which uses the same predicate
+# to decide whether a source can confer authority; see `usable_url`.
+_usable_url = usable_url
 
 
 def _surviving_source_ids(ledger: ResearchResult, fc: FactCheckResult | None) -> set[str]:
