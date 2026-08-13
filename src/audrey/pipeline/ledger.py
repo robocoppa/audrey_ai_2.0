@@ -79,6 +79,15 @@ _SOURCE_TYPES = frozenset(
      "news", "company_claim", "blog", "unknown"]
 )
 
+# Source types that, on their own, earn a plain statement (independent of the
+# claimant). `news`/`blog`/`unknown` do not — they fall through to hedging.
+# Used by `hedge_policy` (rule 4) and by `_demote_urlless_authority`, which
+# strips membership from any source that carries no URL. Defined here rather
+# than beside `hedge_policy` because the normalizer needs it first.
+_AUTHORITATIVE_SOURCES = frozenset(
+    ["official", "primary_paper", "scholarly", "reference"]
+)
+
 Risk = Literal["low", "medium", "high"]
 
 Verdict = Literal[
@@ -346,6 +355,54 @@ def _upgrade_source_types(r: ResearchResult) -> ResearchResult:
     return r
 
 
+def _demote_urlless_authority(r: ResearchResult) -> ResearchResult:
+    """Strip authoritative status from a source with no URL — it was never
+    retrieved, so it cannot ground anything.
+
+    The mirror of `_upgrade_source_types`: that one PROMOTES `unknown` when the
+    URL host is unambiguous; this one DEMOTES an authoritative type when there
+    is no URL at all. Both exist because `source_type` is emitted by the model.
+
+    2026-08-13, three protocol runs: researchers routinely emit a named
+    authority as if it were a fetched source — `(reference) Herodotus, Histories
+    — no url`, `(reference) Plutarch (Ancient Writer) — no url`, `(official)
+    Meta Llama 4 Family Announcement — no url`. 39 / 34 / 7 such rows across the
+    three runs, of which 38 / 28 / 6 backed claims. Because `reference` and
+    `official` are in `_AUTHORITATIVE_SOURCES`, `hedge_policy` rule 4 stated
+    those claims PLAINLY — so the least-grounded claims in the ledger got the
+    most confident phrasing, while claims whose real URLs the structuring pass
+    failed to link fell through to rule 5 and hedged. Hedging was close to
+    inverted relative to grounding.
+
+    The 2026-07-15 (+75) investigation saw half of this and stopped: it noted
+    url-less sources as a driver of OVER-hedging, but every instance it looked
+    at was typed `unknown`, which hedges correctly. A url-less source typed
+    `reference` does the opposite, and that direction is the dangerous one.
+
+    Demotes to `unknown` rather than dropping the row: the source is still worth
+    rendering and reading, it just cannot carry authority. `company_claim` is
+    left alone — it is not in the authoritative set, and its whole purpose is to
+    force attribution, which stays right whether or not a URL came with it.
+
+    ⚠️ Known cost, judged acceptable: a KB document legitimately retrieved by
+    `kb_search` and typed `official` would also be demoted, because the ledger
+    has no retrieval-provenance field and URL presence is the only proxy. No
+    such row appears in any of the three runs swept (the url-less rows are all
+    named authorities or Audrey's own prior memory notes, and a memory note is
+    not retrieved evidence either). If KB-grounded research does start
+    over-hedging, the fix is to give KB sources a synthetic `kb://<doc>` URL,
+    which is the better shape anyway. Pure; runs after `_upgrade_source_types`
+    so a promotable URL has already been promoted."""
+    for s in r.sources:
+        if s.source_type in _AUTHORITATIVE_SOURCES and not s.url.strip():
+            log.info(
+                "ledger: demoting url-less %s source %r to unknown",
+                s.source_type, (s.title or s.id)[:60],
+            )
+            s.source_type = "unknown"
+    return r
+
+
 def _repair_source_links(r: ResearchResult) -> ResearchResult:
     """Re-point `claim.source_ids` entries that name a source by TITLE, URL,
     a case-variant of its id, or a `src{N}`/`source{N}` variant of an `s{N}`
@@ -440,7 +497,9 @@ def parse_research_result(raw: str) -> ResearchResult | None:
             data = {"claims": data}
         result = ResearchResult.model_validate(data)
         return _backfill_supports(
-            _upgrade_source_types(_repair_source_links(_backfill_ids(result)))
+            _demote_urlless_authority(
+                _upgrade_source_types(_repair_source_links(_backfill_ids(result)))
+            )
         )
     except ValidationError as e:
         # Log the distinct failing fields (not the full multi-error dump) so a
@@ -486,13 +545,6 @@ HedgeDisposition = Literal[
     "hedge_or_cite_strongly", # high-risk: soften unless a strong source backs it
 ]
 
-# Source types that, on their own, earn a plain statement (independent of the
-# claimant). `news`/`blog`/`unknown` do not — they fall through to hedging.
-_AUTHORITATIVE_SOURCES = frozenset(
-    ["official", "primary_paper", "scholarly", "reference"]
-)
-
-
 def hedge_policy(claim: Claim, source_types: set[SourceType]) -> HedgeDisposition:
     """Compute how confidently the writer should state `claim`.
 
@@ -502,7 +554,11 @@ def hedge_policy(claim: Claim, source_types: set[SourceType]) -> HedgeDispositio
        the honest framing).
     2. The fact-checker (or researcher) flagged it `needs_hedge` → soften.
     3. High-risk claims hedge unless a strong source carries them.
-    4. An authoritative, non-high-risk claim is stated plainly.
+    4. An authoritative, non-high-risk claim is stated plainly. "Authoritative"
+       is `_AUTHORITATIVE_SOURCES` (defined at the top of the module), and
+       `_demote_urlless_authority` has already stripped membership from any
+       source that arrived without a URL — a source nobody fetched cannot make
+       a claim confident.
     5. Otherwise hedge — the conservative default, which also covers a surviving
        claim whose sources the model never linked (`source_types` empty).
     """

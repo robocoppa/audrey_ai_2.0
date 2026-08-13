@@ -252,6 +252,13 @@ docker compose logs audrey-ai | grep "escalate: fast→deep" | tail -20
 # the catalogue guard fetching a file the model tried to describe unread
 docker compose logs audrey-ai | grep catalogue-guard
 
+# a researcher naming an authority it never fetched ("Herodotus, Histories",
+# "Meta Llama 4 Family Announcement") — demoted so it can no longer make a
+# claim read as confident. Expect a handful per research run; ZERO means the
+# demotion is not deployed, not that the ledgers were clean.
+docker compose logs audrey-ai | grep -c "ledger: demoting url-less"
+docker compose logs audrey-ai | grep "ledger: demoting url-less" | tail -20
+
 # which env overrides are actually live
 docker compose logs audrey-ai | grep "ENV OVERRIDE"
 

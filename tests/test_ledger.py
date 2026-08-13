@@ -326,6 +326,72 @@ class TestParseResearchResult:
         types = {s.source_type for s in r.sources if "c1" in s.supports}
         assert hedge_policy(r.claims[0], types) == "state_plainly"
 
+    def test_urlless_authoritative_source_demoted(self):
+        # 2026-08-13, three protocol runs: researchers emit a named authority as
+        # if it were a fetched source. `reference` and `official` are in
+        # `_AUTHORITATIVE_SOURCES`, so those claims were STATED PLAINLY on the
+        # strength of a source nobody retrieved.
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "x", "risk": "low"}],
+            "sources": [
+                {"id": "s1", "title": "Herodotus, Histories",
+                 "source_type": "reference"},
+                {"id": "s2", "title": "Meta Llama 4 Family Announcement",
+                 "source_type": "official"},
+                {"id": "s3", "title": "Plutarch (Ancient Writer)", "url": "   ",
+                 "source_type": "scholarly"},
+            ],
+        })
+        r = parse_research_result(raw)
+        assert [s.source_type for s in r.sources] == ["unknown"] * 3
+
+    def test_urlless_non_authoritative_types_untouched(self):
+        # Only membership of the authoritative set is at stake. `company_claim`
+        # in particular must survive — it is not authoritative, and its job is to
+        # force attribution, which is right with or without a URL.
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "x", "risk": "low"}],
+            "sources": [
+                {"id": "s1", "title": "vendor benchmark",
+                 "source_type": "company_claim"},
+                {"id": "s2", "title": "a blog", "source_type": "blog"},
+                {"id": "s3", "title": "a wire report", "source_type": "news"},
+            ],
+        })
+        r = parse_research_result(raw)
+        assert [s.source_type for s in r.sources] == [
+            "company_claim", "blog", "news",
+        ]
+
+    def test_authoritative_source_with_url_survives_demotion(self):
+        # The guard must not touch a real retrieved source — including one the
+        # domain upgrade just promoted, since it runs after `_upgrade_source_types`.
+        raw = json.dumps({
+            "claims": [{"id": "c1", "text": "x", "risk": "low"}],
+            "sources": [
+                {"id": "s1", "title": "SEP", "source_type": "reference",
+                 "url": "https://plato.stanford.edu/entries/pythagoras/"},
+                {"id": "s2", "title": "AIAYN", "source_type": "unknown",
+                 "url": "https://arxiv.org/abs/1706.03762"},
+            ],
+        })
+        r = parse_research_result(raw)
+        assert [s.source_type for s in r.sources] == ["reference", "primary_paper"]
+
+    def test_urlless_demotion_reaches_hedge_policy(self):
+        # End-to-end, and the whole point: a low-risk claim backed ONLY by
+        # "Herodotus, Histories — no url" used to reach rule 4 and state plainly.
+        # It must now fall through to rule 5 and hedge.
+        raw = json.dumps({
+            "claims": [{"id": "c1", "risk": "low", "source_ids": ["s1"],
+                        "text": "Xenophanes wrote a satirical fragment"}],
+            "sources": [{"id": "s1", "title": "Xenophanes, fragments",
+                         "source_type": "reference"}],
+        })
+        r = parse_research_result(raw)
+        types = {s.source_type for s in r.sources if "c1" in s.supports}
+        assert hedge_policy(r.claims[0], types) == "hedge"
+
     def test_content_free_source_dropped(self):
         # The 2026-07-09 trace-run `w2_, untitled — no url` shape: the qwen
         # structuring pass emitted source rows with no title AND no url (a stray
