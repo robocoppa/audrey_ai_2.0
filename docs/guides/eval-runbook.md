@@ -299,3 +299,83 @@ Only sweeps (`MODELS=`) write the results JSON.
 can see at least as much as with the answers. Before reading a delta, confirm
 both runs used the same harness commit — a check added between them changes the
 number without anything changing in Audrey.
+
+---
+
+## Harness reference
+
+Moved out of `docs/PROJECT_STATE.md` 2026-08-13: this is stable
+reference about the checks themselves, not current state.
+
+**The inventory.** Opt-in: `names_files` (⚠️ NOT `answer_contains` — one
+filename is a substring of the other, so a contains-check on both is
+satisfied by naming only the longer), `continuation`, `disclaims`,
+`not_contains`. Always-on: `not_truncated`, `not_misattributed`,
+`no_reasoning_leak`. Per-corpus: `no_fiction`. Automatic but rarely
+applicable: `grounded`. Informational, never a gate:
+`_reports_degraded_context`.
+
+⚠️⚠️ **`no_false_limit` shipped as a gate on 2026-08-11 and was RETRACTED
+the next morning.** It failed an answer for blaming a limit while its footer
+showed ✅, on the theory the limit must be invented; the compaction work that
+followed says those answers are most likely telling the TRUTH about a thinned
+context. **A harness that cannot see the input must not call the output a
+lie.**
+
+⚠️ **Two text normalisations, both found by a false FAIL.** A check reading
+the END of an answer must call `_prose_region` (the footer opens
+`\n\n---\n>`, not the banner separator; it also folds curly quotes). A
+check matching a PHRASE must call `_unemphasised` too — `has **no**
+transcript` defeats a regex needing its words adjacent. ⚠️ Both are kept
+away from `_filenames_named` (`*` is a **delimiter** there) and
+`_looks_truncated` (`**Summary:**` ends on a colon once stripped).
+
+⚠️ **`no_fiction` ground truth**, needed whenever `_CORPUS_FICTIONS` is
+touched: the Gracie clip is **visual only** — grappling, a pin, a
+scoreboard, IBJJF signage — with **no result of any kind**; Carlsen plays
+**White** and plays the London himself (3272 vs CM Shuvalov 2707, 3-minute
+blitz, he wins). Everything else about them is invented. ⚠️ Update
+`_KNOWN_UPLOADS` when the box's uploads change.
+
+⚠️ **Three cases carry no case-SPECIFIC check on purpose** —
+`unnamed-reference`, `two-file-compare`, `control-named-scoped`;
+`test_every_video_case_is_checked_for_something_behavioural` pins the set.
+
+### Writing a check
+
+**Writing an eval check: match SHAPE, not wording, and measure it against the
+answers archive BEFORE wiring it in.** Three own-goals in one week — a
+substring blacklist of observed phrasings that both models walked around on
+the very next run (paraphrase space is infinite); an ASCII-only `don'?t` that
+false-failed a textbook disclaimer (models write `don’t`); an opt-in check
+that covered only the case I predicted while the behaviour moved to another.
+**A check that false-fails a good answer is as damaging as one that misses a
+bad one — it is the one that gets deleted.** So: describe the property
+(`continuation`, `not_misattributed`), not the sentence; run the candidate
+over `~/Downloads/Telegram Desktop/*onbox-answers.md` — 55 files, every suite
+— and count true vs false positives first; make it ALWAYS-ON with an opt-out
+when the behaviour could show up in any case. ⚠️ The one legitimate
+blacklist is FALSE FACTS about a fixed corpus: the files never change, so the
+set of untruths is bounded. Phrasings are not. ⚠️ And attach that blacklist
+to the CORPUS, not to the case where you last saw the invention — five times
+running, the next one landed somewhere else (`no_fiction`, `"corpus":
+"video"`). Ground truth for it is the artifact summaries on the OWUI upload
+page, which is what the model is actually given.
+⚠️ **Normalise before matching a phrase; never let a check depend on
+formatting.** Curly apostrophes and markdown emphasis have each cost several
+runs of silent false fails — `don’t` and `has **no** transcript` both defeat
+a regex that wants its words adjacent. `_prose_region` folds the quotes,
+`_unemphasised` drops the asterisks, and both stay away from filename
+extraction, where `*` is a delimiter.
+⚠️ **One clean archive flip does not justify a widening.** `you would like me
+to` was adopted on a single genuine flip, was redundant on the very answer it
+was added for, and passed the worst answer in the next run.
+⚠️⚠️ **Never conclude "the model made this up" from the OUTPUT alone.** The
+answer cannot distinguish an invention from an accurate report of a degraded
+context, and a check built on that distinction will punish honesty — it did,
+for one day, as `no_false_limit`. Log what the model RECEIVED
+(`agentic.debug_context_trace`) before writing any check that calls an
+answer false.
+⚠️ **Correlate failures against tool-call count before theorising.** It cost
+one query and overturned fourteen runs of conclusions.
+

@@ -211,7 +211,21 @@ RESEARCHER_SYSTEM = (
     "(for knowledge-base hits). List only sources you genuinely drew on; do not "
     "pad the list, and do not invent a URL for something you already knew. Keep "
     "this to the end — do NOT clutter the notes themselves with inline "
-    "citations. If you used no tools, omit the section."
+    # This used to read "If you used no tools, omit the section." — a trailing
+    # conditional at the end of a long prompt, and the one instruction here that
+    # licenses omitting the block. 2026-08-13 base-rate sweep over 107
+    # researcher-notes blocks in 8 archived runs: deepseek-v4-pro omitted it
+    # 0/36, glm-5.2 4/36, and the local qwen3.6:35b **16/35**. Every miss had
+    # used tools, so the escape hatch never legitimately applied — but a 35B
+    # model reading it at the very end, right after two "do not cite inline"
+    # instructions, drops the block roughly half the time. A worker's whole
+    # claim set then reaches the ledger unsourced and gets hedged or dropped.
+    # An unconditional header with an explicit empty form removes the choice.
+    # ⚠️ Re-measure with the archive sweep before changing this again; the noun
+    # tuning above was won the same way.
+    "citations. ALWAYS end with this section, even when it is empty: if you "
+    "genuinely used no tools, write exactly `SOURCES: none`. Never omit the "
+    "heading."
 )
 
 # Phase 26 Stage 1: a second, mechanical pass that converts a researcher's prose

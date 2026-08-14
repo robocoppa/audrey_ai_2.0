@@ -183,7 +183,17 @@ def test_researcher_system_unchanged():
         "(for knowledge-base hits). List only sources you genuinely drew on; do not "
         "pad the list, and do not invent a URL for something you already knew. Keep "
         "this to the end — do NOT clutter the notes themselves with inline "
-        "citations. If you used no tools, omit the section."
+        # Changed 2026-08-13 from "If you used no tools, omit the section." on a
+        # base-rate sweep of 107 researcher-notes blocks across 8 archived runs:
+        # deepseek-v4-pro omitted the SOURCES block 0/36, glm-5.2 4/36, and the
+        # local qwen3.6:35b 16/35. Every miss had used tools, so the conditional
+        # never legitimately applied — it just licensed the omission. A worker
+        # that drops the block hands the ledger a whole unsourced claim set.
+        # ⚠️ This assertion is the point: re-measure with the archive sweep
+        # before editing this prompt again, exactly as the noun tuning above was.
+        "citations. ALWAYS end with this section, even when it is empty: if you "
+        "genuinely used no tools, write exactly `SOURCES: none`. Never omit the "
+        "heading."
     )
     assert RESEARCHER_SYSTEM == expected
 
