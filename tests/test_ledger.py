@@ -726,3 +726,52 @@ class TestHedgePolicy:
         for st in ("official", "primary_paper", "scholarly", "reference"):
             c = Claim(id="c1", text="x", risk="medium")
             assert hedge_policy(c, {st}) == "state_plainly"
+
+
+class TestHedgePolicyRespectsTheFactCheckVerdict:
+    """Rule 3's exemption. The disposition block and the corrections block are
+    built by separate functions from the same fact-check result; before this,
+    only the corrections block read the verdicts, so a claim could arrive at the
+    writer as CONFIRMED and HEDGE at once (run `113119`, 15 of 28 checked
+    claims). An unchecked claim must behave exactly as it always did."""
+
+    def test_a_supported_verdict_lets_an_authoritative_high_risk_claim_be_plain(self):
+        # The Tokio-release case: risk high, backed by the official releases
+        # page, and the checker returned `supported`. "Unless a strong source
+        # backs it" has been answered — stop asking.
+        c = Claim(id="c1", text="Tokio's latest release is v1.53.1", risk="high")
+        assert hedge_policy(c, {"official"}, "supported") == "state_plainly"
+
+    def test_a_supported_verdict_without_authority_still_hedges(self):
+        # Verified against a blog is not plain-statement material — rule 5.
+        c = Claim(id="c1", text="x", risk="high")
+        assert hedge_policy(c, {"news", "blog"}, "supported") == "hedge"
+
+    def test_a_supported_verdict_with_no_sources_at_all_still_hedges(self):
+        # `w2_c11` in run `113119`: the checker returned `supported` for a claim
+        # carrying zero sources. A verdict must not manufacture confidence the
+        # ledger has no grounding for.
+        c = Claim(id="c1", text="x", risk="high")
+        assert hedge_policy(c, set(), "supported") == "hedge"
+
+    def test_a_supported_verdict_does_not_override_company_attribution(self):
+        # Verification changes whether a claim is true, not who asserted it.
+        c = Claim(id="c1", text="our model is SOTA", risk="high")
+        assert hedge_policy(c, {"company_claim", "official"}, "supported") == (
+            "attribute_to_company"
+        )
+
+    def test_a_supported_verdict_does_not_override_needs_hedge(self):
+        c = Claim(id="c1", text="x", risk="high", needs_hedge=True)
+        assert hedge_policy(c, {"official"}, "supported") == "hedge"
+
+    def test_a_non_supported_verdict_leaves_rule_3_alone(self):
+        for v in ("needs_hedge", "conflicting", "irrelevant", None):
+            c = Claim(id="c1", text="x", risk="high")
+            assert hedge_policy(c, {"official"}, v) == "hedge_or_cite_strongly"
+
+    def test_the_verdict_argument_is_optional(self):
+        # Every pre-existing caller passes two arguments; the default must
+        # reproduce the old behaviour exactly.
+        c = Claim(id="c1", text="x", risk="high")
+        assert hedge_policy(c, {"official"}) == "hedge_or_cite_strongly"

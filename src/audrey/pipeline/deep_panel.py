@@ -1220,7 +1220,15 @@ def _factcheck_result_to_corrections(fc: FactCheckResult, ledger: ResearchResult
 _NO_CORRECTIONS = "NO CORRECTIONS"
 
 # Cap the user-facing Sources list — a research answer that drew on a dozen
-# pages doesn't need to dump all of them; the most-cited ones are enough.
+# pages doesn't need to dump all of them.
+#
+# Which ones survive the cap is decided by AUTHORITY (`_source_rank`), not by how
+# many claims cite them. That is deliberate but worth stating, because it is not
+# what you'd guess: in run `113119` the single most-cited source on
+# `current-rust-async` (corrode.dev, backing 13 claims) did not make the list,
+# crowded out by `official` sources backing one claim each. Ranking by citation
+# count instead would reopen the hole authority ranking was added to close — a
+# heavily-cited scribd/facebook URL would win a slot.
 _MAX_SOURCES_RENDERED = 8
 
 
@@ -1399,6 +1407,11 @@ def _render_dispositions_block(
         chk.claim_id for chk in (fc.checks if fc else [])
         if chk.verdict == "unsupported"
     }
+    # ⚠️ The verdicts have to reach `hedge_policy`, not just the drop set. The
+    # corrections block renders `supported` as `CONFIRMED: <claim>`; if this block
+    # independently renders `HEDGE` for the same sentence, the writer gets two
+    # contradictory instructions and picks caution. See `hedge_policy` rule 3.
+    verdicts = {chk.claim_id: chk.verdict for chk in (fc.checks if fc else [])}
     citable = any(_usable_url(s.url) for s in ledger.sources)
     lines: list[str] = []
     seen_texts: set[str] = set()
@@ -1408,7 +1421,9 @@ def _render_dispositions_block(
         if c.id in dropped or not (c.text or "").strip():
             continue
         n_surviving += 1
-        disposition = hedge_policy(c, _source_types_for_claim(c, ledger))
+        disposition = hedge_policy(
+            c, _source_types_for_claim(c, ledger), verdicts.get(c.id)
+        )
         if disposition == "state_plainly":
             continue  # plain is the default; the framing line covers these
         if disposition == "hedge" or (

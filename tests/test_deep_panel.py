@@ -1334,6 +1334,60 @@ def test_dispositions_block_renders_hedge_or_cite_when_citable():
     assert "HEDGE (unless a strong source backs it): high-risk claim" in out
 
 
+def test_dispositions_block_does_not_hedge_what_the_factchecker_confirmed():
+    # ⚠️ The two blocks the writer receives are built by different functions from
+    # the same FactCheckResult. `_factcheck_result_to_corrections` renders a
+    # `supported` verdict as "CONFIRMED: <claim>"; this block must not then render
+    # "HEDGE" for the same sentence. Run `113119` shipped exactly that pairing on
+    # the Tokio release claim and the writer obeyed the hedge, downgrading a date
+    # verified against the official releases page to "around mid-July 2026".
+    from audrey.pipeline.deep_panel import _render_dispositions_block
+    from audrey.pipeline.ledger import (
+        Claim,
+        ClaimCheck,
+        FactCheckResult,
+        ResearchResult,
+        Source,
+    )
+    led = ResearchResult(
+        claims=[Claim(id="c1", text="Tokio's latest release is v1.53.1",
+                      source_ids=["s1"], risk="high"),
+                Claim(id="c2", text="a vendor benchmark", source_ids=["s2"], risk="low")],
+        sources=[Source(id="s1", title="releases", url="https://github.com/t/releases",
+                        source_type="official"),
+                 Source(id="s2", title="M", url="https://m.com",
+                        source_type="company_claim")],
+    )
+    fc = FactCheckResult(checks=[ClaimCheck(claim_id="c1", verdict="supported")])
+    out = _render_dispositions_block(led, fc)
+    # c2 keeps the block alive, so an empty string can't be what passes this test.
+    assert "ATTRIBUTE TO SOURCE: a vendor benchmark" in out
+    assert "Tokio's latest release is v1.53.1" not in out
+
+
+def test_dispositions_block_still_hedges_an_unchecked_high_risk_claim():
+    # The checker samples. A high-risk claim it never looked at must keep its
+    # hedge — the exemption is for verdicts, not for optimism.
+    from audrey.pipeline.deep_panel import _render_dispositions_block
+    from audrey.pipeline.ledger import (
+        Claim,
+        ClaimCheck,
+        FactCheckResult,
+        ResearchResult,
+        Source,
+    )
+    led = ResearchResult(
+        claims=[Claim(id="c1", text="the verified fact", source_ids=["s1"], risk="high"),
+                Claim(id="c2", text="the unsampled fact", source_ids=["s1"], risk="high")],
+        sources=[Source(id="s1", title="ref", url="https://e.com",
+                        source_type="official")],
+    )
+    fc = FactCheckResult(checks=[ClaimCheck(claim_id="c1", verdict="supported")])
+    out = _render_dispositions_block(led, fc)
+    assert "HEDGE (unless a strong source backs it): the unsampled fact" in out
+    assert "the verified fact" not in out
+
+
 def test_dispositions_block_dedups_near_identical_claims():
     # Three workers each contribute the same fact; the wall gets ONE line for
     # it, not three. Normalization ignores case/punctuation differences.

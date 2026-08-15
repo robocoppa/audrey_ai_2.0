@@ -627,28 +627,51 @@ HedgeDisposition = Literal[
     "hedge_or_cite_strongly", # high-risk: soften unless a strong source backs it
 ]
 
-def hedge_policy(claim: Claim, source_types: set[SourceType]) -> HedgeDisposition:
+def hedge_policy(
+    claim: Claim,
+    source_types: set[SourceType],
+    verdict: Verdict | None = None,
+) -> HedgeDisposition:
     """Compute how confidently the writer should state `claim`.
+
+    `verdict` is the fact-checker's finding for this claim, or None when the
+    claim was never checked (the checker samples — most claims arrive here with
+    no verdict at all).
 
     Order matters — the first matching rule wins:
     1. A vendor's own assertion (`company_claim`) is attributed, never endorsed,
        even if the same fact also has an independent source (the attribution is
-       the honest framing).
-    2. The fact-checker (or researcher) flagged it `needs_hedge` → soften.
-    3. High-risk claims hedge unless a strong source carries them.
-    4. An authoritative, non-high-risk claim is stated plainly. "Authoritative"
-       is `_AUTHORITATIVE_SOURCES` (defined at the top of the module), and
+       the honest framing). A `supported` verdict does NOT override this: the
+       attribution is about WHO says it, which verification doesn't change.
+    2. The fact-checker (or researcher) flagged it `needs_hedge` → soften. Also
+       not overridden — an explicit "this needs hedging" annotation is a stronger
+       signal than a sampled verdict.
+    3. High-risk claims hedge unless a strong source carries them — UNLESS the
+       fact-checker already checked this claim and returned `supported`.
+       ⚠️ Without that exemption the two stages contradict each other: run
+       `113119` handed the writer `CONFIRMED: Tokio's latest release is v1.53.1,
+       with v1.53.0 released on July 17, 2026` (verified against the official
+       GitHub releases page) AND `HEDGE (unless a strong source backs it)` for
+       the same sentence, and the writer resolved the conflict by hedging —
+       "appears to be v1.53.1 … around mid-July 2026". The label says "unless a
+       strong source backs it"; when a verdict exists, that question has been
+       ANSWERED, and rule 3 has no business asking it again.
+    4. An authoritative claim is stated plainly. "Authoritative" is
+       `_AUTHORITATIVE_SOURCES` (defined at the top of the module), and
        `_demote_urlless_authority` has already stripped membership from any
        source that arrived without a URL — a source nobody fetched cannot make
        a claim confident.
     5. Otherwise hedge — the conservative default, which also covers a surviving
-       claim whose sources the model never linked (`source_types` empty).
+       claim whose sources the model never linked (`source_types` empty). A
+       `supported` high-risk claim with nothing authoritative behind it lands
+       here, and still hedges: verified-but-unsourced is not plain-statement
+       material.
     """
     if "company_claim" in source_types:
         return "attribute_to_company"
     if claim.needs_hedge:
         return "hedge"
-    if claim.risk == "high":
+    if claim.risk == "high" and verdict != "supported":
         return "hedge_or_cite_strongly"
     if source_types & _AUTHORITATIVE_SOURCES:
         return "state_plainly"
