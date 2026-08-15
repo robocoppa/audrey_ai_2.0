@@ -1164,6 +1164,29 @@ async def _structure_factcheck(
         for batch in batches
     ]
     results = await asyncio.gather(*coros)
+    # ⚠️ Log the PER-BATCH outcome, not just the merged total. Batching was added
+    # on 2026-07-08 so one collapsed call could not zero the others — and it
+    # worked, but it also hid how often a call collapses. Run `171922` reads as
+    # "30 checks" on one case and "0 checks" on the other; the batch boundaries
+    # say it was really 2 of 5 batches answering and 0 of 6. A batch that FAILED
+    # already logged its reason (OllamaError, or unusable JSON); a batch that
+    # parsed cleanly and returned an empty `checks` array logged NOTHING, which is
+    # the case that needs naming. Include the claim-id span so a verdict list in
+    # an answers file maps straight onto the batch that produced it.
+    spans: list[str] = []
+    for batch, r in zip(batches, results, strict=True):
+        span = f"{batch[0].id}..{batch[-1].id}"
+        if r is None:
+            spans.append(f"[{span} FAILED]")
+        elif not r.checks:
+            spans.append(f"[{span} EMPTY fatal={len(r.fatal_errors)}]")
+        else:
+            spans.append(f"[{span} ok:{len(r.checks)}/{len(batch)}]")
+    n_answered = sum(1 for r in results if r is not None and r.checks)
+    log.info(
+        "research: factcheck batches — %d/%d answered %s",
+        n_answered, len(batches), " ".join(spans),
+    )
     if all(r is None for r in results):
         return None
     merged = FactCheckResult()
@@ -1184,14 +1207,28 @@ def _factcheck_result_to_corrections(fc: FactCheckResult, ledger: ResearchResult
       - unsupported  → DROP (writer omits)
       - conflicting  → UNVERIFIED (writer hedges)
       - needs_hedge  → CORRECT to corrected_text, or UNVERIFIED if none
-      - supported    → CONFIRMED (no action; kept for transparency)
+      - supported    → CONFIRMED, but ONLY if `hedge_policy` would also state the
+                       claim plainly (no action either way; kept for transparency)
     `irrelevant` claims are skipped. Returns _NO_CORRECTIONS when nothing
     actionable came back.
+
+    ⚠️ **`supported` is not on its own enough to print CONFIRMED.** This block and
+    `_render_dispositions_block` are two renderings of the same verdicts, and a
+    claim that appears in both as `CONFIRMED` and `HEDGE` tells the writer two
+    opposite things. Deferring to `hedge_policy` — the one place the precedence
+    lives — makes that contradiction structurally impossible rather than merely
+    unlikely. Run `132152` still produced three of them after the rule-3 fix, all
+    via the paths a verdict deliberately does NOT override: a claim the
+    researcher itself flagged `needs_hedge` ("from stored memory, not re-verified"
+    — and the fact-checker called it supported anyway), and claims whose only
+    grounding is a blog or nothing at all. In every one the HEDGE was right and
+    the CONFIRMED was the wrong label.
     """
-    by_id = {c.id: c.text for c in ledger.claims}
+    by_id = {c.id: c for c in ledger.claims}
     lines: list[str] = []
     for chk in fc.checks:
-        claim_text = by_id.get(chk.claim_id, chk.claim_id)
+        claim = by_id.get(chk.claim_id)
+        claim_text = claim.text if claim is not None else chk.claim_id
         if chk.verdict == "unsupported":
             lines.append(f"DROP: {claim_text} — unsupported by sources ({chk.notes})".rstrip())
         elif chk.verdict == "conflicting":
@@ -1202,7 +1239,13 @@ def _factcheck_result_to_corrections(fc: FactCheckResult, ledger: ResearchResult
             else:
                 lines.append(f"UNVERIFIED: {claim_text} — HEDGE it ({chk.notes})".rstrip())
         elif chk.verdict == "supported":
-            lines.append(f"CONFIRMED: {claim_text}")
+            # Only when the disposition side agrees the claim can stand plainly.
+            # An unresolvable claim id (`claim is None`) has no grounding to check,
+            # so it gets no CONFIRMED either.
+            if claim is not None and hedge_policy(
+                claim, _source_types_for_claim(claim, ledger), "supported"
+            ) == "state_plainly":
+                lines.append(f"CONFIRMED: {claim_text}")
         # irrelevant → skip
     if fc.fatal_errors:
         for fe in fc.fatal_errors:

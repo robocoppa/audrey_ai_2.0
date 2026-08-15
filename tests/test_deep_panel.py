@@ -917,6 +917,99 @@ def test_factcheck_corrections_all_supported_is_no_corrections():
     assert _has_corrections(out) is False
 
 
+class TestConfirmedAndHedgeCanNeverContradict:
+    """⚠️ The two blocks the writer receives are separate renderings of one
+    `FactCheckResult`. Run `132152` still paired `CONFIRMED: <claim>` with
+    `HEDGE: <same claim>` three times after the rule-3 fix, through the paths a
+    verdict deliberately does not override. Deferring CONFIRMED to `hedge_policy`
+    makes the pairing structurally impossible instead of merely rarer."""
+
+    @staticmethod
+    def _both_blocks(led, fc):
+        from audrey.pipeline.deep_panel import (
+            _factcheck_result_to_corrections,
+            _render_dispositions_block,
+        )
+        return (_factcheck_result_to_corrections(fc, led),
+                _render_dispositions_block(led, fc))
+
+    def test_a_supported_claim_the_researcher_flagged_gets_no_confirmed(self):
+        # `w0_c9` in run `132152`: the researcher said "from stored memory, not
+        # re-verified", the structurer set `needs_hedge`, and the fact-checker
+        # returned `supported` anyway. HEDGE is right; CONFIRMED was the bug.
+        from audrey.pipeline.ledger import (
+            Claim,
+            ClaimCheck,
+            FactCheckResult,
+            ResearchResult,
+            Source,
+        )
+        led = ResearchResult(
+            claims=[Claim(id="c1", text="V3.1 shipped in Aug or Sep", risk="high",
+                          needs_hedge=True),
+                    Claim(id="c2", text="a plain fact", source_ids=["s1"], risk="low")],
+            sources=[Source(id="s1", title="docs", url="https://e.com",
+                            source_type="official")],
+        )
+        fc = FactCheckResult(checks=[ClaimCheck(claim_id="c1", verdict="supported")])
+        corrections, dispositions = self._both_blocks(led, fc)
+        assert "HEDGE: V3.1 shipped in Aug or Sep" in dispositions
+        assert "CONFIRMED" not in corrections
+
+    def test_a_supported_claim_backed_only_by_a_blog_gets_no_confirmed(self):
+        # `w1_c18`: risk medium, one `blog` source, verdict `supported`. Rule 5
+        # hedges it, so the corrections block must not call it confirmed.
+        from audrey.pipeline.ledger import (
+            Claim,
+            ClaimCheck,
+            FactCheckResult,
+            ResearchResult,
+            Source,
+        )
+        led = ResearchResult(
+            claims=[Claim(id="c1", text="unveiled on July 28", source_ids=["s1"],
+                          risk="medium")],
+            sources=[Source(id="s1", title="b", url="https://b.com",
+                            source_type="blog")],
+        )
+        fc = FactCheckResult(checks=[ClaimCheck(claim_id="c1", verdict="supported")])
+        corrections, _ = self._both_blocks(led, fc)
+        assert "CONFIRMED" not in corrections
+
+    def test_a_supported_and_authoritative_claim_still_gets_its_confirmed(self):
+        # The fix must not swallow the case CONFIRMED exists for.
+        from audrey.pipeline.ledger import (
+            Claim,
+            ClaimCheck,
+            FactCheckResult,
+            ResearchResult,
+            Source,
+        )
+        led = ResearchResult(
+            claims=[Claim(id="c1", text="the release is v1.53.1", source_ids=["s1"],
+                          risk="high"),
+                    # c2 only exists to make the block actionable — a body of
+                    # nothing but CONFIRMED collapses to _NO_CORRECTIONS.
+                    Claim(id="c2", text="a shakier fact", source_ids=["s1"], risk="high")],
+            sources=[Source(id="s1", title="releases", url="https://gh.com/releases",
+                            source_type="official")],
+        )
+        fc = FactCheckResult(checks=[
+            ClaimCheck(claim_id="c1", verdict="supported"),
+            ClaimCheck(claim_id="c2", verdict="needs_hedge", corrected_text="allegedly"),
+        ])
+        corrections, dispositions = self._both_blocks(led, fc)
+        assert "CONFIRMED: the release is v1.53.1" in corrections
+        assert "the release is v1.53.1" not in dispositions
+
+    def test_an_unresolvable_claim_id_does_not_crash_or_confirm(self):
+        from audrey.pipeline.ledger import ClaimCheck, FactCheckResult, ResearchResult
+        led = ResearchResult(claims=[])
+        fc = FactCheckResult(checks=[ClaimCheck(claim_id="ghost", verdict="supported")])
+        corrections, _ = self._both_blocks(led, fc)
+        assert "CONFIRMED" not in corrections
+
+
 def test_has_corrections_recognizes_drop():
     from audrey.pipeline.deep_panel import _has_corrections
     assert _has_corrections("DROP: some claim — unsupported") is True
@@ -993,6 +1086,65 @@ async def test_structure_factcheck_chunks_and_merges():
     # First batch's 15 claims survived even though the second batch collapsed.
     assert len(checked) == _FACTCHECK_STRUCTURE_BATCH
     assert "c0" in checked and f"c{_FACTCHECK_STRUCTURE_BATCH - 1}" in checked
+
+
+async def test_structure_factcheck_logs_which_batches_answered(caplog):
+    # ⚠️ Batching stopped one collapsed call from zeroing the rest — and thereby
+    # hid how often a call collapses. Run `171922` reported "30 checks" on one
+    # case and "0 checks" on the other; the batch boundaries showed the truth was
+    # 2 of 5 batches answering and 0 of 6. A FAILED batch already logs its reason;
+    # a batch that parses fine and returns an empty `checks` array logged nothing.
+    import json
+    import logging
+
+    from audrey.pipeline.deep_panel import (
+        _FACTCHECK_STRUCTURE_BATCH,
+        _structure_factcheck,
+    )
+    from audrey.pipeline.ledger import Claim
+
+    n = _FACTCHECK_STRUCTURE_BATCH + 3
+    claims = [Claim(id=f"c{i}", text=f"claim {i}", risk="low") for i in range(n)]
+    led = _ledger_with(*claims)
+
+    class _EmptySecondBatch:
+        def __init__(self):
+            self.batch_calls = 0
+
+        async def chat(self, *, model, messages, options=None, timeout_s=0, tools=None, format=None, think=None):
+            self.batch_calls += 1
+            user = messages[-1]["content"]
+            asked = [c.id for c in claims if f"- {c.id} (" in user]
+            if self.batch_calls == 2:
+                # Parses cleanly, answers nothing — the silent case.
+                body = {"checks": [], "fatal_errors": ["c1 and c2 disagree"]}
+            else:
+                body = {"checks": [{"claim_id": cid, "verdict": "supported"} for cid in asked],
+                        "fatal_errors": []}
+            return {"message": {"content": json.dumps(body)}, "prompt_eval_count": 1, "eval_count": 1}
+
+    with caplog.at_level(logging.INFO, logger="audrey.pipeline.deep_panel"):
+        await _structure_factcheck(
+            _EmptySecondBatch(), HealthTracker(), FairLocalGate(concurrency=1), _Cfg({}),
+            model="fc", location="cloud", ledger=led,
+            fc_notes="notes", timeout_s=1, user_id=None,
+        )
+    line = next(m for m in caplog.messages if "factcheck batches" in m)
+    assert "1/2 answered" in line          # one batch answered, one did not
+    assert "EMPTY fatal=1" in line         # and the silent one is named EMPTY
+    assert f"c0..c{_FACTCHECK_STRUCTURE_BATCH - 1} ok:" in line  # id span present
+
+
+def test_factcheck_structure_prompt_demands_a_verdict_for_every_claim():
+    # ⚠️ "Put any claim that contradicts another claim in `fatal_errors`" read as
+    # an instruction to put the claim ID there INSTEAD of giving it a verdict —
+    # run `171922` returned `fatal_errors: ["w1_c19", "w1_c46"]` with zero checks,
+    # and the writer got `UNVERIFIED: contradiction — w1_c19`, which names a
+    # conflict without saying what it is.
+    from audrey.pipeline.prompts import FACTCHECK_STRUCTURE_SYSTEM
+    assert "EVERY claim in the list gets its own entry in `checks`" in FACTCHECK_STRUCTURE_SYSTEM
+    assert "never bare claim ids" in FACTCHECK_STRUCTURE_SYSTEM
+    assert "never a substitute for a verdict" in FACTCHECK_STRUCTURE_SYSTEM
 
 
 # ── Worker-reply think-stripping ───────────────────────────────────────

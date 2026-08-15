@@ -363,8 +363,13 @@ FACTCHECK_STRUCTURE_SYSTEM = (
     "disputed authorship uses \"attributed to\", not \"authored\"; claims using "
     "\"first\"/\"only\"/\"proved\"/\"invented\"/\"founded\"/\"definitively\"/"
     "\"worldwide\"/\"complete\"/\"all\" require strong support or get a softer "
-    "`corrected_text`. Put any claim that contradicts another claim in "
-    "`fatal_errors`. Do not invent claim_ids — only reference ids from the list."
+    "`corrected_text`. EVERY claim in the list gets its own entry in `checks` — "
+    "including a claim that contradicts another one. When two claims conflict, "
+    "ALSO add one short SENTENCE to `fatal_errors` naming both ids and the "
+    "conflict, e.g. \"w1_c19 dates the release to July 17 but w1_c46 says June\". "
+    "`fatal_errors` holds sentences, never bare claim ids, and is never a "
+    "substitute for a verdict. Do not invent claim_ids — only reference ids from "
+    "the list."
 )
 
 WRITER_SYSTEM = (
