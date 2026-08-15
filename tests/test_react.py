@@ -505,3 +505,42 @@ class TestRetrievedSources:
     def test_catalogue_is_capped(self):
         rows = [{"title": f"t{i}", "url": f"https://e.example/{i}"} for i in range(_MAX_RETRIEVED + 25)]
         assert len(_retrieved_sources([_tr("web_search", {"results": rows})])) == _MAX_RETRIEVED
+
+
+class TestRetrievedSourcesWebFetch:
+    """A page the researcher FETCHED is stronger grounding than a search snippet.
+
+    Leaving `web_fetch` out of the catalogue meant run `065953` dropped
+    `rustsec.org` and the Tokio releases page from a ledger whose claims plainly
+    rested on them — a search-only catalogue quietly punishes the worker that did
+    the most thorough job."""
+
+    def test_a_fetched_page_enters_the_catalogue(self):
+        got = _retrieved_sources([
+            _tr("web_fetch", {"url": "https://rustsec.org/advisories/RUSTSEC-2025-0052",
+                              "text": "async-std has been discontinued"}),
+        ])
+        assert got == [{"title": "", "url": "https://rustsec.org/advisories/RUSTSEC-2025-0052",
+                        "tool": "web_fetch"}]
+
+    def test_the_final_url_after_redirects_is_what_counts(self):
+        # web_fetch answers with the URL it landed on, which is the one the
+        # researcher actually read and the one a reader should be sent to.
+        got = _retrieved_sources([_tr("web_fetch", {"url": "https://example.com/final", "text": "x"})])
+        assert got[0]["url"] == "https://example.com/final"
+
+    def test_a_fetch_of_an_already_searched_url_does_not_duplicate(self):
+        got = _retrieved_sources([
+            _tr("web_search", {"results": [{"title": "A", "url": "https://a.example/"}]}),
+            _tr("web_fetch", {"url": "https://a.example/", "text": "body"}),
+        ])
+        assert len(got) == 1
+        assert got[0]["title"] == "A", "the search row's title must survive"
+
+    def test_a_failed_fetch_contributes_nothing(self):
+        assert _retrieved_sources([
+            _tr("web_fetch", {"url": "https://a.example/", "text": ""}, is_error=True),
+        ]) == []
+
+    def test_a_fetch_with_no_url_is_skipped(self):
+        assert _retrieved_sources([_tr("web_fetch", {"text": "orphan body"})]) == []

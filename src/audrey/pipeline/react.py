@@ -285,6 +285,14 @@ def _catalogue_rows(results: list[ToolResult]) -> list[dict[str, Any]]:
 # in an answer's Sources list.
 _RETRIEVAL_TOOLS: frozenset[str] = frozenset({"web_search", "kb_search"})
 
+# `web_fetch` answers `{url, text}` — one page, no `results` rows — so it needs
+# its own branch. ⚠️ Leaving it out was a real hole: a page the researcher
+# actually FETCHED is the strongest grounding it has, stronger than a search
+# snippet, and run `065953` dropped `rustsec.org` and the Tokio releases page
+# from a ledger whose claims plainly rested on them. Search-only catalogues
+# quietly punish the worker that did the most thorough job.
+_FETCH_TOOL = "web_fetch"
+
 # Ceiling on the catalogue handed to the structuring pass. Three researchers at
 # ~6 searches each returning ~8 rows is ~150 URLs, which would crowd out the notes
 # themselves in the structurer's context. The cap is per worker.
@@ -310,11 +318,21 @@ def _retrieved_sources(results: list[ToolResult]) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     seen: set[str] = set()
     for r in results:
-        if r.name not in _RETRIEVAL_TOOLS or r.is_error:
+        if r.is_error or (r.name not in _RETRIEVAL_TOOLS and r.name != _FETCH_TOOL):
             continue
         try:
             body = json.loads(r.content)
         except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if r.name == _FETCH_TOOL:
+            # One page, `{url, text}`. No title, so the catalogue renders it
+            # `(untitled)` — the URL is the part that has to be right.
+            url = str((body or {}).get("url") or "").strip() if isinstance(body, dict) else ""
+            if url and url not in seen:
+                seen.add(url)
+                out.append({"title": "", "url": url, "tool": r.name})
+                if len(out) >= _MAX_RETRIEVED:
+                    return out
             continue
         rows = body.get("results") if isinstance(body, dict) else body
         if not isinstance(rows, list):

@@ -51,6 +51,7 @@ from audrey.pipeline.ledger import (
     ResearchResult,
     Source,
     SourceType,
+    backfill_supports,
     hedge_policy,
     inlined_schema,
     parse_factcheck_result,
@@ -768,6 +769,16 @@ def _reconcile_with_catalogue(
         for sid in by_id
         if sid in cited
     ]
+    # ⚠️ Re-derive the source→claim index. These are FRESH `Source` objects, so
+    # they arrive with `supports=[]` and the parser's backfill — which ran before
+    # reconciliation — is wiped. Run `065953` shipped exactly that: `supports:
+    # none` on 47 of 47 rows across both cases, which is the identical symptom
+    # `backfill_supports` was written for on 2026-07-09. Nothing user-facing broke
+    # (both `_surviving_source_ids` and `_render_dispositions_block` read the two
+    # directions with an OR, so the `claim.source_ids` leg carried it), and that
+    # is the point: the redundancy hid a dead index, and the human reading the
+    # rendered ledger saw no linkage at all.
+    backfill_supports(result)
     return dropped, notes_only
 
 

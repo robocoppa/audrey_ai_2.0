@@ -234,7 +234,7 @@ class FactCheckResult(BaseModel):
 #
 # `id` is deliberately NOT required anywhere: models routinely omit it and
 # `_backfill_ids` assigns positional ids, so requiring it only invites a
-# fabricated or duplicated one. `supports` is derived by `_backfill_supports`.
+# fabricated or duplicated one. `supports` is derived by `backfill_supports`.
 _REQUIRED_FOR_DECODE: dict[str, tuple[str, ...]] = {
     "ResearchResult": ("claims", "sources"),
     "Claim": ("text", "source_ids", "risk"),
@@ -342,7 +342,7 @@ def _backfill_ids(r: ResearchResult) -> ResearchResult:
     return r
 
 
-def _backfill_supports(r: ResearchResult) -> ResearchResult:
+def backfill_supports(r: ResearchResult) -> ResearchResult:
     """Populate each source's `supports` from the claims that cite it, so the
     source→claim index is complete regardless of what the model emitted.
 
@@ -578,7 +578,7 @@ def parse_research_result(raw: str) -> ResearchResult | None:
         if isinstance(data, list):
             data = {"claims": data}
         result = ResearchResult.model_validate(data)
-        return _backfill_supports(
+        return backfill_supports(
             _demote_urlless_authority(
                 _upgrade_source_types(_repair_source_links(_backfill_ids(result)))
             )

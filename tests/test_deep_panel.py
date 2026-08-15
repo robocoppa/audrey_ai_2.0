@@ -1686,6 +1686,19 @@ class TestReconcileWithCatalogue:
         _, notes_only = dpmod._reconcile_with_catalogue(r, self.CAT)
         assert notes_only == 1
 
+    def test_the_source_to_claim_index_survives_the_rebuild(self):
+        # ⚠️ Rebuilding `sources` mints FRESH objects, so the parser's
+        # `backfill_supports` (which ran before reconciliation) is wiped. Run
+        # `065953` shipped `supports: none` on 47 of 47 rows — the identical
+        # symptom that function was written for in July. Nothing user-facing
+        # broke, because both readers of this index OR it with
+        # `claim.source_ids`; the redundancy is exactly what hid it.
+        r = self._ledger([["s1"], ["s1", "s2"]])
+        dpmod._reconcile_with_catalogue(r, self.CAT)
+        by_id = {s.id: s for s in r.sources}
+        assert by_id["s1"].supports == ["c0", "c1"]
+        assert by_id["s2"].supports == ["c1"]
+
     def test_a_fully_dropped_draft_must_still_trip_the_marker(self):
         # ⚠️ The trap reconciliation introduces: rebuilding `sources` from cited
         # rows means a draft where NOTHING resolves ends with `sources=0`, and
