@@ -254,6 +254,20 @@ RESEARCH_STRUCTURE_SYSTEM = (
     "session\") is NOT per-claim doubt — do not propagate it onto every "
     "claim; the pipeline already knows the grounding state from the sources "
     "themselves. For "
+    # ⚠️ THE ID RULE. Measured over the three protocol runs of 2026-08-14 (34
+    # structured drafts): a model would emit its sources numbered `s1`, `s2` and
+    # then cite `src-corrode` / `src_microsoft_phi4` — two id schemes inside one
+    # JSON object, zero overlap, so EVERY claim in that draft reached the writer
+    # unsourced. qwen3.6:35b did it in 5 of 12 drafts, deepseek 1 of 11, glm-5.2
+    # 0 of 11; it was all-or-nothing every time, never partial. The user message
+    # now leads with a real `s1..sN` catalogue of what the researcher actually
+    # retrieved, so the ids exist before the model starts writing and it has
+    # nothing left to mint. Re-measure with the archive sweep before touching this.
+    "When the request begins with a SOURCES RETRIEVED list, those ids are the "
+    "ONLY ids you may use: reuse each `sN` exactly as written, for both the "
+    "`Source.id` and every `source_ids` entry that refers to it. Never renumber "
+    "them and never invent an id of your own — a claim citing an id that is not "
+    "in that list is discarded and its evidence is lost. For "
     "each source the notes cite, write a `Source` with its `title`, `url`, and "
     "`source_type` — use \"company_claim\" for a vendor's own benchmark or "
     "marketing assertion (not independent fact), \"official\" for vendor docs / "

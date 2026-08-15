@@ -66,6 +66,11 @@ class ReactResult:
     # (large). Successful web_search only: errors and the budget stub carry no
     # grounding, so counting them would inflate the "reached the model" figure.
     web_search_chars: int = 0
+    # Every `(title, url)` this loop actually retrieved, in call order, deduped by
+    # URL. The research pipeline's structuring pass is handed these as a numbered
+    # catalogue so it cites ids it was GIVEN rather than re-copying URLs out of
+    # prose and inventing keys for them — see `_retrieved_sources`.
+    retrieved: list[dict[str, str]] = field(default_factory=list)
 
 
 def _debug_research_trace(cfg: Any) -> bool:
@@ -272,6 +277,63 @@ def _catalogue_rows(results: list[ToolResult]) -> list[dict[str, Any]]:
         rows = body.get("files") if isinstance(body, dict) else body
         return [x for x in rows if isinstance(x, dict)] if isinstance(rows, list) else []
     return []
+
+
+# Tools whose successful results carry retrievable `(title, url)` rows. Kept
+# narrow on purpose: a tool that returns a user's own files or memories is not a
+# citable source, and putting one in this list would let private content surface
+# in an answer's Sources list.
+_RETRIEVAL_TOOLS: frozenset[str] = frozenset({"web_search", "kb_search"})
+
+# Ceiling on the catalogue handed to the structuring pass. Three researchers at
+# ~6 searches each returning ~8 rows is ~150 URLs, which would crowd out the notes
+# themselves in the structurer's context. The cap is per worker.
+_MAX_RETRIEVED = 60
+
+
+def _retrieved_sources(results: list[ToolResult]) -> list[dict[str, str]]:
+    """`[{title, url, tool}]` actually retrieved, in call order, deduped by URL.
+
+    Pure and fail-soft — an unparseable body contributes nothing rather than
+    raising, because a body long enough to be cut at `max_tool_result_chars`
+    arrives as invalid JSON and a truncated catalogue is still worth having.
+
+    ⚠️ This exists because the pipeline was throwing away exactly the thing it
+    then asked a model to reproduce from memory. `WorkerDraft.tool_calls` kept
+    only `{name, elapsed_s, is_error}`, so the URLs a `web_search` returned were
+    discarded at the end of the worker and the structuring pass had to recover
+    them from the researcher's prose. qwen3.6:35b answered that by emitting
+    sources numbered `s1`, `s2` and then citing `src-corrode` — two id schemes in
+    one JSON object, every claim orphaned, in 5 of 12 drafts over the three runs
+    of 2026-08-14.
+    """
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for r in results:
+        if r.name not in _RETRIEVAL_TOOLS or r.is_error:
+            continue
+        try:
+            body = json.loads(r.content)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        rows = body.get("results") if isinstance(body, dict) else body
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            url = str(row.get("url") or "").strip()
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            out.append({
+                "title": str(row.get("title") or "").strip(),
+                "url": url,
+                "tool": r.name,
+            })
+            if len(out) >= _MAX_RETRIEVED:
+                return out
+    return out
 
 
 def _unread_fetch(answer: str, results: list[ToolResult]) -> tuple[str, str] | None:
@@ -484,6 +546,7 @@ async def run_react(
                     prompt_eval_count=int(last_resp.get("prompt_eval_count", 0) or 0),
                     eval_count=int(last_resp.get("eval_count", 0) or 0),
                     web_search_chars=web_search_chars,
+                    retrieved=_retrieved_sources(all_results),
                 )
 
             # The assistant's tool-call turn must be in history before we add tool results.
@@ -584,6 +647,7 @@ async def run_react(
             prompt_eval_count=int(final.get("prompt_eval_count", 0) or 0),
             eval_count=int(final.get("eval_count", 0) or 0),
             web_search_chars=web_search_chars,
+            retrieved=_retrieved_sources(all_results),
         )
 
 

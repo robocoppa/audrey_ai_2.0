@@ -249,6 +249,7 @@ async def _run_one_worker(
                         for r in react.tool_calls
                     ],
                     web_search_chars=react.web_search_chars,
+                    retrieved=react.retrieved,
                 )
 
             resp = await ollama.chat(
@@ -661,6 +662,72 @@ def _hedge_policy_enabled(cfg: Config) -> bool:
     return bool(rl.get("hedge_policy", False))
 
 
+def _linkage_counts(r: ResearchResult) -> tuple[int, int]:
+    """`(linked, dangling)` claims — linked means the ids RESOLVE.
+
+    ⚠️ Counting "is `source_ids` non-empty" is worthless, and the 2026-08-14 runs
+    are why. A draft emits its sources numbered `s1`, `s2`… and then cites
+    `src-corrode` / `src_microsoft_phi4` — two id schemes inside one JSON object,
+    zero overlap, so every claim in it is orphaned. The old counter reported those
+    drafts as fully linked and looked healthy. Downstream is unharmed
+    (`_surviving_source_ids` intersects against real ids), so the damage was to
+    the INSTRUMENT, which is worse: it hid the exact failure it existed to find.
+
+    Not rare, and not evenly spread. Swept over the three runs of 2026-08-14 (34
+    drafts): qwen3.6:35b did it in 5 of 12 drafts, deepseek-v4-pro 1 of 11,
+    glm-5.2 0 of 11. It is all-or-nothing when it happens — `linked` was 0 every
+    time, never partial — which is the tell that the model has switched naming
+    scheme mid-object rather than missed a citation.
+
+    `dangling` is kept separate from an empty `source_ids` on purpose. Empty is
+    an honest "the notes carried no source for this"; dangling is the model
+    inventing a citation, which is what a schema that REQUIRES the field pressures
+    it toward. They want different fixes, so they must not share a number."""
+    real = {s.id for s in r.sources if s.id}
+    linked = sum(1 for c in r.claims if any(sid in real for sid in c.source_ids))
+    dangling = sum(1 for c in r.claims
+                   if c.source_ids and not any(sid in real for sid in c.source_ids))
+    return linked, dangling
+
+
+def _source_catalogue(retrieved: list[dict[str, Any]]) -> str:
+    """The numbered source list handed to the structuring pass, `""` if empty.
+
+    Ids are `s1..sN` and WE assign them, which is the whole point: the model is
+    citing keys it was given instead of minting its own for URLs it copied out of
+    prose. Before this, the pipeline retrieved these URLs, threw them away at the
+    end of the worker, and then asked a model to reconstruct them from its own
+    notes — the structuring pass owned both the source ids and the claim
+    references, so nothing could tell it when the two disagreed.
+    """
+    lines = []
+    for i, row in enumerate(retrieved, start=1):
+        title = str(row.get("title") or "").strip() or "(untitled)"
+        lines.append(f"s{i}\t{row.get('url', '')}\t{title}")
+    return "\n".join(lines)
+
+
+def _catalogue_coverage(result: ResearchResult, retrieved: list[dict[str, Any]]) -> tuple[int, int]:
+    """`(n_sources_in_catalogue, n_sources_total)` for the ledger the model returned.
+
+    ⚠️ Read this before trusting the catalogue with anything. Stage 1 only puts
+    the catalogue in the PROMPT; the model's own `sources` array is still the
+    ledger's source of truth, because nothing has yet confirmed that what a worker
+    retrieves covers what it ends up citing. A researcher that leans on
+    `memory_recall`, or cites a page it read a snippet of and never fetched, would
+    lose sources if the catalogue became authoritative on an unchecked assumption.
+    This number is the check: once coverage runs high across a protocol run, the
+    catalogue can own `sources` outright and claim ids stop being model-minted at
+    both ends. If it runs low, find out why BEFORE flipping it.
+    """
+    urls = {str(r.get("url") or "").strip().rstrip("/") for r in retrieved}
+    urls.discard("")
+    total = len(result.sources)
+    hit = sum(1 for s in result.sources
+              if (s.url or "").strip().rstrip("/") in urls)
+    return hit, total
+
+
 def _linkage_lost(n_linked: int, n_sources: int) -> bool:
     """Did the structuring pass DROP linkage the researcher actually supplied?
 
@@ -695,6 +762,7 @@ async def _structure_one_draft(
     model: str,
     location: str,
     prose: str,
+    retrieved: list[dict[str, Any]],
     timeout_s: float,
     user_id: str | None,
     worker_idx: int,
@@ -708,9 +776,22 @@ async def _structure_one_draft(
     """
     if not prose.strip():
         return None
+    catalogue = _source_catalogue(retrieved)
+    # The catalogue goes BEFORE the notes. It is short, it is the thing the model
+    # must copy ids out of, and the notes can run to 15k chars — burying a lookup
+    # table under that is how the trailing-conditional bug in RESEARCHER_SYSTEM
+    # happened. An empty catalogue (tool-free worker) falls back silently to the
+    # prose-only form, which is the behaviour that shipped before this.
+    user = f"RESEARCHER NOTES:\n{prose.strip()}\n\nReturn the ledger as JSON."
+    if catalogue:
+        user = (
+            "SOURCES RETRIEVED THIS SESSION (id, url, title) — these are the "
+            "real search results behind the notes below:\n"
+            f"{catalogue}\n\n{user}"
+        )
     msgs = [
         {"role": "system", "content": prompt_from_config(cfg, "research_structure", RESEARCH_STRUCTURE_SYSTEM)},
-        {"role": "user", "content": f"RESEARCHER NOTES:\n{prose.strip()}\n\nReturn the ledger as JSON."},
+        {"role": "user", "content": user},
     ]
     try:
         async with gate.acquire(model, location=location, user_id=user_id):
@@ -747,12 +828,19 @@ async def _structure_one_draft(
             model, len(raw), raw[:300],
         )
     # Linkage shape, read AFTER the parser's repair chain so it reflects what
-    # downstream actually gets. Read the triple directly — it separates the two
-    # very different reasons a claim ends up unsourced.
-    n_linked = sum(1 for c in result.claims if c.source_ids)
+    # downstream actually gets. Read the triple directly — it separates the
+    # different reasons a claim ends up unsourced.
+    #
+    # ⚠️ `linked` counts claims whose `source_ids` RESOLVE, not claims with a
+    # non-empty list — see `_linkage_counts` for why the difference is the whole
+    # point of the instrument. `dangling` is the invented-id shape.
+    n_linked, n_dangling = _linkage_counts(result)
+    n_covered, n_total = _catalogue_coverage(result, retrieved)
     log.info(
-        "research: structured %s — claims=%d linked=%d sources=%d%s",
-        model, len(result.claims), n_linked, len(result.sources),
+        "research: structured %s — claims=%d linked=%d dangling=%d sources=%d "
+        "catalogue=%d covered=%d/%d%s",
+        model, len(result.claims), n_linked, n_dangling, len(result.sources),
+        len(retrieved), n_covered, n_total,
         "  UNLINKED-LEDGER" if _linkage_lost(n_linked, len(result.sources)) else "",
     )
     # Namespace ids per worker so cross-worker merge can't collide.
@@ -1469,6 +1557,7 @@ async def run_research_pipeline_streaming(
                 model=d.get("model", "?"),
                 location=registry.location_of(d.get("model", "")),
                 prose=(d.get("content") or ""),
+                retrieved=list(d.get("retrieved") or []),
                 timeout_s=timeout_s,
                 user_id=user_id,
                 worker_idx=i,

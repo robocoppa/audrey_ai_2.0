@@ -34,6 +34,7 @@ from audrey.pipeline.prompts import (
     MEMORY_STORE_HINT,
     PLANNER_SYSTEM,
     REACT_FINAL_ANSWER_USER,
+    RESEARCH_STRUCTURE_SYSTEM,
     RESEARCHER_SYSTEM,
     SYNTH_SYSTEM,
     VERIFIER_SYSTEM,
@@ -196,6 +197,31 @@ def test_researcher_system_unchanged():
         "heading."
     )
     assert RESEARCHER_SYSTEM == expected
+
+
+def test_research_structure_system_forbids_minting_source_ids():
+    """The id rule is measurement-won and load-bearing — pin it, not the essay.
+
+    Over the three protocol runs of 2026-08-14 (34 structured drafts), a model
+    would emit its sources numbered `s1`, `s2` and then cite `src-corrode` —
+    two id schemes inside one JSON object, zero overlap, so every claim in that
+    draft reached the writer unsourced. qwen3.6:35b did it in 5 of 12 drafts,
+    deepseek 1 of 11, glm-5.2 0 of 11, all-or-nothing every time. The fix is that
+    `s1..sN` now arrive in the request from `_source_catalogue`, so there is
+    nothing left to mint. ⚠️ Re-measure with the archive sweep before loosening
+    any of this — the SOURCES-block wording above was won the same way.
+    """
+    p = RESEARCH_STRUCTURE_SYSTEM
+    assert "SOURCES RETRIEVED" in p, "the prompt must name the block it is fed"
+    assert "reuse each `sN` exactly as written" in p
+    assert "never invent an id of your own" in p
+    # The consequence has to be stated. A rule with no stated cost reads as
+    # style guidance, and this one is the difference between a sourced answer
+    # and an unsourced one.
+    assert "discarded and its evidence is lost" in p
+    # Belt and braces: the pre-existing no-fabrication rule for URLs must survive
+    # any future edit to the id rule sitting next to it.
+    assert "Do NOT fabricate a URL" in p
 
 
 def test_verifier_system_unchanged():

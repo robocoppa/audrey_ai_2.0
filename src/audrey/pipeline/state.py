@@ -23,6 +23,7 @@ class WorkerDraft(TypedDict, total=False):
     tool_rounds: int                 # ReAct rounds that invoked tools (0 if tool-free)
     tool_calls: list[dict]           # per-call summary: name, elapsed_s, is_error
     web_search_chars: int            # chars of successful web_search bodies that reached the model (research-trace diagnostic)
+    retrieved: list[dict]            # [{title, url, tool}] this worker actually retrieved — the structuring pass's source catalogue
 
 
 class PipelineState(TypedDict, total=False):

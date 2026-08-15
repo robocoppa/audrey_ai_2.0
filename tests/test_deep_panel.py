@@ -1563,3 +1563,102 @@ class TestLinkageLostMarker:
         # Nothing to lose: a researcher that found nothing is a grounding
         # problem, and the `sources=0` in the same log line already says so.
         assert not dpmod._linkage_lost(n_linked=0, n_sources=0)
+
+
+
+class TestLinkageCounts:
+    """`linked=` in the structuring log must count RESOLVABLE ids.
+
+    Grounded in the 2026-08-14 run, where both qwen3.6 drafts cited source ids
+    the ledger never defined and the old non-empty-list counter reported 21 and
+    16 linked claims against zero real ones."""
+
+    def _ledger(self, claims, sources):
+        return ResearchResult(
+            claims=[Claim(id=i, text="t", source_ids=s) for i, s in claims],
+            sources=[Source(id=i, title="t", url="https://example.com/") for i in sources],
+        )
+
+    def test_fabricated_ids_are_dangling_not_linked(self):
+        # The exact shape from `current-2025-recent`: every claim cites a
+        # descriptive id the ledger never emitted.
+        r = self._ledger(
+            [("c1", ["src_microsoft_phi4"]), ("c2", ["src_alibaba_qwen3"])],
+            ["s1"],
+        )
+        assert dpmod._linkage_counts(r) == (0, 2)
+
+    def test_one_resolving_id_is_enough_to_count_linked(self):
+        r = self._ledger([("c1", ["s1"]), ("c2", ["s1", "ghost"])], ["s1"])
+        assert dpmod._linkage_counts(r) == (2, 0)
+
+    def test_empty_source_ids_are_neither_linked_nor_dangling(self):
+        # The honest case — the notes carried no source. It wants a different
+        # fix from the fabrication above, so it must not share a number.
+        r = self._ledger([("c1", [])], ["s1"])
+        assert dpmod._linkage_counts(r) == (0, 0)
+
+    def test_a_fully_dangling_ledger_trips_the_marker(self):
+        # linked=0 with several sources present is exactly `_linkage_lost`.
+        r = self._ledger([("c1", ["ghost"]), ("c2", ["ghost2"])], ["s1", "s2"])
+        linked, dangling = dpmod._linkage_counts(r)
+        assert (linked, dangling) == (0, 2)
+        assert dpmod._linkage_lost(linked, len(r.sources))
+
+
+class TestSourceCatalogue:
+    """The structuring pass is handed the ids instead of minting them.
+
+    This is the fix for the shape `TestLinkageCounts` measures: the model emitted
+    `sources` numbered `s1`, `s2` and cited `src-corrode`, so nothing could tell
+    it the two disagreed. Now `s1..sN` arrive in the request."""
+
+    def test_rows_are_numbered_from_one_with_url_and_title(self):
+        cat = dpmod._source_catalogue([
+            {"title": "The State of Async Rust", "url": "https://corrode.dev/blog/async/"},
+            {"title": "Tokio", "url": "https://docs.rs/crate/tokio/latest"},
+        ])
+        assert cat.splitlines() == [
+            "s1\thttps://corrode.dev/blog/async/\tThe State of Async Rust",
+            "s2\thttps://docs.rs/crate/tokio/latest\tTokio",
+        ]
+
+    def test_missing_title_still_yields_a_citable_row(self):
+        # A row without a title is still a real URL the model may need to cite;
+        # dropping it would silently shrink the catalogue below what was fetched.
+        cat = dpmod._source_catalogue([{"url": "https://example.com/x"}])
+        assert cat == "s1\thttps://example.com/x\t(untitled)"
+
+    def test_no_retrieval_yields_an_empty_catalogue(self):
+        # A tool-free worker falls back to the prose-only request — the shape
+        # that shipped before this, so it must stay reachable.
+        assert dpmod._source_catalogue([]) == ""
+
+
+class TestCatalogueCoverage:
+    """⚠️ The gate on making the catalogue authoritative.
+
+    Stage 1 puts the catalogue in the prompt only; the model's own `sources` stay
+    the ledger's source of truth until a protocol run shows that what a worker
+    retrieves covers what it cites. This counter is that check."""
+
+    def _ledger(self, urls):
+        return ResearchResult(
+            claims=[],
+            sources=[Source(id=f"s{i}", title="t", url=u) for i, u in enumerate(urls)],
+        )
+
+    def test_counts_sources_present_in_the_catalogue(self):
+        r = self._ledger(["https://corrode.dev/blog/async/", "https://invented.example/x"])
+        got = dpmod._catalogue_coverage(r, [{"url": "https://corrode.dev/blog/async/"}])
+        assert got == (1, 2)
+
+    def test_a_trailing_slash_is_not_a_miss(self):
+        # Search results and researcher prose disagree about trailing slashes
+        # constantly; counting that as uncovered would understate coverage and
+        # argue against a flip that the evidence actually supports.
+        r = self._ledger(["https://example.com/page"])
+        assert dpmod._catalogue_coverage(r, [{"url": "https://example.com/page/"}]) == (1, 1)
+
+    def test_an_empty_catalogue_covers_nothing(self):
+        assert dpmod._catalogue_coverage(self._ledger(["https://a.example/"]), []) == (0, 1)

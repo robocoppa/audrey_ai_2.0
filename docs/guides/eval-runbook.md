@@ -261,19 +261,46 @@ docker compose logs audrey-ai | grep "ledger: demoting url-less" | tail -20
 
 # the linkage shape of every structuring call. READ THE TRIPLE — it separates
 # two different faults that both end in unsourced claims:
-#   claims=48 linked=46 sources=11  healthy
-#   claims=41 linked=0  sources=5   linkage LOST — cited URLs never reached the
-#                                   claims, so grounded work gets soft-pedalled
-#   claims=16 linked=1  sources=1   the RESEARCHER wrote no `SOURCES:` block.
-#                                   The empty source_ids are correct; the fix is
-#                                   upstream in the researcher prompt.
-#   claims=N  linked=0  sources=0   found nothing — a grounding problem
+#   claims=48 linked=46 dangling=0  sources=11  healthy
+#   claims=41 linked=0  dangling=0  sources=5   linkage LOST — cited URLs never
+#                                   reached the claims; grounded work gets
+#                                   soft-pedalled
+#   claims=21 linked=0  dangling=21 sources=3   the model INVENTED citation ids
+#                                   (`w2_src_corrode` vs a ledger numbering its
+#                                   sources `w2_s2`). Nothing resolves. This is
+#                                   the pressure a required `source_ids` creates.
+#   claims=16 linked=1  dangling=0  sources=1   the RESEARCHER wrote no
+#                                   `SOURCES:` block. Empty source_ids are
+#                                   CORRECT here; the fix is upstream.
+#   claims=N  linked=0  dangling=0  sources=0   found nothing — grounding, not
+#                                   linkage
 docker compose logs audrey-ai | grep "research: structured"
+
+# ▶▶ The same line now ends `catalogue=N covered=H/T`, and that pair is the
+# GATE on the next change, not decoration:
+#   catalogue=N  how many real `(title, url)` rows the worker retrieved and was
+#                handed as `s1..sN`. catalogue=0 on a tool-using worker means
+#                `_retrieved_sources` parsed nothing — a tools-server response
+#                shape changed, and the whole fix is inert.
+#   covered=H/T  how many of the T sources the model put in its ledger were
+#                already in that catalogue. ⚠️ Read this BEFORE making the
+#                catalogue authoritative over the model's own `sources`. High
+#                coverage says the flip is safe; low coverage says workers cite
+#                things they never retrieved (memory_recall, snippets they never
+#                fetched) and flipping would DELETE those sources. Find out which
+#                before touching it.
+docker compose logs audrey-ai | grep "research: structured" | grep -o "catalogue=[0-9]* covered=[0-9]*/[0-9]*"
 
 # only the middle case above. ⚠️ Wants ZERO, and unlike the demotion grep a zero
 # here is meaningful on its own — the `research: structured` lines prove the
 # instrument is live.
 docker compose logs audrey-ai | grep -c "UNLINKED-LEDGER"
+
+# ⚠️ The one video shape that produces an authoritative summary built on almost
+# nothing: 0 transcript segments AND only 1-2 keyframe descriptions. Zero
+# instances so far — the case that prompted the check had 10 descriptions and was
+# fine — so this is a watch, not a known bug.
+docker compose logs audrey-ai | grep "summarise:" | grep "(0 segments"
 
 # which env overrides are actually live
 docker compose logs audrey-ai | grep "ENV OVERRIDE"

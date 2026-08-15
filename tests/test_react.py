@@ -23,9 +23,11 @@ from types import SimpleNamespace
 import pytest
 
 from audrey.pipeline.react import (
+    _MAX_RETRIEVED,
     _WEB_SEARCH_BUDGET_STUB,
     _compress_history,
     _context_census,
+    _retrieved_sources,
     _summarize_tool_message,
     _without_web_search,
     run_react,
@@ -432,3 +434,74 @@ def test_without_web_search_filters_and_none_when_empty():
     assert _without_web_search([ws, kb]) == [kb]
     assert _without_web_search([ws]) is None   # nothing left → None, not []
     assert _without_web_search(None) is None
+
+
+def _tr(name, body, is_error=False):
+    return ToolResult(name=name, call_id=None, content=json.dumps(body),
+                      elapsed_s=0.1, is_error=is_error)
+
+
+class TestRetrievedSources:
+    """The URLs a worker actually fetched, carried out of the loop.
+
+    These used to be discarded: `WorkerDraft.tool_calls` kept only
+    `{name, elapsed_s, is_error}`, so the structuring pass had to recover them
+    from the researcher's prose and models answered that by inventing ids.
+    """
+
+    def test_web_search_rows_are_collected_in_call_order(self):
+        got = _retrieved_sources([
+            _tr("web_search", {"results": [
+                {"title": "A", "url": "https://a.example/"},
+                {"title": "B", "url": "https://b.example/"},
+            ]}),
+            _tr("kb_search", {"results": [{"title": "C", "url": "kb://c"}]}),
+        ])
+        assert [r["url"] for r in got] == ["https://a.example/", "https://b.example/", "kb://c"]
+        assert got[0] == {"title": "A", "url": "https://a.example/", "tool": "web_search"}
+
+    def test_duplicate_urls_collapse(self):
+        # Three researchers running near-identical queries is the normal case,
+        # and a catalogue that repeats a URL invites two ids for one source —
+        # which is the ambiguity this whole change exists to remove.
+        got = _retrieved_sources([
+            _tr("web_search", {"results": [{"title": "A", "url": "https://a.example/"}]}),
+            _tr("web_search", {"results": [{"title": "A again", "url": "https://a.example/"}]}),
+        ])
+        assert len(got) == 1
+
+    def test_failed_calls_contribute_nothing(self):
+        assert _retrieved_sources([
+            _tr("web_search", {"results": [{"title": "A", "url": "https://a.example/"}]},
+                is_error=True),
+        ]) == []
+
+    def test_non_retrieval_tools_are_ignored(self):
+        # ⚠️ Deliberate. A user's own files and memories are not citable sources,
+        # and widening this would surface private content in an answer's Sources
+        # list — a much worse failure than the one being fixed.
+        assert _retrieved_sources([
+            _tr("list_my_files", {"results": [{"title": "notes", "url": "file://notes"}]}),
+            _tr("memory_recall", {"results": [{"title": "m", "url": "mem://1"}]}),
+        ]) == []
+
+    def test_unparseable_body_is_skipped_not_raised(self):
+        # A body cut at `max_tool_result_chars` arrives as invalid JSON. The rest
+        # of the catalogue is still worth having.
+        bad = ToolResult(name="web_search", call_id=None, content='{"results": [{"url"',
+                         elapsed_s=0.1, is_error=False)
+        got = _retrieved_sources([
+            bad,
+            _tr("web_search", {"results": [{"title": "B", "url": "https://b.example/"}]}),
+        ])
+        assert [r["url"] for r in got] == ["https://b.example/"]
+
+    def test_rows_without_a_url_are_dropped(self):
+        got = _retrieved_sources([
+            _tr("web_search", {"results": [{"title": "no url"}, {"title": "ok", "url": "https://o.example/"}]}),
+        ])
+        assert [r["url"] for r in got] == ["https://o.example/"]
+
+    def test_catalogue_is_capped(self):
+        rows = [{"title": f"t{i}", "url": f"https://e.example/{i}"} for i in range(_MAX_RETRIEVED + 25)]
+        assert len(_retrieved_sources([_tr("web_search", {"results": rows})])) == _MAX_RETRIEVED
