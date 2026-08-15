@@ -15,7 +15,7 @@ real model. The unawaited coroutines are closed so pytest doesn't warn.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import patch
 
 from audrey.config import get_config
@@ -1635,30 +1635,74 @@ class TestSourceCatalogue:
         assert dpmod._source_catalogue([]) == ""
 
 
-class TestCatalogueCoverage:
-    """⚠️ The gate on making the catalogue authoritative.
+class TestReconcileWithCatalogue:
+    """One id authority. The half-measure was worse than the original bug.
 
-    Stage 1 puts the catalogue in the prompt only; the model's own `sources` stay
-    the ledger's source of truth until a protocol run shows that what a worker
-    retrieves covers what it cites. This counter is that check."""
+    With the catalogue in the prompt but the model still emitting `sources`, run
+    `220557` produced 37 out-of-range cites (against 0 in 249 pre-change sources)
+    AND silent wrong attachments where an out-of-range id landed inside the
+    model's own shorter array. This function removes the second authority."""
 
-    def _ledger(self, urls):
+    CAT: ClassVar[list[dict[str, str]]] = [
+        {"title": "Qwen3", "url": "https://alibaba.example/qwen3"},
+        {"title": "Nemotron", "url": "https://nvidia.example/nemotron"},
+        {"title": "gpt-oss", "url": "https://openai.example/gpt-oss"},
+    ]
+
+    def _ledger(self, claim_ids, sources=()):
         return ResearchResult(
-            claims=[],
-            sources=[Source(id=f"s{i}", title="t", url=u) for i, u in enumerate(urls)],
+            claims=[Claim(id=f"c{i}", text="t", source_ids=list(s))
+                    for i, s in enumerate(claim_ids)],
+            sources=list(sources),
         )
 
-    def test_counts_sources_present_in_the_catalogue(self):
-        r = self._ledger(["https://corrode.dev/blog/async/", "https://invented.example/x"])
-        got = dpmod._catalogue_coverage(r, [{"url": "https://corrode.dev/blog/async/"}])
-        assert got == (1, 2)
+    def test_out_of_range_ids_are_dropped_not_left_to_mislead(self):
+        # The `s33`-against-a-16-row-array shape, in miniature.
+        r = self._ledger([["s1", "s9"], ["s7"]])
+        dropped, _ = dpmod._reconcile_with_catalogue(r, self.CAT)
+        assert dropped == 2
+        assert [c.source_ids for c in r.claims] == [["s1"], []]
 
-    def test_a_trailing_slash_is_not_a_miss(self):
-        # Search results and researcher prose disagree about trailing slashes
-        # constantly; counting that as uncovered would understate coverage and
-        # argue against a flip that the evidence actually supports.
-        r = self._ledger(["https://example.com/page"])
-        assert dpmod._catalogue_coverage(r, [{"url": "https://example.com/page/"}]) == (1, 1)
+    def test_sources_are_rebuilt_from_the_catalogue_rows_actually_cited(self):
+        # Only cited rows materialise, which is also what stops raw search junk
+        # (async.com, brutalist.report) landing in the ledger as sources.
+        r = self._ledger([["s3"]])
+        dpmod._reconcile_with_catalogue(r, self.CAT)
+        assert [(s.id, s.url) for s in r.sources] == [
+            ("s3", "https://openai.example/gpt-oss")]
 
-    def test_an_empty_catalogue_covers_nothing(self):
-        assert dpmod._catalogue_coverage(self._ledger(["https://a.example/"]), []) == (0, 1)
+    def test_the_models_source_type_survives_for_a_url_it_named(self):
+        # The catalogue knows what was fetched; only the model read the content,
+        # and official-vs-company_claim drives the hedge policy downstream.
+        r = self._ledger([["s1"]], [Source(id="whatever", url="https://alibaba.example/qwen3",
+                                           source_type="company_claim")])
+        dpmod._reconcile_with_catalogue(r, self.CAT)
+        assert (r.sources[0].id, r.sources[0].source_type) == ("s1", "company_claim")
+
+    def test_notes_only_sources_are_counted_as_the_cost_of_the_trade(self):
+        # A memory_recall hit or an unfetched snippet. Dropped — but the number is
+        # logged, so the rescue path can be a measurement rather than a guess.
+        r = self._ledger([["s1"]], [Source(id="x", url="https://recalled.example/from-memory")])
+        _, notes_only = dpmod._reconcile_with_catalogue(r, self.CAT)
+        assert notes_only == 1
+
+    def test_a_fully_dropped_draft_must_still_trip_the_marker(self):
+        # ⚠️ The trap reconciliation introduces: rebuilding `sources` from cited
+        # rows means a draft where NOTHING resolves ends with `sources=0`, and
+        # `_linkage_lost` needs `n_sources >= 2` — so reading the rebuilt list
+        # would mute the alarm in precisely the worst case. The denominator has
+        # to be what the worker HAD, which is the catalogue.
+        r = self._ledger([["s41"], ["s55"]])
+        dpmod._reconcile_with_catalogue(r, self.CAT)
+        linked, _ = dpmod._linkage_counts(r)
+        assert (linked, len(r.sources)) == (0, 0)
+        assert not dpmod._linkage_lost(linked, len(r.sources)), "the trap"
+        assert dpmod._linkage_lost(linked, len(self.CAT)), "the fix"
+
+    def test_an_empty_catalogue_leaves_the_ledger_untouched(self):
+        # A tool-free worker keeps the pre-catalogue path exactly, so the change
+        # cannot regress a draft it was never meant to touch.
+        r = self._ledger([["anything"]], [Source(id="s1", url="https://a.example/")])
+        assert dpmod._reconcile_with_catalogue(r, []) == (0, 0)
+        assert r.claims[0].source_ids == ["anything"]
+        assert len(r.sources) == 1

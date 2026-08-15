@@ -276,20 +276,23 @@ docker compose logs audrey-ai | grep "ledger: demoting url-less" | tail -20
 #                                   linkage
 docker compose logs audrey-ai | grep "research: structured"
 
-# ▶▶ The same line now ends `catalogue=N covered=H/T`, and that pair is the
-# GATE on the next change, not decoration:
-#   catalogue=N  how many real `(title, url)` rows the worker retrieved and was
-#                handed as `s1..sN`. catalogue=0 on a tool-using worker means
-#                `_retrieved_sources` parsed nothing — a tools-server response
-#                shape changed, and the whole fix is inert.
-#   covered=H/T  how many of the T sources the model put in its ledger were
-#                already in that catalogue. ⚠️ Read this BEFORE making the
-#                catalogue authoritative over the model's own `sources`. High
-#                coverage says the flip is safe; low coverage says workers cite
-#                things they never retrieved (memory_recall, snippets they never
-#                fetched) and flipping would DELETE those sources. Find out which
-#                before touching it.
-docker compose logs audrey-ai | grep "research: structured" | grep -o "catalogue=[0-9]* covered=[0-9]*/[0-9]*"
+# ▶▶ The same line now ends `catalogue=N dropped=D notes_only=M`. The catalogue
+# is the ONLY id authority since 2026-08-14, so these three read as:
+#   catalogue=N  real `(title, url)` rows the worker retrieved, handed to the
+#                structurer as `s1..sN`. ⚠️ `catalogue=0` on a TOOL-USING worker
+#                means `_retrieved_sources` parsed nothing — a tools-server
+#                response shape changed and the whole mechanism is inert.
+#   dropped=D    claim `source_ids` outside the catalogue, discarded. This is the
+#                old bug, now visible instead of silent: run `220557` had 37 such
+#                cites landing on wrong sources. A steady low D is the model
+#                fumbling one id; a spike means it has gone back to inventing a
+#                numbering scheme, and the prompt rule needs re-measuring.
+#   notes_only=M sources the model named whose URL is nowhere in the catalogue —
+#                a `memory_recall` hit, or a page it saw a snippet of and never
+#                fetched. These are DROPPED, and M is the price of the trade.
+#                ⚠️ If M runs high the fix is a SECOND id namespace, never
+#                relaxing the single-authority rule.
+docker compose logs audrey-ai | grep -o "catalogue=[0-9]* dropped=[0-9]* notes_only=[0-9]*"
 
 # only the middle case above. ⚠️ Wants ZERO, and unlike the demotion grep a zero
 # here is meaningful on its own — the `research: structured` lines prove the

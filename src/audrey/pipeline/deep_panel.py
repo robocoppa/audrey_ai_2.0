@@ -707,25 +707,68 @@ def _source_catalogue(retrieved: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _catalogue_coverage(result: ResearchResult, retrieved: list[dict[str, Any]]) -> tuple[int, int]:
-    """`(n_sources_in_catalogue, n_sources_total)` for the ledger the model returned.
+def _reconcile_with_catalogue(
+    result: ResearchResult, retrieved: list[dict[str, Any]],
+) -> tuple[int, int]:
+    """Make the catalogue the ONLY id authority. Returns `(dropped, notes_only)`.
 
-    ⚠️ Read this before trusting the catalogue with anything. Stage 1 only puts
-    the catalogue in the PROMPT; the model's own `sources` array is still the
-    ledger's source of truth, because nothing has yet confirmed that what a worker
-    retrieves covers what it ends up citing. A researcher that leans on
-    `memory_recall`, or cites a page it read a snippet of and never fetched, would
-    lose sources if the catalogue became authoritative on an unchecked assumption.
-    This number is the check: once coverage runs high across a protocol run, the
-    catalogue can own `sources` outright and claim ids stop being model-minted at
-    both ends. If it runs low, find out why BEFORE flipping it.
+    Mutates `result` in place: claim ids outside the catalogue are dropped, and
+    `sources` is rebuilt from the catalogue rows a surviving claim actually cites.
+
+    ⚠️⚠️ THIS EXISTS BECAUSE HANDING THE MODEL THE CATALOGUE WAS NOT ENOUGH, AND
+    THE HALF-MEASURE WAS WORSE THAN THE ORIGINAL BUG. With the catalogue in the
+    prompt but the model still emitting its own `sources`, there were two
+    numbering schemes: the model cited CATALOGUE positions while its array was
+    numbered from its own notes list. Run `220557`, `current-2025-recent`:
+    qwen3.6 emitted 16 sources and cited ids up to `s33`. Ids past the array
+    dangled (**37 out-of-range cites, against 0 in 249 sources across four
+    pre-change runs**), and — far worse — ids that landed INSIDE the array
+    attached the WRONG source silently: Alibaba's Qwen3 page recorded as
+    supporting three NVIDIA Nemotron claims, an NVIDIA page supporting three
+    DeepSeek claims. A dangling id renders unsourced and is honest; a wrong one
+    reads as grounded and the hedge policy believes it.
+
+    ⚠️ `linked` went UP (0% → 64%) on that run while correctness went DOWN,
+    because wrong-but-resolvable beats dangling on a counter that only tests
+    resolution. Do not read a link rate as a quality measure across this change.
+
+    `notes_only` is the cost of the trade, logged rather than assumed: sources
+    the model emitted whose URL is nowhere in the catalogue — a `memory_recall`
+    hit, or a page it saw a snippet of and never fetched. They are dropped. If
+    that number runs high, the rescue path is a second id namespace, NOT relaxing
+    the single-authority rule that this whole function exists to establish.
     """
-    urls = {str(r.get("url") or "").strip().rstrip("/") for r in retrieved}
-    urls.discard("")
-    total = len(result.sources)
-    hit = sum(1 for s in result.sources
-              if (s.url or "").strip().rstrip("/") in urls)
-    return hit, total
+    if not retrieved:
+        return 0, 0
+    by_id = {f"s{i}": r for i, r in enumerate(retrieved, start=1)}
+    cat_urls = {str(r.get("url") or "").strip().rstrip("/") for r in retrieved}
+    cat_urls.discard("")
+    # Keep the model's own `source_type` where it named the same URL: the
+    # catalogue knows what was fetched, but only the model read the content, and
+    # `official` vs `company_claim` drives the hedge policy downstream.
+    typed = {(s.url or "").strip().rstrip("/"): s.source_type
+             for s in result.sources if (s.url or "").strip()}
+    notes_only = sum(1 for s in result.sources
+                     if (s.url or "").strip()
+                     and (s.url or "").strip().rstrip("/") not in cat_urls)
+    dropped = 0
+    cited: set[str] = set()
+    for c in result.claims:
+        keep = [sid for sid in c.source_ids if sid in by_id]
+        dropped += len(c.source_ids) - len(keep)
+        c.source_ids = keep
+        cited.update(keep)
+    result.sources = [
+        Source(
+            id=sid,
+            title=str(by_id[sid].get("title") or ""),
+            url=str(by_id[sid].get("url") or ""),
+            source_type=typed.get(str(by_id[sid].get("url") or "").strip().rstrip("/"), "unknown"),
+        )
+        for sid in by_id
+        if sid in cited
+    ]
+    return dropped, notes_only
 
 
 def _linkage_lost(n_linked: int, n_sources: int) -> bool:
@@ -834,14 +877,25 @@ async def _structure_one_draft(
     # ⚠️ `linked` counts claims whose `source_ids` RESOLVE, not claims with a
     # non-empty list — see `_linkage_counts` for why the difference is the whole
     # point of the instrument. `dangling` is the invented-id shape.
+    # ⚠️ Reconcile BEFORE reading the linkage triple. After this the catalogue is
+    # the only id authority, so `dangling` can only mean "the model cited a
+    # catalogue id it then never used" — a much narrower fault than the two
+    # readings it carried before.
+    n_dropped, n_notes_only = _reconcile_with_catalogue(result, retrieved)
     n_linked, n_dangling = _linkage_counts(result)
-    n_covered, n_total = _catalogue_coverage(result, retrieved)
+    # ⚠️ Test the marker against the CATALOGUE size, not the rebuilt `sources`.
+    # Reconciliation builds `sources` from the rows a claim cites, so a draft
+    # where nothing resolves now ends with `sources=0` — and `_linkage_lost`
+    # requires `n_sources >= 2`, which would have muted the alarm in exactly the
+    # case it exists to catch. The catalogue is what the worker HAD; that is the
+    # right denominator for "held several sources and used none of them".
+    n_had = len(retrieved) or len(result.sources)
     log.info(
         "research: structured %s — claims=%d linked=%d dangling=%d sources=%d "
-        "catalogue=%d covered=%d/%d%s",
+        "catalogue=%d dropped=%d notes_only=%d%s",
         model, len(result.claims), n_linked, n_dangling, len(result.sources),
-        len(retrieved), n_covered, n_total,
-        "  UNLINKED-LEDGER" if _linkage_lost(n_linked, len(result.sources)) else "",
+        len(retrieved), n_dropped, n_notes_only,
+        "  UNLINKED-LEDGER" if _linkage_lost(n_linked, n_had) else "",
     )
     # Namespace ids per worker so cross-worker merge can't collide.
     prefix = f"w{worker_idx}_"
