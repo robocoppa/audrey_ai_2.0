@@ -166,7 +166,7 @@ USAGE
     # is the input for scripts/eval_compare.py's case-by-model matrix:
     .venv/bin/python scripts/eval_research.py \\
         --cases scripts/eval_prompts_code_models.json \\
-        --models 'audrey_passthrough/qwen3.6:35b,audrey_passthrough/kimi-k2.7-code:cloud' \\
+        --models 'audrey_passthrough/qwen3.8:latest,audrey_passthrough/kimi-k2.7-code:cloud' \\
         --save-json docs/testing/2026-07-10-code-sweep-results.json
 
 EXIT CODES

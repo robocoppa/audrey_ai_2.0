@@ -20,36 +20,39 @@ router:
 # Speed/quality are informational hints used by the planner when building panels.
 model_registry:
   code:
-    - { name: "qwen3-coder-next:latest",  priority: 100, speed: 60, quality: 95, location: local }
+    # ⚠️ 2026-08-15: qwen3.8:latest replaced THREE local entries here —
+    # qwen3-coder-next:latest (100), qwen2.5-coder:32b (90) and qwen3.6:35b (80).
+    # It takes the lead local slot at 100. ⚠️ `speed`/`quality` are inherited
+    # from the code specialist it replaced and are UNMEASURED for 3.8 — they are
+    # planner hints only, but do not quote them as if they were probed.
+    - { name: "qwen3.8:latest",           priority: 100, speed: 60, quality: 95, location: local }
     - { name: "minimax-m3:cloud",         priority:  98, speed: 85, quality: 96, location: cloud }
-    - { name: "qwen2.5-coder:32b",        priority:  90, speed: 70, quality: 90, location: local }
     - { name: "granite4.1:30b",           priority:  82, speed: 80, quality: 86, location: local }
     - { name: "deepseek-v4-pro:cloud",    priority:  82, speed: 80, quality: 95, location: cloud }
     - { name: "kimi-k2.7-code:cloud",     priority:  92, speed: 90, quality: 94, location: cloud }
     - { name: "glm-5.2:cloud",            priority:  88, speed: 90, quality: 91, location: cloud }
-    - { name: "qwen3.6:35b",              priority:  80, speed: 70, quality: 90, location: local }
     - { name: "kimi-k2.6:cloud",          priority:  78, speed: 90, quality: 92, location: cloud }
     - { name: "deepseek-v4-flash:cloud",  priority:  72, speed: 92, quality: 90, location: cloud }
     - { name: "deepseek-v3.2:cloud",      priority:  70, speed: 85, quality: 90, location: cloud }
     - { name: "cogito-2.1:671b-cloud",    priority:  65, speed: 80, quality: 93, location: cloud }
 
   reasoning:
-    # Ranked by the quality column, not by locality: qwen3.6:35b led this pool
-    # at 100 despite being the lowest-quality entry of the top group (93 vs
+    # Ranked by the quality column, not by locality: the local entry led this
+    # pool at 100 despite being the lowest-quality of the top group (93 vs
     # 95/95/94). It stays the highest-priority LOCAL entry, so it is still the
     # first failover when cloud is unhealthy or credits run out.
     # `general` deliberately keeps its local lead — see the cost note there.
     - { name: "deepseek-v4-pro:cloud",    priority: 100, speed: 80, quality: 95, location: cloud }
     - { name: "minimax-m3:cloud",         priority:  98, speed: 85, quality: 95, location: cloud }
     - { name: "kimi-k2.6:cloud",          priority:  96, speed: 90, quality: 94, location: cloud }
-    - { name: "qwen3.6:35b",              priority:  94, speed: 70, quality: 93, location: local }
+    - { name: "qwen3.8:latest",           priority:  94, speed: 70, quality: 93, location: local }
     - { name: "kimi-k2.7-code:cloud",     priority:  88, speed: 90, quality: 93, location: cloud }
     - { name: "deepseek-r1:32b",          priority:  85, speed: 65, quality: 90, location: local }
     - { name: "cogito-2.1:671b-cloud",    priority:  75, speed: 80, quality: 93, location: cloud }
     - { name: "nemotron-3-super:cloud",   priority:  70, speed: 85, quality: 90, location: cloud }
 
   general:
-    - { name: "qwen3.6:35b",              priority: 100, speed: 75, quality: 92, location: local }
+    - { name: "qwen3.8:latest",           priority: 100, speed: 75, quality: 92, location: local }
     - { name: "deepseek-v4-pro:cloud",    priority:  97, speed: 80, quality: 95, location: cloud }
     - { name: "minimax-m3:cloud",         priority:  96, speed: 85, quality: 95, location: cloud }
     - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 93, location: cloud }
@@ -83,7 +86,9 @@ fast_path:
   # request** — which is the part that matters, because this path's job is tool
   # calling and a prose benchmark would have justified it for the wrong reason.
   #
-  # `qwen3.6:35b`, TOOLS=1, three samples (2026-08-07):
+  # `qwen3.6:35b` (REPLACED by qwen3.8:latest 2026-08-15 — this table is the
+  # measurement that justified the line, not a claim about the current model),
+  # TOOLS=1, three samples (2026-08-07):
   #
   #     omitted    933c thinking   277 eval tok   right tool 2/3
   #     true      1090c thinking   333 eval tok   right tool 3/3
@@ -98,10 +103,13 @@ fast_path:
   # run-to-run variance disappears too.
   #
   # ⚠️ Not a flat flag — sending `think` to a model that does not declare
-  # `thinking` is a HARD ERROR, and three models below do not declare it
-  # (`granite4.1:30b`, `qwen2.5-coder:32b`, `qwen3-coder-next:latest`). The
-  # code asks Ollama once per model and omits the field for those, so this is
-  # safe to leave on while the list changes.
+  # `thinking` is a HARD ERROR. `granite4.1:30b` does not declare it; the two
+  # others that did not (`qwen2.5-coder:32b`, `qwen3-coder-next:latest`) were
+  # replaced by `qwen3.8:latest` on 2026-08-15 and **whether 3.8 declares
+  # `thinking` is UNVERIFIED** (`ollama show qwen3.8:latest`). The code asks
+  # Ollama once per model and omits the field for those that do not, so this is
+  # safe to leave on while the list changes — that indirection is what makes the
+  # unknown tolerable, not knowledge of the answer.
   #
   # ⚠️ Measured on ONE of the fourteen. The role argument does not depend on
   # the model — a waiting user pays for reasoning in latency either way — but
@@ -109,11 +117,14 @@ fast_path:
   no_thinking: true
 
   tool_capable_models:
-    - "qwen3.6:35b"
+    # ⚠️ One entry where there were three (2026-08-15): qwen3.6:35b,
+    # qwen3-coder-next:latest and qwen2.5-coder:32b all became qwen3.8:latest.
+    # ✅ `ollama show qwen3.8:latest` declares `tools` (2026-08-15), so its place
+    # in this list is verified capability, not assumption. It also declares
+    # `thinking` and `vision` — see `vision.also_capable` for the second one.
+    - "qwen3.8:latest"
     - "kimi-k2.7-code:cloud"
     - "kimi-k2.6:cloud"
-    - "qwen3-coder-next:latest"
-    - "qwen2.5-coder:32b"
     - "granite4.1:30b"
     - "deepseek-v4-pro:cloud"
     - "deepseek-v4-flash:cloud"
@@ -133,28 +144,30 @@ fast_path:
 # VRAM on the host fits one local model at a time (GPU_CONCURRENCY=1).
 deep_panel:
   code:
-    workers: ["qwen3-coder-next:latest", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud"]
-    # glm-5.2 (cloud) primary synth: skips the local cold-load a synth on
-    # qwen3.6:35b incurred (synth can't co-reside in VRAM with a local worker
-    # under GPU_CONCURRENCY=1, so it had to load AFTER the worker unloaded).
-    # qwen3.6:35b stays as the local fallback if the cloud synth call fails.
+    workers: ["qwen3.8:latest", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud"]
+    # glm-5.2 (cloud) primary synth: skips the local cold-load a LOCAL synth
+    # incurs (synth can't co-reside in VRAM with a local worker under
+    # GPU_CONCURRENCY=1, so it has to load AFTER the worker unloads). Measured
+    # on qwen3.6:35b; the argument is about locality, not the model, so it
+    # survives the 2026-08-15 swap. The local model stays as the fallback if
+    # the cloud synth call fails.
     synthesizer: "glm-5.2:cloud"
-    fallback_synth: "qwen3.6:35b"
+    fallback_synth: "qwen3.8:latest"
   reasoning:
-    workers: ["qwen3.6:35b", "kimi-k2.6:cloud", "deepseek-v4-pro:cloud"]
+    workers: ["qwen3.8:latest", "kimi-k2.6:cloud", "deepseek-v4-pro:cloud"]
     synthesizer: "glm-5.2:cloud"
-    fallback_synth: "qwen3.6:35b"
+    fallback_synth: "qwen3.8:latest"
   general:
-    workers: ["qwen3.6:35b", "kimi-k2.6:cloud", "deepseek-v4-pro:cloud"]
+    workers: ["qwen3.8:latest", "kimi-k2.6:cloud", "deepseek-v4-pro:cloud"]
     synthesizer: "glm-5.2:cloud"
-    fallback_synth: "qwen3.6:35b"
+    fallback_synth: "qwen3.8:latest"
   # vl stays one local + one cloud: the deep path rebuilds prompts text-only,
   # so the cloud workers never see the image — and image turns force the fast
   # path anyway (the local qwen3-vl is the real worker). A second cloud draft
   # here would merge a blind text take, so it isn't worth the call.
   vl:
     workers: ["qwen3-vl:32b", "kimi-k2.6:cloud"]
-    synthesizer: "qwen3.6:35b"
+    synthesizer: "qwen3.8:latest"
     fallback_synth: "glm-5.2:cloud"
 
 # ─── Deep panel: cloud-only (audrey_cloud) ─────────────────────────────
@@ -185,26 +198,37 @@ deep_panel_cloud:
 # Both workers serialize through GpuGate (GPU_CONCURRENCY=1) — no parallelism.
 # Worker ORDER matters here: the first-listed worker runs first (and loads
 # cold first), so it's the de-facto primary. reasoning + general lead with
-# deepseek-r1:32b, then qwen3.6:35b. (Dropped glm-4.7-flash:q8_0 from general:
+# deepseek-r1:32b, then the local general model (qwen3.6:35b when this was
+# written; qwen3.8:latest since 2026-08-15). (Dropped glm-4.7-flash:q8_0 from general:
 # it was hitting the 240s deep_worker ReadTimeout — too slow to cold-load +
 # generate when it ran second behind qwen3.6 through the single GPU.)
 deep_panel_local:
   code:
-    workers: ["qwen3-coder-next:latest", "qwen2.5-coder:32b"]
-    synthesizer: "qwen3.6:35b"
-    fallback_synth: "qwen3.6:35b"
+    # ⚠️⚠️ DEGENERATE AND DELIBERATE (2026-08-15). This pool held
+    # [qwen3-coder-next:latest, qwen2.5-coder:32b]; both became qwen3.8:latest,
+    # so it collapses to ONE worker whose synthesizer is the SAME model — 3.8
+    # drafts once, then merges its own single draft. That is strictly worse than
+    # answering directly, and it is the only `audrey_local` pool in that state.
+    # ▶ A repair needs a SECOND LOCAL MODEL THAT ACTUALLY EXISTS.
+    # ⚠️ `granite4.1:30b` is NOT pulled on the box (checked 2026-08-15) despite
+    # sitting in `model_registry.code` and `tool_capable_models` — so naming it
+    # here would swap a degenerate pool for a dead one. Same for
+    # `deepseek-r1:32b` and `olmo-3.1:32b`. Pull one first, or leave this as is.
+    workers: ["qwen3.8:latest"]
+    synthesizer: "qwen3.8:latest"
+    fallback_synth: "qwen3.8:latest"
   reasoning:
-    workers: ["deepseek-r1:32b", "qwen3.6:35b"]
-    synthesizer: "qwen3.6:35b"
-    fallback_synth: "qwen3.6:35b"
+    workers: ["deepseek-r1:32b", "qwen3.8:latest"]
+    synthesizer: "qwen3.8:latest"
+    fallback_synth: "qwen3.8:latest"
   general:
-    workers: ["deepseek-r1:32b", "qwen3.6:35b"]
-    synthesizer: "qwen3.6:35b"
-    fallback_synth: "qwen3.6:35b"
+    workers: ["deepseek-r1:32b", "qwen3.8:latest"]
+    synthesizer: "qwen3.8:latest"
+    fallback_synth: "qwen3.8:latest"
   vl:
     workers: ["qwen3-vl:32b", "llava:34b"]
-    synthesizer: "qwen3.6:35b"
-    fallback_synth: "qwen3.6:35b"
+    synthesizer: "qwen3.8:latest"
+    fallback_synth: "qwen3.8:latest"
 
 # ─── Deep panel: research (audrey_research) ────────────────────────────
 # A STAGED pipeline, not a flat panel. Each task type carries:
@@ -235,19 +259,19 @@ deep_panel_local:
 # corrections, no error). Promote it only after a clean research eval.
 deep_panel_research:
   code:
-    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.6:35b"]
+    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.8:latest"]
     verifier: "glm-5.2:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     writer: "glm-5.2:cloud"
     fallback_synth: "glm-5.2:cloud"
   reasoning:
-    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.6:35b"]
+    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.8:latest"]
     verifier: "glm-5.2:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     writer: "glm-5.2:cloud"
     fallback_synth: "glm-5.2:cloud"
   general:
-    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.6:35b"]
+    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.8:latest"]
     verifier: "glm-5.2:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     writer: "glm-5.2:cloud"
@@ -1087,6 +1111,15 @@ vision:
   timeout_s: 120                         # a dense screenshot is a slow decode
   max_images_per_turn: 4                 # local calls serialize on the GPU gate
   cache_size: 64                         # OWUI resends the data URI every turn
+  # ▶ **OPEN DECISION (2026-08-15): `qwen3.8:latest` CAN SEE.** `ollama show`
+  # reports a `vision` capability and a 460M-param CLIP projector. It is not
+  # listed here, so Audrey treats it as text-only and the sidecar transcribes an
+  # image to prose before handing it over — a fidelity hop the model does not
+  # need. Adding it would let image turns reach it directly.
+  # ⚠️ NOT done yet, deliberately: this changes routing on the image path, and
+  # that path has never been exercised end-to-end (the sidecar itself is still
+  # an unvalidated item). Verify a real image turn in OWUI on the *Audrey*
+  # connection before adding it, not after.
   also_capable: []                       # vision models that aren't in the vl pool
 
   # ─── Sampling (Phase 38) ─────────────────────────────────────────────
@@ -1185,8 +1218,16 @@ passthrough:
   think: null
 
   allowed_models:                        # concrete models clients may target
-    - qwen3.6:35b-64k
-    - qwen3-coder-next-64k:latest
+    # ⚠️ NO 64k VARIANT ANY MORE, AND DO NOT BUILD ONE (2026-08-15).
+    # `qwen3.6:35b-64k` and `qwen3-coder-next-64k:latest` were Modelfile builds
+    # that RAISED a small default window to 65536. `ollama show qwen3.8:latest`
+    # reports **context length 262144** natively, so a 64k variant would CAP the
+    # model at a quarter of what it already does. The base tag below is the
+    # long-context entry now.
+    # ⚠️ Nothing in this repo sets `num_ctx`, so Ollama's per-model default is
+    # what every call gets — which is the whole 262144 here. That is a much
+    # larger default than the 35B-class models this config was tuned around;
+    # if a long conversation starts costing latency, this is why.
     # Registry text-pool models (code + reasoning + general, deduped), exposed
     # for the per-model eval sweeps (scripts/eval_research.py --models
     # 'audrey_passthrough/<name>,…'): testing panel candidates in isolation is
@@ -1194,19 +1235,22 @@ passthrough:
     # Keep in sync with model_registry when models are added/retired.
     # 2026-08-12 arrivals, added for the local bake-off
     # (scripts/eval_prompts_local_models.json). ⚠️ Local weights: nemotron
-    # 25 GB + muse 18 GB + qwen3.6 23 GB is 66 GB against 48 GB of VRAM, so a
+    # 25 GB + muse 18 GB + qwen3.6 23 GB was 66 GB against 48 GB of VRAM, so a
     # sweep across all three WILL swap models. `_expand_sweep` groups by model
     # so each loads once; do not reorder it into per-case grouping.
+    # ✅ **qwen3.8:latest is 17 GB** (27.3B Q4_K_M, measured 2026-08-15) — the
+    # smallest of the three and 6 GB under the qwen3.6 it replaced, so that sum
+    # is now 60 GB. Still over 48 GB: a three-model sweep STILL swaps.
     - nemotron-3.5-lightning:latest
     - muse-glimmer:latest
-    - qwen3-coder-next:latest
+    # One entry where there were three (qwen3.6:35b, qwen3-coder-next:latest,
+    # qwen2.5-coder:32b) — deduped 2026-08-15.
+    - qwen3.8:latest
     - minimax-m3:cloud
-    - qwen2.5-coder:32b
     - granite4.1:30b
     - deepseek-v4-pro:cloud
     - kimi-k2.7-code:cloud
     - glm-5.2:cloud
-    - qwen3.6:35b
     - kimi-k2.6:cloud
     - deepseek-v4-flash:cloud
     - deepseek-v3.2:cloud

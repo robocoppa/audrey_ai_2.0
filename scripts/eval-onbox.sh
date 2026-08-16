@@ -37,7 +37,7 @@
 #   # Per-model sweep (MODELS= adds --models + a results JSON next to the
 #   # answers file; feed that JSON to scripts/eval_compare.py afterwards):
 #   CASES=eval_prompts_code_models.json LABEL=code-sweep \
-#     MODELS='audrey_passthrough/qwen3-coder-next:latest,audrey_passthrough/kimi-k2.7-code:cloud' \
+#     MODELS='audrey_passthrough/qwen3.8:latest,audrey_passthrough/kimi-k2.7-code:cloud' \
 #     scripts/eval-onbox.sh
 #
 # NOTE: harness + case files are MOUNTED from ./scripts at run time, so editing

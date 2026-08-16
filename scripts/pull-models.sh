@@ -8,11 +8,13 @@ set -euo pipefail
 OLLAMA_HOST="${OLLAMA_HOST:-http://localhost:11434}"
 
 LOCAL_MODELS=(
+  # `qwen3:4b` is the ROUTER — deliberately tiny, on the hot path of every
+  # request. It is NOT the model that was replaced below; leave it alone.
   "qwen3:4b"
-  "qwen3.6:35b"
+  # 2026-08-15: replaced qwen3.6:35b, qwen3-coder-next:latest and
+  # qwen2.5-coder:32b across every text role (code, reasoning, general).
+  "qwen3.8:latest"
   "qwen3.5:35b-a3b"
-  "qwen3-coder-next:latest"
-  "qwen2.5-coder:32b"
   "devstral-small-2:latest"
   "llama4:latest"
   "nemotron-cascade-2:latest"

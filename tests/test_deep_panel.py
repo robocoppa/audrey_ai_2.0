@@ -903,6 +903,43 @@ def test_factcheck_corrections_conflicting_becomes_unverified():
     assert "UNVERIFIED:" in out
 
 
+def test_factcheck_corrections_conflicting_discards_its_corrected_text():
+    """`conflicting` is the ONE verdict whose `corrected_text` is thrown away.
+
+    `needs_hedge` renders `CORRECT: use "<corrected_text>"`; `conflicting`
+    renders only `UNVERIFIED: … HEDGE it` and drops the rewrite on the floor.
+    That asymmetry is deliberate — when sources genuinely disagree, a model
+    picking the winner is inventing a resolution it cannot have researched —
+    but nothing pinned it, and the old test passed no `corrected_text` at all,
+    so the discard was never exercised.
+
+    ⚠️ Run `181202` is the evidence on both sides, and it does not point one
+    way. Three `conflicting` verdicts arrived carrying rewrites: two were
+    right and useful (Llama's previous release, and "first MoE since Mixtral"
+    narrowing a false "first open-weight MoE"), one asserted what a Wikipedia
+    page says — which the checker cannot see and did not retrieve. The cost of
+    discarding shows up in the answer: the writer hedged a claim the checker
+    had already corrected, and shipped "the exact release history is somewhat
+    unclear" over a fact that was not unclear. ⚠️ Do NOT start adopting
+    `corrected_text` here on that sample — the failure mode it buys is the
+    writer stating a fabricated correction plainly, which is strictly worse
+    than an over-hedge. Surfacing it as a non-binding suggestion is the option
+    worth testing if this recurs.
+    """
+    from audrey.pipeline.deep_panel import _factcheck_result_to_corrections
+    from audrey.pipeline.ledger import Claim, ClaimCheck, FactCheckResult
+    led = _ledger_with(Claim(id="c1", text="X shipped in July"))
+    fc = FactCheckResult(checks=[ClaimCheck(
+        claim_id="c1", verdict="conflicting", notes="sources disagree",
+        corrected_text="X shipped in December",
+    )])
+    out = _factcheck_result_to_corrections(fc, led)
+    assert "UNVERIFIED:" in out
+    assert "X shipped in July" in out          # the original still reaches the writer
+    assert "X shipped in December" not in out  # the rewrite does not
+    assert "CORRECT:" not in out
+
+
 def test_factcheck_corrections_all_supported_is_no_corrections():
     from audrey.pipeline.deep_panel import (
         _NO_CORRECTIONS,

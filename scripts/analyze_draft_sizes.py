@@ -37,7 +37,13 @@ USAGE
 
   # On Unraid, dump the logs to a file first (the instrumentation
   # uses `log.info`, so default container logging captures it).
-  docker logs audrey-ai 2>&1 > /tmp/audrey.log
+  #
+  # ⚠️ The file redirect goes FIRST. `docker logs X 2>&1 > file` writes an
+  # almost-empty file: `2>&1` points stderr at the terminal (the stdout of
+  # the moment), then `>` moves stdout to the file — and docker writes the
+  # container log to stderr. The pipe form below is fine, because the pipe
+  # is already stdout by the time `2>&1` is evaluated.
+  docker logs audrey-ai > /tmp/audrey.log 2>&1
 
   # Then analyze:
   python3 scripts/analyze_draft_sizes.py /tmp/audrey.log

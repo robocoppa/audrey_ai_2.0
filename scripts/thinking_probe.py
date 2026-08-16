@@ -54,7 +54,7 @@ Needs Ollama, so it runs on the box. `audrey-ai` reaches it over `ollama-net`;
 fed on stdin, so no rebuild is needed:
 
     # Unraid box, from /mnt/user/appdata/audrey_ai_2.0
-    docker exec -i -e MODEL=qwen3.6:35b audrey-ai python3 - < scripts/thinking_probe.py
+    docker exec -i -e MODEL=qwen3.8:latest audrey-ai python3 - < scripts/thinking_probe.py
 
 **Run it on a prompt like the role you are deciding about.** Reasoning scales
 with how much work the question is, so a probe on "what is 2+2" says nothing
@@ -68,7 +68,7 @@ spend creep.
 
 Environment:
 
-    MODEL        required in practice (default qwen3.6:35b)
+    MODEL        required in practice (default qwen3.8:latest)
     OLLAMA_HOST  default http://ollama:11434
     PROMPT       the question to ask (default: a multi-step reasoning one)
     SAMPLES      runs per state (default 3) — reasoning length is noisy
@@ -93,7 +93,7 @@ import time
 import urllib.error
 import urllib.request
 
-MODEL = os.environ.get("MODEL", "qwen3.6:35b")
+MODEL = os.environ.get("MODEL", "qwen3.8:latest")
 HOST = os.environ.get("OLLAMA_HOST", "http://ollama:11434").rstrip("/")
 SAMPLES = int(os.environ.get("SAMPLES", "3"))
 NUM_PREDICT = int(os.environ.get("NUM_PREDICT", "2048"))
