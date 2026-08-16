@@ -229,15 +229,39 @@ class TestConfigReading:
         assert ae._ceiling_from({}) == 0.95
         assert ae._ceiling_from({"agentic": {"escalation": {"confidence_ceiling": 0.5}}}) == 0.5
 
-    def test_an_escalated_panel_costs_three_cloud_calls_not_two(self):
-        # `Standing gotchas` says "two cloud models", counting workers only.
-        # The synthesizer is `glm-5.2:cloud` as well, so the real unit of spend
-        # is three. Pinned against the live config so a pool edit shows up here.
+    def test_an_escalated_panel_costs_more_cloud_calls_than_the_gotcha_says(self):
+        """`Standing gotchas` says "two cloud models" — it counts workers only.
+
+        The synthesizer is `glm-5.2:cloud` too, so the unit of spend was already
+        three. Pinned against the LIVE config so a pool edit surfaces here rather
+        than quietly changing what an escalation costs — which is exactly what
+        happened on 2026-08-15, when `minimax-m3:cloud` joined `code` and this
+        test failed with `(4, 5) != (3, 4)`. That is the guard working; update
+        the number deliberately, never by loosening the assert.
+        """
         raw = ae.read_config(_ROOT / "config.yaml")
         pools, locations = ae.load_pools(raw)
-        for task in ("general", "reasoning", "code"):
-            cloud, total = ae.panel_cost("deep_panel", task, pools, locations)
-            assert (cloud, total) == (3, 4), f"{task} pool changed shape"
+        expected = {
+            "general": (3, 4),
+            "reasoning": (3, 4),
+            "code": (4, 5),      # 3 cloud workers + cloud synth (2026-08-15)
+        }
+        for task, want in expected.items():
+            got = ae.panel_cost("deep_panel", task, pools, locations)
+            assert got == want, f"{task} pool changed shape: {got} != {want}"
+
+    def test_the_code_pool_is_exactly_at_the_cloud_worker_cap(self):
+        # `_healthy_workers` drops cloud workers past `max_deep_workers_cloud`
+        # with NO log line, so a fifth entry here would be dead config that
+        # looks live. This test is the thing that notices.
+        raw = ae.read_config(_ROOT / "config.yaml")
+        cap = int(((raw.get("agentic") or {}).get("max_deep_workers_cloud")) or 3)
+        workers = raw["deep_panel"]["code"]["workers"]
+        cloud = [w for w in workers if ae.is_cloud(w, ae.load_pools(raw)[1])]
+        assert len(cloud) <= cap, (
+            f"{len(cloud)} cloud workers against a cap of {cap} — the extras are "
+            "silently dropped at dispatch"
+        )
 
 
 class TestWilsonInterval:

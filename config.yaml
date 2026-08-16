@@ -144,7 +144,20 @@ fast_path:
 # VRAM on the host fits one local model at a time (GPU_CONCURRENCY=1).
 deep_panel:
   code:
-    workers: ["qwen3.8:latest", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud"]
+    # ⚠️ THREE cloud workers here, not two — `code` is the exception to the
+    # header above. `minimax-m3:cloud` was added 2026-08-15: at quality 96 it is
+    # the highest-rated entry in `model_registry.code` and was going unused, and
+    # it is a fourth vendor (qwen / moonshot / deepseek / minimax), which is the
+    # diversity argument this panel is built on.
+    # ⚠️⚠️ THIS POOL IS NOW EXACTLY AT `max_deep_workers_cloud` (3, pinned by
+    # MAX_DEEP_WORKERS_CLOUD in .env). A FOURTH cloud worker added here would be
+    # dropped by `_healthy_workers` with NO log line — dead config that looks
+    # live. Raise the cap first, or do not add one.
+    # ⚠️ Cost: a code panel is now FOUR cloud calls (3 workers + the cloud
+    # synth), up from three. Cloud credits are a hard budget — see
+    # `scripts/analyze_escalations.py` for what escalation multiplies that by.
+    workers: ["qwen3.8:latest", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud",
+              "minimax-m3:cloud"]
     # glm-5.2 (cloud) primary synth: skips the local cold-load a LOCAL synth
     # incurs (synth can't co-reside in VRAM with a local worker under
     # GPU_CONCURRENCY=1, so it has to load AFTER the worker unloads). Measured
