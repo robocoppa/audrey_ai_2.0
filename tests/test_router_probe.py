@@ -209,6 +209,46 @@ class TestScoring:
         assert "and 3 more" in out
 
 
+class TestItImportsWhatActuallyExists:
+    """The probe crashed on its first real invocation: `load_config` is `get_config`.
+
+    A probe that dies on import is worse than no probe — and the ImportError
+    handler said "run this INSIDE the container", which would have been actively
+    misleading to someone already inside it.
+    """
+
+    def test_the_config_loader_it_calls_exists(self):
+        from audrey.config import get_config  # noqa: F401
+
+    def test_it_does_not_reference_the_name_that_never_existed(self):
+        src = (_SCRIPTS / "router_probe.py").read_text()
+        assert "load_config" not in src, "audrey.config has get_config, not load_config"
+
+    def test_the_ollama_client_takes_base_url_positionally(self):
+        import inspect
+
+        from audrey.models.ollama import OllamaClient
+        params = list(inspect.signature(OllamaClient.__init__).parameters)
+        assert params[1] == "base_url"
+
+    def test_a_missing_config_degrades_instead_of_refusing(self, monkeypatch, capsys, tmp_path):
+        # `get_config()` resolves AUDREY_CONFIG against CWD and runs the pool
+        # validators, so it raises from /tmp inside the container — which is
+        # exactly where `docker cp` puts this script.
+        import asyncio
+
+        import audrey.config as config
+
+        def _boom():
+            raise FileNotFoundError("config.yaml")
+
+        monkeypatch.setattr(config, "get_config", _boom)
+        monkeypatch.setenv("MODEL", "m:1b")
+        monkeypatch.setenv("OLLAMA", "http://127.0.0.1:1")  # refused, fast
+        asyncio.run(rp.amain())
+        assert "no config loaded" in capsys.readouterr().err
+
+
 class TestEntryPoint:
     def test_no_model_is_a_usage_error(self, monkeypatch, capsys):
         import asyncio

@@ -198,18 +198,31 @@ async def amain() -> int:
     timeout_s = float(os.environ.get("TIMEOUT", "20"))
 
     try:
-        from audrey.config import load_config
+        from audrey.config import get_config
         from audrey.models.ollama import OllamaClient
     except ImportError as e:
-        return _fail(f"run this INSIDE the audrey-ai container: {e}")
+        return _fail(
+            f"cannot import the audrey package ({e}) — run this INSIDE the "
+            "audrey-ai container, or from the repo root with the venv active"
+        )
 
+    # ⚠️ `get_config()` resolves `AUDREY_CONFIG` relative to CWD and runs the
+    # pool validators, so it raises when run from a directory without a
+    # config.yaml — which is exactly the case inside the container (`docker cp`
+    # puts the script in /tmp). Degrade to the default ceiling rather than
+    # refusing to probe: the ceiling only labels the confidence column, and a
+    # probe that will not run because it could not find a config file is
+    # useless precisely when it is most needed.
     try:
-        cfg = load_config()
+        cfg = get_config()
         ceiling = float(
             ((cfg.raw.get("agentic") or {}).get("escalation") or {})
             .get("confidence_ceiling", 0.95)
         )
-    except Exception:  # noqa: BLE001 — probe must run even with an unloadable config
+    except Exception as e:  # noqa: BLE001 — probe must run without a loadable config
+        print(f"note: no config loaded ({type(e).__name__}); using the default "
+              f"escalation ceiling of 0.95 and the built-in classifier prompt\n",
+              file=sys.stderr)
         cfg, ceiling = None, 0.95
 
     # BOTH=1 runs each candidate twice — free prose vs `format=`-pinned — which
