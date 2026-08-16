@@ -5,6 +5,18 @@
 version: "7.0.0"
 
 router:
+  # ⚠️⚠️ THIS SLOT MUST STAY TINY, AND NOT FOR THE REASON IT LOOKS LIKE.
+  # `classify_with_registry` takes NO gate argument and calls Ollama directly on
+  # both the graph and streaming paths, so `FairLocalGate` — which serialises
+  # deep workers in-process — never sees the router call. Under
+  # GPU_CONCURRENCY=1 a large local router does not QUEUE behind the deep
+  # worker, it EVICTS it. That rules out the big general model (qwen3.8 is
+  # 17 GB) however good it would be at the classification itself.
+  # ▶ Before changing this: `scripts/router_probe.py` measures parse rate,
+  # accuracy, latency AND the confidence distribution on a candidate.
+  # ⚠️ Confidence matters as much as accuracy here — the escalation trigger is
+  # `conf < 0.95` STRICTLY, so a router that routes correctly but timidly
+  # (0.8) sends nearly every turn into a deep panel at ~3 cloud calls each.
   model: "qwen3:4b"
   timeout_s: 20
   max_failures_before_fallback: 2

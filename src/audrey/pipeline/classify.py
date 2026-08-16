@@ -125,6 +125,22 @@ _ROUTER_SYSTEM = CLASSIFIER_SYSTEM
 _VALID_TASKS: set[TaskType] = {"code", "reasoning", "general", "vl"}
 
 
+# Ollama structured-output schema for the router's reply. NOT used by default —
+# see `response_format` on `router_classify`.
+#
+# The `enum` is the load-bearing part: it makes an out-of-vocabulary task
+# impossible to emit, where today `_parse_router_output` has to catch one after
+# the fact and throw the whole call away.
+ROUTER_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "task": {"type": "string", "enum": sorted(_VALID_TASKS)},
+        "confidence": {"type": "number"},
+    },
+    "required": ["task", "confidence"],
+}
+
+
 async def router_classify(
     ollama: OllamaClient,
     *,
@@ -132,11 +148,28 @@ async def router_classify(
     user_text: str,
     timeout_s: float,
     cfg: Any = None,
+    response_format: dict[str, Any] | str | None = None,
 ) -> tuple[TaskType | None, float, str]:
     """Ask the router model. Returns (task | None, confidence, raw_body_or_error).
 
     `cfg` is optional. When supplied, `agentic.prompts.classifier` overrides
     the default system prompt; missing/empty falls back to `_ROUTER_SYSTEM`.
+
+    `response_format` forwards Ollama's structured-output field (pass
+    `ROUTER_SCHEMA`). ⚠️ **Defaults to None, so production behaviour is
+    unchanged** — this exists so `scripts/router_probe.py` can measure a
+    candidate WITH and WITHOUT schema pinning on the same model before anyone
+    puts it on the hot path.
+
+    Why it is worth measuring: the router's practical size floor is set by
+    "will this model emit clean JSON unprompted", not by "can it classify".
+    4-way classification is easy for a 1B model; unprompted JSON is not.
+    Pinning the schema moves that floor and widens the candidate pool.
+
+    ⚠️ It is NOT free. `Standing gotchas` records thinking breaking `format=`
+    JSON before, and a `format`-pinned structuring call in `deep_panel` has
+    returned a 200 OK with zero bytes for what looks like that reason. Measure
+    it on the actual candidate; do not assume the schema can only help.
     """
     system_prompt = prompt_from_config(cfg, "classifier", _ROUTER_SYSTEM)
     messages = [
@@ -149,6 +182,7 @@ async def router_classify(
             messages=messages,
             options={"temperature": 0.0},
             timeout_s=timeout_s,
+            format=response_format,
         )
     except OllamaError as e:
         return None, 0.0, f"ollama_error:{e}"
