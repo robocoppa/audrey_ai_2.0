@@ -807,6 +807,30 @@ def _linkage_lost(n_linked: int, n_sources: int) -> bool:
     return n_sources >= 2 and n_linked <= 1
 
 
+def _empty_content_diag(resp: dict[str, Any]) -> str:
+    """Why a `format=`-pinned call came back with no content, as one log fragment.
+
+    ⚠️ `len=0` on its own cannot tell a model that THOUGHT its whole budget away
+    from one that genuinely returned nothing, and those need opposite fixes.
+    Ollama puts reasoning in `message.thinking`, and `OllamaClient.chat` never
+    folds it into `message.content` — its docstring says so outright: thinking
+    tokens "are counted in `eval_count` and billed in wall-clock, but they never
+    reach `message.content`". So a mechanical structuring call that thinks can
+    answer 200 OK with zero bytes of JSON.
+
+    Run `173826` lost a fact-check batch exactly that way and left only
+    `len=0, head='', tail=''` to go on. ⚠️ Worth knowing while reading this:
+    **no deep-panel `ollama.chat` call passes `think`**, so all four run at
+    whatever the model defaults to.
+    """
+    msg = resp.get("message", {}) or {}
+    thinking = msg.get("thinking") or ""
+    return (
+        f"thinking={len(thinking)} done_reason={resp.get('done_reason')!r} "
+        f"eval_count={resp.get('eval_count')}"
+    )
+
+
 async def _structure_one_draft(
     ollama: OllamaClient,
     health: HealthTracker,
@@ -868,8 +892,8 @@ async def _structure_one_draft(
         # refusal each need a different fix, and we can't tell without seeing it.
         log.info(
             "research: structuring call for %s produced unusable JSON "
-            "(len=%d, head=%r, tail=%r)",
-            model, len(raw), raw[:200], raw[-120:],
+            "(len=%d, head=%r, tail=%r) %s",
+            model, len(raw), raw[:200], raw[-120:], _empty_content_diag(resp),
         )
         return None
     if not result.claims:
@@ -1095,6 +1119,11 @@ async def _structure_factcheck_batch(
     returns None so the chunked caller can keep the batches that succeeded."""
     if not claims:
         return None
+    # ⚠️ Stamp every failure line with the claim-id span. The caller's summary can
+    # say a batch FAILED but not why, and these two lines say why but not which —
+    # so localising `[w1_c34..w1_c48 FAILED]` on run `173826` meant correlating by
+    # timestamp across three log lines. One grep should be enough.
+    span = f"{claims[0].id}..{claims[-1].id}"
     block = (
         f"{_render_claims_for_factcheck(claims, sources)}\n\n"
         f"FACT-CHECKER NOTES:\n{fc_notes.strip()}\n\n"
@@ -1116,15 +1145,17 @@ async def _structure_factcheck_batch(
         health.record_success(model)
     except OllamaError as e:
         health.record_failure(model, str(e))
-        log.warning("research: factcheck structuring for %s failed: %s", model, e)
+        log.warning(
+            "research: factcheck batch %s for %s FAILED (transport): %s", span, model, e
+        )
         return None
     raw = (resp.get("message", {}) or {}).get("content", "") or ""
     result = parse_factcheck_result(raw)
     if result is None:
         log.info(
-            "research: factcheck structuring produced unusable JSON "
-            "(len=%d, head=%r, tail=%r)",
-            len(raw), raw[:200], raw[-120:],
+            "research: factcheck batch %s FAILED (unusable JSON) "
+            "len=%d head=%r tail=%r %s",
+            span, len(raw), raw[:200], raw[-120:], _empty_content_diag(resp),
         )
     return result
 

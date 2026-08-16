@@ -1135,6 +1135,79 @@ async def test_structure_factcheck_logs_which_batches_answered(caplog):
     assert f"c0..c{_FACTCHECK_STRUCTURE_BATCH - 1} ok:" in line  # id span present
 
 
+async def test_structure_factcheck_failure_lines_name_their_batch(caplog):
+    # ⚠️ The caller's summary says a batch FAILED but not why; these lines say why
+    # but used to omit which. Localising `[w1_c34..w1_c48 FAILED]` on run `173826`
+    # meant correlating three log lines by timestamp. Both greps must stand alone.
+    import logging
+
+    from audrey.models.ollama import OllamaError
+    from audrey.pipeline.deep_panel import _structure_factcheck
+    from audrey.pipeline.ledger import Claim
+
+    claims = [Claim(id=f"c{i}", text=f"claim {i}", risk="low") for i in range(3)]
+    led = _ledger_with(*claims)
+
+    class _Boom:
+        async def chat(self, **kw):
+            raise OllamaError("upstream timed out")
+
+    class _Garbage:
+        async def chat(self, **kw):
+            return {"message": {"content": "not json at all"},
+                    "prompt_eval_count": 1, "eval_count": 1}
+
+    for fake, needle in ((_Boom(), "FAILED (transport)"),
+                         (_Garbage(), "FAILED (unusable JSON)")):
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="audrey.pipeline.deep_panel"):
+            await _structure_factcheck(
+                fake, HealthTracker(), FairLocalGate(concurrency=1), _Cfg({}),
+                model="fc", location="cloud", ledger=led,
+                fc_notes="notes", timeout_s=1, user_id=None,
+            )
+        line = next(m for m in caplog.messages if needle in m)
+        assert "c0..c2" in line, f"{needle} line does not name its batch: {line}"
+
+
+async def test_empty_content_is_logged_with_enough_to_tell_thinking_apart(caplog):
+    # ⚠️ Run `173826` lost a batch to `len=0, head='', tail=''` — a 200 OK with no
+    # content. That reads identically whether the model thought its whole budget
+    # away (Ollama keeps reasoning in `message.thinking`, which never reaches
+    # `content`) or genuinely returned nothing, and the two need opposite fixes.
+    import logging
+
+    from audrey.pipeline.deep_panel import _structure_factcheck
+    from audrey.pipeline.ledger import Claim
+
+    led = _ledger_with(Claim(id="c1", text="a claim", risk="low"))
+
+    class _AllThinkingNoContent:
+        async def chat(self, **kw):
+            return {"message": {"content": "", "thinking": "x" * 8213},
+                    "done_reason": "stop", "prompt_eval_count": 1, "eval_count": 4096}
+
+    with caplog.at_level(logging.INFO, logger="audrey.pipeline.deep_panel"):
+        await _structure_factcheck(
+            _AllThinkingNoContent(), HealthTracker(), FairLocalGate(concurrency=1),
+            _Cfg({}), model="fc", location="cloud", ledger=led,
+            fc_notes="notes", timeout_s=1, user_id=None,
+        )
+    line = next(m for m in caplog.messages if "unusable JSON" in m)
+    assert "len=0" in line
+    assert "thinking=8213" in line     # the discriminator
+    assert "done_reason='stop'" in line
+    assert "eval_count=4096" in line
+
+
+def test_empty_content_diag_survives_a_response_missing_every_field():
+    # Fail-soft: a diagnostic that raises turns a logged failure into a crash.
+    from audrey.pipeline.deep_panel import _empty_content_diag
+    assert "thinking=0" in _empty_content_diag({})
+    assert "thinking=0" in _empty_content_diag({"message": None})
+    assert "thinking=0" in _empty_content_diag({"message": {"content": ""}})
+
+
 def test_factcheck_structure_prompt_demands_a_verdict_for_every_claim():
     # ⚠️ "Put any claim that contradicts another claim in `fatal_errors`" read as
     # an instruction to put the claim ID there INSTEAD of giving it a verdict —
