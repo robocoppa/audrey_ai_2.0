@@ -61,6 +61,13 @@ Env:
   TIMEOUT    per-call seconds (default 20, matching `router.timeout_s`)
   BOTH=1     run each candidate twice: free prose AND `format=`-pinned
   FORMAT=1   run the schema-pinned arm only
+  NOTHINK=1  ask the model not to reason first — the LATENCY arm
+
+⚠️ **Arms are not order-independent.** The first arm eats the model cold-load,
+so its first case can time out for a reason that has nothing to do with the arm.
+`qwen3.5:4b` showed exactly that on 2026-08-15: two ReadTimeouts, both on case 1
+of the FIRST arm. Re-run with the arms reversed before crediting a difference to
+schema pinning.
 
 ⚠️ **Production does NOT pin the schema today** — `router_classify` defaults
 `response_format=None`, so the pinned arm measures a change you have not made
@@ -114,7 +121,8 @@ def _fail(msg: str) -> int:
 
 
 async def probe_model(
-    ollama, model: str, rounds: int, timeout_s: float, cfg, schema=None
+    ollama, model: str, rounds: int, timeout_s: float, cfg, schema=None,
+    no_thinking: bool = False,
 ) -> dict:
     from audrey.pipeline.classify import router_classify
 
@@ -132,6 +140,7 @@ async def probe_model(
             task, conf, body = await router_classify(
                 ollama, router_model=model, user_text=prompt,
                 timeout_s=timeout_s, cfg=cfg, response_format=schema,
+                no_thinking=no_thinking,
             )
             latencies.append(time.perf_counter() - t0)
             if task is None:
@@ -148,7 +157,8 @@ async def probe_model(
                 failures.append((prompt[:40], f"routed {task}, wanted {expected}"))
 
     return {
-        "model": model + (" [schema-pinned]" if schema else ""),
+        "model": model + (" [schema-pinned]" if schema else "")
+                       + (" [no-think]" if no_thinking else ""),
         "total": total,
         "parsed": parsed,
         "correct": correct,
@@ -236,13 +246,21 @@ async def amain() -> int:
     elif schema_only:
         arms = [ROUTER_SCHEMA]
 
+    # ⚠️ NOTHINK is the arm that matters for latency. `qwen3.5:4b` probed at a
+    # 4.8s MEDIAN for a 4-way classification (2026-08-15) — enormous for the hot
+    # path — and the qwen3.5 family declares `thinking`. Reasoning is not the
+    # product here; the label is.
+    nothink = os.environ.get("NOTHINK", "").strip() not in ("", "0")
+
     ollama = OllamaClient(base_url=base)
     print(f"probing {len(models)} candidate(s) × {len(arms)} arm(s) against "
-          f"{len(CASES)} cases × {rounds} round(s) at {base}\n")
+          f"{len(CASES)} cases × {rounds} round(s) at {base}"
+          f"{' [no-think]' if nothink else ''}\n")
     worst_ok = True
     for model in models:
         for schema in arms:
-            result = await probe_model(ollama, model, rounds, timeout_s, cfg, schema)
+            result = await probe_model(ollama, model, rounds, timeout_s, cfg,
+                                       schema, nothink)
             print(render(result, ceiling))
             print()
             worst_ok = worst_ok and result["parse_rate"] >= _PARSE_FLOOR

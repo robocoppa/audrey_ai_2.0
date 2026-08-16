@@ -149,6 +149,7 @@ async def router_classify(
     timeout_s: float,
     cfg: Any = None,
     response_format: dict[str, Any] | str | None = None,
+    no_thinking: bool = False,
 ) -> tuple[TaskType | None, float, str]:
     """Ask the router model. Returns (task | None, confidence, raw_body_or_error).
 
@@ -170,12 +171,24 @@ async def router_classify(
     JSON before, and a `format`-pinned structuring call in `deep_panel` has
     returned a 200 OK with zero bytes for what looks like that reason. Measure
     it on the actual candidate; do not assume the schema can only help.
+
+    `no_thinking` asks the model not to reason before answering. ⚠️ Also
+    defaults off, and also exists to be MEASURED first: `qwen3.5:4b` probed at a
+    **4.8s median** for a 4-way classification on 2026-08-15, which is enormous
+    for something on the hot path of every non-skipped turn, and the qwen3.5
+    family declares `thinking`. Reasoning about `code` vs `general` is not the
+    product here — the label is.
+
+    ⚠️ Never sent raw. `ollama.thinking_flag` returns `None` for a model that
+    does not declare `thinking`, and Ollama HARD ERRORS on the field rather than
+    ignoring it — a flat `False` would break every turn on such a model.
     """
     system_prompt = prompt_from_config(cfg, "classifier", _ROUTER_SYSTEM)
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_text[:2000]},  # hard cap; routing is cheap
     ]
+    think = await ollama.thinking_flag(router_model, False) if no_thinking else None
     try:
         resp = await ollama.chat(
             model=router_model,
@@ -183,6 +196,7 @@ async def router_classify(
             options={"temperature": 0.0},
             timeout_s=timeout_s,
             format=response_format,
+            think=think,
         )
     except OllamaError as e:
         return None, 0.0, f"ollama_error:{e}"

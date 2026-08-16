@@ -38,8 +38,7 @@ class TestItExercisesTheRealClassifier:
 
         seen: list[str] = []
 
-        async def _fake(ollama, *, router_model, user_text, timeout_s, cfg=None,
-                        response_format=None):
+        async def _fake(ollama, *, router_model, user_text, timeout_s, **_kw):
             seen.append(user_text)
             return "general", 0.97, '{"task":"general","confidence":0.97}'
 
@@ -122,8 +121,7 @@ class TestSchemaPinningIsOptOut:
         import audrey.pipeline.classify as classify
         from audrey.pipeline.classify import ROUTER_SCHEMA
 
-        async def _ok(ollama, *, router_model, user_text, timeout_s, cfg=None,
-                     response_format=None):
+        async def _ok(ollama, *, router_model, user_text, timeout_s, **_kw):
             return "general", 0.99, "{}"
 
         monkeypatch.setattr(classify, "router_classify", _ok)
@@ -131,6 +129,97 @@ class TestSchemaPinningIsOptOut:
         plain = asyncio.run(rp.probe_model(None, "m:1b", 1, 20.0, None, None))
         assert "schema-pinned" in pinned["model"]
         assert "schema-pinned" not in plain["model"]
+
+
+class TestNoThinkingIsGuardedNotRaw:
+    """⚠️ Ollama HARD ERRORS on `think` for a model that does not declare it.
+
+    A flat `False` would break every turn on such a model — `granite4.1:30b` is
+    one. `thinking_flag` returns None for those, and None means omit the field.
+    """
+
+    def test_it_defaults_off(self):
+        import inspect
+
+        from audrey.pipeline.classify import router_classify
+        assert inspect.signature(router_classify).parameters["no_thinking"].default is False
+
+    def test_off_never_touches_thinking_flag(self):
+        import asyncio
+
+        import audrey.pipeline.classify as classify
+
+        seen: dict = {}
+
+        class _Ollama:
+            async def thinking_flag(self, model, want):
+                raise AssertionError("must not be consulted when no_thinking is off")
+
+            async def chat(self, **kw):
+                seen.update(kw)
+                return {"message": {"content": '{"task":"code","confidence":0.9}'}}
+
+        asyncio.run(classify.router_classify(
+            _Ollama(), router_model="m:1b", user_text="hi", timeout_s=5,
+        ))
+        assert seen["think"] is None
+
+    def test_on_goes_through_the_capability_guard(self):
+        import asyncio
+
+        import audrey.pipeline.classify as classify
+
+        seen: dict = {}
+        asked: list = []
+
+        class _Ollama:
+            async def thinking_flag(self, model, want):
+                asked.append((model, want))
+                return want          # declares thinking
+
+            async def chat(self, **kw):
+                seen.update(kw)
+                return {"message": {"content": '{"task":"code","confidence":0.9}'}}
+
+        asyncio.run(classify.router_classify(
+            _Ollama(), router_model="m:1b", user_text="hi", timeout_s=5,
+            no_thinking=True,
+        ))
+        assert asked == [("m:1b", False)]
+        assert seen["think"] is False
+
+    def test_a_model_that_cannot_think_gets_the_field_omitted(self):
+        import asyncio
+
+        import audrey.pipeline.classify as classify
+
+        seen: dict = {}
+
+        class _Ollama:
+            async def thinking_flag(self, model, want):
+                return None          # does NOT declare thinking
+
+            async def chat(self, **kw):
+                seen.update(kw)
+                return {"message": {"content": '{"task":"code","confidence":0.9}'}}
+
+        asyncio.run(classify.router_classify(
+            _Ollama(), router_model="granite-ish:30b", user_text="hi", timeout_s=5,
+            no_thinking=True,
+        ))
+        assert seen["think"] is None, "a raw False here hard-errors on Ollama"
+
+    def test_the_probe_labels_the_nothink_arm(self, monkeypatch):
+        import asyncio
+
+        import audrey.pipeline.classify as classify
+
+        async def _ok(ollama, *, router_model, user_text, timeout_s, **_kw):
+            return "general", 0.99, "{}"
+
+        monkeypatch.setattr(classify, "router_classify", _ok)
+        r = asyncio.run(rp.probe_model(None, "m:1b", 1, 20.0, None, None, True))
+        assert "[no-think]" in r["model"]
 
 
 class TestCases:
@@ -168,8 +257,7 @@ class TestScoring:
 
         calls = {"n": 0}
 
-        async def _half(ollama, *, router_model, user_text, timeout_s, cfg=None,
-                        response_format=None):
+        async def _half(ollama, *, router_model, user_text, timeout_s, **_kw):
             calls["n"] += 1
             if calls["n"] % 2:
                 return None, 0.0, "parse_error:blah"
