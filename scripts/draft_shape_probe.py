@@ -1,40 +1,52 @@
 #!/usr/bin/env python3
-"""Why does this model's draft come back malformed? Two arms, same model.
+"""Does heavy thinking cost this model its output formatting? Two arms.
 
 WHY
 
 `nemotron-3.5-lightning` returned its `code-hard-lru-ttl` draft as bare,
-unfenced source on three consecutive eval runs while fencing every other draft
-it produced. The synthesizer repaired it each time, so every eval check passed
-and the artifact showed nothing but a slightly odd-looking draft.
+unfenced source on four consecutive eval runs, while fencing every one of its
+fourteen other drafts. The synthesizer repaired it each time, so every eval
+check passed and the artifact showed only a slightly odd-looking draft.
 
-The panel could not answer why, because a deep-panel worker is handed a
-PLANNER SUBTASK, not the user's question — `_messages_for_subtask` replaces the
-last user message outright. The original prompt for that case ends with:
+⚠️ FOUR EXPLANATIONS ARE ALREADY DEAD, killed by the `deep_panel: draft` log
+line on 2026-08-17 — do not re-open them:
 
-    Reply with a single complete Python code block using only the standard
-    library, defining the class exactly as named.
+  truncation      `done_reason=stop`. The model finished.
+  `_strip_think`  `think_stripped=0`. The stripper removed nothing.
+  the planner     `subtask=''`. The panel did not split, so the worker saw the
+                  original prompt — "Reply with a single complete Python code
+                  block" included — and disregarded it.
+  the renderer    `_HR_LINE` matches hyphens only; it cannot touch a fence.
 
-If the planner's decomposition drops that sentence, the model has been told
-nothing about fencing and an unfenced answer is CORRECT BEHAVIOUR. The rival
-explanation is a token cap truncating the reply, which `done_reason` settles.
-This probe separates the two without a panel in the way.
+What is left is a correlation. On the anomalous call nemotron logged
+`eval_count=6172` for `content_len=1053` — `chars_per_tok=0.17` against
+0.35–0.48 on its four clean calls in the same run. Roughly 5,900 of those
+6,172 tokens produced no text at all. They went to Ollama's separate
+`thinking` field, which `OllamaClient.chat` never returns, so the only trace
+is the ratio. **The one call that thought hardest is the one that lost its
+fence.** That is n=1 on the mechanism, however solid the case is at 4-for-4 —
+hence this probe.
 
 THE ARMS
 
-  full    — the case prompt verbatim, formatting instruction included
-  subtask — the same question with the trailing instruction sentence removed,
-            standing in for what a planner decomposition looks like
+  think-default — exactly what the deep panel sends: no `think` field at all
+  think-false   — the same prompt with thinking suppressed
 
-If `full` fences and `subtask` does not, the fencing is a prompt-content
-effect and the panel is losing the instruction. If NEITHER fences, it is the
-model. If drafts come back `done_reason=length`, it is neither and you are
-looking at a truncation.
+If `think-default` loses the fence and `think-false` keeps it, the mechanism
+is thinking, and the fix is a per-role knob rather than a prompt edit. If both
+lose it, thinking is a bystander and it is plain model behaviour on this
+prompt. If neither loses it, the panel is implicated after all and the next
+step is the panel's own message list.
 
-⚠️ ARM ORDER IS REVERSED HALFWAY (`--flip`, on by default). A first arm eats
-the model's cold load and gets its latency charged to the arm; this repo has
-credited that to the wrong variable three times. There is also one untimed
-warm-up call before anything is recorded.
+⚠️ THIS IS A PROBE, NOT A LICENCE. `think=false` is measured to be 2.7–7.4×
+faster AND to have bought a fabrication — see the standing warning against
+adding `think=` to deep-panel calls. Learning the mechanism here does not
+authorise turning thinking off in the panel.
+
+⚠️ ARM ORDER REVERSES HALFWAY (`FLIP`, on by default). A first arm eats the
+model's cold load and gets it charged to the arm; this repo has credited that
+to the wrong variable three times. One untimed warm-up runs before anything is
+recorded.
 
 HOW IT STAYS HONEST
 
@@ -51,6 +63,10 @@ USAGE
   CASES    cases file (default: eval_prompts_code_hard.json)
   N        runs per arm (default: 3)
   FLIP     1 to reverse arm order for the second half (default: 1)
+
+⚠️ Ollama REJECTS `think` for a model without the `thinking` capability rather
+than ignoring it, so the probe checks capabilities first and says so instead
+of reporting a whole dead arm as a result.
 
 Exit 1 when either arm produced an anomaly — a FINDING, not a failure.
 """
@@ -105,89 +121,116 @@ def _load_prompt() -> str:
     )
 
 
-def _strip_format_instruction(prompt: str) -> str:
-    """Drop the trailing 'Reply with…' sentence — the planner's likely loss.
+async def _one(client: OllamaClient, prompt: str, think: bool | None) -> dict:
+    """One call. `think=None` sends NO `think` field — what the panel does.
 
-    Deliberately crude: it removes the LAST sentence beginning with "Reply
-    with", which is how these case prompts carry their output-shape rule. If a
-    prompt has no such sentence the arms are identical, and the probe says so
-    rather than pretending it tested something.
+    ⚠️ The tri-state matters: `None` is not `False`. `OllamaClient.chat` omits
+    the field entirely on `None`, and that omission is the production arm.
+    Sending `think=False` is a different request, which is the whole point of
+    having two arms.
     """
-    marker = "Reply with"
-    idx = prompt.rfind(marker)
-    return prompt[:idx].rstrip() if idx != -1 else prompt
-
-
-async def _one(client: OllamaClient, prompt: str) -> dict:
     try:
         resp = await client.chat(
             model=MODEL,
             messages=[{"role": "user", "content": prompt}],
             timeout_s=360.0,
+            think=think,
         )
     except OllamaError as e:
         return {"error": str(e)[:200]}
     raw = (resp.get("message", {}) or {}).get("content", "") or ""
     stripped = _strip_think(raw)
+    evals = int(resp.get("eval_count", 0) or 0)
     return {
         "done_reason": str(resp.get("done_reason") or "?"),
-        "eval_count": int(resp.get("eval_count", 0) or 0),
+        "eval_count": evals,
         "raw_len": len(raw),
         "content_len": len(stripped),
+        # The signal that diagnosed this in the first place. Crude and only
+        # ever a comparator between arms of the SAME model — see the note on
+        # `_log_draft_shape`.
+        "chars_per_tok": round(len(stripped) / evals, 2) if evals else 0.0,
         "fences": stripped.count("```"),
         "anomaly": _fence_anomaly(stripped) or "none",
         "head": stripped.lstrip()[:60].replace("\n", "\\n"),
     }
 
 
+async def _thinking_capable(client: OllamaClient) -> bool:
+    """⚠️ Ollama REJECTS `think` for a model that lacks the capability.
+
+    Rather than ignoring it — so an unguarded `think=False` arm errors on every
+    call and reports as a finding when it is really a mis-run probe.
+    """
+    try:
+        caps = await client.capabilities(MODEL)
+    except Exception as e:  # noqa: BLE001 — a probe must not die on a capability read
+        print(f"⚠️  could not read capabilities for {MODEL}: {e}")
+        return False
+    return "thinking" in {str(c).lower() for c in (caps or [])}
+
+
 async def main() -> int:
     if not MODEL:
         raise SystemExit("MODEL is required")
-    full = _load_prompt()
-    subtask = _strip_format_instruction(full)
-    if subtask == full:
-        print("⚠️  prompt has no 'Reply with…' sentence — both arms are IDENTICAL, "
-              "so this run cannot separate prompt-content from model behaviour.")
-
-    arms = {"full": full, "subtask": subtask}
-    print(f"model={MODEL} case={CASE} n={N} flip={FLIP}")
-    print(f"full={len(full)} chars  subtask={len(subtask)} chars  "
-          f"(dropped {len(full) - len(subtask)})\n")
-
+    prompt = _load_prompt()
     client = OllamaClient(base_url=OLLAMA)
-    print("warm-up (untimed, discarded)…")
-    await _one(client, "Say OK.")
 
-    results: dict[str, list[dict]] = {"full": [], "subtask": []}
+    # `None` = send no `think` field, which is exactly what the deep panel does.
+    arms: dict[str, bool | None] = {"think-default": None}
+    if await _thinking_capable(client):
+        arms["think-false"] = False
+    else:
+        print(f"⚠️  {MODEL} reports no `thinking` capability — running the "
+              "default arm ONLY. Ollama would reject `think=false` outright, so "
+              "a second arm here would be all errors, not a result.")
+
+    print(f"model={MODEL} case={CASE} n={N} flip={FLIP} arms={list(arms)}")
+    print(f"prompt={len(prompt)} chars\n")
+
+    print("warm-up (untimed, discarded)…")
+    await _one(client, "Say OK.", None)
+
+    results: dict[str, list[dict]] = {arm: [] for arm in arms}
     order = list(arms)
     for i in range(N):
         # Reverse for the back half so neither arm always runs first.
         run_order = list(reversed(order)) if (FLIP and i >= N / 2) else order
         for arm in run_order:
-            r = await _one(client, arms[arm])
+            r = await _one(client, prompt, arms[arm])
             results[arm].append(r)
-            print(f"  [{i + 1}/{N}] {arm:8} {r}")
+            print(f"  [{i + 1}/{N}] {arm:14} {r}")
 
     print("\n─── summary ───")
     findings = False
     for arm, rows in results.items():
         ok = [r for r in rows if "error" not in r]
         if not ok:
-            print(f"{arm:8} all {len(rows)} calls errored")
+            print(f"{arm:14} all {len(rows)} calls errored: {rows[0].get('error', '')[:120]}")
             findings = True
             continue
         anomalies = [r["anomaly"] for r in ok if r["anomaly"] != "none"]
-        lengths = [r["done_reason"] for r in ok if r["done_reason"] == "length"]
-        print(f"{arm:8} fenced {sum(1 for r in ok if r['fences'] >= 2)}/{len(ok)}  "
+        lengths = [r for r in ok if r["done_reason"] == "length"]
+        ratios = [r["chars_per_tok"] for r in ok]
+        print(f"{arm:14} fenced {sum(1 for r in ok if r['fences'] >= 2)}/{len(ok)}  "
               f"anomalies {len(anomalies)}/{len(ok)} {set(anomalies) or ''}  "
-              f"done_reason=length {len(lengths)}/{len(ok)}")
+              f"done=length {len(lengths)}/{len(ok)}  "
+              f"chars_per_tok {min(ratios):.2f}–{max(ratios):.2f}")
         if anomalies or lengths:
             findings = True
 
-    print("\nRead it as: full fences and subtask does not → the panel is losing the "
-          "formatting instruction to `_messages_for_subtask`. Neither fences → the "
-          "model. done_reason=length anywhere → truncation, and the other two "
-          "readings do not apply.")
+    print(
+        "\nRead it as:\n"
+        "  default loses the fence, think-false keeps it → THINKING is the\n"
+        "    mechanism. The fix is a per-role knob, not a prompt edit — and\n"
+        "    note the standing warning: `think=false` bought a fabrication.\n"
+        "  BOTH lose it → thinking is a bystander; plain model behaviour on\n"
+        "    this prompt, and a lineup or prompt decision rather than a bug.\n"
+        "  NEITHER loses it → the panel is implicated after all, and the next\n"
+        "    place to look is the message list it actually sent.\n"
+        "⚠️ Truncation, `_strip_think`, the planner subtask and the renderer are\n"
+        "   ALL already eliminated (2026-08-17). Do not re-derive them."
+    )
     return 1 if findings else 0
 
 

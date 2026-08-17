@@ -259,6 +259,15 @@ def _draft_section_lines(drafts: list[dict], *, heading: str) -> list[str]:
         raw_len = int(d.get("raw_content_len") or 0)
         if raw_len and raw_len - len(content) > 32:
             meta.append(f"raw:{raw_len}→{len(content)}")
+        # ⚠️ The first cut of this sent the anomaly to the LOG ONLY, which left
+        # the artifact showing an oddly-formatted draft and still unable to say
+        # it was odd — the exact gap the diagnostic exists to close. Carried as
+        # a field rather than recomputed here: `banners` is a leaf module with
+        # no `audrey` imports, and reaching into `deep_panel` for one regex
+        # would point the dependency the wrong way.
+        anomaly = str(d.get("shape_anomaly") or "")
+        if anomaly:
+            meta.append(f"⚠ {anomaly}")
         head = f"{heading} {model}" + (" — " + " · ".join(meta) if meta else "")
         lines.append(head)
         lines.append("")

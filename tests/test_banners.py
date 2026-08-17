@@ -651,3 +651,25 @@ async def test_phase_ticker_skips_header_when_already_on_wire():
 
     assert BANNER_THINKING not in emitted   # header NOT re-emitted
     assert emitted == [" ✅\n"]             # only the closing mark
+
+
+def test_a_malformed_draft_says_so_in_its_heading():
+    """The gap the first cut of this diagnostic left open.
+
+    The anomaly went to the LOG only, so an artifact could show four fenced
+    drafts and one bare one with nothing marking which was which — and the
+    artifact is what actually gets read.
+    """
+    out = panel_drafts_block([
+        {"model": "m", "content": "from collections import OrderedDict\n",
+         "elapsed_s": 74.6, "shape_anomaly": "unfenced_code"},
+    ])
+    assert "⚠ unfenced_code" in out
+
+
+def test_a_clean_draft_carries_no_anomaly_marker():
+    out = panel_drafts_block([
+        {"model": "m", "content": "```python\nx = 1\n```", "elapsed_s": 1.0,
+         "shape_anomaly": ""},
+    ])
+    assert "⚠" not in out

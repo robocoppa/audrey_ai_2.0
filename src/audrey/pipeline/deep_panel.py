@@ -229,14 +229,26 @@ def _log_draft_shape(
     `think_stripped` is the count `_strip_think` removed. A large value on a
     short draft means the stripper ate the answer, not that the model was terse
     — and those two have identical content.
+
+    `chars_per_tok` is the one that diagnosed the 2026-08-17 unfenced draft.
+    Tokens billed to `eval_count` that never reach `message.content` went to
+    Ollama's separate `thinking` field, which `OllamaClient.chat` does not
+    return — so a heavily-thinking call is invisible except as a low ratio.
+    ⚠️ It is CRUDE (≈4 chars/token for English) and only ever a COMPARATOR:
+    read it against the same model's other calls in the same run, never as an
+    absolute. Nemotron logged 0.17 on the anomalous case against 0.35–0.48 on
+    its four clean ones — roughly 5,900 tokens of the 6,172 produced no text.
     """
     anomaly = _fence_anomaly(stripped)
+    chars_per_tok = (len(stripped) / eval_count) if eval_count > 0 else 0.0
     log_at = log.warning if (anomaly or done_reason == "length" or not stripped.strip()) else log.info
     log_at(
         "deep_panel: draft %s done_reason=%s eval_count=%d raw_len=%d "
-        "content_len=%d think_stripped=%d anomaly=%s elapsed=%.2fs subtask=%r",
+        "content_len=%d think_stripped=%d chars_per_tok=%.2f anomaly=%s "
+        "elapsed=%.2fs subtask=%r",
         model, done_reason or "?", eval_count, len(raw), len(stripped),
-        max(0, len(raw) - len(stripped)), anomaly or "none", elapsed, subtask[:160],
+        max(0, len(raw) - len(stripped)), chars_per_tok, anomaly or "none",
+        elapsed, subtask[:160],
     )
     return anomaly
 
@@ -298,7 +310,7 @@ async def _run_one_worker(
                 )
                 elapsed = round(time.monotonic() - start, 2)
                 stripped = _strip_think(react.content)
-                _log_draft_shape(
+                anomaly = _log_draft_shape(
                     model, raw=react.content, stripped=stripped,
                     done_reason=react.done_reason, eval_count=react.eval_count,
                     elapsed=elapsed, subtask=subtask,
@@ -313,6 +325,7 @@ async def _run_one_worker(
                     done_reason=react.done_reason,
                     raw_content_len=len(react.content),
                     subtask=subtask,
+                    shape_anomaly=anomaly,
                     tool_rounds=react.tool_rounds,
                     tool_calls=[
                         {"name": r.name, "elapsed_s": r.elapsed_s, "is_error": r.is_error}
@@ -335,7 +348,7 @@ async def _run_one_worker(
         eval_count = int(resp.get("eval_count", 0) or 0)
         done_reason = str(resp.get("done_reason") or "")
         health.record_success(model)
-        _log_draft_shape(
+        anomaly = _log_draft_shape(
             model, raw=content, stripped=stripped, done_reason=done_reason,
             eval_count=eval_count, elapsed=elapsed, subtask=subtask,
         )
@@ -348,6 +361,7 @@ async def _run_one_worker(
             done_reason=done_reason,
             raw_content_len=len(content),
             subtask=subtask,
+            shape_anomaly=anomaly,
             tool_rounds=0,
             tool_calls=[],
         )
