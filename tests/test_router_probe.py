@@ -222,6 +222,101 @@ class TestNoThinkingIsGuardedNotRaw:
         assert "[no-think]" in r["model"]
 
 
+class TestTheLiveConfigMatchesWhatWasProbed:
+    """The router settings are hot-path, so drift between config and evidence
+    has to be loud. Every number in the `router:` comment block came from
+    `scripts/router_probe.py` on 2026-08-16; these assert the settings those
+    numbers justified are still the settings in force.
+    """
+
+    def _router(self):
+        import yaml
+        return yaml.safe_load((_ROOT / "config.yaml").read_text())["router"]
+
+    def test_no_thinking_is_on(self):
+        # 4.75s -> 0.46s median. Turning this off silently gives back ~10x on
+        # every non-skipped turn.
+        assert self._router()["no_thinking"] is True
+
+    def test_schema_pinning_is_on(self):
+        assert self._router()["pin_schema"] is True
+
+    def test_the_router_model_is_the_probed_one(self):
+        assert self._router()["model"] == "qwen3.5:4b"
+
+    def test_the_router_is_not_a_cloud_model(self):
+        # It fires on every non-skipped turn; cloud credits are a hard budget.
+        assert "cloud" not in self._router()["model"]
+
+    def test_the_router_is_pulled_by_pull_models(self):
+        # A router that is not in the pull script is a phantom one deploy later.
+        script = (_SCRIPTS / "pull-models.sh").read_text()
+        assert self._router()["model"] in script
+
+
+class TestKnobsDefaultOffInCode:
+    """config.yaml says true; the function defaults say false. Deliberate.
+
+    A caller that forgets to thread `router_cfg` through gets the old, slower,
+    always-worked behaviour rather than a silently different one.
+    """
+
+    def test_classify_defaults_both_knobs_off(self):
+        import inspect
+
+        from audrey.pipeline.classify import classify
+        params = inspect.signature(classify).parameters
+        assert params["no_thinking"].default is False
+        assert params["pin_schema"].default is False
+
+    def test_the_config_values_actually_reach_router_classify(self):
+        import asyncio
+
+        import audrey.pipeline.classify as classify
+        from audrey.pipeline.classify import ROUTER_SCHEMA
+
+        seen: dict = {}
+
+        async def _spy(ollama, *, router_model, user_text, timeout_s, cfg=None,
+                       response_format=None, no_thinking=False):
+            seen.update(no_thinking=no_thinking, response_format=response_format)
+            return "general", 0.99, "{}"
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(classify, "router_classify", _spy)
+            asyncio.run(classify.classify_with_registry(
+                None,
+                user_text="a prompt long enough to get past the short-skip gate please",
+                messages=[{"role": "user", "content": "x"}],
+                router_cfg={"model": "m:1b", "no_thinking": True, "pin_schema": True},
+            ))
+        assert seen["no_thinking"] is True
+        assert seen["response_format"] is ROUTER_SCHEMA
+
+    def test_an_empty_router_cfg_sends_neither(self):
+        import asyncio
+
+        import audrey.pipeline.classify as classify
+
+        seen: dict = {}
+
+        async def _spy(ollama, *, router_model, user_text, timeout_s, cfg=None,
+                       response_format=None, no_thinking=False):
+            seen.update(no_thinking=no_thinking, response_format=response_format)
+            return "general", 0.99, "{}"
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(classify, "router_classify", _spy)
+            asyncio.run(classify.classify_with_registry(
+                None,
+                user_text="a prompt long enough to get past the short-skip gate please",
+                messages=[{"role": "user", "content": "x"}],
+                router_cfg={},
+            ))
+        assert seen["no_thinking"] is False
+        assert seen["response_format"] is None
+
+
 class TestCases:
     def test_every_case_expects_a_task_the_parser_accepts(self):
         from audrey.pipeline.classify import _VALID_TASKS

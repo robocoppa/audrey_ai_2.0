@@ -257,6 +257,8 @@ async def classify(
     tool_names: set[str] | None = None,
     skip_llm_under_tokens: int = 0,
     cfg: Any = None,
+    no_thinking: bool = False,
+    pin_schema: bool = False,
 ) -> tuple[TaskType, str, float]:
     """Classify with keyword short-circuit + router fallback.
 
@@ -299,6 +301,8 @@ async def classify(
         task, conf, info = await router_classify(
             ollama, router_model=router_model, user_text=user_text,
             timeout_s=router_timeout_s, cfg=cfg,
+            no_thinking=no_thinking,
+            response_format=ROUTER_SCHEMA if pin_schema else None,
         )
         if task is not None:
             return task, f"router:{task}", conf
@@ -351,6 +355,11 @@ async def classify_with_registry(
         tool_names=tool_names,
         skip_llm_under_tokens=int(router_cfg.get("skip_llm_under_tokens", 0)),
         cfg=cfg,
+        # Both default TRUE in `config.yaml` but FALSE here, so a caller that
+        # forgets to pass `router_cfg` gets the old, slower, always-worked
+        # behaviour rather than a silently different one.
+        no_thinking=bool(router_cfg.get("no_thinking", False)),
+        pin_schema=bool(router_cfg.get("pin_schema", False)),
     )
 
     # A `vl` verdict with no image anywhere in the conversation is always
