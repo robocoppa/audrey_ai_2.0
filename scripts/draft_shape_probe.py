@@ -56,7 +56,11 @@ detector can pass while production fails.
 
 USAGE
 
-  scripts/probe-onbox.sh draft_shape_probe.py MODEL=nemotron-3.5-lightning:latest
+  scripts/probe-onbox.sh draft_shape_probe.py MODEL=nemotron-3.5-lightning:latest \
+      N=5 COPY=eval_prompts_code_hard.json
+
+⚠️ `COPY=` is not optional. The repo is not mounted into `audrey-ai`, so the
+cases file is absent without it and the probe exits before calling anything.
 
   MODEL    required — the model to probe
   CASE     eval case name (default: code-hard-lru-ttl)
@@ -103,10 +107,14 @@ def _load_prompt() -> str:
     """
     if os.environ.get("PROMPT"):
         return os.environ["PROMPT"]
-    # `/tmp` first: that is where `docker cp` lands it, and this is a read of a
-    # file the operator just placed there by hand, not a temp file we create.
-    searched = [Path("/tmp") / CASES, Path("/eval") / CASES,  # noqa: S108
-                Path("/app/scripts") / CASES, Path(__file__).resolve().parent / CASES]
+    # `/tmp` first: that is where `probe-onbox.sh COPY=` lands it. Deduped
+    # because the probe itself is copied to /tmp, so `__file__`'s parent IS
+    # /tmp on the box and the failure message listed the same path twice.
+    searched: list[Path] = []
+    for p in (Path("/tmp") / CASES, Path("/eval") / CASES,  # noqa: S108
+              Path("/app/scripts") / CASES, Path(__file__).resolve().parent / CASES):
+        if p not in searched:
+            searched.append(p)
     for p in searched:
         if p.exists():
             for case in json.loads(p.read_text()):
@@ -115,8 +123,7 @@ def _load_prompt() -> str:
             raise SystemExit(f"{p} has no case named {CASE!r}")
     raise SystemExit(
         f"{CASES} not found. Looked in: {', '.join(str(p) for p in searched)}\n"
-        f"▶ Copy it in first, from the repo on the box:\n"
-        f"    docker cp scripts/{CASES} audrey-ai:/tmp/{CASES}\n"
+        f"▶ The wrapper can bring it: add COPY={CASES} to the probe-onbox.sh line.\n"
         f"▶ Or pass the text directly:  PROMPT='...'"
     )
 

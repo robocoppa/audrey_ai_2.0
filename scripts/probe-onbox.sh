@@ -35,8 +35,17 @@
 #   scripts/probe-onbox.sh check_model_inventory.py \
 #       ARGS='--config /app/config.yaml --tags-url http://ollama:11434'
 #
-# Trailing KEY=VALUE pairs become environment for the probe. `ARGS=` is special:
-# its contents are passed as command-line flags instead.
+#   scripts/probe-onbox.sh draft_shape_probe.py MODEL=nemotron-3.5-lightning:latest \
+#       COPY=eval_prompts_code_hard.json
+#
+# Trailing KEY=VALUE pairs become environment for the probe. Two are special:
+# `ARGS=` contents are passed as command-line flags instead, and `COPY=` is a
+# comma-separated list of extra files (resolved against scripts/) copied into
+# /tmp alongside the probe.
+#
+# ⚠️ **A probe that reads a data file needs `COPY=`.** The repo is not mounted,
+# so the file is simply absent however right the path looks — and the probe
+# then exits 1, which this wrapper reports as a FINDING rather than a mis-run.
 #
 #   FOREGROUND=1 scripts/probe-onbox.sh …   # do not detach (for debugging)
 #
@@ -89,11 +98,19 @@ mkdir -p "${OUT_DIR}"
 # ── split trailing KEY=VALUE pairs into env, and pull ARGS= out ──────────────
 ENV_FLAGS=()
 PROBE_ARGS=""
+COPY_LIST=""
 for kv in "$@"; do
   case "${kv}" in
     ARGS=*) PROBE_ARGS="${kv#ARGS=}" ;;
+    # ⚠️ COPY= exists because the repo is NOT mounted into the container, so a
+    # probe that reads a data file (an eval cases JSON, a fixture) finds
+    # nothing however correct its path is. Copying only the .py was a silent
+    # trap: the probe ran, failed on a missing file, and exited 1 — which this
+    # wrapper reports as a FINDING. Comma-separated, resolved against
+    # scripts/, landing in /tmp under the same basename.
+    COPY=*) COPY_LIST="${kv#COPY=}" ;;
     *=*)    ENV_FLAGS+=("-e" "${kv}") ;;
-    *)      echo "WARN: ignoring '${kv}' — expected KEY=VALUE or ARGS='…'" >&2 ;;
+    *)      echo "WARN: ignoring '${kv}' — expected KEY=VALUE, COPY=… or ARGS='…'" >&2 ;;
   esac
 done
 
@@ -112,11 +129,36 @@ if ! docker cp "${PROBE_PATH}" "${CONTAINER}:${IN_CONTAINER}"; then
   exit 2
 fi
 
+# Any data files the probe needs, alongside it. Failing here is fatal on
+# purpose: a probe missing its input produces a confident empty result, and
+# this wrapper's exit code cannot tell that from a real finding.
+COPIED_EXTRAS=()
+if [[ -n "${COPY_LIST}" ]]; then
+  IFS=',' read -ra _extras <<< "${COPY_LIST}"
+  for f in "${_extras[@]}"; do
+    f="${f# }"; f="${f% }"
+    [[ -z "${f}" ]] && continue
+    src="${f}"
+    [[ -f "${src}" ]] || src="${APPDATA}/scripts/${f}"
+    if [[ ! -f "${src}" ]]; then
+      echo "ERROR: COPY file not found: ${f} (tried '${f}' and '${APPDATA}/scripts/${f}')" >&2
+      exit 2
+    fi
+    dest="/tmp/$(basename "${src}")"
+    if ! docker cp "${src}" "${CONTAINER}:${dest}"; then
+      echo "ERROR: could not copy ${src} into ${CONTAINER}" >&2
+      exit 2
+    fi
+    COPIED_EXTRAS+=("${dest}")
+    echo ">> copied  : ${src} -> ${dest}"
+  done
+fi
+
 # shellcheck disable=SC2086 — PROBE_ARGS is a deliberate word-split flag string
 docker exec "${ENV_FLAGS[@]}" "${CONTAINER}" python3 "${IN_CONTAINER}" ${PROBE_ARGS}
 rc=$?
 
-docker exec "${CONTAINER}" rm -f "${IN_CONTAINER}" 2>/dev/null || true
+docker exec "${CONTAINER}" rm -f "${IN_CONTAINER}" "${COPIED_EXTRAS[@]}" 2>/dev/null || true
 
 echo
 echo ">> finished: $(date)"
