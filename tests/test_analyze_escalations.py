@@ -234,9 +234,10 @@ class TestConfigReading:
 
         The synthesizer is `glm-5.2:cloud` too, so the unit of spend was already
         three. Pinned against the LIVE config so a pool edit surfaces here rather
-        than quietly changing what an escalation costs — which is exactly what
-        happened on 2026-08-15, when `minimax-m3:cloud` joined `code` and this
-        test failed with `(4, 5) != (3, 4)`. That is the guard working; update
+        than quietly changing what an escalation costs. It has now caught the
+        change in both directions: `minimax-m3:cloud` joining `code` on
+        2026-08-15 (`(4, 5) != (3, 4)`), and leaving again on 2026-08-16, which
+        put `code` back on the house shape. That is the guard working; update
         the number deliberately, never by loosening the assert.
         """
         raw = ae.read_config(_ROOT / "config.yaml")
@@ -244,16 +245,20 @@ class TestConfigReading:
         expected = {
             "general": (3, 4),
             "reasoning": (3, 4),
-            "code": (4, 5),      # 3 cloud workers + cloud synth (2026-08-15)
+            # 2 cloud workers + cloud synth — same as the other two since
+            # minimax-m3 came out of the pool on 2026-08-16.
+            "code": (3, 4),
         }
         for task, want in expected.items():
             got = ae.panel_cost("deep_panel", task, pools, locations)
             assert got == want, f"{task} pool changed shape: {got} != {want}"
 
-    def test_the_code_pool_is_exactly_at_the_cloud_worker_cap(self):
+    def test_no_deep_panel_pool_exceeds_the_cloud_worker_cap(self):
         # `_healthy_workers` drops cloud workers past `max_deep_workers_cloud`
-        # with NO log line, so a fifth entry here would be dead config that
-        # looks live. This test is the thing that notices.
+        # with NO log line, so an extra entry would be dead config that looks
+        # live. `code` sat exactly ON the cap from 2026-08-15 until minimax-m3
+        # came out; there is one slot of headroom now. This test is the thing
+        # that notices either way.
         raw = ae.read_config(_ROOT / "config.yaml")
         cap = int(((raw.get("agentic") or {}).get("max_deep_workers_cloud")) or 3)
         workers = raw["deep_panel"]["code"]["workers"]

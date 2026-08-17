@@ -16,13 +16,14 @@ LOCAL_MODELS=(
   # 2026-08-15: replaced qwen3.6:35b, qwen3-coder-next:latest and
   # qwen2.5-coder:32b across every text role (code, reasoning, general).
   "qwen3.8:latest"
+  # Second local workers for the audrey_local panels (2026-08-16). devstral is
+  # the code pool's, qwen3.5:35b-a3b serves reasoning + general. Both replaced
+  # names that sat in config for weeks without ever being pulled.
   "qwen3.5:35b-a3b"
   "devstral-small-2:latest"
   "llama4:latest"
   "nemotron-cascade-2:latest"
-  "olmo-3.1:32b"
   "glm-4.7-flash:q8_0"
-  "deepseek-r1:32b"
   "qwen3-vl:32b"
   "llava:34b"
   "gemma4:31b"
@@ -35,9 +36,11 @@ CLOUD_MODELS=(
   "qwen3.5:397b-cloud"
   "deepseek-v3.2:cloud"
   "deepseek-v4-flash:cloud"
-  "cogito-2.1:671b-cloud"
   "nemotron-3-super:cloud"
-  "minimax-m2.7:cloud"
+  # ⚠️ config names `minimax-m3:cloud`; this list said `minimax-m2.7:cloud`
+  # until 2026-08-16, so the model config actually dispatches was never
+  # registered by this script. A cloud pull only registers a name — cheap.
+  "minimax-m3:cloud"
   "glm-5.1:cloud"
 )
 

@@ -335,6 +335,33 @@ def test_committed_config_deep_panel_models_are_registered():
                 assert name in registry_names, f"{pool_key}/{task}: {name!r} not in registry"
 
 
+def test_no_flat_panel_is_degenerate():
+    """A panel needs two DISTINCT workers or it is worse than not panelling.
+
+    `deep_panel_local.code` spent a day in the state this catches: one worker,
+    synthesised by that same model, so it drafted once and then "merged" its own
+    single draft — strictly more latency than answering directly, for nothing.
+    Nothing complained, because a one-worker pool is structurally valid; the
+    validator only checks that names resolve.
+
+    It arrived by substitution rather than by anyone choosing it — two distinct
+    workers both got renamed to `qwen3.8:latest` in the same edit and collapsed
+    into one. That is why this asserts on DISTINCT names rather than on list
+    length: the length never changed.
+    """
+    raw = _load_yaml(_REPO_ROOT / "config.yaml")
+    for pool_key in (k for k in raw if k.startswith("deep_panel")):
+        for task, body in raw[pool_key].items():
+            workers = body.get("workers")
+            if not workers:  # staged audrey_research shape has researchers
+                continue
+            assert len(set(workers)) >= 2, (
+                f"{pool_key}/{task}: {workers} collapses to "
+                f"{len(set(workers))} distinct worker(s) — a panel that "
+                "synthesises a single draft is slower than answering directly"
+            )
+
+
 # ─── pool_key_for warning ──────────────────────────────────────────────
 
 def test_pool_key_for_known_virtual_model_returns_pool_silently(caplog):

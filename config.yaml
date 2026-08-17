@@ -73,16 +73,22 @@ model_registry:
     # It takes the lead local slot at 100. ⚠️ `speed`/`quality` are inherited
     # from the code specialist it replaced and are UNMEASURED for 3.8 — they are
     # planner hints only, but do not quote them as if they were probed.
+    # ⚠️ 2026-08-16: `granite4.1:30b` and `cogito-2.1:671b-cloud` REMOVED — both
+    # were named here but never pulled, so both were dud slots that cost a
+    # GPU-gate turn before degrading. Standing rule: not pulled means gone.
+    # `devstral-small-2:latest` takes the second local slot — it IS pulled, and
+    # it is the only other local model on the box built for code.
     - { name: "qwen3.8:latest",           priority: 100, speed: 60, quality: 95, location: local }
     - { name: "minimax-m3:cloud",         priority:  98, speed: 85, quality: 96, location: cloud }
-    - { name: "granite4.1:30b",           priority:  82, speed: 80, quality: 86, location: local }
-    - { name: "deepseek-v4-pro:cloud",    priority:  82, speed: 80, quality: 95, location: cloud }
     - { name: "kimi-k2.7-code:cloud",     priority:  92, speed: 90, quality: 94, location: cloud }
     - { name: "glm-5.2:cloud",            priority:  88, speed: 90, quality: 91, location: cloud }
+    # ⚠️ speed/quality are UNMEASURED placeholders — planner hints only, and
+    # deliberately conservative. Do not quote them as if they were probed.
+    - { name: "devstral-small-2:latest",  priority:  84, speed: 80, quality: 85, location: local }
+    - { name: "deepseek-v4-pro:cloud",    priority:  82, speed: 80, quality: 95, location: cloud }
     - { name: "kimi-k2.6:cloud",          priority:  78, speed: 90, quality: 92, location: cloud }
     - { name: "deepseek-v4-flash:cloud",  priority:  72, speed: 92, quality: 90, location: cloud }
     - { name: "deepseek-v3.2:cloud",      priority:  70, speed: 85, quality: 90, location: cloud }
-    - { name: "cogito-2.1:671b-cloud",    priority:  65, speed: 80, quality: 93, location: cloud }
 
   reasoning:
     # Ranked by the quality column, not by locality: the local entry led this
@@ -95,8 +101,13 @@ model_registry:
     - { name: "kimi-k2.6:cloud",          priority:  96, speed: 90, quality: 94, location: cloud }
     - { name: "qwen3.8:latest",           priority:  94, speed: 70, quality: 93, location: local }
     - { name: "kimi-k2.7-code:cloud",     priority:  88, speed: 90, quality: 93, location: cloud }
-    - { name: "deepseek-r1:32b",          priority:  85, speed: 65, quality: 90, location: local }
-    - { name: "cogito-2.1:671b-cloud",    priority:  75, speed: 80, quality: 93, location: cloud }
+    # ⚠️ 2026-08-16: `deepseek-r1:32b` (85, local) and `cogito-2.1:671b-cloud`
+    # (75) REMOVED — neither was pulled. deepseek-r1 was the FIRST-LISTED worker
+    # of two `audrey_local` pools, i.e. the de-facto primary, and it never
+    # existed. `qwen3.5:35b-a3b` replaces it as the second local: a 35B MoE with
+    # ~3B active, which matters because local workers serialize through the GPU
+    # gate. ⚠️ speed/quality UNMEASURED — planner hints only.
+    - { name: "qwen3.5:35b-a3b",          priority:  85, speed: 82, quality: 89, location: local }
     - { name: "nemotron-3-super:cloud",   priority:  70, speed: 85, quality: 90, location: cloud }
 
   general:
@@ -107,8 +118,10 @@ model_registry:
     - { name: "kimi-k2.7-code:cloud",     priority:  88, speed: 90, quality: 92, location: cloud }
     - { name: "qwen3.5:397b-cloud",       priority:  90, speed: 80, quality: 94, location: cloud }
     - { name: "deepseek-v4-flash:cloud",  priority:  82, speed: 92, quality: 89, location: cloud }
+    # ⚠️ 2026-08-16: `olmo-3.1:32b` (70, local) REMOVED — never pulled.
+    # `qwen3.5:35b-a3b` takes the second local slot here too.
+    - { name: "qwen3.5:35b-a3b",          priority:  84, speed: 82, quality: 89, location: local }
     - { name: "glm-4.7-flash:q8_0",       priority:  80, speed: 85, quality: 87, location: local }
-    - { name: "olmo-3.1:32b",             priority:  70, speed: 75, quality: 85, location: local }
     - { name: "llama4:latest",            priority:  65, speed: 55, quality: 90, location: local }
     - { name: "glm-5.2:cloud",            priority:  62, speed: 90, quality: 88, location: cloud }
 
@@ -151,13 +164,14 @@ fast_path:
   # run-to-run variance disappears too.
   #
   # ⚠️ Not a flat flag — sending `think` to a model that does not declare
-  # `thinking` is a HARD ERROR. `granite4.1:30b` does not declare it; the two
-  # others that did not (`qwen2.5-coder:32b`, `qwen3-coder-next:latest`) were
-  # replaced by `qwen3.8:latest` on 2026-08-15 and **whether 3.8 declares
-  # `thinking` is UNVERIFIED** (`ollama show qwen3.8:latest`). The code asks
-  # Ollama once per model and omits the field for those that do not, so this is
-  # safe to leave on while the list changes — that indirection is what makes the
-  # unknown tolerable, not knowledge of the answer.
+  # `thinking` is a HARD ERROR. Three models in this list have historically
+  # lacked it (`granite4.1:30b`, `qwen2.5-coder:32b`, `qwen3-coder-next:latest`);
+  # all three are now gone from the config, but do not read that as "the problem
+  # is retired". The code asks Ollama once per model and omits the field for
+  # those that do not declare it, so this is safe to leave on while the list
+  # changes — that indirection is what makes the unknown tolerable, not
+  # knowledge of the answer. `tests/test_fast_path.py` still pins the behaviour
+  # against the historical names on purpose.
   #
   # ⚠️ Measured on ONE of the fourteen. The role argument does not depend on
   # the model — a waiting user pays for reasoning in latency either way — but
@@ -170,15 +184,16 @@ fast_path:
     # ✅ `ollama show qwen3.8:latest` declares `tools` (2026-08-15), so its place
     # in this list is verified capability, not assumption. It also declares
     # `thinking` and `vision` — see `vision.also_capable` for the second one.
+    # ⚠️ 2026-08-16: `granite4.1:30b` and `cogito-2.1:671b-cloud` removed — not
+    # pulled. A phantom here is worse than a phantom in a pool: this list gates
+    # whether the fast path runs the TOOL loop at all.
     - "qwen3.8:latest"
     - "kimi-k2.7-code:cloud"
     - "kimi-k2.6:cloud"
-    - "granite4.1:30b"
     - "deepseek-v4-pro:cloud"
     - "deepseek-v4-flash:cloud"
     - "deepseek-v3.2:cloud"
     - "qwen3.5:397b-cloud"
-    - "cogito-2.1:671b-cloud"
     - "nemotron-3-super:cloud"
     - "minimax-m3:cloud"
     - "glm-5.2:cloud"
@@ -192,20 +207,17 @@ fast_path:
 # VRAM on the host fits one local model at a time (GPU_CONCURRENCY=1).
 deep_panel:
   code:
-    # ⚠️ THREE cloud workers here, not two — `code` is the exception to the
-    # header above. `minimax-m3:cloud` was added 2026-08-15: at quality 96 it is
-    # the highest-rated entry in `model_registry.code` and was going unused, and
-    # it is a fourth vendor (qwen / moonshot / deepseek / minimax), which is the
-    # diversity argument this panel is built on.
-    # ⚠️⚠️ THIS POOL IS NOW EXACTLY AT `max_deep_workers_cloud` (3, pinned by
-    # MAX_DEEP_WORKERS_CLOUD in .env). A FOURTH cloud worker added here would be
+    # 2026-08-16: back to the house shape — one local + TWO cloud. `minimax-m3`
+    # was added the day before as a third cloud worker; it is out again, so
+    # `qwen3.8:latest` carries the local draft and the panel costs THREE cloud
+    # calls (2 workers + the cloud synth) rather than four. Cloud credits are a
+    # hard budget — see `scripts/analyze_escalations.py` for what escalation
+    # multiplies that by.
+    # ⚠️ That also takes the pool back OFF `max_deep_workers_cloud` (3, pinned
+    # by MAX_DEEP_WORKERS_CLOUD in .env). At the cap, a further cloud worker is
     # dropped by `_healthy_workers` with NO log line — dead config that looks
-    # live. Raise the cap first, or do not add one.
-    # ⚠️ Cost: a code panel is now FOUR cloud calls (3 workers + the cloud
-    # synth), up from three. Cloud credits are a hard budget — see
-    # `scripts/analyze_escalations.py` for what escalation multiplies that by.
-    workers: ["qwen3.8:latest", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud",
-              "minimax-m3:cloud"]
+    # live. There is one slot of headroom now; adding two needs the cap raised.
+    workers: ["qwen3.8:latest", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud"]
     # glm-5.2 (cloud) primary synth: skips the local cold-load a LOCAL synth
     # incurs (synth can't co-reside in VRAM with a local worker under
     # GPU_CONCURRENCY=1, so it has to load AFTER the worker unloads). Measured
@@ -258,32 +270,31 @@ deep_panel_cloud:
 # ─── Deep panel: local-only (audrey_local) ─────────────────────────────
 # Both workers serialize through GpuGate (GPU_CONCURRENCY=1) — no parallelism.
 # Worker ORDER matters here: the first-listed worker runs first (and loads
-# cold first), so it's the de-facto primary. reasoning + general lead with
-# deepseek-r1:32b, then the local general model (qwen3.6:35b when this was
-# written; qwen3.8:latest since 2026-08-15). (Dropped glm-4.7-flash:q8_0 from general:
-# it was hitting the 240s deep_worker ReadTimeout — too slow to cold-load +
-# generate when it ran second behind qwen3.6 through the single GPU.)
+# cold first), so it's the de-facto primary. (Dropped glm-4.7-flash:q8_0 from
+# general: it was hitting the 240s deep_worker ReadTimeout — too slow to
+# cold-load + generate when it ran second behind another model through the
+# single GPU. ⚠️ Watch for the same on the new second workers; a pool that
+# times out on its first worker looks identical to a slow pool.)
 deep_panel_local:
+  # ⚠️ REPAIRED 2026-08-16. All three text pools were broken, two of them
+  # invisibly: `code` had collapsed to a single worker synthesising its own only
+  # draft (strictly worse than answering directly), and `reasoning`/`general`
+  # led with `deepseek-r1:32b` — a model that was never pulled, so the de-facto
+  # primary of both pools burned a GPU-gate slot and degraded on every request.
+  # Second workers are now models that are actually on the box.
+  # ⚠️ qwen3.8 is deliberately LAST in each pool because it is also the
+  # synthesizer: under GPU_CONCURRENCY=1 the synth cannot co-reside with a
+  # worker, so running it last leaves it resident and skips one cold load.
   code:
-    # ⚠️⚠️ DEGENERATE AND DELIBERATE (2026-08-15). This pool held
-    # [qwen3-coder-next:latest, qwen2.5-coder:32b]; both became qwen3.8:latest,
-    # so it collapses to ONE worker whose synthesizer is the SAME model — 3.8
-    # drafts once, then merges its own single draft. That is strictly worse than
-    # answering directly, and it is the only `audrey_local` pool in that state.
-    # ▶ A repair needs a SECOND LOCAL MODEL THAT ACTUALLY EXISTS.
-    # ⚠️ `granite4.1:30b` is NOT pulled on the box (checked 2026-08-15) despite
-    # sitting in `model_registry.code` and `tool_capable_models` — so naming it
-    # here would swap a degenerate pool for a dead one. Same for
-    # `deepseek-r1:32b` and `olmo-3.1:32b`. Pull one first, or leave this as is.
-    workers: ["qwen3.8:latest"]
+    workers: ["devstral-small-2:latest", "qwen3.8:latest"]
     synthesizer: "qwen3.8:latest"
     fallback_synth: "qwen3.8:latest"
   reasoning:
-    workers: ["deepseek-r1:32b", "qwen3.8:latest"]
+    workers: ["qwen3.5:35b-a3b", "qwen3.8:latest"]
     synthesizer: "qwen3.8:latest"
     fallback_synth: "qwen3.8:latest"
   general:
-    workers: ["deepseek-r1:32b", "qwen3.8:latest"]
+    workers: ["qwen3.5:35b-a3b", "qwen3.8:latest"]
     synthesizer: "qwen3.8:latest"
     fallback_synth: "qwen3.8:latest"
   vl:
@@ -1306,21 +1317,22 @@ passthrough:
     - muse-glimmer:latest
     # One entry where there were three (qwen3.6:35b, qwen3-coder-next:latest,
     # qwen2.5-coder:32b) — deduped 2026-08-15.
+    # ⚠️ 2026-08-16: granite4.1:30b, cogito-2.1:671b-cloud, deepseek-r1:32b and
+    # olmo-3.1:32b removed — none were pulled. Here a phantom is quieter still:
+    # it is offered to OWUI as a selectable model and only fails when picked.
     - qwen3.8:latest
     - minimax-m3:cloud
-    - granite4.1:30b
+    - devstral-small-2:latest
+    - qwen3.5:35b-a3b
     - deepseek-v4-pro:cloud
     - kimi-k2.7-code:cloud
     - glm-5.2:cloud
     - kimi-k2.6:cloud
     - deepseek-v4-flash:cloud
     - deepseek-v3.2:cloud
-    - cogito-2.1:671b-cloud
-    - deepseek-r1:32b
     - nemotron-3-super:cloud
     - qwen3.5:397b-cloud
     - glm-4.7-flash:q8_0
-    - olmo-3.1:32b
     - llama4:latest
     # Vision-language pool, exposed so an image-capable model can be targeted
     # directly. Batch image work (Phase 36 media-worker keyframe description)

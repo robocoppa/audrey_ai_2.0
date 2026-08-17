@@ -54,9 +54,12 @@ async def _think(ollama: Any, model: str, no_thinking: bool) -> bool | None:
     ## Why it asks first
 
     ⚠️ **Sending `think` to a model that does not declare `thinking` is a hard
-    error**, and **3 of the 14 `fast_path.tool_capable_models` do not declare
-    it** — `granite4.1:30b`, `qwen2.5-coder:32b`, `qwen3-coder-next:latest`. A
-    flat `False` here breaks every chat turn that lands on one of those. The
+    error.** Three models that have sat in `fast_path.tool_capable_models` did
+    not declare it — `granite4.1:30b`, `qwen2.5-coder:32b`,
+    `qwen3-coder-next:latest`. All three are out of the config as of
+    2026-08-16, but the hazard is a property of Ollama, not of those names: a
+    flat `False` here breaks every chat turn that lands on the next such
+    model, and the list changes faster than this docstring. The
     lookup is cached per model in `OllamaClient.thinking_flag`, so it is one
     `/api/show` per model per process, not one per request.
     """
