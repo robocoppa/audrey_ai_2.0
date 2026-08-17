@@ -62,10 +62,26 @@ def test_no_passthrough_block_is_not_an_error():
     assert _CANDIDATE not in {s for places in uses.values() for s, _ in places}
 
 
-def test_the_real_config_lists_the_bakeoff_models_as_candidates():
-    """⚠️ Reads the repo's config.yaml, so it fails if a bake-off model is
-    promoted into a role — which is the correct moment to revisit this."""
+def test_the_bakeoff_models_now_hold_reasoning_is_the_product_roles():
+    """This test used to assert both bake-off models were candidates only, with
+    a docstring saying it would fail "if a bake-off model is promoted into a
+    role — which is the correct moment to revisit this". Both were promoted on
+    2026-08-16, so this is that moment.
+
+    ⚠️ **The promotion carries a live risk and this is the place it is written
+    down.** The passthrough probe recorded `nemotron-3.5-lightning` returning
+    9149c of thinking and **0c of content** with thinking omitted, and the same
+    at `think=true`; only `think=false` produced text, and that is the arm the
+    local bake-off caught fabricating. Both models are now deep-panel workers,
+    where `run_react` leaves `think` at `None` — the omitted arm.
+
+    The stance is what makes that tolerable rather than reckless:
+    `reasoning-is-the-product` is exactly the group that must NEVER be given
+    `think=false`, so the fabricating arm is off the table by policy. The
+    empty-content risk is real and rests on the panel setting no `num_predict`
+    cap, unlike the 2,048 the probe used.
+    """
     cfg = thinking_audit._load(thinking_audit._find_config())
     uses = thinking_audit._collect(cfg)
     for m in ("nemotron-3.5-lightning:latest", "muse-glimmer:latest"):
-        assert _stances(uses, m) == {_CANDIDATE}, m
+        assert _stances(uses, m) == {"reasoning-is-the-product"}, m

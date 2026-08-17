@@ -88,12 +88,12 @@ nohup env CASES=eval_prompts_local_models.json LABEL=local-bakeoff \
 
 # coding lineup
 nohup env CASES=eval_prompts_code_models.json LABEL=code-sweep \
-  MODELS='audrey_passthrough/qwen3.8:latest,audrey_passthrough/devstral-small-2:latest,audrey_passthrough/kimi-k2.7-code:cloud,audrey_passthrough/deepseek-v4-pro:cloud,audrey_passthrough/minimax-m3:cloud' \
+  MODELS='audrey_passthrough/qwen3.8:latest,audrey_passthrough/nemotron-3.5-lightning:latest,audrey_passthrough/kimi-k2.7-code:cloud,audrey_passthrough/deepseek-v4-pro:cloud,audrey_passthrough/minimax-m3:cloud' \
   scripts/eval-onbox.sh > testing-out/last-code-sweep.log 2>&1 &
 
 # general lineup A-B
 nohup env CASES=eval_prompts_models_ab.json LABEL=models-ab \
-  MODELS='audrey_passthrough/qwen3.8:latest,audrey_passthrough/qwen3.5:35b-a3b,audrey_passthrough/deepseek-v4-pro:cloud,audrey_passthrough/kimi-k2.6:cloud,audrey_passthrough/glm-5.2:cloud' \
+  MODELS='audrey_passthrough/qwen3.8:latest,audrey_passthrough/muse-glimmer:latest,audrey_passthrough/deepseek-v4-pro:cloud,audrey_passthrough/kimi-k2.6:cloud,audrey_passthrough/glm-5.2:cloud' \
   scripts/eval-onbox.sh > testing-out/last-models-ab-run.log 2>&1 &
 
 # virtual-model A-B (task role on vs off)

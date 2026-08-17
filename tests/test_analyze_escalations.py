@@ -245,9 +245,15 @@ class TestConfigReading:
         expected = {
             "general": (3, 4),
             "reasoning": (3, 4),
-            # 2 cloud workers + cloud synth — same as the other two since
-            # minimax-m3 came out of the pool on 2026-08-16.
-            "code": (3, 4),
+            # (cloud, total) — `code` is the expensive pool and deliberately so.
+            # Final 2026-08-16 lineup: ONE local worker
+            # (`nemotron-3.5-lightning`) + THREE cloud (`kimi-k2.7-code`,
+            # `deepseek-v4-pro`, `minimax-m3`) + the cloud synth = 4 cloud calls
+            # of 5 total. `qwen3.8:latest` is off this pool entirely.
+            # ⚠️ This is the MOST expensive fast-path escalation there is: a
+            # third more cloud spend per panel than `general` or `reasoning`,
+            # and it sits exactly ON `max_deep_workers_cloud`.
+            "code": (4, 5),
         }
         for task, want in expected.items():
             got = ae.panel_cost("deep_panel", task, pools, locations)

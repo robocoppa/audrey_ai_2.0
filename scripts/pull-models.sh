@@ -7,6 +7,16 @@ set -euo pipefail
 
 OLLAMA_HOST="${OLLAMA_HOST:-http://localhost:11434}"
 
+# ⚠️ RECONCILED AGAINST A REAL `ollama list` ON 2026-08-16. Before that this
+# script and `config.yaml` were two independent authorities and had silently
+# diverged in BOTH directions: names here that were never on the box
+# (`nemotron-cascade-2`, `gemma4:31b`, `glm-5.1:cloud`), a name here that config
+# never used while config dispatched a different one (`minimax-m2.7` vs
+# `minimax-m3`), and a model on the box that this script never listed
+# (`nemotron-3.5-lightning`, which reached config only through
+# `passthrough.allowed_models`, so a rebuilt box would have lacked it).
+# ▶ `scripts/check_model_inventory.py` compares CONFIG to the box; it cannot see
+#   this file. Reconcile the two by hand whenever either changes.
 LOCAL_MODELS=(
   # THE ROUTER — deliberately tiny, on the hot path of every non-skipped
   # request, and NOT GPU-gated, so a big model here evicts the deep worker
@@ -16,32 +26,29 @@ LOCAL_MODELS=(
   # 2026-08-15: replaced qwen3.6:35b, qwen3-coder-next:latest and
   # qwen2.5-coder:32b across every text role (code, reasoning, general).
   "qwen3.8:latest"
-  # Second local workers for the audrey_local panels (2026-08-16). devstral is
-  # the code pool's, qwen3.5:35b-a3b serves reasoning + general. Both replaced
-  # names that sat in config for weeks without ever being pulled.
-  "qwen3.5:35b-a3b"
-  "devstral-small-2:latest"
+  # The two local panel workers. nemotron is the sole local draft on
+  # deep_panel.code and the second worker on deep_panel_local.code; muse-glimmer
+  # is the second worker on deep_panel_local.reasoning + .general. Both have
+  # been on the box since the local bake-off and neither was listed here.
+  "nemotron-3.5-lightning:latest"
+  "muse-glimmer:latest"
   "llama4:latest"
-  "nemotron-cascade-2:latest"
   "glm-4.7-flash:q8_0"
   "qwen3-vl:32b"
   "llava:34b"
-  "gemma4:31b"
   "nomic-embed-text:latest"
 )
 
 CLOUD_MODELS=(
   "deepseek-v4-pro:cloud"
   "kimi-k2.6:cloud"
+  "kimi-k2.7-code:cloud"
   "qwen3.5:397b-cloud"
   "deepseek-v3.2:cloud"
   "deepseek-v4-flash:cloud"
   "nemotron-3-super:cloud"
-  # ⚠️ config names `minimax-m3:cloud`; this list said `minimax-m2.7:cloud`
-  # until 2026-08-16, so the model config actually dispatches was never
-  # registered by this script. A cloud pull only registers a name — cheap.
   "minimax-m3:cloud"
-  "glm-5.1:cloud"
+  "glm-5.2:cloud"
 )
 
 pull_model() {

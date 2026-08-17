@@ -70,22 +70,28 @@ model_registry:
   code:
     # ⚠️ 2026-08-15: qwen3.8:latest replaced THREE local entries here —
     # qwen3-coder-next:latest (100), qwen2.5-coder:32b (90) and qwen3.6:35b (80).
-    # It takes the lead local slot at 100. ⚠️ `speed`/`quality` are inherited
-    # from the code specialist it replaced and are UNMEASURED for 3.8 — they are
-    # planner hints only, but do not quote them as if they were probed.
+    # It takes the lead local slot at 100 for the FAST path; it is no longer on
+    # the `deep_panel.code` panel. ⚠️ `speed`/`quality` are inherited from the
+    # code specialist it replaced and are UNMEASURED for 3.8 — they are planner
+    # hints only, but do not quote them as if they were probed.
     # ⚠️ 2026-08-16: `granite4.1:30b` and `cogito-2.1:671b-cloud` REMOVED — both
     # were named here but never pulled, so both were dud slots that cost a
     # GPU-gate turn before degrading. Standing rule: not pulled means gone.
-    # `devstral-small-2:latest` takes the second local slot — it IS pulled, and
-    # it is the only other local model on the box built for code.
+    # ⚠️ `devstral-small-2:latest` briefly replaced them here and is ALSO not on
+    # the box — the same mistake twice in one day, because `pull-models.sh` was
+    # read as proof of what is installed. It is not. `ollama list` is.
     - { name: "qwen3.8:latest",           priority: 100, speed: 60, quality: 95, location: local }
     - { name: "minimax-m3:cloud",         priority:  98, speed: 85, quality: 96, location: cloud }
     - { name: "kimi-k2.7-code:cloud",     priority:  92, speed: 90, quality: 94, location: cloud }
     - { name: "glm-5.2:cloud",            priority:  88, speed: 90, quality: 91, location: cloud }
-    # ⚠️ speed/quality are UNMEASURED placeholders — planner hints only, and
-    # deliberately conservative. Do not quote them as if they were probed.
-    - { name: "devstral-small-2:latest",  priority:  84, speed: 80, quality: 85, location: local }
     - { name: "deepseek-v4-pro:cloud",    priority:  82, speed: 80, quality: 95, location: cloud }
+    # The sole LOCAL worker on `deep_panel.code` from 2026-08-16. Registered
+    # here because `_validate_deep_panel_pools` requires it, at a priority below
+    # qwen3.8 so it is a fast-path failover, not a primary — the panel slot is
+    # the deliberate use. ⚠️ speed/quality are UNMEASURED placeholders.
+    # ⚠️ `devstral-small-2:latest` was briefly listed here and is NOT on the
+    # box — see the note on the local pools below.
+    - { name: "nemotron-3.5-lightning:latest", priority: 80, speed: 85, quality: 84, location: local }
     - { name: "kimi-k2.6:cloud",          priority:  78, speed: 90, quality: 92, location: cloud }
     - { name: "deepseek-v4-flash:cloud",  priority:  72, speed: 92, quality: 90, location: cloud }
     - { name: "deepseek-v3.2:cloud",      priority:  70, speed: 85, quality: 90, location: cloud }
@@ -102,12 +108,10 @@ model_registry:
     - { name: "qwen3.8:latest",           priority:  94, speed: 70, quality: 93, location: local }
     - { name: "kimi-k2.7-code:cloud",     priority:  88, speed: 90, quality: 93, location: cloud }
     # ⚠️ 2026-08-16: `deepseek-r1:32b` (85, local) and `cogito-2.1:671b-cloud`
-    # (75) REMOVED — neither was pulled. deepseek-r1 was the FIRST-LISTED worker
-    # of two `audrey_local` pools, i.e. the de-facto primary, and it never
-    # existed. `qwen3.5:35b-a3b` replaces it as the second local: a 35B MoE with
-    # ~3B active, which matters because local workers serialize through the GPU
-    # gate. ⚠️ speed/quality UNMEASURED — planner hints only.
-    - { name: "qwen3.5:35b-a3b",          priority:  85, speed: 82, quality: 89, location: local }
+    # (75) REMOVED — neither was pulled. `qwen3.5:35b-a3b` was put here as the
+    # replacement second local and is NOT on the box either; `muse-glimmer`
+    # is, and takes the slot. ⚠️ speed/quality UNMEASURED — planner hints only.
+    - { name: "muse-glimmer:latest",      priority:  85, speed: 82, quality: 86, location: local }
     - { name: "nemotron-3-super:cloud",   priority:  70, speed: 85, quality: 90, location: cloud }
 
   general:
@@ -119,8 +123,8 @@ model_registry:
     - { name: "qwen3.5:397b-cloud",       priority:  90, speed: 80, quality: 94, location: cloud }
     - { name: "deepseek-v4-flash:cloud",  priority:  82, speed: 92, quality: 89, location: cloud }
     # ⚠️ 2026-08-16: `olmo-3.1:32b` (70, local) REMOVED — never pulled.
-    # `qwen3.5:35b-a3b` takes the second local slot here too.
-    - { name: "qwen3.5:35b-a3b",          priority:  84, speed: 82, quality: 89, location: local }
+    # `muse-glimmer:latest` takes the second local slot here too.
+    - { name: "muse-glimmer:latest",      priority:  84, speed: 82, quality: 86, location: local }
     - { name: "glm-4.7-flash:q8_0",       priority:  80, speed: 85, quality: 87, location: local }
     - { name: "llama4:latest",            priority:  65, speed: 55, quality: 90, location: local }
     - { name: "glm-5.2:cloud",            priority:  62, speed: 90, quality: 88, location: cloud }
@@ -217,7 +221,26 @@ deep_panel:
     # by MAX_DEEP_WORKERS_CLOUD in .env). At the cap, a further cloud worker is
     # dropped by `_healthy_workers` with NO log line — dead config that looks
     # live. There is one slot of headroom now; adding two needs the cap raised.
-    workers: ["qwen3.8:latest", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud"]
+    #
+    # LINEUP AS OF 2026-08-16: one local + THREE cloud. `qwen3.8:latest` is off
+    # this pool and `nemotron-3.5-lightning:latest` is the sole local draft;
+    # `minimax-m3:cloud` is back alongside the other two cloud workers.
+    # ⚠️⚠️ THAT PUTS THE POOL EXACTLY ON `max_deep_workers_cloud` (3, pinned by
+    # MAX_DEEP_WORKERS_CLOUD in .env) AGAIN. A fourth cloud worker here is
+    # dropped by `_healthy_workers` with NO log line — dead config that looks
+    # live. Raise the cap first, or swap rather than add.
+    # ⚠️⚠️ **The local draft now rests entirely on nemotron**, and the
+    # passthrough probe table below has it returning ZERO characters of content
+    # in BOTH thinking arms at NUM_PREDICT=2048 — the only arm that produced
+    # text is `think=false`, which is the arm caught fabricating. The panel sets
+    # no `num_predict`, so it should have room to reason and then answer, but
+    # that is an assumption, not a measurement. **If this pool starts returning
+    # 2 drafts instead of 3, or a local draft with empty content, read that
+    # here first** — `done_reason == "length"` with empty content is the
+    # signature, and with one local worker there is no second local draft to
+    # cover for it.
+    workers: ["nemotron-3.5-lightning:latest", "kimi-k2.7-code:cloud",
+              "deepseek-v4-pro:cloud", "minimax-m3:cloud"]
     # glm-5.2 (cloud) primary synth: skips the local cold-load a LOCAL synth
     # incurs (synth can't co-reside in VRAM with a local worker under
     # GPU_CONCURRENCY=1, so it has to load AFTER the worker unloads). Measured
@@ -285,16 +308,22 @@ deep_panel_local:
   # ⚠️ qwen3.8 is deliberately LAST in each pool because it is also the
   # synthesizer: under GPU_CONCURRENCY=1 the synth cannot co-reside with a
   # worker, so running it last leaves it resident and skips one cold load.
+  # ⚠️ SECOND CORRECTION, same day. The first repair named `devstral-small-2`
+  # and `qwen3.5:35b-a3b` — NEITHER IS ON THE BOX, so it swapped one phantom
+  # primary for another, in the same edit that removed the first. Both were in
+  # `pull-models.sh` and absent from the last phantom report, and that was
+  # treated as evidence; it is not. **`ollama list` is the only authority.**
+  # The names below are checked against a real listing (2026-08-16).
   code:
-    workers: ["devstral-small-2:latest", "qwen3.8:latest"]
+    workers: ["nemotron-3.5-lightning:latest", "qwen3.8:latest"]
     synthesizer: "qwen3.8:latest"
     fallback_synth: "qwen3.8:latest"
   reasoning:
-    workers: ["qwen3.5:35b-a3b", "qwen3.8:latest"]
+    workers: ["muse-glimmer:latest", "qwen3.8:latest"]
     synthesizer: "qwen3.8:latest"
     fallback_synth: "qwen3.8:latest"
   general:
-    workers: ["qwen3.5:35b-a3b", "qwen3.8:latest"]
+    workers: ["muse-glimmer:latest", "qwen3.8:latest"]
     synthesizer: "qwen3.8:latest"
     fallback_synth: "qwen3.8:latest"
   vl:
@@ -1322,8 +1351,6 @@ passthrough:
     # it is offered to OWUI as a selectable model and only fails when picked.
     - qwen3.8:latest
     - minimax-m3:cloud
-    - devstral-small-2:latest
-    - qwen3.5:35b-a3b
     - deepseek-v4-pro:cloud
     - kimi-k2.7-code:cloud
     - glm-5.2:cloud
