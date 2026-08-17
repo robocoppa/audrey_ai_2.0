@@ -327,6 +327,74 @@ def test_panel_drafts_block_omits_web_search_chars_for_tool_free_worker():
     assert "web_search→ctx" not in out
 
 
+# ─── Draft-shape diagnostics in the artifact ───────────────────────────
+# A malformed draft used to reach the artifact with nothing to explain it: the
+# synthesizer repairs it, every check passes, and the only trace is a draft
+# that looks slightly odd. These fields are what makes the artifact answer
+# "why", so they must appear when they have something to say — and stay out of
+# the way when they do not, because a field printed on every draft is a field
+# nobody reads.
+
+def test_a_truncated_draft_says_so_in_its_heading():
+    out = panel_drafts_block([
+        {"model": "m", "content": "half an ans", "elapsed_s": 9.0,
+         "done_reason": "length"},
+    ])
+    assert "done:length" in out
+
+
+def test_an_ordinary_draft_heading_is_unchanged():
+    # `done_reason == "stop"` is the overwhelmingly common case and carries no
+    # information. Rendering it would bury the one that does.
+    out = panel_drafts_block([
+        {"model": "m", "content": "a complete answer", "elapsed_s": 9.0,
+         "done_reason": "stop", "raw_content_len": 17},
+    ])
+    assert "done:" not in out
+    assert "raw:" not in out
+
+
+def test_a_heavily_stripped_draft_shows_what_it_lost():
+    """A draft stripped to death and a genuinely terse one read identically.
+
+    The body cannot distinguish them — only the gap between raw and content
+    can, which is exactly the ambiguity that made an unfenced draft
+    undiagnosable from the artifact.
+    """
+    out = panel_drafts_block([
+        {"model": "m", "content": "tiny", "elapsed_s": 9.0,
+         "raw_content_len": 4000},
+    ])
+    assert "raw:4000→4" in out
+
+
+def test_trailing_whitespace_alone_does_not_trigger_the_raw_marker():
+    out = panel_drafts_block([
+        {"model": "m", "content": "body", "elapsed_s": 9.0,
+         "raw_content_len": 4 + 8},
+    ])
+    assert "raw:" not in out
+
+
+def test_a_split_panel_records_what_each_worker_was_actually_asked():
+    """⚠️ `_messages_for_subtask` REPLACES the last user message.
+
+    So "why did this worker answer that?" is unanswerable from the draft
+    alone — the question in the artifact is the user's, and the question the
+    worker saw is the planner's.
+    """
+    out = panel_drafts_block([
+        {"model": "m", "content": "x", "elapsed_s": 1.0,
+         "subtask": "Implement  the\n  eviction  policy"},
+    ])
+    assert "_asked: Implement the eviction policy_" in out
+
+
+def test_an_unsplit_panel_adds_no_asked_line():
+    out = panel_drafts_block([{"model": "m", "content": "x", "elapsed_s": 1.0}])
+    assert "_asked:" not in out
+
+
 def test_panel_drafts_block_omits_zero_tool_rounds():
     # A tool-free worker's heading carries latency only — "0 tool rounds"
     # would be noise on every non-agentic draft.

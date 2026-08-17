@@ -25,6 +25,18 @@ class WorkerDraft(TypedDict, total=False):
     web_search_chars: int            # chars of successful web_search bodies that reached the model (research-trace diagnostic)
     retrieved: list[dict]            # [{title, url, tool}] this worker actually retrieved — the structuring pass's source catalogue
 
+    # ─── Draft-shape diagnostics (2026-08-17) ─────────────────────────
+    # Added because a worker's draft could arrive malformed with nothing in
+    # the system able to say HOW. A draft is `message.content` after
+    # `_strip_think`, and both of those steps can eat an answer silently:
+    # Ollama truncates at a token cap and still returns 200, and a dangling
+    # `</think>` makes the stripper discard everything before it. Neither
+    # leaves a trace in the content itself — it just looks short, or oddly
+    # formatted, or (the case that started this) like bare code with no fence.
+    done_reason: str                 # Ollama stop reason: "stop" | "length" | "" when unknown
+    raw_content_len: int             # len(content) BEFORE `_strip_think` — the gap is what the stripper removed
+    subtask: str                     # the focal question this worker was actually asked; "" when the panel did not split
+
 
 class PipelineState(TypedDict, total=False):
     # Input — set at request time

@@ -247,9 +247,28 @@ def _draft_section_lines(drafts: list[dict], *, heading: str) -> list[str]:
             # retrieved" (≈0) from "retrieved but wrote thin grounding".
             ws_chars = int(d.get("web_search_chars") or 0)
             meta.append(f"web_search→ctx: {ws_chars} chars")
+        # Draft-shape diagnostics. Only rendered when they have something to
+        # say, so an ordinary draft's heading is unchanged — a field printed on
+        # every draft is a field nobody reads.
+        done_reason = str(d.get("done_reason") or "")
+        if done_reason and done_reason != "stop":
+            meta.append(f"done:{done_reason}")
+        # The gap `_strip_think` removed. Worth showing only when it is large
+        # enough to be an answer rather than trailing whitespace: a short draft
+        # and a stripped-to-death one look identical in the body.
+        raw_len = int(d.get("raw_content_len") or 0)
+        if raw_len and raw_len - len(content) > 32:
+            meta.append(f"raw:{raw_len}→{len(content)}")
         head = f"{heading} {model}" + (" — " + " · ".join(meta) if meta else "")
         lines.append(head)
         lines.append("")
+        # ⚠️ The subtask, not the user's question. A split panel replaces the
+        # focal question per worker, so "why did this worker answer THAT?" is
+        # unanswerable from the draft alone.
+        subtask = _one_line(d.get("subtask") or "")
+        if subtask:
+            lines.append(f"_asked: {subtask[:300]}_")
+            lines.append("")
         if content:
             lines.append(_sanitize_draft_text(content))
         else:

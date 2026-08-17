@@ -71,6 +71,12 @@ class ReactResult:
     # catalogue so it cites ids it was GIVEN rather than re-copying URLs out of
     # prose and inventing keys for them — see `_retrieved_sources`.
     retrieved: list[dict[str, str]] = field(default_factory=list)
+    # Ollama's stop reason for the call that produced `content` — "stop" when
+    # the model finished, "length" when it hit a token cap mid-answer. Carried
+    # out of the loop because a truncated answer is otherwise indistinguishable
+    # from a short one: the content is well-formed prose either way, just
+    # missing its end. `""` when upstream did not say.
+    done_reason: str = ""
 
 
 def _debug_research_trace(cfg: Any) -> bool:
@@ -589,6 +595,7 @@ async def run_react(
                     eval_count=int(last_resp.get("eval_count", 0) or 0),
                     web_search_chars=web_search_chars,
                     retrieved=_retrieved_sources(all_results),
+                    done_reason=str(last_resp.get("done_reason") or ""),
                 )
 
             # The assistant's tool-call turn must be in history before we add tool results.
@@ -690,6 +697,7 @@ async def run_react(
             eval_count=int(final.get("eval_count", 0) or 0),
             web_search_chars=web_search_chars,
             retrieved=_retrieved_sources(all_results),
+            done_reason=str(final.get("done_reason") or ""),
         )
 
 

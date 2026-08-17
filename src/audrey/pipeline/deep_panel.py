@@ -182,6 +182,65 @@ def _strip_think(content: str) -> str:
     return s if s.strip() else content
 
 
+# A draft that opens on one of these, with no fence anywhere, is code the model
+# forgot to fence — not prose. Deliberately anchored and deliberately narrow:
+# the point is to name a shape we have actually seen, not to classify text.
+_OPENS_LIKE_CODE = re.compile(r"^(from|import|def|class|async\s+def)\s")
+
+
+def _fence_anomaly(text: str) -> str:
+    """Name how a draft's code fencing is malformed, or "" if it is fine.
+
+    Two shapes, and they mean opposite things:
+
+    `unterminated_fence` — an odd number of ``` runs. The draft opened a code
+    block and never closed it, which is what a truncated generation looks like
+    (pair it with `done_reason` to confirm).
+
+    `unfenced_code` — no fence at all, on a draft that opens like source. The
+    generation completed; the model simply never fenced. `nemotron-3.5-lightning`
+    did this on the same case three runs running while fencing every other
+    draft, which is what this detector exists to pin down.
+
+    A synthesizer usually repairs both before the user sees anything, so
+    neither shape reaches an eval check — the panel looks clean and the draft
+    is still wrong.
+    """
+    fences = text.count("```")
+    if fences % 2:
+        return "unterminated_fence"
+    if fences == 0 and _OPENS_LIKE_CODE.match(text.lstrip()):
+        return "unfenced_code"
+    return ""
+
+
+def _log_draft_shape(
+    model: str, *, raw: str, stripped: str, done_reason: str,
+    eval_count: int, elapsed: float, subtask: str,
+) -> str:
+    """Emit one line describing the shape of a draft. Returns the anomaly name.
+
+    ⚠️ This is the line that did not exist. `_run_one_worker` read
+    `message.content` and threw `done_reason` away, so the signature
+    `config.yaml` tells you to look for — `done_reason == "length"` with empty
+    content — was **not observable on the path the warning is about**. Three
+    eval runs could show a malformed draft without anything able to say why.
+
+    `think_stripped` is the count `_strip_think` removed. A large value on a
+    short draft means the stripper ate the answer, not that the model was terse
+    — and those two have identical content.
+    """
+    anomaly = _fence_anomaly(stripped)
+    log_at = log.warning if (anomaly or done_reason == "length" or not stripped.strip()) else log.info
+    log_at(
+        "deep_panel: draft %s done_reason=%s eval_count=%d raw_len=%d "
+        "content_len=%d think_stripped=%d anomaly=%s elapsed=%.2fs subtask=%r",
+        model, done_reason or "?", eval_count, len(raw), len(stripped),
+        max(0, len(raw) - len(stripped)), anomaly or "none", elapsed, subtask[:160],
+    )
+    return anomaly
+
+
 async def _run_one_worker(
     ollama: OllamaClient,
     health: HealthTracker,
@@ -202,6 +261,7 @@ async def _run_one_worker(
     react_max_web_searches: int = 0,
     user_id: str | None = None,
     cfg: Any = None,
+    subtask: str = "",
 ) -> WorkerDraft:
     """Execute one worker. Always returns a WorkerDraft — never raises.
 
@@ -237,13 +297,22 @@ async def _run_one_worker(
                     cfg=cfg,
                 )
                 elapsed = round(time.monotonic() - start, 2)
+                stripped = _strip_think(react.content)
+                _log_draft_shape(
+                    model, raw=react.content, stripped=stripped,
+                    done_reason=react.done_reason, eval_count=react.eval_count,
+                    elapsed=elapsed, subtask=subtask,
+                )
                 # run_react already records success/failure per chat call.
                 return WorkerDraft(
                     model=model,
-                    content=_strip_think(react.content),
+                    content=stripped,
                     elapsed_s=elapsed,
                     prompt_eval_count=react.prompt_eval_count,
                     eval_count=react.eval_count,
+                    done_reason=react.done_reason,
+                    raw_content_len=len(react.content),
+                    subtask=subtask,
                     tool_rounds=react.tool_rounds,
                     tool_calls=[
                         {"name": r.name, "elapsed_s": r.elapsed_s, "is_error": r.is_error}
@@ -262,13 +331,23 @@ async def _run_one_worker(
         elapsed = round(time.monotonic() - start, 2)
         msg = resp.get("message", {}) or {}
         content = msg.get("content", "") or ""
+        stripped = _strip_think(content)
+        eval_count = int(resp.get("eval_count", 0) or 0)
+        done_reason = str(resp.get("done_reason") or "")
         health.record_success(model)
+        _log_draft_shape(
+            model, raw=content, stripped=stripped, done_reason=done_reason,
+            eval_count=eval_count, elapsed=elapsed, subtask=subtask,
+        )
         return WorkerDraft(
             model=model,
-            content=_strip_think(content),
+            content=stripped,
             elapsed_s=elapsed,
             prompt_eval_count=int(resp.get("prompt_eval_count", 0) or 0),
-            eval_count=int(resp.get("eval_count", 0) or 0),
+            eval_count=eval_count,
+            done_reason=done_reason,
+            raw_content_len=len(content),
+            subtask=subtask,
             tool_rounds=0,
             tool_calls=[],
         )
@@ -397,14 +476,21 @@ def _prepare_panel(
     # narrate, so the prompt would be pure token cost — and leaving those
     # messages untouched keeps the tool-free path byte-identical to before.
     per_worker_messages: list[list[dict[str, Any]]] = []
+    # ⚠️ Kept alongside the messages because `_messages_for_subtask` REPLACES
+    # the last user message — so a worker in a split panel never sees the
+    # question the user asked, only the planner's decomposition of it. Any
+    # instruction that lived in the original prompt ("reply with a single
+    # complete Python code block") is gone by the time the worker reads it,
+    # and until 2026-08-17 nothing recorded what each worker was actually
+    # asked. Diagnosing a per-worker output oddity without this is guesswork.
+    per_worker_subtask: list[str] = []
     for i, (name, _loc) in enumerate(workers):
-        msgs = (
-            _messages_for_subtask(messages, subtasks[i % len(subtasks)])
-            if subtasks else messages
-        )
+        subtask = subtasks[i % len(subtasks)] if subtasks else ""
+        msgs = _messages_for_subtask(messages, subtask) if subtasks else messages
         if have_tools and name in capable:
             msgs = _with_worker_system(msgs, worker_role)
         per_worker_messages.append(msgs)
+        per_worker_subtask.append(subtask)
 
     for name, _loc in workers:
         dispatch_total.labels(
@@ -429,6 +515,7 @@ def _prepare_panel(
             react_max_web_searches=react_max_web_searches,
             user_id=user_id,
             cfg=cfg,
+            subtask=per_worker_subtask[i],
         )
         for i, (name, loc) in enumerate(workers)
     ]

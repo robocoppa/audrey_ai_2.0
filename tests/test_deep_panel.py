@@ -2035,3 +2035,43 @@ class TestReconcileWithCatalogue:
         assert dpmod._reconcile_with_catalogue(r, []) == (0, 0)
         assert r.claims[0].source_ids == ["anything"]
         assert len(r.sources) == 1
+
+
+# ─── _fence_anomaly: naming a malformed draft ──────────────────────────
+# `nemotron-3.5-lightning` returned bare, unfenced source for the same eval
+# case three runs running while fencing every other draft it produced. The
+# synthesizer repaired it each time, so no check ever failed and nothing in
+# the system could say what had happened. This detector is what notices.
+
+def test_bare_code_with_no_fence_is_named():
+    from audrey.pipeline.deep_panel import _fence_anomaly
+    # The exact shape observed: opens on an import, no fence anywhere.
+    draft = "from collections import OrderedDict\n\n\nclass TTLCache:\n    pass\n"
+    assert _fence_anomaly(draft) == "unfenced_code"
+
+
+def test_an_opened_but_unclosed_fence_is_named_differently():
+    # Distinct from `unfenced_code` on purpose: an odd fence count means the
+    # generation STOPPED mid-block, which points at `done_reason`, while no
+    # fence at all means it finished and never fenced. Opposite causes.
+    from audrey.pipeline.deep_panel import _fence_anomaly
+    assert _fence_anomaly("```python\nx = 1\n") == "unterminated_fence"
+
+
+def test_a_well_formed_fenced_draft_is_clean():
+    from audrey.pipeline.deep_panel import _fence_anomaly
+    assert _fence_anomaly("Here you go:\n\n```python\nx = 1\n```\n") == ""
+
+
+def test_prose_is_never_flagged_as_unfenced_code():
+    # The detector is anchored and narrow by design. Ordinary prose that
+    # happens to discuss imports must not read as code, or the warning fires
+    # on every research draft and stops meaning anything.
+    from audrey.pipeline.deep_panel import _fence_anomaly
+    assert _fence_anomaly("The import of foreign grain rose sharply.") == ""
+    assert _fence_anomaly("") == ""
+
+
+def test_a_draft_that_opens_on_async_def_counts_as_code():
+    from audrey.pipeline.deep_panel import _fence_anomaly
+    assert _fence_anomaly("async def fetch_all(fetch, keys):\n    pass\n") == "unfenced_code"
