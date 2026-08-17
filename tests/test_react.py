@@ -52,10 +52,12 @@ def test_compress_history_keeps_only_last_n_tool_messages():
         {"role": "assistant", "content": "thinking..."},
     ]
     out = _compress_history(convo, keep_last_round=1)
-    # The two older tool messages become summary stubs (role=system).
+    # The two older tool messages become summary stubs, still role=tool —
+    # a stub with role=system is a mid-conversation system message, which
+    # Ollama's qwen3-family renderer rejects outright (2026-08-17).
     assert out[0] == {"role": "user", "content": "hi"}
-    assert out[1]["role"] == "system" and "web_search" in out[1]["content"]
-    assert out[2]["role"] == "system" and "kb_search" in out[2]["content"]
+    assert out[1]["role"] == "tool" and "web_search" in out[1]["content"]
+    assert out[2]["role"] == "tool" and "kb_search" in out[2]["content"]
     # The newest tool message is preserved verbatim.
     assert out[3] == {"role": "tool", "name": "memory_search", "content": "newest"}
     # Non-tool tail stays as-is.
@@ -73,7 +75,7 @@ def test_compress_history_keep_last_round_two():
     ]
     out = _compress_history(convo, keep_last_round=2)
     # Old → stub; mid + newest → verbatim.
-    assert out[0]["role"] == "system" and "web_search" in out[0]["content"]
+    assert out[0]["role"] == "tool" and "web_search" in out[0]["content"]
     assert out[1] == {"role": "tool", "name": "kb_search", "content": "mid"}
     assert out[2] == {"role": "tool", "name": "memory_search", "content": "newest"}
 
@@ -117,8 +119,8 @@ def test_compress_history_evicts_failures_before_successful_searches():
     assert out[0] == convo[0]
     assert out[1] == convo[1]
     # Both failures are stubbed despite being newest.
-    assert out[2]["role"] == "system" and "web_fetch" in out[2]["content"]
-    assert out[3]["role"] == "system" and "web_fetch" in out[3]["content"]
+    assert out[2]["role"] == "tool" and "web_fetch" in out[2]["content"]
+    assert out[3]["role"] == "tool" and "web_fetch" in out[3]["content"]
 
 
 def test_compress_history_recency_still_decides_among_successes():
@@ -130,7 +132,7 @@ def test_compress_history_recency_still_decides_among_successes():
         _tool_msg("memory_search", "newest"),
     ]
     out = _compress_history(convo, keep_last_round=2)
-    assert out[0]["role"] == "system"          # oldest stubbed
+    assert out[0]["role"] == "tool"            # oldest stubbed
     assert out[1] == convo[1]
     assert out[2] == convo[2]
 
@@ -155,8 +157,41 @@ def test_compress_history_preserves_message_order():
     ]
     out = _compress_history(convo, keep_last_round=1)
     # Order preserved; only the old tool message is stubbed.
-    assert [m["role"] for m in out] == ["system", "system", "assistant", "tool"]
+    assert [m["role"] for m in out] == ["system", "tool", "assistant", "tool"]
     assert out[1]["content"].startswith("[history compacted:")
+
+
+def test_a_stub_never_introduces_a_mid_conversation_system_message():
+    """⚠️ The 2026-08-17 regression, pinned. The stub used to carry
+    `role: "system"`, which put a system message after a user turn — and
+    Ollama's qwen3-family renderer rejects that at render time with
+    `500 {"error":"system message must be at the beginning"}`. Nothing is
+    generated, so the worker reads as silent rather than broken: it cost
+    `qwen3.8:latest` every draft it attempted across three eval runs.
+
+    Asserted on the ROLE rather than on the error, because the error only
+    appears against a real Ollama and only for models whose renderer enforces
+    it — the ones that tolerate it today are free to stop tomorrow."""
+    convo = [
+        {"role": "system", "content": "you are a worker"},
+        {"role": "user", "content": "question"},
+        _tool_msg("web_search", "old"),
+        _tool_msg("web_search", "newer"),
+    ]
+    out = _compress_history(convo, keep_last_round=1)
+    assert any(m["content"].startswith("[history compacted:") for m in out)
+    for i, m in enumerate(out):
+        if m["role"] == "system":
+            assert i == 0, f"system message at index {i}: {m}"
+
+
+def test_a_stub_keeps_the_tool_name_it_replaced():
+    """`{**m}` carries `name`/`tool_call_id` through, so the stub stays a
+    well-formed tool message — Ollama pairs tool replies to their calls."""
+    convo = [_tool_msg("get_file_text", "page one"),
+             _tool_msg("get_file_text", "page two")]
+    stub = _compress_history(convo, keep_last_round=1)[0]
+    assert stub["role"] == "tool" and stub["name"] == "get_file_text"
 
 
 # ─── _summarize_tool_message ──────────────────────────────────────────

@@ -43,6 +43,55 @@ def _data_uri_to_b64(url: str) -> str | None:
     return url[idx + len(marker) :] or None
 
 
+def _merge_leading_system(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse a run of leading system messages into one.
+
+    ⚠️ Ollama's qwen3-family renderer accepts a system message only as the
+    FIRST message and raises on any later one — including a second consecutive
+    system message at index 1. It fails the render, so the call returns
+    `/api/chat -> 500 {"error":"system message must be at the beginning"}`
+    before a single token is generated, and the worker looks like it produced
+    nothing rather than like it errored.
+
+    Audrey stacks these routinely and legitimately: `node_datetime` prepends
+    one, `node_memory_recall` prepends the recall hint plus chat-history
+    guidance, OWUI sends the user's persona, and the deep panel prepends a
+    worker/researcher role on top (`deep_panel._with_role_system`). Four is an
+    ordinary request. Every one of those call sites is correct on its own — the
+    constraint is a property of the wire format, so it is enforced here, at the
+    one choke point every local call passes through, rather than asked of each.
+
+    Found 2026-08-17: `qwen3.8:latest` returned zero usable drafts across two
+    research runs and a code run — every panel and researcher call, dead on
+    arrival, while the fast path worked. The asymmetry was the tell. Eval
+    requests carry no persona (`eval_research.py` sends a bare user turn), so a
+    fast-path turn holds exactly ONE system message and renders fine; a panel
+    worker gets the role prompt on top of it, hits two, and dies. Real OWUI
+    traffic arrives with a persona already, so the fast path is exposed there
+    in a way no eval run can reproduce.
+
+    Joins with a blank line, keeps the first message's other keys, and leaves
+    the list alone when there is nothing to merge or when a leading system
+    message carries `images` (never seen in practice, but merging would drop
+    them). Non-leading system messages are NOT relocated: position can carry
+    meaning, and the one path that produced them — react history compaction —
+    now keeps its stubs as tool messages instead.
+    """
+    idx = 0
+    for m in messages:
+        if m.get("role") != "system":
+            break
+        idx += 1
+    if idx < 2:
+        return list(messages)
+    lead = messages[:idx]
+    if any(m.get("images") or isinstance(m.get("content"), list) for m in lead):
+        return list(messages)
+    bodies = [str(m.get("content") or "") for m in lead]
+    merged = {**lead[0], "content": "\n\n".join(b for b in bodies if b.strip())}
+    return [merged, *messages[idx:]]
+
+
 def _to_ollama_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Convert OpenAI-shaped messages into Ollama's native `/api/chat` shape.
 
@@ -54,6 +103,10 @@ def _to_ollama_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     is flattened — text parts joined with `\\n`, `image_url` data-URIs lifted
     into `images`. Every other key on the message (role, name, tool_calls) is
     preserved. Mirrors the flatten logic in `pipeline/messages.py`.
+
+    Leading system messages are then collapsed into one — see
+    `_merge_leading_system` for why that is a wire-format concern and not a
+    caller's. The merge runs AFTER flattening so it only ever joins strings.
     """
     out: list[dict[str, Any]] = []
     for m in messages:
@@ -77,7 +130,7 @@ def _to_ollama_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if images:
             converted["images"] = images
         out.append(converted)
-    return out
+    return _merge_leading_system(out)
 
 
 class OllamaClient:

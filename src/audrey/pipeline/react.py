@@ -121,12 +121,22 @@ def _context_census(messages: list[dict[str, Any]]) -> str:
     for m in messages:
         content = str(m.get("content") or "")
         total += len(content)
-        if m.get("role") == "tool":
-            live.append(f"{m.get('name', '?')}:{len(content)}")
-        elif m.get("role") == "system" and content.startswith("[history compacted:"):
+        # Content-first, role-second. The stub used to carry `role: "system"`
+        # and now carries `role: "tool"` (see `_compress_history`), so keying
+        # off the role alone would count every stub as a live result and
+        # report `compacted_out=0` on exactly the turns this line exists for.
+        if content.startswith(_COMPACTED_MARKER):
             stubbed += 1
+        elif m.get("role") == "tool":
+            live.append(f"{m.get('name', '?')}:{len(content)}")
     return (f"live_tool_results=[{', '.join(live) or '-'}] "
             f"compacted_out={stubbed} convo_chars={total}")
+
+
+# Opening text of a compaction stub. Shared by `_summarize_tool_message` (which
+# writes it) and `_context_census` (which counts it) so the two cannot drift —
+# a reworded stub would otherwise silently zero the diagnostic.
+_COMPACTED_MARKER = "[history compacted:"
 
 
 def _summarize_tool_message(msg: dict[str, Any]) -> str:
@@ -138,7 +148,7 @@ def _summarize_tool_message(msg: dict[str, Any]) -> str:
     # model narrating its own compaction as a grounding failure. This phrasing
     # makes the omission unambiguous and carries no count to misread as "thin".
     name = msg.get("name", "?")
-    return f"[history compacted: an earlier `{name}` result is omitted here to save context]"
+    return f"{_COMPACTED_MARKER} an earlier `{name}` result is omitted here to save context]"
 
 
 # Tool message for a web_search call skipped because the per-request budget is
@@ -206,7 +216,21 @@ def _compress_history(messages: list[dict[str, Any]], *, keep_last_round: int) -
     keep = set(ranked[:keep_last_round])
     for i, m in enumerate(messages):
         if m.get("role") == "tool" and i not in keep:
-            out.append({"role": "system", "content": _summarize_tool_message(m)})
+            # ⚠️ The stub keeps `role: "tool"`. It was `role: "system"` until
+            # 2026-08-17, which put a system message in the MIDDLE of the
+            # conversation — and Ollama's qwen3-family renderer rejects that
+            # outright: `/api/chat -> 500 {"error":"system message must be at
+            # the beginning"}`. Rendering fails before a single token, so the
+            # signature is a worker that dies in ~0.3s warm (or one model-load
+            # time cold) having produced nothing.
+            #
+            # Keeping the tool role also preserves the stub's POSITION, which
+            # is the point of a stub: it marks where a result used to be.
+            # Hoisting it to the front instead would have said an earlier call
+            # happened later. `{**m}` carries `name`/`tool_call_id` through, so
+            # the stub stays a well-formed tool message and `_context_census`
+            # can still tell it from a live result by its opening text.
+            out.append({**m, "content": _summarize_tool_message(m)})
         else:
             out.append(m)
     return out
