@@ -673,3 +673,22 @@ def test_a_clean_draft_carries_no_anomaly_marker():
          "shape_anomaly": ""},
     ])
     assert "⚠" not in out
+
+
+def test_an_anomalous_draft_shows_the_thinking_ratio():
+    """`chars_per_tok` is the number that says whether the model spent its
+    budget thinking, and a reader who has to go to the logs for it usually
+    does not — so it rides along with the anomaly that made them look."""
+    out = panel_drafts_block([
+        {"model": "m", "content": "from x import y\n", "elapsed_s": 86.6,
+         "shape_anomaly": "unterminated_fence", "chars_per_tok": 0.17},
+    ])
+    assert "0.17 chars/tok" in out
+
+
+def test_a_clean_draft_does_not_show_the_ratio():
+    out = panel_drafts_block([
+        {"model": "m", "content": "fine", "elapsed_s": 1.0,
+         "shape_anomaly": "", "chars_per_tok": 0.42},
+    ])
+    assert "chars/tok" not in out

@@ -217,8 +217,8 @@ def _fence_anomaly(text: str) -> str:
 def _log_draft_shape(
     model: str, *, raw: str, stripped: str, done_reason: str,
     eval_count: int, elapsed: float, subtask: str,
-) -> str:
-    """Emit one line describing the shape of a draft. Returns the anomaly name.
+) -> tuple[str, float]:
+    """Emit one line describing a draft's shape. Returns `(anomaly, chars_per_tok)`.
 
     ⚠️ This is the line that did not exist. `_run_one_worker` read
     `message.content` and threw `done_reason` away, so the signature
@@ -250,7 +250,7 @@ def _log_draft_shape(
         max(0, len(raw) - len(stripped)), chars_per_tok, anomaly or "none",
         elapsed, subtask[:160],
     )
-    return anomaly
+    return anomaly, round(chars_per_tok, 2)
 
 
 async def _run_one_worker(
@@ -310,7 +310,7 @@ async def _run_one_worker(
                 )
                 elapsed = round(time.monotonic() - start, 2)
                 stripped = _strip_think(react.content)
-                anomaly = _log_draft_shape(
+                anomaly, cpt = _log_draft_shape(
                     model, raw=react.content, stripped=stripped,
                     done_reason=react.done_reason, eval_count=react.eval_count,
                     elapsed=elapsed, subtask=subtask,
@@ -326,6 +326,7 @@ async def _run_one_worker(
                     raw_content_len=len(react.content),
                     subtask=subtask,
                     shape_anomaly=anomaly,
+                    chars_per_tok=cpt,
                     tool_rounds=react.tool_rounds,
                     tool_calls=[
                         {"name": r.name, "elapsed_s": r.elapsed_s, "is_error": r.is_error}
@@ -348,7 +349,7 @@ async def _run_one_worker(
         eval_count = int(resp.get("eval_count", 0) or 0)
         done_reason = str(resp.get("done_reason") or "")
         health.record_success(model)
-        anomaly = _log_draft_shape(
+        anomaly, cpt = _log_draft_shape(
             model, raw=content, stripped=stripped, done_reason=done_reason,
             eval_count=eval_count, elapsed=elapsed, subtask=subtask,
         )
@@ -362,6 +363,7 @@ async def _run_one_worker(
             raw_content_len=len(content),
             subtask=subtask,
             shape_anomaly=anomaly,
+            chars_per_tok=cpt,
             tool_rounds=0,
             tool_calls=[],
         )

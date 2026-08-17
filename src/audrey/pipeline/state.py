@@ -37,6 +37,7 @@ class WorkerDraft(TypedDict, total=False):
     raw_content_len: int             # len(content) BEFORE `_strip_think` — the gap is what the stripper removed
     subtask: str                     # the focal question this worker was actually asked; "" when the panel did not split
     shape_anomaly: str               # `_fence_anomaly` verdict: "unfenced_code" | "unterminated_fence" | ""
+    chars_per_tok: float             # content chars / eval_count — low means tokens went to `thinking`, which never reaches content
 
 
 class PipelineState(TypedDict, total=False):

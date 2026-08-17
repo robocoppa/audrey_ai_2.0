@@ -268,6 +268,13 @@ def _draft_section_lines(drafts: list[dict], *, heading: str) -> list[str]:
         anomaly = str(d.get("shape_anomaly") or "")
         if anomaly:
             meta.append(f"⚠ {anomaly}")
+            # Only alongside an anomaly. On a clean draft this is noise on
+            # every heading; on a flagged one it is the number that says
+            # whether the model spent its budget thinking — and a reader who
+            # has to go to the logs for it usually does not.
+            cpt = float(d.get("chars_per_tok") or 0.0)
+            if cpt:
+                meta.append(f"{cpt:.2f} chars/tok")
         head = f"{heading} {model}" + (" — " + " · ".join(meta) if meta else "")
         lines.append(head)
         lines.append("")
