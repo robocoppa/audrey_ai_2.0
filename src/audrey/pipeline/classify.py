@@ -33,7 +33,20 @@ log = logging.getLogger(__name__)
 
 _CODE_STRONG = re.compile(
     r"```[a-zA-Z0-9_+-]*\n"                       # fenced code block
-    r"|^\s*(def|class)\s+\w+\s*\("                # python def/class
+    # ⚠️ The python arm must tolerate an `async ` prefix and a base-less
+    # `class Foo:`. Until 2026-08-17 it was `^\s*(def|class)\s+\w+\s*\(`,
+    # which matched NEITHER — `^\s*` will not cross the `async` keyword, and
+    # requiring `(` rejects the commonest class form of all. Unfenced pasted
+    # Python therefore produced no strong signal, fell through to
+    # `_REASONING_STRONG`, and any prompt saying "explain the…" was routed to
+    # the reasoning panel at confidence 0.95 — ahead of the router, which
+    # never got to see it. Found when `code-hard-debug-async` drew the
+    # reasoning lineup in an eval suite named "code".
+    # NOTE the sibling gap left in place: the js arm still requires `=`, so a
+    # bare `function foo() {}` or `async function foo()` misses. Unfenced JS
+    # has not been observed misrouting; widen it on evidence, not on symmetry.
+    r"|^\s*(async\s+)?def\s+\w+\s*\("             # python def / async def
+    r"|^\s*class\s+\w+\s*[(:]"                    # python class, bases optional
     r"|^\s*(public|private|protected)\s+\w"       # java/C# modifiers
     r"|^\s*(func|fn)\s+\w+\s*\("                  # go/rust
     r"|^\s*(const|let|var|function)\s+\w+\s*=",   # js

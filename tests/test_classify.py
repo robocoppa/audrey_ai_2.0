@@ -103,6 +103,67 @@ def test_keyword_classify_with_no_tools_arg_works():
     assert sig.reason == "code_strong"
 
 
+# ─── unfenced pasted Python ────────────────────────────────────────────
+# The 2026-08-17 misroute. `_CODE_STRONG` only recognised `def foo(` and
+# `class Foo(`, so a pasted `async def` or a base-less `class Foo:` scored
+# nothing strong. That mattered because the very next check is
+# `_REASONING_STRONG`, which fires on "explain the…" at confidence 0.95 and
+# short-circuits before the router — so pasted Python drew the reasoning
+# panel instead of the code panel, silently and with high confidence.
+
+def test_pasted_async_def_is_code_not_reasoning():
+    # Shape lifted from the `code-hard-debug-async` eval case: an unfenced
+    # async function plus "Explain the bug". Both signals are live here, so
+    # this pins the ORDER as much as the pattern.
+    prompt = (
+        "Explain the bug in one short paragraph, then give a corrected "
+        "async function.\n\nimport asyncio\n\n"
+        "async def fetch_all(fetch, keys):\n"
+        "    return await asyncio.gather(*(fetch(k) for k in keys))"
+    )
+    sig = keyword_classify(prompt, tool_names=_REGISTERED_TOOLS)
+    assert sig is not None
+    assert sig.task == "code", "unfenced async def must beat 'explain the'"
+    assert sig.reason == "code_strong"
+
+
+def test_pasted_class_without_bases_is_code():
+    # `class Foo:` — no parens — is the commonest class form in Python and
+    # was rejected by the old `\w+\s*\(`.
+    sig = keyword_classify("why does this leak?\n\nclass TTLCache:\n    pass")
+    assert sig is not None
+    assert sig.task == "code"
+    assert sig.reason == "code_strong"
+
+
+def test_plain_def_and_subclass_still_match():
+    # Guard the two forms that already worked, so widening the pattern is
+    # additive rather than a rewrite.
+    for snippet in ("def foo(x):\n    return x", "class Foo(Base):\n    pass"):
+        sig = keyword_classify(snippet)
+        assert sig is not None and sig.reason == "code_strong", snippet
+
+
+def test_prose_about_a_class_of_problems_is_not_code():
+    # `class` as an ordinary English noun. The pattern is anchored per line
+    # and needs `(` or `:` immediately after the identifier, so prose that
+    # merely opens with the word does not trip it.
+    sig = keyword_classify("class action lawsuits are slow to resolve")
+    assert sig is None or sig.reason != "code_strong"
+
+
+def test_review_override_still_beats_an_async_def():
+    # `_REVIEW_OVERRIDE` runs ahead of `_CODE_STRONG`; widening the code
+    # pattern must not promote it past an explicit review request.
+    sig = keyword_classify(
+        "review this function for bugs:\n\nasync def foo():\n    pass",
+        tool_names=_REGISTERED_TOOLS,
+    )
+    assert sig is not None
+    assert sig.task == "reasoning"
+    assert sig.reason == "review_override"
+
+
 def test_keyword_classify_review_override_beats_code():
     # "review this code" is reasoning, not code — even though "code" is
     # in the prompt and there might be a snippet attached.
