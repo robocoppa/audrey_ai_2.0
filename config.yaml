@@ -387,6 +387,48 @@ deep_panel_research:
     writer: "glm-5.2:cloud"
     fallback_synth: "glm-5.2:cloud"
 
+# ─── Thinking policy for the deep panel ────────────────────────────────
+#
+# ⚠️ THIS CANNOT LIVE UNDER `deep_panel:`. `_validate_deep_panel_pools`
+# iterates EVERY key there as a task pool and would reject a `no_thinking` key
+# for "missing required `synthesizer`". The other three thinking switches are
+# still where they belong on their own sections: `router.no_thinking`,
+# `fast_path.no_thinking`, `kb.video.summary_no_thinking`.
+#
+# ⚠️ `null`/absent ≠ `false`. Omitting the `think` field is the pre-2026-08-07
+# behaviour and is safe on every model; `think: false` is a DIFFERENT request
+# and Ollama REJECTS it outright on a model with no `thinking` capability. Both
+# paths below go through `OllamaClient.thinking_flag`, which asks once per
+# model per process and returns `None` (omit) whenever it cannot confirm.
+#
+# ▶ Why anything is off at all — `draft_shape_probe.py`, nemotron, n=5, arms
+#   reversed, `code-hard-lru-ttl`:
+#
+#       arm             fenced   chars/tok   eval tokens   content
+#       think-default    2/5     0.04–0.27   3,713–34,463  1,005–1,355c
+#       think=false      5/5     4.13–4.24     475–695     1,965–2,892c
+#
+#   It paid 10–50× the tokens for a SHORTER answer that was malformed 3 times
+#   in 5. ⚠️ Not a dose-response — its 34k-token call was fine and its 3.7k one
+#   was not — so a token cap is not the alternative.
+thinking:
+  # ▶ PREFER THIS over the role switches. Per-model is what the evidence
+  # supports: the probe measured ONE model, and the fabrication that
+  # `think=false` bought in 2026-08-12 was a different model on a grounding
+  # task. Naming models keeps the blast radius the size of the measurement.
+  # Applies in every deep-panel role the model holds.
+  no_thinking_models:
+    - "nemotron-3.5-lightning:latest"
+
+  # Whole-role switches, applied on top of the list above. `false` = leave
+  # thinking alone (send no field), which is the historical behaviour.
+  # ⚠️ Turning `deep_worker` on affects EVERY worker in EVERY pool, including
+  # the research-adjacent `reasoning` and `general` panels where a worker's
+  # product IS the reasoning. Probe a model before adding it, and prefer
+  # `no_thinking_models` unless you have measured the whole role.
+  deep_worker: false
+  deep_synth: false
+
 # ─── Agentic behavior ──────────────────────────────────────────────────
 agentic:
   # Max concurrent cloud workers per deep request, across all deep pools.

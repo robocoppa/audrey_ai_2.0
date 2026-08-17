@@ -32,8 +32,14 @@ class _FakeOllama:
     def __init__(self, responses: dict[str, str]):
         self.responses = responses
 
-    async def chat(self, *, model, messages, options=None, timeout_s=0, tools=None):
-        # `tools=` accepted so the fact-checker's run_react loop can call us.
+    async def chat(self, *, model, messages, options=None, timeout_s=0, tools=None,
+                   format=None, think=None):
+        # ⚠️ Every kwarg the real `OllamaClient.chat` accepts must appear here,
+        # even the ones this fake ignores. When `think=` was added to the panel's
+        # call, this double still had the older, narrower signature: the
+        # TypeError escaped `_run_one_worker` and the streaming test HUNG rather
+        # than failed, which is far more expensive to diagnose than a red test.
+        # `tools=` is likewise here so the fact-checker's run_react loop can call us.
         return {"message": {"content": self.responses.get(model, "")},
                 "prompt_eval_count": 1, "eval_count": 1}
 
@@ -208,13 +214,13 @@ class _StructuringFakeOllama(_FakeOllama):
     the pipeline builds a real merged ledger from the fake stack."""
 
     async def chat(self, *, model, messages, options=None, timeout_s=0,
-                   tools=None, format=None):  # `format` mirrors OllamaClient.chat
+                   tools=None, format=None, think=None):
         if format is not None:
             return {"message": {"content": _LEDGER_JSON},
                     "prompt_eval_count": 1, "eval_count": 1}
         return await super().chat(model=model, messages=messages,
                                   options=options, timeout_s=timeout_s,
-                                  tools=tools)
+                                  tools=tools, think=think)
 
 
 async def test_research_stream_trace_block_when_flag_on():

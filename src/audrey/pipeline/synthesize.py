@@ -27,6 +27,7 @@ from audrey.metrics import dispatch_total
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
+from audrey.pipeline.deep_panel import think_for
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.messages import last_user_text
 from audrey.pipeline.prompts import SYNTH_SYSTEM, prompt_from_config
@@ -150,12 +151,17 @@ async def _try_synth(
     messages = _build_synth_messages(
         prior_messages, drafts_block, draft_count=draft_count, cfg=cfg,
     )
+    # Outside the gate on purpose: first sight of a model costs an `/api/show`,
+    # and holding the GPU gate through a metadata round trip would stall every
+    # local worker behind it.
+    think = await think_for(ollama, cfg, role="deep_synth", model=model)
     async with gate.acquire(model, location=location, user_id=user_id):
         resp = await ollama.chat(
             model=model,
             messages=messages,
             options={"temperature": 0.2},
             timeout_s=timeout_s,
+            think=think,
         )
     health.record_success(model)
     msg = resp.get("message", {}) or {}

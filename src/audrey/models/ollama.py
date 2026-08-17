@@ -21,6 +21,14 @@ from audrey.metrics import model_seconds
 
 log = logging.getLogger(__name__)
 
+#: Deadline for `/api/show`, independent of the client's chat timeout.
+#: ⚠️ It is a metadata read that sits IN FRONT OF request work, so it must be
+#: budgeted well below it — the client default is 120s, and inheriting that let
+#: one unreachable-host lookup stall a whole turn. Callers already degrade
+#: correctly on failure (`thinking_flag` returns None → omit the field), so a
+#: short deadline costs nothing and a long one costs everything.
+_SHOW_TIMEOUT_S = 5.0
+
 
 class OllamaError(Exception):
     """Raised for Ollama HTTP, transport, or response parsing failures."""
@@ -192,9 +200,20 @@ class OllamaClient:
         and produces the same reasoning either way. Capability is a
         precondition for the setting mattering, never evidence that it does;
         `scripts/thinking_probe.py` is what settles the second question.
+
+        ⚠️ **This runs on the REQUEST path and needs its own short deadline.**
+        It inherited the client's 120s default until 2026-08-17, which is the
+        inverted-ladder shape: a metadata lookup budgeted at or above the work
+        it precedes can stall the whole turn, and the caller's fallback
+        (`thinking_flag` → `None` → omit the field) is both cheap and correct.
+        `/api/show` reads local metadata — if it cannot answer in seconds it is
+        not going to, so waiting is pure loss. Caught by a hermetic test
+        blocking for two minutes against an unreachable host.
         """
         try:
-            r = await self._client.post("/api/show", json={"model": model})
+            r = await self._client.post(
+                "/api/show", json={"model": model}, timeout=_SHOW_TIMEOUT_S,
+            )
         except httpx.HTTPError as e:
             raise OllamaError(f"POST /api/show transport error: {type(e).__name__}: {e}") from e
         self._raise_for_status(r, "/api/show")

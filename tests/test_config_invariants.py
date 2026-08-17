@@ -148,6 +148,38 @@ def test_the_script_pulls_nothing_the_config_never_uses(cfg):
     )
 
 
+# ─── Thinking policy ───────────────────────────────────────────────────
+
+def test_every_no_thinking_model_is_one_the_config_actually_dispatches(cfg):
+    """A typo here is silent in BOTH directions.
+
+    `think_for` matches on the exact model string, so a misspelled entry never
+    fires — the model keeps thinking and nothing says the policy was ignored.
+    And a correctly-spelled model the config no longer uses leaves a rule
+    nobody can trace to a call site.
+    """
+    named = {str(m) for m in (cfg.get("thinking", {}).get("no_thinking_models") or [])}
+    unknown = sorted(named - _config_model_names(cfg))
+    assert not unknown, (
+        f"`thinking.no_thinking_models` names models the config never "
+        f"dispatches: {unknown}. The policy silently does nothing."
+    )
+
+
+def test_a_role_switch_is_a_bool_not_a_model_list(cfg):
+    """The two knobs read differently and mixing them up fails quietly:
+    `deep_worker: ["some-model"]` is truthy, so it would turn thinking off for
+    the WHOLE role while looking like a narrow per-model rule."""
+    thinking = cfg.get("thinking", {})
+    for role in ("deep_worker", "deep_synth"):
+        if role in thinking:
+            assert isinstance(thinking[role], bool), (
+                f"`thinking.{role}` must be a bool — a list here reads as "
+                "truthy and silently widens to the entire role. Use "
+                "`no_thinking_models` to name models."
+            )
+
+
 # ─── The YAML that reads one way and looks another ─────────────────────
 # Replaces the parenthetical in "A temporary toggle belongs in `.env`, not
 # `config.yaml`": an on-box `sed` once produced a duplicate key, and YAML keeps

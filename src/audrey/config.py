@@ -237,6 +237,12 @@ class Config:
         return self._merged.get("tools", {})
 
     @property
+    def thinking(self) -> dict[str, Any]:
+        """Deep-panel thinking policy. ⚠️ Top-level, NOT under `deep_panel` —
+        `_validate_deep_panel_pools` treats every key there as a task pool."""
+        return self._merged.get("thinking", {})
+
+    @property
     def raw(self) -> dict[str, Any]:
         return self._merged
 

@@ -214,6 +214,41 @@ def _fence_anomaly(text: str) -> str:
     return ""
 
 
+async def think_for(ollama: OllamaClient, cfg: Any, *, role: str, model: str) -> bool | None:
+    """`False` when this role+model should skip thinking, else `None` (omit).
+
+    Tri-state, and the distinction is load-bearing: `None` omits the `think`
+    field, which every model accepts, while `False` is a different request that
+    Ollama REJECTS outright on a model lacking the `thinking` capability. The
+    final answer therefore comes from `OllamaClient.thinking_flag`, which asks
+    once per model per process and returns `None` whenever it cannot confirm —
+    so a capability probe that fails degrades to today's behaviour rather than
+    breaking every call.
+
+    Two independent switches, OR'd:
+
+    `thinking.no_thinking_models` names individual models. **Prefer it.** The
+    probe that motivated this measured one model on one prompt, and the
+    fabrication `think=false` bought in 2026-08-12 was a different model on a
+    grounding task — so per-model keeps the change the size of the evidence.
+
+    `thinking.deep_worker` / `.deep_synth` switch a whole role, across every
+    pool. Wider blast radius, same warning.
+
+    ⚠️ Deliberately NOT wired into `run_react`'s default. That loop is shared
+    with the factchecker, which runs under `format=` where thinking has broken
+    JSON before; it takes `think` per call so each caller decides.
+    """
+    section = getattr(cfg, "thinking", None) or {}
+    if not isinstance(section, dict):
+        section = {}
+    named = {str(m) for m in (section.get("no_thinking_models") or [])}
+    role_off = bool(section.get(role, False))
+    if model not in named and not role_off:
+        return None
+    return await ollama.thinking_flag(model, False)
+
+
 def _log_draft_shape(
     model: str, *, raw: str, stripped: str, done_reason: str,
     eval_count: int, elapsed: float, subtask: str,
@@ -285,6 +320,12 @@ async def _run_one_worker(
     start = time.monotonic()
     use_tools = bool(tool_capable and tools is not None and tools.by_name)
     try:
+        # Inside the `try` but outside the gate, deliberately on both counts.
+        # Outside the gate because first sight of a model can cost an
+        # `/api/show`, and holding the GPU through a metadata round trip
+        # serialises every other local worker behind it. Inside the `try`
+        # because this function promises never to raise — see below.
+        think = await think_for(ollama, cfg, role="deep_worker", model=model)
         async with gate.acquire(model, location=location, user_id=user_id):
             if use_tools:
                 # Deep panel holds the gate for the *whole* worker (this
@@ -307,6 +348,7 @@ async def _run_one_worker(
                     gate=None,
                     location=location,
                     cfg=cfg,
+                    think=think,
                 )
                 elapsed = round(time.monotonic() - start, 2)
                 stripped = _strip_think(react.content)
@@ -341,6 +383,7 @@ async def _run_one_worker(
                 messages=messages,
                 options=options or None,
                 timeout_s=timeout_s,
+                think=think,
             )
         elapsed = round(time.monotonic() - start, 2)
         msg = resp.get("message", {}) or {}
@@ -373,6 +416,27 @@ async def _run_one_worker(
         log.warning("deep_panel: worker %s failed in %.2fs: %s", model, elapsed, e)
         return WorkerDraft(
             model=model, content="", error=str(e)[:300], elapsed_s=elapsed,
+            tool_rounds=0, tool_calls=[],
+        )
+    except Exception as e:
+        # ⚠️ "Always returns a WorkerDraft — never raises" was aspirational
+        # until 2026-08-17: only `OllamaError` was caught, so anything else
+        # escaped into `asyncio.gather` and, on the streaming path, DEADLOCKED
+        # the response generator instead of failing it. The headers are already
+        # sent by then, so the client cannot even be told — a raise here is
+        # invisible twice over.
+        #
+        # Found by adding one kwarg to the chat call: a test double whose
+        # signature had drifted narrower than the real client raised TypeError,
+        # and the suite hung rather than failed. A panel that loses one worker
+        # still has others; a panel that hangs has nothing.
+        elapsed = round(time.monotonic() - start, 2)
+        health.record_failure(model, str(e))
+        log.exception("deep_panel: worker %s raised %s in %.2fs",
+                      model, type(e).__name__, elapsed)
+        return WorkerDraft(
+            model=model, content="",
+            error=f"{type(e).__name__}: {e}"[:300], elapsed_s=elapsed,
             tool_rounds=0, tool_calls=[],
         )
 

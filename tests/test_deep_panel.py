@@ -18,6 +18,8 @@ from __future__ import annotations
 from typing import Any, ClassVar
 from unittest.mock import patch
 
+import pytest
+
 from audrey.config import get_config
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
@@ -2075,3 +2077,120 @@ def test_prose_is_never_flagged_as_unfenced_code():
 def test_a_draft_that_opens_on_async_def_counts_as_code():
     from audrey.pipeline.deep_panel import _fence_anomaly
     assert _fence_anomaly("async def fetch_all(fetch, keys):\n    pass\n") == "unfenced_code"
+
+
+# ─── think_for: the per-role thinking knob ─────────────────────────────
+# ⚠️ Tri-state, and the middle state is the whole point. `None` omits the
+# `think` field and every model accepts that; `False` is a DIFFERENT request
+# that Ollama rejects outright on a model without the `thinking` capability.
+# A knob that collapsed the two would turn "this role need not think" into a
+# hard failure on the next model that cannot.
+
+class _CapClient:
+    """Fake Ollama that records whether the capability probe was consulted."""
+
+    def __init__(self, capable: bool = True):
+        self.capable = capable
+        self.asked: list[tuple[str, bool]] = []
+
+    async def thinking_flag(self, model: str, want: bool):
+        self.asked.append((model, want))
+        return want if self.capable else None
+
+
+class _ThinkCfg:
+    def __init__(self, thinking: dict | None = None):
+        self.thinking = thinking or {}
+
+
+async def _tf(client, cfg, *, role="deep_worker", model="m"):
+    from audrey.pipeline.deep_panel import think_for
+    return await think_for(client, cfg, role=role, model=model)
+
+
+@pytest.mark.asyncio
+async def test_no_policy_omits_the_field_and_never_probes():
+    """The historical path. Absent config must not cost an `/api/show`, and
+    must not send `think` at all — omitting it is the only universally safe
+    request."""
+    c = _CapClient()
+    assert await _tf(c, _ThinkCfg()) is None
+    assert c.asked == [], "capability probe ran with no policy configured"
+
+
+@pytest.mark.asyncio
+async def test_a_named_model_skips_thinking():
+    c = _CapClient()
+    cfg = _ThinkCfg({"no_thinking_models": ["nemotron-3.5-lightning:latest"]})
+    assert await _tf(c, cfg, model="nemotron-3.5-lightning:latest") is False
+
+
+@pytest.mark.asyncio
+async def test_an_unnamed_model_is_untouched_by_the_list():
+    """Blast radius equals the evidence: naming one model must not quiet the
+    rest of the pool."""
+    c = _CapClient()
+    cfg = _ThinkCfg({"no_thinking_models": ["nemotron-3.5-lightning:latest"]})
+    assert await _tf(c, cfg, model="deepseek-v4-pro:cloud") is None
+
+
+@pytest.mark.asyncio
+async def test_a_model_that_cannot_think_gets_no_field_even_when_named():
+    """⚠️ The hard-error guard. Ollama REJECTS `think` on a model without the
+    capability, so a named-but-incapable model must degrade to omission — not
+    to `False`, which would break every call that lands on it."""
+    c = _CapClient(capable=False)
+    cfg = _ThinkCfg({"no_thinking_models": ["old-model:latest"]})
+    assert await _tf(c, cfg, model="old-model:latest") is None
+
+
+@pytest.mark.asyncio
+async def test_a_role_switch_applies_to_every_model_in_that_role():
+    c = _CapClient()
+    cfg = _ThinkCfg({"deep_worker": True})
+    assert await _tf(c, cfg, role="deep_worker", model="anything") is False
+
+
+@pytest.mark.asyncio
+async def test_a_role_switch_does_not_leak_into_another_role():
+    """`deep_worker` and `deep_synth` are separate because their products are
+    separate: a worker drafts, a synthesizer reasons over drafts. Turning one
+    off must not quietly turn off the other."""
+    c = _CapClient()
+    cfg = _ThinkCfg({"deep_worker": True})
+    assert await _tf(c, cfg, role="deep_synth", model="anything") is None
+
+
+@pytest.mark.asyncio
+async def test_a_missing_cfg_is_the_historical_path():
+    c = _CapClient()
+    assert await _tf(c, None) is None
+    assert c.asked == []
+
+
+@pytest.mark.asyncio
+async def test_a_worker_that_raises_anything_still_returns_a_draft():
+    """⚠️ `_run_one_worker` documents "never raises". Until 2026-08-17 it caught
+    only `OllamaError`, so anything else escaped into `asyncio.gather` — and on
+    the streaming path that DEADLOCKED the response generator rather than
+    failing it, with the headers already sent so the client could not be told.
+
+    A panel that loses one worker still has others. A panel that hangs has
+    nothing, and the operator gets no error to search for.
+    """
+    class _Exploding:
+        async def thinking_flag(self, model, want):
+            return None
+
+        async def chat(self, **kw):
+            raise RuntimeError("upstream did something unexpected")
+
+    draft = await dpmod._run_one_worker(
+        _Exploding(), HealthTracker(), FairLocalGate(concurrency=1),
+        model="m", location="cloud", messages=[{"role": "user", "content": "hi"}],
+        options={}, timeout_s=5.0, tools=None, tool_capable=False,
+        react_max_rounds=1, react_compress_after=1, react_max_tool_chars=100,
+        react_dispatch_timeout_s=5.0,
+    )
+    assert draft["content"] == ""
+    assert "RuntimeError" in draft["error"], draft
