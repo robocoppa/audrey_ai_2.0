@@ -1166,7 +1166,24 @@ def test_render_claims_includes_ids_and_no_source_marker():
     sources = [Source(id="s1", title="T", url="https://e.com", source_type="official")]
     out = _render_claims_for_factcheck(claims, sources)
     assert "c1" in out and "c2" in out
-    assert "[no source]" in out  # c2 has none
+    assert "[sources: none]" in out  # c2 has none
+
+
+def test_render_claims_never_calls_an_unlinked_claim_unsourced():
+    # ⚠️ The marker for "we attached no source id" must not read as a finding
+    # about the world. It used to say `[no source]`, which is almost verbatim
+    # the structuring prompt's definition of `unsupported` ("no source actually
+    # supports it") — and `unsupported` DELETES the claim. On run `103331`, 12 of
+    # 13 DROPs landed on unlinked claims, with the same fact CONFIRMED elsewhere
+    # in the pass wherever its link had survived.
+    from audrey.pipeline.deep_panel import _render_claims_for_factcheck
+    from audrey.pipeline.ledger import Claim
+    out = _render_claims_for_factcheck([Claim(id="c1", text="unlinked")], [])
+    assert "[no source]" not in out
+    # And the batch carries the rule, not just the neutral wording: the marker
+    # is about our ledger, and the claim is judged like any other.
+    assert "NOT a finding" in out
+    assert "linkage" in out.lower()
 
 
 def test_render_claims_shows_all_sources_for_a_batch():
@@ -1361,6 +1378,30 @@ def test_factcheck_structure_prompt_demands_a_verdict_for_every_claim():
     assert "EVERY claim in the list gets its own entry in `checks`" in FACTCHECK_STRUCTURE_SYSTEM
     assert "never bare claim ids" in FACTCHECK_STRUCTURE_SYSTEM
     assert "never a substitute for a verdict" in FACTCHECK_STRUCTURE_SYSTEM
+
+
+def test_factcheck_structure_prompt_bars_deleting_a_claim_for_a_lost_link():
+    # `unsupported` is the only verdict the writer acts on by DELETING, so its
+    # bar is contradiction — not absence, and above all not `[sources: none]`,
+    # which describes our own ledger. The prose `FACTCHECK_SYSTEM` already got
+    # this right; the policy was being lost at the structuring pass, which is
+    # the one that emits the machine-readable verdict.
+    from audrey.pipeline.prompts import FACTCHECK_STRUCTURE_SYSTEM
+    assert "CONTRADICT" in FACTCHECK_STRUCTURE_SYSTEM
+    assert "[sources: none]" in FACTCHECK_STRUCTURE_SYSTEM
+    assert "could not confirm is NOT unsupported" in FACTCHECK_STRUCTURE_SYSTEM
+
+
+def test_factcheck_structure_prompt_requires_a_real_difference_for_a_conflict():
+    # Run `103331` reported "w0_c16 dates Tokio 1.53.0 to July 17, 2026 but w1_c2
+    # ALSO dates it to July 17, 2026 …" — agreement filed as a conflict, and
+    # across two different releases (1.53.0 vs 1.53.1). Every `fatal_errors`
+    # sentence becomes an UNVERIFIED line, so a false one hedges a fact two
+    # researchers independently confirmed.
+    from audrey.pipeline.prompts import FACTCHECK_STRUCTURE_SYSTEM
+    assert "SAME entity" in FACTCHECK_STRUCTURE_SYSTEM
+    assert "actually DIFFER" in FACTCHECK_STRUCTURE_SYSTEM
+    assert "AGREE" in FACTCHECK_STRUCTURE_SYSTEM
 
 
 # ── Worker-reply think-stripping ───────────────────────────────────────
@@ -1613,6 +1654,57 @@ async def test_sources_block_reaches_stream_when_ledger_present():
     assert "## Sources" in final["content"]
     assert "MacTutor" in final["content"]
     assert any("## Sources" in d for d in deltas)  # streamed, not just in final
+
+
+async def test_factcheck_log_separates_drops_that_landed_on_unlinked_claims(caplog):
+    # The prompt rule is the fix; this counter is how we find out whether it
+    # held. A DROP deletes the claim outright, and an unlinked claim is unlinked
+    # because of OUR structurer — so `[N unlinked]` is the rate at which we
+    # delete for the wrong reason. It must count only the intersection: a drop
+    # on a linked claim is an ordinary fact-check judgement and does not belong
+    # in this number, or the instrument reports the pathology as permanent.
+    import json as _json
+    import logging
+
+    models = (("r1", 100, "cloud"), ("v", 80, "cloud"), ("fc", 75, "cloud"), ("w", 70, "local"))
+    reg = _registry(*models)
+    cfg = _research_cfg_fc_ledger(["r1"], "v", "fc", "w", models)
+    research_json = _json.dumps({
+        "summary_notes": "n",
+        "claims": [
+            {"id": "c1", "text": "linked and dropped", "source_ids": ["s1"], "risk": "low"},
+            {"id": "c2", "text": "unlinked and dropped", "source_ids": [], "risk": "low"},
+            {"id": "c3", "text": "unlinked but kept", "source_ids": [], "risk": "low"},
+        ],
+        "sources": [{"id": "s1", "title": "MacTutor",
+                     "url": "https://mathshistory.st-andrews.ac.uk/Euclid/",
+                     "source_type": "reference", "supports": ["c1"]}],
+    })
+    # Ids are namespaced per worker (`w0_`) before the fact-check sees them.
+    factcheck_json = _json.dumps({"checks": [
+        {"claim_id": "w0_c1", "verdict": "unsupported"},
+        {"claim_id": "w0_c2", "verdict": "unsupported"},
+        {"claim_id": "w0_c3", "verdict": "needs_hedge"},
+    ]})
+    ollama = _LedgerOllama(
+        {"r1": "notes", "v": "ok", "fc": "notes", "w": "answer"},
+        research_json=research_json, factcheck_json=factcheck_json,
+    )
+
+    with caplog.at_level(logging.INFO, logger="audrey.pipeline.deep_panel"):
+        async for _evt in run_research_pipeline_streaming(
+            cfg, ollama, reg, HealthTracker(), FairLocalGate(concurrency=1),
+            task="reasoning", messages=[{"role": "user", "content": "q"}],
+            options={}, timeout_s=5.0, max_researchers_cloud=2,
+            tools=_one_tool_registry(), tool_capable_models={"fc"}, user_id=None,
+        ):
+            pass
+
+    line = next((r.getMessage() for r in caplog.records
+                 if "factcheck ledger" in r.getMessage()), None)
+    assert line is not None, "the factcheck ledger summary never logged"
+    # 2 drops total, of which exactly 1 sat on an unlinked claim.
+    assert "2 drop [1 unlinked]" in line, line
 
 
 # ── Stage 4: deterministic hedging dispositions ────────────────────────

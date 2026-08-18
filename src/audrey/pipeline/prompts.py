@@ -342,14 +342,42 @@ FACTCHECK_SYSTEM = (
 # list in the prompt so every verdict references a real claim_id. Pinned to the
 # FactCheckResult JSON schema (Ollama `format`). Overridable via
 # `agentic.prompts.factcheck_structure`.
+#
+# ⚠️⚠️ TWO RULES HERE ARE LOAD-BEARING AND BOTH WERE ADDED FROM MEASURED
+# FAILURES ON RUN `103331`. Do not "simplify" either back.
+#
+# 1. `unsupported` DELETES the claim (`_factcheck_result_to_corrections` maps it
+#    to DROP and the writer omits it), so its bar is contradiction, never mere
+#    absence. The old wording — "no source actually supports it" — matched the
+#    `[no source]` marker the claim list used to print, and 12 of 13 DROPs
+#    landed on claims our own structurer had left unlinked. The upstream
+#    `FACTCHECK_SYSTEM` prose prompt already had this right ("Only recommend
+#    deletion when a claim is actively CONTRADICTED"); the policy was being lost
+#    at the structuring step, which is the pass that actually produces the
+#    machine-readable verdict.
+# 2. A conflict needs SAME ENTITY plus DIFFERENT VALUES. Given only the example
+#    sentence, models pattern-match its shape and fill it with whatever two
+#    claims are adjacent: `103331` emitted "w0_c16 dates Tokio 1.53.0 to July
+#    17, 2026 but w1_c2 also dates it to July 17, 2026 while w1_c1 dates the
+#    latest release v1.53.1 to July 20, 2026" — agreement reported as conflict,
+#    across two different releases. Every `fatal_errors` sentence becomes an
+#    UNVERIFIED line telling the writer to hedge, so a false one hedges a fact
+#    two researchers independently confirmed.
 FACTCHECK_STRUCTURE_SYSTEM = (
     "You convert a fact-checker's findings into a structured per-claim verdict "
     "list. You are given the CLAIMS (each with an id) and the fact-checker's "
     "notes. For each claim the notes actually address, emit a `ClaimCheck` with "
     "its `claim_id` and a `verdict`:\n"
     "  - \"supported\": the sources back the claim as stated.\n"
-    "  - \"unsupported\": no source actually supports it (e.g. a work called "
-    "\"surviving\" that is in fact lost) — the writer will OMIT it.\n"
+    "  - \"unsupported\": your sources actively CONTRADICT it, or you checked "
+    "it and it is false (e.g. a work called \"surviving\" that is in fact "
+    "lost) — the writer DELETES it, so this is the one verdict that cannot be "
+    "walked back downstream. A claim you merely could not confirm is NOT "
+    "unsupported — use \"needs_hedge\". Neither is a claim marked "
+    "[sources: none]: that marks a link missing from our ledger, not a finding "
+    "about the world, and a true claim whose link was lost looks identical to "
+    "an invented one. Never make [sources: none] your reason for "
+    "\"unsupported\".\n"
     "  - \"conflicting\": sources or other claims contradict it.\n"
     "  - \"needs_hedge\": plausible but the exact form isn't earned — soften it; "
     "set `corrected_text` to the hedged wording.\n"
@@ -364,9 +392,16 @@ FACTCHECK_STRUCTURE_SYSTEM = (
     "\"first\"/\"only\"/\"proved\"/\"invented\"/\"founded\"/\"definitively\"/"
     "\"worldwide\"/\"complete\"/\"all\" require strong support or get a softer "
     "`corrected_text`. EVERY claim in the list gets its own entry in `checks` — "
-    "including a claim that contradicts another one. When two claims conflict, "
-    "ALSO add one short SENTENCE to `fatal_errors` naming both ids and the "
-    "conflict, e.g. \"w1_c19 dates the release to July 17 but w1_c46 says June\". "
+    "including a claim that contradicts another one. When two claims genuinely "
+    "conflict, ALSO add one short SENTENCE to `fatal_errors` naming both ids and "
+    "the conflict, e.g. \"w1_c19 dates the release to July 17 but w1_c46 says "
+    "June\". Two claims conflict ONLY IF BOTH tests pass: they describe the SAME "
+    "entity — the same version, product, person or event, so v1.53.0 and v1.53.1 "
+    "are different releases and their dates cannot disagree — AND the values they "
+    "give actually DIFFER. Two claims giving the same date AGREE; that is "
+    "corroboration, and reporting it as a conflict makes the writer hedge a fact "
+    "two researchers independently confirmed. If you cannot say what the "
+    "difference IS, there is no conflict. "
     "`fatal_errors` holds sentences, never bare claim ids, and is never a "
     "substitute for a verdict. Do not invent claim_ids — only reference ids from "
     "the list."

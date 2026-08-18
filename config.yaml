@@ -1331,16 +1331,22 @@ vision:
   # encoding of "no single target here" — do NOT "fix" it by passing a model
   # name, which would silently re-route the image path.
   #
-  # ▶ **OPEN DECISION (2026-08-15): `qwen3.8:latest` CAN SEE.** `ollama show`
-  # reports a `vision` capability and a 460M-param CLIP projector. It is not
-  # listed here, so a passthrough client naming it gets the sidecar's prose
-  # transcription rather than the pixels — a fidelity hop that model does not
-  # need. ✅ The old blocker is gone: the sidecar was exercised end-to-end on
-  # 2026-08-18 (`vision: described 1/1 image(s) with qwen3-vl:32b`).
-  # ▶ What is left to check is a PASSTHROUGH image turn
-  # (`audrey_passthrough/qwen3.8:latest`, which is in `allowed_models`): decide
-  # on whether the transcription loses anything real on a chart or a dense
-  # screenshot. Adding a name here is what turns that answer into a change.
+  # ✅ **DECIDED 2026-08-18 (user): STAYS EMPTY. `qwen3.8:latest` can see and is
+  # deliberately not listed.** `ollama show` reports a `vision` capability and a
+  # 460M CLIP projector, so a passthrough client naming it takes a fidelity hop
+  # it does not strictly need. Closed anyway, on transcription quality: the
+  # sidecar's descriptions were judged good in real use, so the hop is not
+  # costing anything worth a change.
+  # ▶ The asymmetry is the argument. Leaving this empty risks a fidelity hop on
+  # one model on one path; adding a name re-routes the ONE image path that is
+  # known to work, and does it silently — an image simply stops being
+  # transcribed, with no log line saying so, because the short-circuit returns
+  # `messages` untouched.
+  # ⚠️ **The evidence is from the DEEP path, which cannot read this list at all**
+  # (`target_model=""`), so this is closed on an absent deficit, not on a
+  # passthrough measurement. Re-open only on a CONCRETE failure: a chart or dense
+  # screenshot where the answer visibly misses what is in the image. Judging it
+  # needs `audrey_passthrough/qwen3.8:latest`, not another deep turn.
   also_capable: []                       # vision models that aren't in the vl pool
 
   # ─── Sampling (Phase 38) ─────────────────────────────────────────────
@@ -1480,6 +1486,26 @@ passthrough:
     - qwen3.5:397b-cloud
     - glm-4.7-flash:q8_0
     - llama4:latest
+    # ── 2026-08-18 arrivals, exposed for the local bake-off, NOT in any pool ──
+    # Listing a model here makes it targetable by
+    # `scripts/eval_research.py --models audrey_passthrough/<name>` and nothing
+    # else — passthrough gates on THIS LIST ALONE
+    # (`routes/openai/passthrough.py:91`); no `model_registry` entry is needed
+    # until a model earns a production role.
+    #
+    # ⚠️ `laguna-s-2.1` IS 96 GB AGAINST 48 GB OF VRAM. It cannot be resident;
+    # Ollama will split it across GPU and CPU, and the tokens/sec that follows
+    # is a memory-bandwidth measurement, not a measurement of the model. Run
+    # `ollama ps` after its first prompt and read the CPU/GPU split BEFORE
+    # spending a 12-case suite on it. Precedent is `llama4:latest` above: 67 GB,
+    # carries the registry's lowest `speed` (55), parked at priority 65 in
+    # `general` only, and in no deep panel.
+    # ⚠️ NEVER SWEEP THESE TOGETHER. `_expand_sweep` groups by model so each
+    # loads once, but 96 GB + 20 GB + 5.6 GB against 48 GB still means the
+    # bigger one is evicted and reloaded from disk. One `--models` value per run.
+    - laguna-s-2.1:latest
+    - laguna-xs-2.1:latest
+    - ornith:latest
     # Vision-language pool, exposed so an image-capable model can be targeted
     # directly. Batch image work (Phase 36 media-worker keyframe description)
     # reaches the GPU through passthrough precisely so both fair-scheduling

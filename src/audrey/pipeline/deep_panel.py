@@ -1286,9 +1286,25 @@ def _render_claims_for_factcheck(claims: list[Claim], sources: list[Source]) -> 
     is the FULL source set (a batch is judged against all sources, not just the
     ones its claims cite). Sources appended so the checker can judge support
     without re-fetching."""
-    lines = ["CLAIMS:"]
+    lines = [
+        "CLAIMS:  ([sources: none] means THIS PIPELINE attached no source id to "
+        "the claim. That is a fact about our own ledger's linkage, NOT a finding "
+        "that no source supports the claim. Judge such a claim on your notes and "
+        "the SOURCES list below, exactly as you would a linked one.)"
+    ]
     for c in claims:
-        src = f" [sources: {', '.join(c.source_ids)}]" if c.source_ids else " [no source]"
+        # ⚠️ The empty case used to read `[no source]`, which is a claim about the
+        # WORLD, and the structuring prompt defines `unsupported` as "no source
+        # actually supports it" — so the two strings matched almost verbatim and
+        # the model dropped the claim on our plumbing. Measured on run `103331`:
+        # 12 of 13 DROP verdicts landed on `sources: none` claims, and the proof
+        # it was linkage and not grounding is inside one case — `w0_c7` ("Llama 4
+        # released April 5 2025", sourced) was CONFIRMED while `w1_c9`, the same
+        # fact from another worker with the link lost, was DROPPED in the same
+        # pass. The answer kept the fact only because the linked copy existed.
+        # ▶ `[sources: none]` is deliberately the same wording the rendered
+        # artifacts use, so the grep vocabulary does not fork.
+        src = f" [sources: {', '.join(c.source_ids)}]" if c.source_ids else " [sources: none]"
         lines.append(f"- {c.id} (risk={c.risk}): {c.text}{src}")
     if sources:
         lines.append("\nSOURCES:")
@@ -2059,9 +2075,23 @@ async def run_research_pipeline_streaming(
                     rendered = _factcheck_result_to_corrections(fc_struct, ledger)
                     n_drop = sum(1 for c in fc_struct.checks if c.verdict == "unsupported")
                     n_hedge = sum(1 for c in fc_struct.checks if c.verdict in ("needs_hedge", "conflicting"))
+                    # ⚠️ Drops landing on claims OUR OWN structurer left unlinked.
+                    # A DROP deletes the claim, and `[sources: none]` describes
+                    # our ledger's plumbing rather than the world — so this is
+                    # the rate at which we delete for the wrong reason, and it
+                    # is the only way to tell whether the prompt rule landed.
+                    # Baseline before the fix, run `103331`: 12 of 13. Near zero
+                    # is healthy; tracking `n_drop` means the rule is not biting.
+                    unlinked = {c.id for c in ledger.claims if not c.source_ids}
+                    n_drop_unlinked = sum(
+                        1 for c in fc_struct.checks
+                        if c.verdict == "unsupported" and c.claim_id in unlinked
+                    )
                     log.info(
-                        "research: factcheck ledger — %d checks (%d drop, %d hedge), %d fatal",
-                        len(fc_struct.checks), n_drop, n_hedge, len(fc_struct.fatal_errors),
+                        "research: factcheck ledger — %d checks (%d drop [%d unlinked], "
+                        "%d hedge), %d fatal",
+                        len(fc_struct.checks), n_drop, n_drop_unlinked, n_hedge,
+                        len(fc_struct.fatal_errors),
                     )
                     corrections = rendered
         except OllamaError as e:

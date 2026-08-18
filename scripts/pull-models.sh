@@ -37,6 +37,19 @@ LOCAL_MODELS=(
   "qwen3-vl:32b"
   "llava:34b"
   "nomic-embed-text:latest"
+  # ── 2026-08-18 bake-off candidates, NOT production roles ──
+  # These hold no `model_registry` slot and sit in no pool; they reach config
+  # through `passthrough.allowed_models` alone, so they are targetable by
+  # `eval_research.py --models` and nothing else. They are listed here because
+  # `test_every_model_the_config_names_is_pulled_by_the_script` is right that a
+  # rebuilt box must not come up missing a name config mentions — that is the
+  # exact trap this file's header records. ▶ If a candidate loses its bake-off,
+  # delete it from BOTH files rather than leaving a 96 GB download in a rebuild.
+  # ⚠️ `laguna-s-2.1` is 96 GB against 48 GB of VRAM — it cannot be resident,
+  # and pulling it costs an hour and a fifth of the array.
+  "laguna-s-2.1:latest"
+  "laguna-xs-2.1:latest"
+  "ornith:latest"
 )
 
 CLOUD_MODELS=(
