@@ -249,6 +249,13 @@ async def think_for(ollama: OllamaClient, cfg: Any, *, role: str, model: str) ->
     `thinking.deep_worker` / `.deep_synth` switch a whole role, across every
     pool. Wider blast radius, same warning.
 
+    `thinking.ledger_structure` is the exception to "prefer per-model", and it
+    is on by default: it covers the two schema-pinned structuring calls, whose
+    product is a TRANSCRIPTION rather than a judgement. A model that thinks
+    there spends the budget reasoning and returns zero bytes of JSON — measured
+    at `thinking=273013 done_reason='length' eval_count=65536`, a whole 64k
+    budget for an empty reply, and the fail-soft path made it a silent loss.
+
     ⚠️ Deliberately NOT wired into `run_react`'s default. That loop is shared
     with the factchecker, which runs under `format=` where thinking has broken
     JSON before; it takes `think` per call so each caller decides.
@@ -1066,6 +1073,9 @@ async def _structure_one_draft(
         {"role": "system", "content": prompt_from_config(cfg, "research_structure", RESEARCH_STRUCTURE_SYSTEM)},
         {"role": "user", "content": user},
     ]
+    # Resolved BEFORE the gate: `think_for` may cost one `/api/show`, and a
+    # capability probe has no business holding a GPU slot.
+    think = await think_for(ollama, cfg, role="ledger_structure", model=model)
     try:
         async with gate.acquire(model, location=location, user_id=user_id):
             resp = await ollama.chat(
@@ -1074,6 +1084,7 @@ async def _structure_one_draft(
                 options={"temperature": 0.0},
                 timeout_s=timeout_s,
                 format=inlined_schema(ResearchResult),
+                think=think,
             )
         health.record_success(model)
     except OllamaError as e:
@@ -1328,6 +1339,8 @@ async def _structure_factcheck_batch(
         {"role": "system", "content": prompt_from_config(cfg, "factcheck_structure", FACTCHECK_STRUCTURE_SYSTEM)},
         {"role": "user", "content": block},
     ]
+    # See `_structure_one_draft` — same role, same reason, resolved off the gate.
+    think = await think_for(ollama, cfg, role="ledger_structure", model=model)
     try:
         async with gate.acquire(model, location=location, user_id=user_id):
             resp = await ollama.chat(
@@ -1336,6 +1349,7 @@ async def _structure_factcheck_batch(
                 options={"temperature": 0.0},
                 timeout_s=timeout_s,
                 format=inlined_schema(FactCheckResult),
+                think=think,
             )
         health.record_success(model)
     except OllamaError as e:

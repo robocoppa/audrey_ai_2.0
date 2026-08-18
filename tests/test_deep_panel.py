@@ -2171,6 +2171,59 @@ async def test_a_missing_cfg_is_the_historical_path():
     assert c.asked == []
 
 
+class _ThinkCapturingOllama:
+    """Records the `think` each `format=`-pinned call actually sent."""
+
+    def __init__(self, content: str = "{}"):
+        self.content = content
+        self.thinks: list[bool | None] = []
+
+    async def thinking_flag(self, model, want):
+        return want  # model is thinking-capable
+
+    async def chat(self, *, model, messages, options=None, timeout_s=0,
+                   tools=None, format=None, think=None):
+        self.thinks.append(think)
+        return {"message": {"content": self.content}, "eval_count": 1}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("site", ["draft", "factcheck"])
+async def test_both_structuring_sites_send_the_ledger_structure_think_policy(site):
+    """The two schema-pinned passes are direct `ollama.chat`, not `run_react`,
+    so no other thinking rule reaches them — they were the last callers sending
+    no `think` at all. That is not a cosmetic gap: thinking there spent a whole
+    64k budget and returned zero bytes of JSON, which the fail-soft path then
+    swallowed. Assert the policy ARRIVES, per site, because wiring one and
+    forgetting the other is exactly the shape of the original bug.
+    """
+    from audrey.pipeline.deep_panel import (
+        _structure_factcheck_batch,
+        _structure_one_draft,
+    )
+    from audrey.pipeline.ledger import Claim
+    c = _ThinkCapturingOllama()
+    cfg = _ThinkCfg({"ledger_structure": True})
+    common = dict(
+        model="deepseek-v4-pro:cloud", location="cloud", timeout_s=5.0, user_id=None,
+    )
+    if site == "draft":
+        await _structure_one_draft(
+            c, HealthTracker(), FairLocalGate(concurrency=1), cfg,
+            prose="notes", retrieved=[], worker_idx=0, **common,
+        )
+    else:
+        await _structure_factcheck_batch(
+            c, HealthTracker(), FairLocalGate(concurrency=1), cfg,
+            claims=[Claim(id="w0_c1", text="a claim")], sources=[],
+            fc_notes="notes", **common,
+        )
+    assert c.thinks == [False], (
+        f"the {site} structuring call sent think={c.thinks!r}; `None` means it "
+        "omits the field and the model thinks its budget away again"
+    )
+
+
 @pytest.mark.asyncio
 async def test_a_worker_that_raises_anything_still_returns_a_draft():
     """⚠️ `_run_one_worker` documents "never raises". Until 2026-08-17 it caught

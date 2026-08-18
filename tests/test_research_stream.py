@@ -213,6 +213,12 @@ class _StructuringFakeOllama(_FakeOllama):
     returns canned ResearchResult JSON instead of the researcher prose, so
     the pipeline builds a real merged ledger from the fake stack."""
 
+    async def thinking_flag(self, model, want):
+        # The structuring passes ask this before every `format=` call. Absent it,
+        # the AttributeError is caught by the gather's blanket handler and the
+        # ONLY symptom is a missing ledger — which reads as a structuring bug.
+        return want
+
     async def chat(self, *, model, messages, options=None, timeout_s=0,
                    tools=None, format=None, think=None):
         if format is not None:

@@ -171,7 +171,7 @@ def test_a_role_switch_is_a_bool_not_a_model_list(cfg):
     `deep_worker: ["some-model"]` is truthy, so it would turn thinking off for
     the WHOLE role while looking like a narrow per-model rule."""
     thinking = cfg.get("thinking", {})
-    for role in ("deep_worker", "deep_synth"):
+    for role in ("deep_worker", "deep_synth", "ledger_structure"):
         if role in thinking:
             assert isinstance(thinking[role], bool), (
                 f"`thinking.{role}` must be a bool — a list here reads as "

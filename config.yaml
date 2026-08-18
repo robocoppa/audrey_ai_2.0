@@ -448,6 +448,20 @@ thinking:
   deep_worker: false
   deep_synth: false
 
+  # ▶ ON, and the only role switch that is. It covers the two schema-pinned
+  # structuring calls (`_structure_one_draft`, `_structure_factcheck_batch`) —
+  # direct `ollama.chat` with `format=`, NOT `run_react`, so no other thinking
+  # rule reached them.
+  # ⚠️ MEASURED, not inferred: `deepseek-v4-pro:cloud` twice returned 200 OK with
+  # ZERO bytes at `thinking=273013 done_reason='length' eval_count=65536` — the
+  # entire 64k budget spent reasoning about a transcription task, and the
+  # fail-soft path turned each one into a silently dropped ledger.
+  # ▶ Safe here for the reason the standing rule gives: these roles' product is
+  # a LABEL, not a judgement. ⚠️ The factchecker's VERDICTS are a judgement, but
+  # this switch touches only the pass that puts them in JSON, never the
+  # `run_react` pass that reaches them.
+  ledger_structure: true
+
 # ─── Agentic behavior ──────────────────────────────────────────────────
 agentic:
   # Max concurrent cloud workers per deep request, across all deep pools.
