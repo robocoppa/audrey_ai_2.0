@@ -278,19 +278,22 @@ deep_panel_cloud:
     # holds both slots), which drafts once and then "merges" its own only draft:
     # strictly more latency than answering directly, for nothing. Caught by
     # `test_no_flat_panel_is_degenerate`, which asserts on DISTINCT names.
-    # ▶ TWO workers, and the reason is a HARD CAP, not a preference.
-    # `deepseek-v4-pro` was added here on 2026-08-17 and NEVER RAN: the
-    # effective `max_deep_workers_cloud` is 2, so `select_workers` dropped the
-    # third cloud worker — silently, until that was fixed. The config is back
-    # to two so it states what actually dispatches.
-    # ⚠️⚠️ **ADDING A THIRD WORKER HERE IS A NO-OP** until the cap is raised.
-    # The cap lives in TWO places and the env wins: `agentic.max_deep_workers_cloud`
-    # in this file, overridden by `MAX_DEEP_WORKERS_CLOUD` in `.env`. Check the
-    # deployed value (`grep "ENV OVERRIDE"` in the logs) before editing this list.
-    # ▶ Measured on `202130` (5/5): `kimi-k2.7-code` supplied the winning code in
-    # FOUR of five cases, `glm-5.2` in one. Both earn their slot; deepseek is the
-    # one to promote here if the cap ever goes up.
-    workers: ["glm-5.2:cloud", "kimi-k2.7-code:cloud"]
+    # THREE workers. `deepseek-v4-pro` is the measured #1 code contributor
+    # (`analyze_draft_contribution.py`: 0.69 code recall, 0.60 win rate, and the
+    # fastest cloud worker). It is also `fallback_synth`; a model may hold both
+    # roles, and a glm-synth outage still degrades to a different vendor.
+    # ⚠️ It did NOT draft on `202130` and the cap was NOT why — the deployed
+    # `MAX_DEEP_WORKERS_CLOUD` is 3, confirmed from the `ENV OVERRIDE` log line.
+    # The likely cause was simply that this edit was not yet in the running
+    # image. ▶ LESSON: `config.yaml` is not evidence of what is deployed; read
+    # `docker logs audrey-ai | grep "ENV OVERRIDE"` before diagnosing a missing
+    # draft, and check for a `deep_panel: DROPPING cloud worker` warning, which
+    # now fires whenever the cap really is the reason.
+    # ⚠️⚠️ THREE cloud workers sits EXACTLY ON the cap of 3. A fourth is dropped
+    # by `_healthy_workers` — audibly now, but still dropped. Swap, do not add.
+    # ▶ On `202130` (5/5, two workers): `kimi-k2.7-code` supplied the winning
+    # code in four of five cases, `glm-5.2` in one.
+    workers: ["glm-5.2:cloud", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud"]
     synthesizer: "glm-5.2:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
   reasoning:
