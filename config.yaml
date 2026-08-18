@@ -1318,15 +1318,29 @@ vision:
   timeout_s: 120                         # a dense screenshot is a slow decode
   max_images_per_turn: 4                 # local calls serialize on the GPU gate
   cache_size: 64                         # OWUI resends the data URI every turn
+  # ⚠️⚠️ THIS LIST ONLY AFFECTS PASSTHROUGH. The short-circuit that reads it is
+  # `if target_model and is_vision_capable(target_model, cfg)`
+  # (`pipeline/vision.py:641`), and the DEEP path calls the sidecar with
+  # `target_model=""` (`routes/openai/pipeline.py:299`) — so the guard can never
+  # fire there and a deep pick transcribes unconditionally, whatever is listed
+  # here. Only `passthrough.py` passes a concrete target.
+  # ▶ That is correct, not an oversight: a panel is several workers of mixed
+  # capability plus a synthesizer, so there is no single target to test.
+  # `deep_panel.code` runs `nemotron-3.5-lightning` and two cloud models that
+  # cannot see, no matter what the local text model can do. `""` is the honest
+  # encoding of "no single target here" — do NOT "fix" it by passing a model
+  # name, which would silently re-route the image path.
+  #
   # ▶ **OPEN DECISION (2026-08-15): `qwen3.8:latest` CAN SEE.** `ollama show`
   # reports a `vision` capability and a 460M-param CLIP projector. It is not
-  # listed here, so Audrey treats it as text-only and the sidecar transcribes an
-  # image to prose before handing it over — a fidelity hop the model does not
-  # need. Adding it would let image turns reach it directly.
-  # ⚠️ NOT done yet, deliberately: this changes routing on the image path, and
-  # that path has never been exercised end-to-end (the sidecar itself is still
-  # an unvalidated item). Verify a real image turn in OWUI on the *Audrey*
-  # connection before adding it, not after.
+  # listed here, so a passthrough client naming it gets the sidecar's prose
+  # transcription rather than the pixels — a fidelity hop that model does not
+  # need. ✅ The old blocker is gone: the sidecar was exercised end-to-end on
+  # 2026-08-18 (`vision: described 1/1 image(s) with qwen3-vl:32b`).
+  # ▶ What is left to check is a PASSTHROUGH image turn
+  # (`audrey_passthrough/qwen3.8:latest`, which is in `allowed_models`): decide
+  # on whether the transcription loses anything real on a chart or a dense
+  # screenshot. Adding a name here is what turns that answer into a change.
   also_capable: []                       # vision models that aren't in the vl pool
 
   # ─── Sampling (Phase 38) ─────────────────────────────────────────────

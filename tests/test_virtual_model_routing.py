@@ -132,3 +132,40 @@ def test_every_model_that_can_route_deep_has_a_panel_pool():
     can_route_deep = set(VIRTUAL_MODELS) - {"audrey_fast"}
     missing = can_route_deep - set(_POOL_KEYS)
     assert not missing, f"virtual model(s) can reach the panel unregistered: {missing}"
+
+
+# ─── The sidecar call: both gates must declare "no single target" ──────
+
+
+_DESCRIBE_CALL = re.compile(r"describe_for_text_model\((.*?)^\s*\)", re.S | re.M)
+_TARGET_KWARG = re.compile(r'target_model\s*=\s*(".*?"|[\w.\[\]"\']+)')
+
+
+@pytest.mark.parametrize("path", [_GRAPH, _STREAM], ids=["graph", "streaming"])
+def test_both_pipelines_call_the_sidecar_with_no_target_model(path):
+    """Both deep paths must pass `target_model=""`, and it is not a placeholder.
+
+    `describe_for_text_model` short-circuits on `if target_model and
+    is_vision_capable(target_model, cfg)`. Passing an empty string is what makes
+    a deep pick transcribe unconditionally — correct, because a panel is
+    several workers of mixed capability plus a synthesizer and there is no one
+    model whose eyes could be tested.
+
+    ⚠️ The regression this catches looks like a FIX. Threading the picked model
+    through reads as obviously better, and it would silently stop transcribing
+    for any model named in `vision.also_capable` — on the one image path that
+    is known to work, with no error and no log line saying so. The answer would
+    just quietly get worse for whichever worker happened to be asked.
+
+    Source-level for the same reason as the rest of this file: the call is
+    inline in both places, so there is nothing to import and call.
+    """
+    m = _DESCRIBE_CALL.search(path.read_text())
+    assert m, f"no describe_for_text_model(...) call found in {path.name} — did it move?"
+    t = _TARGET_KWARG.search(m.group(1))
+    assert t, f"{path.name} calls the sidecar without an explicit `target_model=`"
+    assert t.group(1) == '""', (
+        f"{path.name} passes target_model={t.group(1)} — a deep pick has no single "
+        "target model, and a non-empty one lets `vision.also_capable` suppress "
+        "transcription on the deep path. See test_vision_sidecar.py."
+    )

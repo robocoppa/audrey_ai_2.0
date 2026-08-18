@@ -117,6 +117,33 @@ def test_also_capable_extends_the_vl_pool():
     assert vision_capable_models(cfg) == {"qwen3-vl:32b", "some-vlm:cloud"}
 
 
+async def test_an_empty_target_describes_even_a_vision_capable_model():
+    """`target_model=""` means "no single target", and must always describe.
+
+    The capability short-circuit is guarded by `if target_model and ...`, so an
+    empty string falls through to the transcription. That is not an accident of
+    truthiness — it is the contract the DEEP path relies on. A panel is several
+    workers of mixed capability plus a synthesizer, so there is no one model
+    whose eyes could be tested; `deep_panel.code` runs two cloud models that
+    cannot see whatever the local one can do.
+    ▶ The consequence worth stating out loud: `vision.also_capable` therefore
+    affects PASSTHROUGH ONLY. Listing a model there does nothing to a deep pick.
+    """
+    cfg = _Cfg(raw={"vision": {"also_capable": ["glm-5.2:cloud"]}})
+    ollama = _ScriptedOllama()
+    msgs = _image_msgs()
+
+    # Named as the target, the listed model is left alone …
+    out, n = await _describe(msgs, cfg, ollama, target_model="glm-5.2:cloud")
+    assert out is msgs and n == 0 and ollama.calls == []
+
+    # … but with no target, the same config still transcribes.
+    out, n = await _describe(msgs, cfg, ollama, target_model="")
+    assert out is not msgs, "an empty target must not short-circuit"
+    assert n == 1
+    assert len(ollama.calls) == 1
+
+
 def test_has_any_image_part_sees_earlier_history():
     """Broader than `messages.has_image_part`, which only reads the last turn."""
     msgs = [
