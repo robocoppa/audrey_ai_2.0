@@ -255,8 +255,17 @@ _BANNER_SETS = {
     "audrey_cloud": _DEEP_BANNERS,
     "audrey_local": _DEEP_BANNERS,
 }
+# ⚠️ `"[error:"` IS OWUI'S ENVELOPE, NOT AUDREY'S, and it arrives as ASSISTANT
+# CONTENT. When OWUI's upstream read to Audrey times out it does not drop the
+# stream — it streams the string `[error: POST /api/chat (stream) transport
+# error: ReadTimeout: ]` as the answer. Every structural check then passes:
+# `reachable` (no transport error reached us), `has_answer` (it clears the
+# 20-char floor), `not_truncated` (it ends on a bracket). On 2026-08-18 a
+# 180s laguna-s timeout was caught ONLY because that case carries
+# `answer_contains`; any case without content assertions would have scored a
+# clean PASS on a generation that never happened.
 _ERROR_MARKERS = ["[internal error]", "[ollama error", "[empty]",
-                  "[deep panel produced no usable drafts"]
+                  "[deep panel produced no usable drafts", "[error:"]
 _SEPARATOR = "\n\n---\n\n"
 
 
@@ -339,6 +348,15 @@ def _post_stream_once(base_url: str, api_key: str, model: str, prompt: str,
              client.stream("POST", url, headers=headers, json=body) as resp:
             if resp.status_code >= 300:
                 resp.read()
+                # ⚠️ Set the clock here too. This branch used to return `timing`
+                # untouched, so an HTTP error recorded NO latency at all — the
+                # answers file printed a bare `latency: route:unknown` and the
+                # results JSON carried `total_s: null`. That is the difference
+                # between "the stack refused instantly" and "it ground for four
+                # minutes and then 500'd", which is the first thing you want to
+                # know. Found 2026-08-18 when twelve OWUI connection errors
+                # arrived with no timings between them.
+                timing.total_s = time.monotonic() - t0
                 return "", [], f"HTTP {resp.status_code}: {resp.text[:300]}", timing
             for line in resp.iter_lines():
                 if not line or not line.startswith("data: "):
@@ -973,6 +991,20 @@ _DISCLAIMS_ABSENCE = re.compile(
     r"|appear|provide|specify|state|report|list|give|indicate|disclose)"
     r"|don'?t (?:have|contain|cover|discuss|mention|reference|address|see|show"
     r"|appear|provide|specify|state|report|list|give|indicate|disclose)"
+    # ⚠️ Second widening, 2026-08-18, same rule as above: MEASURE before adding.
+    # `synth-absent-subtopic` false-failed for `laguna-s-2.1`, which disclaimed
+    # four separate ways — "I cannot determine", "Neither note contains
+    # information", "is not addressed in the provided documentation", "Cannot be
+    # determined from the provided notes" — and matched none of them. The gap is
+    # narrow and specific: this pattern already carries a BARE `was not`, but no
+    # bare `is not`, and no "determine" verb at all. Bare `is not` would be
+    # genuinely vacuous ("the answer is not simple"), so the present-tense arm is
+    # pinned to the same absence verbs the `does not` arm uses.
+    r"|(?:cannot|can'?t|could not|couldn'?t|unable to) (?:be )?determined?"
+    r"|(?:is|are) not (?:addressed|provided|specified|stated|included|mentioned"
+    r"|available|present|given|listed|reported|disclosed|covered|documented)"
+    r"|neither\s+\w+(?:\s+\w+){0,4}\s+(?:contains?|mentions?|provides?|states?"
+    r"|includes?|addresses|specifies|discusses|reports?)"
     r"|has no|there is no|there's no|was not|wasn'?t|is not available"
     r"|isn'?t available|not available|could not find|couldn'?t find"
     r"|unable to find|cannot find|can'?t find|cannot see|can'?t see"

@@ -1738,3 +1738,121 @@ def test_no_archived_fast_turn_would_be_reclassified():
     for answer in ("Short answer." + _FOOTER,
                    "Answer with its own --- rule.\n\n---\n\nMore." + _FOOTER):
         assert er.infer_route(_FAST_BANNERS, answer) == "fast", answer
+
+
+# ── the two defects the 2026-08-18 laguna bake-off exposed ──────────────────
+# Both were found the same way: a case scored FAIL, and reading the ANSWER
+# showed the model had done the right thing. A check that false-fails is worse
+# than a missing check, because it moves a model comparison in a direction
+# nobody audits.
+
+class TestOwuiStreamsItsTimeoutAsAnAnswer:
+    """OWUI does not drop a timed-out stream — it sends the error AS content.
+
+    Every structural check passed on it: `reachable` (no transport error ever
+    reached the harness), `has_answer` (the string clears the 20-char floor),
+    `not_truncated` (it ends on a bracket, not a colon). The case failed only
+    because it happened to carry `answer_contains`.
+    """
+
+    ENVELOPE = "[error: POST /api/chat (stream) transport error: ReadTimeout: ]"
+
+    def test_the_owui_envelope_is_an_error_marker(self):
+        assert any(m in self.ENVELOPE for m in er._ERROR_MARKERS)
+
+    def test_it_clears_the_has_answer_floor_which_is_the_whole_problem(self):
+        # Pinning WHY the marker is needed: length alone cannot reject it.
+        assert len(self.ENVELOPE) >= 20
+
+    def test_a_normal_answer_still_has_no_error_marker(self):
+        ok = "The retention window is 96 hours and throughput was 420 events/sec."
+        assert not any(m in ok for m in er._ERROR_MARKERS)
+
+    def test_prose_mentioning_an_error_in_passing_is_not_flagged(self):
+        # The marker is the bracketed envelope, not the word — a model
+        # explaining error handling must not trip it.
+        ok = "On error the consumer retries; an error here is not fatal."
+        assert not any(m in ok for m in er._ERROR_MARKERS)
+
+
+class TestDisclaimsAbsenceCoversThePresentTense:
+    """`synth-absent-subtopic` false-failed a textbook disclaimer.
+
+    The pattern carried a BARE `was not` but no bare `is not`, and no
+    "determine" verb at all — so four separate correct phrasings in one answer
+    matched nothing.
+    """
+
+    # The real laguna-s-2.1 answer, trimmed to the disclaiming sentences.
+    CORRECT = (
+        "Based on the provided notes, I cannot determine what the Kessler-7 "
+        "pipeline does about back-pressure when a downstream consumer stalls. "
+        "Neither note contains information about back-pressure mechanisms. "
+        "This critical operational detail is not addressed in the provided "
+        "documentation. Answer: Cannot be determined from the provided notes."
+    )
+
+    # The real laguna-xs-2.1 answer, trimmed. It invented a mechanism and
+    # attributed it to Note B — the failure this case exists to catch.
+    FABRICATED = (
+        "The Kessler-7 pipeline handles back-pressure when a downstream "
+        "consumer stalls by leveraging an asynchronous replication mechanism "
+        "in its fanout stage (as noted in Note B). The fanout stage does not "
+        "wait for acknowledgments from the stalled consumer, so messages may "
+        "be buffered temporarily while the pipeline continues at 420 events/sec."
+    )
+
+    def test_the_correct_disclaimer_is_recognised(self):
+        assert er._disclaims_absence(self.CORRECT)
+
+    def test_the_fabrication_is_still_rejected(self):
+        # The point of the widening is that it must NOT make the check vacuous:
+        # the answer this case exists to catch has to keep failing.
+        assert not er._disclaims_absence(self.FABRICATED)
+
+    @pytest.mark.parametrize("phrasing", [
+        "I cannot determine that from the notes.",
+        "That cannot be determined from the passage.",
+        "It could not be determined from what is given.",
+        "I am unable to determine the p99 latency.",
+        "The retention policy is not addressed in the notes.",
+        "The figure is not provided in the passage.",
+        "Neither note contains information about back-pressure.",
+        "Neither of the two notes mentions back-pressure.",
+    ])
+    def test_each_new_phrasing_matches(self, phrasing):
+        assert er._disclaims_absence(phrasing)
+
+    @pytest.mark.parametrize("prose", [
+        "The answer is not simple, but the pipeline sustains 420 events/sec.",
+        "This is not straightforward: fanout replicates to two to five consumers.",
+        "The design is not fast, though retention is 96 hours.",
+        "Throughput was measured at 420 events per second sustained.",
+        "The fanout stage does not wait for acknowledgments from consumers.",
+    ])
+    def test_ordinary_prose_does_not_become_a_disclaimer(self, prose):
+        # A POSITIVE check gets more vacuous every time it is widened. These
+        # pin the boundary: `is not <adjective>` must stay unmatched, and only
+        # `is not <absence-verb>` counts.
+        assert not er._disclaims_absence(prose)
+
+
+class TestAnHttpErrorStillRecordsHowLongItTook:
+    """The `>= 300` branch returned `timing` untouched, so an HTTP failure
+    carried no latency — indistinguishable from an instant refusal."""
+
+    def test_the_http_error_branch_sets_total_s(self):
+        import inspect
+        src = inspect.getsource(er._post_stream_once)
+        # Comments are stripped first: the explanatory note in that branch says
+        # the word "return", which a naive split on the source text reads as the
+        # return statement and so scans an empty region.
+        code = "\n".join(
+            ln for ln in src.splitlines() if not ln.lstrip().startswith("#")
+        )
+        branch = code.split("if resp.status_code >= 300:")[1]
+        branch = branch.split('return "", [], f"HTTP')[0]
+        assert "timing.total_s" in branch, (
+            "the HTTP-error branch must stamp total_s before returning — "
+            "otherwise a 400 and a four-minute 500 look identical in the results"
+        )

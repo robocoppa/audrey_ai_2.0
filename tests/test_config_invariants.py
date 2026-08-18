@@ -303,3 +303,49 @@ async def test_a_strong_keyword_route_never_escalates(cfg):
         f"a keyword route now scores {conf} against a {ceiling} ceiling with a "
         "strict `<` trigger — every keyword-routed turn escalates into a panel."
     )
+
+
+# ── the eval harness must not launch into a stack that is still starting ────
+
+_EVAL_ONBOX = _PULL_SCRIPT.parent / "eval-onbox.sh"
+
+
+class TestEvalOnboxWaitsForTheStack:
+    """A run started seconds after a recreate reported "12 cases, 0 passed".
+
+    That is the worst possible shape for a failure: a total verdict, phrased
+    exactly like a real one, on a suite that never reached a model. The gate
+    that prevents it is only useful BEFORE the launch, so the order is what
+    gets pinned here rather than the mere presence of the function.
+    """
+
+    def _text(self) -> str:
+        return _EVAL_ONBOX.read_text()
+
+    def test_the_readiness_gate_exists(self):
+        assert "wait_ready" in self._text()
+
+    def test_the_gate_runs_before_the_eval_container_launches(self):
+        text = self._text()
+        gate = text.index("for _c in ${READY_CONTAINERS}")
+        launch = text.index('docker run -d --name "${CONTAINER}"')
+        assert gate < launch, (
+            "the readiness gate must run before `docker run` — a gate after the "
+            "launch cannot stop the run it is meant to hold back"
+        )
+
+    def test_both_containers_the_harness_depends_on_are_gated(self):
+        text = self._text()
+        # audrey-ai is what was late; open-webui is what the harness actually
+        # talks to, and it gets bounced whenever allowed_models changes.
+        assert "READY_CONTAINERS:-audrey-ai open-webui" in text
+
+    def test_there_is_an_escape_hatch(self):
+        # A gate with no bypass becomes the thing people delete.
+        assert "SKIP_READY" in self._text()
+
+    def test_a_missing_container_is_skipped_not_fatal(self):
+        # The script has to stay runnable against a box where one of these is
+        # named differently, so an absent container warns rather than dies.
+        text = self._text()
+        assert "no such container, skipping" in text

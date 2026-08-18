@@ -127,6 +127,56 @@ command -v docker >/dev/null || die "docker not found — run this on the box, n
 docker image inspect "${IMAGE}" >/dev/null 2>&1 || die "image ${IMAGE} not built (see phase-27 step 1)."
 mkdir -p "${OUT_DIR}"; chmod 700 "${OUT_DIR}"
 
+# ── wait for the stack to be READY, not merely started ──────────────────────
+# ⚠️ A CONTAINER THAT IS `Up` IS NOT A CONTAINER THAT IS LISTENING. On
+# 2026-08-18 a run launched seconds after `up -d --force-recreate audrey-ai`
+# fired all twelve cases at 14:50:32 while uvicorn finished binding at
+# 14:50:33.9. Every case returned `HTTP 400 {"detail":"Open WebUI: Server
+# Connection Error"}` and the answers file led with **"12 cases, 0 passed"** —
+# a total verdict, in the harness's normal voice, on a suite that never reached
+# a model. That is the failure this whole script exists to prevent: a run that
+# looks like a result.
+# ⚠️ The STAMP step above does NOT cover this. `docker exec … date` succeeds the
+# instant the container starts, which is why the run was stamped 14:50:32 and
+# still had nothing to talk to.
+# Both containers are gated, for different reasons: `audrey-ai` is what was late
+# here, and `open-webui` is what the harness actually talks to — an
+# `allowed_models` change requires bouncing it, so it is routinely restarted
+# moments before a run.
+READY_TIMEOUT="${READY_TIMEOUT:-180}"
+READY_CONTAINERS="${READY_CONTAINERS:-audrey-ai open-webui}"
+
+wait_ready() {
+  local name="$1" deadline=$(( SECONDS + READY_TIMEOUT )) state health
+  if ! docker inspect "${name}" >/dev/null 2>&1; then
+    echo ">> ready   : ${name} — no such container, skipping" >&2
+    return 0
+  fi
+  while :; do
+    state="$(docker inspect -f '{{.State.Status}}' "${name}" 2>/dev/null || echo missing)"
+    # ⚠️ `.State.Health` is ABSENT unless the image declares a HEALTHCHECK, and
+    # the template prints an empty string rather than failing — so an empty
+    # health field means "no healthcheck", not "unhealthy". open-webui may or
+    # may not declare one depending on how it was recreated on the Unraid UI,
+    # so running is all that can be required of it.
+    health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${name}" 2>/dev/null || true)"
+    if [[ "${state}" == "running" && ( -z "${health}" || "${health}" == "healthy" ) ]]; then
+      echo ">> ready   : ${name} (${health:-no healthcheck})"
+      return 0
+    fi
+    if (( SECONDS >= deadline )); then
+      die "${name} not ready after ${READY_TIMEOUT}s (status=${state}, health=${health:-none}). Nothing ran — re-run when it is up, or SKIP_READY=1 to bypass."
+    fi
+    sleep 2
+  done
+}
+
+if [[ "${SKIP_READY:-0}" == "1" ]]; then
+  echo ">> ready   : SKIPPED (SKIP_READY=1) — a 0/N run may mean the stack, not the model"
+else
+  for _c in ${READY_CONTAINERS}; do wait_ready "${_c}"; done
+fi
+
 # Fixed container name → remove any stopped prior one so re-runs don't collide.
 docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
 

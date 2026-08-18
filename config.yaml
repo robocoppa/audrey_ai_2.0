@@ -1445,6 +1445,13 @@ passthrough:
   think: null
 
   allowed_models:                        # concrete models clients may target
+    # ⚠️ ADDING A NAME HERE IS A TWO-CONTAINER CHANGE. `allowed_models` feeds
+    # `/v1/models`, but OWUI reads that list ONCE and holds it, and the eval
+    # harness talks to OWUI, never to Audrey directly. So this needs
+    # `up -d --build audrey-ai` AND `docker restart open-webui`. Skipping the
+    # second one fails every case with `HTTP 400 {"detail":"Model not found"}`
+    # — OWUI's string, which appears nowhere in `src/`, and which looks exactly
+    # like a bad model name (2026-08-18, the whole laguna-s run).
     # ⚠️ NO 64k VARIANT ANY MORE, AND DO NOT BUILD ONE (2026-08-15).
     # `qwen3.6:35b-64k` and `qwen3-coder-next-64k:latest` were Modelfile builds
     # that RAISED a small default window to 65536. `ollama show qwen3.8:latest`
