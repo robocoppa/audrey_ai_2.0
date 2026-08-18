@@ -754,3 +754,117 @@ async def test_think_is_dropped_for_a_model_that_does_not_declare_it():
     ollama = _ThinkingAwareOllama(declares=False)
     await _run(_think_app(ollama, False))
     assert ollama.chat_calls[0]["think"] is None
+
+
+# ── what was ASKED for vs what came BACK ────────────────────────────────────
+# A `PASSTHROUGH_THINK` A/B is only falsifiable if the log carries both. On
+# 2026-08-18 a thinking-on arm came back within noise of the thinking-off arm
+# and there was no way to tell "the model ignored the flag" from "the flag
+# never reached Ollama" — the request line named model, user and prompt head,
+# and said nothing about thinking.
+
+_LOGGER = "audrey.pipeline.passthrough"
+
+
+async def _run_chat(ollama, *, think=None, user="a@example.com"):
+    gate = _RecordingGate()
+    return await passthrough_chat(
+        ollama, gate, concrete="m:latest", location="local",
+        messages=[{"role": "user", "content": "hi"}], options={},
+        user_id=user, tools=None, timeout_s=30.0, think=think,
+    )
+
+
+async def _run_stream(ollama, *, think=None, user="a@example.com"):
+    gate = _RecordingGate()
+    return [
+        c async for c in passthrough_stream(
+            ollama, gate, concrete="m:latest", location="local",
+            messages=[{"role": "user", "content": "hi"}], options={},
+            user_id=user, tools=None, timeout_s=30.0, think=think,
+        )
+    ]
+
+
+class TestThinkIsLoggedOnBothSides:
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("asked", [True, False, None])
+    async def test_chat_logs_what_was_asked_for(self, caplog, asked):
+        # ⚠️ `None` is a THIRD state, not a synonym for False: it means the
+        # field was omitted entirely, which is what every passthrough turn did
+        # before the knob existed and what Ollama needs for models that do not
+        # declare `thinking`.
+        caplog.set_level("INFO", logger=_LOGGER)
+        await _run_chat(_FakeOllama(), think=asked)
+        line = [r.getMessage() for r in caplog.records if "passthrough.chat " in r.getMessage()]
+        assert line and f"think={asked}" in line[0]
+
+    @pytest.mark.asyncio
+    async def test_the_stream_request_line_carries_think(self, caplog):
+        # On the REQUEST line too — a stream that dies mid-flight still has to
+        # say what it asked for.
+        caplog.set_level("INFO", logger=_LOGGER)
+        await _run_stream(_FakeOllama(), think=True)
+        req = [r.getMessage() for r in caplog.records if "passthrough.stream.req" in r.getMessage()]
+        assert req and "think=True" in req[0]
+
+    @pytest.mark.asyncio
+    async def test_chat_logs_thinking_length_that_came_back(self, caplog):
+        caplog.set_level("INFO", logger=_LOGGER)
+        ollama = _FakeOllama(chat_response={
+            "message": {"role": "assistant", "content": "ok", "thinking": "x" * 500},
+            "eval_count": 100,
+        })
+        await _run_chat(ollama, think=True)
+        line = next(r.getMessage() for r in caplog.records
+                    if "passthrough.chat " in r.getMessage())
+        assert "thinking_len=500" in line
+        assert "content_len=2" in line
+
+    @pytest.mark.asyncio
+    async def test_the_stream_sums_thinking_across_chunks(self, caplog):
+        caplog.set_level("INFO", logger=_LOGGER)
+        ollama = _FakeOllama(stream_chunks=[
+            {"message": {"content": "", "thinking": "aaa"}, "done": False},
+            {"message": {"content": "hi", "thinking": "bb"}, "done": False},
+            {"message": {"content": ""}, "done": True, "eval_count": 40,
+             "done_reason": "stop"},
+        ])
+        await _run_stream(ollama, think=True)
+        line = next(r.getMessage() for r in caplog.records
+                    if "passthrough.stream " in r.getMessage())
+        assert "thinking_len=5" in line
+        assert "content_len=2" in line
+
+
+class TestCharsPerTokMeasuresContentOnly:
+    """The ratio answers "did the billed tokens become text the client saw?".
+
+    Folding thinking into the numerator answers a different question and hides
+    the one case worth catching: a full budget spent where nothing reaches the
+    client.
+    """
+
+    @pytest.mark.asyncio
+    async def test_thinking_is_not_counted_in_the_ratio(self, caplog):
+        caplog.set_level("INFO", logger=_LOGGER)
+        ollama = _FakeOllama(chat_response={
+            # 4,000 characters of reasoning, 10 of answer, 1,000 tokens billed.
+            "message": {"role": "assistant", "content": "x" * 10,
+                        "thinking": "t" * 4000},
+            "eval_count": 1000,
+        })
+        await _run_chat(ollama, think=True)
+        line = next(r.getMessage() for r in caplog.records
+                    if "passthrough.chat " in r.getMessage())
+        # 10/1000 = 0.01, NOT 4010/1000 = 4.01 (which would read as healthy prose).
+        assert "chars_per_tok=0.01" in line
+
+    def test_a_zero_eval_count_does_not_divide_by_zero(self):
+        from audrey.pipeline.passthrough import _chars_per_tok
+        assert _chars_per_tok(100, 0) == 0.0
+
+    def test_ordinary_prose_lands_near_four(self):
+        from audrey.pipeline.passthrough import _chars_per_tok
+        assert 3.0 < _chars_per_tok(4000, 1000) < 5.0

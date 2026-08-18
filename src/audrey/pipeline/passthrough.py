@@ -66,14 +66,27 @@ async def passthrough_chat(
             tools=tools, timeout_s=timeout_s, think=think,
         )
     msg = resp.get("message") or {}
+    # ⚠️ `think=` IS WHAT WAS ASKED FOR; `thinking_len=` IS WHAT CAME BACK.
+    # Logging only one of them makes a `PASSTHROUGH_THINK` A/B unfalsifiable.
+    # On 2026-08-18 a thinking-on arm for `laguna-xs-2.1` came back within noise
+    # of the thinking-off arm, and there was no way to tell "the model ignores
+    # the flag" from "the flag never reached Ollama" — the request line named
+    # the model, the user and the prompt head, and nothing about thinking. The
+    # answer had to be inferred from the SHAPE of the prose, which is not
+    # evidence. `None` here means the field was omitted entirely, which is a
+    # third state and not the same as `False`.
+    content_len = len(str(msg.get("content") or ""))
+    thinking_len = len(str(msg.get("thinking") or ""))
+    eval_count = int(resp.get("eval_count", 0) or 0)
     log.info(
-        "passthrough.chat model=%s user=%s tools=%d elapsed=%.2fs "
-        "content_len=%d tool_calls=%d eval_count=%d done_reason=%s",
+        "passthrough.chat model=%s user=%s tools=%d elapsed=%.2fs think=%s "
+        "content_len=%d thinking_len=%d chars_per_tok=%.2f "
+        "tool_calls=%d eval_count=%d done_reason=%s",
         concrete, _safe_user(user_id), len(tools or []),
-        time.perf_counter() - t0,
-        len(str(msg.get("content") or "")),
+        time.perf_counter() - t0, think,
+        content_len, thinking_len, _chars_per_tok(content_len, eval_count),
         len(list(msg.get("tool_calls") or [])),
-        int(resp.get("eval_count", 0) or 0),
+        eval_count,
         resp.get("done_reason", "?"),
     )
     return resp
@@ -109,6 +122,7 @@ async def passthrough_stream(
     ).inc()
     t0 = time.perf_counter()
     total_content_len = 0
+    total_thinking_len = 0
     total_tool_calls = 0
     last_eval_count = 0
     last_done_reason = "?"
@@ -123,9 +137,13 @@ async def passthrough_stream(
     last_msg = messages[-1] if messages else {}
     last_role = str(last_msg.get("role") or "?")
     last_content_head = str(last_msg.get("content") or "")[:120].replace("\n", "\\n")
+    # `think=` goes on the REQUEST line as well as the completion line on
+    # purpose: a stream that dies mid-flight still has to say what it asked for.
     log.info(
-        "passthrough.stream.req model=%s user=%s roles=%s last_role=%s last_head=%r",
-        concrete, _safe_user(user_id), role_counts, last_role, last_content_head,
+        "passthrough.stream.req model=%s user=%s think=%s roles=%s "
+        "last_role=%s last_head=%r",
+        concrete, _safe_user(user_id), think, role_counts,
+        last_role, last_content_head,
     )
     async with gate.acquire(concrete, location=location, user_id=user_id):
         async for chunk in ollama.chat_stream(
@@ -135,19 +153,38 @@ async def passthrough_stream(
             chunks_received += 1
             cmsg = chunk.get("message") or {}
             total_content_len += len(str(cmsg.get("content") or ""))
+            # Ollama streams reasoning in its own `thinking` field, never in
+            # `content`, so a model that spends its whole budget there yields a
+            # stream of chunks that sum to no text at all.
+            total_thinking_len += len(str(cmsg.get("thinking") or ""))
             total_tool_calls += len(list(cmsg.get("tool_calls") or []))
             if chunk.get("done"):
                 last_eval_count = int(chunk.get("eval_count", 0) or 0)
                 last_done_reason = chunk.get("done_reason", "?")
             yield chunk
     log.info(
-        "passthrough.stream model=%s user=%s tools=%d elapsed=%.2fs "
-        "chunks=%d content_len=%d tool_calls=%d eval_count=%d done_reason=%s",
+        "passthrough.stream model=%s user=%s tools=%d elapsed=%.2fs think=%s "
+        "chunks=%d content_len=%d thinking_len=%d chars_per_tok=%.2f "
+        "tool_calls=%d eval_count=%d done_reason=%s",
         concrete, _safe_user(user_id), len(tools or []),
-        time.perf_counter() - t0,
-        chunks_received, total_content_len, total_tool_calls,
-        last_eval_count, last_done_reason,
+        time.perf_counter() - t0, think,
+        chunks_received, total_content_len, total_thinking_len,
+        _chars_per_tok(total_content_len, last_eval_count),
+        total_tool_calls, last_eval_count, last_done_reason,
     )
+
+
+def _chars_per_tok(content_len: int, eval_count: int) -> float:
+    """Characters of CONTENT per billed token — "did the tokens become text?"
+
+    ⚠️ The numerator is the content the client actually received, and thinking
+    is reported alongside it as its own length rather than folded in here. A
+    ratio computed over content+thinking answers a different question and hides
+    exactly the case this exists to expose: tokens billed that produced no
+    visible output. Prose runs around 4; a ratio near zero with a healthy
+    `eval_count` means the budget went somewhere the client never saw.
+    """
+    return (content_len / eval_count) if eval_count > 0 else 0.0
 
 
 def _safe_user(user_id: str) -> str:
