@@ -28,6 +28,7 @@ from audrey.models.registry import ModelRegistry
 from audrey.pipeline import deep_panel as dpmod
 from audrey.pipeline import graph as gmod
 from audrey.pipeline.deep_panel import (
+    _log_draft_shape,
     _merge_ledgers,
     _prefix_ledger_ids,
     _prepare_panel,
@@ -2240,3 +2241,35 @@ class TestTheCloudWorkerCapIsAudible:
         with caplog.at_level(logging.WARNING, logger="audrey.pipeline.deep_panel"):
             self._select(3)
         assert not [r for r in caplog.records if "DROPPING" in r.getMessage()]
+
+
+class TestCharsPerTokIsMeasuredOnRawOutput:
+    """The ratio must not double-count what `_strip_think` removed.
+
+    It answers "did the tokens billed become TEXT at all". A `<think>` block
+    emitted inline DID become text; the stripper removing it afterwards is a
+    separate fact, already reported as `think_stripped`. Dividing the stripped
+    length merges the two and reads as heavy hidden thinking when there was
+    none — which is exactly how a local draft came back at 1.73 on 2026-08-17
+    while its raw ratio was a perfectly healthy 3.94.
+    """
+
+    def test_a_stripped_draft_still_reports_the_raw_ratio(self):
+        raw = "x" * 4000
+        stripped = "x" * 1000
+        _, cpt = _log_draft_shape(
+            "m", raw=raw, stripped=stripped, done_reason="stop",
+            eval_count=1000, elapsed=1.0, subtask="",
+        )
+        assert cpt == 4.0, (
+            f"expected the RAW ratio (4000/1000); got {cpt}, which is the "
+            "stripped ratio and would read as hidden thinking"
+        )
+
+    def test_genuine_hidden_thinking_still_reads_low(self):
+        # Nothing stripped, few chars per billed token → the real signal.
+        _, cpt = _log_draft_shape(
+            "m", raw="x" * 1053, stripped="x" * 1053, done_reason="stop",
+            eval_count=6172, elapsed=1.0, subtask="",
+        )
+        assert cpt < 0.5

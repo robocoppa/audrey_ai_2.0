@@ -287,9 +287,23 @@ def _log_draft_shape(
     read it against the same model's other calls in the same run, never as an
     absolute. Nemotron logged 0.17 on the anomalous case against 0.35–0.48 on
     its four clean ones — roughly 5,900 tokens of the 6,172 produced no text.
+    ▶ Read it BESIDE `think_stripped`, because the two anomalies look alike and
+    are fixed differently: a low ratio at `think_stripped=0` is hidden thinking
+    (a `thinking:` policy question); a healthy ratio with a large
+    `think_stripped` is inline `<think>` TEXT the stripper removed (a prompt or
+    stripper question, and thinking may already be off).
     """
     anomaly = _fence_anomaly(stripped)
-    chars_per_tok = (len(stripped) / eval_count) if eval_count > 0 else 0.0
+    # ⚠️ RAW, not stripped — and the difference is a whole diagnosis. The
+    # question this answers is "did the tokens billed become TEXT at all"; a
+    # `<think>` block emitted inline DID become text, and `think_stripped`
+    # already reports that the stripper then removed it. Dividing the stripped
+    # length conflates the two failures into one number: on 2026-08-17 a local
+    # draft read 1.73 (looks like heavy hidden thinking) when raw/tok was 3.94
+    # (no hidden thinking at all — the stripper had eaten 56% of the draft,
+    # opening fence included). ⚠️ Historical values are unaffected: every case
+    # this metric has diagnosed had `think_stripped=0`, so raw == stripped.
+    chars_per_tok = (len(raw) / eval_count) if eval_count > 0 else 0.0
     log_at = log.warning if (anomaly or done_reason == "length" or not stripped.strip()) else log.info
     log_at(
         "deep_panel: draft %s done_reason=%s eval_count=%d raw_len=%d "
