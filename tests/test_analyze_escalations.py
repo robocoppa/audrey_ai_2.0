@@ -260,19 +260,29 @@ class TestConfigReading:
             assert got == want, f"{task} pool changed shape: {got} != {want}"
 
     def test_no_deep_panel_pool_exceeds_the_cloud_worker_cap(self):
-        # `_healthy_workers` drops cloud workers past `max_deep_workers_cloud`
-        # with NO log line, so an extra entry would be dead config that looks
-        # live. `code` sat exactly ON the cap from 2026-08-15 until minimax-m3
-        # came out; there is one slot of headroom now. This test is the thing
-        # that notices either way.
+        """EVERY `deep_panel*` pool, not just `deep_panel.code`.
+
+        `_healthy_workers` drops cloud workers past `max_deep_workers_cloud`
+        with NO log line, so an extra entry is dead config that looks live.
+        ⚠️ This test carried its own gap until 2026-08-17: it asserted only on
+        `deep_panel["code"]` while its NAME promised every pool — so
+        `deep_panel_cloud.code` went unguarded through two lineup edits. A guard
+        narrower than its name is worse than no guard, because it reads as
+        cover. `load_pools` already collects every `deep_panel*` key; use it.
+        """
         raw = ae.read_config(_ROOT / "config.yaml")
         cap = int(((raw.get("agentic") or {}).get("max_deep_workers_cloud")) or 3)
-        workers = raw["deep_panel"]["code"]["workers"]
-        cloud = [w for w in workers if ae.is_cloud(w, ae.load_pools(raw)[1])]
-        assert len(cloud) <= cap, (
-            f"{len(cloud)} cloud workers against a cap of {cap} — the extras are "
-            "silently dropped at dispatch"
-        )
+        pools, locations = ae.load_pools(raw)
+        for pool_name, pool in pools.items():
+            for task, body in pool.items():
+                if not isinstance(body, dict):
+                    continue
+                workers = body.get("workers") or []
+                cloud = [w for w in workers if ae.is_cloud(w, locations)]
+                assert len(cloud) <= cap, (
+                    f"{pool_name}/{task}: {len(cloud)} cloud workers against a "
+                    f"cap of {cap} — the extras are silently dropped at dispatch"
+                )
 
 
 class TestWilsonInterval:

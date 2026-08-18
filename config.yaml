@@ -280,9 +280,15 @@ deep_panel_cloud:
     # `test_no_flat_panel_is_degenerate`, which asserts on DISTINCT names.
     # ▶ kimi is the pick because it is the measured #2 code contributor
     # (`analyze_draft_contribution.py`: 0.54 code recall, 31% win rate) AND a
-    # third vendor — glm/kimi as workers, deepseek as the degrade target, so a
-    # glm outage still falls onto someone else's model.
-    workers: ["glm-5.2:cloud", "kimi-k2.7-code:cloud"]
+    # third vendor.
+    # ▶ 2026-08-17: `deepseek-v4-pro` ADDED as a third worker — the measured #1
+    # by a distance (0.69 code recall, 0.60 win rate, and the fastest cloud
+    # worker at 11.1s). It stays `fallback_synth` as well; a model may hold both
+    # roles, and a glm-synth outage still degrades to a different vendor.
+    # ⚠️⚠️ THREE cloud workers puts this pool EXACTLY ON `max_deep_workers_cloud`
+    # (3). A fourth is dropped by `_healthy_workers` with NO log line — dead
+    # config that looks live. Swap rather than add, or raise the cap first.
+    workers: ["glm-5.2:cloud", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud"]
     synthesizer: "glm-5.2:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
   reasoning:
