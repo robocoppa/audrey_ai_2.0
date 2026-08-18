@@ -47,7 +47,6 @@ CLOUD_MODELS=(
   "deepseek-v3.2:cloud"
   "deepseek-v4-flash:cloud"
   "nemotron-3-super:cloud"
-  "minimax-m3:cloud"
   "glm-5.2:cloud"
 )
 

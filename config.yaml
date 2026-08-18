@@ -81,7 +81,6 @@ model_registry:
     # the box — the same mistake twice in one day, because `pull-models.sh` was
     # read as proof of what is installed. It is not. `ollama list` is.
     - { name: "qwen3.8:latest",           priority: 100, speed: 60, quality: 95, location: local }
-    - { name: "minimax-m3:cloud",         priority:  98, speed: 85, quality: 96, location: cloud }
     - { name: "kimi-k2.7-code:cloud",     priority:  92, speed: 90, quality: 94, location: cloud }
     - { name: "glm-5.2:cloud",            priority:  88, speed: 90, quality: 91, location: cloud }
     - { name: "deepseek-v4-pro:cloud",    priority:  82, speed: 80, quality: 95, location: cloud }
@@ -103,7 +102,6 @@ model_registry:
     # first failover when cloud is unhealthy or credits run out.
     # `general` deliberately keeps its local lead — see the cost note there.
     - { name: "deepseek-v4-pro:cloud",    priority: 100, speed: 80, quality: 95, location: cloud }
-    - { name: "minimax-m3:cloud",         priority:  98, speed: 85, quality: 95, location: cloud }
     - { name: "kimi-k2.6:cloud",          priority:  96, speed: 90, quality: 94, location: cloud }
     - { name: "qwen3.8:latest",           priority:  94, speed: 70, quality: 93, location: local }
     - { name: "kimi-k2.7-code:cloud",     priority:  88, speed: 90, quality: 93, location: cloud }
@@ -117,7 +115,6 @@ model_registry:
   general:
     - { name: "qwen3.8:latest",           priority: 100, speed: 75, quality: 92, location: local }
     - { name: "deepseek-v4-pro:cloud",    priority:  97, speed: 80, quality: 95, location: cloud }
-    - { name: "minimax-m3:cloud",         priority:  96, speed: 85, quality: 95, location: cloud }
     - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 93, location: cloud }
     - { name: "kimi-k2.7-code:cloud",     priority:  88, speed: 90, quality: 92, location: cloud }
     - { name: "qwen3.5:397b-cloud",       priority:  90, speed: 80, quality: 94, location: cloud }
@@ -199,7 +196,6 @@ fast_path:
     - "deepseek-v3.2:cloud"
     - "qwen3.5:397b-cloud"
     - "nemotron-3-super:cloud"
-    - "minimax-m3:cloud"
     - "glm-5.2:cloud"
 
 # ─── Deep panel: mixed (audrey_deep) ───────────────────────────────────
@@ -211,36 +207,38 @@ fast_path:
 # VRAM on the host fits one local model at a time (GPU_CONCURRENCY=1).
 deep_panel:
   code:
-    # 2026-08-16: back to the house shape — one local + TWO cloud. `minimax-m3`
-    # was added the day before as a third cloud worker; it is out again, so
-    # `qwen3.8:latest` carries the local draft and the panel costs THREE cloud
-    # calls (2 workers + the cloud synth) rather than four. Cloud credits are a
-    # hard budget — see `scripts/analyze_escalations.py` for what escalation
-    # multiplies that by.
-    # ⚠️ That also takes the pool back OFF `max_deep_workers_cloud` (3, pinned
-    # by MAX_DEEP_WORKERS_CLOUD in .env). At the cap, a further cloud worker is
-    # dropped by `_healthy_workers` with NO log line — dead config that looks
-    # live. There is one slot of headroom now; adding two needs the cap raised.
+    # LINEUP AS OF 2026-08-17: one local + TWO cloud, the house shape.
+    # `nemotron-3.5-lightning:latest` is the sole local draft; `minimax-m3` is
+    # OUT. The panel costs THREE cloud calls (2 workers + the cloud synth), not
+    # four. Cloud credits are a hard budget — `scripts/analyze_escalations.py`
+    # prices what escalation multiplies that by.
     #
-    # LINEUP AS OF 2026-08-16: one local + THREE cloud. `qwen3.8:latest` is off
-    # this pool and `nemotron-3.5-lightning:latest` is the sole local draft;
-    # `minimax-m3:cloud` is back alongside the other two cloud workers.
-    # ⚠️⚠️ THAT PUTS THE POOL EXACTLY ON `max_deep_workers_cloud` (3, pinned by
-    # MAX_DEEP_WORKERS_CLOUD in .env) AGAIN. A fourth cloud worker here is
-    # dropped by `_healthy_workers` with NO log line — dead config that looks
-    # live. Raise the cap first, or swap rather than add.
-    # ⚠️⚠️ **The local draft now rests entirely on nemotron**, and the
-    # passthrough probe table below has it returning ZERO characters of content
-    # in BOTH thinking arms at NUM_PREDICT=2048 — the only arm that produced
-    # text is `think=false`, which is the arm caught fabricating. The panel sets
-    # no `num_predict`, so it should have room to reason and then answer, but
-    # that is an assumption, not a measurement. **If this pool starts returning
-    # 2 drafts instead of 3, or a local draft with empty content, read that
-    # here first** — `done_reason == "length"` with empty content is the
-    # signature, and with one local worker there is no second local draft to
-    # cover for it.
+    # ▶ WHY minimax LEFT, and the one number that argues the other way.
+    # `scripts/analyze_draft_contribution.py` over 55 code case-runs: minimax
+    # won 12% of cases against `kimi-k2.7-code`'s 31% AT THE SAME code recall
+    # (0.54), while being the slowest worker in the pool at 23.3s. It was the
+    # weakest cloud call on every axis but one. ⚠️ It did uniquely win 4 cases,
+    # and those are forfeited — this was a cost decision, not a claim that it
+    # contributed nothing. Re-add it if code answers visibly thin out.
+    # ⚠️ It is now gone from the config ENTIRELY — registries, the cloud
+    # allow-list, the OWUI model list, `deep_panel_cloud.code` and
+    # `pull-models.sh` — and off the box. Re-adding it is a re-pull, not an
+    # edit; `deep_panel_cloud.code` took `kimi-k2.7-code` in its place.
+    #
+    # ⚠️ That takes the pool back OFF `max_deep_workers_cloud` (3, pinned by
+    # MAX_DEEP_WORKERS_CLOUD in .env), so there is one slot of headroom. AT the
+    # cap, a further cloud worker is dropped by `_healthy_workers` with NO log
+    # line — dead config that looks live. Adding two needs the cap raised.
+    # ⚠️⚠️ **The local draft rests entirely on nemotron.** It is also the
+    # weakest worker measured (top rate 0.10, code recall 0.38) — kept because
+    # its cost is GPU time rather than credit and it is the pool's only defence
+    # against cloud being unreachable, NOT because it drafts well.
+    # **If this pool starts returning 2 drafts instead of 3, or a local draft
+    # with empty content, read that here first** — `done_reason == "length"`
+    # with empty content is the signature, and with one local worker there is
+    # no second local draft to cover for it.
     workers: ["nemotron-3.5-lightning:latest", "kimi-k2.7-code:cloud",
-              "deepseek-v4-pro:cloud", "minimax-m3:cloud"]
+              "deepseek-v4-pro:cloud"]
     # glm-5.2 (cloud) primary synth: skips the local cold-load a LOCAL synth
     # incurs (synth can't co-reside in VRAM with a local worker under
     # GPU_CONCURRENCY=1, so it has to load AFTER the worker unloads). Measured
@@ -274,7 +272,17 @@ deep_panel:
 # different vendor rather than a second glm call.
 deep_panel_cloud:
   code:
-    workers: ["glm-5.2:cloud", "minimax-m3:cloud"]
+    # 2026-08-17: `kimi-k2.7-code` REPLACES `minimax-m3`, which is off the box.
+    # ⚠️ This was a forced swap, not a free one — dropping minimax without a
+    # replacement would have left ONE worker synthesised by ITSELF (`glm-5.2`
+    # holds both slots), which drafts once and then "merges" its own only draft:
+    # strictly more latency than answering directly, for nothing. Caught by
+    # `test_no_flat_panel_is_degenerate`, which asserts on DISTINCT names.
+    # ▶ kimi is the pick because it is the measured #2 code contributor
+    # (`analyze_draft_contribution.py`: 0.54 code recall, 31% win rate) AND a
+    # third vendor — glm/kimi as workers, deepseek as the degrade target, so a
+    # glm outage still falls onto someone else's model.
+    workers: ["glm-5.2:cloud", "kimi-k2.7-code:cloud"]
     synthesizer: "glm-5.2:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
   reasoning:
@@ -1392,7 +1400,6 @@ passthrough:
     # olmo-3.1:32b removed — none were pulled. Here a phantom is quieter still:
     # it is offered to OWUI as a selectable model and only fails when picked.
     - qwen3.8:latest
-    - minimax-m3:cloud
     - deepseek-v4-pro:cloud
     - kimi-k2.7-code:cloud
     - glm-5.2:cloud
