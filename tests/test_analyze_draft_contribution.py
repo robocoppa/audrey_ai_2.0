@@ -175,7 +175,20 @@ def test_a_draft_that_will_not_parse_is_flagged():
 def _row(artifact, case, model, code_recall):
     return {"artifact": artifact, "case": case, "key": (artifact, case),
             "model": model, "code_recall": code_recall, "prose_recall": None,
-            "elapsed_s": 1.0, "has_code": True, "final_has_code": True}
+            "elapsed_s": 1.0, "has_code": True, "final_has_code": True,
+            "prose_words": 0}
+
+
+def test_the_synthetic_row_helper_matches_a_real_scored_row():
+    """Pins the test double against the real thing.
+
+    `_row` is hand-built so the summary tests can control the numbers, which
+    makes it a double — and a double narrower than its subject fails as a
+    KeyError deep inside `summarise`, not as a readable assertion. This repo
+    has already lost time to exactly that shape once, in `test_research_stream`.
+    """
+    real = adc.score_case(_cases()[0], check_syntax=False)[0]
+    assert set(_row("a", "b", "c", 1.0)) == set(real)
 
 
 def test_a_tied_top_score_counts_for_every_model_tied():

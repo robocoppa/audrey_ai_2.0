@@ -265,6 +265,12 @@ def score_case(case: Case, *, check_syntax: bool, artifact: str = "") -> list[di
             "prose_recall": _recall(fin_p, _prose_units(d_prose)),
             "has_code": bool(d_code.strip()),
             "final_has_code": bool(fin_c),
+            # ⚠️ Recall confounds with LENGTH, and only this disambiguates it.
+            # A draft that writes no prose scores ~0 prose recall for the same
+            # reason a draft whose prose was rejected does — and those are
+            # opposite findings. "Contributes no explanation" is a lineup
+            # problem; "writes bare code" may just be the prompt working.
+            "prose_words": len(re.findall(r"[a-z0-9_]+", d_prose.lower())),
         }
         if check_syntax:
             row["syntax_ok"] = _syntax_ok(d_code)
@@ -308,6 +314,7 @@ def summarise(rows: list[dict]) -> list[dict]:
             "code_cases": len(code),
             "mean_code_recall": sum(code) / len(code) if code else None,
             "mean_prose_recall": sum(prose) / len(prose) if prose else None,
+            "mean_prose_words": sum(r["prose_words"] for r in rs) / len(rs),
             "top_code_cases": tops.get(model, 0),
             "missing_code": sum(1 for r in rs if r["final_has_code"] and not r["has_code"]),
             "syntax_bad": sum(1 for r in rs if r.get("syntax_ok") is False),
@@ -375,21 +382,24 @@ def main() -> int:
     n_keys = len({r["key"] for r in rows})
     n_art = len({r["artifact"] for r in rows})
     print(f"\n── per-model over {n_keys} case-run(s) in {n_art} artifact(s) ──")
-    print(f"{'model':<34} {'n':>4} {'code':>6} {'prose':>6} {'top':>5} "
-          f"{'/n':>6} {'nocode':>7} {'badsyn':>7} {'mean s':>8}")
+    print(f"{'model':<34} {'n':>4} {'code':>6} {'prose':>6} {'pwords':>7} "
+          f"{'top':>5} {'/n':>6} {'nocode':>7} {'badsyn':>7} {'mean s':>8}")
     for s in summary:
         # `top` is unreadable without its denominator: 2 of 5 and 2 of 40 are
         # opposite findings and the raw count cannot tell them apart.
         rate = (f"{s['top_code_cases'] / s['code_cases']:5.2f}"
                 if s["code_cases"] else "   — ")
         print(f"{s['model']:<34} {s['cases']:>4} {_fmt(s['mean_code_recall'])} "
-              f"{_fmt(s['mean_prose_recall'])} "
+              f"{_fmt(s['mean_prose_recall'])} {s['mean_prose_words']:>7.0f} "
               f"{s['top_code_cases']:>5} {rate:>6} {s['missing_code']:>7} "
               f"{s['syntax_bad']:>7} {s['mean_elapsed_s']:>8.1f}")
 
     print("\ncode = fraction of the FINAL answer's significant code lines "
           f"present verbatim in that draft;\nprose = same for its word "
           f"{_SHINGLE}-grams (prose gets paraphrased, code does not).")
+    print("pwords = mean words of prose the draft WROTE. ⚠️  Read it beside "
+          "`prose`: a near-zero score\n   at near-zero pwords means the model "
+          "wrote no explanation, NOT that its explanation lost.")
     print("⚠️  A low score is evidence of non-contribution. A high score is NOT "
           "evidence of contribution —")
     print("   converging models all score high. `top` counts ties for everyone "
