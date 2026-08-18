@@ -1818,7 +1818,8 @@ async def run_research_pipeline_streaming(
       {"type": "factcheck_done", "ok": bool}
           Stage 3 finished; `ok` True means actionable corrections were found.
           Emitted only when grounded (skipped → not emitted), and the stage
-          itself only runs when a `factchecker` is configured + tool-capable.
+          itself only runs when a `factchecker` (or its `fallback_factcheck`)
+          is configured, healthy and tool-capable.
       {"type": "write_delta", "text": str}
           A chunk of the Writer's answer (streamed live).
       {"type": "done", "content": str, "writer_model": str, "drafts": list,
@@ -1969,21 +1970,47 @@ async def run_research_pipeline_streaming(
     # pipeline proceeds exactly as the verify→write flow did before.
     corrections = ""
     fc_result: FactCheckResult | None = None  # structured verdicts, for Stage-3 Sources
-    factchecker = pool.get("factchecker")
-    fc_can_run = bool(
-        grounded and factchecker and health.is_healthy(factchecker)
-        and tools is not None and tools.by_name and factchecker in capable
+    # ⚠️ The primary and its fallback, tried in order. The fallback exists
+    # because of ROLE-DOUBLING: the `factchecker` is also a `researcher` in
+    # every shipped pool, so one transient upstream 503 during Stage 1 puts the
+    # model into `HealthTracker` cooldown and this gate then deleted the ENTIRE
+    # stage. Measured 2026-08-18: a single "temporarily overloaded" on
+    # `deepseek-v4-pro:cloud` cost one case its verdicts with NO failure logged
+    # anywhere, because the gate skips before any batch dispatches and so
+    # neither fact-check failure path is reached.
+    # ▶ A fallback only helps if it cannot be disqualified by the same event:
+    # it must not appear in `researchers` for this pool, and should be a
+    # different vendor from the primary.
+    fc_candidates = [
+        m for m in (pool.get("factchecker"), pool.get("fallback_factcheck")) if m
+    ]
+    # Both model preconditions now SELECT rather than veto: an unhealthy or
+    # non-tool-capable primary falls through instead of cancelling the stage.
+    factchecker = next(
+        (m for m in fc_candidates if health.is_healthy(m) and m in capable), None
     )
+    fc_can_run = bool(grounded and factchecker and tools is not None and tools.by_name)
     # Log the decision either way — when the stage silently skips, this is the
     # only way to see WHICH precondition failed (config vs health vs tools).
     if not fc_can_run:
         log.info(
-            "research: fact-check SKIPPED — grounded=%s factchecker=%r healthy=%s "
-            "tools=%s tool_capable=%s",
-            grounded, factchecker,
-            (health.is_healthy(factchecker) if factchecker else None),
-            (bool(tools and tools.by_name)),
-            (factchecker in capable if factchecker else None),
+            "research: fact-check SKIPPED — grounded=%s candidates=%s healthy=%s "
+            "tool_capable=%s tools=%s",
+            grounded, fc_candidates,
+            [health.is_healthy(m) for m in fc_candidates],
+            [m in capable for m in fc_candidates],
+            bool(tools and tools.by_name),
+        )
+    elif factchecker != fc_candidates[0]:
+        # The only record that the fallback fired: the rendered answer looks
+        # identical either way, so without this line the primary could be
+        # failing every single turn and nothing would say so. WARNING, not
+        # INFO — a degraded stage that still produces verdicts is exactly the
+        # kind of thing that stays broken for weeks.
+        log.warning(
+            "research: fact-check FELL BACK to %s — primary %s healthy=%s tool_capable=%s",
+            factchecker, fc_candidates[0],
+            health.is_healthy(fc_candidates[0]), fc_candidates[0] in capable,
         )
     else:
         log.info("research: fact-check stage running with %s", factchecker)

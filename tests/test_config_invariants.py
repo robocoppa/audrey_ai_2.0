@@ -180,6 +180,64 @@ def test_a_role_switch_is_a_bool_not_a_model_list(cfg):
             )
 
 
+# ─── The fact-check stage's two silent preconditions ───────────────────
+# Both of these fail the SAME way: `deep_panel.py`'s Stage-3 gate skips the
+# whole stage and the answer renders without verdicts or a corrections block.
+# Nothing errors, because the gate runs before anything is dispatched.
+
+def _research_pools(cfg: dict) -> list[tuple[str, dict]]:
+    return [
+        (f"deep_panel_research/{task}", body)
+        for task, body in (cfg.get("deep_panel_research") or {}).items()
+        if isinstance(body, dict)
+    ]
+
+
+def test_every_factcheck_model_is_tool_capable(cfg):
+    """The gate tests `factchecker in fast_path.tool_capable_models`.
+
+    A fact-checker missing from that list is not a degraded fact-checker — it
+    is no fact-checker at all, permanently, on every research turn. And the
+    config reads perfectly: the role is filled, the model is registered, the
+    model is pulled. This is why the fallback is not `glm-5.2` despite glm
+    already holding three roles in these pools.
+    """
+    capable = {str(m) for m in (cfg.get("fast_path", {}).get("tool_capable_models") or [])}
+    bad = [
+        (pool, slot, body[slot])
+        for pool, body in _research_pools(cfg)
+        for slot in ("factchecker", "fallback_factcheck")
+        if body.get(slot) and str(body[slot]) not in capable
+    ]
+    assert not bad, (
+        f"fact-check models absent from `fast_path.tool_capable_models`: {bad}. "
+        "The Stage-3 gate skips silently — no error, no verdicts, no clue."
+    )
+
+
+def test_the_factcheck_fallback_is_not_also_a_researcher(cfg):
+    """A fallback that Stage 1 can disqualify is not a fallback.
+
+    `HealthTracker` cools a model down on ANY failure, so a model that
+    researches and then fact-checks can be knocked out of the second role by a
+    transient failure in the first. That is the defect the fallback exists to
+    cover — measured 2026-08-18, one upstream 503 on `deepseek-v4-pro:cloud`
+    deleted a whole answer's verdicts. Naming a researcher here reintroduces it
+    while looking like the fix.
+    """
+    bad = [
+        (pool, body["fallback_factcheck"])
+        for pool, body in _research_pools(cfg)
+        if body.get("fallback_factcheck")
+        and str(body["fallback_factcheck"]) in {str(r) for r in (body.get("researchers") or [])}
+    ]
+    assert not bad, (
+        f"`fallback_factcheck` is also a `researcher` in the same pool: {bad}. "
+        "One Stage-1 failure would cool down BOTH fact-check candidates and "
+        "skip the stage exactly as before."
+    )
+
+
 # ─── The YAML that reads one way and looks another ─────────────────────
 # Replaces the parenthetical in "A temporary toggle belongs in `.env`, not
 # `config.yaml`": an on-box `sed` once produced a duplicate key, and YAML keeps

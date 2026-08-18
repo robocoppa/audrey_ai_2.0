@@ -783,6 +783,107 @@ async def test_factcheck_stage_order_when_present():
     assert types.index("verify_done") < types.index("factcheck_done") < types.index("write_delta")
 
 
+# ── `fallback_factcheck`: the role-doubling escape hatch ───────────────
+# The factchecker is also a researcher in every shipped pool, so a Stage-1
+# failure used to put it in health cooldown and delete Stage 3 outright — with
+# no error logged, because the gate skips before any batch dispatches. These
+# pin that the gate now SELECTS a model rather than being vetoed by one.
+
+def _research_cfg_fc2(researchers, verifier, factchecker, fallback, writer,
+                      registry_models):
+    cfg = _research_cfg_fc(researchers, verifier, factchecker, writer, registry_models)
+    cfg.raw["deep_panel_research"]["reasoning"]["fallback_factcheck"] = fallback
+    return cfg
+
+
+async def _factcheck_run(cfg, reg, health, ollama, capable):
+    types, final = [], {}
+    async for evt in run_research_pipeline_streaming(
+        cfg, ollama, reg, health, FairLocalGate(concurrency=1),
+        task="reasoning", messages=[{"role": "user", "content": "q"}],
+        options={}, timeout_s=5.0, max_researchers_cloud=2,
+        tools=_one_tool_registry(), tool_capable_models=capable, user_id=None,
+    ):
+        types.append(evt["type"])
+        if evt["type"] == "done":
+            final = evt
+    return types, final
+
+
+async def test_factcheck_falls_back_when_the_primary_is_in_health_cooldown():
+    # The exact 2026-08-18 shape: `fc` is a researcher AND the factchecker, and
+    # it fails during Stage 1. Before the fallback existed, the whole stage
+    # vanished; now `fb` — which is NOT a researcher — carries it.
+    models = (("fc", 100, "cloud"), ("r2", 95, "cloud"), ("v", 80, "cloud"),
+              ("fb", 75, "cloud"), ("w", 70, "local"))
+    reg = _registry(*models)
+    cfg = _research_cfg_fc2(["fc", "r2"], "v", "fc", "fb", "w", models)
+    health = HealthTracker()
+    health.record_failure("fc", "model 'fc' is temporarily overloaded")
+    ollama = _FakeOllama({"r2": "fact", "v": "ok",
+                          "fb": "CONFIRMED: fact (src)", "w": "answer"})
+
+    types, final = await _factcheck_run(cfg, reg, health, ollama, {"fc", "fb"})
+
+    assert "factcheck_done" in types, "the stage was skipped instead of falling back"
+    assert "fb" in ollama.chat_models   # the fallback did the work
+    assert "fc" not in ollama.chat_models  # and the cooled-down primary was untouched
+    assert "CONFIRMED:" in final["corrections"]
+
+
+async def test_factcheck_falls_back_when_the_primary_is_not_tool_capable():
+    # The same selection path, different failed precondition. Worth its own
+    # test because a name missing from `fast_path.tool_capable_models` fails
+    # the gate exactly like an unhealthy model — silently, and permanently.
+    models = (("r1", 100, "cloud"), ("v", 80, "cloud"), ("fc", 78, "cloud"),
+              ("fb", 75, "cloud"), ("w", 70, "local"))
+    reg = _registry(*models)
+    cfg = _research_cfg_fc2(["r1"], "v", "fc", "fb", "w", models)
+    ollama = _FakeOllama({"r1": "fact", "v": "ok",
+                          "fb": "CONFIRMED: fact (src)", "w": "answer"})
+
+    types, _ = await _factcheck_run(cfg, reg, HealthTracker(), ollama, {"fb"})
+
+    assert "factcheck_done" in types
+    assert "fb" in ollama.chat_models
+
+
+async def test_factcheck_still_skips_when_neither_candidate_is_available():
+    # The fallback widens the gate; it must not remove it. With both models
+    # cooling down there is nothing to dispatch, and the stage stays silent
+    # rather than emitting an empty Fact-checking banner.
+    models = (("r1", 100, "cloud"), ("v", 80, "cloud"), ("fc", 78, "cloud"),
+              ("fb", 75, "cloud"), ("w", 70, "local"))
+    reg = _registry(*models)
+    cfg = _research_cfg_fc2(["r1"], "v", "fc", "fb", "w", models)
+    health = HealthTracker()
+    health.record_failure("fc", "down")
+    health.record_failure("fb", "down")
+    ollama = _FakeOllama({"r1": "fact", "v": "ok", "w": "answer"})
+
+    types, final = await _factcheck_run(cfg, reg, health, ollama, {"fc", "fb"})
+
+    assert "factcheck_done" not in types
+    assert final["corrections"] == ""
+    assert final["content"] == "answer"  # the answer still lands
+
+
+async def test_the_primary_is_preferred_while_it_is_healthy():
+    # The fallback is a degrade path, not a load balancer.
+    models = (("r1", 100, "cloud"), ("v", 80, "cloud"), ("fc", 78, "cloud"),
+              ("fb", 75, "cloud"), ("w", 70, "local"))
+    reg = _registry(*models)
+    cfg = _research_cfg_fc2(["r1"], "v", "fc", "fb", "w", models)
+    ollama = _FakeOllama({"r1": "fact", "v": "ok",
+                          "fc": "CONFIRMED: fact (src)", "w": "answer"})
+
+    _types, _final = await _factcheck_run(cfg, reg, HealthTracker(), ollama,
+                                          {"fc", "fb"})
+
+    assert "fc" in ollama.chat_models
+    assert "fb" not in ollama.chat_models
+
+
 # ── Phase 26 Stage 1: ledger merge/prefix helpers ──────────────────────
 
 def test_prefix_ledger_ids_namespaces_claims_and_sources():

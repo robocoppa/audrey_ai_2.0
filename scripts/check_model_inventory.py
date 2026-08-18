@@ -103,6 +103,7 @@ _SEVERITY: tuple[tuple[str, str], ...] = (
     ("workers[", "MEDIUM"),
     ("researchers[", "MEDIUM"),
     (".fallback_synth", "MEDIUM"),
+    (".fallback_factcheck", "MEDIUM"),
     ("model_registry", "MEDIUM"),          # a pool member, reachable by failover
     ("allowed_models", "LOW"),             # passthrough clients only
     ("also_capable", "LOW"),

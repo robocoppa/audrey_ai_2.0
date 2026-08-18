@@ -363,6 +363,9 @@ deep_panel_local:
 #                  the writer applies. OPTIONAL — omit it and the stage is
 #                  skipped (pipeline runs verify→write as before). Uses the
 #                  `react.factcheck_worker` budget.
+#   fallback_factcheck — second choice for that same stage, tried when the
+#                  primary is in health cooldown or is not tool-capable.
+#                  OPTIONAL. See the role-doubling note below.
 #   writer       — Stage-4 single pass: turns verified+corrected findings into
 #                  the answer (no new facts). Its output IS the final answer.
 #   fallback_synth — degrade target if the write stage fails.
@@ -377,23 +380,50 @@ deep_panel_local:
 # is the one stage where a glm regression silently empties the corrections
 # block (`_structure_factcheck_batch` is fail-soft: bad JSON → None → no
 # corrections, no error). Promote it only after a clean research eval.
+#
+# ⚠️⚠️ ROLE-DOUBLING IS ONLY SAFE WHEN THE ROLES CANNOT DISQUALIFY EACH OTHER.
+# `deepseek-v4-pro` is BOTH a researcher and the factchecker here, and on
+# 2026-08-18 that cost a real answer its verdicts: it 503'd once in Stage 1
+# ("model 'deepseek-v4-pro:0813' is temporarily overloaded"), `HealthTracker`
+# put it in cooldown, and the Stage-3 gate then skipped the WHOLE stage. The
+# artifact shows a Ledger and hedge dispositions but no `Fact-check verdicts`
+# and no `Corrections` at all — and no failure is logged, because the gate
+# skips before any batch dispatches. (Contrast `deep_panel_cloud.code`, where
+# deepseek is worker + `fallback_synth`: failing to draft cannot disqualify it
+# from synthesising, so that pairing is fine.)
+#
+# `fallback_factcheck` is the fix. Its two requirements are structural, not
+# about quality: it must NOT be in this pool's `researchers` (or Stage 1 can
+# disqualify it by the same event), and it must be in
+# `fast_path.tool_capable_models` (the gate tests membership; a model missing
+# from that list silently fails the gate exactly like an unhealthy one).
+# ▶ That second rule is why the fallback is NOT glm-5.2 despite glm already
+# holding verifier + writer + fallback_synth here: glm-5.2 is not tool-capable
+# in this config, so naming it would have looked correct and skipped anyway.
+# `kimi-k2.6` satisfies both, and adds vendor diversity — a DeepSeek-side
+# outage does not reach it. A fallback firing is logged at WARNING
+# ("fact-check FELL BACK to"); the answer looks identical, so that line is the
+# only way to learn the primary is failing.
 deep_panel_research:
   code:
     researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.8:latest"]
     verifier: "glm-5.2:cloud"
     factchecker: "deepseek-v4-pro:cloud"
+    fallback_factcheck: "kimi-k2.6:cloud"
     writer: "glm-5.2:cloud"
     fallback_synth: "glm-5.2:cloud"
   reasoning:
     researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.8:latest"]
     verifier: "glm-5.2:cloud"
     factchecker: "deepseek-v4-pro:cloud"
+    fallback_factcheck: "kimi-k2.6:cloud"
     writer: "glm-5.2:cloud"
     fallback_synth: "glm-5.2:cloud"
   general:
     researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.8:latest"]
     verifier: "glm-5.2:cloud"
     factchecker: "deepseek-v4-pro:cloud"
+    fallback_factcheck: "kimi-k2.6:cloud"
     writer: "glm-5.2:cloud"
     fallback_synth: "glm-5.2:cloud"
   # vl: the research path grounds with text tools; image turns force fast
@@ -403,6 +433,7 @@ deep_panel_research:
     researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud"]
     verifier: "glm-5.2:cloud"
     factchecker: "deepseek-v4-pro:cloud"
+    fallback_factcheck: "kimi-k2.6:cloud"
     writer: "glm-5.2:cloud"
     fallback_synth: "glm-5.2:cloud"
 

@@ -274,7 +274,8 @@ def _validate_deep_panel_pools(merged: dict[str, Any]) -> None:
     - **Staged pool** (`deep_panel_research`): a body carrying a
       `researchers` list is the staged `audrey_research` shape. It requires
       `researchers` (non-empty), `verifier`, and `writer`; names models in
-      `researchers[*]` / `verifier` / `writer` / `fallback_synth`. It has no
+      `researchers[*]` / `verifier` / `factchecker` / `fallback_factcheck` /
+      `writer` / `fallback_synth`. It has no
       `synthesizer` — the writer produces the answer.
 
     Two failure modes this catches at boot instead of at request time:
@@ -322,9 +323,10 @@ def _validate_deep_panel_pools(merged: dict[str, Any]) -> None:
                         errors.append(f"{pool_key}/{task}: missing required `{slot}` key")
                 for r in researchers:
                     named.append(("researcher", str(r)))
-                # `factchecker` is optional (omit → stage skipped); validated
-                # only when present.
-                for slot in ("verifier", "factchecker", "writer", "fallback_synth"):
+                # `factchecker` and its `fallback_factcheck` are optional
+                # (omit both → stage skipped); validated only when present.
+                for slot in ("verifier", "factchecker", "fallback_factcheck",
+                             "writer", "fallback_synth"):
                     if body.get(slot):
                         named.append((slot, str(body[slot])))
             else:
