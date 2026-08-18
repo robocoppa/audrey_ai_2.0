@@ -241,14 +241,24 @@ def _syntax_ok(code: str) -> bool | None:
     return True
 
 
-def score_case(case: Case, *, check_syntax: bool) -> list[dict]:
+def score_case(case: Case, *, check_syntax: bool, artifact: str = "") -> list[dict]:
+    """⚠️ `artifact` is part of case IDENTITY, not decoration.
+
+    Case NAMES repeat across runs — `code-hard-tokenizer` appears in every
+    `code_hard` artifact ever saved. Keying on the name alone silently merges
+    six runs into one "case" and then picks a `top` by comparing one run's
+    draft against another run's, which is not a comparison at all. Every
+    grouping below keys on `(artifact, case)`.
+    """
     fin_code, fin_prose = _split_code_and_prose(case.final)
     fin_c, fin_p = _code_units(fin_code), _prose_units(fin_prose)
     rows = []
     for d in case.drafts:
         d_code, d_prose = _split_code_and_prose(d.text)
         row = {
+            "artifact": artifact,
             "case": case.name,
+            "key": (artifact, case.name),
             "model": d.model,
             "elapsed_s": d.elapsed_s,
             "code_recall": _recall(fin_c, _code_units(d_code)),
@@ -276,9 +286,11 @@ def summarise(rows: list[dict]) -> list[dict]:
     # for everyone tied — a shared top spot is exactly the convergence case
     # this script cannot resolve, and silently picking one would hide that.
     tops: dict[str, int] = defaultdict(int)
-    cases = {r["case"] for r in rows}
-    for c in cases:
-        scored = [r for r in rows if r["case"] == c and r["code_recall"] is not None]
+    by_key: dict[tuple, list[dict]] = defaultdict(list)
+    for r in rows:
+        by_key[r["key"]].append(r)
+    for group in by_key.values():
+        scored = [r for r in group if r["code_recall"] is not None]
         if not scored:
             continue
         best = max(r["code_recall"] for r in scored)
@@ -293,6 +305,7 @@ def summarise(rows: list[dict]) -> list[dict]:
         out.append({
             "model": model,
             "cases": len(rs),
+            "code_cases": len(code),
             "mean_code_recall": sum(code) / len(code) if code else None,
             "mean_prose_recall": sum(prose) / len(prose) if prose else None,
             "top_code_cases": tops.get(model, 0),
@@ -328,7 +341,8 @@ def main() -> int:
             skipped.append(p.name)
             continue
         for c in cases:
-            rows.extend(score_case(c, check_syntax=args.check_syntax))
+            rows.extend(score_case(c, check_syntax=args.check_syntax,
+                                  artifact=p.name))
 
     if not rows:
         print("no artifacts with a `## Panel drafts (debug)` block.", file=sys.stderr)
@@ -346,9 +360,9 @@ def main() -> int:
         print(f"({len(skipped)} artifact(s) had no drafts block, ignored)\n")
 
     if args.per_case:
-        for case in dict.fromkeys(r["case"] for r in rows):
-            print(f"\n{case}")
-            for r in (x for x in rows if x["case"] == case):
+        for key in dict.fromkeys(r["key"] for r in rows):
+            print(f"\n{key[1]}   [{key[0]}]")
+            for r in (x for x in rows if x["key"] == key):
                 flags = []
                 if r["final_has_code"] and not r["has_code"]:
                     flags.append("NO CODE")
@@ -358,14 +372,19 @@ def main() -> int:
                       f"  prose {_fmt(r['prose_recall'])}"
                       f"  {r['elapsed_s']:6.1f}s  {' '.join(flags)}")
 
-    n_cases = len({r["case"] for r in rows})
-    print(f"\n── per-model over {n_cases} case(s) ──")
-    print(f"{'model':<34} {'code':>6} {'prose':>6} {'top':>5} "
-          f"{'nocode':>7} {'badsyn':>7} {'mean s':>8}")
+    n_keys = len({r["key"] for r in rows})
+    n_art = len({r["artifact"] for r in rows})
+    print(f"\n── per-model over {n_keys} case-run(s) in {n_art} artifact(s) ──")
+    print(f"{'model':<34} {'n':>4} {'code':>6} {'prose':>6} {'top':>5} "
+          f"{'/n':>6} {'nocode':>7} {'badsyn':>7} {'mean s':>8}")
     for s in summary:
-        print(f"{s['model']:<34} {_fmt(s['mean_code_recall'])} "
+        # `top` is unreadable without its denominator: 2 of 5 and 2 of 40 are
+        # opposite findings and the raw count cannot tell them apart.
+        rate = (f"{s['top_code_cases'] / s['code_cases']:5.2f}"
+                if s["code_cases"] else "   — ")
+        print(f"{s['model']:<34} {s['cases']:>4} {_fmt(s['mean_code_recall'])} "
               f"{_fmt(s['mean_prose_recall'])} "
-              f"{s['top_code_cases']:>5} {s['missing_code']:>7} "
+              f"{s['top_code_cases']:>5} {rate:>6} {s['missing_code']:>7} "
               f"{s['syntax_bad']:>7} {s['mean_elapsed_s']:>8.1f}")
 
     print("\ncode = fraction of the FINAL answer's significant code lines "

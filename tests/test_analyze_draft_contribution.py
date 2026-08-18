@@ -172,18 +172,49 @@ def test_a_draft_that_will_not_parse_is_flagged():
     assert adc.score_case(case, check_syntax=True)[0]["syntax_ok"] is False
 
 
+def _row(artifact, case, model, code_recall):
+    return {"artifact": artifact, "case": case, "key": (artifact, case),
+            "model": model, "code_recall": code_recall, "prose_recall": None,
+            "elapsed_s": 1.0, "has_code": True, "final_has_code": True}
+
+
 def test_a_tied_top_score_counts_for_every_model_tied():
     """Convergence is the case the metric cannot resolve. Picking one winner
     would hide that; the summary must show the tie."""
-    rows = [
-        {"case": "c", "model": "a", "code_recall": 1.0, "prose_recall": None,
-         "elapsed_s": 1.0, "has_code": True, "final_has_code": True},
-        {"case": "c", "model": "b", "code_recall": 1.0, "prose_recall": None,
-         "elapsed_s": 2.0, "has_code": True, "final_has_code": True},
-    ]
+    rows = [_row("f.md", "c", "a", 1.0), _row("f.md", "c", "b", 1.0)]
     summary = {s["model"]: s for s in adc.summarise(rows)}
     assert summary["a"]["top_code_cases"] == 1
     assert summary["b"]["top_code_cases"] == 1
+
+
+def test_the_same_case_name_in_two_artifacts_is_two_cases():
+    """The bug this pins made the first real run unreadable.
+
+    Case NAMES repeat across runs — `code-hard-tokenizer` is in every
+    `code_hard` artifact. Keying on the name alone merged six runs into one
+    "case" and then picked a `top` by comparing one run's draft against a
+    DIFFERENT run's. Both the denominator and the winner were wrong.
+    """
+    rows = [
+        _row("run1.md", "shared-name", "a", 1.0),
+        _row("run1.md", "shared-name", "b", 0.1),
+        _row("run2.md", "shared-name", "a", 0.1),
+        _row("run2.md", "shared-name", "b", 1.0),
+    ]
+    summary = {s["model"]: s for s in adc.summarise(rows)}
+    # One top each — not one model taking both, and not a single merged case.
+    assert summary["a"]["top_code_cases"] == 1
+    assert summary["b"]["top_code_cases"] == 1
+    assert summary["a"]["cases"] == 2
+
+
+def test_the_summary_carries_the_denominator_for_its_top_count():
+    """`top` alone is unreadable: 2 of 5 and 2 of 40 are opposite findings."""
+    rows = [_row("r.md", "c1", "a", 1.0), _row("r.md", "c2", "a", 0.0),
+            _row("r.md", "c2", "b", 1.0)]
+    summary = {s["model"]: s for s in adc.summarise(rows)}
+    assert summary["a"]["code_cases"] == 2
+    assert summary["a"]["top_code_cases"] == 1
 
 
 def test_an_answer_with_no_code_yields_no_code_verdict_rather_than_zero():
