@@ -151,6 +151,20 @@ def select_workers(
         loc = registry.location_of(name)
         if loc == "cloud":
             if cloud_count >= max_workers_cloud:
+                # ⚠️ This used to `continue` in SILENCE, and that silence cost a
+                # whole eval run on 2026-08-17: `deep_panel_cloud.code` was
+                # given three cloud workers against an effective cap of 2, so
+                # `deepseek-v4-pro` never drafted and the artifact simply showed
+                # two drafts with nothing anywhere saying why. Dead config that
+                # looks live is the worst kind, and the cap is set in TWO places
+                # (`config.yaml` and `MAX_DEEP_WORKERS_CLOUD`), so the effective
+                # value is worth printing rather than inferring.
+                log.warning(
+                    "deep_panel: DROPPING cloud worker %s — %s/%s already at the "
+                    "max_deep_workers_cloud cap of %d (config.yaml can be "
+                    "overridden by MAX_DEEP_WORKERS_CLOUD; this worker never runs)",
+                    name, pool_key, task, max_workers_cloud,
+                )
                 continue
             cloud_count += 1
         out.append((name, loc))

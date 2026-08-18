@@ -1960,6 +1960,20 @@ def main() -> int:
     if sweep:
         cases = _expand_sweep(cases, sweep)
 
+    # ⚠️ A per-case `"model"` BEATS `--model` (see `run_case`). So asking for
+    # `--model audrey_cloud` against a cases file that pins `audrey_deep` runs
+    # the deep panel and labels the output `cloud` — a whole run spent on the
+    # wrong panel, discoverable only by reading the per-case header afterwards.
+    # The unpinned `*_models.json` variants exist for exactly this.
+    if args.model:
+        overridden = sorted({str(c["model"]) for c in cases
+                             if c.get("model") and c["model"] != args.model})
+        if overridden:
+            print(f"WARNING: --model {args.model} is IGNORED for every case that "
+                  f"pins its own model ({', '.join(overridden)}). Use an unpinned "
+                  f"cases file (`*_models.json`) to make --model apply.",
+                  file=sys.stderr)
+
     results: list[CaseResult] = []
     for case in cases:
         print(f"running: {case.get('name') or case['prompt'][:48]} "

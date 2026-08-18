@@ -32,6 +32,17 @@ in one direction only:
     shown to have caused anything. Agreement between drafts is itself a signal
     the synthesizer uses, and that use is invisible here.
 
+⚠️⚠️ **RECALL RISES WHEN THE FIELD SHRINKS — NEVER COMPARE IT ACROSS LINEUPS.**
+The score is resemblance to the FINAL, and the final is a merge of whoever
+drafted. Take a worker out and the synthesizer has fewer sources to blend, so
+every survivor's recall goes up without anyone improving. Dropping `minimax-m3`
+moved `deepseek-v4-pro` from 0.69 to 0.90 code recall overnight; that is
+arithmetic, not a better model. Compare within one lineup only.
+
+⚠️ Latency and recall both move with CASE MIX too. The same model read 11.1s
+across a mixed corpus and 3.2s on five hard code cases — and 3.8s on those same
+five cases in the previous run, so the "speedup" was the mix, not the model.
+
 So read this as a NEGATIVE instrument — it identifies dead weight, it does not
 award credit. Do not rank two high scorers against each other with it.
 

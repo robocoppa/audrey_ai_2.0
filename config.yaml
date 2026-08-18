@@ -278,17 +278,19 @@ deep_panel_cloud:
     # holds both slots), which drafts once and then "merges" its own only draft:
     # strictly more latency than answering directly, for nothing. Caught by
     # `test_no_flat_panel_is_degenerate`, which asserts on DISTINCT names.
-    # ▶ kimi is the pick because it is the measured #2 code contributor
-    # (`analyze_draft_contribution.py`: 0.54 code recall, 31% win rate) AND a
-    # third vendor.
-    # ▶ 2026-08-17: `deepseek-v4-pro` ADDED as a third worker — the measured #1
-    # by a distance (0.69 code recall, 0.60 win rate, and the fastest cloud
-    # worker at 11.1s). It stays `fallback_synth` as well; a model may hold both
-    # roles, and a glm-synth outage still degrades to a different vendor.
-    # ⚠️⚠️ THREE cloud workers puts this pool EXACTLY ON `max_deep_workers_cloud`
-    # (3). A fourth is dropped by `_healthy_workers` with NO log line — dead
-    # config that looks live. Swap rather than add, or raise the cap first.
-    workers: ["glm-5.2:cloud", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud"]
+    # ▶ TWO workers, and the reason is a HARD CAP, not a preference.
+    # `deepseek-v4-pro` was added here on 2026-08-17 and NEVER RAN: the
+    # effective `max_deep_workers_cloud` is 2, so `select_workers` dropped the
+    # third cloud worker — silently, until that was fixed. The config is back
+    # to two so it states what actually dispatches.
+    # ⚠️⚠️ **ADDING A THIRD WORKER HERE IS A NO-OP** until the cap is raised.
+    # The cap lives in TWO places and the env wins: `agentic.max_deep_workers_cloud`
+    # in this file, overridden by `MAX_DEEP_WORKERS_CLOUD` in `.env`. Check the
+    # deployed value (`grep "ENV OVERRIDE"` in the logs) before editing this list.
+    # ▶ Measured on `202130` (5/5): `kimi-k2.7-code` supplied the winning code in
+    # FOUR of five cases, `glm-5.2` in one. Both earn their slot; deepseek is the
+    # one to promote here if the cap ever goes up.
+    workers: ["glm-5.2:cloud", "kimi-k2.7-code:cloud"]
     synthesizer: "glm-5.2:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
   reasoning:

@@ -398,3 +398,44 @@ class TestSourcesBlock:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+class TestTheCasesFilesAgreeWithHowModelSelectionWorks:
+    """A per-case `"model"` beats `--model`, so the pinning has to be deliberate.
+
+    `run_case` resolves `case.get("model") or default_model`. That means asking
+    for `--model audrey_cloud` against a cases file whose entries pin
+    `audrey_deep` runs the DEEP panel while the output is labelled `cloud` — a
+    whole run spent on the wrong panel, visible only in the per-case header
+    afterwards. The `*_models.json` variants exist to be unpinned; this pins
+    that contract so the two families cannot quietly converge.
+    """
+
+    _SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+
+    def _cases(self, name):
+        import json
+        d = json.loads((self._SCRIPTS / name).read_text())
+        return d if isinstance(d, list) else (d.get("cases") or d.get("prompts"))
+
+    @pytest.mark.parametrize("name", [
+        p.name for p in sorted(
+            (Path(__file__).resolve().parent.parent / "scripts").glob("eval_prompts_*_models.json"))
+    ])
+    def test_a_models_variant_pins_no_model(self, name):
+        pinned = [c.get("name") for c in self._cases(name) if c.get("model")]
+        assert not pinned, (
+            f"{name} is a `_models` variant but pins a model on {pinned} — "
+            "`--model` and MODELS= sweeps are both silently ignored for those cases"
+        )
+
+    def test_at_least_one_unpinned_code_suite_exists_for_the_other_panels(self):
+        # `audrey_cloud` and `audrey_local` have no code cases file of their own;
+        # they are meant to reuse an unpinned suite via `--model`. If every code
+        # suite were pinned there would be no way to exercise them at all.
+        unpinned = [p.name for p in sorted(self._SCRIPTS.glob("eval_prompts_code*.json"))
+                    if not any(c.get("model") for c in self._cases(p.name))]
+        assert unpinned, (
+            "every code cases file pins a model — nothing can exercise "
+            "deep_panel_cloud or deep_panel_local"
+        )

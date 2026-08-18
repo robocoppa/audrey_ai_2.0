@@ -15,6 +15,7 @@ real model. The unawaited coroutines are closed so pytest doesn't warn.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, ClassVar
 from unittest.mock import patch
 
@@ -34,6 +35,7 @@ from audrey.pipeline.deep_panel import (
     pool_key_for,
     run_panel,
     run_panel_streaming,
+    select_workers,
 )
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.ledger import Claim, ResearchResult, Source
@@ -2194,3 +2196,47 @@ async def test_a_worker_that_raises_anything_still_returns_a_draft():
     )
     assert draft["content"] == ""
     assert "RuntimeError" in draft["error"], draft
+
+
+class TestTheCloudWorkerCapIsAudible:
+    """A worker dropped for the cap must say so — silence costs a whole run.
+
+    `deep_panel_cloud.code` was given three cloud workers on 2026-08-17 against
+    an effective cap of 2. `deepseek-v4-pro` therefore never drafted, and the
+    eval artifact showed two drafts with nothing anywhere explaining the third.
+    The cap is set in TWO places — `config.yaml`'s `agentic.max_deep_workers_cloud`
+    and the `MAX_DEEP_WORKERS_CLOUD` env override — so the effective value has
+    to be printed, not inferred from config that may not be what is running.
+    """
+
+    _MODELS = (("a:cloud", 100, "cloud"), ("b:cloud", 90, "cloud"),
+               ("c:cloud", 80, "cloud"))
+
+    def _select(self, cap):
+        cfg = _cfg_with_pool(["a:cloud", "b:cloud", "c:cloud"], self._MODELS)
+        return select_workers(
+            cfg, _registry(*self._MODELS), HealthTracker(),
+            pool_key="deep_panel", task="reasoning", max_workers_cloud=cap,
+        )
+
+    def test_the_cap_still_drops_the_extra_worker(self):
+        assert [n for n, _ in self._select(2)] == ["a:cloud", "b:cloud"]
+        assert [n for n, _ in self._select(3)] == ["a:cloud", "b:cloud", "c:cloud"]
+
+    def test_a_dropped_worker_is_logged_at_warning_with_the_effective_cap(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="audrey.pipeline.deep_panel"):
+            self._select(2)
+        dropped = [r for r in caplog.records if "DROPPING cloud worker" in r.getMessage()]
+        assert len(dropped) == 1, "the dropped worker must announce itself exactly once"
+        msg = dropped[0].getMessage()
+        assert "c:cloud" in msg, "the message must name WHICH worker never runs"
+        assert "2" in msg, "the message must carry the EFFECTIVE cap, not just config"
+        assert "MAX_DEEP_WORKERS_CLOUD" in msg, (
+            "the env override is the likeliest reason the cap is not what "
+            "config.yaml says, so the message has to point at it"
+        )
+
+    def test_nothing_is_logged_when_every_worker_fits(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="audrey.pipeline.deep_panel"):
+            self._select(3)
+        assert not [r for r in caplog.records if "DROPPING" in r.getMessage()]
