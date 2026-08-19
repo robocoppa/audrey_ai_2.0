@@ -868,3 +868,95 @@ class TestCharsPerTokMeasuresContentOnly:
     def test_ordinary_prose_lands_near_four(self):
         from audrey.pipeline.passthrough import _chars_per_tok
         assert 3.0 < _chars_per_tok(4000, 1000) < 5.0
+
+
+# ── the completion line has to survive an early break ───────────────────────
+# `TestThinkIsLoggedOnBothSides` passed from the day it was written while the
+# line it asserts on had NEVER been emitted in production. `_run_stream` drains
+# the generator with `[c async for c in ...]`; the SSE route
+# (`routes/openai/passthrough.py`) `break`s the moment it sees `done`. A drained
+# generator runs the code after its loop, an abandoned one does not — so the
+# helper tested a control flow no caller uses. The tests below consume the
+# stream the way the route actually does.
+
+
+async def _run_stream_like_the_route(ollama, *, think=None, user="a@example.com"):
+    """Consume exactly as the SSE route does: break on `done`, then close.
+
+    The `break` is the whole point — it strands the generator at its `yield`,
+    which is what killed the trailing `log.info`. `aclose()` stands in for the
+    garbage collection / `athrow(GeneratorExit)` the event loop would do.
+    """
+    gen = passthrough_stream(
+        ollama, _RecordingGate(), concrete="m:latest", location="local",
+        messages=[{"role": "user", "content": "hi"}], options={},
+        user_id=user, tools=None, timeout_s=30.0, think=think,
+    )
+    seen = []
+    async for chunk in gen:
+        seen.append(chunk)
+        if chunk.get("done"):
+            break
+    await gen.aclose()
+    return seen
+
+
+class TestTheCompletionLineSurvivesAnEarlyBreak:
+
+    @pytest.mark.asyncio
+    async def test_breaking_on_done_still_logs_the_numbers(self, caplog):
+        caplog.set_level("INFO", logger=_LOGGER)
+        ollama = _FakeOllama(stream_chunks=[
+            {"message": {"content": "he", "thinking": "aaa"}, "done": False},
+            {"message": {"content": "llo", "thinking": "bb"}, "done": False},
+            {"message": {"content": ""}, "done": True, "eval_count": 40,
+             "done_reason": "stop"},
+        ])
+        seen = await _run_stream_like_the_route(ollama, think=True)
+        assert seen[-1]["done"] is True
+        line = next((r.getMessage() for r in caplog.records
+                     if "passthrough.stream " in r.getMessage()), None)
+        assert line is not None, "completion line missing — is it back outside the finally?"
+        # Every field the A/B needs, from a generator that was never drained.
+        assert "think=True" in line
+        assert "thinking_len=5" in line
+        assert "content_len=5" in line
+        assert "chunks=3" in line
+        assert "eval_count=40" in line
+        assert "done_reason=stop" in line
+
+    @pytest.mark.asyncio
+    async def test_a_stream_abandoned_mid_flight_still_logs(self, caplog):
+        # No `done` chunk ever seen: the client hung up early. The counts are
+        # partial ON PURPOSE — a partial line is the evidence that the turn was
+        # cut short, and silence is indistinguishable from a turn that never ran.
+        caplog.set_level("INFO", logger=_LOGGER)
+        ollama = _FakeOllama(stream_chunks=[
+            {"message": {"content": "he"}, "done": False},
+            {"message": {"content": "llo"}, "done": False},
+            {"message": {"content": ""}, "done": True, "eval_count": 40,
+             "done_reason": "stop"},
+        ])
+        gen = passthrough_stream(
+            ollama, _RecordingGate(), concrete="m:latest", location="local",
+            messages=[{"role": "user", "content": "hi"}], options={},
+            user_id="a@example.com", tools=None, timeout_s=30.0, think=False,
+        )
+        async for _ in gen:
+            break
+        await gen.aclose()
+        line = next((r.getMessage() for r in caplog.records
+                     if "passthrough.stream " in r.getMessage()), None)
+        assert line is not None
+        assert "chunks=1" in line
+        assert "done_reason=?" in line
+
+    @pytest.mark.asyncio
+    async def test_the_request_line_and_the_completion_line_both_land(self, caplog):
+        # The pair is the A/B: `.req` says what was asked for, the completion
+        # line says what came back. One without the other is unfalsifiable.
+        caplog.set_level("INFO", logger=_LOGGER)
+        await _run_stream_like_the_route(_FakeOllama(), think=False)
+        msgs = [r.getMessage() for r in caplog.records]
+        assert any("passthrough.stream.req" in m for m in msgs)
+        assert any("passthrough.stream " in m for m in msgs)

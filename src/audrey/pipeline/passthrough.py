@@ -145,33 +145,49 @@ async def passthrough_stream(
         concrete, _safe_user(user_id), think, role_counts,
         last_role, last_content_head,
     )
-    async with gate.acquire(concrete, location=location, user_id=user_id):
-        async for chunk in ollama.chat_stream(
-            model=concrete, messages=messages, options=options,
-            tools=tools, timeout_s=timeout_s, think=think,
-        ):
-            chunks_received += 1
-            cmsg = chunk.get("message") or {}
-            total_content_len += len(str(cmsg.get("content") or ""))
-            # Ollama streams reasoning in its own `thinking` field, never in
-            # `content`, so a model that spends its whole budget there yields a
-            # stream of chunks that sum to no text at all.
-            total_thinking_len += len(str(cmsg.get("thinking") or ""))
-            total_tool_calls += len(list(cmsg.get("tool_calls") or []))
-            if chunk.get("done"):
-                last_eval_count = int(chunk.get("eval_count", 0) or 0)
-                last_done_reason = chunk.get("done_reason", "?")
-            yield chunk
-    log.info(
-        "passthrough.stream model=%s user=%s tools=%d elapsed=%.2fs think=%s "
-        "chunks=%d content_len=%d thinking_len=%d chars_per_tok=%.2f "
-        "tool_calls=%d eval_count=%d done_reason=%s",
-        concrete, _safe_user(user_id), len(tools or []),
-        time.perf_counter() - t0, think,
-        chunks_received, total_content_len, total_thinking_len,
-        _chars_per_tok(total_content_len, last_eval_count),
-        total_tool_calls, last_eval_count, last_done_reason,
-    )
+    # ⚠️ `try/finally`, NOT a trailing statement. The SSE route breaks out of its
+    # `async for` the moment it sees the `done` chunk (see
+    # `routes/openai/passthrough.py`), which leaves this generator suspended at
+    # the `yield` below — code placed after the loop is NEVER REACHED on the
+    # normal path. Written as a plain trailing `log.info` on 2026-08-18, this
+    # line did not fire once: a 12-hour window held ten `.req` lines and zero
+    # completions, so `thinking_len`, `chars_per_tok`, `eval_count` and
+    # `done_reason` were all dead while looking live in the source. What made
+    # that survivable was putting `think=` on the `.req` line too, and only the
+    # A/B it was added for revealed the rest was missing.
+    # `GeneratorExit` runs a `finally` on close, so the numbers now survive an
+    # early break AND a stream that dies mid-flight. ⛔ Nothing in the `finally`
+    # may await or yield — that raises `RuntimeError` during close. Logging is
+    # sync; keep it that way.
+    try:
+        async with gate.acquire(concrete, location=location, user_id=user_id):
+            async for chunk in ollama.chat_stream(
+                model=concrete, messages=messages, options=options,
+                tools=tools, timeout_s=timeout_s, think=think,
+            ):
+                chunks_received += 1
+                cmsg = chunk.get("message") or {}
+                total_content_len += len(str(cmsg.get("content") or ""))
+                # Ollama streams reasoning in its own `thinking` field, never in
+                # `content`, so a model that spends its whole budget there
+                # yields a stream of chunks that sum to no text at all.
+                total_thinking_len += len(str(cmsg.get("thinking") or ""))
+                total_tool_calls += len(list(cmsg.get("tool_calls") or []))
+                if chunk.get("done"):
+                    last_eval_count = int(chunk.get("eval_count", 0) or 0)
+                    last_done_reason = chunk.get("done_reason", "?")
+                yield chunk
+    finally:
+        log.info(
+            "passthrough.stream model=%s user=%s tools=%d elapsed=%.2fs think=%s "
+            "chunks=%d content_len=%d thinking_len=%d chars_per_tok=%.2f "
+            "tool_calls=%d eval_count=%d done_reason=%s",
+            concrete, _safe_user(user_id), len(tools or []),
+            time.perf_counter() - t0, think,
+            chunks_received, total_content_len, total_thinking_len,
+            _chars_per_tok(total_content_len, last_eval_count),
+            total_tool_calls, last_eval_count, last_done_reason,
+        )
 
 
 def _chars_per_tok(content_len: int, eval_count: int) -> float:
