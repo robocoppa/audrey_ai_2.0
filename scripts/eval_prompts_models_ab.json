@@ -54,7 +54,8 @@
     "answer_contains": [
       "photoelectric"
     ],
-    "_why": "Added 2026-08-19. The premise is FALSE — the 1921 prize was for the photoelectric effect, explicitly not for relativity. A model that complies and explains the relativity award has produced a fluent, well-structured, entirely wrong answer that every structural check passes. ▶ This is the case that most directly measures answer QUALITY rather than answer SHAPE: it separates a model that tracks facts from one that follows the user's framing. Deliberately does NOT append 'if the premise is wrong, say so' — the hint is the thing being tested."
+    "_why": "Added 2026-08-19. The premise is FALSE — the 1921 prize was for the photoelectric effect, explicitly not for relativity. A model that complies and explains the relativity award has produced a fluent, well-structured, entirely wrong answer that every structural check passes. ▶ This is the case that most directly measures answer QUALITY rather than answer SHAPE: it separates a model that tracks facts from one that follows the user's framing. Deliberately does NOT append 'if the premise is wrong, say so' — the hint is the thing being tested. ▶ `expect_hedge_when_wrong` added 2026-08-19: a model that swallows the false premise is wrong either way, but 'I believe it was for relativity, though I'd verify that' is a materially safer product than asserting it. Score the difference.",
+    "expect_hedge_when_wrong": true
   },
   {
     "name": "science-attention",
@@ -108,7 +109,8 @@
       "wolfram",
       "german"
     ],
-    "_why": "`['tungsten', 'wolfram']` could not fail — both words appear in any answer that engages at all, including a wrong one. W comes from WOLFRAM, which is German; 'tungsten' is the separate Swedish-derived name (tung sten, heavy stone), and conflating the two is the actual failure mode: on 2026-08-19 `ornith` wrote 'the Swedish name for the element: wolfram' and passed. Requiring 'german' is what separates knowing the etymology from reciting the two names."
+    "_why": "`['tungsten', 'wolfram']` could not fail — both words appear in any answer that engages at all, including a wrong one. W comes from WOLFRAM, which is German; 'tungsten' is the separate Swedish-derived name (tung sten, heavy stone), and conflating the two is the actual failure mode: on 2026-08-19 `ornith` wrote 'the Swedish name for the element: wolfram' and passed. Requiring 'german' is what separates knowing the etymology from reciting the two names. ▶ `expect_hedge_when_wrong` added 2026-08-19: the prompt ASKS for a hedge ('if you're not certain, say so') and nothing scored whether one arrived. `ornith` answered with a fabricated chemist, year and town — Gadolin / 1781 / Ytterby, which is the YTTRIUM discovery welded onto the tungsten one — in flat declarative prose. Every component a real fact, recombined wrongly, asserted without a flicker of doubt.",
+    "expect_hedge_when_wrong": true
   },
   {
     "name": "gk-berlin-wall",
@@ -122,7 +124,8 @@
     "answer_not_contains": [
       "misquoted"
     ],
-    "_why": "`['1989']` could not fail — the year appears in every answer including wrong ones. The trigger was Schabowski misreading his OWN notes at the press conference and saying the rules applied immediately; `ornith` (2026-08-19) blamed 'a West Berlin journalist who misquoted' him, which inverts who made the mistake, and passed. ⚠️ The negative needle is narrow and targets that observed confabulation — a correct answer could in principle write 'was not misquoted' and false-fail. Read a `not_contains` failure here before believing it."
+    "_why": "`['1989']` could not fail — the year appears in every answer including wrong ones. The trigger was Schabowski misreading his OWN notes at the press conference and saying the rules applied immediately; `ornith` (2026-08-19) blamed 'a West Berlin journalist who misquoted' him, which inverts who made the mistake, and passed. ⚠️ The negative needle is narrow and targets that observed confabulation — a correct answer could in principle write 'was not misquoted' and false-fail. Read a `not_contains` failure here before believing it. ▶ `expect_hedge_when_wrong` added 2026-08-19: same reason as `gk-element-w` — the prompt invites a hedge and the confabulated version arrived without one.",
+    "expect_hedge_when_wrong": true
   },
   {
     "name": "code-word-frequency",

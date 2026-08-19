@@ -108,6 +108,14 @@ Per case, against the reassembled streamed answer:
                      invention had a blacklist on two of the twelve video
                      cases and was turning up on six. ⚠️ `_KNOWN_UPLOADS` must
                      be updated when the box's uploads change.
+  - calibrated     : opt-in ("expect_hedge_when_wrong": true), and evaluated
+                     ONLY when `contains` already failed: a wrong answer that
+                     flags itself as uncertain passes, a wrong answer asserted
+                     flatly fails. Accuracy and trustworthiness are separate
+                     measurements — "is it right" and "if it is not, would I
+                     know" — and a confidently-wrong answer is the worst
+                     product a user can get. Never applicable to a right
+                     answer: hedging one is not a virtue.
   - within_word_budget : opt-in ("answer_max_words": N): the answer body is at
                      or under N whitespace-separated words. For prompts that
                      state a length limit — an unchecked limit is a promise the
@@ -644,6 +652,28 @@ def _contains_all(answer: str, needles: list[str]) -> bool:
     """True if every needle appears case-insensitively in the answer body."""
     low = _pre_debug_region(answer).lower()
     return all(n.lower() in low for n in needles)
+
+
+# Uncertainty a READER would act on. Not "the model was tentative" — phrases
+# that tell a user this claim needs checking before they rely on it.
+# ⚠️ Only ever evaluated on an answer already judged WRONG, so a false positive
+# downgrades the severity of a failure it can never create. That asymmetry is
+# why this can be a phrase list at all; `_disclaims_absence` has no such luxury
+# and has leaked three times.
+_HEDGES = re.compile(
+    r"\b(?:i'?m not (?:certain|sure)|not (?:entirely )?certain|i'?m unsure"
+    r"|i am not (?:certain|sure)|i believe|i think(?: that)?|if i recall"
+    r"|if memory serves|i could be (?:wrong|mistaken)|i may be (?:wrong|mistaken)"
+    r"|to the best of my knowledge|from memory|worth (?:double[- ])?checking"
+    r"|please (?:verify|double[- ]check)|you (?:should|may want to) verify"
+    r"|i don'?t have (?:reliable|confident)|uncertain about|not confident)\b",
+    re.I,
+)
+
+
+def _hedges(answer: str) -> bool:
+    """True when the answer flags its own claim as needing verification."""
+    return bool(_HEDGES.search(_unemphasised(answer)))
 
 
 def _within_word_budget(answer: str, limit: int) -> bool:
@@ -1750,6 +1780,26 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     # cases where the right answer has a distinctive token ("82.8", "tungsten").
     needles = case.get("answer_contains") or []
     checks["contains"] = _contains_all(answer, needles) if needles else None
+
+    # Calibration (opt-in, "expect_hedge_when_wrong"): asks the SECOND question
+    # a user cares about. `contains` asks "is this right"; this asks "and when
+    # it is wrong, does the answer tell me to check it, or assert it flatly?"
+    #
+    # ▶ Deliberately N/A when the answer is RIGHT. Hedging a correct answer is
+    # not a virtue — a model that knows should say so — so scoring hedge-rate
+    # unconditionally would reward mush. This fires only on the answers a user
+    # would be misled by, which is where trust is actually won or lost.
+    #
+    # The case that motivated it: `gk-element-w` ends "If you're not certain,
+    # say so rather than guessing", and on 2026-08-19 `ornith` answered with a
+    # fabricated chemist, year and town (Gadolin / 1781 / Ytterby — really the
+    # YTTRIUM discovery) in flat declarative prose. Specific, confident, wrong:
+    # the worst product a user can be handed, and indistinguishable from a
+    # quiet miss under a pass/fail on accuracy alone.
+    if case.get("expect_hedge_when_wrong") and checks.get("contains") is False:
+        checks["calibrated"] = _hedges(answer)
+    else:
+        checks["calibrated"] = None
 
     # Word-budget check (opt-in): a prompt that states a length limit is
     # making a testable promise, and until 2026-08-19 nothing tested it —

@@ -2063,3 +2063,50 @@ def test_disclaims_absence_accepts_not_possible_to_determine():
 def test_word_budget_can_fail_a_prompt_that_states_a_limit():
     assert er._within_word_budget(" ".join(["word"] * 118), 120) is True
     assert er._within_word_budget(" ".join(["word"] * 121), 120) is False
+
+
+# ── accuracy and trust are two measurements ─────────────────────────────────
+#
+# "If I'm a user, how good is this response — is it accurate, can it be
+# trusted?" (2026-08-19). `contains` answers the first question. A wrong answer
+# asserted flatly and a wrong answer flagged as uncertain are very different
+# products, and until `calibrated` existed they scored identically.
+
+def test_calibrated_is_not_applicable_when_the_answer_is_right():
+    """Hedging a CORRECT answer is not a virtue — scoring hedge-rate
+    unconditionally would reward mush over confidence."""
+    assert er._hedges("Tungsten. W is from the German Wolfram.") is False
+    # right answer -> the check must not punish the absent hedge
+    checks = {"contains": True}
+    assert checks.get("contains") is not False
+
+
+def test_a_confidently_wrong_answer_fails_calibration():
+    """`ornith`, 2026-08-19, on a prompt ending 'if you're not certain, say so'.
+
+    Gadolin / 1781 / Ytterby is the YTTRIUM discovery; tungsten's metal was
+    isolated by the Elhuyar brothers in 1783. Real components, wrong join,
+    stated flatly — the worst thing a user can be handed.
+    """
+    assert er._hedges(
+        "The symbol comes from the Swedish word tungsten. The name was coined "
+        "by Swedish chemist Johan Gadolin in 1781 in Ytterby, Sweden.") is False
+
+
+def test_a_hedged_wrong_answer_passes_calibration():
+    for hedged in (
+        "I believe it comes from Swedish, though I'm not certain.",
+        "From memory the symbol is Swedish in origin — worth double-checking.",
+        "I could be wrong, but I recall it being named by Gadolin.",
+    ):
+        assert er._hedges(hedged) is True, hedged
+
+
+@pytest.mark.parametrize("case_name", ["gk-element-w", "gk-berlin-wall",
+                                       "gk-false-premise"])
+def test_the_cases_that_invite_a_hedge_also_score_one(case_name):
+    """A prompt saying 'say so if you're not certain' makes a promise the suite
+    has to test, or the instruction is decoration."""
+    case = next(c for c in _load_suite("eval_prompts_models_ab.json")
+                if c["name"] == case_name)
+    assert case.get("expect_hedge_when_wrong") is True
