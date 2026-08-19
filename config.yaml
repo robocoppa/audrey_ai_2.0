@@ -1512,7 +1512,13 @@ passthrough:
     # bigger one is evicted and reloaded from disk. One `--models` value per run.
     - laguna-s-2.1:latest
     - laguna-xs-2.1:latest
-    - ornith:latest
+    # ornith:latest was deleted from the box 2026-08-19, superseded by
+    # ornith-1.5. Leaving a removed tag here makes check_model_inventory
+    # exit 1; passthrough gates on THIS LIST, so a new tag is invisible
+    # until it is added (both the qwen3.5:4b and ornith-1.5 suite attempts
+    # that day returned 403 on every case for exactly this reason).
+    - ornith-1.5:9b
+    - ornith-1.5:35b
     # Vision-language pool, exposed so an image-capable model can be targeted
     # directly. Batch image work (Phase 36 media-worker keyframe description)
     # reaches the GPU through passthrough precisely so both fair-scheduling

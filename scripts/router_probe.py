@@ -69,10 +69,17 @@ so its first case can time out for a reason that has nothing to do with the arm.
 of the FIRST arm. Re-run with the arms reversed before crediting a difference to
 schema pinning.
 
-⚠️ **Production does NOT pin the schema today** — `router_classify` defaults
-`response_format=None`, so the pinned arm measures a change you have not made
-yet. That is the point: the router's size floor is set by "will it emit clean
-JSON unprompted", not by "can it classify", and pinning moves the floor.
+⚠️ **Production pins the schema AND suppresses thinking** — `config.yaml` sets
+`router.pin_schema: true` and `router.no_thinking: true`, both read in
+`classify.py`. So the arm that matches what the box actually runs is
+`NOTHINK=1 FORMAT=1`, and the bare default arm measures a configuration you
+retired. (This paragraph said the opposite until 2026-08-19: `pin_schema` was
+false when the probe was written and was turned on off the back of its own
+results, which left the docstring describing the old default.)
+▶ Probe the production arm FIRST. The free-prose arm is the follow-up that
+answers "would pinning rescue a candidate that failed the parse floor" — the
+router's size floor is set by "will it emit clean JSON unprompted", and pinning
+moves that floor.
 ⚠️ Pinning is not free — `Standing gotchas` records thinking breaking `format=`
 JSON, and a pinned call in `deep_panel` has returned 200 OK with zero bytes for
 what looks like that reason. Measure, do not assume it only helps.
