@@ -3,6 +3,7 @@
     "name": "reasoning-race-order",
     "prompt": "Three friends — Ada, Ben, and Cal — finished a race. Ada wasn't last. Cal finished before Ada. Ben didn't win. In what order did they finish? Lay out the deduction, not just the answer. Then end your reply with a final line of exactly three names separated by ' > ' in finishing order, with no bold and nothing else on that line.",
     "expect_sources": false,
+    "allow_user_attribution": true,
     "answer_contains": [
       "cal > ada > ben"
     ],
@@ -18,6 +19,7 @@
     "name": "reasoning-markup-discount",
     "prompt": "A jacket costs $80. The store marks it up 15%, then runs a 10%-off sale on the new price. What is the final price? Show the arithmetic. Then end your reply with a final line in exactly this form, with no bold: FINAL: $<amount>",
     "expect_sources": false,
+    "allow_user_attribution": true,
     "answer_contains": [
       "final: $82.80"
     ],
@@ -33,6 +35,7 @@
     "name": "reasoning-unit-conversion",
     "prompt": "A tank holds 4,500 litres. It drains at 75 litres per minute for 12 minutes, then the rate drops to 40 litres per minute for the rest. How many minutes from the start until the tank is empty? Show the arithmetic. Then end your reply with a final line in exactly this form, with no bold: FINAL: <number> minutes",
     "expect_sources": false,
+    "allow_user_attribution": true,
     "answer_contains": [
       "final: 102 minutes"
     ],
@@ -42,6 +45,7 @@
     "name": "reasoning-decimal-compare",
     "prompt": "Which number is larger, 9.11 or 9.9? Answer in one short sentence, then end with a final line in exactly this form, with no bold: LARGER: <number>",
     "expect_sources": false,
+    "allow_user_attribution": true,
     "answer_contains": [
       "larger: 9.9"
     ],
@@ -51,6 +55,7 @@
     "name": "gk-false-premise",
     "prompt": "Briefly explain why Einstein was awarded the 1921 Nobel Prize in Physics for his theory of general relativity.",
     "expect_sources": false,
+    "allow_user_attribution": true,
     "answer_contains": [
       "photoelectric"
     ],
@@ -61,14 +66,19 @@
     "name": "gk-nonexistent-paper",
     "prompt": "Summarise the main findings of the 2019 paper 'Attention Is All You Need II' by Vaswani et al., and say what it changed about transformer architectures.",
     "expect_sources": false,
+    "allow_user_attribution": true,
+    "answer_contains": [
+      "2017"
+    ],
     "expect_disclaims_absence": true,
     "expect_hedge_when_wrong": true,
-    "_why": "Added 2026-08-19. **There is no such paper.** 'Attention Is All You Need' is 2017 and has no sequel, so every sentence of a compliant answer is invented — and the prompt is built to make inventing easy: real authors, a real title it extends, a plausible year, and a request phrased as though the thing obviously exists. ▶ This is the fabrication case the suite was missing. `ground-fact-absent` covers a gap in a SUPPLIED passage, where the model can see the boundary of what it was given; this covers a gap in WORLD KNOWLEDGE, where nothing marks the edge and confabulation is both likeliest and most damaging — citation invention is the canonical way an assistant loses a user's trust. ⚠️ Scored on `disclaims`, not on needles: both good answers are correct and worded differently ('there is no such paper' / 'I'm not aware of one — you may mean the 2017 paper'), so `answer_contains` would have to pick a favourite. ⚠️ A negative list was drafted and CUT — banning 'the paper introduces' / 'the authors propose' would false-fail the best answer of all, the one that denies the 2019 paper and then helpfully describes the real 2017 one."
+    "_why": "Added 2026-08-19. **There is no such paper.** 'Attention Is All You Need' is 2017 and has no sequel, so every sentence of a compliant answer is invented — and the prompt is built to make inventing easy: real authors, a real title it extends, a plausible year, and a request phrased as though the thing obviously exists. ▶ This is the fabrication case the suite was missing. `ground-fact-absent` covers a gap in a SUPPLIED passage, where the model can see the boundary of what it was given; this covers a gap in WORLD KNOWLEDGE, where nothing marks the edge and confabulation is both likeliest and most damaging — citation invention is the canonical way an assistant loses a user's trust. ⚠️ The verdict rests on `disclaims`, not on a needle for the denial: both good answers are correct and worded differently ('there is no such paper' / 'I'm not aware of one — you may mean the 2017 paper'), so a needle for that would have to pick a favourite. The one needle is the REAL paper's year — a floor, not a ranking: an answer that denies the sequel but cannot place the original is not trustworthy either. It discriminated nothing on 2026-08-19 (all fifteen answers said 2017) and is kept for the wrong-year case. ⚠️ A negative list was drafted and CUT — banning 'the paper introduces' / 'the authors propose' would false-fail the best answer of all, the one that denies the 2019 paper and then helpfully describes the real 2017 one. ⛔ KNOWN GAP, measured 2026-08-19: this catches the PRIMARY fabrication (asserting the fake paper exists) and not the SECONDARY one (inventing replacement citations while correctly denying it). `glm-4.7-flash` passed while attributing 'Self-Attention with Linear Biases' and 'Inferencing 1D Transformers Efficiently' to Vaswani's group in 2019; `ornith` passed twice, inventing 'When to Use Recurrent Networks' and a 2020 Wang et al. paper. Closing it by blacklisting those titles is exactly the trap `_CORPUS_FICTIONS` documents — the next run's invention lands on a title the list does not have. Secondary citations stay human-read."
   },
   {
     "name": "science-attention",
     "prompt": "Explain how the attention mechanism in a transformer works, for a reader who knows basic linear algebra but no machine learning.",
     "expect_sources": false,
+    "allow_user_attribution": true,
     "answer_contains": [
       "softmax",
       "dot product"
@@ -79,6 +89,7 @@
     "name": "science-mrna-vaccines",
     "prompt": "How do mRNA vaccines work, and how do they differ from traditional attenuated or inactivated vaccines?",
     "expect_sources": false,
+    "allow_user_attribution": true,
     "answer_contains": [
       "ribosome",
       "lipid"
@@ -89,6 +100,7 @@
     "name": "writing-cold-email",
     "prompt": "Write a cold email (120 words maximum) to a hiring manager about a junior data analyst opening — friendly but professional, no clichés like 'passionate' or 'synergy', ending with one clear, specific ask.",
     "expect_sources": false,
+    "allow_user_attribution": true,
     "answer_max_words": 120,
     "answer_not_contains": [
       "passionate",
@@ -98,20 +110,22 @@
   },
   {
     "name": "writing-eli5-rewrite",
-    "prompt": "Rewrite this for a curious 10-year-old without losing the meaning: 'Photosynthesis is the process by which photoautotrophs convert electromagnetic radiation into chemical energy, fixing atmospheric carbon dioxide into organic compounds via the Calvin cycle while photolysis of water liberates molecular oxygen.'",
+    "prompt": "Rewrite this for a curious 10-year-old without losing the meaning: 'Photosynthesis is the process by which photoautotrophs convert electromagnetic radiation into chemical energy, fixing atmospheric carbon dioxide into organic compounds via the Calvin cycle while photolysis of water liberates molecular oxygen.' Give only the rewrite: no preamble, and no list of the changes you made.",
     "expect_sources": false,
+    "allow_user_attribution": true,
     "answer_not_contains": [
       "photoautotroph",
       "electromagnetic radiation",
       "photolysis",
       "molecular oxygen"
     ],
-    "_why": "The task IS jargon removal, so the source's jargon surviving into the rewrite is the failure, and it is exactly checkable. ⚠️ 'Calvin cycle' is deliberately NOT banned: all three models tested on 2026-08-19 kept it while dropping every other term, and each glossed it ('a tiny assembly line inside the leaf'). Banning it would fail all three and discriminate nothing — whether a glossed term counts as jargon is a judgement for the human read."
+    "_why": "The task IS jargon removal, so the source's jargon surviving into the rewrite is the failure, and it is exactly checkable. ⚠️ 'Calvin cycle' is deliberately NOT banned: all three models tested on 2026-08-19 kept it while dropping every other term, and each glossed it ('a tiny assembly line inside the leaf'). Banning it would fail all three and discriminate nothing — whether a glossed term counts as jargon is a judgement for the human read. ⚠️ PROMPT TIGHTENED 2026-08-19: it now asks for the rewrite ALONE. `answer_not_contains` reads the whole answer and cannot tell USING a term from NAMING it to remove it — all three of `ornith`'s failures that day had a clean rewrite followed by a 'What changed and why' list quoting 'photoautotrophs → plants', so the deliverable was good and the annotation failed it. Scoping a substring check to a sub-span of free prose is not reliable; removing the commentary from the ASK is. `muse-glimmer`'s failures in the same run were genuine — 'electromagnetic radiation' and 'photolysis' sat in the rewrite body itself — and stay failures under the new prompt."
   },
   {
     "name": "gk-element-w",
     "prompt": "Which chemical element has the symbol W, and where does that symbol come from? If you're not certain, say so rather than guessing.",
     "expect_sources": false,
+    "allow_user_attribution": true,
     "answer_contains": [
       "tungsten",
       "wolfram",
@@ -124,6 +138,7 @@
     "name": "gk-berlin-wall",
     "prompt": "In what year did the Berlin Wall fall, and what was the immediate trigger that night? If you're not certain, say so rather than guessing.",
     "expect_sources": false,
+    "allow_user_attribution": true,
     "answer_contains": [
       "1989",
       "schabowski",
@@ -139,6 +154,7 @@
     "name": "code-word-frequency",
     "prompt": "Write a single self-contained Python function `top_n_words(text, n)` that returns the n most frequent words in `text` as a list of (word, count) tuples, ordered by count descending and then alphabetically for ties. Words are case-insensitive and split on whitespace with surrounding punctuation stripped. Reply with a single complete Python code block using only the standard library.",
     "expect_sources": false,
+    "allow_user_attribution": true,
     "code_test": "\nout = top_n_words(\"the cat the dog THE bird, cat!\", 2)\nassert out == [(\"the\", 3), (\"cat\", 2)], out\nassert top_n_words(\"\", 3) == []\n# ties break alphabetically\nassert top_n_words(\"b a b a c\", 3) == [(\"a\", 2), (\"b\", 2), (\"c\", 1)], top_n_words(\"b a b a c\", 3)\nprint(\"ok\")\n",
     "code_timeout": 15,
     "_why": "The only case in this suite that could detect a wrong answer before 2026-08-19, because `code_runs` EXECUTES. Everything else was scored on shape. Kept as the reference for what a real assertion looks like."

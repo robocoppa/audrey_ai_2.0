@@ -1690,7 +1690,18 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     # ever covers the case you predicted, and this blind spot has already moved
     # once — from `video-ambiguous-singular` to the paging case — while nobody
     # was looking. `allow_user_attribution` opts out a case whose own prompt
-    # makes a claim the model may legitimately reflect back.
+    # makes a claim the model may legitimately reflect back — and, since
+    # 2026-08-19, every case in a suite that hands the model no user content at
+    # all. `eval_prompts_models_ab.json` is bare prompts: there is no supplied
+    # passage or upload to credit the user with, so a hit there is a false
+    # positive BY CONSTRUCTION. It failed `ornith` on `science-attention` for
+    # "you say 'I pay 70% attention to word A'" — ordinary second-person
+    # TEACHING prose, which the zero-false-positive measurement above never saw
+    # because the video and research archives contain none of it. A guard test
+    # keeps the flag on every case in that suite so a new one has to answer the
+    # question. The passage-based suites keep the check: there, a model really
+    # can credit the user with what NOTE A said, and `local_models` came
+    # through the same run clean.
     checks["not_misattributed"] = (
         None if case.get("allow_user_attribution")
         else not _misattributes_to_user(answer)

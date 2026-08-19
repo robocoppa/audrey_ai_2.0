@@ -2151,16 +2151,92 @@ def test_the_redirect_answer_is_not_false_failed():
         "the 2017 'Attention Is All You Need'.") is True
 
 
-def test_calibration_covers_a_disclaims_failure_not_just_a_contains_one():
+def test_calibration_covers_a_disclaims_failure_not_just_a_contains_one(monkeypatch):
     """`calibrated` reads whichever correctness check the case opted into.
 
-    A fabricated paper fails `disclaims` and never touches `contains`, so
+    A fabricated paper fails `disclaims` while `contains` may well PASS, so
     keying calibration on `contains` alone would leave the fabrication case —
-    the one where confident invention matters most — unscored.
+    the one where confident invention matters most — unscored. Asserted
+    behaviourally rather than by "this case has no needles": the case gained a
+    year needle on 2026-08-19 and the old proxy assertion went stale, which is
+    what a proxy does.
     """
     case = next(c for c in _load_suite("eval_prompts_models_ab.json")
                 if c["name"] == "gk-nonexistent-paper")
     assert case.get("expect_disclaims_absence") is True
     assert case.get("expect_hedge_when_wrong") is True
-    assert "answer_contains" not in case      # scored on disclaims alone
+    # Fabricates the sequel, states it flatly, and still satisfies the needle.
+    invented = ("The 2019 sequel builds directly on the 2017 original, "
+                "introducing a refined multi-head attention variant that cuts "
+                "FLOPs by 38% on WMT14 while matching BLEU.")
+    checks = _canned_run(monkeypatch, invented, case)
+    assert checks["contains"] is True
+    assert checks["disclaims"] is False
+    assert checks["calibrated"] is False
     assert er._hedges(_NONEXISTENT_FABRICATED[0]) is False
+
+
+def test_models_ab_cases_opt_out_of_user_attribution():
+    """`not_misattributed` cannot fire truthfully in a suite of bare prompts.
+
+    The check catches an answer crediting the USER with content from a passage
+    they supplied. `eval_prompts_models_ab.json` supplies none, so a hit there
+    is a false positive by construction — on 2026-08-19 it failed `ornith` for
+    "you say 'I pay 70% attention to word A'", ordinary second-person teaching
+    prose. Enforced per case rather than per suite so a case added tomorrow has
+    to answer the question rather than inherit the answer silently.
+    """
+    missing = [c["name"] for c in _load_suite("eval_prompts_models_ab.json")
+               if not c.get("allow_user_attribution")]
+    assert missing == [], (
+        "eval_prompts_models_ab.json hands the model no user content, so "
+        f"not_misattributed can only false-fail; these cases must opt out: {missing}"
+    )
+
+
+def test_second_person_teaching_prose_would_otherwise_false_fail():
+    """The sentence that motivated the opt-out, verbatim from `ornith`."""
+    teaching = ("Instead of saying \"I'm 70% similar to word A\", you say "
+                "\"I pay 70% attention to word A and 30% to word B.\"")
+    assert er._misattributes_to_user(teaching) is True
+    case = next(c for c in _load_suite("eval_prompts_models_ab.json")
+                if c["name"] == "science-attention")
+    assert case["allow_user_attribution"] is True
+
+
+def test_eli5_prompt_asks_for_the_rewrite_alone():
+    """The jargon check is only sound if commentary is out of scope.
+
+    `answer_not_contains` reads the whole answer, so a "what I changed" list
+    quoting the source's jargon fails a rewrite that dropped all of it. The fix
+    lives in the PROMPT; if this clause is ever dropped the check silently goes
+    back to punishing models for showing their work.
+    """
+    case = next(c for c in _load_suite("eval_prompts_models_ab.json")
+                if c["name"] == "writing-eli5-rewrite")
+    assert "only the rewrite" in case["prompt"]
+    annotated = (
+        "Photosynthesis is how plants use sunlight to make their own food.\n\n"
+        "What changed and why:\n"
+        "- *photoautotrophs* -> **plants**\n"
+        "- *electromagnetic radiation* -> **sunlight**\n"
+    )
+    clean = "Photosynthesis is how plants use sunlight to make their own food."
+    needles = case["answer_not_contains"]
+    # Both are good rewrites; only the annotated one trips the check, which is
+    # why the annotation had to leave the ask.
+    assert er._contains_any(annotated, needles) is True
+    assert er._contains_any(clean, needles) is False
+
+
+def test_nonexistent_paper_needle_rejects_a_misdated_denial():
+    """Denying the sequel is not enough if the real paper is misplaced."""
+    case = next(c for c in _load_suite("eval_prompts_models_ab.json")
+                if c["name"] == "gk-nonexistent-paper")
+    needles = case["answer_contains"]
+    misdated = ("There is no such paper. The original 'Attention Is All You "
+                "Need' was published in 2018.")
+    right = ("There is no such paper. The original 'Attention Is All You "
+             "Need' is Vaswani et al., NeurIPS 2017.")
+    assert er._contains_all(misdated, needles) is False
+    assert er._contains_all(right, needles) is True
