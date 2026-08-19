@@ -42,18 +42,27 @@ MODEL=audrey_auto CASES=eval_prompts_video.json LABEL=paging \
 
 Research/deep turns run 2–4 min each; fast/video turns 15–60 s.
 
-| cases file | n | typical model | rough time |
-|---|---|---|---|
-| `eval_prompts_protocol.json` | 10 | `audrey_research` | **20–40 min** |
-| `eval_prompts_deep.json` | 18 | `audrey_deep` | long |
-| `eval_prompts_topics.json` | 13 | `audrey_deep` | long |
-| `eval_prompts_video.json` | 12 | `audrey_auto` | ~10 min |
-| `eval_prompts_fast.json` | 12 | `audrey_fast` | short |
-| `eval_prompts_code.json` | 10 | `audrey_deep` | plumbing gate |
-| `eval_prompts_code_hard.json` | 5 | `audrey_deep` | the discriminating tier |
-| `eval_prompts_writer_ab.json` | 5 | `audrey_research` | writer A-B |
-| `eval_prompts_local_models.json` | 12 | sweep | local bake-off |
-| `eval_prompts_models_ab.json` | 9 | sweep | lineup A-B |
+⚠️ **The `executed` column is the one to read when the question is "is this
+model any good".** Those cases extract the answer's code, run it, and pass on
+exit 0 — a real verdict. Every other check in this harness is structural or
+phrase-matched: they catch a model that wandered off task, fabricated, or lost
+its fence, but they cannot tell a correct answer from a plausible one. A suite
+with `0 executed` measures shape, not accuracy.
+
+| cases file | n | executed | typical model | rough time |
+|---|---|---|---|---|
+| `eval_prompts_protocol.json` | 10 | 0 | `audrey_research` | **20–40 min** |
+| `eval_prompts_deep.json` | 18 | 2 | `audrey_deep` | long |
+| `eval_prompts_topics.json` | 13 | 0 | `audrey_deep` | long |
+| `eval_prompts_video.json` | 12 | 0 | `audrey_auto` | ~10 min |
+| `eval_prompts_fast.json` | 12 | 0 | `audrey_fast` | short |
+| `eval_prompts_code.json` | 10 | 7 | `audrey_deep` | plumbing gate |
+| `eval_prompts_code_hard.json` | 5 | **5** | `audrey_deep` | the discriminating tier |
+| `eval_prompts_writer_ab.json` | 5 | 0 | `audrey_research` | writer A-B |
+| `eval_prompts_local_models.json` | 12 | 2 | sweep | local bake-off (SMOKE TEST) |
+| `eval_prompts_code_models.json` | 6 | **6** | sweep | coding lineup |
+| `eval_prompts_code_hard_models.json` | 5 | **5** | sweep | hardest, unpinned |
+| `eval_prompts_models_ab.json` | 9 | 1 | sweep | lineup A-B |
 
 ```bash
 # video
@@ -83,12 +92,12 @@ the answers file — feed that to `scripts/eval_compare.py`.
 ```bash
 # local bake-off
 nohup env CASES=eval_prompts_local_models.json LABEL=local-bakeoff \
-  MODELS='audrey_passthrough/nemotron-3.5-lightning:latest,audrey_passthrough/muse-glimmer:latest,audrey_passthrough/qwen3.6:35b' \
+  MODELS='audrey_passthrough/nemotron-3.5-lightning:latest,audrey_passthrough/muse-glimmer:latest,audrey_passthrough/qwen3.8:latest' \
   scripts/eval-onbox.sh > testing-out/last-run.log 2>&1 &
 
 # coding lineup
 nohup env CASES=eval_prompts_code_models.json LABEL=code-sweep \
-  MODELS='audrey_passthrough/qwen3.8:latest,audrey_passthrough/nemotron-3.5-lightning:latest,audrey_passthrough/kimi-k2.7-code:cloud,audrey_passthrough/deepseek-v4-pro:cloud,audrey_passthrough/minimax-m3:cloud' \
+  MODELS='audrey_passthrough/qwen3.8:latest,audrey_passthrough/nemotron-3.5-lightning:latest,audrey_passthrough/kimi-k2.7-code:cloud,audrey_passthrough/deepseek-v4-pro:cloud' \
   scripts/eval-onbox.sh > testing-out/last-code-sweep.log 2>&1 &
 
 # general lineup A-B
@@ -105,6 +114,86 @@ nohup env MODEL=audrey_video CASES=eval_prompts_video.json LABEL=video-ab \
 ⚠️ A sweep multiplies cloud spend by the model count. Cloud credits are a hard
 budget.
 
+
+### "How good is this model?" — the capability battery
+
+Reach for this when a NEW model lands and the question is capability, not
+lineup. `eval_prompts_local_models.json` does **not** answer it: its own header
+calls it a smoke test, and only 2 of its 12 cases are executed. It tells you a
+model can hold a format and disclaim a gap — nothing about whether its answers
+are right.
+
+Three suites, twenty cases, **twelve of them executed**. Run them in this order;
+the first is the sharpest signal per minute.
+
+```bash
+M=audrey_passthrough/<model>:latest
+
+# 5 cases, ALL executed — LRU-with-TTL, async debugging, a tokenizer,
+# topological sort, duration parsing. The tier that discriminates.
+nohup env CASES=eval_prompts_code_hard_models.json LABEL=cap-hard \
+  MODELS="$M" scripts/eval-onbox.sh > testing-out/cap-hard.log 2>&1 &
+
+# 6 cases, ALL executed — LRU cache, merge intervals, two debugging cases,
+# word frequency, flatten. Broader and easier; separates "cannot code" from
+# "cannot do the hard ones".
+nohup env CASES=eval_prompts_code_models.json LABEL=cap-code \
+  MODELS="$M" scripts/eval-onbox.sh > testing-out/cap-code.log 2>&1 &
+
+# 9 cases — reasoning, science explanation, writing, general knowledge.
+# Only 1 executed, so the score is a floor: it catches wandering and
+# fabrication, not weak prose. ▶ READ THE ANSWERS FILE for these.
+nohup env CASES=eval_prompts_models_ab.json LABEL=cap-ab \
+  MODELS="$M" scripts/eval-onbox.sh > testing-out/cap-ab.log 2>&1 &
+```
+
+Then the same three against whatever the candidate would displace — a score
+with no baseline is not a result. Models that fit in VRAM together can share one
+sweep:
+
+```bash
+nohup env CASES=eval_prompts_code_hard_models.json LABEL=cap-hard-base \
+  MODELS='audrey_passthrough/qwen3.8:latest,audrey_passthrough/nemotron-3.5-lightning:latest' \
+  scripts/eval-onbox.sh > testing-out/cap-hard-base.log 2>&1 &
+```
+
+⚠️ **A model that cannot be resident gets its OWN run, never a sweep.**
+`_expand_sweep` groups by model so each loads once, which is enough when the set
+fits in 48 GB and useless when it does not — the big one is evicted and reloaded
+from disk on every alternation. 2026-08-18: `laguna-s-2.1` is 96 GB against
+48 GB of VRAM and ran at 4–6 tok/s, so its latency column is a memory-bandwidth
+reading, not a measurement of the model. Judge such a model on ACCURACY here and
+take its latency from a box where it fits.
+
+⚠️ **Quantization is part of the answer, not a detail.** `ollama show` reports
+it, and a Q8_0 build is twice the bytes per weight of Q4_K_M — the same
+parameter count can be resident or not depending purely on which tag was pulled.
+Check `ollama show <model>` for `parameters`, `quantization` and `embedding
+length` before drawing conclusions from a size on disk. ▶ An embedding length
+far too small for the parameter count (3072 at 117.6B) means a sparse MoE: the
+file is large, the active fraction is not, and it will outrun what its footprint
+suggests.
+
+**Before the first run**, a new model needs all three of these or every case
+fails identically:
+
+1. `passthrough.allowed_models` in `config.yaml` — the only gate
+   (`routes/openai/passthrough.py`). No `model_registry` entry is needed until
+   it earns a production role.
+2. `scripts/pull-models.sh` — pinned by
+   `test_every_model_the_config_names_is_pulled_by_the_script`, so a rebuilt box
+   cannot come up missing a name the config mentions.
+3. **`docker restart open-webui`** after `up -d --build audrey-ai`. OWUI reads
+   `/v1/models` once and holds it, and the harness talks to OWUI, never to
+   Audrey. Skipping this fails every case with
+   `HTTP 400 {"detail":"Model not found"}` — OWUI's string, absent from `src/`,
+   and it reads exactly like a bad model name.
+
+⚠️ **Thinking is a separate arm, not a setting to leave on.** `PASSTHROUGH_THINK`
+is global: Claudette, Hermes and OpenClaw all get whatever it says. Set it, run
+the arm, take it back out. The completion log now carries `think=` alongside
+`thinking_len` and `chars_per_tok`, so what was asked for and what came back are
+both on the record — check them rather than inferring thinking from prose shape.
 ---
 
 ## Watch a run
@@ -319,11 +408,33 @@ to `python3`.
 
 ## Compare two runs
 
+On the LAPTOP, against results you have pulled down:
+
 ```bash
 uv run scripts/eval_compare.py testing-out/<a>-results.json testing-out/<b>-results.json
 ```
 
-Only sweeps (`MODELS=`) write the results JSON.
+⚠️ **On the BOX there is no `python3`**, so it has to run inside a container.
+The eval image has Python and both directories are already bind-mountable:
+
+```bash
+docker run --rm --entrypoint sh \
+  -v /mnt/user/appdata/audrey_ai_2.0/testing-out:/out \
+  -v /mnt/user/appdata/audrey_ai_2.0/scripts:/eval:ro \
+  audrey-eval:latest -c \
+  'python /eval/eval_compare.py /out/*-lag-s-hard-*-results.json /out/*-base-hard-*-results.json'
+```
+
+⚠️ **Entrypoint `sh -c`, not `python`, whenever the paths carry a glob.** `/out`
+does not exist on the HOST, so the host shell finds nothing to expand and passes
+the pattern through as a literal — Python then reports
+`results file not found: /out/*-…-results.json`, which reads like a missing file
+rather than an unexpanded wildcard. Letting the CONTAINER's shell expand it is
+the fix; naming both files explicitly also works.
+
+A results JSON is written for **every** run, not only sweeps — a single-model
+re-run used to leave the human-readable `.md` alone, so run-over-run comparison
+was eyeball-only.
 
 ⚠️ **A run's score is not a quality trend line.** It moves with what the checks
 can see at least as much as with the answers. Before reading a delta, confirm

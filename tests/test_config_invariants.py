@@ -349,3 +349,37 @@ class TestEvalOnboxWaitsForTheStack:
         # named differently, so an absent container warns rather than dies.
         text = self._text()
         assert "no such container, skipping" in text
+
+
+class TestASetupFailureStillNotifies:
+    """`die` exits before the notify block, so a gate failure was silent.
+
+    Harmless while every `die` was an instant pre-flight check the operator
+    would see in their own terminal. The readiness gate broke that: it can fire
+    after a 180s wait, on a run launched with `nohup … &` and walked away from.
+    2026-08-18 produced no eval, no ping, and no signal until the missing models
+    were noticed by hand.
+    """
+
+    def _text(self) -> str:
+        return _EVAL_ONBOX.read_text()
+
+    def test_die_notifies_before_exiting(self):
+        text = self._text()
+        die = text[text.index("die() {"):]
+        die = die[:die.index("\n")]
+        assert "notify_setup_failure" in die, (
+            "die() must notify before `exit 2` — a gate failure after a long "
+            "wait is exactly the case nobody is watching the terminal for"
+        )
+
+    def test_the_notifier_is_defined_before_die_uses_it(self):
+        text = self._text()
+        assert text.index("notify_setup_failure() {") < text.index("die() {")
+
+    def test_a_missing_watchdog_env_is_not_fatal(self):
+        # The setup error has already happened; a failed send must not mask it
+        # or change the exit code the caller sees.
+        text = self._text()
+        fn = text[text.index("notify_setup_failure() {"):text.index("die() {")]
+        assert 'return 0' in fn and "|| true" in fn

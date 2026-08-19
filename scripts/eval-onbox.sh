@@ -121,7 +121,27 @@ if [[ -n "${ARGS:-}" ]]; then
 fi
 
 # ── preflight ───────────────────────────────────────────────────────────────
-die() { echo "ERROR: $*" >&2; exit 2; }
+# ⚠️ `die` EXITS BEFORE THE NOTIFY BLOCK AT THE END OF THIS SCRIPT. That was
+# harmless while every `die` was an instant pre-flight check you would see in
+# your own terminal — but the readiness gate below can fire after a 180s wait,
+# on a run you launched with `nohup … &` and walked away from. On 2026-08-18
+# that produced the worst possible outcome: no eval, no ping, and no signal at
+# all until the models were noticed missing from OWUI by hand.
+# ▶ So a setup failure notifies too, matching `probe-onbox.sh`, which has always
+# reported exit 2 as "❌ setup error — nothing probed".
+notify_setup_failure() {
+  local msg="$1"
+  [[ -f "${WATCHDOG_ENV}" ]] || return 0
+  # shellcheck disable=SC1090
+  set -a; . "${WATCHDOG_ENV}"; set +a
+  [[ -n "${WATCHDOG_TOKEN:-}" && -n "${WATCHDOG_CHAT_ID:-}" ]] || return 0
+  curl -s "https://api.telegram.org/bot${WATCHDOG_TOKEN}/sendMessage" \
+    -d chat_id="${WATCHDOG_CHAT_ID}" \
+    -d "text=❌ Audrey eval SETUP ERROR (exit 2) — nothing ran.
+${msg}" >/dev/null || true
+}
+
+die() { echo "ERROR: $*" >&2; notify_setup_failure "$*"; exit 2; }
 command -v docker >/dev/null || die "docker not found — run this on the box, not the laptop."
 [[ -f "${EVAL_ENV}" ]] || die "eval env-file missing: ${EVAL_ENV} (see phase-27 step 2)."
 docker image inspect "${IMAGE}" >/dev/null 2>&1 || die "image ${IMAGE} not built (see phase-27 step 1)."
