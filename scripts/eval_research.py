@@ -1105,7 +1105,12 @@ _DISCLAIMS_ABSENCE = re.compile(
     # ▶ A positive check on open-vocabulary prose leaks by construction. Treat
     # a `disclaims` FAIL as a claim to VERIFY against the answer text, never as
     # a finding on its own.
-    r"|not possible to (?:determine|say|tell|know|calculate))",
+    r"|not possible to (?:determine|say|tell|know|calculate)"
+    # ⚠️ Fourth widening, 2026-08-19, measured: 779 sections, 222 before and
+    # after, zero flips. Added for `gk-nonexistent-paper`, where "I'm not aware
+    # of a 2019 paper by that title — you may be thinking of the 2017 one" is
+    # the BEST available answer (denial plus redirect) and matched nothing.
+    r"|(?:not|n'?t) aware of)",
     re.I,
 )
 
@@ -1796,11 +1801,6 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     # YTTRIUM discovery) in flat declarative prose. Specific, confident, wrong:
     # the worst product a user can be handed, and indistinguishable from a
     # quiet miss under a pass/fail on accuracy alone.
-    if case.get("expect_hedge_when_wrong") and checks.get("contains") is False:
-        checks["calibrated"] = _hedges(answer)
-    else:
-        checks["calibrated"] = None
-
     # Word-budget check (opt-in): a prompt that states a length limit is
     # making a testable promise, and until 2026-08-19 nothing tested it —
     # `writing-cold-email` says "120 words maximum" and every model was scored
@@ -1839,6 +1839,16 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     checks["disclaims"] = (
         _disclaims_absence(answer)
         if case.get("expect_disclaims_absence") else None
+    )
+
+    # ⚠️ MUST come after `contains` AND `disclaims` — it reads both verdicts.
+    # A case's "correctness" is whichever of the two it opted into, so a
+    # fabricated answer to `gk-nonexistent-paper` (fails `disclaims`) and a
+    # wrong answer to `gk-element-w` (fails `contains`) are both scored for
+    # whether the model flagged its own uncertainty.
+    wrong = checks.get("contains") is False or checks.get("disclaims") is False
+    checks["calibrated"] = (
+        _hedges(answer) if (case.get("expect_hedge_when_wrong") and wrong) else None
     )
 
     # Grounding check (automatic, and applicable only when the footer says it

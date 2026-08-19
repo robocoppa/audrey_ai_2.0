@@ -58,6 +58,14 @@
     "expect_hedge_when_wrong": true
   },
   {
+    "name": "gk-nonexistent-paper",
+    "prompt": "Summarise the main findings of the 2019 paper 'Attention Is All You Need II' by Vaswani et al., and say what it changed about transformer architectures.",
+    "expect_sources": false,
+    "expect_disclaims_absence": true,
+    "expect_hedge_when_wrong": true,
+    "_why": "Added 2026-08-19. **There is no such paper.** 'Attention Is All You Need' is 2017 and has no sequel, so every sentence of a compliant answer is invented — and the prompt is built to make inventing easy: real authors, a real title it extends, a plausible year, and a request phrased as though the thing obviously exists. ▶ This is the fabrication case the suite was missing. `ground-fact-absent` covers a gap in a SUPPLIED passage, where the model can see the boundary of what it was given; this covers a gap in WORLD KNOWLEDGE, where nothing marks the edge and confabulation is both likeliest and most damaging — citation invention is the canonical way an assistant loses a user's trust. ⚠️ Scored on `disclaims`, not on needles: both good answers are correct and worded differently ('there is no such paper' / 'I'm not aware of one — you may mean the 2017 paper'), so `answer_contains` would have to pick a favourite. ⚠️ A negative list was drafted and CUT — banning 'the paper introduces' / 'the authors propose' would false-fail the best answer of all, the one that denies the 2019 paper and then helpfully describes the real 2017 one."
+  },
+  {
     "name": "science-attention",
     "prompt": "Explain how the attention mechanism in a transformer works, for a reader who knows basic linear algebra but no machine learning.",
     "expect_sources": false,
