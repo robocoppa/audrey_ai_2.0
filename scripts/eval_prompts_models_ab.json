@@ -1,52 +1,135 @@
 [
   {
     "name": "reasoning-race-order",
-    "prompt": "Three friends — Ada, Ben, and Cal — finished a race. Ada wasn't last. Cal finished before Ada. Ben didn't win. In what order did they finish? Lay out the deduction, not just the answer.",
-    "expect_sources": false
+    "prompt": "Three friends — Ada, Ben, and Cal — finished a race. Ada wasn't last. Cal finished before Ada. Ben didn't win. In what order did they finish? Lay out the deduction, not just the answer. Then end your reply with a final line of exactly three names separated by ' > ' in finishing order, with no bold and nothing else on that line.",
+    "expect_sources": false,
+    "answer_contains": [
+      "cal > ada > ben"
+    ],
+    "answer_not_contains": [
+      "wait —",
+      "wait,",
+      "let me recompute",
+      "let me recalculate"
+    ],
+    "_why": "This case had NO assertions at all until 2026-08-19, so it could not fail: `glm-4.7-flash` answered 'Ada 1st, Cal 2nd, Ben 3rd' — which violates the puzzle's own 'Cal finished before Ada' — and scored PASS. ▶ A required final line is what makes the deduction checkable: the names appear in ANY answer, so `answer_contains: [Ada, Ben, Cal]` (the sibling suite's version) is vacuous, while the ORDERED sequence appears only in a correct one. The banned self-correction markers are the second observed defect: `ornith` published 'Final price: $76.40 … Wait — let me recompute' on the markup case, and a contains-check on the right number scores that a pass while the reader sees a wrong number first."
   },
   {
     "name": "reasoning-markup-discount",
-    "prompt": "A jacket costs $80. The store marks it up 15%, then runs a 10%-off sale on the new price. What is the final price? Show the arithmetic.",
+    "prompt": "A jacket costs $80. The store marks it up 15%, then runs a 10%-off sale on the new price. What is the final price? Show the arithmetic. Then end your reply with a final line in exactly this form, with no bold: FINAL: $<amount>",
     "expect_sources": false,
-    "answer_contains": ["82.8"]
+    "answer_contains": [
+      "final: $82.80"
+    ],
+    "answer_not_contains": [
+      "wait —",
+      "wait,",
+      "let me recompute",
+      "let me recalculate"
+    ],
+    "_why": "`answer_contains: ['82.8']` alone passed an answer that opened 'Final price: $76.40', self-corrected mid-reply, and landed on the right number — the check found 82.8 somewhere and never saw the wrong figure. Requiring the value on a FINAL line makes the committed answer the thing measured; the banned markers catch the deliberation itself."
+  },
+  {
+    "name": "reasoning-unit-conversion",
+    "prompt": "A tank holds 4,500 litres. It drains at 75 litres per minute for 12 minutes, then the rate drops to 40 litres per minute for the rest. How many minutes from the start until the tank is empty? Show the arithmetic. Then end your reply with a final line in exactly this form, with no bold: FINAL: <number> minutes",
+    "expect_sources": false,
+    "answer_contains": [
+      "final: 102 minutes"
+    ],
+    "_why": "Added 2026-08-19. Two-stage rate problem: 75×12 = 900, leaving 3,600 at 40/min = 90, so 102 total. The failure mode it targets is answering 90 (forgetting the first stage) or 112.5 (applying one rate throughout) — both are confident, well-formatted, and invisible to every structural check. Unique numeric answer, so the FINAL line either matches or does not."
+  },
+  {
+    "name": "reasoning-decimal-compare",
+    "prompt": "Which number is larger, 9.11 or 9.9? Answer in one short sentence, then end with a final line in exactly this form, with no bold: LARGER: <number>",
+    "expect_sources": false,
+    "answer_contains": [
+      "larger: 9.9"
+    ],
+    "_why": "Added 2026-08-19. A known failure family — models read decimals as version strings and answer 9.11. Trivial for a human, so a miss here is a real signal rather than a hard-question artifact, and it costs one short generation."
+  },
+  {
+    "name": "gk-false-premise",
+    "prompt": "Briefly explain why Einstein was awarded the 1921 Nobel Prize in Physics for his theory of general relativity.",
+    "expect_sources": false,
+    "answer_contains": [
+      "photoelectric"
+    ],
+    "_why": "Added 2026-08-19. The premise is FALSE — the 1921 prize was for the photoelectric effect, explicitly not for relativity. A model that complies and explains the relativity award has produced a fluent, well-structured, entirely wrong answer that every structural check passes. ▶ This is the case that most directly measures answer QUALITY rather than answer SHAPE: it separates a model that tracks facts from one that follows the user's framing. Deliberately does NOT append 'if the premise is wrong, say so' — the hint is the thing being tested."
   },
   {
     "name": "science-attention",
     "prompt": "Explain how the attention mechanism in a transformer works, for a reader who knows basic linear algebra but no machine learning.",
-    "expect_sources": false
+    "expect_sources": false,
+    "answer_contains": [
+      "softmax",
+      "dot product"
+    ],
+    "_why": "A FLOOR, not a ranking. An explanation of attention that never reaches softmax or the dot product is wrong, and now fails; beyond that the quality of an open-ended explanation is not substring-checkable and this case stays human-read. ⚠️ Do not add the scaling factor (1/√d_k) as a needle even though a good answer covers it — models write it as '√k', '1/sqrt(d_k)' or 'square root', and `answer_contains` has no OR."
   },
   {
     "name": "science-mrna-vaccines",
     "prompt": "How do mRNA vaccines work, and how do they differ from traditional attenuated or inactivated vaccines?",
-    "expect_sources": false
+    "expect_sources": false,
+    "answer_contains": [
+      "ribosome",
+      "lipid"
+    ],
+    "_why": "Both needles are mechanism, not vocabulary: the lipid nanoparticle is how the mRNA gets in and the ribosome is what reads it, and an account missing both describes the effect without the mechanism. Observed 2026-08-19 — `ornith` omitted both and still passed on shape alone. ⚠️ Negative needles were tried and dropped here: the common misconceptions are all phrased as negations in correct answers ('does not enter the nucleus'), and `answer_not_contains` is a SUBSTRING match, so banning 'enters the nucleus' fails the models that got it right."
   },
   {
     "name": "writing-cold-email",
     "prompt": "Write a cold email (120 words maximum) to a hiring manager about a junior data analyst opening — friendly but professional, no clichés like 'passionate' or 'synergy', ending with one clear, specific ask.",
-    "expect_sources": false
+    "expect_sources": false,
+    "answer_max_words": 120,
+    "answer_not_contains": [
+      "passionate",
+      "synergy"
+    ],
+    "_why": "The prompt made three promises and the suite tested none of them until 2026-08-19. The word cap and the banned clichés are stated IN the prompt, so checking them is holding the model to its own brief rather than to a hidden rubric. The 'one clear ask' is the part that stays human-read."
   },
   {
     "name": "writing-eli5-rewrite",
     "prompt": "Rewrite this for a curious 10-year-old without losing the meaning: 'Photosynthesis is the process by which photoautotrophs convert electromagnetic radiation into chemical energy, fixing atmospheric carbon dioxide into organic compounds via the Calvin cycle while photolysis of water liberates molecular oxygen.'",
-    "expect_sources": false
+    "expect_sources": false,
+    "answer_not_contains": [
+      "photoautotroph",
+      "electromagnetic radiation",
+      "photolysis",
+      "molecular oxygen"
+    ],
+    "_why": "The task IS jargon removal, so the source's jargon surviving into the rewrite is the failure, and it is exactly checkable. ⚠️ 'Calvin cycle' is deliberately NOT banned: all three models tested on 2026-08-19 kept it while dropping every other term, and each glossed it ('a tiny assembly line inside the leaf'). Banning it would fail all three and discriminate nothing — whether a glossed term counts as jargon is a judgement for the human read."
   },
   {
     "name": "gk-element-w",
     "prompt": "Which chemical element has the symbol W, and where does that symbol come from? If you're not certain, say so rather than guessing.",
     "expect_sources": false,
-    "answer_contains": ["tungsten", "wolfram"]
+    "answer_contains": [
+      "tungsten",
+      "wolfram",
+      "german"
+    ],
+    "_why": "`['tungsten', 'wolfram']` could not fail — both words appear in any answer that engages at all, including a wrong one. W comes from WOLFRAM, which is German; 'tungsten' is the separate Swedish-derived name (tung sten, heavy stone), and conflating the two is the actual failure mode: on 2026-08-19 `ornith` wrote 'the Swedish name for the element: wolfram' and passed. Requiring 'german' is what separates knowing the etymology from reciting the two names."
   },
   {
     "name": "gk-berlin-wall",
     "prompt": "In what year did the Berlin Wall fall, and what was the immediate trigger that night? If you're not certain, say so rather than guessing.",
     "expect_sources": false,
-    "answer_contains": ["1989"]
+    "answer_contains": [
+      "1989",
+      "schabowski",
+      "immediately"
+    ],
+    "answer_not_contains": [
+      "misquoted"
+    ],
+    "_why": "`['1989']` could not fail — the year appears in every answer including wrong ones. The trigger was Schabowski misreading his OWN notes at the press conference and saying the rules applied immediately; `ornith` (2026-08-19) blamed 'a West Berlin journalist who misquoted' him, which inverts who made the mistake, and passed. ⚠️ The negative needle is narrow and targets that observed confabulation — a correct answer could in principle write 'was not misquoted' and false-fail. Read a `not_contains` failure here before believing it."
   },
   {
     "name": "code-word-frequency",
-    "prompt": "Write a single self-contained Python function `top_n_words(text, n)` that returns the n most frequent words in `text` as a list of (word, count) tuples, ordered by count descending and then alphabetically for ties. Words are case-insensitive and split on whitespace with surrounding punctuation stripped. Use only the standard library. Put it in one complete ```python code block.",
+    "prompt": "Write a single self-contained Python function `top_n_words(text, n)` that returns the n most frequent words in `text` as a list of (word, count) tuples, ordered by count descending and then alphabetically for ties. Words are case-insensitive and split on whitespace with surrounding punctuation stripped. Reply with a single complete Python code block using only the standard library.",
     "expect_sources": false,
-    "code_test": "res = top_n_words('The cat sat. The CAT ran; the dog sat!', 2)\nassert res == [('the', 3), ('cat', 2)], res\nres2 = top_n_words('a a b b c', 3)\nassert res2 == [('a', 2), ('b', 2), ('c', 1)], res2\nprint('ok')",
-    "code_timeout": 15.0
+    "code_test": "\nout = top_n_words(\"the cat the dog THE bird, cat!\", 2)\nassert out == [(\"the\", 3), (\"cat\", 2)], out\nassert top_n_words(\"\", 3) == []\n# ties break alphabetically\nassert top_n_words(\"b a b a c\", 3) == [(\"a\", 2), (\"b\", 2), (\"c\", 1)], top_n_words(\"b a b a c\", 3)\nprint(\"ok\")\n",
+    "code_timeout": 15,
+    "_why": "The only case in this suite that could detect a wrong answer before 2026-08-19, because `code_runs` EXECUTES. Everything else was scored on shape. Kept as the reference for what a real assertion looks like."
   }
 ]

@@ -100,7 +100,7 @@ def _resolve_passthrough_model(
 
 
 async def _passthrough_think(
-    ollama: OllamaClient, cfg, concrete: str,
+    ollama: OllamaClient, cfg, concrete: str, requested: bool | None = None,
 ) -> bool | None:
     """Resolve `passthrough.think` for one model. `None` = omit the field.
 
@@ -119,16 +119,42 @@ async def _passthrough_think(
     `allowed_models` — of which there are several. `thinking_flag` returns
     None for those, which omits the field.
 
-    ⚠️ Default is None (omit), which is exactly today's behaviour. This is an
-    experiment knob: set it in `.env` as `PASSTHROUGH_THINK`, run the sweep,
-    unset it. It is deliberately NOT wired to a per-request field — a client
-    that could ask for thinking would make the eval's model column mean
-    something different per caller.
+    ⚠️ Default is still None (omit) — absent `requested` and absent config,
+    behaviour is unchanged and serving clients see exactly what they saw.
+
+    ▶ **REVERSED 2026-08-19: `requested` (the per-request `think` field) now
+    wins over config.** This docstring previously said a per-request field was
+    deliberately excluded, because "a client that could ask for thinking would
+    make the eval's model column mean something different per caller". That
+    concern is real but the prohibition was the wrong fix, and it cost a full
+    day of evidence: with the state living ONLY in `PASSTHROUGH_THINK`, the
+    arm of a run was recorded nowhere except this container's logs, and
+    `docker logs` starts empty after every recreate. On 2026-08-19 two model
+    sweeps (`repl-ab`, `repl-gap`) were rebuilt over ~20 minutes later and
+    their thinking arm became permanently unrecoverable — the runs are intact,
+    labelled, and worthless, because nothing says what they asked for.
+    ▶ The answer to "per-caller ambiguity" is RECORDING, not prohibition: the
+    harness sets this field and writes the value into its results JSON, so the
+    arm travels with the artifact instead of with a container. What the caller
+    asked for is also logged below, with its source.
     """
+    src = "config"
     want = (cfg.raw.get("passthrough") or {}).get("think")
+    if requested is not None:
+        want, src = requested, "request"
     if want is None:
+        log.info("passthrough.think model=%s resolved=omit src=default", concrete)
         return None
-    return await ollama.thinking_flag(concrete, bool(want))
+    # ⚠️ `thinking_flag` can still return None here — a model that does not
+    # declare `thinking` gets the field omitted no matter who asked. Log the
+    # RESOLVED value, not the wanted one, or the A/B records an intent that
+    # never reached Ollama.
+    flag = await ollama.thinking_flag(concrete, bool(want))
+    log.info(
+        "passthrough.think model=%s wanted=%s resolved=%s src=%s",
+        concrete, bool(want), flag, src,
+    )
+    return flag
 
 
 async def _handle_passthrough(
@@ -151,7 +177,7 @@ async def _handle_passthrough(
     inflight = app.state.inflight
     ollama: OllamaClient = app.state.ollama
     gate: FairLocalGate = app.state.gate
-    think = await _passthrough_think(ollama, cfg, concrete)
+    think = await _passthrough_think(ollama, cfg, concrete, payload.think)
 
     # Passthrough forwards verbatim, so an attached image reaches the
     # concrete model as Ollama's `images: [...]`. Text-only targets — most

@@ -108,6 +108,27 @@ if [[ -n "${MODELS}" ]]; then
   SWEEP_ARGS=(--models "${MODELS}")
 fi
 
+# THINK selects the passthrough thinking arm for this run: on | off | default.
+# ⚠️ It also SWITCHES THE BASE URL to Audrey direct, because it has to. `think`
+# is Audrey's vendor field on /v1/chat/completions and Open WebUI — which
+# `eval.env` points at, and which every historical run went through — builds
+# its own upstream payload and drops unknown body fields. The harness refuses
+# (exit 2) rather than record an arm it did not actually send, so setting THINK
+# without this would simply fail. The eval container is on `ollama-net`
+# alongside `audrey-ai`, and the `sk-` OWUI key authenticates against Audrey
+# (verified 2026-08-19: /v1/models → 200), so direct is reachable here even
+# though Audrey's :8000 is not published to the LAN.
+#
+# ⚠️⚠️ **A DIRECT RUN IS NOT COMPARABLE TO AN OWUI RUN.** OWUI can add a system
+# prompt, its own sampling params and retrieval context; going direct removes
+# all of that. Cleaner for comparing MODELS, and a different baseline — so run
+# a whole comparison one way or the other, never half and half.
+#   THINK=on CASES=eval_prompts_models_ab.json MODELS='...' scripts/eval-onbox.sh
+THINK_ARGS=()
+if [[ -n "${THINK:-}" ]]; then
+  THINK_ARGS=(--think "${THINK}" --base-url "${DIRECT_URL:-http://audrey-ai:8000/v1}")
+fi
+
 # ARGS forwards extra harness flags verbatim. Added 2026-08-12: without it
 # `--only` and `--repeat` were unreachable through this runner, so the
 # diagnostic protocol they exist for (sample ONE case enough times to tell a
@@ -228,7 +249,7 @@ else
   echo ">> harness: baked into ${IMAGE}"
 fi
 
-echo ">> running ${MODEL} (${CASES}) on the box → ${OUT_DIR}/${SAVE_FILE}"
+echo ">> running ${MODEL} (${CASES}) think=${THINK:-config} → ${OUT_DIR}/${SAVE_FILE}"
 docker run -d --name "${CONTAINER}" --network "${NETWORK}" \
   --env-file "${EVAL_ENV}" \
   -v "${OUT_DIR}:/out" \
@@ -239,6 +260,7 @@ docker run -d --name "${CONTAINER}" --network "${NETWORK}" \
     --save-file "/out/${SAVE_FILE}" \
     --save-json "/out/${RESULTS_FILE}" \
     "${SWEEP_ARGS[@]}" \
+    "${THINK_ARGS[@]}" \
     "${EXTRA_ARGS[@]}" \
   || die "docker run failed."
 

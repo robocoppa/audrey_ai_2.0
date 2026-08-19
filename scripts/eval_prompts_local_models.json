@@ -108,23 +108,31 @@
   },
   {
     "name": "reasoning-markup-discount",
-    "prompt": "A jacket costs $80. The store marks it up 15%, then runs a 10%-off sale on the new price. What is the final price? Show the arithmetic.",
+    "prompt": "A jacket costs $80. The store marks it up 15%, then runs a 10%-off sale on the new price. What is the final price? Show the arithmetic. Then end your reply with a final line in exactly this form, with no bold: FINAL: $<amount>",
     "expect_sources": false,
     "answer_contains": [
-      "82.8"
+      "final: $82.80"
     ],
-    "_why": "Carried over from `eval_prompts_models_ab.json` deliberately, so this suite's numbers can be read against every historical model sweep. Two-step percentage arithmetic where the wrong method (netting +15% and -10% to +5%, giving 84) produces a confident, clean-looking answer."
+    "_why": "Carried over from `eval_prompts_models_ab.json` deliberately, so this suite's numbers can be read against every historical model sweep. Two-step percentage arithmetic where the wrong method (netting +15% and -10% to +5%, giving 84) produces a confident, clean-looking answer. ⚠️ TIGHTENED 2026-08-19: ['82.8'] passed an answer that opened 'Final price: $76.40' and self-corrected — the substring was present somewhere, so a reader-visible wrong number scored clean.",
+    "answer_not_contains": [
+      "wait —",
+      "wait,",
+      "let me recompute"
+    ]
   },
   {
     "name": "reasoning-race-order",
-    "prompt": "Three friends — Ada, Ben, and Cal — finished a race. Ada wasn't last. Cal finished before Ada. Ben didn't win. In what order did they finish? Lay out the deduction, not just the answer.",
+    "prompt": "Three friends — Ada, Ben, and Cal — finished a race. Ada wasn't last. Cal finished before Ada. Ben didn't win. In what order did they finish? Lay out the deduction, not just the answer. Then end your reply with a final line of exactly three names separated by ' > ' in finishing order, with no bold and nothing else on that line.",
     "expect_sources": false,
     "answer_contains": [
-      "Cal",
-      "Ada",
-      "Ben"
+      "cal > ada > ben"
     ],
-    "_why": "Also carried over for comparability. ⚠️ `answer_contains` can only assert all three names appear, which any answer does — the ORDER (Cal, Ada, Ben) needs eyes. Kept anyway because the deduction it forces is a good read on how a model lays out constrained reasoning, and because the historical sweeps ran it."
+    "_why": "Also carried over for comparability. ⚠️ `answer_contains` can only assert all three names appear, which any answer does — the ORDER (Cal, Ada, Ben) needs eyes. Kept anyway because the deduction it forces is a good read on how a model lays out constrained reasoning, and because the historical sweeps ran it. ⚠️ REWRITTEN 2026-08-19: the needles were ['Cal','Ada','Ben'] — three names that appear in ANY answer, right or wrong, so the check could not fail. `glm-4.7-flash` returned an order violating the puzzle's own 'Cal before Ada' and passed. The ORDERED sequence on a required final line is what makes the deduction checkable.",
+    "answer_not_contains": [
+      "wait —",
+      "wait,",
+      "let me recompute"
+    ]
   },
   {
     "name": "code-rle-roundtrip",

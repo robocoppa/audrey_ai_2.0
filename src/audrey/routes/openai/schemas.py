@@ -44,6 +44,18 @@ class ChatCompletionRequest(BaseModel):
             "(Hermes, OpenClaw) can advertise their own tools."
         ),
     )
+    think: bool | None = Field(
+        default=None,
+        description=(
+            "**Vendor extension, not OpenAI-spec.** Overrides "
+            "`passthrough.think` for THIS request; honored only on the "
+            "passthrough path, like `tools`. Absent (the default) keeps the "
+            "configured behaviour exactly, so serving clients are unaffected. "
+            "Still routed through `ollama.thinking_flag`, so asking for "
+            "thinking on a model that does not declare the capability omits "
+            "the field rather than erroring."
+        ),
+    )
     user: str | None = Field(
         default=None,
         description=(

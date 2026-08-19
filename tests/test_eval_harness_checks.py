@@ -1300,13 +1300,19 @@ def test_expand_repeats_is_a_no_op_by_default():
     assert er._expand_repeats(cases, 0) == cases
 
 
-def test_a_repeat_marker_survives_the_sweep_suffix_strip():
-    """`eval_compare` keys rows by the name with ` [<model>]` removed, so the
-    `#N` has to sit inside that, or every repeat collapses onto one row."""
+def test_repeat_markers_pool_onto_one_row():
+    """Repeats of a case must land in ONE cell, as a pass rate.
+
+    ⚠️ This asserted the OPPOSITE until 2026-08-19 — `a#2` keyed separately, one
+    row per repeat — and that is why the tool could not answer the only question
+    a repeated run is for. Five ✅/❌ rows for one case is a pass rate written
+    the long way, with the counting left to the reader. The `#N` must still sit
+    INSIDE the ` [<model>]` suffix so the two strips compose in either order.
+    """
     out = er._expand_sweep(er._expand_repeats([{"name": "a", "prompt": "p"}], 2),
                            ["m1"])
     assert [c["name"] for c in out] == ["a [m1]", "a#2 [m1]"]
-    assert [eval_compare._case_key(c["name"]) for c in out] == ["a", "a#2"]
+    assert [eval_compare._case_key(c["name"]) for c in out] == ["a", "a"]
 
 
 def test_expand_sweep_name_falls_back_to_prompt():
@@ -1332,7 +1338,9 @@ def test_save_json_round_trips(tmp_path):
         "name": "c1 [m1]", "model": "m1", "ok": False,
         "checks": {"reachable": True, "code_runs": False, "banners": None},
         "route": "unknown", "ttft_s": 1.5, "total_s": 12.0,
-        "answer_len": 40, "banners": [], "error": "",
+        # `think_requested` joined the record 2026-08-19: the arm has to
+        # ride in the artifact, because container logs do not survive a rebuild.
+        "answer_len": 40, "think_requested": None, "banners": [], "error": "",
         "code_detail": "exit 1: AssertionError", "fiction_detail": "",
         "context_detail": "", "ungrounded_detail": "", "sources": None,
     }]
@@ -1387,9 +1395,111 @@ def test_build_table_summary_and_missing_cells():
         _rec("a", "m2", True, total=30.0),   # m2 never ran case b → "—" cell
     ])
     assert "| b | ✅ 20s | — |" in table
-    assert "| `m1` | 2/2 | 1.0s | 15.0s | 100.0 |" in table
-    assert "| `m2` | 1/1 | 1.0s | 30.0s | 100.0 |" in table
+    # `flaky` is the column after `pass`; 0 here because nothing repeated.
+    assert "| `m1` | 2/2 | 0 | 1.0s | 15.0s | 100.0 |" in table
+    assert "| `m2` | 1/1 | 0 | 1.0s | 30.0s | 100.0 |" in table
     assert "## Failures" not in table
+
+
+# ── repeats: the whole point is the RATE ────────────────────────────────────
+#
+# `scripts/eval_research.py` sends no `seed` and no `temperature` (options come
+# only from the request body via `_options_from_request`, and the harness sets
+# none), so every case is ONE draw from the model's default sampler. On
+# 2026-08-19 that produced 2/5 and then 5/5 for the same model on the same
+# suite, and the difference was read as a hardware fault before anyone checked
+# whether the harness seeded. It does not. n=1 cannot answer "is this model
+# good at this case", and these tests pin the shape that can.
+
+def _reps(name, model, oks, **extra):
+    """One record per element of `oks` — a repeat group for (name, model)."""
+    return [
+        _rec(name if i == 0 else f"{name}#{i + 1}", model, ok, **extra)
+        for i, ok in enumerate(oks)
+    ]
+
+
+def test_repeats_render_as_a_pass_rate_with_a_three_valued_mark():
+    table = eval_compare.build_table(
+        _reps("mixed", "m1", [True, False, True, True, False])
+        + _reps("always", "m1", [True, True, True])
+        + _reps("never", "m1", [False, False, False])
+    )
+    # ⚠️ mixed is ⚠️, not ❌. "passes 3 times in 5" and "never passes" are
+    # different facts about a model and the mark must not merge them.
+    assert "| mixed | ⚠️ 3/5 10s |" in table
+    assert "| always | ✅ 3/3 10s |" in table
+    assert "| never | ❌ 0/3 10s |" in table
+
+
+def test_flaky_separates_cannot_do_it_from_unreliable_at_it():
+    """Same 4/6 pass count, opposite diagnoses — `flaky` is what tells them apart."""
+    unreliable = eval_compare.build_table(
+        _reps("a", "m1", [True, False, True]) + _reps("b", "m1", [True, False, True])
+    )
+    incapable = eval_compare.build_table(
+        _reps("a", "m1", [True, True, True]) + _reps("b", "m1", [True, False, False])
+    )
+    assert "| `m1` | 4/6 | 2 |" in unreliable   # both cases sometimes-pass
+    assert "| `m1` | 4/6 | 1 |" in incapable    # one solid, one shaky
+
+
+def test_repeat_latency_is_the_median_so_a_cold_load_cannot_skew_it():
+    """The first case of a run pays a model load — 40-60s against 0.4s warm.
+
+    One such sample drags a mean of five far enough to invert a model
+    comparison, which is why the cell reports the median instead.
+    """
+    group = _reps("a", "m1", [True] * 5)
+    for rec, total in zip(group, [59.0, 2.0, 3.0, 2.0, 3.0], strict=True):
+        rec["total_s"] = total
+    table = eval_compare.build_table(group)
+    assert "| a | ✅ 5/5 3s |" in table          # median 3s, not the 13.8s mean
+
+
+def test_failures_count_each_check_across_the_repeats():
+    group = _reps("a", "m1", [False, False, True],
+                  checks={"code_runs": False}, code_detail="exit 1: AssertionError")
+    group[1]["checks"] = {"not_truncated": False}
+    group[1]["code_detail"] = ""
+    table = eval_compare.build_table(group)
+    # Two failing runs, two DIFFERENT causes — counted, not merged into one.
+    assert "**a** on `m1` — 2/3 runs failed; code_runs (1×), not_truncated (1×)" in table
+    assert "code: exit 1: AssertionError" in table
+
+
+# ── merge_files: the clobber that ate an arm ────────────────────────────────
+
+def test_merge_files_replaces_a_whole_group_and_says_so():
+    """Two files holding the same (case, model) = rerun semantics, not pooling.
+
+    2026-08-19: a thinking-ON run and a thinking-OFF run of one model were
+    globbed into a single invocation. The ON arm was silently dropped and the
+    printed matrix described one arm while appearing to describe both.
+    """
+    recs, warnings = eval_compare.merge_files([
+        ("think-on.json", _reps("a", "m1", [True, True, True])),
+        ("think-off.json", _reps("a", "m1", [False, False])),
+    ])
+    assert [r["ok"] for r in recs] == [False, False]      # later file wins whole
+    assert len(warnings) == 1
+    assert "3 sample(s) from think-on.json REPLACED by 2 from think-off.json" in warnings[0]
+
+
+def test_merge_files_pools_repeats_inside_one_file_without_warning():
+    recs, warnings = eval_compare.merge_files([
+        ("run.json", _reps("a", "m1", [True, False, True])),
+    ])
+    assert len(recs) == 3 and warnings == []
+
+
+def test_merge_files_keeps_first_seen_order_when_a_group_is_replaced():
+    """Replacing a group must not reshuffle rows — layout follows first sight."""
+    recs, _ = eval_compare.merge_files([
+        ("one.json", _reps("a", "m1", [True]) + _reps("b", "m1", [True])),
+        ("two.json", _reps("a", "m1", [False])),
+    ])
+    assert [eval_compare._case_key(r["name"]) for r in recs] == ["a", "b"]
 
 
 # ── grounded: content claimed with no content tool behind it ────────────────
@@ -1856,3 +1966,100 @@ class TestAnHttpErrorStillRecordsHowLongItTook:
             "the HTTP-error branch must stamp total_s before returning — "
             "otherwise a 400 and a four-minute 500 look identical in the results"
         )
+
+
+# ── the suite must be able to FAIL ──────────────────────────────────────────
+#
+# On 2026-08-19 `eval_prompts_models_ab.json` had ONE case of nine that could
+# detect a wrong answer (`code-word-frequency`, because `code_runs` executes).
+# Three models were compared on it and three wrong answers scored PASS: an
+# order that violated the puzzle's own constraint, W attributed to Swedish
+# instead of German, and the Berlin Wall blamed on a journalist. The suite was
+# not measuring answer quality — it was measuring whether prose came back.
+
+_CONTENT_ASSERTIONS = ("answer_contains", "answer_not_contains", "code_test",
+                       "answer_max_words", "expect_disclaims_absence",
+                       "expect_names_files")
+
+
+def _load_suite(name):
+    import json
+    from pathlib import Path
+    return json.loads((Path(__file__).parent.parent / "scripts" / name).read_text())
+
+
+@pytest.mark.parametrize("suite", ["eval_prompts_models_ab.json",
+                                   "eval_prompts_local_models.json"])
+def test_every_case_carries_a_content_assertion(suite):
+    """A case with no content assertion cannot fail, and a check that cannot
+    fail is worse than no check — it manufactures confidence."""
+    naked = [c["name"] for c in _load_suite(suite)
+             if not any(k in c for k in _CONTENT_ASSERTIONS)]
+    assert naked == [], f"{suite}: cases that cannot fail: {naked}"
+
+
+def test_race_order_needles_are_not_satisfied_by_a_wrong_order():
+    """The old needles were ['Cal','Ada','Ben'] — present in ANY answer.
+
+    Verbatim from `glm-4.7-flash`, 2026-08-19, which scored PASS: its stated
+    order puts Ada first, violating "Cal finished before Ada".
+    """
+    wrong = ("Since Ben cannot win and Cal cannot win, **Ada must have won**.\n"
+             "**Final Order:**\n1. **Ada** (1st)\n2. **Cal** (2nd)\n3. **Ben** (3rd)")
+    right = "Hence Cal is 1st, Ada is 2nd, Ben is 3rd.\nCal > Ada > Ben"
+    case = next(c for c in _load_suite("eval_prompts_models_ab.json")
+                if c["name"] == "reasoning-race-order")
+    needles = case["answer_contains"]
+    assert er._contains_all(wrong, needles) is False
+    assert er._contains_all(right, needles) is True
+
+
+def test_element_w_needles_reject_the_swedish_confusion():
+    """`ornith`, 2026-08-19 — scored PASS on needles ['tungsten', 'wolfram']."""
+    case = next(c for c in _load_suite("eval_prompts_models_ab.json")
+                if c["name"] == "gk-element-w")
+    wrong = "Tungsten. The symbol W comes from the Swedish name for the element: wolfram."
+    right = "Tungsten. The symbol comes from the German name for the element: Wolfram."
+    assert er._contains_all(wrong, case["answer_contains"]) is False
+    assert er._contains_all(right, case["answer_contains"]) is True
+
+
+# ── the arm has to survive the next rebuild ─────────────────────────────────
+
+def test_request_body_omits_think_unless_asked():
+    assert "think" not in er._request_body("m", "p", None)
+    assert er._request_body("m", "p", True)["think"] is True
+    assert er._request_body("m", "p", False)["think"] is False
+
+
+@pytest.mark.parametrize(("url", "direct"), [
+    ("http://audrey-ai:8000/v1", True),
+    ("http://localhost:8000/v1", True),
+    ("http://localhost:8080/api", False),      # Open WebUI — drops the field
+    ("http://192.168.1.11:8080/v1", False),
+])
+def test_only_a_direct_audrey_url_may_set_the_arm(url, direct):
+    """Through OWUI the `think` field is dropped and the recorded arm would be
+    a lie. The runner exits 2 rather than produce a mislabelled result."""
+    assert er._is_direct_audrey(url) is direct
+
+
+def test_think_requested_is_written_into_the_results_json(tmp_path):
+    import json
+    out = tmp_path / "r.json"
+    er.save_json([er.CaseResult(name="a", model="m", ok=True, checks={},
+                                answer="hi", think_requested=True)], out)
+    assert json.loads(out.read_text())[0]["think_requested"] is True
+
+
+# ── checks added 2026-08-19 ─────────────────────────────────────────────────
+
+def test_disclaims_absence_accepts_not_possible_to_determine():
+    """`glm-4.7-flash` on `ground-fact-absent` — correct behaviour, scored FAIL."""
+    assert er._disclaims_absence(
+        "Based on the passage provided, it is not possible to determine the p99 latency.")
+
+
+def test_word_budget_can_fail_a_prompt_that_states_a_limit():
+    assert er._within_word_budget(" ".join(["word"] * 118), 120) is True
+    assert er._within_word_budget(" ".join(["word"] * 121), 120) is False

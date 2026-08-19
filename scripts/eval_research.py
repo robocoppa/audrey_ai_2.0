@@ -108,6 +108,10 @@ Per case, against the reassembled streamed answer:
                      invention had a blacklist on two of the twelve video
                      cases and was turning up on six. ⚠️ `_KNOWN_UPLOADS` must
                      be updated when the box's uploads change.
+  - within_word_budget : opt-in ("answer_max_words": N): the answer body is at
+                     or under N whitespace-separated words. For prompts that
+                     state a length limit — an unchecked limit is a promise the
+                     suite lets the model break for free.
   - names_files    : opt-in ("expect_names_files": [..]): every listed file is
                      named DISTINCTLY, matched longest-first so one filename
                      being a substring of another cannot satisfy both. The
@@ -287,6 +291,12 @@ class CaseResult:
     total_s: float | None = None
     # Informational domain-based source breakdown (never a pass/fail check).
     source_stats: SourceStats | None = None
+    # ⚠️ THE ARM. What this run ASKED Audrey for on the passthrough `think`
+    # field: True / False / None (field omitted, model template decides).
+    # It rides in the results JSON because the only other record of it was a
+    # container log line, and `docker logs` is empty after the next recreate —
+    # which on 2026-08-19 made two completed model sweeps unattributable.
+    think_requested: bool | None = None
 
 
 @dataclass
@@ -305,8 +315,45 @@ class StreamTiming:
 _CONNECT_RETRY_DELAY_S = 60.0
 
 
+def _is_direct_audrey(base_url: str) -> bool:
+    """True when the base-url points at Audrey itself rather than Open WebUI.
+
+    Audrey's `:8000` is not published to the host (2026-07-18 security review),
+    so the LAN path is OWUI — but the eval CONTAINER runs on `ollama-net`
+    alongside `audrey-ai`, which is why direct is reachable at all from a box
+    run. Matched on host/port rather than on a flag so a stale `eval.env`
+    cannot claim direct while pointing somewhere else.
+    """
+    from urllib.parse import urlparse
+    host = (urlparse(base_url).hostname or "").lower()
+    port = urlparse(base_url).port
+    return host in {"audrey-ai", "audrey"} or (
+        host in {"localhost", "127.0.0.1"} and port == 8000)
+
+
+def _request_body(model: str, prompt: str, think: bool | None) -> dict:
+    """The chat-completions body for one case.
+
+    `think` is Audrey's vendor extension, omitted entirely when None so the
+    request is byte-identical to what this harness has always sent. Pulled out
+    of `_post_stream_once` purely so a test can assert on the payload without
+    a live server — the field's whole value is that the ARM travels with the
+    run, and a silently-dropped field would restore the ambiguity it exists to
+    remove.
+    """
+    body: dict = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": True,
+    }
+    if think is not None:
+        body["think"] = think
+    return body
+
+
 def _post_stream(base_url: str, api_key: str, model: str, prompt: str,
-                 timeout_s: float) -> tuple[str, list[str], str, StreamTiming]:
+                 timeout_s: float, think: bool | None = None,
+                 ) -> tuple[str, list[str], str, StreamTiming]:
     """Stream a chat completion. Returns (full_content, banner_words, error, timing).
 
     `full_content` is every delta concatenated (banners + answer, as the user
@@ -322,7 +369,7 @@ def _post_stream(base_url: str, api_key: str, model: str, prompt: str,
     without turning a genuinely-down stack into a hung run.
     """
     for attempt in (1, 2):
-        out = _post_stream_once(base_url, api_key, model, prompt, timeout_s)
+        out = _post_stream_once(base_url, api_key, model, prompt, timeout_s, think)
         if attempt == 1 and out[2].startswith("ConnectError"):
             print(f"    connection refused; retrying once in {_CONNECT_RETRY_DELAY_S:.0f}s...")
             time.sleep(_CONNECT_RETRY_DELAY_S)
@@ -332,14 +379,11 @@ def _post_stream(base_url: str, api_key: str, model: str, prompt: str,
 
 
 def _post_stream_once(base_url: str, api_key: str, model: str, prompt: str,
-                      timeout_s: float) -> tuple[str, list[str], str, StreamTiming]:
+                      timeout_s: float, think: bool | None = None,
+                      ) -> tuple[str, list[str], str, StreamTiming]:
     url = base_url.rstrip("/") + "/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    body = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "stream": True,
-    }
+    body = _request_body(model, prompt, think)
     content_parts: list[str] = []
     timing = StreamTiming()
     t0 = time.monotonic()
@@ -600,6 +644,17 @@ def _contains_all(answer: str, needles: list[str]) -> bool:
     """True if every needle appears case-insensitively in the answer body."""
     low = _pre_debug_region(answer).lower()
     return all(n.lower() in low for n in needles)
+
+
+def _within_word_budget(answer: str, limit: int) -> bool:
+    """True when the answer body is at or under `limit` whitespace-separated words.
+
+    Deliberately crude. The point is not to adjudicate what a word is — it is
+    that a prompt saying "120 words maximum" should be able to FAIL, and a
+    model 40% over the cap trips this on any reasonable definition. Uses the
+    pre-debug region so an appended panel-drafts block cannot blow the budget.
+    """
+    return len(_pre_debug_region(answer).split()) <= limit
 
 
 def _contains_any(answer: str, needles: list[str]) -> bool:
@@ -1008,7 +1063,19 @@ _DISCLAIMS_ABSENCE = re.compile(
     r"|has no|there is no|there's no|was not|wasn'?t|is not available"
     r"|isn'?t available|not available|could not find|couldn'?t find"
     r"|unable to find|cannot find|can'?t find|cannot see|can'?t see"
-    r"|not found|empty)",
+    r"|not found|empty"
+    # ⚠️ Third widening, 2026-08-19, measured like the two above: 779 archived
+    # sections, 222 matches BEFORE and 222 AFTER — zero flips, so no historical
+    # verdict moves. It exists for a live failure the archive never saw:
+    # `glm-4.7-flash` answered `ground-fact-absent` correctly with "it is not
+    # possible to determine the p99 latency" and scored FAIL. Note the shape of
+    # the gap — the pattern had `cannot|can't|could not|unable to` before
+    # "determine" but no `not possible to`, which is the same near-miss that
+    # caught `laguna-s-2.1` and is now the third phrasing to slip through.
+    # ▶ A positive check on open-vocabulary prose leaks by construction. Treat
+    # a `disclaims` FAIL as a claim to VERIFY against the answer text, never as
+    # a finding on its own.
+    r"|not possible to (?:determine|say|tell|know|calculate))",
     re.I,
 )
 
@@ -1557,17 +1624,19 @@ def infer_route(banners: list[str], answer: str = "") -> str:
 
 
 def run_case(base_url: str, api_key: str, case: dict, default_model: str,
-             timeout_s: float) -> CaseResult:
+             timeout_s: float, think: bool | None = None) -> CaseResult:
     model = case.get("model") or default_model
     name = case.get("name") or case["prompt"][:48]
-    content, banners, err, timing = _post_stream(base_url, api_key, model, case["prompt"], timeout_s)
+    content, banners, err, timing = _post_stream(
+        base_url, api_key, model, case["prompt"], timeout_s, think)
     route = infer_route(banners)
 
     checks: dict[str, bool | None] = {}
     if err:
         return CaseResult(name=name, model=model, ok=False, checks={"reachable": False},
                           answer="", banners_seen=banners, error=err, route=route,
-                          ttft_s=timing.ttft_s, total_s=timing.total_s)
+                          ttft_s=timing.ttft_s, total_s=timing.total_s,
+                          think_requested=think)
 
     checks["reachable"] = True
     answer = _answer_body(content)
@@ -1682,6 +1751,16 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     needles = case.get("answer_contains") or []
     checks["contains"] = _contains_all(answer, needles) if needles else None
 
+    # Word-budget check (opt-in): a prompt that states a length limit is
+    # making a testable promise, and until 2026-08-19 nothing tested it —
+    # `writing-cold-email` says "120 words maximum" and every model was scored
+    # purely on having produced prose. Counts the answer body, so a model that
+    # obeys the cap but pads a footer is not punished for the footer.
+    max_words = case.get("answer_max_words")
+    checks["within_word_budget"] = (
+        _within_word_budget(answer, int(max_words)) if max_words else None
+    )
+
     # Names-files check (opt-in): every listed file must be named distinctly.
     # The one check here that is behavioural rather than structural — see
     # `_names_all_files` for why a plain contains-check cannot do this job.
@@ -1730,7 +1809,8 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
                       source_stats=stats, code_detail=code_detail,
                       fiction_detail="; ".join(fictions),
                       context_detail=degraded,
-                      ungrounded_detail=ungrounded or "")
+                      ungrounded_detail=ungrounded or "",
+                      think_requested=think)
 
 
 def _fmt_check(v: bool | None) -> str:
@@ -1857,6 +1937,7 @@ def save_json(results: list[CaseResult], save_json_file: Path) -> None:
             "ttft_s": r.ttft_s,
             "total_s": r.total_s,
             "answer_len": len(r.answer),
+            "think_requested": r.think_requested,
             "banners": r.banners_seen,
             "error": r.error,
             "code_detail": r.code_detail,
@@ -1957,6 +2038,11 @@ def main() -> int:
                    help="run the whole case list N times (names suffixed #2, #3, …). "
                         "Use with --only to sample a few diagnostic cases enough "
                         "times to tell a real change from run-to-run variance."),
+    p.add_argument("--think", choices=("on", "off", "default"), default="default",
+                   help="passthrough thinking arm for this run: on / off / "
+                        "default (send no field, model template decides). "
+                        "Recorded in --save-json as think_requested, so the "
+                        "arm survives the next container rebuild.")
     p.add_argument("--only", default="",
                    help="run only cases whose name contains this substring")
     p.add_argument("--save-file", type=Path, default=None,
@@ -2006,11 +2092,28 @@ def main() -> int:
                   f"cases file (`*_models.json`) to make --model apply.",
                   file=sys.stderr)
 
+    # ⚠️ HARD FAIL, not a warning. `think` is Audrey's vendor extension on
+    # `/v1/chat/completions`; Open WebUI builds its own upstream payload and
+    # does not forward unknown body fields, so a `--think` run through OWUI
+    # would reach Ollama in whatever arm `passthrough.think` happens to hold
+    # while the results JSON swore it was something else. A mislabelled arm is
+    # worse than a refused run — that mistake is the reason this flag exists.
+    think = {"on": True, "off": False, "default": None}[args.think]
+    if think is not None and not _is_direct_audrey(args.base_url):
+        print(f"error: --think {args.think} needs a DIRECT Audrey base-url "
+              f"(got {args.base_url!r}). Open WebUI drops unknown body fields, "
+              f"so the arm would be recorded wrong. From the box, the eval "
+              f"container is on ollama-net: --base-url http://audrey-ai:8000/v1",
+              file=sys.stderr)
+        return 2
+
     results: list[CaseResult] = []
     for case in cases:
         print(f"running: {case.get('name') or case['prompt'][:48]} "
-              f"(model={case.get('model') or args.model})…", file=sys.stderr)
-        results.append(run_case(args.base_url, args.api_key, case, args.model, args.timeout))
+              f"(model={case.get('model') or args.model}, think={args.think})…",
+              file=sys.stderr)
+        results.append(
+            run_case(args.base_url, args.api_key, case, args.model, args.timeout, think))
 
     render(results, show_answers=not args.no_answers, verbose=args.verbose)
     if args.save_file is not None:
