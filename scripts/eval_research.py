@@ -1068,14 +1068,16 @@ _DISCLAIMS_ABSENCE = re.compile(
     # fail. Add a verb here only with the same measurement.
     r"|does not (?:have|contain|exist|cover|appear|include|discuss|mention"
     r"|reference|address|show|say|provide|specify|state|report|list|give"
-    r"|indicate|disclose)"
+    r"|indicate|disclose|describe)"
     r"|doesn'?t (?:have|contain|exist|cover|appear|include|discuss|mention"
     r"|reference|address|show|say|provide|specify|state|report|list|give"
-    r"|indicate|disclose)"
+    r"|indicate|disclose|describe)"
     r"|do not (?:have|contain|cover|discuss|mention|reference|address|see|show"
-    r"|appear|provide|specify|state|report|list|give|indicate|disclose)"
+    r"|appear|provide|specify|state|report|list|give|indicate|disclose"
+    r"|describe)"
     r"|don'?t (?:have|contain|cover|discuss|mention|reference|address|see|show"
-    r"|appear|provide|specify|state|report|list|give|indicate|disclose)"
+    r"|appear|provide|specify|state|report|list|give|indicate|disclose"
+    r"|describe)"
     # ⚠️ Second widening, 2026-08-18, same rule as above: MEASURE before adding.
     # `synth-absent-subtopic` false-failed for `laguna-s-2.1`, which disclaimed
     # four separate ways — "I cannot determine", "Neither note contains
@@ -1680,7 +1682,23 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
     # needs the body, and an error turn never has one.
     route = infer_route(banners, answer)
     checks["no_error_marker"] = not any(m in content for m in _ERROR_MARKERS)
-    checks["has_answer"] = len(answer) >= 20
+    # ⚠️ THE FLOOR IS AN EMPTY-RESPONSE GUARD, NOT A LENGTH PREFERENCE. The
+    # failure it exists for is `content_len=0` — a thinking model that spends
+    # its whole budget reasoning and emits nothing (see pipeline/passthrough.py).
+    # A bare 20-char floor cannot tell that apart from an answer that is short
+    # BECAUSE IT IS EXACT: on 2026-08-19 `glm-4.7-flash` answered
+    # `ground-fact-present` with "2,140 ms" — the correct value, the whole
+    # question, eight characters — and was scored a failure twice while wordier
+    # and equally correct answers passed. That is a check measuring shape
+    # instead of trust, which is worse than no check.
+    # ▶ So a case that declares its own `answer_contains` needles has already
+    # said what "answered" means; if every needle is present the answer
+    # answered, and its length is not the harness's business. Cases without
+    # needles keep the floor, because there the floor is all there is.
+    _needles = case.get("answer_contains") or []
+    checks["has_answer"] = (
+        len(answer) >= 20 or bool(_needles and _contains_all(answer, _needles))
+    )
     # Always on, like has_answer: no case ever wants an answer that stops
     # mid-promise, and the character floor cannot see one. See _looks_truncated.
     checks["not_truncated"] = not _looks_truncated(answer)

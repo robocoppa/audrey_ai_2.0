@@ -49,7 +49,7 @@ LOCAL_MODELS=(
   # and pulling it costs an hour and a fifth of the array.
   "laguna-s-2.1:latest"
   "laguna-xs-2.1:latest"
-  "ornith:latest"
+  "ornith-1.5:35b"
 )
 
 CLOUD_MODELS=(

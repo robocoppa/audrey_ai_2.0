@@ -38,6 +38,22 @@ These make the difference between a comparison and a coincidence.
   are safe; the same model twice is not.
 - Repeats pool into a single cell as a pass rate (`⚠️ 3/5`), and the `flaky`
   column counts cases that neither always pass nor always fail.
+- ⚠️ **Scores from before 2026-08-19 evening under-count.** Three checks were
+  failing correct answers, and they hit whichever model wrote most plainly:
+  `has_answer` had a flat 20-char floor that failed `2,140 ms` (right value,
+  whole question); `_DISCLAIMS_ABSENCE` carried eighteen verbs but not
+  `describe`, so "the notes do not describe X" read as a failure to disclaim;
+  and `synth-absent-subtopic` forbade `back-pressure is handled`, which is the
+  phrasing of the correct REFUSAL. Four of seven `gap-r5b` failures were these.
+  Fixed and guarded by tests. ▶ **`gap-r5b` real scores: qwen3.8 60/60,
+  muse-glimmer 60/60, nemotron 60/60, ornith-1.5:35b 59/60, glm-4.7-flash
+  58/60.** `[gap-r5b, 2026-08-19]`
+- ⚠️ **`docker logs audrey-ai | grep …` DOES NOT FILTER.** Python logging writes
+  to **stderr**, `docker logs` keeps the streams separate, and the pipe only
+  ever sees stdout — so the grep returns the whole log and looks like a broken
+  filter. Two separate 2026-08-19 attempts to confirm a thinking arm this way
+  returned unfiltered output and cost several rounds each. Always redirect
+  first: `docker logs audrey-ai --since 3h 2>&1 | grep 'model=<name>'`.
 - The thinking arm is per-request as of 2026-08-19 and is recorded in the
   results JSON as `think_requested`, so an arm can no longer be lost to a
   container recreate.
@@ -210,16 +226,72 @@ Production router (`router.model`). Probed 10 cases × 3 rounds.
   `[config.yaml]`
 - Leads **both** the `code` and `general` fast-path pools. `[config.yaml]`
 
-### `ornith-1.5:9b` / `ornith-1.5:35b`
+### `ornith-1.5:35b`
 
-- Sizes: **6.6 GB** and **22 GB**. `[ollama list, 2026-08-19]`
-- ⛔ **Neither tag is in `passthrough.allow`.** `config.yaml` lists
-  `ornith:latest` (now deleted from the box) and no `ornith-1.5` entry, so both
-  suites return 403 on every case and the runner exits 1. The 2026-08-19
-  `ab-ornith15` run failed for this reason. ▶ **Add the tag to the list and
-  redeploy before running either suite** — this is the same trap that consumed
-  the `qwen3.5:4b` attempt. `[config.yaml:1515 + ab-ornith15, 2026-08-19]`
-- Nothing else measured yet — see [Not established](#not-established).
+- **59/60 on the grounding suite**, `--repeat 5`. One real failure; see below.
+  `[gap-r5b, 2026-08-19]`
+- ✅ **Thinking confirmed applied.** Every call logged
+  `wanted=True resolved=True src=request` with a non-zero `thinking_len`, so
+  this score IS comparable to muse/glm/nemotron and is NOT the llama4 case.
+  `[audrey-ai logs, 2026-08-19]`
+- **22 GB.** Cold load ~44s; warm cases 2.6-12.6s elapsed.
+  `[ollama list + audrey-ai logs, 2026-08-19]`
+- ✅ **The best chars-per-token of any thinking model measured here** on
+  ordinary prose: 0.53-1.90, against muse's 0.06-1.19 on the same suite. It
+  spends its budget on the answer rather than on reasoning the user never sees.
+  `[audrey-ai logs, 2026-08-19]`
+- ⚠️ **Its reasoning budget is unstable on hard code, and the instability is
+  large.** On `code-rle-roundtrip` — five draws of one identical prompt — it
+  generated 4,008 / 7,354 / 12,108 / 21,854 / 24,169 chars of thinking against
+  500-675 chars of answer, a six-fold spread run to run and `chars_per_tok`
+  down to 0.08. Every other case in the suite sat between 223 and 5,108. muse
+  on the same case was stable at ~5,700-6,000. ▶ It is also **the one case it
+  got wrong**: after 24k characters of reasoning it still shipped
+  `int(s[i:j])` where `j` starts at `i+1` while the slice starts at `i`, so it
+  parses `'a3'` as an integer and raises. **Thinking longer did not make it
+  more correct, only slower.** `[gap-r5b + audrey-ai logs, 2026-08-19]`
+- Refuses well: on the absent-subtopic case it states outright that it will not
+  invent an answer, and separately flags its own AMQP prefetch assumption as
+  world knowledge rather than grounding. `[gap-r5b, 2026-08-19]`
+- ▶ **Holds `deep_panel_local.general` as of 2026-08-19**, displacing
+  muse-glimmer on cost rather than accuracy. Registered in `model_registry`
+  BELOW muse so the fast path is untouched. ⛔ Deliberately kept OUT of
+  `deep_panel_local.code` — see the thinking instability above.
+- Not yet measured on the general-quality suite (`eval_prompts_models_ab.json`)
+  — the `ab-r5b` run was SIGKILLed before writing an answers file.
+
+### `ornith-1.5:9b` — ⛔ REMOVED FROM THE BOX 2026-08-19
+
+Pulled as a router candidate, probed, disqualified, deleted the same day.
+The measurements below are kept because they are the reason, and because
+they are the clearest evidence on file that **router accuracy is not the
+binding constraint — confidence calibration is.** ⚠️ They can no longer be
+re-measured. Dropped from `passthrough.allow` and `pull-models.sh` with it.
+
+Probed head to head against the production router, 10 cases x 3 rounds,
+`NOTHINK=1 FORMAT=1` (the production-matching arm).
+
+| | `qwen3.5:4b` | `ornith-1.5:9b` |
+|---|---|---|
+| parse | 30/30 | 30/30 |
+| accuracy | 24/30 | 24/30 |
+| latency median | 0.48s | 0.49s |
+| conf median | 0.97 | **0.90** |
+| **conf at/above 0.95** | **27/30** | **9/30** |
+
+`[router probe, 2026-08-19]`
+
+- ⛔ **Not on accuracy — they are identical**, down to the same two failing
+  prompts (Postgres query plan -> reasoning; polite email -> code). Latency is
+  a tie. It loses on **confidence calibration alone**.
+- ▶ Escalation fires on `conf < 0.95` STRICTLY. That is 3 escalations in 30 for
+  the incumbent against **21 in 30** for this candidate — roughly seven times
+  the deep-panel traffic, at three cloud calls each, for identical routing.
+  Against a hard credit budget that settles it. This is exactly the "routes
+  correctly but timidly" failure `router_probe.py` was written to catch.
+- Also 6.6 GB against a slot that is small on purpose: the router is not
+  GPU-gated, so under `GPU_CONCURRENCY=1` it would evict the deep worker.
+- **Keep `qwen3.5:4b`.** The router question is closed.
 
 ### Other installed local models
 
@@ -228,12 +300,10 @@ Production router (`router.model`). Probed 10 cases × 3 rounds.
 `nomic-embed-text:latest` (embeddings). `[pull-models.sh]`
 No quality facts established for any of them on the current suites.
 
-⚠️ **Inventory drift, opened 2026-08-19.** `ornith:latest` was deleted from the
-box but is still named in `config.yaml` and `pull-models.sh`, and the
-`ornith-1.5` tags are in neither. `scripts/check_model_inventory.py` exits 1
-when config names a model Ollama does not have, so it will now report a
-finding. Resolve by deciding which `ornith-1.5` tag takes the slot — that is
-what the pending measurements are for — rather than by re-pulling the old tag.
+✅ **Inventory drift closed 2026-08-19.** `ornith:latest` and `ornith-1.5:9b`
+are both gone from the box and from `config.yaml` + `pull-models.sh`;
+`ornith-1.5:35b` is the surviving tag and is allow-listed.
+`scripts/check_model_inventory.py` should be clean.
 
 ---
 

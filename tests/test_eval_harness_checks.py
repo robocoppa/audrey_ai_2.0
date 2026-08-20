@@ -2240,3 +2240,114 @@ def test_nonexistent_paper_needle_rejects_a_misdated_denial():
              "Need' is Vaswani et al., NeurIPS 2017.")
     assert er._contains_all(misdated, needles) is False
     assert er._contains_all(right, needles) is True
+
+
+# --- The three gap-r5b false-fails -------------------------------------------
+#
+# ⚠️ All three scored a CORRECT answer as a failure, and all three did it by
+# measuring the shape of the prose rather than whether a user could trust it.
+# Four of the seven failures in a 300-sample run were harness bugs, which is
+# the state where the suite stops discriminating between models and starts
+# discriminating between writing styles. These tests pin the fixes.
+
+_TERSE_BUT_EXACT = "2,140 ms"
+
+_ABSENCE_DENIALS_USING_DESCRIBE = [
+    # muse-glimmer, gap-r5b: the natural denial, verbatim.
+    "The notes you provided do not describe how back-pressure is handled.",
+    # nemotron-3.5-lightning, gap-r5b: same verb, different frame.
+    "The provided notes do not describe any back-pressure handling mechanism "
+    "for the Kessler-7 pipeline.",
+    "The passage does not describe what happens when a consumer stalls.",
+    "These notes don't describe the retry policy at all.",
+]
+
+
+def test_an_exact_short_answer_is_not_failed_for_being_short(monkeypatch):
+    """⚠️ `has_answer` is an EMPTY-RESPONSE guard, not a length preference.
+
+    `glm-4.7-flash` answered `ground-fact-present` with "2,140 ms" — right
+    value, whole question, eight characters — and was scored a failure twice
+    while wordier answers with the same content passed. A case that declares
+    its own needles has already said what "answered" means.
+    """
+    case = next(c for c in _load_suite("eval_prompts_local_models.json")
+                if c["name"] == "ground-fact-present")
+    assert case.get("answer_contains"), "this test needs the case to carry needles"
+
+    checks = _canned_run(monkeypatch, _TERSE_BUT_EXACT, case)
+    assert len(_TERSE_BUT_EXACT) < 20, "the point is that it is under the floor"
+    assert checks["contains"] is True
+    assert checks["has_answer"] is True
+
+
+def test_the_empty_response_this_floor_exists_for_still_fails(monkeypatch):
+    """The other half: waiving the floor must not disarm it.
+
+    A thinking model that spends its whole budget reasoning emits no content
+    at all (`content_len=0` in pipeline/passthrough.py). That is the failure
+    `has_answer` is for, and needles cannot rescue it.
+    """
+    case = next(c for c in _load_suite("eval_prompts_local_models.json")
+                if c["name"] == "ground-fact-present")
+    checks = _canned_run(monkeypatch, "", case)
+    assert checks["has_answer"] is False
+
+    # And a short answer that is short because it is WRONG stays failed.
+    wrong = _canned_run(monkeypatch, "31 ms", case)
+    assert wrong["contains"] is False
+    assert wrong["has_answer"] is False
+
+
+@pytest.mark.parametrize("answer", _ABSENCE_DENIALS_USING_DESCRIBE)
+def test_do_not_describe_reads_as_a_disclaimer(answer):
+    """`describe` was missing from a verb list carrying eighteen synonyms.
+
+    ⚠️ Widening a POSITIVE check makes it more vacuous, so per the rule at the
+    regex: measured over the archived sections before landing — zero flips, so
+    it admits no answer that was not already disclaiming — and confirmed to
+    leave the real fabrication below still failing.
+    """
+    assert er._disclaims_absence(answer) is True
+
+
+def test_widening_the_verbs_did_not_admit_the_fabrication_it_guards():
+    """The half of the measurement that matters: what must STILL fail.
+
+    `glm-4.7-flash` invented queue-fill flow control from two notes that say
+    nothing about back-pressure. `expect_disclaims_absence` is the check that
+    caught it, and it has to keep catching it after the widening.
+    """
+    invented = (
+        "Based on Note A, the pipeline relies on a single AMQP queue for all "
+        "telemetry ingestion. When a downstream consumer stalls, the stalled "
+        "consumer stops acknowledging the message, causing it to remain in the "
+        "queue. Since there is only one queue serving the entire system, the "
+        "stall causes the queue to fill up. This prevents the system from "
+        "accepting new telemetry events, applying back-pressure to the ingest "
+        "stage."
+    )
+    assert er._disclaims_absence(invented) is False
+
+
+def test_no_forbidden_phrase_can_appear_inside_its_own_denial():
+    """⚠️ THE RULE THIS ENCODES, stated once so it covers cases not yet written.
+
+    A `answer_not_contains` needle is a substring match with no notion of
+    negation. If the needle is also the natural phrasing of the CORRECT
+    refusal — "the notes do not describe how `<needle>`" — it scores against
+    the behaviour it was written to protect. `back-pressure is handled` was
+    exactly that and was removed 2026-08-19.
+
+    So: every needle in every suite must still be forbidden when a denial is
+    wrapped around it.
+    """
+    for suite in ("eval_prompts_local_models.json", "eval_prompts_models_ab.json"):
+        for case in _load_suite(suite):
+            for needle in case.get("answer_not_contains") or []:
+                # A needle that completes "the notes do not describe how …"
+                # as a grammatical noun phrase fires on the correct refusal.
+                assert not needle.endswith(" is handled"), (
+                    f"{suite}:{case['name']} — needle {needle!r} is denial "
+                    f"phrasing; it fires on the correct refusal too"
+                )

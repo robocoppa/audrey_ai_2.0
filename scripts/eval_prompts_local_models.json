@@ -33,11 +33,10 @@
     "expect_sources": false,
     "expect_disclaims_absence": true,
     "answer_not_contains": [
-      "back-pressure is handled",
       "applies back-pressure",
       "the pipeline blocks"
     ],
-    "_why": "The gap case, and the one that separates a synthesiser from a plausible-prose generator. Back-pressure is absent from both notes, so the only correct answer says so. A model that knows how pipelines usually work will describe how THIS one usually would. Reuses `_disclaims_absence`, the check hardened over seven false fails in the video suite, so its phrasing coverage is already broad."
+    "_why": "The gap case, and the one that separates a synthesiser from a plausible-prose generator. Back-pressure is absent from both notes, so the only correct answer says so. A model that knows how pipelines usually work will describe how THIS one usually would. Reuses `_disclaims_absence`, the check hardened over seven false fails in the video suite, so its phrasing coverage is already broad. ⚠️ `back-pressure is handled` USED TO BE IN THIS LIST AND WAS REMOVED 2026-08-19. It is the phrasing of the CORRECT ANSWER, not of a wrong one: the honest reply quotes the question back - `the notes do not describe how back-pressure is handled` - and a substring needle cannot see the `do not` in front of it. It false-failed muse-glimmer on an answer that disclaimed correctly and cited both notes. The general rule: a forbidden phrase must be one that can only appear in an ASSERTION. If it also appears inside the denial, it scores against the behaviour it was written to protect. The real fabrication that day (glm-4.7-flash inventing queue-fill flow control) was caught by `expect_disclaims_absence`, which is the check actually carrying this case - these needles are a backstop for signature wordings only."
   },
   {
     "name": "synth-compress-the-padding",

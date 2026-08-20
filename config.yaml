@@ -122,6 +122,18 @@ model_registry:
     # ⚠️ 2026-08-16: `olmo-3.1:32b` (70, local) REMOVED — never pulled.
     # `muse-glimmer:latest` takes the second local slot here too.
     - { name: "muse-glimmer:latest",      priority:  84, speed: 82, quality: 86, location: local }
+    # ⚠️ REGISTERED SO IT CAN BE A PANEL WORKER, not to change the fast path.
+    # `_validate_deep_panel_pools` rejects any deep-panel name absent from
+    # this registry at BOOT — an unregistered worker otherwise passes
+    # `is_healthy` (unknown -> True), defaults to location=local, and burns a
+    # GPU-gate slot failing the Ollama call. Priority is deliberately BELOW
+    # muse-glimmer so fast-path selection is untouched by this edit; the panel
+    # slot comes from the `workers` list order, not from priority.
+    # Measured 2026-08-19 (--repeat 5, thinking confirmed applied): 59/60 on
+    # the grounding suite, best chars-per-token of any thinking model here
+    # (0.53-1.90 vs muse 0.06-1.19), warm 2.6-12.6s. See
+    # docs/testing/MODEL-FACTS.md. ⛔ NOT for a code pool — see below.
+    - { name: "ornith-1.5:35b",           priority:  83, speed: 86, quality: 86, location: local }
     - { name: "glm-4.7-flash:q8_0",       priority:  80, speed: 85, quality: 87, location: local }
     - { name: "llama4:latest",            priority:  65, speed: 55, quality: 90, location: local }
     - { name: "glm-5.2:cloud",            priority:  62, speed: 90, quality: 88, location: cloud }
@@ -333,6 +345,17 @@ deep_panel_local:
   # `pull-models.sh` and absent from the last phantom report, and that was
   # treated as evidence; it is not. **`ollama list` is the only authority.**
   # The names below are checked against a real listing (2026-08-16).
+  # ⛔ ornith-1.5:35b IS DELIBERATELY ABSENT FROM THIS POOL despite scoring
+  # 59/60 overall and leading `general` below. Its one failure was a code case,
+  # and the way it failed disqualifies it here: on five draws of one identical
+  # prompt it generated 4,008 / 7,354 / 12,108 / 21,854 / 24,169 characters of
+  # reasoning against ~500 of answer — a six-fold spread, 56s wall clock, and
+  # after 24k characters of thinking it still shipped an off-by-one
+  # (`int(s[i:j])` where `j` starts at `i+1` while the slice starts at `i`).
+  # Thinking longer did not make it more correct, only slower and less
+  # predictable. Under GPU_CONCURRENCY=1 an unbounded first worker is a
+  # scheduling hazard, not just a slow case — the pool behind it waits.
+  # `nemotron` was clean on both code cases and takes the slot.
   code:
     workers: ["nemotron-3.5-lightning:latest", "qwen3.8:latest"]
     synthesizer: "qwen3.8:latest"
@@ -341,8 +364,21 @@ deep_panel_local:
     workers: ["muse-glimmer:latest", "qwen3.8:latest"]
     synthesizer: "qwen3.8:latest"
     fallback_synth: "qwen3.8:latest"
+  # ⚠️ `general` LEADS WITH ornith-1.5:35b FROM 2026-08-19, `reasoning` STILL
+  # LEADS WITH muse-glimmer. That split is deliberate and is not an oversight.
+  # Both were measured the same day, same suite, --repeat 5, thinking confirmed
+  # applied on both. They tie on accuracy (60/60 vs 59/60), and ornith wins the
+  # tie-break on cost: warm 2.6-12.6s against muse's 13-20s, and 0.53-1.90
+  # chars-per-token against 0.06-1.19. muse spent 3,781 characters of reasoning
+  # to emit a 56-character JSON object. On a pool where two workers SERIALIZE
+  # through one GPU, that overhead is the dominant cost of the whole turn.
+  # ▶ `reasoning` keeps muse because the EVIDENCE FOR ornith IS THINNER THERE:
+  # the run that separates models on reasoning and world knowledge
+  # (eval_prompts_models_ab.json) has never completed for ornith — the ab-r5b
+  # sweep was SIGKILLed. Two reasoning cases at 5/5 is not a reason to displace
+  # the top-scoring model on the box. Move `reasoning` only after that run.
   general:
-    workers: ["muse-glimmer:latest", "qwen3.8:latest"]
+    workers: ["ornith-1.5:35b", "qwen3.8:latest"]
     synthesizer: "qwen3.8:latest"
     fallback_synth: "qwen3.8:latest"
   vl:
@@ -1512,12 +1548,16 @@ passthrough:
     # bigger one is evicted and reloaded from disk. One `--models` value per run.
     - laguna-s-2.1:latest
     - laguna-xs-2.1:latest
-    # ornith:latest was deleted from the box 2026-08-19, superseded by
-    # ornith-1.5. Leaving a removed tag here makes check_model_inventory
-    # exit 1; passthrough gates on THIS LIST, so a new tag is invisible
-    # until it is added (both the qwen3.5:4b and ornith-1.5 suite attempts
-    # that day returned 403 on every case for exactly this reason).
-    - ornith-1.5:9b
+    # ⚠️ THIS LIST IS THE PASSTHROUGH GATE. A tag absent here 403s on every
+    # case even when Ollama has it and `model_registry` names it, and a tag
+    # here that Ollama does NOT have makes check_model_inventory exit 1. Both
+    # halves bit on 2026-08-19: the qwen3.5:4b and ornith-1.5 suite attempts
+    # each burned a run slot on 403s, and `ornith:latest` sat here after being
+    # deleted from the box.
+    # `ornith-1.5:9b` was pulled as a router candidate, probed, and removed
+    # 2026-08-19 — it matched qwen3.5:4b on parse, accuracy and latency but
+    # answered 0.90 confidence against a 0.95 escalation floor, which would
+    # have sent ~70% of turns into a deep panel. See docs/testing/MODEL-FACTS.md.
     - ornith-1.5:35b
     # Vision-language pool, exposed so an image-capable model can be targeted
     # directly. Batch image work (Phase 36 media-worker keyframe description)
