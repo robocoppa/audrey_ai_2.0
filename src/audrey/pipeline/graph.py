@@ -200,6 +200,9 @@ def build_graph(
     # behaviour it has, and "omit the field" is the only universally safe
     # request. Opting in is a config edit, not an upgrade side effect.
     fast_no_thinking = bool(fast_path_cfg.get("no_thinking", False))
+    # Absent -> fall back to `no_thinking`, preserving pre-split behaviour.
+    _prose_nt = fast_path_cfg.get("no_thinking_prose")
+    fast_no_thinking_prose = fast_no_thinking if _prose_nt is None else bool(_prose_nt)
     react_cfg = cfg.raw.get("agentic", {}).get("react", {}) or {}
     react_max_rounds = int(react_cfg.get("max_rounds", 3))
     react_compress_after = int(react_cfg.get("compress_after_round", 2))
@@ -419,6 +422,7 @@ def build_graph(
             user_id=(state.get("user_id") or None),
             cfg=cfg,
             no_thinking=fast_no_thinking,
+            no_thinking_prose=fast_no_thinking_prose,
         )
         msg = resp.get("message", {}) or {}
         react_meta = resp.get("_react") or {}

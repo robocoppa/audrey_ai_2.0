@@ -33,7 +33,6 @@ LOCAL_MODELS=(
   "nemotron-3.5-lightning:latest"
   "muse-glimmer:latest"
   "llama4:latest"
-  "glm-4.7-flash:q8_0"
   "qwen3-vl:32b"
   "llava:34b"
   "nomic-embed-text:latest"

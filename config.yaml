@@ -134,7 +134,6 @@ model_registry:
     # (0.53-1.90 vs muse 0.06-1.19), warm 2.6-12.6s. See
     # docs/testing/MODEL-FACTS.md. ⛔ NOT for a code pool — see below.
     - { name: "ornith-1.5:35b",           priority:  83, speed: 86, quality: 86, location: local }
-    - { name: "glm-4.7-flash:q8_0",       priority:  80, speed: 85, quality: 87, location: local }
     - { name: "llama4:latest",            priority:  65, speed: 55, quality: 90, location: local }
     - { name: "glm-5.2:cloud",            priority:  62, speed: 90, quality: 88, location: cloud }
 
@@ -190,6 +189,28 @@ fast_path:
   # the model — a waiting user pays for reasoning in latency either way — but
   # if a specific model answers worse, probe it before blaming this line.
   no_thinking: true
+
+  # ⚠️ The line above now governs the **ReAct/tool branch only**. This one
+  # governs the plain-chat branch — a direct answer, no tools — and they are
+  # deliberately opposite. Measured 2026-08-19, `--repeat 5`, both suites:
+  #
+  #   tool selection   5/5 correct in ALL THREE thinking states  -> thinking
+  #                    buys nothing, and costs ~0.7s PER ReAct round
+  #   prose answers    qwen3.8 116/125 thinking-on vs 112/125 off -> thinking
+  #                    buys +4/125 and COSTS ~4.0s (6.25s vs 2.29s mean total,
+  #                    59 warm cases), with ttft 4.59s vs 0.49s
+  #
+  # The 4 points include `reasoning-decimal-compare`, which qwen3.8 answers
+  # `9.11 > 9.9` on 3/5 draws with thinking off. ⚠️ ~4s is a REAL cost on the
+  # user-is-waiting path and is 6x what an earlier estimate here claimed (that
+  # figure was the TOOL-turn delta, 1.5s->0.8s, wrongly applied to prose). It
+  # is accepted deliberately: a prose turn is one call, not a loop, so it does
+  # not compound the way it would on the tool branch, where thinking buys
+  # nothing anyway. Revisit if fast-path p95 latency becomes a complaint.
+  # ⛔ Do not collapse these back to one flag without re-measuring BOTH
+  # branches — a prose-only probe justified the wrong thing once already.
+  # Absent -> falls back to `no_thinking`, so this is a safe key to delete.
+  no_thinking_prose: false
 
   tool_capable_models:
     # ⚠️ One entry where there were three (2026-08-15): qwen3.6:35b,
@@ -324,11 +345,14 @@ deep_panel_cloud:
 # ─── Deep panel: local-only (audrey_local) ─────────────────────────────
 # Both workers serialize through GpuGate (GPU_CONCURRENCY=1) — no parallelism.
 # Worker ORDER matters here: the first-listed worker runs first (and loads
-# cold first), so it's the de-facto primary. (Dropped glm-4.7-flash:q8_0 from
-# general: it was hitting the 240s deep_worker ReadTimeout — too slow to
-# cold-load + generate when it ran second behind another model through the
-# single GPU. ⚠️ Watch for the same on the new second workers; a pool that
-# times out on its first worker looks identical to a slow pool.)
+# cold first), so it's the de-facto primary. ⚠️ A pool that times out on its
+# first worker looks identical to a slow pool — the failure that took
+# glm-4.7-flash:q8_0 out of `general` was a 240s deep_worker ReadTimeout, too
+# slow to cold-load AND generate when it ran second through the single GPU.
+# Watch for the same shape on any second worker.
+# ⛔ glm-4.7-flash:q8_0 RETIRED 2026-08-19 — dropped from `model_registry`,
+# `passthrough.allowed_models` and `scripts/pull-models.sh` as out of date.
+# Its measurements are kept in docs/testing/MODEL-FACTS.md as the reason.
 deep_panel_local:
   # ⚠️ REPAIRED 2026-08-16. All three text pools were broken, two of them
   # invisibly: `code` had collapsed to a single worker synthesising its own only
@@ -1527,7 +1551,6 @@ passthrough:
     - deepseek-v3.2:cloud
     - nemotron-3-super:cloud
     - qwen3.5:397b-cloud
-    - glm-4.7-flash:q8_0
     - llama4:latest
     # ── 2026-08-18 arrivals, exposed for the local bake-off, NOT in any pool ──
     # Listing a model here makes it targetable by

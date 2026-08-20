@@ -72,6 +72,15 @@ passages, instruction-following, code).
 - **122/125** across both suites, `--repeat 5`, thinking on. ab 62/65, gap
   **60/60** — the only clean sweep of any model on the grounding suite.
   `[ab/gap-think-r5, 2026-08-19]`
+- ✅ **123/125 with thinking OFF** — ab 63/65, gap **60/60**. The only model
+  that does not move when thinking is removed, and the highest thinking-off
+  score of the five. Both failures are `reasoning-decimal-compare`
+  (`9.11 > 9.9`). ⚠️ It is NOT the fast-path primary — qwen3.8 holds that at
+  priority 100 against muse's 84. `[ab-off-r5b + gap-off-r5b, 2026-08-19]`
+- ⚠️ **The slowest local by a wide margin.** Thinking off, warm, grounding
+  suite: ttft mean 3.55s, total mean 5.71s, 7 of 59 cases over 8s. That is
+  **2.5x qwen3.8 and 6.3x nemotron** on total. Its accuracy lead has to be paid
+  for in latency. `[gap-off-r5b, 2026-08-19]`
 - Slowest of the three measured: mean ttft 15.2s, mean total 20.5s, mean answer
   1094.6 chars (ab suite). `[ab-think-r5, 2026-08-19]`
 - Wrote the explicit `sorted(key=lambda x: (-x[1], x[0]))` tie-break on
@@ -84,7 +93,16 @@ passages, instruction-following, code).
   (Transformer-XL, Tensor2Tensor, T5). No invented citations in 5 runs — the
   only measured model of which that is true. `[ab-think-r5, 2026-08-19]`
 
-### `glm-4.7-flash:q8_0`
+### `glm-4.7-flash:q8_0` — ⛔ RETIRED 2026-08-19
+
+Dropped as out of date at the user's call: removed from `model_registry.general`
+(it held priority 80), `passthrough.allowed_models` and `scripts/pull-models.sh`.
+It was already out of every deep panel — pulled from `deep_panel_local.general`
+earlier on a 240s `deep_worker` ReadTimeout. ⚠️ `ollama rm` it on the box; a tag
+present but unlisted trips the inventory check to exit 1. The measurements below
+are kept because two of the harness fixes shipped 2026-08-19 exist because of
+them. ⚠️ Not to be confused with `glm-5.2:cloud`, which stays — that is
+Claudette's gateway model.
 
 - **115/125**. ab 60/65, gap 55/60. Mean ttft 11.5s, total 14.4s, 1297.4 chars
   (longest answers measured). `[ab/gap-think-r5, 2026-08-19]`
@@ -102,6 +120,13 @@ passages, instruction-following, code).
   the word "buffer". `[gap-think-r5, 2026-08-19]`
 - Failed `reasoning-decimal-compare` 1/5. `[ab-think-r5, 2026-08-19]`
 - Correct tie-break on `code-word-frequency` 5/5. `[ab-think-r5, 2026-08-19]`
+- ⛔ **107/125 with thinking OFF** — ab 56/65, gap 51/60, the largest grounding
+  drop of any model (−7). `instruction-strict-json` went **0/5**: fenced in
+  ```json every time, with `replicas` rendered `3`, `"between two and five"`,
+  `{"min":2,"max":5}` and `"between 2 and 5"` — never the required form, against
+  2/5 fenced with thinking on. It also leaked raw scratchpad into answers
+  ("Alright, let's tackle this puzzle step by step", all six permutations, a
+  `### Final Answer` header). `[ab-off-r5b + gap-off-r5b, 2026-08-19]`
 
 ### `ornith:latest` — ⛔ REMOVED FROM THE BOX 2026-08-19
 
@@ -133,6 +158,22 @@ them are the reason it is being replaced. ⚠️ They can no longer be re-measur
 ### `nemotron-3.5-lightning:latest`
 
 - **120/125** — ab 60/65, gap **60/60**. `[ab/gap-next4, 2026-08-19]`
+- ⛔ **115/125 with thinking OFF** — ab 60/65, gap 55/60. ▶ **It invents metrics
+  when the fact is absent.** `ground-fact-absent` answered **`2322 ms`** on one
+  draw and **`p99 latency: 1424 ms`** on another — numbers that appear nowhere
+  in the passage, stated bare, no hedge, in a two-word reply, on a question
+  whose only correct answer is that the passage does not say. It was 60/60 on
+  this suite WITH thinking. ⛔ This disqualifies it from any thinking-off
+  grounding role, including the fast path, on trust rather than accuracy.
+  It also shipped literal placeholder code on `code-rle-roundtrip`
+  (`s[result[-1] - result[-1] ...]  # placeholder to make syntax happy`) for a
+  SyntaxError exit 1. `[gap-off-r5b, 2026-08-19]`
+- ✅ **The fastest local measured.** Thinking off, warm, grounding suite: ttft
+  mean **0.32s**, total mean **0.90s**, max 1.9s — 6.3x faster than muse and
+  2.5x faster than qwen3.8 on total. Cold load 39.0s, the slowest cold of the
+  three. ▶ On speed alone it is the strongest fast-path candidate on the box;
+  the fabrication above is the only thing keeping it out.
+  `[gap-off-r5b, 2026-08-19]`
 - Fast: most cases ttft 2–4s, total 2–15s. `[ab-next4, 2026-08-19]`
 - Correct alphabetical tie-break on `code-word-frequency` **5/5**, and clean on
   both gap code cases. `[ab/gap-next4, 2026-08-19]`
@@ -148,8 +189,22 @@ them are the reason it is being replaced. ⚠️ They can no longer be re-measur
 ### `qwen3.8:latest`
 
 - **116/125** — ab 57/65, gap 59/60. `[ab/gap-next4, 2026-08-19]`
+- **112/125 with thinking OFF** — ab 54/65, gap 58/60. Flipped
+  `reasoning-decimal-compare` to `9.11 > 9.9` **3/5**.
+  `[ab-off-r5b + gap-off-r5b, 2026-08-19]`
 - **17 GB** — ruled out for the router slot on size, not ability. `[config.yaml]`
-- Leads **both** the `code` and `general` fast-path pools. `[config.yaml]`
+- ▶ **THE `general` FAST-PATH PRIMARY, at priority 100** — and it leads `code`
+  at 100 too, and sits third in `reasoning` at 94. muse-glimmer is 84 and
+  ornith-1.5:35b 83, so neither is reached while qwen3.8 is healthy.
+  ⚠️ Read this before reasoning about the fast path: it is NOT the
+  highest-scoring local (muse beats it by 6 points thinking-on and 11
+  thinking-off). It holds the slot on **tool calling**, which is what this path
+  is actually for and which was measured directly — 5/5 correct selection in
+  all three thinking states, `false` 2x faster on under half the tokens. See
+  the fast-path table below. `[config.yaml + thinking_probe, 2026-08-19]`
+- **Middle of the three on latency.** Thinking off, warm, grounding suite: ttft
+  mean 0.49s, total mean 2.29s, median 2.00s. Cold load 29.1s.
+  `[gap-off-r5b, 2026-08-19]`
 - ⚠️ **Fabricated a named official.** `gk-berlin-wall` 4/5: one run attributed
   the press conference to "the regime's spokesman **Josef Ahern**" — an invented
   person — and then invented a scholarly debate about whether Ahern "misspoke or
@@ -257,8 +312,16 @@ Production router (`router.model`). Probed 10 cases × 3 rounds.
   muse-glimmer on cost rather than accuracy. Registered in `model_registry`
   BELOW muse so the fast path is untouched. ⛔ Deliberately kept OUT of
   `deep_panel_local.code` — see the thinking instability above.
-- Not yet measured on the general-quality suite (`eval_prompts_models_ab.json`)
-  — the `ab-r5b` run was SIGKILLed before writing an answers file.
+- ⛔ **Worst of the five on general quality with thinking OFF** — 48/65, against
+  2 failures on the grounding suite in the same arm. Four defect classes, all
+  absent when it thinks: answers truncated to their closing sentence
+  (`science-attention` 4/5 returned only "In one sentence: …" plus an offer to
+  elaborate), `reasoning-race-order` landing on a wrong final order 4/5 after
+  reasoning correctly in the body, `string.punctuation` used without
+  `import string` 2/5, and one substituted name on `gk-berlin-wall`. ▶ It is
+  the most thinking-dependent model measured, which is fine while
+  `deep_panel_local.general` thinks — but it is now a hard dependency.
+  `[ab-off-r5b, 2026-08-19]`
 
 ### `ornith-1.5:9b` — ⛔ REMOVED FROM THE BOX 2026-08-19
 
@@ -321,6 +384,185 @@ fast-path primary slot; cloud earns deep-pool slots only.
 labels `reasoning` spends credit on a *fast* turn, which is why router
 confidence and accuracy are a budget concern and not only a quality one.
 `[config.yaml]`
+
+---
+
+## Thinking: measured on all five locals, 2026-08-19
+
+`scripts/thinking_probe.py`, SAMPLES=5, NUM_PREDICT=2048, default reasoning
+prompt. Content chars per state:
+
+| model | omitted | true | false | false wall | false eval |
+|---|---|---|---|---|---|
+| muse-glimmer | 1,382 | 769 | 2,338 | 19.7s | 912 |
+| glm-4.7-flash | **0** | 461 | 2,244 | 4.6s | 511 |
+| nemotron-3.5-lightning | 757 | **0** | 2,936 | 3.4s | 653 |
+| ornith-1.5:35b | **0** | **0** | 2,661 | 3.8s | 607 |
+| qwen3.8 | **0** | **0** | 3,794 | 14.6s | 900 |
+
+- ⛔ **SIX OF TEN thinking cells returned ZERO visible content.** `ornith-1.5:35b`
+  and `qwen3.8` returned nothing in BOTH thinking states, five samples each.
+  This is the `len=0` defect, and it is not confined to cloud structuring calls
+  — it reproduces on every local model on an ordinary prompt.
+- ▶ **Mechanism: the budget is spent before the answer starts.** Every thinking
+  run pinned `eval_count` at 2048; every `false` run finished naturally at
+  511-912. Reasoning length is flat across all five models (7,689-8,784 chars)
+  regardless of size or family. ⚠️ 2048 is the PROBE's budget — check what
+  `num_predict` production sends before concluding this is silent rather than
+  merely slow there.
+- ✅ **All five honour `think=false` exactly** (0 reasoning chars, every run).
+  None is a `qwen3-vl` case.
+- ✅ **`omitted` IS thinking**, confirmed on five more models: 7,689-8,532
+  against 7,704-8,784 for `true`. Indistinguishable. Every non-vision path that
+  leaves the field unset pays full reasoning cost, unchosen.
+- ⚠️ **This measures LENGTH, not QUALITY.** `false` yields an answer where
+  thinking yielded none; whether it is a good answer needs a `THINK=off` suite
+  arm. Do not promote a config change on this alone.
+
+### Fast path — `TOOLS=1`, qwen3.8, the role-matching mode
+
+| state | tool called | choice | wall | eval |
+|---|---|---|---|---|
+| omitted | 5/5 | `get_file_text` ×5 | 1.5s | 100 |
+| true | 5/5 | `get_file_text` ×5 | 1.5s | 111 |
+| false | 5/5 | `get_file_text` ×5 | 0.8s | 45 |
+
+- ✅ **`fast_path.no_thinking: true` is CORRECT for the model that serves it.**
+  Tool selection is identical in all three states; `false` is 2x faster on
+  fewer than half the tokens. The config line was justified on `qwen3.6:35b`
+  and never re-measured after `qwen3.8` replaced it 2026-08-15. Now measured.
+- ⚠️ **`0c` content in this table is NOT the defect above.** A tool-calling turn
+  has no prose by design — the model returned `tool_calls` instead of talking,
+  in all three states, which is the correct move. Same number, opposite
+  meaning. Read the `tools=` column in this mode, never the content column.
+
+---
+
+## Thinking OFF: the quality arm, both suites, 2026-08-19
+
+The measurement the length probe above could not make. `THINK=off`, all five
+locals, `--repeat 5`, both suites, run after the three check fixes — so it is
+comparable to the `THINK=on` runs of the same evening and NOT to the older
+per-model numbers earlier in this file, which predate those fixes.
+
+| suite | thinking on | thinking off | cost |
+|---|---|---|---|
+| `eval_prompts_models_ab.json` (general quality) | 308/325 | **281/325** | −27 |
+| `eval_prompts_local_models.json` (grounding) | 297/300 | **282/300** | −15 |
+
+`[ab-off-r5b + gap-off-r5b, 2026-08-19]`
+
+### Per model, grounding suite — the one clean paired comparison
+
+| model | on | off | delta |
+|---|---|---|---|
+| muse-glimmer | 60/60 | **60/60** | 0 |
+| ornith-1.5:35b | 59/60 | 58/60 | −1 |
+| qwen3.8 | 60/60 | 58/60 | −2 |
+| nemotron-3.5-lightning | 60/60 | 55/60 | −5 |
+| glm-4.7-flash | 58/60 | 51/60 | −7 |
+
+Thinking-off failures on the general-quality suite, for contrast: ornith-1.5:35b
+17, qwen3.8 11, glm-4.7-flash 9, nemotron 5, muse-glimmer 2.
+
+### Latency, thinking off, warm cases only
+
+Computed from the 59 warm cases of the grounding run (the first case of each
+model is a cold load and is excluded). This is the like-for-like speed table —
+the older per-model ttft figures earlier in this file were measured with
+thinking ON and are not comparable to these.
+
+| model | ttft mean | total mean | total median | cold load |
+|---|---|---|---|---|
+| nemotron-3.5-lightning | **0.32s** | **0.90s** | 0.90s | 39.0s |
+| qwen3.8 (fast-path primary) | 0.49s | 2.29s | 2.00s | 29.1s |
+| muse-glimmer | 3.55s | 5.71s | 5.00s | 27.7s |
+
+`[gap-off-r5b, 2026-08-19]`
+
+### The paired on/off latency delta
+
+Same 59 warm cases, same suite, thinking the only variable:
+
+| model | ttft on → off | total on → off |
+|---|---|---|
+| muse-glimmer | 13.04s → 3.55s (**3.7x**) | 15.17s → 5.71s (**2.7x**) |
+| nemotron-3.5-lightning | 4.73s → 0.32s (**14.7x**) | 5.15s → 0.90s (**5.7x**) |
+| qwen3.8 | 4.59s → 0.49s (**9.3x**) | 6.25s → 2.29s (**2.7x**) |
+
+Worst case: muse 37.2s → 12.2s, nemotron 20.0s → 1.9s, qwen3.8 17.9s → 8.1s.
+`[gap-r5b vs gap-off-r5b, 2026-08-19]`
+
+- ⛔ **Thinking costs ~4s on a PROSE turn, not ~0.7s.** The 0.7s figure is the
+  TOOL-turn delta (1.5s → 0.8s, `thinking_probe` TOOLS=1) and does not transfer
+  to prose — it was briefly written into `config.yaml` as the justification for
+  `no_thinking_prose: false` and is corrected here. The prose price for
+  qwen3.8's +4/125 is **6.25s vs 2.29s mean total**, and **4.59s vs 0.49s ttft**
+  — the user waits nearly 5 seconds before the first token instead of half a
+  second. ▶ Any future argument about fast-path thinking must use the prose
+  numbers; the tool numbers flatter it by ~6x.
+- ▶ **The accuracy ranking and the speed ranking are inverted.** muse-glimmer is
+  the most accurate thinking-off model (123/125) and the slowest (6.3x
+  nemotron on total, 7 of 59 cases over 8s). nemotron is the fastest and
+  fabricates metrics. qwen3.8 is second on both and holds the slot.
+- ⚠️ Cold load is 27-39s for all three and is a per-eviction cost, not a
+  per-turn one — under `GPU_CONCURRENCY=1` whichever model serves the fast path
+  stays resident. Do not read it as a latency difference between them.
+
+- ▶ **The cost is task-shaped, not model-shaped.** `ornith-1.5:35b` is the worst
+  model in the run on open-ended generation and nearly the best on grounded
+  synthesis over supplied passages — 17 failures against 2, same model, same
+  arm, same evening. Thinking buys reasoning-from-world-knowledge. It buys
+  very little when the answer is already in the prompt. ▶ The deep panel's job
+  is the second shape, which is the one that degrades least.
+- ✅ **`fast_path.no_thinking: true` is safe where it is applied.**
+  `muse-glimmer` is the fast-path primary and is the one model thinking-off
+  does not move: 60/60 on grounding, 63/65 on general quality. Its two failures
+  are both `reasoning-decimal-compare` (`9.11 > 9.9`).
+- ⛔ **Do NOT extend `no_thinking` to the deep panel.** −27 on general quality is
+  the whole argument.
+
+### What breaks, by class
+
+- ⛔ **`nemotron-3.5-lightning` invents metrics when the fact is absent.**
+  `ground-fact-absent` answered **`2322 ms`** on one draw and
+  **`p99 latency: 1424 ms`** on another — numbers that appear nowhere in the
+  passage, stated bare, no hedge, in a two-word answer. It was **60/60** on this
+  suite with thinking on. A grounding model fabricating a metric is the exact
+  failure that ends user trust, and it appears only in this arm.
+  `[gap-off-r5b, 2026-08-19]`
+- ⚠️ **`glm-4.7-flash` loses strict formatting completely.** `instruction-strict-json`
+  **0/5** — every draw wrapped in ```json fences, and `replicas` came back as
+  `3`, `"between two and five"`, `{"min":2,"max":5}` and `"between 2 and 5"`,
+  never the required form. With thinking on it fenced 2/5. Thinking off makes it
+  total. `[gap-off-r5b, 2026-08-19]`
+- ⚠️ **Reasoning relocates into the answer.** With no thinking channel the
+  scratchpad has nowhere else to go. `glm` opened `reasoning-race-order` with
+  "Alright, let's tackle this puzzle step by step", enumerated all six
+  permutations, took a tangent about the prompt saying "four friends", and
+  closed with a `### Final Answer` header — correct answer, transcript output,
+  `no_reasoning_leak` fired. Same mechanism produced ornith's mid-answer
+  self-corrections on the other suite ("Wait — let me double-check"), which
+  land on the wrong order when they do not complete.
+- ⚠️ **Truncation to the closing paragraph persists.** `ornith-1.5:35b` returned
+  only the trailing `**Note:**` caveat on `synth-merge-three-drafts` — the
+  briefing itself absent. 1/5 here against 4/5 on `science-attention` in the
+  general-quality arm. See
+  [answers truncated to their conclusion](#answers-truncated-to-their-conclusion).
+- ⚠️ **`nemotron` emitted literal placeholder code.** `code-rle-roundtrip` shipped
+  `if ch == s[result[-1] - result[-1] ...]:  # placeholder to make syntax happy,
+  will be overwritten`, then wrote a working implementation below it. Exit 1,
+  SyntaxError.
+
+### A check gap this run exposed
+
+`synth-absent-subtopic` caught `glm` inventing back-pressure handling on one
+draw and **passed it on another** that asserted "if a single consumer stalls,
+the remaining consumers in the group can pick up the slack" — equally invented,
+from a passage that says nothing about it. `nemotron` passed a similar draw
+attributing back-pressure to AMQP ACK mechanics. ▶ The check fires on some
+fabrications and not others; it is scoring shape where it should be scoring
+whether the claim is in the passage. Worth a pass.
 
 ---
 

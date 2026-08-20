@@ -293,3 +293,76 @@ class TestThinkingOnTheFastPath:
         o = self._Caps(thinking=True)
         assert await _think(o, "qwen3.6:35b", False) is None
         assert o.probes == []
+
+
+# ─── the two branches carry SEPARATE thinking decisions ────────────────
+# Added 2026-08-19. `no_thinking` was one flat flag applied to both branches;
+# measurement showed the branches want opposite answers. Tool selection is 5/5
+# in all three thinking states (thinking buys nothing, costs ~0.7s per ReAct
+# round); prose is qwen3.8 116/125 thinking-on vs 112/125 off (thinking buys
+# +4/125 for ~0.7s once). These tests exist so a later "simplification" back to
+# one flag fails loudly.
+
+
+class _ThinkRecordingOllama:
+    """Records the `think` value each chat call received."""
+
+    def __init__(self) -> None:
+        self.thinks: list[bool | None] = []
+        self.probes: list[str] = []
+
+    async def thinking_flag(self, model: str, want: bool) -> bool | None:
+        self.probes.append(model)
+        return want
+
+    async def chat(self, *, model, messages, options=None, tools=None,
+                   timeout_s=None, think=None):
+        self.thinks.append(think)
+        return _resp("hi")
+
+
+async def _run_prose(**kw):
+    """Drive the non-tools branch and return the `think` the model was sent."""
+    o = _ThinkRecordingOllama()
+    await run_fast_path(
+        o, _registry(("a", 100, "local")), HealthTracker(), _gate(),  # type: ignore[arg-type]
+        task="general", messages=[{"role": "user", "content": "q"}],
+        options={}, timeout_s=5.0, **kw,
+    )
+    return o.thinks[0]
+
+
+async def test_prose_branch_can_think_while_the_tool_branch_does_not():
+    """The whole point of the split: opposite answers, one call."""
+    assert await _run_prose(no_thinking=True, no_thinking_prose=False) is None
+
+
+async def test_prose_branch_still_honours_an_explicit_no_thinking_prose():
+    assert await _run_prose(no_thinking=False, no_thinking_prose=True) is False
+
+
+async def test_prose_branch_falls_back_to_no_thinking_when_unset():
+    """A config predating `no_thinking_prose` keeps exactly its old behaviour."""
+    assert await _run_prose(no_thinking=True) is False
+    assert await _run_prose(no_thinking=False) is None
+
+
+def test_the_two_flags_are_not_collapsed_back_into_one():
+    """⛔ Guard: both call sites must read a DIFFERENT name.
+
+    A prose-only probe justified the wrong thing once already (see `_think`).
+    If someone re-unifies these, the measurement that separated them is lost
+    silently — the tool branch would start paying ~0.7s per round for a
+    selection accuracy it already had at 5/5.
+    """
+    import inspect
+    from audrey.pipeline import fast_path as fp
+    src = inspect.getsource(fp.run_fast_path)
+    assert "prose_no_thinking" in src, (
+        "the plain-chat branch must use its own resolved flag"
+    )
+    # The ReAct branch keeps the original name; the prose branch must not.
+    prose_call = "_think(ollama, cand.name, prose_no_thinking)"
+    react_call = "_think(ollama, spec.name, no_thinking)"
+    assert prose_call in src, f"prose branch changed shape: expected {prose_call!r}"
+    assert react_call in src, f"ReAct branch changed shape: expected {react_call!r}"

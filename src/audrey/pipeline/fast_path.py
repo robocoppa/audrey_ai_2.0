@@ -130,6 +130,7 @@ async def run_fast_path(
     user_id: str | None = None,
     cfg: Any = None,
     no_thinking: bool = False,
+    no_thinking_prose: bool | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Return (concrete_model, response_like_dict).
 
@@ -159,6 +160,20 @@ async def run_fast_path(
         and spec.name in tool_capable_models
     )
 
+    # ⚠️ TWO BRANCHES, TWO THINKING DECISIONS — they are not the same question.
+    # `no_thinking` governs the ReAct branch (tool calling); `no_thinking_prose`
+    # governs the plain-chat branch (a direct answer). Measured 2026-08-19:
+    # tool selection is 5/5 in ALL THREE thinking states, so thinking buys
+    # nothing on the ReAct branch and costs ~0.7s PER ROUND. On prose it buys
+    # qwen3.8 +4/125 (116 thinking-on vs 112 off, both suites, --repeat 5) for
+    # ~0.7s ONCE, including the `9.11 > 9.9` flip it makes 3/5 with thinking
+    # off. ⛔ Do not collapse these back into one flag without re-measuring
+    # BOTH branches — a prose-only probe justified the wrong thing once already
+    # (see `_think`).
+    # Defaults to `no_thinking` so a config predating `no_thinking_prose` keeps
+    # exactly the behaviour it has.
+    prose_no_thinking = no_thinking if no_thinking_prose is None else no_thinking_prose
+
     if not use_tools:
         # Try the top healthy model, then fall back to the next healthy
         # candidate if it errors. `spec` (already chosen above) is the first
@@ -177,7 +192,7 @@ async def run_fast_path(
                 model=cand.name, task_type=str(task), path="fast",
             ).inc()
             try:
-                think = await _think(ollama, cand.name, no_thinking)
+                think = await _think(ollama, cand.name, prose_no_thinking)
                 async with gate.acquire(cand.name, location=cand.location, user_id=user_id):
                     resp = await ollama.chat(
                         model=cand.name, messages=messages,
