@@ -1546,12 +1546,12 @@ passthrough:
     # ── Quant bake-off arms, 2026-08-25. NOT in any pool; passthrough only.
     # Same 27.3B weights as `qwen3.8:latest` (Q4_K_M, 17 GB) at a different
     # quantization, so `_expand_sweep` can A-B them against it directly.
-    # ⚠️ mtp-q8_0 IS 30 GB AGAINST 24 GB PER CARD. It cannot sit on one card;
+    # ⚠️ mtp-q8_0 IS 29 GB AGAINST 24 GB PER CARD. It cannot sit on one card;
     # Ollama will span both or spill to CPU, and either way the tokens/sec that
     # follows is partly a memory-bandwidth measurement. Run `ollama ps` after
     # its first prompt and read the CPU/GPU split BEFORE trusting a suite of
     # latency numbers — same precedent as laguna-s-2.1 below.
-    # ⚠️ The three arms sum to 66 GB against 48 GB. `_expand_sweep` groups by
+    # ⚠️ The three arms sum to 63 GB against 48 GB. `_expand_sweep` groups by
     # model so each loads ONCE, which is affordable; but there is no warmup in
     # the harness, so the FIRST case per arm carries that cold load. Read the
     # first case per model as cold and discount it, or repeat enough that it

@@ -54,7 +54,7 @@ LOCAL_MODELS=(
   # `qwen3.8:latest` (Q4_K_M, 17 GB) — pulled to A-B quant and multi-token
   # prediction against it. Different tags coexist; `:latest` keeps serving
   # until a winner is promoted. ▶ Delete the losers from BOTH files.
-  # ⚠️ `27b-mtp-q8_0` is 30 GB against 24 GB per card: it cannot sit on one
+  # ⚠️ `27b-mtp-q8_0` is 29 GB against 24 GB per card: it cannot sit on one
   # card. Confirm the CPU/GPU split with `ollama ps` before trusting its
   # latency numbers.
   "qwen3.8:27b-mtp-q4_K_M"
