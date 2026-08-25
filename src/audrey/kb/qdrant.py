@@ -98,8 +98,9 @@ class SearchScope:
 
     file_ids: list[str] | None = None
     artifact: str | None = None
-    # Kept so a caller can pin user scope here too if a future path needs it;
-    # today every user-scoped read is already addressed by collection name.
+    # Load-bearing ownership boundary for private reads. Collection names are
+    # sanitized and can collide, so routes must filter on the exact raw user
+    # stored in each point as well as selecting the user collection.
     user: str | None = None
 
     def __post_init__(self) -> None:

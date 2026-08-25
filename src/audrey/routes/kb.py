@@ -445,6 +445,20 @@ def _scoped_to_one_users_files(scope: SearchScope | None) -> bool:
     return scope is not None and scope.file_ids is not None
 
 
+def _private_search_scope(scope: SearchScope | None, user: str) -> SearchScope:
+    """Add the exact authenticated user to every private-collection read.
+
+    User collection names are sanitized for Qdrant and are therefore not a
+    unique identity boundary: distinct raw user identifiers can map to the
+    same collection. The raw user stored on each point is the final ownership
+    check. Replacing the field also prevents a caller-provided scope from
+    selecting a different user while preserving file and artifact filters.
+    """
+    if scope is None:
+        return SearchScope(user=user)
+    return replace(scope, user=user)
+
+
 async def _search_text_merged(
     qdrant: QdrantKB, vec: list[float], *, top_k: int, user: str | None,
     min_score: float = 0.0, scope: SearchScope | None = None,
@@ -484,7 +498,13 @@ async def _search_text_merged(
         user_col = user_text_collection(user)
         if await qdrant.collection_exists(user_col):
             coros.append(
-                qdrant.search_text(vec, top_k=fetch_k, collection=user_col, scope=scope))
+                qdrant.search_text(
+                    vec,
+                    top_k=fetch_k,
+                    collection=user_col,
+                    scope=_private_search_scope(scope, user),
+                )
+            )
             had_user = True
     results = await asyncio.gather(*coros)
     merged: list[KBHit] = [h for batch in results for h in batch if h.score >= min_score]
@@ -529,8 +549,15 @@ async def _search_text_hybrid(
     if user:
         user_col = user_text_collection(user)
         if await qdrant.collection_exists(user_col):
-            coros.append(qdrant.search_hybrid(
-                vec, query, top_k=fetch_k, collection=user_col, scope=scope))
+            coros.append(
+                qdrant.search_hybrid(
+                    vec,
+                    query,
+                    top_k=fetch_k,
+                    collection=user_col,
+                    scope=_private_search_scope(scope, user),
+                )
+            )
             had_user = True
 
     pairs = await asyncio.gather(*coros)
@@ -645,7 +672,14 @@ async def _search_images_merged(
     if user:
         user_col = user_image_collection(user)
         if await qdrant.collection_exists(user_col):
-            coros.append(qdrant.search_images(vec, top_k=top_k, collection=user_col))
+            coros.append(
+                qdrant.search_images(
+                    vec,
+                    top_k=top_k,
+                    collection=user_col,
+                    scope=_private_search_scope(None, user),
+                )
+            )
             had_user = True
     results = await asyncio.gather(*coros)
     merged: list[KBHit] = [h for batch in results for h in batch]

@@ -38,11 +38,11 @@ useful contract ideas locally rather than depend on a hosted runtime:
 Phase 2 starts only after the Phase 1 completion gate, with particular reliance
 on:
 
-- H1: private data isolation is enforced below prompt/skill text;
-- H2/H3: selected-skill work cannot leak request tasks or GPU slots;
-- H4/M1/M2: stream and request contracts have one owner;
-- H7/M5/M6: capabilities have declarative policy and availability;
-- M9: configuration precedence and generated inventories are trustworthy.
+- private-data policy is enforced server-side rather than by prompt text;
+- request tasks and GPU scheduling have explicit lifecycle ownership;
+- streaming and request contracts have one owner and terminal outcome;
+- model-visible capabilities have declarative policy and availability;
+- configuration precedence and generated inventories are trustworthy.
 
 A registry-only spike may be developed earlier behind an off-by-default flag,
 but it does not ship or become an implicit dependency of `audrey_video` until

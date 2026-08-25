@@ -1,0 +1,153 @@
+# Campaign 3 Phase 1 — platform hardening
+
+**Status:** In progress. Wave 1A private-search isolation is laptop-verified;
+request-ownership work and Unraid verification remain.
+
+## Goal
+
+Strengthen Audrey's privacy boundaries, request lifecycle, protocol
+compatibility, durable storage behavior, degraded operation, and deployment
+reproducibility before adding another extensibility layer.
+
+The detailed engineering assessment and finding-level remediation notes are
+laptop-local working documents. This public plan records product outcomes,
+sequence, and verification gates without publishing internal security analysis.
+
+## Delivery model
+
+Phase 1 ships as independently verifiable waves, not one large rewrite. Each
+wave has:
+
+- focused regression and failure-injection tests;
+- the full hermetic test gate;
+- lint and lesson-link verification for changed source;
+- a separate deployment boundary and rollback point;
+- user-run Unraid smoke tests before it is marked complete.
+
+## Product invariants
+
+- Authenticated identity remains server-owned.
+- Private data access is scoped below model instructions.
+- The documented complexity-routing order remains unchanged.
+- Client disconnects stop work owned by that request.
+- Tool side effects are not blindly retried.
+- Existing storage remains recoverable through migrations and rollback windows.
+- Optional component failure does not unnecessarily disable unrelated features.
+- Laptop tests do not stand in for deployed-stack verification.
+
+## Wave 1A — data boundaries and request ownership
+
+Make private search scoping consistent across every query mode and give every
+spawned request task one explicit owner. Cover GPU scheduling, deep execution,
+research execution, queue shutdown, and client cancellation with deterministic
+tests.
+
+Gate:
+
+- private text, hybrid, filtered, and image query isolation tests pass;
+- cancellation at every generation stage leaves no child work or held slot;
+- ordinary requests still follow the existing routing behavior;
+- laptop verification and the focused Unraid smoke pass.
+
+## Wave 1B — protocol and streaming consistency
+
+Complete the supported Chat Completions message lifecycle and consolidate
+stream ownership so fast, deep, research, and passthrough responses share clear
+terminal behavior, identity, metrics, and archive boundaries.
+
+Gate:
+
+- supported multi-turn tool calling works in streaming and non-streaming modes;
+- each stream has one response identity, role transition, and terminal outcome;
+- fallback, thinking, health, and metrics policies are consistent where their
+  contracts overlap;
+- progress-banner ordering remains unchanged;
+- Open WebUI and agent-client deployment smokes pass.
+
+## Wave 1C — storage accounting and durable lifecycle
+
+Centralize storage reservations and make indexing, retention, migration,
+archive capture, and deletion retryable. Build user-facing memory and chat
+inspection, correction, export, and deletion only on top of those durable
+primitives.
+
+Gate:
+
+- concurrent mixed uploads honor configured storage limits;
+- interrupted work and cleanup converge after restart;
+- archive and deletion repair paths are idempotent;
+- response delivery is not blocked on archive indexing;
+- conversation identity remains stable across a growing thread;
+- disposable-user export and deletion are verified across stores on Unraid.
+
+## Wave 1D — capability policy and readiness
+
+Represent model-visible capabilities and their dependencies declaratively.
+Make discovery resilient per source, allow independent capabilities to degrade
+independently, and expose component-level readiness and repair status.
+
+Gate:
+
+- one unavailable optional dependency does not block unrelated chat/tools;
+- capability recovery and rediscovery work without a full stack restart;
+- only explicitly model-visible endpoints enter the tool registry;
+- readiness, admin status, and metrics agree under injected component failures;
+- degraded-start and recovery behavior is verified on Unraid.
+
+## Wave 1E — reproducible and responsive runtime
+
+Build Python services from the committed lockfile, finish non-root container
+operation, remove blocking hot-path file work, reuse long-lived clients, and
+bring configuration/documentation back in line with runtime behavior.
+
+Gate:
+
+- repeated builds from one lockfile resolve the same environment;
+- Audrey and custom-tools operate non-root with deliberate bind-mount ownership;
+- slow storage operations do not stall unrelated requests;
+- environment/YAML precedence is tested and documented;
+- generated capability/model inventories match their sources;
+- container and Unraid smokes pass.
+
+## Wave 1F — bounded simplification
+
+After the behavior above is pinned, extract only the lifecycle and stream
+mechanics whose duplication the earlier waves exposed. Keep request policy,
+research policy, and storage ownership explicit rather than hiding them behind
+an overly generic framework.
+
+This wave is complete when the affected behavior tests pass unchanged and the
+result reduces duplicate state transitions or policy declarations.
+
+## Sequence
+
+```text
+1A data boundaries/request ownership
+  -> 1B protocol/stream consistency
+  -> 1C durable storage lifecycle
+  -> 1D capability policy/readiness
+  -> 1E runtime reproducibility/responsiveness
+  -> 1F justified simplification
+  -> Campaign 3 Phase 2 reusable skills
+```
+
+Storage lifecycle and capability readiness may be developed independently
+after Wave 1A, but they remain separate deploy units. The skills phase begins
+only after Phase 1's platform gates are closed or explicitly accepted with a
+documented disposition in the private engineering record.
+
+## Phase 1 completion gate
+
+- All planned waves have laptop and user-confirmed deployment evidence.
+- Full hermetic tests and changed-file lint pass.
+- Lesson-link checks report no required drift fixes.
+- Restart, cancellation, and failure-injection paths converge cleanly.
+- Runtime status, configuration, and public documentation agree.
+- No unresolved platform-boundary item is being deferred implicitly into the
+  skills implementation.
+
+## Deferred product work
+
+OCR, broader audio/media support, ordinary-answer provenance, artifact
+download, and `/v1/responses` remain candidates for later Campaign 3 phases.
+They are not interleaved with the hardening or initial skills rollout.

@@ -41,9 +41,9 @@ shipped. Use the groupings below for navigation.
 ### Campaign 3 (current, planned)
 
 - [Campaign 3 index](campaign-3/README.md)
-- [01 audit remediation](campaign-3/phase-01-audit-remediation-plan.md) — close
-  the 2026-08-24 review findings in dependency-ordered, separately deployable
-  waves.
+- [01 platform hardening](campaign-3/phase-01-platform-hardening-plan.md) —
+  strengthen privacy boundaries, request ownership, durable storage, component
+  readiness, and deployment reproducibility in separately deployable waves.
 - [02 reusable skills](campaign-3/phase-02-skills-capability-plan.md) — local,
   versioned instruction/resource bundles with explicit selection and enforced
   model-visible tool restriction. Gated on Phase 1.

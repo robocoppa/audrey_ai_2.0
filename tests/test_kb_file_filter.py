@@ -113,6 +113,14 @@ class TestSearchScope:
         flt = _as_filter(SearchScope(artifact="transcript"))
         assert [c.key for c in flt.must] == ["artifact"]
 
+    def test_file_artifact_and_user_filters_compose(self):
+        flt = _as_filter(SearchScope(
+            file_ids=["f1"], artifact="transcript", user="alice@example.com",
+        ))
+
+        assert [c.key for c in flt.must] == ["file_id", "artifact", "user"]
+        assert flt.must[2].match.value == "alice@example.com"
+
 
 # ─── The trap: both retrievers, or neither ────────────────────────────
 
@@ -185,8 +193,9 @@ class TestBothRetrievers:
             min_score=0.0, cfg=CFG, scope=scope,
         )
 
-        assert [s for _, s in q.dense] == [scope]
-        assert [s for _, s in q.lexical] == [scope]
+        expected = SearchScope(file_ids=["f1"], user="alice@example.com")
+        assert [s for _, s in q.dense] == [expected]
+        assert [s for _, s in q.lexical] == [expected]
 
     @pytest.mark.asyncio
     async def test_both_sides_get_the_identical_scope_object(self):
@@ -200,12 +209,16 @@ class TestBothRetrievers:
             min_score=0.0, cfg=CFG, scope=scope,
         )
 
-        assert q.dense[0][1] is q.lexical[0][1] is scope
+        private_scope = q.dense[0][1]
+        assert private_scope is q.lexical[0][1]
+        assert private_scope is not scope
+        assert private_scope == SearchScope(
+            file_ids=["f1"], artifact="transcript", user="alice@example.com",
+        )
 
     @pytest.mark.asyncio
-    async def test_an_unscoped_search_is_unchanged(self):
-        """Omitting the filter must restore the previous behaviour exactly —
-        both collections, both retrievers, no filter."""
+    async def test_an_unscoped_search_only_scopes_the_private_collection(self):
+        """Global reads stay broad; private reads always enforce ownership."""
         q = _ScopeRecordingQdrant()
 
         await _search_text_hybrid(
@@ -215,7 +228,10 @@ class TestBothRetrievers:
 
         assert [c for c, _ in q.dense] == ["kb_text", "kb_user_text_alice_example_com"]
         assert [c for c, _ in q.lexical] == ["kb_text", "kb_user_text_alice_example_com"]
-        assert all(s is None for _, s in q.dense + q.lexical)
+        assert q.dense[0][1] is None
+        assert q.lexical[0][1] is None
+        assert q.dense[1][1] is q.lexical[1][1]
+        assert q.dense[1][1] == SearchScope(user="alice@example.com")
 
     @pytest.mark.asyncio
     async def test_a_file_scope_skips_the_global_collection(self):
@@ -230,6 +246,10 @@ class TestBothRetrievers:
 
         assert [c for c, _ in q.dense] == ["kb_user_text_alice_example_com"]
         assert [c for c, _ in q.lexical] == ["kb_user_text_alice_example_com"]
+        assert q.dense[0][1] is q.lexical[0][1]
+        assert q.dense[0][1] == SearchScope(
+            file_ids=["f1"], user="alice@example.com",
+        )
 
     @pytest.mark.asyncio
     async def test_the_non_hybrid_path_is_scoped_as_well(self):
@@ -243,7 +263,10 @@ class TestBothRetrievers:
         )
 
         assert [c for c, _ in q.dense] == ["kb_user_text_alice_example_com"]
-        assert q.dense[0][1] is scope
+        assert q.dense[0][1] is not scope
+        assert q.dense[0][1] == SearchScope(
+            file_ids=["f1"], user="alice@example.com",
+        )
 
 
 # ─── Resolution, end to end through the route ─────────────────────────

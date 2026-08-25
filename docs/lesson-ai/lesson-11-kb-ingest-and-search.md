@@ -460,7 +460,7 @@ The pieces of FastAPI to notice:
   build the `kb_search` tool spec for the model.
 
 The merge logic is in `_search_text_merged` —
-[`routes/kb.py:444`](../../src/audrey/routes/kb.py#L444):
+[`routes/kb.py:462`](../../src/audrey/routes/kb.py#L462):
 
 ```python
 async def _search_text_merged(qdrant, vec, *, top_k, user):
@@ -499,7 +499,7 @@ If we ever spun up a per-user collection on a different embedder, the
 scores would look comparable on paper (both are floats in the same
 range) but mean different things — the merge would produce arbitrary
 ordering. The docstring at
-[`routes/kb.py:454-456`](../../src/audrey/routes/kb.py#L454) pins
+[`routes/kb.py:471-474`](../../src/audrey/routes/kb.py#L471) pins
 that contract:
 
 > If a per-user collection ever ships with a different model, switch
@@ -525,9 +525,9 @@ text "a black labrador" and an actual picture of a black lab land
 within a few cosine degrees of each other.
 
 `/v1/kb/query/image` (handler at
-[`routes/kb.py:656`](../../src/audrey/routes/kb.py#L656)) picks which
+[`routes/kb.py:691`](../../src/audrey/routes/kb.py#L691)) picks which
 encoder to call based on which field of the request body was supplied
-([`routes/kb.py:673`](../../src/audrey/routes/kb.py#L673)):
+([`routes/kb.py:707`](../../src/audrey/routes/kb.py#L707)):
 
 ```python
 if req.image_url:
@@ -654,7 +654,7 @@ in Lesson 12 is what cleans these up.
 
 **5. SSRF-rejected image URL.**
 `_validate_image_url` raises `ValueError`; the route catches it
-([`routes/kb.py:679-680`](../../src/audrey/routes/kb.py#L679)) and 422s
+([`routes/kb.py:713-714`](../../src/audrey/routes/kb.py#L713)) and 422s
 with the reason. From the model's side this looks like any tool
 failure: it gets the rejection message in the `role: "tool"`
 content, and the right thing is to ask the user for a different URL
@@ -715,7 +715,7 @@ of material. Why?"**
 
 `_search_text_merged` pulls top-K from each collection then sorts by
 raw cosine score and slices to `top_k`
-([`routes/kb.py:489-492`](../../src/audrey/routes/kb.py#L489)). If
+([`routes/kb.py:510-512`](../../src/audrey/routes/kb.py#L510)). If
 the user's personal notes are closer matches to the query — likely
 when the notes use their exact phrasing — they can sweep all five
 slots. The global hits *are* in the candidate list; they just rank
