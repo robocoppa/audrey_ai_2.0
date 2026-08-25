@@ -220,6 +220,42 @@ them are the reason it is being replaced. ⚠️ They can no longer be re-measur
   the paper does not exist AND says why it will not guess ("I'd rather flag the
   gap than invent a plausible-sounding summary"). `[ab-next4, 2026-08-19]`
 
+### `qwen3.8` quant variants — `27b-mtp-q4_K_M`, `27b-mtp-q8_0`
+
+Bake-off 2026-08-25 against the incumbent `qwen3.8:latest` (Q4_K_M, 17 GB).
+Same 27.3B weights, three builds. `eval_prompts_code_hard_models.json`,
+5 cases x `--repeat 5` = 25 draws per arm, all 5 cases `executed`.
+`[quant-mtp + quant-q8, 2026-08-25]`
+
+- ⛔ **NEITHER VARIANT EARNED PROMOTION. `qwen3.8:latest` stays.**
+- **Quality is identical across all three.** latest 24/25, mtp-q4 25/25,
+  mtp-q8 24/25. One failure each in two arms, on different cases, both real
+  code bugs (latest: `lru-ttl` omits the expired-purge from `put`; q8:
+  `parse-duration` writes `\d+[hms]+` where it needs `(?:\d+[hms])+`, so
+  `'1h30m'` is rejected). **Q8_0's extra 12 GB bought no measurable quality.**
+- ✅ **MTP is genuinely active** — `ollama show --modelfile` reports
+  `PARAMETER draft_num_predict 4`, a Modelfile default needing no client
+  involvement. This is a real measurement of MTP, not of an inert tag.
+- **MTP delivered NO speedup.** At Q4 it was slower on 5/5 cases, medians
+  +3% to +38%. Sign test p = 0.062 and pooled Mann-Whitney z = -0.86, so the
+  DIRECTION is consistent but significance is not reached. What is established
+  is the absence of the advertised 1.4-2.2x, not the presence of a penalty.
+- ▶▶ **WHY MTP COULD NOT HELP, and this is the durable finding.** MTP
+  accelerates token generation only. The generation window (`total - ttft`) is
+  **1.3-4.5s** in ALL THREE arms, against 6-100s totals — TTFT is **65-94%** of
+  every request. A perfect 2x on generation would save 1-2s of a 20s request.
+  ⚠️ Generalise this before benchmarking any generation-side optimisation on
+  this box: on a thinking model the reasoning tokens are emitted BEFORE the
+  first content token, so they land inside TTFT. You are timing reasoning, not
+  answering.
+- ⚠️ **`mtp-q8_0` has a heavy tail.** Median 12.7s is the LOWEST of the three,
+  but mean 23.4s is the highest and max is **100.8s** against latest's 56.8s.
+  On `lru-ttl` its five draws spread 63.3s (37.5 / 49.1 / 50.6 / 84.9 / 100.8)
+  and the 97.4s ttft was repeat #4, NOT the cold load. Most requests are fine;
+  some are catastrophic. See *Not established* for what this is.
+- **29 GB against 24 GB per card** (`ollama list`), so it cannot be resident on
+  one card and must span both. Same class of risk as `llama4:latest` below.
+
 ### `llama4:latest`
 
 - ⛔ **DROPPED FROM THE MODEL SWEEP 2026-08-19**, replaced by `ornith-1.5:35b`.
@@ -655,6 +691,29 @@ Open questions, and what would close each.
   VRAM, a sibling model scored 5/5 in the same window, and the harness sets no
   sampler options, which explains it without any hardware theory.
   ▶ *Closes with:* both suites at `--repeat 5`.
+- **Whether `qwen3.8:27b-mtp-q8_0`'s latency tail is memory pressure.** The
+  bimodal shape (median fine, max 100.8s, 63s spread on one prompt) fits a
+  29 GB model spanning two 24 GB cards with the embedder pinned resident, but
+  **`ollama ps` was never captured during the run**, so the GPU/CPU split is
+  unknown and the alternative — ordinary thinking-length variance — is not
+  excluded. ⚠️ Until this is settled its latency column cannot be compared
+  with the Q4 arms at all, exactly as with `llama4:latest`.
+  ▶ *Closes with:* `ollama ps` during a re-run, read before anything else.
+- **Whether MTP's Q4 slowdown is real or verbosity.** The harness sends no seed
+  and no temperature, and the answers file carries no token counts, so "MTP
+  generates slower" and "the MTP arm happened to write more" are
+  indistinguishable. Several mtp-q4 answers are visibly wordier.
+  ▶ *Closes with:* `eval_compare.py`'s mean-answer-length column on the results
+  JSON; normalise latency by output tokens before claiming a rate difference.
+- **The whole quant bake-off ran with thinking ON.** `passthrough.think` is
+  `null` (config.yaml), so the field is omitted and qwen3.8's template thinks by
+  default. ⚠️ The fast path — where qwen3.8 actually serves — runs
+  `think: false`. So NO arm here, including the incumbent baseline, describes
+  the production latency profile, and TTFT dominance is partly an artifact of
+  the arm rather than of the model.
+  ▶ *Closes with:* re-running the three arms with `THINK=off`. That is also the
+  only version of this test whose latency numbers would inform a serving
+  decision.
 - **`ornith-1.5:9b` as router.** Size (6.6 GB vs the incumbent's ~2.5 GB) is the
   open risk, not classification skill. `classify_with_registry` takes no gate
   argument, so `FairLocalGate` never sees the router; under `GPU_CONCURRENCY=1`

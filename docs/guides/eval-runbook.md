@@ -222,13 +222,91 @@ the MTP heads. It is a fair comparison of deployable tags, but it cannot tell
 you which half moved the number. Pull plain `qwen3.8:27b-q8_0` (~29 GB) if the
 Q8 arm wins and you need to know why.
 
-⚠️ **Confirm MTP is actually active.** Ollama's speculative path is normally
-driven by `--speculative-model` with a separate drafter; whether a bundled
-`-mtp-` tag engages it through a plain `/v1/chat/completions` call is
-unverified here. If it does not, the MTP arms are ordinary Q4/Q8 carrying dead
-weight, and a null result means nothing about MTP. There is also an upstream
-report of MTP variants running 2x SLOWER (ollama#17776, Apple Silicon/Metal —
-may not apply to CUDA).
+✅ **MTP IS ACTIVE — settled 2026-08-25, no flag needed.**
+
+```
+$ docker exec ollama ollama show --modelfile qwen3.8:27b-mtp-q4_K_M | grep -i draft
+PARAMETER draft_num_predict 4
+```
+
+MTP tensors in the GGUF do nothing on their own; Ollama gates them behind the
+`draft_num_predict` runtime option. These tags ship it as a **Modelfile
+default**, so it applies with no client involvement. Four tokens are drafted
+per verification pass.
+
+▶ **Check the Q8 tag too** — only `mtp-q4_K_M` was confirmed. Same command.
+
+⚠️ **You cannot TUNE it from here.** `_options_from_request`
+(`routes/openai/responses.py`) maps exactly three knobs — `temperature`,
+`top_p`, `num_predict` — and `ChatCompletionRequest` has no field for anything
+else, so `draft_num_predict` cannot be set per request by ANY client: not OWUI,
+not this harness, not curl. `OllamaClient.chat` would forward it fine; the
+route-level mapping is the ceiling. Trying 2 or 8 means a Modelfile variant, or
+adding the field to the schema + both `_options_from_*` siblings.
+
+▶ **The validity check this gives you for free.** MTP is not an approximation:
+the verify pass only admits tokens the main model would have chosen anyway, so
+the output distribution is UNCHANGED. `latest` and `mtp-q4_K_M` should
+therefore land on the SAME pass rate, with only latency moving. Diverging pass
+rates are a defect signal — bad tensors, or a verification path that is not
+exact — NOT evidence that MTP improves quality. Genuine quality differences can
+only come from the Q8 arm, where the weights actually differ.
+
+⚠️ MTP can also LOSE. Acceptance rate decides it: when the cheap heads guess
+badly you have paid for drafting and verification and discarded both. That is
+the mechanism behind ollama#17776 (MTP variants 2x SLOWER, Apple Silicon /
+Metal). Whether it reproduces on CUDA is what this run answers.
+
+#### The thinking-OFF arm (2026-08-25)
+
+The bake-off above ran thinking-ON and showed TTFT is 65-94% of every request,
+because reasoning tokens precede the first content token. The fast path serves
+`think: false`, so that run does not describe production. This arm does.
+
+⚠️⚠️ **THESE NUMBERS DO NOT COMPARE TO THE RUN ABOVE.** `THINK` forces
+`--base-url` to Audrey-direct (eval-onbox.sh line ~129) because OWUI drops
+vendor body fields, and a direct run has no OWUI system prompt, sampling params
+or retrieval context. Thinking AND the request path both change. Compare the
+three MODELS against each other WITHIN this arm; never across.
+
+▶ **Preflight — the silent mislabel.** `--think off` is dropped server-side by
+`ollama.thinking_flag` for any model that does not declare `thinking`, and
+nothing warns: that arm would run thinking-ON while the results JSON says OFF.
+The harness's hard-fail guard covers the base-url mistake, NOT this one. Check
+all three first:
+
+```bash
+for m in qwen3.8:latest qwen3.8:27b-mtp-q4_K_M qwen3.8:27b-mtp-q8_0; do
+  echo -n "$m: "; docker exec ollama ollama show "$m" | grep -ci thinking
+done
+```
+
+A `0` on any line means that model cannot take the arm — drop it rather than
+letting it run mislabelled.
+
+```bash
+# Serial, and detached from the session with setsid so an SSH drop cannot
+# strand the second run (that is how the q8 arm was lost on 2026-08-25).
+setsid nohup bash -c '
+  THINK=off CASES=eval_prompts_code_hard_models.json LABEL=q4-thinkoff \
+    ARGS="--repeat 5" \
+    MODELS="audrey_passthrough/qwen3.8:latest,audrey_passthrough/qwen3.8:27b-mtp-q4_K_M" \
+    scripts/eval-onbox.sh
+
+  THINK=off CASES=eval_prompts_code_hard_models.json LABEL=q8-thinkoff \
+    ARGS="--repeat 5" \
+    MODELS="audrey_passthrough/qwen3.8:27b-mtp-q8_0" \
+    scripts/eval-onbox.sh
+' > testing-out/thinkoff-bakeoff.log 2>&1 < /dev/null &
+```
+
+▶ **Capture `ollama ps` during the q8 arm.** It was missed last time and its
+latency tail (max 100.8s) is unattributable without it.
+
+▶ **What this arm settles.** If TTFT still dominates with reasoning off, the
+65-94% figure is about prompt processing and MTP is dead for this workload on
+any setting. If the generation window becomes the bulk, MTP finally has
+something to act on and deserves a re-read.
 
 `_expand_sweep` groups by model so each loads once, which is enough when the set
 fits in 48 GB and useless when it does not — the big one is evicted and reloaded
