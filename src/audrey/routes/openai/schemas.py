@@ -8,25 +8,95 @@ schemas without pulling in the streaming machinery.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+import json
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+ChatContent = str | list[dict[str, Any]]
 
 
-class ChatMessage(BaseModel):
-    role: Literal["system", "user", "assistant", "tool"]
-    # A plain string for ordinary text turns, OR the OpenAI multimodal
-    # list-of-parts shape for image turns:
-    #   [{"type": "text", "text": "..."},
-    #    {"type": "image_url", "image_url": {"url": "data:..."}}]
-    # OWUI sends the list form when a user attaches an image. The pipeline
-    # flattens it to text where it only needs words (complexity gate,
-    # classify) and forwards it verbatim to a vision model on the vl pool.
-    content: str | list[dict[str, Any]]
+class _StrictChatMessage(BaseModel):
+    """Shared extensions accepted on every role without forwarding them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Older OWUI payloads attach conversation metadata to a message. The route
+    # reads it from the raw body for archive identity; model providers must not
+    # receive it as prompt data.
+    metadata: dict[str, Any] | None = Field(default=None, exclude=True)
+
+
+class SystemChatMessage(_StrictChatMessage):
+    role: Literal["system"]
+    content: ChatContent
     name: str | None = None
 
 
+class DeveloperChatMessage(_StrictChatMessage):
+    role: Literal["developer"]
+    content: ChatContent
+    name: str | None = None
+
+
+class UserChatMessage(_StrictChatMessage):
+    role: Literal["user"]
+    # A plain string for ordinary text turns, OR the OpenAI multimodal
+    # list-of-parts shape OWUI sends when a user attaches an image.
+    content: ChatContent
+    name: str | None = None
+
+
+class AssistantToolFunction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    arguments: str
+
+
+class AssistantToolCall(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1)
+    type: Literal["function"]
+    function: AssistantToolFunction
+
+
+class AssistantChatMessage(_StrictChatMessage):
+    role: Literal["assistant"]
+    content: ChatContent | None = None
+    name: str | None = None
+    tool_calls: list[AssistantToolCall] | None = None
+
+    @model_validator(mode="after")
+    def require_content_or_tool_calls(self) -> AssistantChatMessage:
+        if self.content is None and not self.tool_calls:
+            raise ValueError("assistant message requires content or tool_calls")
+        return self
+
+
+class ToolChatMessage(_StrictChatMessage):
+    role: Literal["tool"]
+    content: ChatContent
+    tool_call_id: str = Field(min_length=1)
+
+
+ChatMessage = Annotated[
+    SystemChatMessage
+    | DeveloperChatMessage
+    | UserChatMessage
+    | AssistantChatMessage
+    | ToolChatMessage,
+    Field(discriminator="role"),
+]
+
+
 class ChatCompletionRequest(BaseModel):
+    # OWUI adds top-level extension fields such as `chat_id`. Keep accepting
+    # them for client compatibility; the public compatibility table explicitly
+    # records that unmodelled generation controls are ignored.
+    model_config = ConfigDict(extra="ignore")
+
     model: str
     messages: list[ChatMessage] = Field(min_length=1)
     stream: bool = False
@@ -66,4 +136,38 @@ class ChatCompletionRequest(BaseModel):
             "debugging client-vs-resolved identity drift but never trusted."
         ),
     )
+
+    @model_validator(mode="after")
+    def validate_tool_result_links(self) -> ChatCompletionRequest:
+        """Reject tool results Audrey cannot translate to Ollama safely."""
+        calls_by_id: dict[str, str] = {}
+        answered: set[str] = set()
+        for message in self.messages:
+            if isinstance(message, AssistantChatMessage):
+                for call in message.tool_calls or []:
+                    if call.id in calls_by_id:
+                        raise ValueError(f"duplicate assistant tool call id: {call.id}")
+                    try:
+                        arguments = json.loads(call.function.arguments)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(
+                            f"tool call {call.id} arguments must be valid JSON"
+                        ) from exc
+                    if not isinstance(arguments, dict):
+                        raise ValueError(
+                            f"tool call {call.id} arguments must decode to an object"
+                        )
+                    calls_by_id[call.id] = call.function.name
+            elif isinstance(message, ToolChatMessage):
+                if message.tool_call_id not in calls_by_id:
+                    raise ValueError(
+                        "tool message references an unknown earlier tool_call_id: "
+                        f"{message.tool_call_id}"
+                    )
+                if message.tool_call_id in answered:
+                    raise ValueError(
+                        f"duplicate tool result for tool_call_id: {message.tool_call_id}"
+                    )
+                answered.add(message.tool_call_id)
+        return self
 

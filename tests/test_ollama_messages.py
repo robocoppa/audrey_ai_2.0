@@ -28,6 +28,50 @@ def test_missing_content_passes_through():
     assert _to_ollama_messages(msgs) == msgs
 
 
+def test_developer_message_becomes_ollama_system_message():
+    msgs = [
+        {"role": "developer", "content": "Be concise."},
+        {"role": "user", "content": "hello"},
+    ]
+    assert _to_ollama_messages(msgs) == [
+        {"role": "system", "content": "Be concise."},
+        {"role": "user", "content": "hello"},
+    ]
+
+
+def test_openai_tool_call_and_result_become_ollama_messages():
+    msgs = [
+        {"role": "user", "content": "temperature?"},
+        {
+            "role": "assistant",
+            "tool_calls": [{
+                "id": "call_weather_1",
+                "type": "function",
+                "function": {
+                    "name": "get_temperature",
+                    "arguments": """{"city":"New York"}""",
+                },
+            }],
+        },
+        {"role": "tool", "content": "22 C", "tool_call_id": "call_weather_1"},
+    ]
+    assert _to_ollama_messages(msgs) == [
+        {"role": "user", "content": "temperature?"},
+        {
+            "role": "assistant",
+            "tool_calls": [{
+                "type": "function",
+                "function": {
+                    "index": 0,
+                    "name": "get_temperature",
+                    "arguments": {"city": "New York"},
+                },
+            }],
+        },
+        {"role": "tool", "content": "22 C", "tool_name": "get_temperature"},
+    ]
+
+
 def test_array_text_only_flattens_to_string():
     msgs = [
         {

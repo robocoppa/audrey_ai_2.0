@@ -1,8 +1,8 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress. Wave 1A is laptop-complete: private-search isolation
-is Unraid-verified, and request ownership/cancellation awaits its deployment
-smoke.
+**Status:** In progress. Wave 1A is complete and Unraid-verified. Wave 1B is
+underway: the role-aware Chat Completions slice is laptop-complete and awaits
+the deployment smoke.
 
 ## Goal
 
@@ -45,7 +45,8 @@ tests.
 
 Laptop verification passed on 2026-08-25: 163 focused lifecycle tests and all
 2,413 hermetic tests pass; changed-file lint is clean. The user-run deployment
-smoke remains before Wave 1A closes.
+smoke then cancelled Deep during panel dispatch, and an immediately following
+Fast request completed exactly, confirming the local slot was available.
 
 Gate:
 
@@ -59,6 +60,14 @@ Gate:
 Complete the supported Chat Completions message lifecycle and consolidate
 stream ownership so fast, deep, research, and passthrough responses share clear
 terminal behavior, identity, metrics, and archive boundaries.
+
+First-slice status (2026-08-25): role-aware request validation and the
+OpenAI-to-Ollama tool-call/result translation are laptop-complete. A real
+two-request passthrough continuation passes in streaming and non-streaming
+tests. All 2,423 hermetic tests pass, changed-file lint is clean, and the lesson
+check has no broken links. Open WebUI and agent-client deployment smokes remain
+required before this slice is called Unraid-verified; stream-terminal and
+identity consolidation remain subsequent Wave 1B slices.
 
 Gate:
 

@@ -1,8 +1,8 @@
 # Campaign 3 — correctness foundations and reusable skills
 
-**Status:** In progress as of 2026-08-25. Wave 1A is laptop-complete:
-private-search isolation is Unraid-verified, and the request-ownership slice
-awaits its user-run Unraid smoke.
+**Status:** In progress as of 2026-08-25. Wave 1A is complete and
+Unraid-verified. Wave 1B is underway: its role-aware Chat Completions slice is
+laptop-complete and awaits the deployment smoke.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then uses those foundations to add the first general skills layer.
@@ -12,7 +12,7 @@ contracts, then uses those foundations to add the first general skills layer.
 
 | Phase | Plan | Outcome | Entry gate | Status |
 |---|---|---|---|---|
-| 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | In progress (Wave 1A) |
+| 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | In progress (Wave 1B; first slice awaiting smoke) |
 | 02 | [Reusable skills](phase-02-skills-capability-plan.md) | Local versioned instruction/resource bundles, explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 01 completion gate | Planned |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1

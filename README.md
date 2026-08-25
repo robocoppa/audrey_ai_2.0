@@ -87,6 +87,43 @@ Streaming responses (when the client sends `stream: true`) emit progress
 banners during each phase (Thinking / Planning / Dispatching / Synthesizing)
 and a per-worker tools-used footer after the answer.
 
+## Chat Completions compatibility
+
+Audrey implements a deliberate subset of the OpenAI Chat Completions contract.
+OpenAI-compatible here means that supported request and response shapes use the
+same wire format; it does not mean every OpenAI generation option has identical
+semantics.
+
+Message compatibility:
+
+| Role | Support |
+|---|---|
+| `system` | Text or content parts; forwarded as an instruction. |
+| `developer` | Text or content parts; translated to an Ollama `system` instruction. Put instruction messages before conversation turns. |
+| `user` | Text or multimodal content parts, including inline images. |
+| `assistant` | Text may be null or omitted when function `tool_calls` are present. Call ids and JSON-string arguments are validated. |
+| `tool` | Requires `tool_call_id`; Audrey resolves it to the matching Ollama `tool_name`. |
+
+Unknown fields inside a message are rejected with HTTP 422. The OWUI
+per-message `metadata` extension is accepted for archive identity but excluded
+from model requests.
+
+Top-level request compatibility:
+
+| Field | Behavior |
+|---|---|
+| `model`, `messages`, `stream` | Supported. |
+| `temperature`, `top_p`, `max_tokens` | Translated to Ollama generation options. |
+| `tools` | Forwarded only for `audrey_passthrough/<concrete>`; pipeline models use Audrey-managed tools. |
+| `user` | Accepted but never trusted for identity; the authenticated OWUI user wins. |
+| `think` | Audrey passthrough extension; applied only when the concrete model declares thinking support. |
+| OWUI `chat_id` / `metadata` | Read from the raw request for archive stitching, not forwarded to a model. |
+| `tool_choice`, `parallel_tool_calls`, `response_format`, `seed`, `stop`, penalties, `n`, `logprobs`, `stream_options`, and other unmodelled fields | Accepted for client forward-compatibility but currently ignored. Do not rely on them. |
+
+Function tools are the supported tool type. Assistant call/result relationships
+round-trip through passthrough in streaming and non-streaming mode; custom and
+legacy function-call message forms are not implemented.
+
 ## Pipeline shape
 
 ```

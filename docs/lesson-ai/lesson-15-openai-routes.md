@@ -110,42 +110,60 @@ else.
 
 ### 2.1 The schema
 
-[`routes/openai/schemas.py:16-57`](../../src/audrey/routes/openai/schemas.py#L16)
-defines two Pydantic models:
+[`routes/openai/schemas.py:42`](../../src/audrey/routes/openai/schemas.py#L42)
+defines separate message shapes and combines them into a union selected by
+`role`:
 
 ```python
-class ChatMessage(BaseModel):
-    role: Literal["system", "user", "assistant", "tool"]
-    content: str | list[dict[str, Any]]
-    name: str | None = None
+class UserChatMessage(_StrictChatMessage):
+    role: Literal["user"]
+    content: ChatContent
 
 
-class ChatCompletionRequest(BaseModel):
-    model: str
-    messages: list[ChatMessage] = Field(min_length=1)
-    stream: bool = False
-    temperature: float | None = None
-    top_p: float | None = None
-    max_tokens: int | None = None
-    tools: list[dict[str, Any]] | None = ...
-    user: str | None = ...
+class AssistantChatMessage(_StrictChatMessage):
+    role: Literal["assistant"]
+    content: ChatContent | None = None
+    tool_calls: list[AssistantToolCall] | None = None
+
+
+class ToolChatMessage(_StrictChatMessage):
+    role: Literal["tool"]
+    content: ChatContent
+    tool_call_id: str
+
+
+ChatMessage = Annotated[
+    SystemChatMessage | DeveloperChatMessage | UserChatMessage
+    | AssistantChatMessage | ToolChatMessage,
+    Field(discriminator="role"),
+]
 ```
 
-Three fields earn special mention:
+A single permissive message model cannot express the actual contract. A user
+turn needs content, an assistant tool-call turn may omit it, and a tool result
+must identify the call it answers. Selecting the schema from `role` lets
+Pydantic enforce those differences before the route runs. Unknown fields on a
+message are rejected; OWUI message metadata is the deliberate exception and is
+excluded before a model request.
+
+[`ChatCompletionRequest` at `schemas.py:94`](../../src/audrey/routes/openai/schemas.py#L94)
+wraps that union with the top-level request fields. Four parts earn special
+mention:
 
 - **`messages: list[ChatMessage] = Field(min_length=1)`** — at least
   one message is required. An empty list is a 422 before any of the
-  route body runs. Pydantic enforces this in FastAPI's dependency
-  resolution phase, *before* `Depends(require_user)` even has a
-  chance to check the auth header. (More on the order in §2.2.)
+  route body runs. Pydantic enforces this during FastAPI dependency
+  resolution, *before* `Depends(require_user)` can check the auth
+  header. (More on the order in §2.2.)
+- **Assistant `tool_calls` plus `tool` results** are validated as one linked
+  conversation. Call arguments must be JSON objects, and each tool result must
+  name an earlier call id. The Ollama boundary then converts that id to the
+  native tool name.
 - **`tools`** is OpenAI-spec passthrough but **only honored on the
-  passthrough path**. Pipeline modes ignore it — Audrey's tools come
+  passthrough path**. Pipeline modes ignore it — Audrey-managed tools come
   from the server-side registry at
   [`tools/discovery.py`](../../src/audrey/tools/discovery.py), not
-  from per-request client claims. The docstring on the field calls
-  this out explicitly because the silent-ignore is a real surprise
-  for someone debugging "I sent a `tools` array, why aren't they
-  showing up?"
+  from per-request client claims.
 - **`user`** is also OpenAI-spec passthrough but **not trusted for
   identity**. Audrey's user ID comes from the bearer token
   (`require_user → AuthedUser.email`); `payload.user` is logged for
@@ -603,7 +621,7 @@ what point in the request lifecycle does it fire?**
 422, before `require_user` even runs. FastAPI resolves request
 validation as part of dependency injection, and Pydantic's
 `Field(min_length=1)` on `ChatCompletionRequest.messages`
-([`routes/openai/schemas.py:31`](../../src/audrey/routes/openai/schemas.py#L31))
+([`routes/openai/schemas.py:101`](../../src/audrey/routes/openai/schemas.py#L101))
 rejects the empty list during schema validation — which happens
 *before* the route's body and *before* its declared dependencies
 get awaited. The user gets a structured 422 with a path-based error

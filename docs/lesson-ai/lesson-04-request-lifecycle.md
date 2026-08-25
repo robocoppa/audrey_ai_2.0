@@ -67,7 +67,7 @@ top to bottom. Notice:
   (`router = APIRouter(prefix="/v1")`).
 - **`payload: ChatCompletionRequest`** — FastAPI parses the incoming
   JSON body into a `ChatCompletionRequest` object (defined in
-  [`schemas.py:29`](../../src/audrey/routes/openai/schemas.py#L29)).
+  [`schemas.py:94`](../../src/audrey/routes/openai/schemas.py#L94)).
   If the JSON doesn't match, FastAPI returns 422 automatically before
   your code runs.
 - **`me: AuthedUser = Depends(require_user)`** — FastAPI's dependency

@@ -101,26 +101,79 @@ def _merge_leading_system(messages: list[dict[str, Any]]) -> list[dict[str, Any]
 
 
 def _to_ollama_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Convert OpenAI-shaped messages into Ollama's native `/api/chat` shape.
+    """Convert OpenAI Chat Completions messages to native Ollama messages.
 
-    The OpenAI-compatible content field can be a plain string OR a list of
-    typed parts (`[{"type": "text", ...}, {"type": "image_url", ...}]`) for
-    multimodal turns. Ollama's API rejects the list form: it wants
-    `content` as a string plus a sibling `images: ["<base64>"]` list. String
-    content is passed through untouched (the common text case); list content
-    is flattened — text parts joined with `\\n`, `image_url` data-URIs lifted
-    into `images`. Every other key on the message (role, name, tool_calls) is
-    preserved. Mirrors the flatten logic in `pipeline/messages.py`.
+    Besides flattening multimodal content, this translates the two tool-loop
+    wire differences: OpenAI sends function arguments as a JSON string and
+    links a tool result by `tool_call_id`; Ollama expects an arguments object
+    and the matching `tool_name`. Assistant call ids are therefore resolved in
+    conversation order before the result is forwarded. OpenAI `developer`
+    instructions become Ollama `system` messages at the same position.
 
     Leading system messages are then collapsed into one — see
     `_merge_leading_system` for why that is a wire-format concern and not a
-    caller's. The merge runs AFTER flattening so it only ever joins strings.
+    caller concern. The merge runs after conversion so leading developer and
+    system instructions compose before they reach qwen-family renderers.
     """
     out: list[dict[str, Any]] = []
-    for m in messages:
+    tool_names_by_id: dict[str, str] = {}
+    for original in messages:
+        m = dict(original)
+        role = m.get("role")
+        if role == "developer":
+            m["role"] = "system"
+            role = "system"
+
+        raw_calls = m.get("tool_calls")
+        if role == "assistant" and isinstance(raw_calls, list):
+            native_calls: list[Any] = []
+            for index, call in enumerate(raw_calls):
+                if not isinstance(call, dict):
+                    native_calls.append(call)
+                    continue
+                function = call.get("function")
+                if not isinstance(function, dict):
+                    native_calls.append(dict(call))
+                    continue
+                name = str(function.get("name") or "")
+                raw_arguments = function.get("arguments")
+                if isinstance(raw_arguments, str):
+                    arguments = json.loads(raw_arguments)
+                    if not isinstance(arguments, dict):
+                        raise ValueError("tool-call arguments must decode to an object")
+                elif isinstance(raw_arguments, dict):
+                    arguments = dict(raw_arguments)
+                elif raw_arguments is None:
+                    arguments = {}
+                else:
+                    raise ValueError("tool-call arguments must be an object or JSON string")
+                call_id = str(call.get("id") or "")
+                if call_id and name:
+                    tool_names_by_id[call_id] = name
+                raw_index = function.get("index")
+                native_calls.append({
+                    "type": "function",
+                    "function": {
+                        "index": raw_index if isinstance(raw_index, int) else index,
+                        "name": name,
+                        "arguments": arguments,
+                    },
+                })
+            m["tool_calls"] = native_calls
+
+        if role == "tool":
+            call_id = str(m.get("tool_call_id") or "")
+            tool_name = m.get("tool_name") or m.get("name")
+            if not tool_name and call_id:
+                tool_name = tool_names_by_id.get(call_id)
+            if tool_name:
+                m["tool_name"] = str(tool_name)
+                m.pop("name", None)
+                m.pop("tool_call_id", None)
+
         content = m.get("content")
         if not isinstance(content, list):
-            out.append(m)  # plain string (or absent) — already Ollama-shaped
+            out.append(m)
             continue
         texts: list[str] = []
         images: list[str] = []
@@ -134,10 +187,10 @@ def _to_ollama_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 b64 = _data_uri_to_b64(url)
                 if b64:
                     images.append(b64)
-        converted = {**m, "content": "\n".join(texts)}
+        m["content"] = "\n".join(texts)
         if images:
-            converted["images"] = images
-        out.append(converted)
+            m["images"] = images
+        out.append(m)
     return _merge_leading_system(out)
 
 

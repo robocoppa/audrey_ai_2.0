@@ -28,7 +28,7 @@ from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline import graph as gmod
 from audrey.pipeline.fair_gate import FairLocalGate
-from audrey.routes.openai import ChatCompletionRequest, ChatMessage
+from audrey.routes.openai import ChatCompletionRequest
 
 # ─── Schema accepts multimodal content ─────────────────────────────────
 
@@ -40,20 +40,29 @@ _IMAGE_CONTENT = [
 
 def test_chat_message_accepts_multimodal_list_content():
     """The original bug: a list `content` 422'd against `content: str`."""
-    m = ChatMessage(role="user", content=_IMAGE_CONTENT)
+    m = ChatCompletionRequest(
+        model="audrey_auto",
+        messages=[{"role": "user", "content": _IMAGE_CONTENT}],
+    ).messages[0]
     assert isinstance(m.content, list)
     assert m.content[1]["type"] == "image_url"
 
 
 def test_chat_message_still_accepts_plain_string_content():
-    m = ChatMessage(role="user", content="just words")
+    m = ChatCompletionRequest(
+        model="audrey_auto",
+        messages=[{"role": "user", "content": "just words"}],
+    ).messages[0]
     assert m.content == "just words"
 
 
 def test_chat_message_rejects_non_str_non_list_content():
     # Loosening to `str | list` must not start accepting scalars like ints.
     with pytest.raises(ValidationError):
-        ChatMessage(role="user", content=42)
+        ChatCompletionRequest(
+            model="audrey_auto",
+            messages=[{"role": "user", "content": 42}],
+        )
 
 
 def test_completion_request_round_trips_image_message():
@@ -64,6 +73,87 @@ def test_completion_request_round_trips_image_message():
     )
     dumped = [m.model_dump(exclude_none=True) for m in req.messages]
     assert dumped[0]["content"] == _IMAGE_CONTENT
+
+
+_TOOL_CALL = {
+    "id": "call_weather_1",
+    "type": "function",
+    "function": {
+        "name": "get_temperature",
+        "arguments": """{"city":"New York"}""",
+    },
+}
+
+
+def test_completion_request_accepts_developer_message():
+    req = ChatCompletionRequest(
+        model="audrey_auto",
+        messages=[
+            {"role": "developer", "content": "Be concise."},
+            {"role": "user", "content": "Hello"},
+        ],
+    )
+    assert req.messages[0].role == "developer"
+
+
+def test_assistant_tool_call_allows_null_content_and_round_trips():
+    req = ChatCompletionRequest(
+        model="audrey_passthrough/qwen3.8:latest",
+        messages=[
+            {"role": "user", "content": "What is the temperature?"},
+            {"role": "assistant", "content": None, "tool_calls": [_TOOL_CALL]},
+            {"role": "tool", "content": "22 C", "tool_call_id": "call_weather_1"},
+        ],
+    )
+    dumped = [message.model_dump(exclude_none=True) for message in req.messages]
+    assert dumped[1]["tool_calls"] == [_TOOL_CALL]
+    assert "content" not in dumped[1]
+    assert dumped[2]["tool_call_id"] == "call_weather_1"
+
+
+def test_owui_metadata_extensions_validate_but_do_not_reach_models():
+    req = ChatCompletionRequest(
+        model="audrey_auto",
+        messages=[{
+            "role": "user",
+            "content": "Hello",
+            "metadata": {"chat_id": "owui-chat-1"},
+        }],
+        chat_id="owui-chat-1",
+    )
+    assert req.messages[0].metadata == {"chat_id": "owui-chat-1"}
+    assert req.messages[0].model_dump(exclude_none=True) == {
+        "role": "user",
+        "content": "Hello",
+    }
+
+
+def test_tool_message_requires_tool_call_id():
+    with pytest.raises(ValidationError):
+        ChatCompletionRequest(
+            model="audrey_auto",
+            messages=[{"role": "tool", "content": "22 C"}],
+        )
+
+
+def test_assistant_message_requires_content_or_tool_calls():
+    with pytest.raises(ValidationError):
+        ChatCompletionRequest(
+            model="audrey_auto",
+            messages=[{"role": "assistant", "content": None}],
+        )
+
+
+def test_message_fields_are_role_specific():
+    with pytest.raises(ValidationError):
+        ChatCompletionRequest(
+            model="audrey_auto",
+            messages=[{
+                "role": "user",
+                "content": "This is not an assistant turn.",
+                "tool_calls": [_TOOL_CALL],
+            }],
+        )
 
 
 # ─── vl: pool resolves to a local vision model ─────────────────────────

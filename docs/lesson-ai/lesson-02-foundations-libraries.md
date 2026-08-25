@@ -416,8 +416,10 @@ a precise error: `messages: List should have at least 1 item`.
 
 ### Where you'll see it in Audrey
 
-- [`src/audrey/routes/openai/schemas.py:16-57`](../../src/audrey/routes/openai/schemas.py#L16) —
-  `ChatMessage` and `ChatCompletionRequest` schemas.
+- [`src/audrey/routes/openai/schemas.py:19`](../../src/audrey/routes/openai/schemas.py#L19) —
+  role-specific message schemas and their `ChatMessage` union.
+- [`src/audrey/routes/openai/schemas.py:94`](../../src/audrey/routes/openai/schemas.py#L94) —
+  the surrounding `ChatCompletionRequest` schema.
 - [`src/audrey/routes/admin.py`](../../src/audrey/routes/admin.py) —
   response models like `AuthClearResponse`.
 - [`src/audrey/config.py`](../../src/audrey/config.py) — Pydantic

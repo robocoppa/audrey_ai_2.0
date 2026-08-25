@@ -144,3 +144,149 @@ async def test_non_streaming_passthrough_also_completes():
     )
     assert resp["object"] == "chat.completion"
     assert captured[0]["think"] is False
+
+
+_WEATHER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_temperature",
+        "description": "Get the temperature for a city.",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+        },
+    },
+}
+
+
+def _tool_loop_ollama(captured: list[dict]) -> OllamaClient:
+    """Real client over a fake socket for a complete two-request tool loop."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/show":
+            return httpx.Response(200, json={"capabilities": ["completion"]})
+        payload = json.loads(request.content)
+        captured.append(payload)
+        has_tool_result = any(
+            message.get("role") == "tool" for message in payload["messages"]
+        )
+        if has_tool_result:
+            message = {"role": "assistant", "content": "It is 22 C in New York."}
+        else:
+            message = {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "type": "function",
+                    "function": {
+                        "index": 0,
+                        "name": "get_temperature",
+                        "arguments": {"city": "New York"},
+                    },
+                }],
+            }
+        if not payload["stream"]:
+            return httpx.Response(200, json={
+                "message": message,
+                "prompt_eval_count": 12,
+                "eval_count": 8,
+                "done": True,
+            })
+        body = "".join(json.dumps(chunk) + "\n" for chunk in (
+            {"message": message, "done": False},
+            {"message": {"role": "assistant", "content": ""}, "done": True},
+        ))
+        return httpx.Response(200, content=body.encode())
+
+    return OllamaClient("http://ollama:11434", transport=httpx.MockTransport(handler))
+
+
+async def _run_tool_loop_request(app, *, messages, stream: bool):
+    response = await _handle_passthrough(
+        app,
+        request=SimpleNamespace(app=app),
+        payload=ChatCompletionRequest(
+            model=f"{PASSTHROUGH_PREFIX}{_MODEL}",
+            messages=messages,
+            tools=[_WEATHER_TOOL],
+            stream=stream,
+        ),
+        me=SimpleNamespace(email="alice@example.com", role="user", owui_id="abc"),
+    )
+    if not stream:
+        return response
+    frames = [
+        chunk.decode() if isinstance(chunk, bytes) else chunk
+        async for chunk in response.body_iterator
+    ]
+    return [
+        json.loads(line.removeprefix("data: "))
+        for frame in frames
+        for line in frame.splitlines()
+        if line.startswith("data: {")
+    ]
+
+
+@pytest.mark.parametrize("stream", [False, True])
+async def test_two_request_tool_loop_preserves_linkage_to_ollama(stream):
+    captured: list[dict] = []
+    ollama = _tool_loop_ollama(captured)
+    app = _app(ollama, None)
+    first = await _run_tool_loop_request(
+        app,
+        messages=[{"role": "user", "content": "Temperature in New York?"}],
+        stream=stream,
+    )
+    if stream:
+        tool_delta = next(
+            frame["choices"][0]["delta"]
+            for frame in first
+            if frame["choices"][0]["delta"].get("tool_calls")
+        )
+        assistant = {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": tool_delta["tool_calls"],
+        }
+    else:
+        assistant = first["choices"][0]["message"]
+    call_id = assistant["tool_calls"][0]["id"]
+
+    second = await _run_tool_loop_request(
+        app,
+        messages=[
+            {"role": "developer", "content": "Answer concisely."},
+            {"role": "user", "content": "Temperature in New York?"},
+            assistant,
+            {"role": "tool", "content": "22 C", "tool_call_id": call_id},
+        ],
+        stream=stream,
+    )
+
+    assert len(captured) == 2
+    forwarded = captured[1]["messages"]
+    assert forwarded[:2] == [
+        {"role": "system", "content": "Answer concisely."},
+        {"role": "user", "content": "Temperature in New York?"},
+    ]
+    assert forwarded[2].get("content", "") == ""
+    assert forwarded[2]["tool_calls"] == [{
+        "type": "function",
+        "function": {
+            "index": 0,
+            "name": "get_temperature",
+            "arguments": {"city": "New York"},
+        },
+    }]
+    assert forwarded[3] == {
+        "role": "tool",
+        "content": "22 C",
+        "tool_name": "get_temperature",
+    }
+    if stream:
+        assert any(
+            frame["choices"][0]["delta"].get("content") == "It is 22 C in New York."
+            for frame in second
+        )
+    else:
+        assert second["choices"][0]["message"]["content"] == "It is 22 C in New York."
