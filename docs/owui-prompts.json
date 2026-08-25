@@ -1,0 +1,82 @@
+[
+  {
+    "command": "/deep",
+    "title": "Force the deep panel",
+    "content": "Think hard about this and be thorough — I want the multi-model panel, not a quick answer.\n\n[your question]"
+  },
+  {
+    "command": "/brief",
+    "title": "Short answer, no padding",
+    "content": "Answer briefly — a short answer is what I want here, so don't pad it to look complete.\n\n[your question]"
+  },
+  {
+    "command": "/web",
+    "title": "Search the web",
+    "content": "Use web_search to answer this from current sources. Give me the answer first, then the sources with their dates — and say so if the top results disagree.\n\n[your question]"
+  },
+  {
+    "command": "/fetch",
+    "title": "Read a specific page",
+    "content": "Use web_fetch to read this page, then answer from what it actually says. Quote the lines you relied on, and tell me if the page doesn't cover it.\n\nURL: [paste URL]\nQuestion: [what you want to know]"
+  },
+  {
+    "command": "/kb",
+    "title": "Search the knowledge base",
+    "content": "Use kb_search to answer this from the knowledge base. Cite each source by filename and quote the sentence you used. If the KB has nothing on it, say so plainly rather than answering from general knowledge.\n\n[your question]"
+  },
+  {
+    "command": "/img",
+    "title": "Find an image in the KB",
+    "content": "Use kb_image_search to find images matching this description. Show the top matches with their source filenames and similarity scores.\n\n[describe the image]"
+  },
+  {
+    "command": "/files",
+    "title": "Ask about my uploads",
+    "content": "Use list_my_files first to see what I've uploaded, then get_file_text to read the relevant one before answering. Don't answer from a filename alone, and if you only read part of a file, say which part.\n\n[your question]"
+  },
+  {
+    "command": "/compare-files",
+    "title": "Compare two of my uploads",
+    "content": "Use list_my_files, then read each of these files separately with get_file_text and keep them apart in your answer. Don't let one file's contents stand in for the other, and tell me if you could only read one.\n\nFiles: [name them]\nCompare: [what to compare]"
+  },
+  {
+    "command": "/remember",
+    "title": "Save this to memory",
+    "content": "Use memory_store to save this, tagged to me, then confirm exactly what you stored.\n\n[the fact to remember]"
+  },
+  {
+    "command": "/recall",
+    "title": "What do you remember about me",
+    "content": "Use memory_search to recall what you've stored about me on this topic, and list each hit with its key and tags. If nothing matches, say so instead of guessing.\n\nTopic: [topic, or leave blank for everything]"
+  },
+  {
+    "command": "/history",
+    "title": "Find an earlier conversation",
+    "content": "Use chat_history_search to find where we discussed this before. Show me what was said and roughly when, then answer the follow-up.\n\n[what you're trying to find]"
+  },
+  {
+    "command": "/digest",
+    "title": "Personalized news digest",
+    "content": "Use memory_search to find the topics I care about, then web_search for what's new in those areas in the last 7 days. Group 3-5 stories by topic with a one-sentence summary, source, and date each."
+  },
+  {
+    "command": "/explain",
+    "title": "Explain pasted code",
+    "content": "Explain what this does, calling out non-obvious behavior and likely bugs. Then give me one concrete improvement as a diff.\n\n{{CLIPBOARD}}"
+  },
+  {
+    "command": "/plan",
+    "title": "Break a task into steps",
+    "content": "Break this into ordered steps, step by step. Flag the risky ones and tell me what to verify after each.\n\n[the task]"
+  },
+  {
+    "command": "/debug",
+    "title": "Diagnostic tree, not a guess",
+    "content": "Give me a thorough diagnostic plan for this, step by step: what to check first, what each result would mean, and the exact command for each check. Don't guess at the cause — give me the tree.\n\n[the symptom]"
+  },
+  {
+    "command": "/sources",
+    "title": "Grounded answer (switch to audrey_research first)",
+    "content": "Research this properly: ground every claim in a source, verify the claims against each other, and fact-check anything current or dated before you write. Tell me which claims you could not confirm.\n\n[your question]"
+  }
+]

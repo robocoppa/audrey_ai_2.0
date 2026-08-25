@@ -520,6 +520,18 @@ class PhaseTicker:
                 await self._tick_task
             except asyncio.CancelledError:
                 pass
+        # A cancelled or explicitly closed response has no consumer left for
+        # tail fragments or a closing mark. Cancel the drainer instead of
+        # letting cleanup block on either bounded queue. Other exceptions keep
+        # the visible failure marker for a still-connected client.
+        if exc_type in (asyncio.CancelledError, GeneratorExit):
+            if self._tail_drainer is not None:
+                self._tail_drainer.cancel()
+                try:
+                    await self._tail_drainer
+                except asyncio.CancelledError:
+                    pass
+            return
         # Drain whatever tail fragments are still queued before the
         # closing line. Sentinel None tells the drainer to stop.
         await self._tail_q.put(None)  # type: ignore[arg-type]

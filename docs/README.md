@@ -16,7 +16,15 @@
 - [`unraid-ollama.md`](guides/unraid-ollama.md) — canonical Ollama container config
   (referenced by Phase 1).
 - [`owui-prompt-suggestions.json`](owui-prompt-suggestions.json) — OWUI
-  preset prompt suggestions.
+  splash-screen prompt suggestion cards (Admin → Settings → Interface).
+- [`owui-prompts.json`](owui-prompts.json) — OWUI slash-command presets
+  (Workspace → Prompts). Built on Audrey's real text triggers:
+  `/deep` and `/brief` embed literal phrases from
+  `complexity.deep_intent_phrases` and `reflect._BREVITY_CUES`, so they
+  change routing rather than just asking nicely. ⚠️ Editing either list
+  stales this file — the presets only work while the phrases match.
+  `/deep` applies to `audrey_auto` and `audrey_video` only; the forced
+  modes ignore it.
 
 ### Reading a phase number
 

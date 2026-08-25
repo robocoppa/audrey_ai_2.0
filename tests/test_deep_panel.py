@@ -15,6 +15,7 @@ real model. The unawaited coroutines are closed so pytest doesn't warn.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, ClassVar
 from unittest.mock import patch
@@ -2519,3 +2520,111 @@ class TestCharsPerTokIsMeasuredOnRawOutput:
             eval_count=6172, elapsed=1.0, subtask="",
         )
         assert cpt < 0.5
+
+# ─── Cancellation ownership ───────────────────────────────────────────
+
+
+async def _assert_cancel_drains_workers(stream, started, settled, child_tasks):
+    consumer = asyncio.create_task(anext(stream))
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*(event.wait() for event in started)),
+            timeout=1,
+        )
+        consumer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await consumer
+        await asyncio.wait_for(
+            asyncio.gather(*(event.wait() for event in settled)),
+            timeout=1,
+        )
+    finally:
+        consumer.cancel()
+        for task in child_tasks:
+            task.cancel()
+        await asyncio.gather(consumer, *child_tasks, return_exceptions=True)
+        await stream.aclose()
+
+
+async def test_streaming_panel_cancellation_drains_fanout_and_gpu_slot(monkeypatch):
+    gate = FairLocalGate(concurrency=1)
+    started = [asyncio.Event(), asyncio.Event()]
+    settled = [asyncio.Event(), asyncio.Event()]
+    child_tasks = []
+
+    async def worker(index, user):
+        child_tasks.append(asyncio.current_task())
+        started[index].set()
+        try:
+            async with gate.acquire("m", location="local", user_id=user):
+                await asyncio.Event().wait()
+        finally:
+            settled[index].set()
+
+    def prepare(*args, **kwargs):
+        return (
+            [("one", "local"), ("two", "local")],
+            [worker(0, "alice"), worker(1, "bob")],
+        )
+
+    monkeypatch.setattr(dpmod, "_prepare_panel", prepare)
+    stream = run_panel_streaming(
+        object(),
+        object(),
+        object(),
+        object(),
+        gate,
+        pool_key="deep_panel",
+        task="reasoning",
+        messages=[],
+        subtasks=[],
+        options={},
+        timeout_s=30,
+        max_workers_cloud=2,
+    )
+    await _assert_cancel_drains_workers(stream, started, settled, child_tasks)
+
+    async def later_request():
+        async with gate.acquire("m", location="local", user_id="carol"):
+            return True
+
+    assert await asyncio.wait_for(later_request(), timeout=1) is True
+    assert gate._available == gate.concurrency
+
+
+async def test_research_fanout_cancellation_drains_all_researchers(monkeypatch):
+    gate = FairLocalGate(concurrency=1)
+    started = [asyncio.Event(), asyncio.Event()]
+    settled = [asyncio.Event(), asyncio.Event()]
+    child_tasks = []
+    indexes = {"r1": 0, "r2": 1}
+
+    monkeypatch.setattr(
+        dpmod,
+        "select_researchers",
+        lambda *args, **kwargs: [("r1", "cloud"), ("r2", "cloud")],
+    )
+
+    async def blocked_worker(*args, model, **kwargs):
+        index = indexes[model]
+        child_tasks.append(asyncio.current_task())
+        started[index].set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            settled[index].set()
+
+    monkeypatch.setattr(dpmod, "_run_one_worker", blocked_worker)
+    stream = dpmod.run_research_pipeline_streaming(
+        get_config(),
+        object(),
+        object(),
+        HealthTracker(),
+        gate,
+        task="reasoning",
+        messages=[{"role": "user", "content": "question"}],
+        options={},
+        timeout_s=30,
+        max_researchers_cloud=2,
+    )
+    await _assert_cancel_drains_workers(stream, started, settled, child_tasks)

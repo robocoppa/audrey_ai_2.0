@@ -12,6 +12,7 @@ We stub `app.state` with fakes so no real model runs.
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 from types import SimpleNamespace
@@ -21,6 +22,7 @@ from audrey.config import Config, EnvOverrides, get_config
 from audrey.models.health import HealthTracker
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.routes.openai import pipeline as route_pipeline
 from audrey.routes.openai.pipeline import _stream_research_with_banners
 from audrey.routes.openai.schemas import ChatCompletionRequest
 
@@ -264,3 +266,198 @@ async def test_research_stream_no_trace_block_by_default():
 
     assert "## Research trace (debug)" not in joined
     assert frames[-1] == "data: [DONE]\n\n"
+
+# ─── Request-owned task cancellation ──────────────────────────────────
+
+
+class _ResearchArchive:
+    def __init__(self):
+        self.calls = []
+
+    async def archive_turn(self, **kwargs):
+        self.calls.append(kwargs)
+
+
+def _research_generator(app):
+    msgs = [{"role": "user", "content": "cancel this research"}]
+    payload = ChatCompletionRequest(model="audrey_research", messages=msgs, stream=True)
+    return _stream_research_with_banners(
+        app,
+        payload,
+        msgs,
+        {},
+        task="reasoning",
+        conf=0.9,
+        user_id="alice",
+        conversation_id="conversation-1",
+        user_turn_text=msgs[0]["content"],
+    )
+
+
+async def _drain_research_stream(stream, expected_text, observed):
+    async for frame in stream:
+        if expected_text and expected_text in frame:
+            observed.set()
+
+
+async def _cancel_research_consumer(
+    stream,
+    started,
+    settled,
+    child_tasks,
+    expected_text="",
+):
+    observed = asyncio.Event()
+    consumer = asyncio.create_task(_drain_research_stream(stream, expected_text, observed))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        if expected_text:
+            await asyncio.wait_for(observed.wait(), timeout=1)
+        consumer.cancel()
+        try:
+            await asyncio.wait_for(consumer, timeout=1)
+        except asyncio.CancelledError:
+            pass
+        else:
+            raise AssertionError("research consumer did not propagate cancellation")
+        await asyncio.wait_for(settled.wait(), timeout=1)
+    finally:
+        consumer.cancel()
+        for task in child_tasks:
+            task.cancel()
+        await asyncio.gather(consumer, *child_tasks, return_exceptions=True)
+        await stream.aclose()
+
+
+async def test_research_disconnect_during_planning_cancels_planner(monkeypatch):
+    app = _fake_app({})
+    archive = _ResearchArchive()
+    app.state.archive_client = archive
+    started = asyncio.Event()
+    settled = asyncio.Event()
+    child_tasks = []
+
+    async def blocked_planning(**kwargs):
+        child_tasks.append(asyncio.current_task())
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            settled.set()
+
+    monkeypatch.setattr(route_pipeline, "_phase_thinking", blocked_planning)
+    await _cancel_research_consumer(
+        _research_generator(app),
+        started,
+        settled,
+        child_tasks,
+    )
+    assert len(archive.calls) == 1
+    assert archive.calls[0]["partial"] is True
+
+
+async def test_research_disconnect_cancels_pipeline_at_every_later_stage(monkeypatch):
+    stages = [
+        ("research", []),
+        ("verification", [{"type": "findings_ready", "grounded": True}]),
+        (
+            "factcheck",
+            [
+                {"type": "findings_ready", "grounded": True},
+                {"type": "verify_done", "ok": True},
+            ],
+        ),
+        (
+            "writing",
+            [
+                {"type": "findings_ready", "grounded": True},
+                {"type": "verify_done", "ok": True},
+                {"type": "write_delta", "text": "partial answer"},
+            ],
+        ),
+    ]
+
+    async def immediate_planning(**kwargs):
+        return kwargs["messages"], []
+
+    monkeypatch.setattr(route_pipeline, "_phase_thinking", immediate_planning)
+
+    for stage, prefix in stages:
+        app = _fake_app({})
+        archive = _ResearchArchive()
+        app.state.archive_client = archive
+        started = asyncio.Event()
+        settled = asyncio.Event()
+        child_tasks = []
+
+        async def blocked_pipeline(*args, _prefix=prefix, **kwargs):
+            child_tasks.append(asyncio.current_task())
+            try:
+                for event in _prefix:
+                    yield event
+                started.set()
+                await asyncio.Event().wait()
+            finally:
+                settled.set()
+
+        monkeypatch.setattr(
+            route_pipeline,
+            "run_research_pipeline_streaming",
+            blocked_pipeline,
+        )
+        await _cancel_research_consumer(
+            _research_generator(app),
+            started,
+            settled,
+            child_tasks,
+            expected_text="partial answer" if stage == "writing" else "",
+        )
+        assert len(archive.calls) == 1, stage
+        assert archive.calls[0]["partial"] is True, stage
+        if stage == "writing":
+            assert archive.calls[0]["assistant_content"] == "partial answer"
+
+
+async def test_research_queue_full_cleanup_cancels_producer(monkeypatch):
+    app = _fake_app({})
+    put_attempted = asyncio.Event()
+    producer_tasks = []
+
+    async def immediate_planning(**kwargs):
+        return kwargs["messages"], []
+
+    async def fill_event_queue(*args, **kwargs):
+        producer_tasks.append(asyncio.current_task())
+        for index in range(257):
+            if index == 256:
+                put_attempted.set()
+            yield {
+                "type": "researcher_done",
+                "model": f"r{index}",
+                "ok": True,
+                "elapsed_s": 0.0,
+            }
+
+    monkeypatch.setattr(route_pipeline, "_phase_thinking", immediate_planning)
+    monkeypatch.setattr(
+        route_pipeline,
+        "run_research_pipeline_streaming",
+        fill_event_queue,
+    )
+
+    stream = _research_generator(app)
+    try:
+        while True:
+            frame = await asyncio.wait_for(anext(stream), timeout=1)
+            if "_Researching_" in frame:
+                break
+        await asyncio.wait_for(put_attempted.wait(), timeout=1)
+        await asyncio.sleep(0)
+        assert producer_tasks and not producer_tasks[0].done()
+        await asyncio.wait_for(stream.aclose(), timeout=1)
+        await asyncio.sleep(0)
+        assert producer_tasks[0].done()
+    finally:
+        for task in producer_tasks:
+            task.cancel()
+        await asyncio.gather(*producer_tasks, return_exceptions=True)

@@ -36,7 +36,7 @@ import asyncio
 import logging
 import re
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
 from audrey.config import Config
@@ -74,6 +74,22 @@ from audrey.pipeline.state import TaskType, WorkerDraft
 from audrey.tools.discovery import ToolRegistry
 
 log = logging.getLogger(__name__)
+
+
+async def cancel_and_drain(tasks: Iterable[asyncio.Task[Any] | None]) -> None:
+    """Cancel unfinished child tasks and retrieve every terminal result.
+
+    Streaming generators call this from their owner finally block. Gathering
+    completed tasks is intentional: it retrieves latent exceptions as well as
+    waiting for cancellation cleanup such as GPU-gate context exits.
+    """
+    owned = [task for task in tasks if task is not None]
+    for task in owned:
+        if not task.done():
+            task.cancel()
+    if owned:
+        await asyncio.gather(*owned, return_exceptions=True)
+
 
 
 # Map virtual model → pool key in config.yaml
@@ -744,20 +760,27 @@ async def run_panel_streaming(
         yield {"type": "final", "drafts": [], "attempted": []}
         return
 
+    tasks = [
+        asyncio.create_task(coro, name=f"deep-panel:{name}")
+        for (name, _location), coro in zip(workers, coros, strict=True)
+    ]
     drafts: list[WorkerDraft] = []
-    for coro in asyncio.as_completed(coros):
-        draft = await coro
-        ok = bool((draft.get("content") or "").strip())
-        drafts.append(draft)
-        yield {
-            "type": "worker_done",
-            "model": draft.get("model", "?"),
-            "ok": ok,
-            "elapsed_s": float(draft.get("elapsed_s", 0.0) or 0.0),
-        }
+    try:
+        for completed in asyncio.as_completed(tasks):
+            draft = await completed
+            ok = bool((draft.get("content") or "").strip())
+            drafts.append(draft)
+            yield {
+                "type": "worker_done",
+                "model": draft.get("model", "?"),
+                "ok": ok,
+                "elapsed_s": float(draft.get("elapsed_s", 0.0) or 0.0),
+            }
 
-    attempted = [name for name, _ in workers]
-    yield {"type": "final", "drafts": drafts, "attempted": attempted}
+        attempted = [name for name, _ in workers]
+        yield {"type": "final", "drafts": drafts, "attempted": attempted}
+    finally:
+        await cancel_and_drain(tasks)
 
 
 # ─── Research mode (audrey_research) — staged pipeline ─────────────────
@@ -1887,16 +1910,23 @@ async def run_research_pipeline_streaming(
             )
             for name, loc in researchers
         ]
-        for coro in asyncio.as_completed(coros):
-            draft = await coro
-            ok = bool((draft.get("content") or "").strip())
-            drafts.append(draft)
-            yield {
-                "type": "researcher_done",
-                "model": draft.get("model", "?"),
-                "ok": ok,
-                "elapsed_s": float(draft.get("elapsed_s", 0.0) or 0.0),
-            }
+        tasks = [
+            asyncio.create_task(coro, name=f"researcher:{name}")
+            for (name, _location), coro in zip(researchers, coros, strict=True)
+        ]
+        try:
+            for completed in asyncio.as_completed(tasks):
+                draft = await completed
+                ok = bool((draft.get("content") or "").strip())
+                drafts.append(draft)
+                yield {
+                    "type": "researcher_done",
+                    "model": draft.get("model", "?"),
+                    "ok": ok,
+                    "elapsed_s": float(draft.get("elapsed_s", 0.0) or 0.0),
+                }
+        finally:
+            await cancel_and_drain(tasks)
     else:
         log.warning("research: no healthy researchers for task %s", task)
 
@@ -2244,6 +2274,7 @@ async def run_research_pipeline(
 
 
 __all__ = [
+    "cancel_and_drain",
     "pick_panel_timeout",
     "pool_key_for",
     "run_panel",

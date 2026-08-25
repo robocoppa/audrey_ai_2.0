@@ -60,6 +60,7 @@ from audrey.pipeline.complexity import (
 )
 from audrey.pipeline.context import datetime_system_message
 from audrey.pipeline.deep_panel import (
+    cancel_and_drain,
     pick_panel_timeout,
     pool_key_for,
     run_panel_streaming,
@@ -637,6 +638,7 @@ async def _stream_deep_with_banners(
     drafts: list[dict[str, Any]] = []
     final_content = ""
     synth_model = "deep_panel"
+    owned_tasks: list[asyncio.Task[Any]] = []
 
     try:
         # ── Stage 1: Planning (memory recall + planner) ─────────────────
@@ -663,6 +665,7 @@ async def _stream_deep_with_banners(
                 router_cfg=router_cfg,
                 cfg=cfg,
             ))
+            owned_tasks.append(think_task)
             async for frame in _drain_q_until_task(banner_q, think_task, _delta_frame):
                 yield frame
             messages_with_memory, subtasks = think_task.result()
@@ -705,6 +708,7 @@ async def _stream_deep_with_banners(
                 user_id=user_id or None,
                 ticker=ticker,
             ))
+            owned_tasks.append(panel_task)
             async for frame in _drain_q_until_task(banner_q, panel_task, _delta_frame):
                 yield frame
             drafts = panel_task.result()
@@ -720,20 +724,17 @@ async def _stream_deep_with_banners(
         events_q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(maxsize=128)
 
         async def _run_synth_stream() -> None:
-            try:
-                async for evt in synthesize_stream(
-                    cfg, ollama, registry, health, gate,
-                    pool_key=pool_key, task=task,
-                    messages=messages_with_memory, drafts=drafts,
-                    # Pool-aware, matching the panel (`timeout_s` above):
-                    # cloud-only pools get `timeouts.cloud` rather than the
-                    # longer `deep_worker` budget.
-                    subtasks=subtasks, timeout_s=timeout_s,
-                    user_id=user_id or None,
-                ):
-                    await events_q.put(evt)
-            finally:
-                await events_q.put(None)
+            async for evt in synthesize_stream(
+                cfg, ollama, registry, health, gate,
+                pool_key=pool_key, task=task,
+                messages=messages_with_memory, drafts=drafts,
+                # Pool-aware, matching the panel (`timeout_s` above):
+                # cloud-only pools get `timeouts.cloud` rather than the
+                # longer `deep_worker` budget.
+                subtasks=subtasks, timeout_s=timeout_s,
+                user_id=user_id or None,
+            ):
+                await events_q.put(evt)
 
         synth_task = asyncio.create_task(_run_synth_stream())
         first_token_seen = False
@@ -750,7 +751,7 @@ async def _stream_deep_with_banners(
                             yield _delta_frame(item)
                             drained = True
                     try:
-                        evt = await asyncio.wait_for(events_q.get(), timeout=0.05)
+                        evt = await _queue_get_with_timeout(events_q)
                     except TimeoutError:
                         if not drained and synth_task.done():
                             # Generator finished without ever yielding
@@ -880,6 +881,7 @@ async def _stream_deep_with_banners(
         yield _stop_frame()
         yield "data: [DONE]\n\n"
     finally:
+        await cancel_and_drain(owned_tasks)
         elapsed = time.perf_counter() - t0
         pipeline_seconds.labels(mode="deep", task_type=task).observe(elapsed)
         pipeline_total.labels(mode="deep", task_type=task, outcome=pipeline_outcome).inc()
@@ -977,6 +979,7 @@ async def _stream_research_with_banners(
     drafts: list[dict[str, Any]] = []
     final_content = ""
     writer_model = "deep_panel_research"
+    owned_tasks: list[asyncio.Task[Any]] = []
 
     try:
         # ── Stage 0: Planning (memory recall + planner, reused verbatim) ──
@@ -999,6 +1002,7 @@ async def _stream_research_with_banners(
                 router_cfg=router_cfg,
                 cfg=cfg,
             ))
+            owned_tasks.append(think_task)
             async for frame in _drain_q_until_task(banner_q, think_task, _delta_frame):
                 yield frame
             # Research workers answer the full prompt; planner subtasks are not
@@ -1016,19 +1020,17 @@ async def _stream_research_with_banners(
         tool_capable_models = set(fast_path_cfg.get("tool_capable_models", []) or [])
 
         async def _run_pipeline() -> None:
-            try:
-                async for evt in run_research_pipeline_streaming(
-                    cfg, ollama, registry, health, gate,
-                    task=task, messages=messages_with_memory, options=options,
-                    timeout_s=timeout_s, max_researchers_cloud=max_researchers_cloud,
-                    tools=tools, tool_capable_models=tool_capable_models,
-                    user_id=user_id or None,
-                ):
-                    await events_q.put(evt)
-            finally:
-                await events_q.put(None)
+            async for evt in run_research_pipeline_streaming(
+                cfg, ollama, registry, health, gate,
+                task=task, messages=messages_with_memory, options=options,
+                timeout_s=timeout_s, max_researchers_cloud=max_researchers_cloud,
+                tools=tools, tool_capable_models=tool_capable_models,
+                user_id=user_id or None,
+            ):
+                await events_q.put(evt)
 
         pipe_task = asyncio.create_task(_run_pipeline())
+        owned_tasks.append(pipe_task)
 
         # ── Stage 1: Researching (banner; tails per researcher) ───────────
         async with PhaseTicker(BANNER_RESEARCHING, emit) as ticker:
@@ -1039,7 +1041,7 @@ async def _stream_research_with_banners(
                     if item is not None:
                         yield _delta_frame(item)
                 try:
-                    evt = await asyncio.wait_for(events_q.get(), timeout=0.05)
+                    evt = await _queue_get_with_timeout(events_q)
                 except TimeoutError:
                     continue
                 if evt is None:
@@ -1071,7 +1073,7 @@ async def _stream_research_with_banners(
                     if item is not None:
                         return ("banner", item)
                 try:
-                    evt = await asyncio.wait_for(events_q.get(), timeout=0.05)
+                    evt = await _queue_get_with_timeout(events_q)
                 except TimeoutError:
                     continue
                 return ("event", evt)
@@ -1203,6 +1205,7 @@ async def _stream_research_with_banners(
         yield _stop_frame()
         yield "data: [DONE]\n\n"
     finally:
+        await cancel_and_drain(owned_tasks)
         elapsed = time.perf_counter() - t0
         pipeline_seconds.labels(mode="deep", task_type=task).observe(elapsed)
         pipeline_total.labels(mode="deep", task_type=task, outcome=pipeline_outcome).inc()
@@ -1230,6 +1233,30 @@ async def _stream_research_with_banners(
             )
 
 
+async def _queue_get_with_timeout(q: asyncio.Queue[Any]) -> Any:
+    """Poll one queue without parking cancellation on a Queue.get Future."""
+    if not q.empty():
+        return q.get_nowait()
+    await asyncio.sleep(0.05)
+    if q.empty():
+        raise TimeoutError
+    return q.get_nowait()
+
+
+async def _queue_get_until_task(
+    q: asyncio.Queue[Any],
+    task: asyncio.Task[Any],
+) -> Any | None:
+    """Return the next item, or None after the producer settles and drains."""
+    while True:
+        if task.done() and q.empty():
+            return None
+        try:
+            return await _queue_get_with_timeout(q)
+        except TimeoutError:
+            continue
+
+
 async def _drain_q_until_task(
     q: asyncio.Queue[str | None],
     task: asyncio.Task[Any],
@@ -1245,7 +1272,7 @@ async def _drain_q_until_task(
     """
     while not task.done() or not q.empty():
         try:
-            item = await asyncio.wait_for(q.get(), timeout=0.05)
+            item = await _queue_get_with_timeout(q)
         except TimeoutError:
             continue
         if item is None:

@@ -261,3 +261,98 @@ async def test_concurrency_below_one_clamped_to_one():
     assert gate.concurrency == 1
     gate = FairLocalGate(concurrency=-5)
     assert gate.concurrency == 1
+
+async def test_cancelled_waiter_after_grant_transfers_slot_to_next_waiter(monkeypatch):
+    """Cancellation after set_result must not strand the granted slot.
+
+    The hook pauses the first queued waiter after the gate grants its future
+    but before the context body can start. That is the otherwise tiny race
+    window this regression protects; event synchronization keeps it
+    deterministic without sleep timing.
+    """
+    gate = FairLocalGate(concurrency=1)
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    granted_pause = asyncio.Event()
+    third_started = asyncio.Event()
+    release_third = asyncio.Event()
+    hook_calls = 0
+
+    async def pause_first_grantee() -> None:
+        nonlocal hook_calls
+        hook_calls += 1
+        if hook_calls == 1:
+            granted_pause.set()
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(gate, "_after_waiter_granted", pause_first_grantee)
+
+    first = asyncio.create_task(
+        _hold_gate(
+            gate,
+            user_id="alice",
+            started=first_started,
+            release=release_first,
+            log_into=[],
+            label="first",
+        )
+    )
+    await first_started.wait()
+
+    async def second() -> None:
+        async with gate.acquire("m", location="local", user_id="bob"):
+            pytest.fail("cancelled grantee entered the context body")
+
+    async def third() -> None:
+        async with gate.acquire("m", location="local", user_id="carol"):
+            third_started.set()
+            await release_third.wait()
+
+    second_task = asyncio.create_task(second())
+    third_task = asyncio.create_task(third())
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    release_first.set()
+    await asyncio.wait_for(granted_pause.wait(), timeout=1)
+    second_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await second_task
+
+    await asyncio.wait_for(third_started.wait(), timeout=1)
+    assert gate._available == 0
+
+    release_third.set()
+    await asyncio.gather(first, third_task)
+    assert gate._available == gate.concurrency
+    assert gate.snapshot() == {}
+
+
+async def test_cancel_inside_context_releases_exactly_once():
+    gate = FairLocalGate(concurrency=1)
+    inside = asyncio.Event()
+
+    async def cancelled_holder() -> None:
+        async with gate.acquire("m", location="local", user_id="alice"):
+            inside.set()
+            await asyncio.Event().wait()
+
+    holder = asyncio.create_task(cancelled_holder())
+    await inside.wait()
+    holder.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await holder
+
+    entered_later = False
+
+    async def later() -> None:
+        nonlocal entered_later
+        async with gate.acquire("m", location="local", user_id="bob"):
+            entered_later = True
+
+    await asyncio.wait_for(later(), timeout=1)
+    assert entered_later is True
+    assert gate._available == gate.concurrency
+    assert gate.snapshot() == {}
+
+

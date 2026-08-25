@@ -22,6 +22,7 @@ model runs.
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import inspect
 import json
@@ -32,6 +33,7 @@ from types import SimpleNamespace
 from typing import Any, ClassVar
 
 import audrey.pipeline.graph
+from audrey.routes.openai import pipeline as route_pipeline
 from audrey.config import Config, EnvOverrides, get_config
 from audrey.models.health import HealthTracker
 from audrey.models.registry import ModelRegistry
@@ -214,3 +216,179 @@ async def test_the_summary_line_matches_the_non_streaming_wording(caplog):
     assert re.search(r"workers=\d+ ok=\d+ tool_grounded=\d+", _summary_line(caplog))
 
     assert "workers=%d ok=%d tool_grounded=%d" in _GRAPH_SRC
+
+# ─── Request-owned task cancellation ──────────────────────────────────
+
+
+class _RecordingArchive:
+    def __init__(self):
+        self.calls = []
+
+    async def archive_turn(self, **kwargs):
+        self.calls.append(kwargs)
+
+
+def _deep_generator(app):
+    msgs = [{"role": "user", "content": "cancel this request"}]
+    payload = ChatCompletionRequest(model="audrey_deep", messages=msgs, stream=True)
+    return _stream_deep_with_banners(
+        app,
+        payload,
+        msgs,
+        {},
+        task="reasoning",
+        conf=0.9,
+        user_id="alice@example.com",
+        conversation_id="conversation-1",
+        user_turn_text=msgs[0]["content"],
+    )
+
+
+async def _drain_stream(stream):
+    async for _frame in stream:
+        pass
+
+
+async def _assert_cancel_settles_child(stream, started, settled, child_tasks):
+    consumer = asyncio.create_task(_drain_stream(stream))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        consumer.cancel()
+        try:
+            await consumer
+        except asyncio.CancelledError:
+            pass
+        else:
+            raise AssertionError("stream consumer did not propagate cancellation")
+        await asyncio.wait_for(settled.wait(), timeout=1)
+    finally:
+        consumer.cancel()
+        for task in child_tasks:
+            task.cancel()
+        await asyncio.gather(consumer, *child_tasks, return_exceptions=True)
+        await stream.aclose()
+
+
+async def test_deep_disconnect_during_planning_cancels_and_archives_partial(monkeypatch):
+    app = _fake_app({})
+    archive = _RecordingArchive()
+    app.state.archive_client = archive
+    started = asyncio.Event()
+    settled = asyncio.Event()
+    child_tasks = []
+
+    async def blocked_planning(**kwargs):
+        child_tasks.append(asyncio.current_task())
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            settled.set()
+
+    monkeypatch.setattr(route_pipeline, "_phase_thinking", blocked_planning)
+    await _assert_cancel_settles_child(
+        _deep_generator(app),
+        started,
+        settled,
+        child_tasks,
+    )
+    assert len(archive.calls) == 1
+    assert archive.calls[0]["partial"] is True
+
+
+async def test_deep_disconnect_during_panel_cancels_panel_task(monkeypatch):
+    app = _fake_app({})
+    started = asyncio.Event()
+    settled = asyncio.Event()
+    child_tasks = []
+
+    async def immediate_planning(**kwargs):
+        return kwargs["messages"], []
+
+    async def blocked_panel(**kwargs):
+        child_tasks.append(asyncio.current_task())
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            settled.set()
+
+    monkeypatch.setattr(route_pipeline, "_phase_thinking", immediate_planning)
+    monkeypatch.setattr(route_pipeline, "_phase_dispatch", blocked_panel)
+    await _assert_cancel_settles_child(
+        _deep_generator(app),
+        started,
+        settled,
+        child_tasks,
+    )
+
+
+async def test_deep_disconnect_during_synthesis_cancels_producer(monkeypatch):
+    app = _fake_app({})
+    started = asyncio.Event()
+    settled = asyncio.Event()
+    child_tasks = []
+
+    async def immediate_planning(**kwargs):
+        return kwargs["messages"], []
+
+    async def immediate_panel(**kwargs):
+        return []
+
+    async def blocked_synthesis(*args, **kwargs):
+        child_tasks.append(asyncio.current_task())
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            settled.set()
+        yield {"type": "done"}
+
+    monkeypatch.setattr(route_pipeline, "_phase_thinking", immediate_planning)
+    monkeypatch.setattr(route_pipeline, "_phase_dispatch", immediate_panel)
+    monkeypatch.setattr(route_pipeline, "synthesize_stream", blocked_synthesis)
+    await _assert_cancel_settles_child(
+        _deep_generator(app),
+        started,
+        settled,
+        child_tasks,
+    )
+
+
+async def test_deep_queue_full_cleanup_does_not_wait_for_sentinel_space(monkeypatch):
+    app = _fake_app({})
+    put_attempted = asyncio.Event()
+    producer_tasks = []
+
+    async def immediate_planning(**kwargs):
+        return kwargs["messages"], []
+
+    async def immediate_panel(**kwargs):
+        return []
+
+    async def fill_event_queue(*args, **kwargs):
+        producer_tasks.append(asyncio.current_task())
+        for index in range(129):
+            if index == 128:
+                put_attempted.set()
+            yield {"type": "fallback_attempt", "model": "s", "error": "retry"}
+
+    monkeypatch.setattr(route_pipeline, "_phase_thinking", immediate_planning)
+    monkeypatch.setattr(route_pipeline, "_phase_dispatch", immediate_panel)
+    monkeypatch.setattr(route_pipeline, "synthesize_stream", fill_event_queue)
+
+    stream = _deep_generator(app)
+    try:
+        while True:
+            frame = await asyncio.wait_for(anext(stream), timeout=1)
+            if "_Synthesizing_" in frame:
+                break
+        await asyncio.wait_for(put_attempted.wait(), timeout=1)
+        await asyncio.sleep(0)
+        assert producer_tasks and not producer_tasks[0].done()
+        await asyncio.wait_for(stream.aclose(), timeout=1)
+        assert producer_tasks[0].done()
+    finally:
+        for task in producer_tasks:
+            task.cancel()
+        await asyncio.gather(*producer_tasks, return_exceptions=True)

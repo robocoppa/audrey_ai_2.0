@@ -117,10 +117,13 @@ class FairLocalGate:
                 dq.append(fut)
             try:
                 await fut
+                await self._after_waiter_granted()
             except asyncio.CancelledError:
-                # Clean ourselves out of the queue if we were cancelled
-                # before being granted. `_release`'s done-future sweep
-                # also tolerates a cancelled head, so this races safely.
+                # A cancelled await cancels its Future when the waiter was
+                # still queued. A Future completed with a result means
+                # _release already transferred the slot to us, so the context
+                # body will never run and we must transfer it again ourselves.
+                was_granted = fut.done() and not fut.cancelled()
                 async with self._lock:
                     dq = self._waiters.get(bucket)
                     if dq is not None:
@@ -130,6 +133,10 @@ class FairLocalGate:
                             pass
                         if not dq:
                             self._waiters.pop(bucket, None)
+                if was_granted:
+                    # Keep the state transition under the lock in _release,
+                    # but never recursively acquire that lock from above.
+                    await self._release()
                 raise
 
         gpu_gate_wait_seconds.observe(time.perf_counter() - t0)
@@ -137,6 +144,14 @@ class FairLocalGate:
             yield
         finally:
             await self._release()
+
+    async def _after_waiter_granted(self) -> None:
+        """Test seam for the granted-before-resume cancellation window.
+
+        The production implementation deliberately does not suspend. Tests
+        replace it with an event-controlled pause immediately after the queued
+        Future resolves and before the context body begins.
+        """
 
     async def _release(self) -> None:
         """Free one slot and grant it to the next round-robin waiter.

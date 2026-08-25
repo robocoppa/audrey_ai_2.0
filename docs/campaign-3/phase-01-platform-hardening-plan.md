@@ -1,7 +1,7 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress. Wave 1A private-search isolation is laptop-verified;
-request-ownership work and Unraid verification remain.
+**Status:** In progress. Wave 1A private-search isolation is laptop- and
+Unraid-verified; request-ownership work remains.
 
 ## Goal
 
