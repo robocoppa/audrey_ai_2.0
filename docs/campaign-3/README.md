@@ -1,7 +1,8 @@
 # Campaign 3 — correctness foundations and reusable skills
 
-**Status:** In progress as of 2026-08-25. Campaign 3 Phase 1 Wave 1A is
-underway; its private-search isolation slice is laptop- and Unraid-verified.
+**Status:** In progress as of 2026-08-25. Wave 1A is laptop-complete:
+private-search isolation is Unraid-verified, and the request-ownership slice
+awaits its user-run Unraid smoke.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then uses those foundations to add the first general skills layer.

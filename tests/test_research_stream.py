@@ -390,15 +390,22 @@ async def test_research_disconnect_cancels_pipeline_at_every_later_stage(monkeyp
         settled = asyncio.Event()
         child_tasks = []
 
-        async def blocked_pipeline(*args, _prefix=prefix, **kwargs):
-            child_tasks.append(asyncio.current_task())
+        async def blocked_pipeline(
+            *args,
+            _prefix=prefix,
+            _child_tasks=child_tasks,
+            _started=started,
+            _settled=settled,
+            **kwargs,
+        ):
+            _child_tasks.append(asyncio.current_task())
             try:
                 for event in _prefix:
                     yield event
-                started.set()
+                _started.set()
                 await asyncio.Event().wait()
             finally:
-                settled.set()
+                _settled.set()
 
         monkeypatch.setattr(
             route_pipeline,

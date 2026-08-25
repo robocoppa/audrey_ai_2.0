@@ -33,11 +33,11 @@ from types import SimpleNamespace
 from typing import Any, ClassVar
 
 import audrey.pipeline.graph
-from audrey.routes.openai import pipeline as route_pipeline
 from audrey.config import Config, EnvOverrides, get_config
 from audrey.models.health import HealthTracker
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.routes.openai import pipeline as route_pipeline
 from audrey.routes.openai.pipeline import _stream_deep_with_banners
 from audrey.routes.openai.schemas import ChatCompletionRequest
 from audrey.tools.discovery import ToolRegistry, ToolSpec

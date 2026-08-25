@@ -804,7 +804,7 @@ async def _stream_deep_with_banners(
             # deltas. Stream them through.
             if first_token_seen and not synth_done:
                 while True:
-                    evt = await events_q.get()
+                    evt = await _queue_get_until_task(events_q, synth_task)
                     if evt is None:
                         break
                     etype = evt.get("type")
@@ -1043,6 +1043,8 @@ async def _stream_research_with_banners(
                 try:
                     evt = await _queue_get_with_timeout(events_q)
                 except TimeoutError:
+                    if pipe_task.done() and events_q.empty():
+                        break
                     continue
                 if evt is None:
                     break
@@ -1075,6 +1077,8 @@ async def _stream_research_with_banners(
                 try:
                     evt = await _queue_get_with_timeout(events_q)
                 except TimeoutError:
+                    if pipe_task.done() and events_q.empty():
+                        return ("event", None)
                     continue
                 return ("event", evt)
 
@@ -1141,7 +1145,7 @@ async def _stream_research_with_banners(
                 yield _delta_frame(text)
         if not done_evt:
             while True:
-                evt = await events_q.get()
+                evt = await _queue_get_until_task(events_q, pipe_task)
                 if evt is None:
                     break
                 text = _consume(evt)

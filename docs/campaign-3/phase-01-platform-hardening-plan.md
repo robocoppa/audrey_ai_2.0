@@ -1,7 +1,8 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress. Wave 1A private-search isolation is laptop- and
-Unraid-verified; request-ownership work remains.
+**Status:** In progress. Wave 1A is laptop-complete: private-search isolation
+is Unraid-verified, and request ownership/cancellation awaits its deployment
+smoke.
 
 ## Goal
 
@@ -41,6 +42,10 @@ Make private search scoping consistent across every query mode and give every
 spawned request task one explicit owner. Cover GPU scheduling, deep execution,
 research execution, queue shutdown, and client cancellation with deterministic
 tests.
+
+Laptop verification passed on 2026-08-25: 163 focused lifecycle tests and all
+2,413 hermetic tests pass; changed-file lint is clean. The user-run deployment
+smoke remains before Wave 1A closes.
 
 Gate:
 

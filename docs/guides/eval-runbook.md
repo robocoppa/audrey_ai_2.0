@@ -158,6 +158,65 @@ nohup env CASES=eval_prompts_code_hard_models.json LABEL=cap-hard-base \
 ```
 
 ⚠️ **A model that cannot be resident gets its OWN run, never a sweep.**
+
+
+### Quant bake-off — same weights, different quantization
+
+Added 2026-08-25 for `qwen3.8`. The arms are the SAME 27.3B weights, so this
+asks a narrower question than the capability battery: not "is this model any
+good" but "which build of it should serve". Latency is the point, and latency
+is the number this harness measures worst — read the warnings before the table.
+
+| arm | quant | size | resident? |
+|---|---|---|---|
+| `qwen3.8:latest` | Q4_K_M | 17 GB | one card, baseline |
+| `qwen3.8:27b-mtp-q4_K_M` | Q4_K_M + MTP | 18 GB | one card |
+| `qwen3.8:27b-mtp-q8_0` | Q8_0 + MTP | 30 GB | **spans both cards** |
+
+**Run shape is forced by the sizes.** The two Q4 arms are 35 GB together and
+share one sweep. The Q8 arm is 30 GB against 24 GB per card, so it cannot
+co-reside with either — it gets its own run, per the rule above.
+
+```bash
+# Arm A+B — MTP isolated: same quant, same size, MTP the only variable.
+nohup env CASES=eval_prompts_code_hard_models.json LABEL=quant-mtp \
+  ARGS='--repeat 5' \
+  MODELS='audrey_passthrough/qwen3.8:latest,audrey_passthrough/qwen3.8:27b-mtp-q4_K_M' \
+  scripts/eval-onbox.sh > testing-out/quant-mtp.log 2>&1 &
+
+# Arm C — alone. ▶ `ollama ps` after the first prompt, BEFORE trusting latency.
+nohup env CASES=eval_prompts_code_hard_models.json LABEL=quant-q8 \
+  ARGS='--repeat 5' \
+  MODELS='audrey_passthrough/qwen3.8:27b-mtp-q8_0' \
+  scripts/eval-onbox.sh > testing-out/quant-q8.log 2>&1 &
+```
+
+Then `eval_prompts_code_models.json` (6/6 executed) for accuracy breadth, and
+`eval_prompts_models_ab.json` for prose — whose answers file you read by hand.
+
+⚠️ **`--repeat` is not optional here.** The harness sends no seed and no
+temperature, so one case is one draw from the default sampler. A quant
+difference is smaller than that noise; `eval_compare.py` pools repeats into a
+pass RATE precisely so it can be seen.
+
+⚠️ **There is no warmup anywhere in the harness.** `_expand_sweep` groups by
+model so each loads once — but that one cold load lands inside the FIRST case
+of each arm, and cold load is where a 30 GB arm differs most from a 17 GB one.
+Discount the first case per arm, or repeat until it dilutes. Do not report it
+as TTFT.
+
+⚠️ **`mtp-q8_0` confounds two variables** against `:latest` — quantization AND
+the MTP heads. It is a fair comparison of deployable tags, but it cannot tell
+you which half moved the number. Pull plain `qwen3.8:27b-q8_0` (30 GB) if the
+Q8 arm wins and you need to know why.
+
+⚠️ **Confirm MTP is actually active.** Ollama's speculative path is normally
+driven by `--speculative-model` with a separate drafter; whether a bundled
+`-mtp-` tag engages it through a plain `/v1/chat/completions` call is
+unverified here. If it does not, the MTP arms are ordinary Q4/Q8 carrying dead
+weight, and a null result means nothing about MTP. There is also an upstream
+report of MTP variants running 2x SLOWER (ollama#17776, Apple Silicon/Metal —
+may not apply to CUDA).
 `_expand_sweep` groups by model so each loads once, which is enough when the set
 fits in 48 GB and useless when it does not — the big one is evicted and reloaded
 from disk on every alternation. 2026-08-18: `laguna-s-2.1` is 96 GB against

@@ -49,6 +49,16 @@ LOCAL_MODELS=(
   "laguna-s-2.1:latest"
   "laguna-xs-2.1:latest"
   "ornith-1.5:35b"
+  # ── 2026-08-25 quant bake-off, NOT production roles ──
+  # Alternate quantizations of the SAME 27.3B weights already served as
+  # `qwen3.8:latest` (Q4_K_M, 17 GB) — pulled to A-B quant and multi-token
+  # prediction against it. Different tags coexist; `:latest` keeps serving
+  # until a winner is promoted. ▶ Delete the losers from BOTH files.
+  # ⚠️ `27b-mtp-q8_0` is 30 GB against 24 GB per card: it cannot sit on one
+  # card. Confirm the CPU/GPU split with `ollama ps` before trusting its
+  # latency numbers.
+  "qwen3.8:27b-mtp-q4_K_M"
+  "qwen3.8:27b-mtp-q8_0"
 )
 
 CLOUD_MODELS=(
