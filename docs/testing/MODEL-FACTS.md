@@ -202,6 +202,10 @@ them are the reason it is being replaced. ⚠️ They can no longer be re-measur
   is actually for and which was measured directly — 5/5 correct selection in
   all three thinking states, `false` 2x faster on under half the tokens. See
   the fast-path table below. `[config.yaml + thinking_probe, 2026-08-19]`
+  ⚠️ **A duplicate stub of this section existed lower in the file** and said
+  only "leads both the `code` and `general` fast-path pools". That sentence is
+  what got read as "muse-glimmer is the primary" across three consecutive
+  answers on 2026-08-19. Stub deleted 2026-08-20 — **one section per model**.
 - **Middle of the three on latency.** Thinking off, warm, grounding suite: ttft
   mean 0.49s, total mean 2.29s, median 2.00s. Cold load 29.1s.
   `[gap-off-r5b, 2026-08-19]`
@@ -274,12 +278,6 @@ Production router (`router.model`). Probed 10 cases × 3 rounds.
   `HTTP 403 Passthrough not allowed for model 'qwen3.5:4b'` on all 125 samples.
   ▶ Its quality can only be measured by adding it to that list, or via
   `router_probe.py`, which calls Ollama directly. `[ab/gap-next4, 2026-08-19]`
-
-### `qwen3.8:latest`
-
-- **17 GB** — explicitly ruled out for the router slot on size, not on ability.
-  `[config.yaml]`
-- Leads **both** the `code` and `general` fast-path pools. `[config.yaml]`
 
 ### `ornith-1.5:35b`
 
