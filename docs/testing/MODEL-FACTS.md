@@ -77,6 +77,11 @@ passages, instruction-following, code).
   score of the five. Both failures are `reasoning-decimal-compare`
   (`9.11 > 9.9`). ⚠️ It is NOT the fast-path primary — qwen3.8 holds that at
   priority 100 against muse's 84. `[ab-off-r5b + gap-off-r5b, 2026-08-19]`
+- ▶ **LEADS `deep_panel_local.general` AND `deep_panel_local.reasoning` from
+  2026-08-25**, retaking `general` from ornith-1.5:35b. The two local pools are
+  now identical. The trade is accuracy over cost — see the latency line below,
+  which is what that costs and is the first thing to check if deep-local p95
+  becomes a complaint. `[config.yaml]`
 - ⚠️ **The slowest local by a wide margin.** Thinking off, warm, grounding
   suite: ttft mean 3.55s, total mean 5.71s, 7 of 59 cases over 8s. That is
   **2.5x qwen3.8 and 6.3x nemotron** on total. Its accuracy lead has to be paid
@@ -256,6 +261,46 @@ Same 27.3B weights, three builds. `eval_prompts_code_hard_models.json`,
 - **29 GB against 24 GB per card** (`ollama list`), so it cannot be resident on
   one card and must span both. Same class of risk as `llama4:latest` below.
 
+#### Thinking-OFF re-run — the decisive arm `[q4-thinkoff + q8-thinkoff, 2026-08-25]`
+
+Same three arms, same suite, `--repeat 5`, `THINK=off`. ⚠️ `THINK` forces
+Audrey-direct, so these numbers are NOT comparable to the thinking-ON block
+above (no OWUI system prompt, sampling params or retrieval context). Compare
+the three models WITHIN this arm only.
+
+- ✅✅ **TTFT WAS REASONING, CONFIRMED.** Median TTFT collapses from 4-97s to
+  **0.20s** — every arm, every case. The 65-94% TTFT share recorded above was
+  thinking tokens being generated before the first content token, not prompt
+  processing. Generation is now ~100% of the request.
+- ⛔⛔ **MTP IS A NULL RESULT, AND THIS SUPERSEDES THE READING ABOVE.** With
+  thinking off, MTP has the ENTIRE request to accelerate. It changes nothing:
+  per-case median deltas vs `latest` are **+0.00 / +0.00 / +0.00 / -0.10 /
+  +0.10 s**, mean delta **0.000s**, largest **0.10s**, Mann-Whitney
+  **z = +0.10**. Not faster, not slower — flat.
+  ▶ The thinking-ON "slower on 5/5 cases" is **WITHDRAWN as thinking-length
+  variance**, not an MTP penalty. It was measured through TTFT, which MTP does
+  not govern, on unseeded draws of differing reasoning length.
+  ▶▶ **The advertised 1.4-2.2x does not appear on this box on any setting,
+  including the one where MTP had everything to work with.**
+- **`mtp-q8_0` is genuinely slower, and this reading IS clean** (TTFT 0.2s, so
+  it is pure generation rate). Slower on 5/5 cases, +6% to +59%, Mann-Whitney
+  z = -1.81. Median total ratio **1.32x** against a **1.71x** weight ratio
+  (29 GB / 17 GB) — the shape expected of bandwidth-bound generation.
+- ✅ **The 100.8s q8 tail was thinking, not memory pressure.** Warm max drops
+  from 100.8s to **14.3s** and the cold load completes in 40.7s. See
+  *Not established* — the hypothesis is largely retired, not proven wrong.
+- **Quality: 70/75 across all three arms, against 73/75 thinking-ON.** latest
+  24/25, mtp-q4 23/25, mtp-q8 23/25. Directionally consistent with this model's
+  known thinking penalty (116/125 on vs 112/125 off) but 3 cases is noise.
+  Failures concentrate on `lru-ttl`, the hardest case.
+- **Warm median total, `qwen3.8:latest`: 13.4s thinking-ON → 3.90s
+  thinking-OFF.** ⚠️ The request path differs too, so this is NOT a clean
+  thinking delta — it is directionally consistent with the fast path's measured
+  6x token reduction and should not be quoted as a thinking coefficient.
+- ▶ **Both Q4 arms co-resided.** In the sweep, `mtp-q4` took no cold load after
+  `latest` (first case ttft 0.2s), confirming 17+17 GB sits in 48 GB without
+  eviction. The run-shape rule holds.
+
 ### `llama4:latest`
 
 - ⛔ **DROPPED FROM THE MODEL SWEEP 2026-08-19**, replaced by `ornith-1.5:35b`.
@@ -342,10 +387,18 @@ Production router (`router.model`). Probed 10 cases × 3 rounds.
 - Refuses well: on the absent-subtopic case it states outright that it will not
   invent an answer, and separately flags its own AMQP prefetch assumption as
   world knowledge rather than grounding. `[gap-r5b, 2026-08-19]`
-- ▶ **Holds `deep_panel_local.general` as of 2026-08-19**, displacing
-  muse-glimmer on cost rather than accuracy. Registered in `model_registry`
-  BELOW muse so the fast path is untouched. ⛔ Deliberately kept OUT of
-  `deep_panel_local.code` — see the thinking instability above.
+- ⛔ **NO LONGER IN ANY PANEL, 2026-08-25 (user decision).** It held
+  `deep_panel_local.general` from 2026-08-19, having displaced muse-glimmer on
+  COST rather than accuracy; muse has been put back at the top of that pool to
+  favour accuracy. Superseded record: it took the slot on warm 2.6-12.6s
+  against muse's 13-20s, at 59/60 against muse's 60/60.
+  ▶ It remains in `model_registry` (priority 83, below muse's 84, so fast-path
+  selection is unchanged either way) and in `passthrough.allowed_models`, so it
+  is still targetable by `eval_research.py --models`. ⚠️ Its registry comment
+  still reads "REGISTERED SO IT CAN BE A PANEL WORKER" — stale as of this
+  change, harmless where it sits.
+  ⛔ Was deliberately kept OUT of `deep_panel_local.code` — see the thinking
+  instability above; that reasoning stands if it is ever reconsidered.
 - ⛔ **Worst of the five on general quality with thinking OFF** — 48/65, against
   2 failures on the grounding suite in the same arm. Four defect classes, all
   absent when it thinks: answers truncated to their closing sentence
@@ -353,8 +406,9 @@ Production router (`router.model`). Probed 10 cases × 3 rounds.
   elaborate), `reasoning-race-order` landing on a wrong final order 4/5 after
   reasoning correctly in the body, `string.punctuation` used without
   `import string` 2/5, and one substituted name on `gk-berlin-wall`. ▶ It is
-  the most thinking-dependent model measured, which is fine while
-  `deep_panel_local.general` thinks — but it is now a hard dependency.
+  the most thinking-dependent model measured. ▶ **That risk retired 2026-08-25
+  when it left the pool** — it was a hard dependency for as long as it led
+  `deep_panel_local.general`, and would become one again on any re-entry.
   `[ab-off-r5b, 2026-08-19]`
 
 ### `ornith-1.5:9b` — ⛔ REMOVED FROM THE BOX 2026-08-19
@@ -549,10 +603,27 @@ Worst case: muse 37.2s → 12.2s, nemotron 20.0s → 1.9s, qwen3.8 17.9s → 8.1
   arm, same evening. Thinking buys reasoning-from-world-knowledge. It buys
   very little when the answer is already in the prompt. ▶ The deep panel's job
   is the second shape, which is the one that degrades least.
-- ✅ **`fast_path.no_thinking: true` is safe where it is applied.**
-  `muse-glimmer` is the fast-path primary and is the one model thinking-off
-  does not move: 60/60 on grounding, 63/65 on general quality. Its two failures
-  are both `reasoning-decimal-compare` (`9.11 > 9.9`).
+- ✅ **`fast_path.no_thinking: true` is safe where it is applied — but the
+  reason is TOOL SELECTION, not prose.** ⚠️ **CORRECTED 2026-08-25.** This
+  bullet previously read "`muse-glimmer` is the fast-path primary and is the
+  one model thinking-off does not move", and was wrong twice over:
+  1. **The fast-path primary is `qwen3.8:latest`** (priority 100 in `code` and
+     `general`) against muse-glimmer's 84. This is the SAME stale claim the
+     duplicate stub caused on 2026-08-19 and that was deleted 2026-08-20 — it
+     survived here, in a different section. ▶ One section per model, and check
+     `config.yaml` priorities before asserting who serves a path.
+  2. **It justified the flag with the wrong branch's evidence.** `no_thinking`
+     governs the **ReAct/tool branch only**; the plain-chat branch is
+     `no_thinking_prose: false`, i.e. thinking stays ON. So muse's prose scores
+     could not justify this line even if muse held the slot.
+  ▶ **The actual argument, on the model that actually serves it:** tool
+  selection is **5/5 correct in ALL THREE thinking states**, so thinking buys
+  nothing on that branch and costs ~0.7s per ReAct round, which compounds over
+  a loop. `[thinking_probe TOOLS=1, 2026-08-19]`
+- ✅ **`fast_path.no_thinking_prose: false` is the deliberate opposite**, and
+  qwen3.8's −4/125 thinking-off is exactly why. Prose is one call, not a loop,
+  so the ~4.0s does not compound the way it would on the tool branch.
+  `[ab/gap-off-r5b, 2026-08-19 + config.yaml]`
 - ⛔ **Do NOT extend `no_thinking` to the deep panel.** −27 on general quality is
   the whole argument.
 
@@ -691,7 +762,15 @@ Open questions, and what would close each.
   VRAM, a sibling model scored 5/5 in the same window, and the harness sets no
   sampler options, which explains it without any hardware theory.
   ▶ *Closes with:* both suites at `--repeat 5`.
-- **Whether `qwen3.8:27b-mtp-q8_0`'s latency tail is memory pressure.** The
+- **Whether `qwen3.8:27b-mtp-q8_0`'s latency tail is memory pressure.**
+  ⛔ **LARGELY RETIRED 2026-08-25** by the thinking-OFF arm: warm max falls from
+  100.8s to 14.3s and the cold load completes in 40.7s, so the extreme tail was
+  variable reasoning length, not swapping. The residual +6-59% is a clean
+  generation-rate difference consistent with 1.71x the weights to stream.
+  `ollama ps` STILL was not captured, so CPU offload is not formally excluded.
+  ▶ *Closes with:* `ollama ps` during any future run of this tag.
+  Original entry follows for the record.
+- **[superseded] Whether `qwen3.8:27b-mtp-q8_0`'s latency tail is memory pressure.** The
   bimodal shape (median fine, max 100.8s, 63s spread on one prompt) fits a
   29 GB model spanning two 24 GB cards with the embedder pinned resident, but
   **`ollama ps` was never captured during the run**, so the GPU/CPU split is
@@ -699,13 +778,25 @@ Open questions, and what would close each.
   excluded. ⚠️ Until this is settled its latency column cannot be compared
   with the Q4 arms at all, exactly as with `llama4:latest`.
   ▶ *Closes with:* `ollama ps` during a re-run, read before anything else.
-- **Whether MTP's Q4 slowdown is real or verbosity.** The harness sends no seed
+- ⛔ **[CLOSED 2026-08-25] Whether MTP's Q4 slowdown is real or verbosity.**
+  Moot: the thinking-OFF arm shows MTP is a NULL (mean delta 0.000s) with the
+  whole request available to it, so there is no slowdown left to attribute.
+  The thinking-ON direction is withdrawn as reasoning-length variance.
+  Original entry follows for the record.
+- **[superseded] Whether MTP's Q4 slowdown is real or verbosity.** The harness sends no seed
   and no temperature, and the answers file carries no token counts, so "MTP
   generates slower" and "the MTP arm happened to write more" are
   indistinguishable. Several mtp-q4 answers are visibly wordier.
   ▶ *Closes with:* `eval_compare.py`'s mean-answer-length column on the results
   JSON; normalise latency by output tokens before claiming a rate difference.
-- **The whole quant bake-off ran with thinking ON.** `passthrough.think` is
+- ⛔ **[CLOSED 2026-08-25] The whole quant bake-off ran with thinking ON.**
+  Re-run with `THINK=off`; see the thinking-OFF block in the per-model section.
+  ⚠️ It closed one gap and opened a smaller one: `THINK` forces Audrey-direct,
+  so the two arms differ in request path as well as thinking and cannot be
+  differenced against each other.
+  ▶ *A clean thinking coefficient would close with:* both THINK arms run
+  DIRECT, which no run has yet done. Original entry follows for the record.
+- **[superseded] The whole quant bake-off ran with thinking ON.** `passthrough.think` is
   `null` (config.yaml), so the field is omitted and qwen3.8's template thinks by
   default. ⚠️ The fast path — where qwen3.8 actually serves — runs
   `think: false`. So NO arm here, including the incumbent baseline, describes

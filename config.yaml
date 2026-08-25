@@ -388,21 +388,36 @@ deep_panel_local:
     workers: ["muse-glimmer:latest", "qwen3.8:latest"]
     synthesizer: "qwen3.8:latest"
     fallback_synth: "qwen3.8:latest"
-  # ⚠️ `general` LEADS WITH ornith-1.5:35b FROM 2026-08-19, `reasoning` STILL
-  # LEADS WITH muse-glimmer. That split is deliberate and is not an oversight.
-  # Both were measured the same day, same suite, --repeat 5, thinking confirmed
-  # applied on both. They tie on accuracy (60/60 vs 59/60), and ornith wins the
-  # tie-break on cost: warm 2.6-12.6s against muse's 13-20s, and 0.53-1.90
-  # chars-per-token against 0.06-1.19. muse spent 3,781 characters of reasoning
-  # to emit a 56-character JSON object. On a pool where two workers SERIALIZE
-  # through one GPU, that overhead is the dominant cost of the whole turn.
-  # ▶ `reasoning` keeps muse because the EVIDENCE FOR ornith IS THINNER THERE:
-  # the run that separates models on reasoning and world knowledge
-  # (eval_prompts_models_ab.json) has never completed for ornith — the ab-r5b
-  # sweep was SIGKILLed. Two reasoning cases at 5/5 is not a reason to displace
-  # the top-scoring model on the box. Move `reasoning` only after that run.
+  # ▶ **`general` LEADS WITH muse-glimmer FROM 2026-08-25 (user decision).**
+  # ornith-1.5:35b held this slot from 2026-08-19 and is now OUT of it. This
+  # REVERSES a cost tie-break in favour of accuracy, deliberately.
+  #
+  # What the reversal buys: muse is the higher scorer on every completed
+  # measurement — 60/60 grounding against ornith's 59/60, 123/125 thinking-off
+  # (the highest on the box, and the only model that does not move when
+  # thinking is removed), and the only measured model that invented no citation
+  # in 5 runs. `general` is the pool most exposed to open-ended generation,
+  # which is where fabrication shows up.
+  #
+  # ⚠️ WHAT IT COSTS, recorded so nobody rediscovers it as a regression:
+  # warm 13-20s against ornith's 2.6-12.6s, and 0.06-1.19 chars-per-token
+  # against 0.53-1.90. muse once spent 3,781 characters of reasoning to emit a
+  # 56-character JSON object. Both workers SERIALIZE through one GPU here, so
+  # that overhead lands on the whole turn, not just muse's share. If deep-local
+  # p95 latency becomes a complaint, THIS LINE IS THE FIRST SUSPECT — the fix
+  # is to put ornith back, not to hunt elsewhere.
+  #
+  # ▶ `general` and `reasoning` are now the SAME pool. That is a consequence of
+  # the decision, not an oversight: muse was already the reasoning lead. The
+  # SIGKILLed ab-r5b sweep for ornith is now moot for placement — it would only
+  # matter if ornith is ever considered for a lead slot again.
+  # ⚠️ ornith-1.5:35b now serves in NO panel. It stays in `model_registry`
+  # (priority 83, below muse's 84, so fast-path selection is unchanged) and in
+  # `passthrough.allowed_models`, so it remains targetable for evals. Its
+  # registry comment still says "REGISTERED SO IT CAN BE A PANEL WORKER" —
+  # that purpose is now stale, but the entry is harmless where it is.
   general:
-    workers: ["ornith-1.5:35b", "qwen3.8:latest"]
+    workers: ["muse-glimmer:latest", "qwen3.8:latest"]
     synthesizer: "qwen3.8:latest"
     fallback_synth: "qwen3.8:latest"
   vl:
