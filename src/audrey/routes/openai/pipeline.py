@@ -19,7 +19,6 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
-from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import HTTPException
@@ -66,7 +65,11 @@ from audrey.pipeline.deep_panel import (
     run_panel_streaming,
     run_research_pipeline_streaming,
 )
-from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.pipeline.fast_path import (
+    FastStreamEventType,
+    resolve_no_thinking_prose,
+    stream_fast_path,
+)
 from audrey.pipeline.memory import (
     MEMORY_STORE_TOOL,
     memory_system_message,
@@ -83,6 +86,10 @@ from audrey.pipeline.synthesize import synthesize_stream
 from audrey.pipeline.vision import describe_enabled, describe_for_text_model
 from audrey.routes.openai.responses import _to_openai_response
 from audrey.routes.openai.schemas import ChatCompletionRequest
+from audrey.routes.openai.streaming import (
+    OpenAIStreamSession,
+    StreamOutcome,
+)
 
 log = logging.getLogger(__name__)
 
@@ -341,33 +348,13 @@ async def _stream_via_pipeline(
             # closing banner line after classify — same as the deep / tool
             # paths. This is the latency fix: the ack is on the wire before
             # the (possibly slow) router call.
-            fast_created = int(time.time())
-            fast_cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
-            fast_fingerprint = f"audrey-{__version__}/{payload.model}"
-
-            def _fast_delta(text: str) -> str:
-                frame = {
-                    "id": fast_cid, "object": "chat.completion.chunk", "created": fast_created,
-                    "model": payload.model, "system_fingerprint": fast_fingerprint,
-                    "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
-                }
-                return f"data: {json.dumps(frame)}\n\n"
-
-            def _fast_stop() -> str:
-                frame = {
-                    "id": fast_cid, "object": "chat.completion.chunk", "created": fast_created,
-                    "model": payload.model, "system_fingerprint": fast_fingerprint,
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                }
-                return f"data: {json.dumps(frame)}\n\n"
-
-            role_frame = {
-                "id": fast_cid, "object": "chat.completion.chunk", "created": fast_created,
-                "model": payload.model, "system_fingerprint": fast_fingerprint,
-                "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-            }
-            yield f"data: {json.dumps(role_frame)}\n\n"
-            yield _fast_delta(BANNER_THINKING)
+            fast_pipeline_started_at = time.perf_counter()
+            fast_stream = OpenAIStreamSession(
+                virtual_model=payload.model,
+                fingerprint_model=payload.model,
+            )
+            yield fast_stream.role_frame()
+            yield fast_stream.content_frame(BANNER_THINKING)
 
             # Now classify (model selection). Image turns are pinned to vl
             # regardless of wording — the text classifier can't see the image.
@@ -391,30 +378,17 @@ async def _stream_via_pipeline(
                 log.info("complexity.breakdown: %s last_user=%d", parts, last_user)
 
             spec = registry.first_healthy(task, health.is_healthy)
-            if spec is None:
-                # Role frame + Thinking header are already on the wire. Close
-                # the banner line and deliver the error as content under the
-                # SAME stream identity — a fresh _emit_single_message would
-                # emit a second role frame and break the chunk sequence.
-                yield _fast_delta(" ❌\n")
-                yield _fast_delta(BANNER_SEPARATOR)
-                yield _fast_delta(f"[no healthy model for task={task}]")
-                yield _fast_stop()
-                yield "data: [DONE]\n\n"
-                return
-            chosen_concrete = spec.name
-
-            # The role frame + Thinking header are already on the wire (emitted
-            # before classify). `fast_cid` / `fast_created` / `fast_fingerprint`
-            # and `_fast_delta` were defined up there; reuse them so every frame
-            # in this response shares one identity.
+            if spec is not None:
+                chosen_concrete = spec.name
 
             # If the chosen model is tool-capable and tools are registered, route
             # the streaming request through the graph so the ReAct loop can fire.
             # Mid-stream tool dispatch isn't supported — we emit one chunk after
             # the loop completes, rather than streaming tokens during ReAct rounds.
             tool_capable = set(cfg.raw.get("fast_path", {}).get("tool_capable_models", []) or [])
-            tools_active = bool(app.state.tools.by_name) and spec.name in tool_capable
+            tools_active = (
+                spec is not None and bool(app.state.tools.by_name) and spec.name in tool_capable
+            )
             if tools_active:
                 # Tool-capable path can take 1-3s on a `kb_search` round, so
                 # use a full PhaseTicker that emits dots while the graph runs.
@@ -442,7 +416,9 @@ async def _stream_via_pipeline(
                         graph_task = asyncio.create_task(
                             _run_graph_with_metrics(graph, state)
                         )
-                        async for frame in _drain_q_until_task(banner_q, graph_task, _fast_delta):
+                        async for frame in _drain_q_until_task(
+                            banner_q, graph_task, fast_stream.content_frame,
+                        ):
                             yield frame
                         final = graph_task.result()
                         # Surface the model on the Thinking line, right before
@@ -457,15 +433,22 @@ async def _stream_via_pipeline(
                     # then deliver the error as content under the SAME stream
                     # identity (a fresh _emit_single_message would emit a second
                     # role frame and break the chunk sequence).
-                    async for frame in _drain_q_now(banner_q, _fast_delta):
+                    async for frame in _drain_q_now(
+                        banner_q, fast_stream.content_frame,
+                    ):
                         yield frame
-                    yield _fast_delta(BANNER_SEPARATOR)
-                    yield _fast_delta(f"[ollama error: {e}]")
-                    yield _fast_stop()
-                    yield "data: [DONE]\n\n"
+                    yield fast_stream.content_frame(BANNER_SEPARATOR)
+                    yield fast_stream.content_frame(f"[ollama error: {e}]")
+                    fast_stream.terminal.finish(
+                        StreamOutcome.ERROR, finish_reason="stop",
+                    )
+                    yield fast_stream.terminal_frame()
+                    yield fast_stream.done_frame()
                     return
                 # Drain the closing ✅\n that PhaseTicker pushed on exit.
-                async for frame in _drain_q_now(banner_q, _fast_delta):
+                async for frame in _drain_q_now(
+                    banner_q, fast_stream.content_frame,
+                ):
                     yield frame
 
                 concrete = final.get("concrete_model", spec.name)
@@ -512,33 +495,77 @@ async def _stream_via_pipeline(
                         if drafts_debug:
                             content = content + drafts_debug
                 # Separator between banner and answer body — matches deep.
-                yield _fast_delta(BANNER_SEPARATOR)
+                yield fast_stream.content_frame(BANNER_SEPARATOR)
                 # Tool-capable fast path emits the answer in one chunk under the
                 # already-open stream identity (the role frame went out before
                 # classify). Feed the answer text directly into the collector —
                 # the SSE-frame parser would also catch it, but feeding text is
                 # cheaper and unambiguous.
                 collector.feed_text(str(final.get("content", "") or ""))
-                yield _fast_delta(content)
-                yield _fast_stop()
-                yield "data: [DONE]\n\n"
+                yield fast_stream.content_frame(content)
+                fast_stream.terminal.finish(
+                    StreamOutcome.OK, finish_reason="stop",
+                )
+                yield fast_stream.terminal_frame()
+                yield fast_stream.done_frame()
                 return
 
-            # Plain-chat fast path: no tools, tokens stream within ~200ms of
-            # first byte. The Thinking header is already on the wire (emitted
-            # before classify); close the line with the model name + ✅ and a
-            # separator, then stream the answer. No dot animation — the first
-            # token arrives fast enough that dots would never show.
-            yield _fast_delta(worker_ok(spec.name) + "\n")
-            yield _fast_delta(BANNER_SEPARATOR)
-
+            # Plain-chat Fast consumes client-neutral model events and renders
+            # them under the same identity as the already-emitted banner. The
+            # success marker waits for the upstream stream to actually start;
+            # a pre-token Ollama failure may safely fall back once.
+            fast_cfg = cfg.raw.get("fast_path", {}) or {}
+            no_thinking = bool(fast_cfg.get("no_thinking", False))
+            no_thinking_prose = resolve_no_thinking_prose(
+                no_thinking,
+                fast_cfg.get("no_thinking_prose"),
+            )
             timeout = float(cfg.timeouts.get("fast_path", 180))
-            async for frame in collector.wrap(_stream_openai(
-                ollama, payload.model, spec.name, messages, options,
-                timeout_s=timeout, health=health,
-                gate=app.state.gate, location=spec.location, user_id=user_id,
-            )):
-                yield frame
+            banner_open = True
+            async for event in stream_fast_path(
+                ollama,
+                registry,
+                health,
+                app.state.gate,
+                task=task,
+                messages=messages,
+                options=options,
+                timeout_s=timeout,
+                user_id=user_id,
+                pipeline_started_at=fast_pipeline_started_at,
+                no_thinking_prose=no_thinking_prose,
+                terminal=fast_stream.terminal,
+            ):
+                if event.type == FastStreamEventType.ATTEMPT:
+                    chosen_concrete = event.model
+                elif event.type == FastStreamEventType.STARTED:
+                    chosen_concrete = event.model
+                    if banner_open:
+                        yield fast_stream.content_frame(
+                            worker_ok(event.model) + "\n"
+                        )
+                        yield fast_stream.content_frame(BANNER_SEPARATOR)
+                        banner_open = False
+                elif event.type == FastStreamEventType.TEXT:
+                    collector.feed_text(event.text)
+                    yield fast_stream.content_frame(event.text)
+                elif event.type == FastStreamEventType.ERROR:
+                    if event.model:
+                        chosen_concrete = event.model
+                    if banner_open:
+                        failed = worker_fail(event.model) if event.model else "  ❌"
+                        yield fast_stream.content_frame(failed + "\n")
+                        yield fast_stream.content_frame(BANNER_SEPARATOR)
+                        banner_open = False
+                    yield fast_stream.content_frame(event.text)
+
+            if fast_stream.terminal.outcome != StreamOutcome.OK:
+                collector.mark_partial()
+            if banner_open:
+                yield fast_stream.content_frame("  ❌\n")
+                yield fast_stream.content_frame(BANNER_SEPARATOR)
+            yield fast_stream.terminal_frame()
+            yield fast_stream.done_frame()
     except asyncio.CancelledError:
         # Client disconnect mid-stream. Mark partial; archive what we
         # captured before we re-raise. The deep branch handles its own
@@ -1383,83 +1410,3 @@ async def _phase_dispatch(
         elif evt["type"] == "final":
             drafts = list(evt["drafts"])
     return drafts
-
-
-async def _stream_openai(
-    ollama: OllamaClient,
-    virtual: str,
-    concrete: str,
-    messages: list[dict[str, Any]],
-    options: dict[str, Any],
-    *,
-    timeout_s: float | None = None,
-    health: HealthTracker | None = None,
-    gate: FairLocalGate | None = None,
-    location: str = "local",
-    user_id: str | None = None,
-):
-    """Convert Ollama's streaming chunks into OpenAI SSE frames.
-
-    When `gate` is supplied and `location == "local"`, the entire token
-    stream is held under the gate. Tokens are GPU-bound the whole way
-    through (no tool dispatch in this branch), so a single acquire for
-    the full duration is the right granularity here.
-    """
-    created = int(time.time())
-    cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
-    fingerprint = f"audrey-{__version__}/{concrete}"
-
-    first = {
-        "id": cid, "object": "chat.completion.chunk", "created": created,
-        "model": virtual, "system_fingerprint": fingerprint,
-        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-    }
-    yield f"data: {json.dumps(first)}\n\n"
-
-    gate_ctx = (
-        gate.acquire(concrete, location=location, user_id=user_id)
-        if gate is not None
-        else _noop_async_ctx()
-    )
-
-    try:
-        async with gate_ctx:
-            async for chunk in ollama.chat_stream(
-                model=concrete, messages=messages, options=options, timeout_s=timeout_s,
-            ):
-                msg = chunk.get("message", {}) or {}
-                content = msg.get("content", "") or ""
-                done = bool(chunk.get("done"))
-                if content:
-                    frame = {
-                        "id": cid, "object": "chat.completion.chunk", "created": created,
-                        "model": virtual, "system_fingerprint": fingerprint,
-                        "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
-                    }
-                    yield f"data: {json.dumps(frame)}\n\n"
-                if done:
-                    final = {
-                        "id": cid, "object": "chat.completion.chunk", "created": created,
-                        "model": virtual, "system_fingerprint": fingerprint,
-                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                    }
-                    yield f"data: {json.dumps(final)}\n\n"
-                    if health is not None:
-                        health.record_success(concrete)
-                    break
-    except OllamaError as e:
-        if health is not None:
-            health.record_failure(concrete, str(e))
-        err = {
-            "id": cid, "object": "chat.completion.chunk", "created": created,
-            "model": virtual, "system_fingerprint": fingerprint,
-            "choices": [{"index": 0, "delta": {"content": f"\n\n[error: {e}]"}, "finish_reason": "stop"}],
-        }
-        yield f"data: {json.dumps(err)}\n\n"
-
-    yield "data: [DONE]\n\n"
-
-
-@asynccontextmanager
-async def _noop_async_ctx():
-    yield

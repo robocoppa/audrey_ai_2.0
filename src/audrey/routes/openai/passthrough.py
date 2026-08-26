@@ -294,8 +294,8 @@ async def _passthrough_stream_sse(
 ):
     """Stream Ollama chunks as OpenAI-shaped SSE frames.
 
-    Mirrors `_stream_openai` for the content path. When `tools` is
-    supplied, Ollama typically populates `message.tool_calls` on the
+    This route owns the separate raw-model passthrough stream. When `tools`
+    are supplied, Ollama typically populates `message.tool_calls` on the
     final chunk (rather than streaming deltas); we translate that
     into an OpenAI `tool_calls` delta in the terminal frame and set
     `finish_reason="tool_calls"` instead of `"stop"` so agent clients

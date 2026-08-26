@@ -2,8 +2,11 @@
 
 When the chosen model is in `fast_path.tool_capable_models` *and* the tool
 registry is non-empty, we run a ReAct loop (`pipeline/react.py`) that lets
-the model call tools before answering. Otherwise it's a one-shot
-`ollama.chat`. Streaming bypasses both (route-layer concern).
+the model call tools before answering. For a non-streaming request, the
+no-tools alternative is a one-shot `ollama.chat`. Plain streaming instead
+uses `stream_fast_path` below so model selection, bounded fallback, thinking
+policy, gating, health, metrics, and terminal outcome have one owner; the
+route remains responsible only for client framing and banners.
 
 Local calls go through `FairLocalGate`. The non-tools branch holds the
 gate around the single `ollama.chat`. The tools branch passes the gate
@@ -14,15 +17,21 @@ during tool dispatch. Cloud calls bypass the gate entirely
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
-from audrey.metrics import dispatch_total
+from audrey.metrics import dispatch_total, pipeline_seconds, pipeline_total
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry, ModelSpec, TaskType
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.react import ReactResult, run_react
+from audrey.pipeline.streaming import StreamOutcome, StreamTerminal
 from audrey.tools.discovery import ToolRegistry
 
 log = logging.getLogger(__name__)
@@ -109,6 +118,324 @@ def _healthy_fast_candidates(
     return out
 
 
+def resolve_no_thinking_prose(
+    no_thinking: bool,
+    no_thinking_prose: bool | None,
+) -> bool:
+    """Resolve the backwards-compatible plain-prose thinking policy."""
+    return no_thinking if no_thinking_prose is None else no_thinking_prose
+
+
+class FastStreamEventType(StrEnum):
+    """Client-neutral events emitted by one plain Fast model stream."""
+
+    ATTEMPT = "attempt"
+    STARTED = "started"
+    TEXT = "text"
+    ERROR = "error"
+
+
+@dataclass(frozen=True, slots=True)
+class FastStreamEvent:
+    """One observable transition from a plain Fast stream attempt."""
+
+    type: FastStreamEventType
+    model: str = ""
+    text: str = ""
+
+
+class _InlineThinkFilter:
+    """Strip inline think tags without buffering an ordinary full response.
+
+    Ollama normally keeps reasoning in message.thinking. A model has also
+    emitted literal tags in message.content; in the observed short-answer
+    shape the same answer appeared on both sides of a dangling close tag.
+    Keep only a marker-sized tail during normal streaming, suppress a real
+    think block, and elide an exact post-close replay.
+
+    A dangling close cannot retract text that is already on the wire. If the
+    text after it differs, preserve that text; silently discarding a real final
+    answer would be worse than exposing the model's malformed prefix.
+    """
+
+    _OPEN = "<think>"
+    _CLOSE = "</think>"
+    _TAIL = max(len(_OPEN), len(_CLOSE)) - 1
+
+    def __init__(self) -> None:
+        self._mode = "normal"
+        self._carry = ""
+        self._emitted: list[str] = []
+        self._after_close: list[str] = []
+
+    def feed(self, text: str) -> str:
+        if not text:
+            return ""
+        if self._mode == "after_close":
+            self._after_close.append(text)
+            return ""
+
+        data = self._carry + text
+        self._carry = ""
+        out: list[str] = []
+        while data:
+            if self._mode == "thinking":
+                close_at = data.find(self._CLOSE)
+                if close_at < 0:
+                    self._carry = data[-self._TAIL:]
+                    break
+                data = data[close_at + len(self._CLOSE):]
+                self._mode = "normal"
+                continue
+
+            open_at = data.find(self._OPEN)
+            close_at = data.find(self._CLOSE)
+            marker_at = min(
+                (pos for pos in (open_at, close_at) if pos >= 0),
+                default=-1,
+            )
+            if marker_at < 0:
+                if len(data) <= self._TAIL:
+                    self._carry = data
+                else:
+                    out.append(data[:-self._TAIL])
+                    self._carry = data[-self._TAIL:]
+                break
+
+            out.append(data[:marker_at])
+            if marker_at == open_at:
+                data = data[marker_at + len(self._OPEN):]
+                self._mode = "thinking"
+                continue
+
+            # A closing tag with no opening tag is the malformed shape seen in
+            # OWUI. Text after it is buffered until completion so an exact
+            # replay can be dropped instead of rendering the answer twice.
+            self._mode = "after_close"
+            self._after_close.append(data[marker_at + len(self._CLOSE):])
+            data = ""
+
+        emitted = "".join(out)
+        if emitted:
+            self._emitted.append(emitted)
+        return emitted
+
+    def finish(self) -> str:
+        if self._mode == "normal":
+            tail = self._carry
+        elif self._mode == "after_close":
+            tail = "".join(self._after_close)
+            before = "".join(self._emitted).strip()
+            if tail.strip() == before:
+                tail = ""
+        else:
+            # An unclosed opening tag contains reasoning with no final answer.
+            tail = ""
+        self._carry = ""
+        if tail:
+            self._emitted.append(tail)
+        return tail
+
+
+async def stream_fast_path(
+    ollama: OllamaClient,
+    registry: ModelRegistry,
+    health: HealthTracker,
+    gate: FairLocalGate,
+    *,
+    task: TaskType,
+    messages: list[dict[str, Any]],
+    options: dict[str, Any],
+    timeout_s: float,
+    user_id: str | None = None,
+    pipeline_started_at: float | None = None,
+    no_thinking_prose: bool = False,
+    terminal: StreamTerminal | None = None,
+) -> AsyncIterator[FastStreamEvent]:
+    """Stream one no-tools Fast answer with the non-stream policy contract.
+
+    The top two healthy candidates are eligible. A model swap is allowed only
+    before any answer text is emitted; once a token reaches the caller, an
+    error terminates the same attempt. The generator owns thinking policy, GPU
+    gating, health, dispatch/pipeline metrics, and terminal outcome. Its typed
+    events keep banner/SSE rendering outside the model-execution contract.
+    """
+
+    terminal = terminal or StreamTerminal()
+    started_at = (
+        pipeline_started_at
+        if pipeline_started_at is not None
+        else time.perf_counter()
+    )
+    candidates = _healthy_fast_candidates(
+        registry, health, task=task, limit=_FAST_FALLBACK_LIMIT,
+    )
+    last_error: OllamaError | None = None
+
+    try:
+        if not candidates:
+            last_error = OllamaError(f"No healthy model available for task={task}")
+
+        for attempt, candidate in enumerate(candidates, start=1):
+            yield FastStreamEvent(FastStreamEventType.ATTEMPT, model=candidate.name)
+            log.info(
+                "fast_stream task=%s -> %s (attempt %d/%d)",
+                task, candidate.name, attempt, len(candidates),
+            )
+            dispatch_total.labels(
+                model=candidate.name, task_type=str(task), path="fast",
+            ).inc()
+
+            answer_started = False
+            saw_done = False
+            content_filter = _InlineThinkFilter()
+            try:
+                think = await _think(ollama, candidate.name, no_thinking_prose)
+                async with gate.acquire(
+                    candidate.name,
+                    location=candidate.location,
+                    user_id=user_id,
+                ):
+                    async for chunk in ollama.chat_stream(
+                        model=candidate.name,
+                        messages=messages,
+                        options=options or None,
+                        timeout_s=timeout_s,
+                        think=think,
+                    ):
+                        message = chunk.get("message", {}) or {}
+                        filtered = content_filter.feed(
+                            str(message.get("content", "") or "")
+                        )
+                        if filtered:
+                            if not answer_started:
+                                answer_started = True
+                                yield FastStreamEvent(
+                                    FastStreamEventType.STARTED,
+                                    model=candidate.name,
+                                )
+                            yield FastStreamEvent(
+                                FastStreamEventType.TEXT,
+                                model=candidate.name,
+                                text=filtered,
+                            )
+                        if chunk.get("done"):
+                            tail = content_filter.finish()
+                            if not answer_started:
+                                answer_started = True
+                                yield FastStreamEvent(
+                                    FastStreamEventType.STARTED,
+                                    model=candidate.name,
+                                )
+                            if tail:
+                                yield FastStreamEvent(
+                                    FastStreamEventType.TEXT,
+                                    model=candidate.name,
+                                    text=tail,
+                                )
+                            finish_reason = (
+                                "length"
+                                if chunk.get("done_reason") == "length"
+                                else "stop"
+                            )
+                            health.record_success(candidate.name)
+                            terminal.finish(
+                                StreamOutcome.OK,
+                                finish_reason=finish_reason,
+                            )
+                            saw_done = True
+                            break
+                if saw_done:
+                    return
+
+                # The upstream iterator ended without Ollama's required done
+                # chunk. Preserve any held marker tail. With no visible answer
+                # this is still pre-token and can fall back; otherwise truncate.
+                tail = content_filter.finish()
+                if tail:
+                    if not answer_started:
+                        answer_started = True
+                        yield FastStreamEvent(
+                            FastStreamEventType.STARTED,
+                            model=candidate.name,
+                        )
+                    yield FastStreamEvent(
+                        FastStreamEventType.TEXT,
+                        model=candidate.name,
+                        text=tail,
+                    )
+                missing_done = "Ollama stream ended without done"
+                health.record_failure(candidate.name, missing_done)
+                if not answer_started:
+                    last_error = OllamaError(missing_done)
+                    log.warning(
+                        "fast_stream: %s ended before answer text "
+                        "(attempt %d/%d); trying fallback",
+                        candidate.name,
+                        attempt,
+                        len(candidates),
+                    )
+                    continue
+                terminal.finish(
+                    StreamOutcome.TRUNCATED,
+                    finish_reason="length",
+                )
+                return
+            except OllamaError as exc:
+                health.record_failure(candidate.name, str(exc))
+                last_error = exc
+                log.warning(
+                    "fast_stream: %s failed (attempt %d/%d, started=%s): %s",
+                    candidate.name,
+                    attempt,
+                    len(candidates),
+                    answer_started,
+                    exc,
+                )
+                if answer_started:
+                    tail = content_filter.finish()
+                    if tail:
+                        yield FastStreamEvent(
+                            FastStreamEventType.TEXT,
+                            model=candidate.name,
+                            text=tail,
+                        )
+                    terminal.finish(StreamOutcome.ERROR, finish_reason="stop")
+                    yield FastStreamEvent(
+                        FastStreamEventType.ERROR,
+                        model=candidate.name,
+                        text=f"[ollama error: {exc}]",
+                    )
+                    return
+
+        terminal.finish(StreamOutcome.ERROR, finish_reason="stop")
+        yield FastStreamEvent(
+            FastStreamEventType.ERROR,
+            model=candidates[-1].name if candidates else "",
+            text=f"[ollama error: {last_error}]",
+        )
+    except asyncio.CancelledError:
+        terminal.finish_if_unset(StreamOutcome.CANCELLED)
+        raise
+    except GeneratorExit:
+        terminal.finish_if_unset(StreamOutcome.CANCELLED)
+        raise
+    except BaseException:
+        terminal.finish_if_unset(StreamOutcome.ERROR)
+        raise
+    finally:
+        if not terminal.is_final:
+            terminal.finish_if_unset(StreamOutcome.CANCELLED)
+        pipeline_seconds.labels(mode="fast", task_type=str(task)).observe(
+            time.perf_counter() - started_at
+        )
+        pipeline_total.labels(
+            mode="fast",
+            task_type=str(task),
+            outcome=terminal.outcome.value,
+        ).inc()
+
+
 async def run_fast_path(
     ollama: OllamaClient,
     registry: ModelRegistry,
@@ -172,7 +499,9 @@ async def run_fast_path(
     # (see `_think`).
     # Defaults to `no_thinking` so a config predating `no_thinking_prose` keeps
     # exactly the behaviour it has.
-    prose_no_thinking = no_thinking if no_thinking_prose is None else no_thinking_prose
+    prose_no_thinking = resolve_no_thinking_prose(
+        no_thinking, no_thinking_prose,
+    )
 
     if not use_tools:
         # Try the top healthy model, then fall back to the next healthy
@@ -248,4 +577,11 @@ async def run_fast_path(
     }
 
 
-__all__ = ["run_fast_path", "pick_fast_model"]
+__all__ = [
+    "FastStreamEvent",
+    "FastStreamEventType",
+    "pick_fast_model",
+    "resolve_no_thinking_prose",
+    "run_fast_path",
+    "stream_fast_path",
+]

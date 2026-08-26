@@ -1,8 +1,7 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress. Wave 1A and Wave 1B's H4 slice are Unraid-verified.
-M2 typed stream-terminal outcomes are laptop-complete and await the deployment
-smoke; M1 remains queued.
+**Status:** In progress. Wave 1A and Wave 1B's H4 and M2 slices are
+Unraid-verified. M1 is laptop-complete and awaiting its Unraid smoke.
 
 ## Goal
 
@@ -72,8 +71,8 @@ OpenAI-to-Ollama tool-call/result translation are Unraid-verified. The deployed
 Open WebUI passthrough completed a client-provided timestamp tool call and
 rendered its exact result instead of hanging. Streaming and non-streaming
 two-request regressions pass; all 2,423 hermetic tests pass, changed-file lint
-is clean, and the lesson check has no broken links. Stream-terminal and
-identity consolidation remain subsequent Wave 1B slices.
+is clean, and the lesson check has no broken links. M2 and M1 status follow;
+shared deep/research stage mechanics remain the final Wave 1B slice.
 
 M2 status (2026-08-25): passthrough streaming now reports one typed `ok`,
 `error`, `cancelled`, or `truncated` result from the inner generator to the
@@ -81,7 +80,20 @@ outer metric owner. Missing Ollama `done` produces one `length` finish frame
 instead of a successful-looking bare terminator. Normal completion,
 pre-token/mid-stream failure, missing terminal data, and cancellation pass 48
 focused tests; all 2,429 hermetic tests pass, changed-file lint is clean, and
-the lesson check has no broken links. The Unraid smoke remains required.
+the lesson check has no broken links. On Unraid, a completed passthrough
+incremented `outcome="ok"` while an interrupted live generation incremented
+`outcome="cancelled"`, verifying the two terminal paths separately.
+
+M1 status (2026-08-26): plain Fast streaming now has one
+`OpenAIStreamSession` for response identity and OpenAI framing, backed by a
+client-neutral attempt stream that owns model selection, bounded pre-token
+fallback, thinking policy, GPU gating, health, metrics, and terminal outcome.
+It never swaps models after answer text reaches the client. Archive capture
+stays outside banners, missing terminal data is partial/truncated, and the
+observed dangling `</think>` answer replay is filtered. The 99 focused stream
+tests and all 2,440 hermetic tests pass; changed-file ruff and compilation are
+clean, lesson conventions report zero findings, and the link check has zero
+broken links. The Open WebUI and agent-client smokes remain outstanding.
 
 Gate:
 

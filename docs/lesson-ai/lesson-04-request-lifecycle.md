@@ -262,11 +262,13 @@ follow along in `openai.py`.
      `kb_search` if it wanted. For this question it doesn't bother —
      it knows what BTRFS is.
 
-7. **The model's tokens stream back** through `_stream_openai` at
-   [`pipeline.py:1325`](../../src/audrey/routes/openai/pipeline.py#L1325),
-   which converts Ollama's chunks into OpenAI-format SSE frames and
-   yields them. FastAPI passes each frame through to OWUI as it's
-   produced. The user sees the answer typing itself out.
+7. **The model's tokens stream back** through `stream_fast_path` at
+   [`fast_path.py:240`](../../src/audrey/pipeline/fast_path.py#L240).
+   It owns the model attempt, fallback boundary, health, and terminal outcome.
+   `OpenAIStreamSession` at
+   [`streaming.py:15`](../../src/audrey/routes/openai/streaming.py#L15)
+   converts the banner and answer into one sequence of OpenAI-format SSE
+   frames. FastAPI passes each frame to OWUI as it is produced.
 
 8. **The fast answer ends there unless it escalates.** Reflection belongs to
    the deep branch. A normal fast answer returns straight to the route after
