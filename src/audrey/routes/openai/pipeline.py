@@ -14,16 +14,13 @@ documented on `synthesize_stream`; preserve it if you refactor.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
-import uuid
 from collections.abc import Callable
 from typing import Any
 
 from fastapi import HTTPException
 
-from audrey import __version__
 from audrey.metrics import pipeline_seconds, pipeline_total
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
@@ -59,7 +56,6 @@ from audrey.pipeline.complexity import (
 )
 from audrey.pipeline.context import datetime_system_message
 from audrey.pipeline.deep_panel import (
-    cancel_and_drain,
     pick_panel_timeout,
     pool_key_for,
     run_panel_streaming,
@@ -81,6 +77,10 @@ from audrey.pipeline.prompts import (
     compose_system_messages,
     task_role_for,
     without_task_role,
+)
+from audrey.pipeline.streaming import (
+    StreamArchiveTarget,
+    StreamStageRunner,
 )
 from audrey.pipeline.synthesize import synthesize_stream
 from audrey.pipeline.vision import describe_enabled, describe_for_text_model
@@ -622,34 +622,25 @@ async def _stream_deep_with_banners(
     router_cfg = cfg.router
     agentic = cfg.raw.get("agentic", {}) or {}
 
-    created = int(time.time())
-    cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     concrete = "deep_panel"
-    fingerprint = f"audrey-{__version__}/{concrete}"
-
-    def _delta_frame(text: str) -> str:
-        frame = {
-            "id": cid, "object": "chat.completion.chunk", "created": created,
-            "model": payload.model, "system_fingerprint": fingerprint,
-            "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
-        }
-        return f"data: {json.dumps(frame)}\n\n"
-
-    def _stop_frame() -> str:
-        frame = {
-            "id": cid, "object": "chat.completion.chunk", "created": created,
-            "model": payload.model, "system_fingerprint": fingerprint,
-            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-        }
-        return f"data: {json.dumps(frame)}\n\n"
-
-    # Role delta — required first frame per OpenAI streaming spec.
-    role = {
-        "id": cid, "object": "chat.completion.chunk", "created": created,
-        "model": payload.model, "system_fingerprint": fingerprint,
-        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-    }
-    yield f"data: {json.dumps(role)}\n\n"
+    runner = StreamStageRunner(
+        mode="deep",
+        task_type=task,
+        archive=StreamArchiveTarget(
+            client=getattr(app.state, "archive_client", None),
+            registry=tools,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_content=user_turn_text,
+            virtual_model=payload.model,
+        ),
+    )
+    session = OpenAIStreamSession(
+        virtual_model=payload.model,
+        fingerprint_model=concrete,
+        terminal=runner.terminal,
+    )
+    _delta_frame = session.content_frame
 
     # The banner emitter routes string fragments through a queue so the
     # ticker's background task is decoupled from the route generator's
@@ -660,14 +651,12 @@ async def _stream_deep_with_banners(
     async def emit(text: str) -> None:
         await banner_q.put(text)
 
-    t0 = time.perf_counter()
-    pipeline_outcome = "ok"
     drafts: list[dict[str, Any]] = []
     final_content = ""
-    synth_model = "deep_panel"
-    owned_tasks: list[asyncio.Task[Any]] = []
+    synth_model = concrete
 
     try:
+        yield session.role_frame()
         # ── Stage 1: Planning (memory recall + planner) ─────────────────
         memory_cfg = agentic.get("memory", {}) or {}
         memory_enabled = bool(memory_cfg.get("enabled", True))
@@ -681,18 +670,20 @@ async def _stream_deep_with_banners(
         _, prompt_tokens = is_complex(messages, threshold=complexity_threshold)
 
         async with PhaseTicker(BANNER_PLANNING, emit):
-            think_task = asyncio.create_task(_phase_thinking(
-                ollama=ollama, tools=tools, user_id=user_id, messages=messages,
-                memory_enabled=memory_enabled, memory_top_k=memory_top_k,
-                memory_timeout_s=memory_timeout_s,
-                planning_enabled=planning_enabled,
-                planning_min_tokens=planning_min_tokens,
-                planning_max_subtasks=planning_max_subtasks,
-                prompt_tokens=prompt_tokens,
-                router_cfg=router_cfg,
-                cfg=cfg,
-            ))
-            owned_tasks.append(think_task)
+            think_task = runner.own(
+                _phase_thinking(
+                    ollama=ollama, tools=tools, user_id=user_id, messages=messages,
+                    memory_enabled=memory_enabled, memory_top_k=memory_top_k,
+                    memory_timeout_s=memory_timeout_s,
+                    planning_enabled=planning_enabled,
+                    planning_min_tokens=planning_min_tokens,
+                    planning_max_subtasks=planning_max_subtasks,
+                    prompt_tokens=prompt_tokens,
+                    router_cfg=router_cfg,
+                    cfg=cfg,
+                ),
+                name="deep-planning",
+            )
             async for frame in _drain_q_until_task(banner_q, think_task, _delta_frame):
                 yield frame
             messages_with_memory, subtasks = think_task.result()
@@ -720,22 +711,24 @@ async def _stream_deep_with_banners(
             int(react_cfg.get("max_web_searches", 0))))
 
         async with PhaseTicker(BANNER_DISPATCHING, emit) as ticker:
-            panel_task = asyncio.create_task(_phase_dispatch(
-                cfg=cfg, ollama=ollama, registry=registry, health=health, gate=gate,
-                pool_key=pool_key, task=task, messages=messages_with_memory,
-                subtasks=subtasks, options=options,
-                timeout_s=timeout_s, max_workers_cloud=max_workers_cloud,
-                tools=tools, tool_capable_models=tool_capable_models,
-                react_max_rounds=deep_react_max_rounds,
-                react_compress_after=deep_react_compress_after,
-                react_max_tool_chars=deep_react_max_tool_chars,
-                react_dispatch_timeout_s=deep_react_dispatch_timeout,
-                react_compress_keep_last=deep_react_compress_keep_last,
-                react_max_web_searches=deep_react_max_web_searches,
-                user_id=user_id or None,
-                ticker=ticker,
-            ))
-            owned_tasks.append(panel_task)
+            panel_task = runner.own(
+                _phase_dispatch(
+                    cfg=cfg, ollama=ollama, registry=registry, health=health, gate=gate,
+                    pool_key=pool_key, task=task, messages=messages_with_memory,
+                    subtasks=subtasks, options=options,
+                    timeout_s=timeout_s, max_workers_cloud=max_workers_cloud,
+                    tools=tools, tool_capable_models=tool_capable_models,
+                    react_max_rounds=deep_react_max_rounds,
+                    react_compress_after=deep_react_compress_after,
+                    react_max_tool_chars=deep_react_max_tool_chars,
+                    react_dispatch_timeout_s=deep_react_dispatch_timeout,
+                    react_compress_keep_last=deep_react_compress_keep_last,
+                    react_max_web_searches=deep_react_max_web_searches,
+                    user_id=user_id or None,
+                    ticker=ticker,
+                ),
+                name="deep-panel",
+            )
             async for frame in _drain_q_until_task(banner_q, panel_task, _delta_frame):
                 yield frame
             drafts = panel_task.result()
@@ -748,10 +741,8 @@ async def _stream_deep_with_banners(
         # ✅, emit the separator, and then forward each delta straight to
         # the client. Mid-stream errors are surfaced inline.
         synth_done: dict[str, Any] = {}
-        events_q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(maxsize=128)
-
-        async def _run_synth_stream() -> None:
-            async for evt in synthesize_stream(
+        synth_events = runner.start_events(
+            synthesize_stream(
                 cfg, ollama, registry, health, gate,
                 pool_key=pool_key, task=task,
                 messages=messages_with_memory, drafts=drafts,
@@ -760,10 +751,11 @@ async def _stream_deep_with_banners(
                 # longer `deep_worker` budget.
                 subtasks=subtasks, timeout_s=timeout_s,
                 user_id=user_id or None,
-            ):
-                await events_q.put(evt)
-
-        synth_task = asyncio.create_task(_run_synth_stream())
+            ),
+            maxsize=128,
+            name="deep-synthesis",
+        )
+        synth_task = synth_events.producer_task
         first_token_seen = False
         try:
             async with PhaseTicker(BANNER_SYNTHESIZING, emit):
@@ -778,7 +770,7 @@ async def _stream_deep_with_banners(
                             yield _delta_frame(item)
                             drained = True
                     try:
-                        evt = await _queue_get_with_timeout(events_q)
+                        evt = await synth_events.poll()
                     except TimeoutError:
                         if not drained and synth_task.done():
                             # Generator finished without ever yielding
@@ -831,7 +823,7 @@ async def _stream_deep_with_banners(
             # deltas. Stream them through.
             if first_token_seen and not synth_done:
                 while True:
-                    evt = await _queue_get_until_task(events_q, synth_task)
+                    evt = await synth_events.receive()
                     if evt is None:
                         break
                     etype = evt.get("type")
@@ -854,11 +846,16 @@ async def _stream_deep_with_banners(
                 synth_model = str(synth_done.get("synthesizer_model") or synth_model)
                 if not final_content:
                     final_content = synth_done.get("content", "") or "[empty]"
-                if synth_done.get("synth_error"):
-                    pipeline_outcome = "error"
-            elif not final_content:
+                outcome = (
+                    StreamOutcome.ERROR
+                    if synth_done.get("synth_error")
+                    else StreamOutcome.OK
+                )
+            elif final_content:
+                outcome = StreamOutcome.TRUNCATED
+            else:
                 final_content = "[empty]"
-                pipeline_outcome = "error"
+                outcome = StreamOutcome.ERROR
 
             # Per-worker tool-usage footer. Only renders rows for workers
             # that actually called tools; empty when no tools fired.
@@ -878,40 +875,37 @@ async def _stream_deep_with_banners(
                 if drafts_debug:
                     yield _delta_frame(drafts_debug)
 
-            yield _stop_frame()
-            yield "data: [DONE]\n\n"
+            runner.terminal.finish(outcome, finish_reason="stop")
+            yield session.terminal_frame()
+            yield session.done_frame()
         finally:
-            if not synth_task.done():
-                synth_task.cancel()
-                try:
-                    await synth_task
-                except (asyncio.CancelledError, Exception):  # noqa: BLE001, S110 — cleanup path; we just cancelled the task
-                    pass
+            await runner.cancel_and_drain()
 
-    except asyncio.CancelledError:
-        # Client disconnected mid-stream. We can't yield more frames (the
-        # response transport is gone), but we still want the metric/log to
-        # reflect "cancelled" rather than the misleading "ok" the finally
-        # block would otherwise record.
-        pipeline_outcome = "cancelled"
+    except (asyncio.CancelledError, GeneratorExit):
+        # A cancelled response task and an explicitly closed async generator
+        # are both client-abandoned streams. No more frames may be yielded.
+        runner.terminal.finish_if_unset(StreamOutcome.CANCELLED)
         raise
     except OllamaError as e:
-        pipeline_outcome = "error"
+        runner.terminal.finish_if_unset(StreamOutcome.ERROR, finish_reason="stop")
         log.warning("stream deep: ollama error: %s", e)
         yield _delta_frame(f"\n\n[ollama error: {e}]")
-        yield _stop_frame()
-        yield "data: [DONE]\n\n"
+        yield session.terminal_frame()
+        yield session.done_frame()
     except Exception:
-        pipeline_outcome = "error"
+        runner.terminal.finish_if_unset(StreamOutcome.ERROR, finish_reason="stop")
         log.exception("stream deep: unexpected error")
         yield _delta_frame("\n\n[internal error]")
-        yield _stop_frame()
-        yield "data: [DONE]\n\n"
+        yield session.terminal_frame()
+        yield session.done_frame()
     finally:
-        await cancel_and_drain(owned_tasks)
-        elapsed = time.perf_counter() - t0
-        pipeline_seconds.labels(mode="deep", task_type=task).observe(elapsed)
-        pipeline_total.labels(mode="deep", task_type=task, outcome=pipeline_outcome).inc()
+        # The runner archives only `final_content`, which is built from synth
+        # deltas rather than progress banners or debug/footer material.
+        elapsed = await runner.finalize(
+            assistant_content=final_content,
+            concrete_model=synth_model,
+        )
+        pipeline_outcome = runner.terminal.outcome.value
         # `workers/ok/tool_grounded` mirror `graph.py`'s `deep_panel:` line so
         # one grep covers both pipelines. Without them the streaming path —
         # the one OWUI actually uses for questions — reported nothing about
@@ -927,21 +921,6 @@ async def _stream_deep_with_banners(
             payload.model, task, synth_model, pipeline_outcome, elapsed,
             len(drafts), ok, grounded,
         )
-        # Archive whatever synth content actually streamed. `final_content`
-        # is built only from synth deltas (banner text never lands here),
-        # so progress banners stay out of the archive automatically.
-        archive_client: ChatArchiveClient | None = getattr(app.state, "archive_client", None)
-        if archive_client is not None and conversation_id:
-            await archive_client.archive_turn(
-                registry=app.state.tools,
-                user_id=user_id,
-                conversation_id=conversation_id,
-                user_content=user_turn_text,
-                assistant_content=final_content,
-                partial=(pipeline_outcome == "cancelled"),
-                virtual_model=payload.model,
-                concrete_model=synth_model,
-            )
 
 
 async def _stream_research_with_banners(
@@ -968,47 +947,37 @@ async def _stream_research_with_banners(
     router_cfg = cfg.router
     agentic = cfg.raw.get("agentic", {}) or {}
 
-    created = int(time.time())
-    cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     concrete = "deep_panel_research"
-    fingerprint = f"audrey-{__version__}/{concrete}"
-
-    def _delta_frame(text: str) -> str:
-        frame = {
-            "id": cid, "object": "chat.completion.chunk", "created": created,
-            "model": payload.model, "system_fingerprint": fingerprint,
-            "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
-        }
-        return f"data: {json.dumps(frame)}\n\n"
-
-    def _stop_frame() -> str:
-        frame = {
-            "id": cid, "object": "chat.completion.chunk", "created": created,
-            "model": payload.model, "system_fingerprint": fingerprint,
-            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-        }
-        return f"data: {json.dumps(frame)}\n\n"
-
-    role = {
-        "id": cid, "object": "chat.completion.chunk", "created": created,
-        "model": payload.model, "system_fingerprint": fingerprint,
-        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-    }
-    yield f"data: {json.dumps(role)}\n\n"
+    runner = StreamStageRunner(
+        mode="deep",
+        task_type=task,
+        archive=StreamArchiveTarget(
+            client=getattr(app.state, "archive_client", None),
+            registry=tools,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_content=user_turn_text,
+            virtual_model=payload.model,
+        ),
+    )
+    session = OpenAIStreamSession(
+        virtual_model=payload.model,
+        fingerprint_model=concrete,
+        terminal=runner.terminal,
+    )
+    _delta_frame = session.content_frame
 
     banner_q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=128)
 
     async def emit(text: str) -> None:
         await banner_q.put(text)
 
-    t0 = time.perf_counter()
-    pipeline_outcome = "ok"
     drafts: list[dict[str, Any]] = []
     final_content = ""
-    writer_model = "deep_panel_research"
-    owned_tasks: list[asyncio.Task[Any]] = []
+    writer_model = concrete
 
     try:
+        yield session.role_frame()
         # ── Stage 0: Planning (memory recall + planner, reused verbatim) ──
         memory_cfg = agentic.get("memory", {}) or {}
         memory_enabled = bool(memory_cfg.get("enabled", True))
@@ -1017,19 +986,21 @@ async def _stream_research_with_banners(
         _, prompt_tokens = is_complex(messages, threshold=complexity_threshold)
 
         async with PhaseTicker(BANNER_PLANNING, emit):
-            think_task = asyncio.create_task(_phase_thinking(
-                ollama=ollama, tools=tools, user_id=user_id, messages=messages,
-                memory_enabled=memory_enabled,
-                memory_top_k=int(memory_cfg.get("top_k", 3)),
-                memory_timeout_s=float(memory_cfg.get("timeout_s", 5)),
-                planning_enabled=bool(planning_cfg.get("enabled", True)),
-                planning_min_tokens=int(planning_cfg.get("min_prompt_tokens", 40)),
-                planning_max_subtasks=int(planning_cfg.get("max_subtasks", 3)),
-                prompt_tokens=prompt_tokens,
-                router_cfg=router_cfg,
-                cfg=cfg,
-            ))
-            owned_tasks.append(think_task)
+            think_task = runner.own(
+                _phase_thinking(
+                    ollama=ollama, tools=tools, user_id=user_id, messages=messages,
+                    memory_enabled=memory_enabled,
+                    memory_top_k=int(memory_cfg.get("top_k", 3)),
+                    memory_timeout_s=float(memory_cfg.get("timeout_s", 5)),
+                    planning_enabled=bool(planning_cfg.get("enabled", True)),
+                    planning_min_tokens=int(planning_cfg.get("min_prompt_tokens", 40)),
+                    planning_max_subtasks=int(planning_cfg.get("max_subtasks", 3)),
+                    prompt_tokens=prompt_tokens,
+                    router_cfg=router_cfg,
+                    cfg=cfg,
+                ),
+                name="research-planning",
+            )
             async for frame in _drain_q_until_task(banner_q, think_task, _delta_frame):
                 yield frame
             # Research workers answer the full prompt; planner subtasks are not
@@ -1040,24 +1011,23 @@ async def _stream_research_with_banners(
 
         # Drive the whole staged pipeline as one background task; its events
         # feed the three phase banners and the live answer stream.
-        events_q: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(maxsize=256)
         timeout_s = pick_panel_timeout(cfg, "deep_panel_research")
         max_researchers_cloud = int(agentic.get("max_research_workers_cloud", 2))
         fast_path_cfg = cfg.raw.get("fast_path", {}) or {}
         tool_capable_models = set(fast_path_cfg.get("tool_capable_models", []) or [])
 
-        async def _run_pipeline() -> None:
-            async for evt in run_research_pipeline_streaming(
+        research_events = runner.start_events(
+            run_research_pipeline_streaming(
                 cfg, ollama, registry, health, gate,
                 task=task, messages=messages_with_memory, options=options,
                 timeout_s=timeout_s, max_researchers_cloud=max_researchers_cloud,
                 tools=tools, tool_capable_models=tool_capable_models,
                 user_id=user_id or None,
-            ):
-                await events_q.put(evt)
-
-        pipe_task = asyncio.create_task(_run_pipeline())
-        owned_tasks.append(pipe_task)
+            ),
+            maxsize=256,
+            name="research-pipeline",
+        )
+        pipe_task = research_events.producer_task
 
         # ── Stage 1: Researching (banner; tails per researcher) ───────────
         async with PhaseTicker(BANNER_RESEARCHING, emit) as ticker:
@@ -1068,10 +1038,8 @@ async def _stream_research_with_banners(
                     if item is not None:
                         yield _delta_frame(item)
                 try:
-                    evt = await _queue_get_with_timeout(events_q)
+                    evt = await research_events.poll()
                 except TimeoutError:
-                    if pipe_task.done() and events_q.empty():
-                        break
                     continue
                 if evt is None:
                     break
@@ -1102,10 +1070,8 @@ async def _stream_research_with_banners(
                     if item is not None:
                         return ("banner", item)
                 try:
-                    evt = await _queue_get_with_timeout(events_q)
+                    evt = await research_events.poll()
                 except TimeoutError:
-                    if pipe_task.done() and events_q.empty():
-                        return ("event", None)
                     continue
                 return ("event", evt)
 
@@ -1172,7 +1138,7 @@ async def _stream_research_with_banners(
                 yield _delta_frame(text)
         if not done_evt:
             while True:
-                evt = await _queue_get_until_task(events_q, pipe_task)
+                evt = await research_events.receive()
                 if evt is None:
                     break
                 text = _consume(evt)
@@ -1187,11 +1153,16 @@ async def _stream_research_with_banners(
             drafts = list(done_evt.get("drafts") or [])
             if not final_content:
                 final_content = done_evt.get("content", "") or "[empty]"
-            if done_evt.get("error"):
-                pipeline_outcome = "error"
-        elif not final_content:
+            outcome = (
+                StreamOutcome.ERROR
+                if done_evt.get("error")
+                else StreamOutcome.OK
+            )
+        elif final_content:
+            outcome = StreamOutcome.TRUNCATED
+        else:
             final_content = "[empty]"
-            pipeline_outcome = "error"
+            outcome = StreamOutcome.ERROR
 
         footer = tool_summary_block([
             (str(d.get("model") or "?"), list(d.get("tool_calls") or []))
@@ -1217,29 +1188,31 @@ async def _stream_research_with_banners(
             if trace:
                 yield _delta_frame(trace)
 
-        yield _stop_frame()
-        yield "data: [DONE]\n\n"
+        runner.terminal.finish(outcome, finish_reason="stop")
+        yield session.terminal_frame()
+        yield session.done_frame()
 
-    except asyncio.CancelledError:
-        pipeline_outcome = "cancelled"
+    except (asyncio.CancelledError, GeneratorExit):
+        runner.terminal.finish_if_unset(StreamOutcome.CANCELLED)
         raise
     except OllamaError as e:
-        pipeline_outcome = "error"
+        runner.terminal.finish_if_unset(StreamOutcome.ERROR, finish_reason="stop")
         log.warning("stream research: ollama error: %s", e)
         yield _delta_frame(f"\n\n[ollama error: {e}]")
-        yield _stop_frame()
-        yield "data: [DONE]\n\n"
+        yield session.terminal_frame()
+        yield session.done_frame()
     except Exception:
-        pipeline_outcome = "error"
+        runner.terminal.finish_if_unset(StreamOutcome.ERROR, finish_reason="stop")
         log.exception("stream research: unexpected error")
         yield _delta_frame("\n\n[internal error]")
-        yield _stop_frame()
-        yield "data: [DONE]\n\n"
+        yield session.terminal_frame()
+        yield session.done_frame()
     finally:
-        await cancel_and_drain(owned_tasks)
-        elapsed = time.perf_counter() - t0
-        pipeline_seconds.labels(mode="deep", task_type=task).observe(elapsed)
-        pipeline_total.labels(mode="deep", task_type=task, outcome=pipeline_outcome).inc()
+        elapsed = await runner.finalize(
+            assistant_content=final_content,
+            concrete_model=writer_model,
+        )
+        pipeline_outcome = runner.terminal.outcome.value
         # Same fields as the deep path — `drafts` here are the Stage-1
         # researcher notes, which is where research-mode grounding lives.
         ok = sum(1 for d in drafts if (d.get("content") or "").strip())
@@ -1250,18 +1223,6 @@ async def _stream_research_with_banners(
             payload.model, task, writer_model, pipeline_outcome, elapsed,
             len(drafts), ok, grounded,
         )
-        archive_client: ChatArchiveClient | None = getattr(app.state, "archive_client", None)
-        if archive_client is not None and conversation_id:
-            await archive_client.archive_turn(
-                registry=app.state.tools,
-                user_id=user_id,
-                conversation_id=conversation_id,
-                user_content=user_turn_text,
-                assistant_content=final_content,
-                partial=(pipeline_outcome == "cancelled"),
-                virtual_model=payload.model,
-                concrete_model=writer_model,
-            )
 
 
 async def _queue_get_with_timeout(q: asyncio.Queue[Any]) -> Any:
@@ -1272,20 +1233,6 @@ async def _queue_get_with_timeout(q: asyncio.Queue[Any]) -> Any:
     if q.empty():
         raise TimeoutError
     return q.get_nowait()
-
-
-async def _queue_get_until_task(
-    q: asyncio.Queue[Any],
-    task: asyncio.Task[Any],
-) -> Any | None:
-    """Return the next item, or None after the producer settles and drains."""
-    while True:
-        if task.done() and q.empty():
-            return None
-        try:
-            return await _queue_get_with_timeout(q)
-        except TimeoutError:
-            continue
 
 
 async def _drain_q_until_task(

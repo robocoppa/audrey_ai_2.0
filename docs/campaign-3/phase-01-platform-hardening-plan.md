@@ -1,7 +1,7 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress. Wave 1A and Wave 1B's H4 and M2 slices are
-Unraid-verified. M1 is laptop-complete and awaiting its Unraid smoke.
+**Status:** In progress. Wave 1A and Wave 1B's H4, M2, and M1 slices are
+Unraid-verified. Slice 1B.4 is laptop-complete and awaits its Unraid smoke.
 
 ## Goal
 
@@ -93,7 +93,21 @@ stays outside banners, missing terminal data is partial/truncated, and the
 observed dangling `</think>` answer replay is filtered. The 99 focused stream
 tests and all 2,440 hermetic tests pass; changed-file ruff and compilation are
 clean, lesson conventions report zero findings, and the link check has zero
-broken links. The Open WebUI and agent-client smokes remain outstanding.
+broken links. On Unraid, Open WebUI rendered `M1-OWUI-READY` exactly once
+without a thinking-tag leak, and the Fast pipeline recorded `outcome="ok"`.
+The streaming agent-client case passed on route Fast with 0.5-second TTFT,
+1.5-second total latency, no truncation, and no reasoning leak. M1 is
+Unraid-verified.
+
+1B.4 status (2026-08-26): laptop-complete, awaiting the Unraid smoke.
+`StreamStageRunner` now owns the named deep/research child tasks, bounded
+producer delivery, cancellation/drain, one terminal result, pipeline metrics,
+and answer-only archive finalization. The deep panel and staged research state
+machines still interpret their own events and banners. Both use one
+`OpenAIStreamSession`; a producer that ends after visible text but without its
+terminal event is recorded as truncated and archived partial. All 51 adjacent
+streaming tests and all 2,446 hermetic tests pass; scoped ruff and compilation
+are clean, lesson conventions report zero findings, and the link check has zero broken links.
 
 Gate:
 

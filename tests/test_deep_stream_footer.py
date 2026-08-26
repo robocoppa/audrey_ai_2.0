@@ -34,6 +34,7 @@ from typing import Any, ClassVar
 
 import audrey.pipeline.graph
 from audrey.config import Config, EnvOverrides, get_config
+from audrey.metrics import pipeline_total
 from audrey.models.health import HealthTracker
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
@@ -392,3 +393,62 @@ async def test_deep_queue_full_cleanup_does_not_wait_for_sentinel_space(monkeypa
         for task in producer_tasks:
             task.cancel()
         await asyncio.gather(*producer_tasks, return_exceptions=True)
+
+
+def _deep_outcome_counts() -> dict[str, float]:
+    return {
+        outcome: pipeline_total.labels(
+            mode="deep",
+            task_type="reasoning",
+            outcome=outcome,
+        )._value.get()
+        for outcome in ("ok", "error", "cancelled", "truncated")
+    }
+
+
+async def test_deep_missing_done_has_one_identity_and_truncated_outcome(monkeypatch):
+    app = _fake_app({})
+    archive = _RecordingArchive()
+    app.state.archive_client = archive
+
+    async def immediate_planning(**kwargs):
+        return kwargs["messages"], []
+
+    async def immediate_panel(**kwargs):
+        return []
+
+    async def truncated_synthesis(*args, **kwargs):
+        yield {"type": "first_token", "model": "s"}
+        yield {"type": "delta", "text": "partial answer"}
+
+    monkeypatch.setattr(route_pipeline, "_phase_thinking", immediate_planning)
+    monkeypatch.setattr(route_pipeline, "_phase_dispatch", immediate_panel)
+    monkeypatch.setattr(route_pipeline, "synthesize_stream", truncated_synthesis)
+
+    before = _deep_outcome_counts()
+    frames = [frame async for frame in _deep_generator(app)]
+    after = _deep_outcome_counts()
+
+    assert after["truncated"] == before["truncated"] + 1
+    for outcome in ("ok", "error", "cancelled"):
+        assert after[outcome] == before[outcome]
+
+    payloads = [
+        json.loads(frame.removeprefix("data: "))
+        for frame in frames
+        if frame.startswith("data: ") and frame.strip() != "data: [DONE]"
+    ]
+    assert len({item["id"] for item in payloads}) == 1
+    assert sum(
+        item["choices"][0]["delta"].get("role") == "assistant"
+        for item in payloads
+    ) == 1
+    assert sum(
+        item["choices"][0]["finish_reason"] == "stop"
+        for item in payloads
+    ) == 1
+    assert frames.count("data: [DONE]\n\n") == 1
+
+    assert len(archive.calls) == 1
+    assert archive.calls[0]["assistant_content"] == "partial answer"
+    assert archive.calls[0]["partial"] is True
