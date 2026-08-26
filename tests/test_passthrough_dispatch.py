@@ -11,11 +11,15 @@ We stub the OllamaClient surface so no real network is involved.
 
 from __future__ import annotations
 
+import asyncio
+import importlib
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from audrey.models.health import HealthTracker
+from audrey.models.ollama import OllamaError
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.passthrough import passthrough_chat, passthrough_stream
@@ -25,6 +29,7 @@ from audrey.routes.openai import (
     ChatCompletionRequest,
     _handle_passthrough,
 )
+from audrey.routes.openai.streaming import StreamOutcome, StreamTerminal
 
 # ─── Fakes ─────────────────────────────────────────────────────────────
 
@@ -81,6 +86,85 @@ class _RecordingGate(FairLocalGate):
             "model": model, "location": location, "user_id": user_id,
         })
         return super().acquire(model, location=location, user_id=user_id)
+
+
+class _RecordingMetric:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict, float]] = []
+
+    def labels(self, **labels):
+        owner = self
+
+        class _BoundMetric:
+            def inc(self, amount=1):
+                owner.calls.append(("inc", labels, amount))
+
+            def observe(self, value):
+                owner.calls.append(("observe", labels, value))
+
+        return _BoundMetric()
+
+
+class _FailingStreamOllama(_FakeOllama):
+    def __init__(self, *, after_content: bool) -> None:
+        super().__init__()
+        self.after_content = after_content
+
+    async def chat_stream(self, *, model, messages, options=None, tools=None,
+                          timeout_s=None, think=None):
+        self.stream_calls.append({
+            "model": model, "messages": messages, "options": options,
+            "tools": tools, "timeout_s": timeout_s, "think": think,
+        })
+        if self.after_content:
+            yield {"message": {"content": "partial"}, "done": False}
+        raise OllamaError("stream failed")
+
+
+class _BlockingStreamOllama(_FakeOllama):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.settled = asyncio.Event()
+
+    async def chat_stream(self, *, model, messages, options=None, tools=None,
+                          timeout_s=None, think=None):
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            self.settled.set()
+        if False:  # pragma: no cover - makes this an async generator
+            yield {}
+
+
+def _patch_stream_metrics(monkeypatch):
+    route = importlib.import_module("audrey.routes.openai.passthrough")
+    total = _RecordingMetric()
+    seconds = _RecordingMetric()
+    monkeypatch.setattr(route, "pipeline_total", total)
+    monkeypatch.setattr(route, "pipeline_seconds", seconds)
+    return total, seconds
+
+
+async def _consume_response(resp) -> str:
+    chunks = []
+    async for raw in resp.body_iterator:
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        chunks.append(raw)
+    return "".join(chunks)
+
+
+def _finish_reasons(body: str) -> list[str]:
+    reasons = []
+    for line in body.splitlines():
+        if not line.startswith("data: {"):
+            continue
+        choice = json.loads(line.removeprefix("data: "))["choices"][0]
+        if choice.get("finish_reason") is not None:
+            reasons.append(choice["finish_reason"])
+    return reasons
 
 
 def _stub_app(
@@ -319,6 +403,108 @@ async def test_handle_passthrough_streaming_emits_openai_sse_frames():
     assert body.rstrip().endswith("data: [DONE]")
     # Gate held once across the whole stream.
     assert len(gate.acquired) == 1
+
+
+def test_stream_terminal_is_one_shot():
+    terminal = StreamTerminal()
+    terminal.finish(StreamOutcome.OK, finish_reason="stop")
+
+    assert terminal.outcome is StreamOutcome.OK
+    assert terminal.finish_reason == "stop"
+    with pytest.raises(RuntimeError, match="already reported"):
+        terminal.finish(StreamOutcome.ERROR, finish_reason="stop")
+
+
+async def test_passthrough_stream_records_ok_once(monkeypatch):
+    total, seconds = _patch_stream_metrics(monkeypatch)
+    app = _stub_app(
+        ollama=_FakeOllama(), gate=_RecordingGate(),
+        inflight=UserInflightRegistry(max_inflight_per_user=3),
+    )
+    resp = await _handle_passthrough(
+        app, request=SimpleNamespace(app=app),
+        payload=_payload(model=f"{PASSTHROUGH_PREFIX}qwen3.6:35b-64k", stream=True),
+        me=_stub_user(),
+    )
+
+    body = await _consume_response(resp)
+
+    assert _finish_reasons(body) == ["stop"]
+    assert [call[1]["outcome"] for call in total.calls] == ["ok"]
+    assert len(seconds.calls) == 1
+
+
+@pytest.mark.parametrize("after_content", [False, True], ids=["before-token", "mid-stream"])
+async def test_passthrough_stream_records_rendered_ollama_error(
+    monkeypatch, after_content,
+):
+    total, seconds = _patch_stream_metrics(monkeypatch)
+    app = _stub_app(
+        ollama=_FailingStreamOllama(after_content=after_content),
+        gate=_RecordingGate(),
+        inflight=UserInflightRegistry(max_inflight_per_user=3),
+    )
+    resp = await _handle_passthrough(
+        app, request=SimpleNamespace(app=app),
+        payload=_payload(model=f"{PASSTHROUGH_PREFIX}qwen3.6:35b-64k", stream=True),
+        me=_stub_user(),
+    )
+
+    body = await _consume_response(resp)
+
+    assert "[error: stream failed]" in body
+    assert ("partial" in body) is after_content
+    assert _finish_reasons(body) == ["stop"]
+    assert [call[1]["outcome"] for call in total.calls] == ["error"]
+    assert len(seconds.calls) == 1
+
+
+async def test_passthrough_stream_without_done_is_truncated(monkeypatch):
+    total, seconds = _patch_stream_metrics(monkeypatch)
+    ollama = _FakeOllama(stream_chunks=[
+        {"message": {"content": "unfinished"}, "done": False},
+    ])
+    app = _stub_app(
+        ollama=ollama, gate=_RecordingGate(),
+        inflight=UserInflightRegistry(max_inflight_per_user=3),
+    )
+    resp = await _handle_passthrough(
+        app, request=SimpleNamespace(app=app),
+        payload=_payload(model=f"{PASSTHROUGH_PREFIX}qwen3.6:35b-64k", stream=True),
+        me=_stub_user(),
+    )
+
+    body = await _consume_response(resp)
+
+    assert "unfinished" in body
+    assert _finish_reasons(body) == ["length"]
+    assert body.rstrip().endswith("data: [DONE]")
+    assert [call[1]["outcome"] for call in total.calls] == ["truncated"]
+    assert len(seconds.calls) == 1
+
+
+async def test_passthrough_stream_cancellation_is_not_success(monkeypatch):
+    total, seconds = _patch_stream_metrics(monkeypatch)
+    ollama = _BlockingStreamOllama()
+    app = _stub_app(
+        ollama=ollama, gate=_RecordingGate(),
+        inflight=UserInflightRegistry(max_inflight_per_user=3),
+    )
+    resp = await _handle_passthrough(
+        app, request=SimpleNamespace(app=app),
+        payload=_payload(model=f"{PASSTHROUGH_PREFIX}qwen3.6:35b-64k", stream=True),
+        me=_stub_user(),
+    )
+
+    consumer = asyncio.create_task(_consume_response(resp))
+    await asyncio.wait_for(ollama.started.wait(), timeout=1)
+    consumer.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await consumer
+    await asyncio.wait_for(ollama.settled.wait(), timeout=1)
+
+    assert [call[1]["outcome"] for call in total.calls] == ["cancelled"]
+    assert len(seconds.calls) == 1
 
 
 # ─── Config gating from inside the route ───────────────────────────────

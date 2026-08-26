@@ -11,6 +11,7 @@ on the pipeline streaming module.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -35,6 +36,7 @@ from audrey.routes.openai.responses import (
     _to_openai_response,
 )
 from audrey.routes.openai.schemas import ChatCompletionRequest
+from audrey.routes.openai.streaming import StreamOutcome, StreamTerminal
 
 log = logging.getLogger(__name__)
 
@@ -198,7 +200,7 @@ async def _handle_passthrough(
     if payload.stream:
         async def _emit_passthrough_sse():
             t0 = time.perf_counter()
-            outcome = "ok"
+            terminal = StreamTerminal()
             try:
                 async with inflight.slot(me.email):
                     async for frame in _passthrough_stream_sse(
@@ -207,18 +209,30 @@ async def _handle_passthrough(
                         messages=messages, options=options,
                         user_id=me.email, tools=payload.tools, timeout_s=timeout_s,
                         think=think,
+                        terminal=terminal,
                     ):
                         yield frame
-            except OllamaError:
-                outcome = "error"
+            except asyncio.CancelledError:
+                terminal.finish_if_unset(StreamOutcome.CANCELLED)
+                raise
+            except GeneratorExit:
+                terminal.finish_if_unset(StreamOutcome.CANCELLED)
+                raise
+            except Exception:
+                terminal.finish_if_unset(StreamOutcome.ERROR)
                 raise
             finally:
+                # An exhausted/closed generator without a reported result is
+                # incomplete by definition. Inner protocol adapters normally
+                # report first; this guards future early-return paths.
+                terminal.finish_if_unset(StreamOutcome.TRUNCATED)
                 elapsed = time.perf_counter() - t0
                 pipeline_seconds.labels(
                     mode="passthrough", task_type="passthrough",
                 ).observe(elapsed)
                 pipeline_total.labels(
-                    mode="passthrough", task_type="passthrough", outcome=outcome,
+                    mode="passthrough", task_type="passthrough",
+                    outcome=terminal.outcome.value,
                 ).inc()
         return StreamingResponse(
             _emit_passthrough_sse(), media_type="text/event-stream",
@@ -276,6 +290,7 @@ async def _passthrough_stream_sse(
     tools: list[dict[str, Any]] | None,
     timeout_s: float | None,
     think: bool | None = None,
+    terminal: StreamTerminal | None = None,
 ):
     """Stream Ollama chunks as OpenAI-shaped SSE frames.
 
@@ -287,6 +302,7 @@ async def _passthrough_stream_sse(
     parsing the SSE stream see the structured calls and don't fall
     back to scraping plain text.
     """
+    terminal = terminal or StreamTerminal()
     created = int(time.time())
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     fingerprint = f"audrey-{__version__}/{concrete}"
@@ -340,9 +356,32 @@ async def _passthrough_stream_sse(
                     "model": virtual, "system_fingerprint": fingerprint,
                     "choices": [{"index": 0, "delta": final_delta, "finish_reason": finish_reason}],
                 }
+                terminal.finish(
+                    StreamOutcome.OK, finish_reason=finish_reason,
+                )
                 yield f"data: {json.dumps(final)}\n\n"
                 break
+        if not terminal.is_final:
+            # Ollama's iterator ended without its required ``done`` chunk.
+            # Tell OpenAI clients the answer is incomplete instead of sending
+            # a bare [DONE] that looks successful to both clients and metrics.
+            terminal.finish(StreamOutcome.TRUNCATED, finish_reason="length")
+            truncated = {
+                "id": cid, "object": "chat.completion.chunk", "created": created,
+                "model": virtual, "system_fingerprint": fingerprint,
+                "choices": [{
+                    "index": 0, "delta": {}, "finish_reason": "length",
+                }],
+            }
+            yield f"data: {json.dumps(truncated)}\n\n"
+    except asyncio.CancelledError:
+        terminal.finish_if_unset(StreamOutcome.CANCELLED)
+        raise
+    except GeneratorExit:
+        terminal.finish_if_unset(StreamOutcome.CANCELLED)
+        raise
     except OllamaError as e:
+        terminal.finish(StreamOutcome.ERROR, finish_reason="stop")
         err = {
             "id": cid, "object": "chat.completion.chunk", "created": created,
             "model": virtual, "system_fingerprint": fingerprint,
@@ -351,4 +390,3 @@ async def _passthrough_stream_sse(
         yield f"data: {json.dumps(err)}\n\n"
 
     yield "data: [DONE]\n\n"
-

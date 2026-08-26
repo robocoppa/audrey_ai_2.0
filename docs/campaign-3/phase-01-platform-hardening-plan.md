@@ -1,8 +1,8 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress. Wave 1A is complete and Unraid-verified. Wave 1B is
-underway: the role-aware Chat Completions slice is laptop-complete and awaits
-the deployment smoke.
+**Status:** In progress. Wave 1A and Wave 1B's H4 slice are Unraid-verified.
+M2 typed stream-terminal outcomes are laptop-complete and await the deployment
+smoke; M1 remains queued.
 
 ## Goal
 
@@ -68,12 +68,20 @@ keeps OpenAI compatibility important without making it Audrey's internal
 application protocol.
 
 First-slice status (2026-08-25): role-aware request validation and the
-OpenAI-to-Ollama tool-call/result translation are laptop-complete. A real
-two-request passthrough continuation passes in streaming and non-streaming
-tests. All 2,423 hermetic tests pass, changed-file lint is clean, and the lesson
-check has no broken links. Open WebUI and agent-client deployment smokes remain
-required before this slice is called Unraid-verified; stream-terminal and
+OpenAI-to-Ollama tool-call/result translation are Unraid-verified. The deployed
+Open WebUI passthrough completed a client-provided timestamp tool call and
+rendered its exact result instead of hanging. Streaming and non-streaming
+two-request regressions pass; all 2,423 hermetic tests pass, changed-file lint
+is clean, and the lesson check has no broken links. Stream-terminal and
 identity consolidation remain subsequent Wave 1B slices.
+
+M2 status (2026-08-25): passthrough streaming now reports one typed `ok`,
+`error`, `cancelled`, or `truncated` result from the inner generator to the
+outer metric owner. Missing Ollama `done` produces one `length` finish frame
+instead of a successful-looking bare terminator. Normal completion,
+pre-token/mid-stream failure, missing terminal data, and cancellation pass 48
+focused tests; all 2,429 hermetic tests pass, changed-file lint is clean, and
+the lesson check has no broken links. The Unraid smoke remains required.
 
 Gate:
 
