@@ -457,8 +457,9 @@ async def test_handle_passthrough_returns_openai_shaped_tool_calls():
     # call json.loads on this field.
     assert isinstance(call["function"]["arguments"], str)
     assert _json.loads(call["function"]["arguments"]) == {"path": "/etc/hosts"}
-    # And an id was synthesized.
+    # And an id was synthesized. `index` belongs only to stream deltas.
     assert call["id"]
+    assert "index" not in call
 
 
 @pytest.mark.asyncio
@@ -505,6 +506,14 @@ async def test_handle_passthrough_streaming_emits_tool_calls_on_final_frame():
     assert '"finish_reason": "tool_calls"' in body
     assert '"tool_calls"' in body
     assert '"read_file"' in body
+    tool_frame = next(
+        _json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: {") and '"tool_calls"' in line
+    )
+    # Streaming tool calls are deltas, not completed assistant-message calls.
+    # OpenAI clients (including OWUI) assemble them by this required index.
+    assert tool_frame["choices"][0]["delta"]["tool_calls"][0]["index"] == 0
     # Arguments serialized as a JSON string (escaped).
     assert _json.dumps({"path": "/etc/hosts"}) in body or '\\"path\\": \\"/etc/hosts\\"' in body
     # Stream still terminates.

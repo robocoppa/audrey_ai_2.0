@@ -1,6 +1,6 @@
-# Campaign 3 Phase 2 — reusable skills
+# Campaign 3 Phase 3 — reusable skills
 
-**Status:** Planned and gated on Campaign 3 Phase 1.
+**Status:** Planned and gated on Campaign 3 Phase 2.
 
 ## Goal
 
@@ -33,20 +33,23 @@ useful contract ideas locally rather than depend on a hosted runtime:
 - [OpenAI Skills API](https://developers.openai.com/api/reference/go/resources/skills)
 - [Container skill attachment](https://developers.openai.com/api/reference/cli/resources/containers/methods/create)
 
-## Phase 1 prerequisites
+## Phase 1 and Phase 2 prerequisites
 
-Phase 2 starts only after the Phase 1 completion gate, with particular reliance
-on:
+Phase 3 starts only after the platform-hardening and native-UI completion
+gates, with particular reliance on:
 
 - private-data policy is enforced server-side rather than by prompt text;
 - request tasks and GPU scheduling have explicit lifecycle ownership;
 - streaming and request contracts have one owner and terminal outcome;
 - model-visible capabilities have declarative policy and availability;
-- configuration precedence and generated inventories are trustworthy.
+- configuration precedence and generated inventories are trustworthy;
+- the native UI can discover skills and send an explicit skill id without
+  owning selection, authorization, or prompt assembly;
+- Audrey-owned conversation and run records retain immutable skill provenance.
 
 A registry-only spike may be developed earlier behind an off-by-default flag,
 but it does not ship or become an implicit dependency of `audrey_video` until
-Phase 1 is closed.
+Phases 1 and 2 are closed.
 
 ## Product rules
 
@@ -306,7 +309,7 @@ Important separation:
 - A missing declared tool degrades or rejects that skill according to whether
   it is marked required; it does not silently substitute a broader tool.
 
-The no-skill path receives the same registry it receives before Phase 2.
+The no-skill path receives the same registry it receives before Phase 3.
 
 ## Resource delivery
 
@@ -400,7 +403,7 @@ instructions themselves are not copied into every chat record.
 
 ---
 
-## Milestone 2A — registry and behavior-preserving video extraction
+## Milestone 3A — registry and behavior-preserving video extraction
 
 1. Add `src/audrey/skills/` models, loader, registry, and validation.
 2. Package a built-in `video-analysis` bundle containing the exact existing
@@ -421,7 +424,7 @@ Gate:
   precise;
 - no-skill request payload, model choice, tools, and prompt remain unchanged.
 
-## Milestone 2B — explicit selection and enforced tool restriction
+## Milestone 3B — explicit selection and enforced tool restriction
 
 1. Add the `skill` request extension and authenticated catalog route.
 2. Carry `ResolvedSkill` metadata through graph and streaming state.
@@ -441,7 +444,7 @@ Gate:
   documented errors;
 - no-skill regression suite passes.
 
-## Milestone 2C — first new skill and product evaluation
+## Milestone 3C — first new skill and product evaluation
 
 Pilot a `grounded-document-analysis` skill using only the existing file/KB
 capabilities it needs, for example:
@@ -474,7 +477,7 @@ replaces hard-coded specialization plumbing. The pilot skill becomes a public
 choice only if it is measurably useful or clearly improves workflow
 consistency at acceptable cost.
 
-## Milestone 2D — optional automatic selection
+## Milestone 3D — optional automatic selection
 
 Open only after explicit selection has stable evidence.
 
@@ -565,11 +568,11 @@ Milestones stay independently reviewable.
 
 ## Deployment and rollback
 
-1. Deploy 2A with `skills.enabled: false`; verify registry/readiness only.
+1. Deploy 3A with `skills.enabled: false`; verify registry/readiness only.
 2. Enable built-in video mapping and run the existing video comparison suite.
 3. Enable explicit API selection for the pilot user/admin only.
 4. Publish the first new skill only after its evaluation gate.
-5. Leave automatic selection off until 2D passes.
+5. Leave automatic selection off until 3D passes.
 
 Rollback order:
 
@@ -581,9 +584,9 @@ Rollback order:
 No rollback changes stored user data because MVP skills are read-only bundles
 and request metadata.
 
-## Phase 2 completion gate
+## Phase 3 completion gate
 
-Phase 2 is complete when:
+Phase 3 is complete when:
 
 - the registry loads versioned, validated, read-only bundles;
 - `audrey_video` behavior and routing remain at parity through the registry;

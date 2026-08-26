@@ -72,6 +72,8 @@ def _to_openai_response(
 
 def _ollama_to_openai_tool_calls(
     ollama_tool_calls: list[dict[str, Any]] | None,
+    *,
+    streaming: bool = False,
 ) -> list[dict[str, Any]] | None:
     """Convert Ollama's tool_calls shape to OpenAI's.
 
@@ -84,12 +86,14 @@ def _ollama_to_openai_tool_calls(
     The argument shape difference (dict vs JSON-string) is the main
     thing — clients that parse OpenAI responses will try `json.loads`
     on `arguments` and crash if it's already a dict. Audrey synthesizes
-    the `id` since Ollama doesn't emit one.
+    the `id` since Ollama does not emit one. With `streaming=True`, each
+    delta call also receives the required assembly `index`; completed
+    non-streaming assistant messages deliberately omit it.
     """
     if not ollama_tool_calls:
         return None
     out: list[dict[str, Any]] = []
-    for call in ollama_tool_calls:
+    for index, call in enumerate(ollama_tool_calls):
         fn = call.get("function") or {}
         name = fn.get("name") or ""
         raw_args = fn.get("arguments")
@@ -99,9 +103,12 @@ def _ollama_to_openai_tool_calls(
             arguments = "{}"
         else:
             arguments = json.dumps(raw_args)
-        out.append({
+        converted: dict[str, Any] = {
             "id": call.get("id") or f"call_{uuid.uuid4().hex[:24]}",
             "type": "function",
             "function": {"name": name, "arguments": arguments},
-        })
+        }
+        if streaming:
+            converted["index"] = index
+        out.append(converted)
     return out

@@ -326,7 +326,9 @@ async def _passthrough_stream_sse(
                 }
                 yield f"data: {json.dumps(frame)}\n\n"
             if done:
-                tool_calls = _ollama_to_openai_tool_calls(accumulated_tool_calls)
+                tool_calls = _ollama_to_openai_tool_calls(
+                    accumulated_tool_calls, streaming=True,
+                )
                 final_delta: dict[str, Any] = {}
                 if tool_calls:
                     final_delta["tool_calls"] = tool_calls

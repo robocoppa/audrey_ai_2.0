@@ -246,7 +246,10 @@ async def test_two_request_tool_loop_preserves_linkage_to_ollama(stream):
         assistant = {
             "role": "assistant",
             "content": None,
-            "tool_calls": tool_delta["tool_calls"],
+            "tool_calls": [
+                {key: value for key, value in call.items() if key != "index"}
+                for call in tool_delta["tool_calls"]
+            ],
         }
     else:
         assistant = first["choices"][0]["message"]

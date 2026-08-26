@@ -61,6 +61,12 @@ Complete the supported Chat Completions message lifecycle and consolidate
 stream ownership so fast, deep, research, and passthrough responses share clear
 terminal behavior, identity, metrics, and archive boundaries.
 
+The durable endpoint is a typed, client-neutral run-event stream. OpenAI SSE
+frames, progress banners, archive capture, metrics, and the future native UI
+must adapt from those events rather than parsing or wrapping one another. This
+keeps OpenAI compatibility important without making it Audrey's internal
+application protocol.
+
 First-slice status (2026-08-25): role-aware request validation and the
 OpenAI-to-Ollama tool-call/result translation are laptop-complete. A real
 two-request passthrough continuation passes in streaming and non-streaming
@@ -76,18 +82,25 @@ Gate:
 - fallback, thinking, health, and metrics policies are consistent where their
   contracts overlap;
 - progress-banner ordering remains unchanged;
+- typed run, stage, text, tool, usage, cancellation, and terminal events have
+  one owner and adapter contract;
 - Open WebUI and agent-client deployment smokes pass.
 
-## Wave 1C — storage accounting and durable lifecycle
+## Wave 1C — identity, storage accounting, and durable lifecycle
 
-Centralize storage reservations and make indexing, retention, migration,
-archive capture, and deletion retryable. Build user-facing memory and chat
-inspection, correction, export, and deletion only on top of those durable
-primitives.
+Introduce a provider-neutral authenticated principal with a stable Audrey user
+id and storage namespace. Then centralize storage reservations and make
+indexing, retention, migration, archive capture, and deletion retryable. Build
+user-facing memory and chat inspection, correction, export, and deletion only
+on top of those durable primitives.
 
 Gate:
 
 - concurrent mixed uploads honor configured storage limits;
+- changing an email or authentication provider does not silently move or merge
+  a user's private-data namespace;
+- browser, personal-token, transitional OWUI, and internal-service identities
+  cannot be confused or downgraded into one another;
 - interrupted work and cleanup converge after restart;
 - archive and deletion repair paths are idempotent;
 - response delivery is not blocked on archive indexing;
@@ -137,18 +150,19 @@ result reduces duplicate state transitions or policy declarations.
 
 ```text
 1A data boundaries/request ownership
-  -> 1B protocol/stream consistency
-  -> 1C durable storage lifecycle
+  -> 1B protocol/run-event consistency
+  -> 1C identity/durable storage lifecycle
   -> 1D capability policy/readiness
   -> 1E runtime reproducibility/responsiveness
   -> 1F justified simplification
-  -> Campaign 3 Phase 2 reusable skills
+  -> Campaign 3 Phase 2 Audrey application and web UI
+  -> Campaign 3 Phase 3 reusable skills
 ```
 
 Storage lifecycle and capability readiness may be developed independently
-after Wave 1A, but they remain separate deploy units. The skills phase begins
-only after Phase 1's platform gates are closed or explicitly accepted with a
-documented disposition in the private engineering record.
+after Wave 1A, but they remain separate deploy units. The native application
+phase begins only after Phase 1's platform gates are closed or explicitly
+accepted with a documented disposition in the private engineering record.
 
 ## Phase 1 completion gate
 
@@ -158,7 +172,7 @@ documented disposition in the private engineering record.
 - Restart, cancellation, and failure-injection paths converge cleanly.
 - Runtime status, configuration, and public documentation agree.
 - No unresolved platform-boundary item is being deferred implicitly into the
-  skills implementation.
+  native application implementation.
 
 ## Deferred product work
 
