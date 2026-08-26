@@ -1,7 +1,7 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress. Wave 1A and Wave 1B's H4, M2, and M1 slices are
-Unraid-verified. Slice 1B.4 is laptop-complete and awaits its Unraid smoke.
+**Status:** In progress. Waves 1A and 1B are Unraid-verified; Wave 1C is
+next.
 
 ## Goal
 
@@ -99,15 +99,21 @@ The streaming agent-client case passed on route Fast with 0.5-second TTFT,
 1.5-second total latency, no truncation, and no reasoning leak. M1 is
 Unraid-verified.
 
-1B.4 status (2026-08-26): laptop-complete, awaiting the Unraid smoke.
-`StreamStageRunner` now owns the named deep/research child tasks, bounded
+1B.4 status (2026-08-26): complete and Unraid-verified. `StreamStageRunner`
+now owns the named deep/research child tasks, bounded
 producer delivery, cancellation/drain, one terminal result, pipeline metrics,
 and answer-only archive finalization. The deep panel and staged research state
 machines still interpret their own events and banners. Both use one
 `OpenAIStreamSession`; a producer that ends after visible text but without its
 terminal event is recorded as truncated and archived partial. All 51 adjacent
 streaming tests and all 2,446 hermetic tests pass; scoped ruff and compilation
-are clean, lesson conventions report zero findings, and the link check has zero broken links.
+are clean, lesson conventions report zero findings, and the link check has zero
+broken links. On Unraid, the Deep CRISPR agent-client case passed on route Deep
+with the Planning → Dispatching panel → Synthesizing sequence, 1.3-second TTFT,
+58.8-second total latency, and no truncation or reasoning leak. The Research
+Euclid case passed on route Research with all five banners, 6.6-second TTFT,
+231.8-second total latency, eight quality-checked sources, and no truncation or
+reasoning leak. Its completion log recorded `outcome=ok`. Wave 1B is complete.
 
 Gate:
 

@@ -93,6 +93,11 @@ from audrey.kb.ingest import (
     ingest_user_text_file,
 )
 from audrey.kb.qdrant import QdrantKB
+from audrey.kb.storage_lifecycle import (
+    QuotaExceededError,
+    StorageLifecycle,
+    StorageReservation,
+)
 from audrey.kb.uploads_db import UploadsDB
 from audrey.kb.user_store import (
     ensure_user_collections,
@@ -445,6 +450,28 @@ def _get_uploads_db(request: Request) -> UploadsDB:
     return db
 
 
+def _get_storage_lifecycle(request: Request) -> StorageLifecycle:
+    storage: StorageLifecycle | None = getattr(
+        request.app.state, "storage_lifecycle", None,
+    )
+    if storage is None:
+        storage = StorageLifecycle(_get_uploads_db(request))
+        request.app.state.storage_lifecycle = storage
+    return storage
+
+
+def _quota_http_error(error: QuotaExceededError) -> HTTPException:
+    mib = 1024 * 1024
+    return HTTPException(
+        status_code=413,
+        detail=(
+            "Per-user storage quota exceeded: "
+            f"{error.usage.total_bytes // mib}MB in use + "
+            f"{error.requested_bytes // mib}MB requested > "
+            f"{error.max_user_bytes // mib}MB."
+        ),
+    )
+
 @router.post("", response_model=UploadResponse)
 async def upload_file(
     request: Request,
@@ -459,11 +486,7 @@ async def upload_file(
     image_embedder = getattr(request.app.state, "image_embedder", None)
     if qdrant is None or text_embedder is None:
         raise HTTPException(status_code=503, detail="KB is not initialized.")
-    db = _get_uploads_db(request)
-
-    # Ensure user collections + indexes exist before we write.
-    text_col, image_col = await ensure_user_collections(qdrant, user)
-
+    storage = _get_storage_lifecycle(request)
     max_upload = _max_upload_bytes(request)
     max_total = _max_user_bytes(request)
     root = _upload_root(request)
@@ -472,38 +495,76 @@ async def upload_file(
     ext = Path(file.filename or "").suffix.lower()
     dest = root / slug / f"{file_id}{ext}"
 
-    # Pre-flight quota check before we touch disk: if the user is already at
-    # or over their byte budget, every byte we stream is wasted I/O on what
-    # we'll reject anyway. Post-stream check below still runs (we only know
-    # the actual upload size after streaming) — this is an additional guard.
-    already = await db.user_total_bytes(user)
-    if already >= max_total:
-        raise HTTPException(
-            status_code=413,
-            detail=(
-                f"Per-user storage quota already at or over the limit: "
-                f"{already // (1024 * 1024)}MB >= {max_total // (1024 * 1024)}MB."
-            ),
-        )
-
-    written = await _stream_to_disk(file, dest, limit_bytes=max_upload)
-    if written < 0:
-        _safe_unlink(dest)
+    declared = max_upload if file.size is None else int(file.size)
+    if declared <= 0:
+        raise HTTPException(status_code=422, detail="Empty upload.")
+    if declared > max_upload:
         raise HTTPException(
             status_code=413,
             detail=f"Upload exceeds {max_upload // (1024 * 1024)} MB limit.",
         )
-    if written == 0:
-        _safe_unlink(dest)
-        raise HTTPException(status_code=422, detail="Empty upload.")
 
-    return await _validate_and_ingest(
-        request, dest,
-        user=user, file_id=file_id, filename=file.filename or file_id,
-        written=written, already=already, max_total=max_total,
-        qdrant=qdrant, text_embedder=text_embedder, image_embedder=image_embedder,
-        db=db, text_col=text_col, image_col=image_col,
-    )
+    await _sweep_stale_upload_sessions(request, storage)
+    now, expired_before = _reservation_window(request)
+    try:
+        reservation = await storage.reserve_single_upload(
+            reservation_id=file_id,
+            user=user,
+            bytes_=declared,
+            max_user_bytes=max_total,
+            now=now,
+            expired_before=expired_before,
+        )
+    except QuotaExceededError as e:
+        raise _quota_http_error(e) from e
+
+    try:
+        # Collection creation is work too, so it happens only after capacity is
+        # held. Every exit below releases the reservation unless commit already
+        # consumed it.
+        text_col, image_col = await ensure_user_collections(qdrant, user)
+        written = await _stream_to_disk(file, dest, limit_bytes=max_upload)
+        if written < 0:
+            _safe_unlink(dest)
+            raise HTTPException(
+                status_code=413,
+                detail=f"Upload exceeds {max_upload // (1024 * 1024)} MB limit.",
+            )
+        if written == 0:
+            _safe_unlink(dest)
+            raise HTTPException(status_code=422, detail="Empty upload.")
+
+        try:
+            reservation = await storage.reserve_single_upload(
+                reservation_id=file_id,
+                user=user,
+                bytes_=written,
+                max_user_bytes=max_total,
+                now=_dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
+                expired_before=expired_before,
+            )
+        except QuotaExceededError as e:
+            _safe_unlink(dest)
+            raise _quota_http_error(e) from e
+
+        return await _validate_and_ingest(
+            request,
+            dest,
+            user=user,
+            file_id=file_id,
+            filename=file.filename or file_id,
+            written=written,
+            max_total=max_total,
+            qdrant=qdrant,
+            text_embedder=text_embedder,
+            image_embedder=image_embedder,
+            storage=storage,
+            reservation=reservation,
+            text_col=text_col,
+            image_col=image_col,
+        )
+    finally:
+        await storage.release(reservation)
 
 
 async def _validate_and_ingest(
@@ -514,12 +575,12 @@ async def _validate_and_ingest(
     file_id: str,
     filename: str,
     written: int,
-    already: int,
     max_total: int,
     qdrant: QdrantKB,
     text_embedder,
     image_embedder,
-    db: UploadsDB,
+    storage: StorageLifecycle,
+    reservation: StorageReservation,
     text_col: str,
     image_col: str,
 ) -> UploadResponse:
@@ -536,19 +597,6 @@ async def _validate_and_ingest(
         raise HTTPException(
             status_code=415,
             detail=f"Unsupported mime: {mime!r}. Allowed: {sorted(ALLOWED_MIMES)}",
-        )
-
-    # Post-stream quota check — actual upload size only becomes known after
-    # streaming. The pre-flight above catches the already-over case at the
-    # wire; this catches the case where this upload itself crosses the line.
-    if already + written > max_total:
-        _safe_unlink(dest)
-        raise HTTPException(
-            status_code=413,
-            detail=(
-                f"Per-user storage quota exceeded: "
-                f"{(already + written) // (1024 * 1024)}MB > {max_total // (1024 * 1024)}MB."
-            ),
         )
 
     # Strip directory components, then cap at NAME_MAX (255) so a runaway
@@ -570,14 +618,30 @@ async def _validate_and_ingest(
     # keeps it out of the try/except below, whose whole job is ingest.
     if kind == "video":
         try:
-            await db.record_upload(
-                file_id=file_id, user=user, filename=filename, mime=mime,
-                bytes_=written, kind=kind, collection="", chunks=0,
-                uploaded_at=stamp, status="pending",
+            await storage.commit_upload(
+                reservation,
+                file_id=file_id,
+                filename=filename,
+                mime=mime,
+                bytes_=written,
+                kind=kind,
+                collection="",
+                chunks=0,
+                uploaded_at=stamp,
+                status="pending",
+                max_user_bytes=max_total,
             )
+        except QuotaExceededError as e:
+            _safe_unlink(dest)
+            raise _quota_http_error(e) from e
         except Exception as e:
             _safe_unlink(dest)
-            log.exception("files: uploads_db.record failed for %s (%s): %s", filename, user, e)
+            log.exception(
+                "files: reservation commit failed for %s (%s): %s",
+                filename,
+                user,
+                e,
+            )
             raise HTTPException(status_code=500, detail=f"Index write failed: {e}") from e
         log.info(
             "files: stored pending video user=%s file_id=%s filename=%r bytes=%d",
@@ -632,22 +696,42 @@ async def _validate_and_ingest(
     # row never recorded. Best-effort rollback + log + the next boot's
     # `reconcile_with_qdrant` sweep is the recovery story.
     try:
-        await db.record_upload(
-            file_id=file_id, user=user, filename=filename, mime=mime,
-            bytes_=written, kind=kind, collection=collection,
-            chunks=n_chunks, uploaded_at=stamp,
+        await storage.commit_upload(
+            reservation,
+            file_id=file_id,
+            filename=filename,
+            mime=mime,
+            bytes_=written,
+            kind=kind,
+            collection=collection,
+            chunks=n_chunks,
+            uploaded_at=stamp,
+            status="ready",
+            max_user_bytes=max_total,
         )
     except Exception as e:
-        log.exception("files: uploads_db.record failed for %s (%s): %s", filename, user, e)
+        log.exception(
+            "files: reservation commit failed for %s (%s): %s",
+            filename,
+            user,
+            e,
+        )
         try:
-            await qdrant.delete_by_file_id(file_id, user=user, collection=collection)
+            await qdrant.delete_by_file_id(
+                file_id, user=user, collection=collection,
+            )
         except Exception as rollback_err:  # noqa: BLE001 — must not mask the original error
             log.error(
                 "files: qdrant rollback ALSO failed for file_id=%s user=%s collection=%s: %s "
                 "(orphan points will be cleaned up by next boot's reconcile_with_qdrant)",
-                file_id, user, collection, rollback_err,
+                file_id,
+                user,
+                collection,
+                rollback_err,
             )
         _safe_unlink(dest)
+        if isinstance(e, QuotaExceededError):
+            raise _quota_http_error(e) from e
         raise HTTPException(status_code=500, detail=f"Index write failed: {e}") from e
 
     log.info(
@@ -720,6 +804,34 @@ def _session_dir(request: Request, user: str, upload_id: str) -> Path:
     dot-prefixed so it never collides with a stored `<file_id><ext>`.
     """
     return _upload_root(request) / sanitize_user(user) / ".sessions" / upload_id
+def _reservation_window(request: Request) -> tuple[str, str]:
+    now = _dt.datetime.now(_dt.UTC)
+    ttl_minutes = int(_chunked_cfg(request).get("session_ttl_minutes", 120))
+    expired_before = now - _dt.timedelta(minutes=max(1, ttl_minutes))
+    return (
+        now.isoformat(timespec="seconds"),
+        expired_before.isoformat(timespec="seconds"),
+    )
+
+
+async def _sweep_stale_upload_sessions(
+    request: Request,
+    storage: StorageLifecycle,
+) -> int:
+    """Release expired session reservations, then remove their scratch dirs."""
+    _, expired_before = _reservation_window(request)
+    expired = await storage.expire_chunk_sessions(older_than=expired_before)
+    for row in expired:
+        session_dir = _session_dir(
+            request,
+            str(row["user"]),
+            str(row["upload_id"]),
+        )
+        await asyncio.to_thread(shutil.rmtree, session_dir, True)
+    if expired:
+        log.info("files: expired %d abandoned upload session(s)", len(expired))
+    return len(expired)
+
 
 
 @router.post("/upload-sessions", response_model=SessionOpenResponse)
@@ -730,7 +842,7 @@ async def open_upload_session(
 ) -> SessionOpenResponse:
     """Reserve an upload id and tell the client how to slice the file."""
     user = me.email
-    db = _get_uploads_db(request)
+    storage = _get_storage_lifecycle(request)
 
     if body.total_bytes <= 0:
         raise HTTPException(status_code=422, detail="total_bytes must be positive.")
@@ -742,32 +854,32 @@ async def open_upload_session(
             detail=f"Upload exceeds {max_bytes // (1024 * 1024)} MB chunked limit.",
         )
 
-    # Same pre-flight the single-shot route does: refuse before the client
-    # spends forty requests on something the quota will reject at the end.
     max_total = _max_user_bytes(request)
-    already = await db.user_total_bytes(user)
-    if already + body.total_bytes > max_total:
-        raise HTTPException(
-            status_code=413,
-            detail=(
-                f"Per-user storage quota exceeded: "
-                f"{(already + body.total_bytes) // (1024 * 1024)}MB > "
-                f"{max_total // (1024 * 1024)}MB."
-            ),
-        )
-
     part_size = _part_size(request)
     parts_total = (body.total_bytes + part_size - 1) // part_size
     upload_id = str(uuid.uuid4())
-    now = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+    await _sweep_stale_upload_sessions(request, storage)
+    now, expired_before = _reservation_window(request)
+    try:
+        reservation = await storage.open_chunk_session(
+            upload_id=upload_id,
+            user=user,
+            filename=Path(body.filename or "upload").name[:255],
+            total_bytes=body.total_bytes,
+            part_size=part_size,
+            parts_total=parts_total,
+            max_user_bytes=max_total,
+            now=now,
+            expired_before=expired_before,
+        )
+    except QuotaExceededError as e:
+        raise _quota_http_error(e) from e
 
-    _session_dir(request, user, upload_id).mkdir(parents=True, exist_ok=True)
-    await db.open_session(
-        upload_id=upload_id, user=user,
-        filename=Path(body.filename or "upload").name[:255],
-        total_bytes=body.total_bytes, part_size=part_size,
-        parts_total=parts_total, now=now,
-    )
+    try:
+        _session_dir(request, user, upload_id).mkdir(parents=True, exist_ok=True)
+    except Exception:
+        await storage.release(reservation)
+        raise
     log.info(
         "files: session open user=%s upload_id=%s parts=%d bytes=%d",
         user, upload_id, parts_total, body.total_bytes,
@@ -788,6 +900,7 @@ async def upload_part(
     """Stream one part to disk. Idempotent — a retried part overwrites."""
     user = me.email
     db = _get_uploads_db(request)
+    storage = _get_storage_lifecycle(request)
 
     session = await db.get_session(upload_id, user=user)
     if session is None:
@@ -831,7 +944,19 @@ async def upload_part(
         raise HTTPException(status_code=422, detail="Empty part.")
 
     now = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
-    await db.record_part(upload_id=upload_id, part_no=part_no, bytes_=written, now=now)
+    reservation = StorageReservation(
+        upload_id, user, "chunked", int(session["total_bytes"]),
+    )
+    try:
+        await storage.record_chunk_part(
+            reservation, part_no=part_no, bytes_=written, now=now,
+        )
+    except ValueError as e:
+        _safe_unlink(dest)
+        raise HTTPException(
+            status_code=409,
+            detail=str(e),
+        ) from e
     parts_received, _ = await db.session_progress(upload_id)
     return PartResponse(
         upload_id=upload_id, part_no=part_no, bytes=written,
@@ -848,6 +973,7 @@ async def complete_upload_session(
     """Assemble the parts and hand the result to the shared ingest path."""
     user = me.email
     db = _get_uploads_db(request)
+    storage = _get_storage_lifecycle(request)
 
     qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
     text_embedder = getattr(request.app.state, "text_embedder", None)
@@ -872,7 +998,7 @@ async def complete_upload_session(
 
     text_col, image_col = await ensure_user_collections(qdrant, user)
     max_total = _max_user_bytes(request)
-    already = await db.user_total_bytes(user)
+    reservation = StorageReservation(upload_id, user, "chunked", int(session["total_bytes"]))
 
     filename = str(session["filename"])
     file_id = str(uuid.uuid4())
@@ -881,24 +1007,39 @@ async def complete_upload_session(
     session_dir = _session_dir(request, user, upload_id)
 
     written = await asyncio.to_thread(_assemble_parts, session_dir, dest, parts_total)
-    if written == 0:
+    if written != int(session["total_bytes"]):
         _safe_unlink(dest)
-        await _drop_session(db, session_dir, upload_id)
-        raise HTTPException(status_code=422, detail="Empty upload.")
+        await _drop_session(storage, session_dir, reservation)
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Assembled size {written} does not match the declared "
+                f"{int(session['total_bytes'])} bytes."
+            ),
+        )
 
     try:
         result = await _validate_and_ingest(
-            request, dest,
-            user=user, file_id=file_id, filename=filename,
-            written=written, already=already, max_total=max_total,
-            qdrant=qdrant, text_embedder=text_embedder, image_embedder=image_embedder,
-            db=db, text_col=text_col, image_col=image_col,
+            request,
+            dest,
+            user=user,
+            file_id=file_id,
+            filename=filename,
+            written=written,
+            max_total=max_total,
+            qdrant=qdrant,
+            text_embedder=text_embedder,
+            image_embedder=image_embedder,
+            storage=storage,
+            reservation=reservation,
+            text_col=text_col,
+            image_col=image_col,
         )
     finally:
         # Parts are scratch either way: on success they're redundant, on
         # failure the client must reopen a session rather than retry into a
         # half-validated one.
-        await _drop_session(db, session_dir, upload_id)
+        await _drop_session(storage, session_dir, reservation)
 
     log.info(
         "files: session complete user=%s upload_id=%s file_id=%s bytes=%d",
@@ -928,9 +1069,13 @@ def _assemble_parts(session_dir: Path, dest: Path, parts_total: int) -> int:
     return written
 
 
-async def _drop_session(db: UploadsDB, session_dir: Path, upload_id: str) -> None:
-    """Forget a session: its rows and its parts on disk. Best effort."""
-    await db.close_session(upload_id)
+async def _drop_session(
+    storage: StorageLifecycle,
+    session_dir: Path,
+    reservation: StorageReservation,
+) -> None:
+    """Forget a session: its reservation rows and parts on disk. Best effort."""
+    await storage.release(reservation)
     await asyncio.to_thread(shutil.rmtree, session_dir, True)
 
 
@@ -1170,6 +1315,7 @@ async def ingest_from_url(
     """
     user = me.email
     db = _get_uploads_db(request)
+    storage = _get_storage_lifecycle(request)
 
     source_url = _validate_fetch_url(body.url, _allowed_fetch_hosts(request))
 
@@ -1184,26 +1330,24 @@ async def ingest_from_url(
         )
 
     max_total = _max_user_bytes(request)
-    already = await db.user_total_bytes(user)
     ceiling = _max_fetch_bytes(request)
-    if already + ceiling > max_total:
-        raise HTTPException(
-            status_code=413,
-            detail=(
-                f"Not enough room: a fetch can use up to "
-                f"{ceiling // (1024 * 1024)}MB and you are at "
-                f"{already // (1024 * 1024)}MB of "
-                f"{max_total // (1024 * 1024)}MB."
-            ),
-        )
-
     file_id = str(uuid.uuid4())
-    stamp = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
     filename = _url_placeholder_name(source_url)
-    await db.record_url_fetch(
-        file_id=file_id, user=user, source_url=source_url,
-        filename=filename, uploaded_at=stamp,
-    )
+    await _sweep_stale_upload_sessions(request, storage)
+    now, expired_before = _reservation_window(request)
+    try:
+        await storage.reserve_url_fetch(
+            file_id=file_id,
+            user=user,
+            source_url=source_url,
+            filename=filename,
+            ceiling_bytes=ceiling,
+            max_user_bytes=max_total,
+            now=now,
+            expired_before=expired_before,
+        )
+    except QuotaExceededError as e:
+        raise _quota_http_error(e) from e
     log.info(
         "files: queued url fetch user=%s file_id=%s url=%r", user, file_id, source_url,
     )
@@ -1349,7 +1493,9 @@ async def claim_fetch(
         attempts=int(row["attempts"]),
         stage_dir=str(_fetch_stage_dir(request)),
         lease_seconds=_fetch_lease_minutes(request) * 60,
-        max_bytes=_max_fetch_bytes(request),
+        max_bytes=(
+            int(row["quota_reserved_bytes"]) or _max_fetch_bytes(request)
+        ),
         max_duration_s=float(cfg.get("max_duration_s", 0) or 0),
         extractor_args=_fetch_clients(request),
         max_client_attempts=max(1, int(cfg.get("max_client_attempts", 2) or 1)),
@@ -1495,15 +1641,12 @@ async def fetch_result(
             "returning an error page rather than the media",
         )
 
-    max_total = _max_user_bytes(request)
-    # This row still carries bytes=0, so the sum excludes it — `already` is
-    # genuinely everything else the user is storing.
-    already = await db.user_total_bytes(user)
-    if already + written > max_total:
+    ceiling = int(row["quota_reserved_bytes"]) or _max_fetch_bytes(request)
+    if written > ceiling:
         raise await rejected(
             413,
-            f"the download is {written // (1024 * 1024)}MB and would put you over "
-            f"your {max_total // (1024 * 1024)}MB quota",
+            f"the download is {written // (1024 * 1024)}MB, above its reserved "
+            f"{ceiling // (1024 * 1024)}MB ceiling",
         )
 
     segments = [s for s in body.segments if s.text.strip()]
@@ -2160,6 +2303,7 @@ async def requeue_job(
     stuck one needs it, but it should be something you meant to do.
     """
     db = _get_uploads_db(request)
+    storage = _get_storage_lifecycle(request)
     qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
     if qdrant is None:
         raise HTTPException(status_code=503, detail="KB is not initialized.")
@@ -2209,6 +2353,24 @@ async def requeue_job(
         )
 
     user = str(row["user"])
+    refetch_reservation: StorageReservation | None = None
+    if refetch:
+        await _sweep_stale_upload_sessions(request, storage)
+        _, expired_before = _reservation_window(request)
+        try:
+            refetch_reservation = await storage.reserve_url_refetch(
+                file_id=file_id,
+                user=user,
+                ceiling_bytes=min(
+                    _max_fetch_bytes(request),
+                    max(1, int(row["bytes"])),
+                ),
+                max_user_bytes=_max_user_bytes(request),
+                expired_before=expired_before,
+            )
+        except QuotaExceededError as e:
+            raise _quota_http_error(e) from e
+
     # Qdrant first, and fatally. `ingest_user_text_file` deletes by file_id
     # before upserting, so a re-run that produces a transcript would clear
     # these anyway — but a re-run that produces *no* transcript never calls it,
@@ -2219,9 +2381,14 @@ async def requeue_job(
     #
     # Text only. A transcript is the only thing this path ever puts in Qdrant;
     # nothing here writes to the image collection.
-    await qdrant.delete_by_file_id(
-        file_id, user=user, collection=user_text_collection(user),
-    )
+    try:
+        await qdrant.delete_by_file_id(
+            file_id, user=user, collection=user_text_collection(user),
+        )
+    except BaseException:
+        if refetch_reservation is not None:
+            await storage.release(refetch_reservation)
+        raise
 
     # Re-read the size from the file itself rather than trusting the row.
     #
@@ -2251,6 +2418,8 @@ async def requeue_job(
             )
 
     if not await db.requeue_job(file_id, bytes_=source_bytes, refetch=refetch):
+        if refetch_reservation is not None:
+            await storage.release(refetch_reservation)
         raise HTTPException(status_code=404, detail="No such file.")
 
     queued = "fetch_pending" if refetch else "pending"

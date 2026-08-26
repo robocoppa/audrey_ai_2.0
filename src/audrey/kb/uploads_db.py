@@ -37,6 +37,9 @@ import asyncio
 import logging
 import sqlite3
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -151,7 +154,10 @@ CREATE TABLE IF NOT EXISTS uploads (
   -- download is neither — writing progress there would put a growing number
   -- into the quota for a file that may never exist.
   fetch_downloaded_bytes INTEGER NOT NULL DEFAULT 0,
-  fetch_total_bytes      INTEGER NOT NULL DEFAULT 0
+  fetch_total_bytes      INTEGER NOT NULL DEFAULT 0,
+  -- Capacity held while a URL is waiting for or actively being downloaded.
+  -- The real size replaces this ceiling atomically in `complete_fetch`.
+  quota_reserved_bytes   INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_user ON uploads(user);
 -- No index on `status` here. `_SCHEMA` runs before `_migrate`, and on the
@@ -185,6 +191,20 @@ CREATE TABLE IF NOT EXISTS upload_parts (
   bytes      INTEGER NOT NULL,
   PRIMARY KEY (upload_id, part_no)
 );
+
+-- Short-lived reservations for single-shot uploads. Chunk sessions and URL
+-- fetches are durable lifecycle rows already, so their reservation ids are
+-- `upload_sessions.upload_id` and `uploads.file_id` respectively.
+CREATE TABLE IF NOT EXISTS storage_reservations (
+  reservation_id TEXT PRIMARY KEY,
+  user           TEXT NOT NULL,
+  kind           TEXT NOT NULL,
+  bytes          INTEGER NOT NULL CHECK (bytes >= 0),
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_storage_reservations_user ON storage_reservations(user);
+CREATE INDEX IF NOT EXISTS idx_storage_reservations_updated ON storage_reservations(updated_at);
 """
 
 
@@ -207,7 +227,42 @@ _UPLOADS_ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("transcript_source", "TEXT NOT NULL DEFAULT ''"),
     ("fetch_downloaded_bytes", "INTEGER NOT NULL DEFAULT 0"),
     ("fetch_total_bytes", "INTEGER NOT NULL DEFAULT 0"),
+    ("quota_reserved_bytes", "INTEGER NOT NULL DEFAULT 0"),
 )
+
+
+@dataclass(frozen=True)
+class QuotaUsage:
+    """One user's storage budget, split by lifecycle state."""
+
+    stored_bytes: int
+    chunk_declared_bytes: int
+    chunk_part_bytes: int
+    chunk_part_overage_bytes: int
+    url_fetch_bytes: int
+    single_shot_bytes: int
+
+    @property
+    def total_bytes(self) -> int:
+        # Parts are already covered by a session's declared total. Only bytes
+        # beyond that declaration are additive; exposing both values keeps an
+        # on-disk/declared mismatch visible without billing the normal overlap
+        # twice.
+        return (
+            self.stored_bytes
+            + self.chunk_declared_bytes
+            + self.chunk_part_overage_bytes
+            + self.url_fetch_bytes
+            + self.single_shot_bytes
+        )
+
+
+@dataclass(frozen=True)
+class QuotaDecision:
+    accepted: bool
+    usage: QuotaUsage
+    requested_bytes: int
+    max_user_bytes: int
 
 
 #: What a lease sweep does per stage: which status is *held* under a lease, the
@@ -239,6 +294,7 @@ class UploadsDB:
         self._conn = sqlite3.connect(
             str(self._path), check_same_thread=False, isolation_level=None,
         )
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.row_factory = sqlite3.Row
         # No journal_mode=WAL: we hold exactly one connection guarded by
         # `self._lock`, so the multi-writer story WAL exists for doesn't
@@ -279,6 +335,18 @@ class UploadsDB:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_uploads_status ON uploads(status)",
             )
+
+    @contextmanager
+    def _transaction_locked(self) -> Iterator[None]:
+        """One cross-connection SQLite write transaction; caller holds `_lock`."""
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+        except BaseException:
+            self._conn.rollback()
+            raise
+        else:
+            self._conn.commit()
 
     def close(self) -> None:
         with self._lock:
@@ -342,18 +410,145 @@ class UploadsDB:
         # provenance label that is correct until the next restart and blank
         # afterwards, on rows nobody thinks to re-check.
         with self._lock:
-            self._conn.execute(
-                "INSERT INTO uploads "
-                "(file_id, user, filename, mime, bytes, kind, collection, "
-                " chunks, uploaded_at, status) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-                "ON CONFLICT(file_id) DO UPDATE SET "
-                "  user = excluded.user, filename = excluded.filename, "
-                "  mime = excluded.mime, bytes = excluded.bytes, "
-                "  kind = excluded.kind, collection = excluded.collection, "
-                "  chunks = excluded.chunks, uploaded_at = excluded.uploaded_at",
-                (file_id, user, filename, mime, bytes_, kind, collection,
-                 chunks, uploaded_at, status),
+            self._record_locked(
+                file_id, user, filename, mime, bytes_, kind, collection,
+                chunks, uploaded_at, status,
+            )
+
+    def _record_locked(
+        self, file_id: str, user: str, filename: str, mime: str,
+        bytes_: int, kind: str, collection: str, chunks: int, uploaded_at: str,
+        status: str,
+    ) -> None:
+        self._conn.execute(
+            "INSERT INTO uploads "
+            "(file_id, user, filename, mime, bytes, kind, collection, "
+            " chunks, uploaded_at, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(file_id) DO UPDATE SET "
+            "  user = excluded.user, filename = excluded.filename, "
+            "  mime = excluded.mime, bytes = excluded.bytes, "
+            "  kind = excluded.kind, collection = excluded.collection, "
+            "  chunks = excluded.chunks, uploaded_at = excluded.uploaded_at",
+            (file_id, user, filename, mime, bytes_, kind, collection,
+             chunks, uploaded_at, status),
+        )
+
+    async def commit_reserved_upload(
+        self,
+        *,
+        reservation_id: str,
+        reservation_kind: str,
+        user: str,
+        file_id: str,
+        filename: str,
+        mime: str,
+        bytes_: int,
+        kind: str,
+        collection: str,
+        chunks: int,
+        uploaded_at: str,
+        status: str,
+        max_user_bytes: int,
+    ) -> QuotaDecision:
+        return await asyncio.to_thread(
+            self._commit_reserved_upload_sync,
+            reservation_id,
+            reservation_kind,
+            user,
+            file_id,
+            filename,
+            mime,
+            bytes_,
+            kind,
+            collection,
+            chunks,
+            uploaded_at,
+            status,
+            max_user_bytes,
+        )
+
+    def _commit_reserved_upload_sync(
+        self,
+        reservation_id: str,
+        reservation_kind: str,
+        user: str,
+        file_id: str,
+        filename: str,
+        mime: str,
+        bytes_: int,
+        kind: str,
+        collection: str,
+        chunks: int,
+        uploaded_at: str,
+        status: str,
+        max_user_bytes: int,
+    ) -> QuotaDecision:
+        with self._lock, self._transaction_locked():
+            committed = self._conn.execute(
+                "SELECT user FROM uploads WHERE file_id = ?",
+                (file_id,),
+            ).fetchone()
+            if committed is not None:
+                if committed["user"] != user:
+                    raise ValueError("file id belongs to another user")
+                usage = self._quota_usage_locked(user)
+                return QuotaDecision(True, usage, bytes_, max_user_bytes)
+
+            if reservation_kind == "single_shot":
+                row = self._conn.execute(
+                    "SELECT user, bytes FROM storage_reservations "
+                    "WHERE reservation_id = ? AND kind = 'single_shot'",
+                    (reservation_id,),
+                ).fetchone()
+                if row is None or row["user"] != user:
+                    raise ValueError("single-shot reservation is missing or not owned")
+                reserved_bytes = int(row["bytes"])
+            elif reservation_kind == "chunked":
+                row = self._conn.execute(
+                    "SELECT s.user, s.total_bytes, COALESCE(SUM(p.bytes), 0) AS parts "
+                    "FROM upload_sessions s LEFT JOIN upload_parts p USING (upload_id) "
+                    "WHERE s.upload_id = ? GROUP BY s.upload_id",
+                    (reservation_id,),
+                ).fetchone()
+                if row is None or row["user"] != user:
+                    raise ValueError("chunk reservation is missing or not owned")
+                reserved_bytes = max(int(row["total_bytes"]), int(row["parts"]))
+            else:
+                raise ValueError(f"unknown reservation kind {reservation_kind!r}")
+
+            usage = self._quota_usage_locked(user)
+            if usage.total_bytes - reserved_bytes + bytes_ > max_user_bytes:
+                return QuotaDecision(False, usage, bytes_, max_user_bytes)
+
+            self._record_locked(
+                file_id,
+                user,
+                filename,
+                mime,
+                bytes_,
+                kind,
+                collection,
+                chunks,
+                uploaded_at,
+                status,
+            )
+            if reservation_kind == "single_shot":
+                self._conn.execute(
+                    "DELETE FROM storage_reservations WHERE reservation_id = ?",
+                    (reservation_id,),
+                )
+            else:
+                self._conn.execute(
+                    "DELETE FROM upload_parts WHERE upload_id = ?",
+                    (reservation_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM upload_sessions WHERE upload_id = ?",
+                    (reservation_id,),
+                )
+            return QuotaDecision(
+                True, self._quota_usage_locked(user), bytes_, max_user_bytes,
             )
 
     async def delete_upload(self, file_id: str, *, user: str) -> bool:
@@ -415,6 +610,228 @@ class UploadsDB:
                 (user,),
             )
             return int(cur.fetchone()["total"])
+    async def quota_usage(self, user: str) -> QuotaUsage:
+        return await asyncio.to_thread(self._quota_usage_sync, user)
+
+    def _quota_usage_sync(self, user: str) -> QuotaUsage:
+        with self._lock:
+            return self._quota_usage_locked(user)
+
+    def _quota_usage_locked(self, user: str) -> QuotaUsage:
+        stored = int(self._conn.execute(
+            "SELECT COALESCE(SUM(bytes), 0) AS total FROM uploads "
+            "WHERE user = ? AND source_freed_at = ''",
+            (user,),
+        ).fetchone()["total"])
+        session = self._conn.execute(
+            "WITH part_totals AS ("
+            "  SELECT upload_id, COALESCE(SUM(bytes), 0) AS part_bytes "
+            "  FROM upload_parts GROUP BY upload_id"
+            ") "
+            "SELECT COALESCE(SUM(s.total_bytes), 0) AS declared, "
+            "       COALESCE(SUM(COALESCE(p.part_bytes, 0)), 0) AS parts, "
+            "       COALESCE(SUM(CASE "
+            "         WHEN COALESCE(p.part_bytes, 0) > s.total_bytes "
+            "         THEN p.part_bytes - s.total_bytes ELSE 0 END), 0) AS overage "
+            "FROM upload_sessions s LEFT JOIN part_totals p USING (upload_id) "
+            "WHERE s.user = ?",
+            (user,),
+        ).fetchone()
+        url_fetch = int(self._conn.execute(
+            "SELECT COALESCE(SUM(quota_reserved_bytes), 0) AS total "
+            "FROM uploads WHERE user = ? "
+            "AND status IN ('fetch_pending', 'fetching')",
+            (user,),
+        ).fetchone()["total"])
+        single = int(self._conn.execute(
+            "SELECT COALESCE(SUM(bytes), 0) AS total "
+            "FROM storage_reservations WHERE user = ?",
+            (user,),
+        ).fetchone()["total"])
+        return QuotaUsage(
+            stored_bytes=stored,
+            chunk_declared_bytes=int(session["declared"]),
+            chunk_part_bytes=int(session["parts"]),
+            chunk_part_overage_bytes=int(session["overage"]),
+            url_fetch_bytes=url_fetch,
+            single_shot_bytes=single,
+        )
+
+    async def reserve_single_upload(
+        self,
+        *,
+        reservation_id: str,
+        user: str,
+        bytes_: int,
+        max_user_bytes: int,
+        now: str,
+        expired_before: str,
+    ) -> QuotaDecision:
+        return await asyncio.to_thread(
+            self._reserve_single_sync,
+            reservation_id,
+            user,
+            bytes_,
+            max_user_bytes,
+            now,
+            expired_before,
+        )
+
+    def _reserve_single_sync(
+        self,
+        reservation_id: str,
+        user: str,
+        bytes_: int,
+        max_user_bytes: int,
+        now: str,
+        expired_before: str,
+    ) -> QuotaDecision:
+        if bytes_ < 0:
+            raise ValueError("reservation bytes must be non-negative")
+        with self._lock, self._transaction_locked():
+            self._conn.execute(
+                "DELETE FROM storage_reservations "
+                "WHERE kind = 'single_shot' AND updated_at < ?",
+                (expired_before,),
+            )
+            existing = self._conn.execute(
+                "SELECT user, kind, bytes FROM storage_reservations "
+                "WHERE reservation_id = ?",
+                (reservation_id,),
+            ).fetchone()
+            if existing is not None and (
+                existing["user"] != user or existing["kind"] != "single_shot"
+            ):
+                raise ValueError("reservation id belongs to another lifecycle")
+            usage = self._quota_usage_locked(user)
+            old_bytes = int(existing["bytes"]) if existing is not None else 0
+            if usage.total_bytes - old_bytes + bytes_ > max_user_bytes:
+                return QuotaDecision(False, usage, bytes_, max_user_bytes)
+            self._conn.execute(
+                "INSERT INTO storage_reservations "
+                "(reservation_id, user, kind, bytes, created_at, updated_at) "
+                "VALUES (?, ?, 'single_shot', ?, ?, ?) "
+                "ON CONFLICT(reservation_id) DO UPDATE SET "
+                "bytes = excluded.bytes, updated_at = excluded.updated_at",
+                (reservation_id, user, bytes_, now, now),
+            )
+            return QuotaDecision(
+                True, self._quota_usage_locked(user), bytes_, max_user_bytes,
+            )
+
+    async def release_storage_reservation(self, reservation_id: str, *, user: str) -> bool:
+        return await asyncio.to_thread(
+            self._release_storage_reservation_sync, reservation_id, user,
+        )
+
+    def _release_storage_reservation_sync(
+        self, reservation_id: str, user: str,
+    ) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM storage_reservations "
+                "WHERE reservation_id = ? AND user = ?",
+                (reservation_id, user),
+            )
+            return cur.rowcount > 0
+
+    async def reserve_upload_session(
+        self,
+        *,
+        upload_id: str,
+        user: str,
+        filename: str,
+        total_bytes: int,
+        part_size: int,
+        parts_total: int,
+        max_user_bytes: int,
+        now: str,
+        expired_before: str,
+    ) -> QuotaDecision:
+        return await asyncio.to_thread(
+            self._reserve_session_sync,
+            upload_id,
+            user,
+            filename,
+            total_bytes,
+            part_size,
+            parts_total,
+            max_user_bytes,
+            now,
+            expired_before,
+        )
+
+    def _reserve_session_sync(
+        self,
+        upload_id: str,
+        user: str,
+        filename: str,
+        total_bytes: int,
+        part_size: int,
+        parts_total: int,
+        max_user_bytes: int,
+        now: str,
+        expired_before: str,
+    ) -> QuotaDecision:
+        with self._lock, self._transaction_locked():
+            self._conn.execute(
+                "DELETE FROM storage_reservations "
+                "WHERE kind = 'single_shot' AND updated_at < ?",
+                (expired_before,),
+            )
+            existing = self._conn.execute(
+                "SELECT user, total_bytes FROM upload_sessions WHERE upload_id = ?",
+                (upload_id,),
+            ).fetchone()
+            if existing is not None:
+                if existing["user"] != user:
+                    raise ValueError("upload session belongs to another user")
+                usage = self._quota_usage_locked(user)
+                return QuotaDecision(True, usage, total_bytes, max_user_bytes)
+            usage = self._quota_usage_locked(user)
+            if usage.total_bytes + total_bytes > max_user_bytes:
+                return QuotaDecision(False, usage, total_bytes, max_user_bytes)
+            self._conn.execute(
+                "INSERT INTO upload_sessions "
+                "(upload_id, user, filename, total_bytes, part_size, "
+                " parts_total, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    upload_id,
+                    user,
+                    filename,
+                    total_bytes,
+                    part_size,
+                    parts_total,
+                    now,
+                    now,
+                ),
+            )
+            return QuotaDecision(
+                True, self._quota_usage_locked(user), total_bytes, max_user_bytes,
+            )
+
+    async def expire_upload_sessions(self, *, older_than: str) -> list[dict]:
+        return await asyncio.to_thread(self._expire_sessions_sync, older_than)
+
+    def _expire_sessions_sync(self, older_than: str) -> list[dict]:
+        with self._lock, self._transaction_locked():
+            rows = self._conn.execute(
+                "SELECT * FROM upload_sessions WHERE updated_at < ? "
+                "ORDER BY updated_at, upload_id",
+                (older_than,),
+            ).fetchall()
+            for row in rows:
+                self._conn.execute(
+                    "DELETE FROM upload_parts WHERE upload_id = ?",
+                    (row["upload_id"],),
+                )
+                self._conn.execute(
+                    "DELETE FROM upload_sessions WHERE upload_id = ?",
+                    (row["upload_id"],),
+                )
+            return [dict(row) for row in rows]
+
 
     async def all_users(self) -> list[str]:
         return await asyncio.to_thread(self._all_users_sync)
@@ -461,6 +878,160 @@ class UploadsDB:
     # shape: a *_pending status waits, a claim leases it, a result hands it
     # on. What it hands on to is the existing 'pending' queue, so nothing in
     # `media/worker.py` learns that a URL was ever involved.
+
+    async def reserve_url_fetch(
+        self,
+        *,
+        file_id: str,
+        user: str,
+        source_url: str,
+        filename: str,
+        ceiling_bytes: int,
+        max_user_bytes: int,
+        uploaded_at: str,
+        expired_before: str,
+    ) -> QuotaDecision:
+        return await asyncio.to_thread(
+            self._reserve_url_fetch_sync,
+            file_id,
+            user,
+            source_url,
+            filename,
+            ceiling_bytes,
+            max_user_bytes,
+            uploaded_at,
+            expired_before,
+        )
+
+    def _reserve_url_fetch_sync(
+        self,
+        file_id: str,
+        user: str,
+        source_url: str,
+        filename: str,
+        ceiling_bytes: int,
+        max_user_bytes: int,
+        uploaded_at: str,
+        expired_before: str,
+    ) -> QuotaDecision:
+        with self._lock, self._transaction_locked():
+            self._conn.execute(
+                "DELETE FROM storage_reservations "
+                "WHERE kind = 'single_shot' AND updated_at < ?",
+                (expired_before,),
+            )
+            existing = self._conn.execute(
+                "SELECT user, source_url FROM uploads WHERE file_id = ?",
+                (file_id,),
+            ).fetchone()
+            if existing is not None:
+                if existing["user"] != user or existing["source_url"] != source_url:
+                    raise ValueError("file id belongs to another upload lifecycle")
+                usage = self._quota_usage_locked(user)
+                return QuotaDecision(True, usage, ceiling_bytes, max_user_bytes)
+            usage = self._quota_usage_locked(user)
+            if usage.total_bytes + ceiling_bytes > max_user_bytes:
+                return QuotaDecision(False, usage, ceiling_bytes, max_user_bytes)
+            self._conn.execute(
+                "INSERT INTO uploads "
+                "(file_id, user, filename, mime, bytes, kind, collection, "
+                " chunks, uploaded_at, status, source_url, quota_reserved_bytes) "
+                "VALUES (?, ?, ?, '', 0, 'video', '', 0, ?, 'fetch_pending', ?, ?)",
+                (
+                    file_id,
+                    user,
+                    filename,
+                    uploaded_at,
+                    source_url,
+                    ceiling_bytes,
+                ),
+            )
+            return QuotaDecision(
+                True, self._quota_usage_locked(user), ceiling_bytes, max_user_bytes,
+            )
+
+    async def restore_url_fetch_reservations(self, *, ceiling_bytes: int) -> int:
+        """Restore ceilings on pre-migration pending fetch rows after restart."""
+        return await asyncio.to_thread(
+            self._restore_url_fetch_reservations_sync, ceiling_bytes,
+        )
+
+    def _restore_url_fetch_reservations_sync(self, ceiling_bytes: int) -> int:
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE uploads SET quota_reserved_bytes = ? "
+                "WHERE status IN ('fetch_pending', 'fetching') "
+                "AND quota_reserved_bytes = 0",
+                (ceiling_bytes,),
+            )
+            return cur.rowcount
+
+    async def reserve_url_refetch(
+        self,
+        *,
+        file_id: str,
+        user: str,
+        ceiling_bytes: int,
+        max_user_bytes: int,
+        expired_before: str,
+    ) -> QuotaDecision:
+        return await asyncio.to_thread(
+            self._reserve_url_refetch_sync,
+            file_id,
+            user,
+            ceiling_bytes,
+            max_user_bytes,
+            expired_before,
+        )
+
+    def _reserve_url_refetch_sync(
+        self,
+        file_id: str,
+        user: str,
+        ceiling_bytes: int,
+        max_user_bytes: int,
+        expired_before: str,
+    ) -> QuotaDecision:
+        with self._lock, self._transaction_locked():
+            self._conn.execute(
+                "DELETE FROM storage_reservations "
+                "WHERE kind = 'single_shot' AND updated_at < ?",
+                (expired_before,),
+            )
+            row = self._conn.execute(
+                "SELECT user, source_url, source_freed_at, quota_reserved_bytes "
+                "FROM uploads WHERE file_id = ?",
+                (file_id,),
+            ).fetchone()
+            if row is None or row["user"] != user:
+                raise ValueError("no such user-owned URL fetch")
+            if not row["source_url"] or not row["source_freed_at"]:
+                raise ValueError("row is not a reclaimable URL fetch")
+            usage = self._quota_usage_locked(user)
+            old_bytes = int(row["quota_reserved_bytes"])
+            if usage.total_bytes - old_bytes + ceiling_bytes > max_user_bytes:
+                return QuotaDecision(False, usage, ceiling_bytes, max_user_bytes)
+            self._conn.execute(
+                "UPDATE uploads SET quota_reserved_bytes = ? WHERE file_id = ?",
+                (ceiling_bytes, file_id),
+            )
+            return QuotaDecision(
+                True, self._quota_usage_locked(user), ceiling_bytes, max_user_bytes,
+            )
+
+    async def release_url_reservation(self, file_id: str, *, user: str) -> bool:
+        return await asyncio.to_thread(
+            self._release_url_reservation_sync, file_id, user,
+        )
+
+    def _release_url_reservation_sync(self, file_id: str, user: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE uploads SET quota_reserved_bytes = 0 "
+                "WHERE file_id = ? AND user = ? AND quota_reserved_bytes != 0",
+                (file_id, user),
+            )
+            return cur.rowcount > 0
 
     async def record_url_fetch(
         self, *, file_id: str, user: str, source_url: str, filename: str,
@@ -633,7 +1204,8 @@ class UploadsDB:
                 "UPDATE uploads SET status = 'pending', filename = ?, mime = ?, "
                 "       bytes = ?, lease_id = '', leased_at = '', attempts = 0, "
                 "       failure_reason = '', fetched_transcript = ?, "
-                "       fetch_downloaded_bytes = 0, fetch_total_bytes = 0 "
+                "       fetch_downloaded_bytes = 0, fetch_total_bytes = 0, "
+                "       quota_reserved_bytes = 0 "
                 "WHERE file_id = ? AND lease_id = ? AND status = 'fetching'",
                 (filename, mime, bytes_, transcript, file_id, lease_id),
             )
@@ -771,7 +1343,9 @@ class UploadsDB:
         with self._lock:
             cur = self._conn.execute(
                 "UPDATE uploads SET status = 'failed', failure_reason = ?, "
-                "       lease_id = '', leased_at = '' "
+                "       lease_id = '', leased_at = '', "
+                "       quota_reserved_bytes = CASE WHEN status = 'fetching' "
+                "         THEN 0 ELSE quota_reserved_bytes END "
                 "WHERE file_id = ? AND lease_id = ? AND status = ?",
                 (reason[:500], file_id, lease_id, stage),
             )
@@ -998,7 +1572,10 @@ class UploadsDB:
                 if attempts >= max_attempts:
                     self._conn.execute(
                         "UPDATE uploads SET status = 'failed', lease_id = '', "
-                        "       leased_at = '', failure_reason = ? WHERE file_id = ?",
+                        "       leased_at = '', failure_reason = ?, "
+                        "       quota_reserved_bytes = CASE WHEN status = 'fetching' "
+                        "         THEN 0 ELSE quota_reserved_bytes END "
+                        "WHERE file_id = ?",
                         (f"abandoned by the {actor} after {attempts} attempt(s)",
                          row["file_id"]),
                     )
@@ -1074,6 +1651,66 @@ class UploadsDB:
             self._conn.execute(
                 "INSERT OR REPLACE INTO upload_parts (upload_id, part_no, bytes) "
                 "VALUES (?, ?, ?)",
+                (upload_id, part_no, bytes_),
+            )
+            self._conn.execute(
+                "UPDATE upload_sessions SET updated_at = ? WHERE upload_id = ?",
+                (now, upload_id),
+            )
+
+    async def record_reserved_part(
+        self,
+        *,
+        upload_id: str,
+        user: str,
+        part_no: int,
+        bytes_: int,
+        now: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._record_reserved_part_sync,
+            upload_id,
+            user,
+            part_no,
+            bytes_,
+            now,
+        )
+
+    def _record_reserved_part_sync(
+        self,
+        upload_id: str,
+        user: str,
+        part_no: int,
+        bytes_: int,
+        now: str,
+    ) -> None:
+        with self._lock, self._transaction_locked():
+            session = self._conn.execute(
+                "SELECT user, total_bytes, parts_total FROM upload_sessions "
+                "WHERE upload_id = ?",
+                (upload_id,),
+            ).fetchone()
+            if session is None or session["user"] != user:
+                raise ValueError("upload session is missing or not owned")
+            if not 0 <= part_no < int(session["parts_total"]):
+                raise ValueError("part number is outside the session")
+            previous = self._conn.execute(
+                "SELECT bytes FROM upload_parts "
+                "WHERE upload_id = ? AND part_no = ?",
+                (upload_id, part_no),
+            ).fetchone()
+            received = int(self._conn.execute(
+                "SELECT COALESCE(SUM(bytes), 0) AS total FROM upload_parts "
+                "WHERE upload_id = ?",
+                (upload_id,),
+            ).fetchone()["total"])
+            previous_bytes = int(previous["bytes"]) if previous is not None else 0
+            if received - previous_bytes + bytes_ > int(session["total_bytes"]):
+                raise ValueError("chunk parts exceed the declared upload size")
+            self._conn.execute(
+                "INSERT INTO upload_parts (upload_id, part_no, bytes) "
+                "VALUES (?, ?, ?) ON CONFLICT(upload_id, part_no) DO UPDATE SET "
+                "bytes = excluded.bytes",
                 (upload_id, part_no, bytes_),
             )
             self._conn.execute(

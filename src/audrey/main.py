@@ -23,6 +23,7 @@ from audrey.config import get_config
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
 from audrey.kb.qdrant import QdrantKB
 from audrey.kb.reconcile import KBReconciler
+from audrey.kb.storage_lifecycle import StorageLifecycle
 from audrey.kb.uploads_db import UploadsDB, reconcile_with_qdrant
 from audrey.kb.watcher import KBWatcher
 from audrey.metrics import render as render_metrics
@@ -126,7 +127,17 @@ async def lifespan(app: FastAPI):
         await reconcile_with_qdrant(uploads_db, qdrant)
     except Exception as e:  # noqa: BLE001 — reconciliation is a tune-up, not load-bearing
         log.warning("uploads_db: reconcile failed: %s (sqlite still usable)", e)
+    storage_lifecycle = StorageLifecycle(uploads_db)
+    fetch_cfg = kb_cfg.get("fetch", {}) or {}
+    restored_fetches = await storage_lifecycle.restore_pending_url_fetches(
+        ceiling_bytes=int(fetch_cfg.get("max_bytes_mb", 2048)) * 1024 * 1024,
+    )
+    if restored_fetches:
+        log.info(
+            "uploads_db: restored quota ceilings for %d pending URL fetch(es)",
+            restored_fetches,
 
+        )
     text_embedder = TextEmbedder(
         ollama=ollama,
         model=kb_cfg.get("text_embedder", "nomic-embed-text"),
@@ -172,6 +183,7 @@ async def lifespan(app: FastAPI):
     app.state.graph = graph
     app.state.qdrant = qdrant
     app.state.uploads_db = uploads_db
+    app.state.storage_lifecycle = storage_lifecycle
     app.state.text_embedder = text_embedder
     app.state.image_embedder = image_embedder
     app.state.kb_watcher = watcher
