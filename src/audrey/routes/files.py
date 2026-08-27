@@ -33,8 +33,8 @@ Safety layers (all mandatory):
   - Size cap: `kb.max_upload_mb` enforced while streaming (stop + 413 at limit).
   - Mime sniff: libmagic reads the saved bytes — extension is a hint, sniff
     is the gate. Whitelist in `kb.extract.ALLOWED_MIMES`.
-  - Per-user byte quota: sum of already-stored `bytes` payload field must be
-    under `kb.max_user_bytes` *before* ingest.
+  - Per-user byte quota: one SQLite transaction reserves capacity before work
+    starts and counts stored bytes plus every in-flight upload transport.
   - User isolation: every Qdrant read/write is scoped by both `file_id`
     AND `user` in payload filters. See `QdrantKB.delete_by_file_id`.
   - Filename sanitization: we keep the original filename for display, but
@@ -466,11 +466,12 @@ def _quota_http_error(error: QuotaExceededError) -> HTTPException:
         status_code=413,
         detail=(
             "Per-user storage quota exceeded: "
-            f"{error.usage.total_bytes // mib}MB in use + "
-            f"{error.requested_bytes // mib}MB requested > "
-            f"{error.max_user_bytes // mib}MB."
+            f"{error.usage.total_bytes // mib}MB currently accounted; cannot "
+            f"reserve {error.requested_bytes // mib}MB within the "
+            f"{error.max_user_bytes // mib}MB limit."
         ),
     )
+
 
 @router.post("", response_model=UploadResponse)
 async def upload_file(
@@ -584,7 +585,7 @@ async def _validate_and_ingest(
     text_col: str,
     image_col: str,
 ) -> UploadResponse:
-    """Everything after the bytes are on disk: sniff, quota, ingest, index.
+    """Sniff and ingest landed bytes, then atomically commit their reservation.
 
     Shared by the single-shot route and the chunked-session `/complete`, so
     the two transports cannot drift on validation. `dest` is unlinked on
@@ -804,6 +805,8 @@ def _session_dir(request: Request, user: str, upload_id: str) -> Path:
     dot-prefixed so it never collides with a stored `<file_id><ext>`.
     """
     return _upload_root(request) / sanitize_user(user) / ".sessions" / upload_id
+
+
 def _reservation_window(request: Request) -> tuple[str, str]:
     now = _dt.datetime.now(_dt.UTC)
     ttl_minutes = int(_chunked_cfg(request).get("session_ttl_minutes", 120))
@@ -914,13 +917,16 @@ async def upload_part(
     part_size = int(session["part_size"])
     dest = _session_dir(request, user, upload_id) / f"{part_no:06d}.part"
     dest.parent.mkdir(parents=True, exist_ok=True)
+    # Keep a valid prior part intact until both the bytes and the reservation
+    # update succeed. The final replace is atomic because both paths are siblings.
+    incoming = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.incoming")
 
     # Cap each part at the negotiated size. Without this a client could send
     # one enormous "part" and walk straight past the whole-file ceiling that
     # `open_upload_session` enforced against the declared total.
     written = 0
     try:
-        with dest.open("wb") as f:
+        with incoming.open("wb") as f:
             async for chunk in request.stream():
                 if not chunk:
                     continue
@@ -932,15 +938,18 @@ async def upload_part(
                 written += len(chunk)
                 f.write(chunk)
     except HTTPException:
-        _safe_unlink(dest)
+        _safe_unlink(incoming)
+        raise
+    except asyncio.CancelledError:
+        _safe_unlink(incoming)
         raise
     except Exception as e:
-        _safe_unlink(dest)
+        _safe_unlink(incoming)
         log.exception("files: part write failed %s/%s: %s", upload_id, part_no, e)
         raise HTTPException(status_code=500, detail=f"Part write failed: {e}") from e
 
     if written == 0:
-        _safe_unlink(dest)
+        _safe_unlink(incoming)
         raise HTTPException(status_code=422, detail="Empty part.")
 
     now = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
@@ -952,11 +961,37 @@ async def upload_part(
             reservation, part_no=part_no, bytes_=written, now=now,
         )
     except ValueError as e:
-        _safe_unlink(dest)
+        _safe_unlink(incoming)
         raise HTTPException(
             status_code=409,
             detail=str(e),
         ) from e
+    except asyncio.CancelledError:
+        _safe_unlink(incoming)
+        await _drop_session(storage, dest.parent, reservation)
+        raise
+    except Exception as e:
+        _safe_unlink(incoming)
+        await _drop_session(storage, dest.parent, reservation)
+        log.exception(
+            "files: part accounting failed %s/%s: %s", upload_id, part_no, e,
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Part accounting failed: {e}",
+        ) from e
+
+    try:
+        await asyncio.to_thread(incoming.replace, dest)
+    except asyncio.CancelledError:
+        _safe_unlink(incoming)
+        await _drop_session(storage, dest.parent, reservation)
+        raise
+    except OSError as e:
+        _safe_unlink(incoming)
+        await _drop_session(storage, dest.parent, reservation)
+        log.exception("files: part commit failed %s/%s: %s", upload_id, part_no, e)
+        raise HTTPException(status_code=500, detail=f"Part commit failed: {e}") from e
+
     parts_received, _ = await db.session_progress(upload_id)
     return PartResponse(
         upload_id=upload_id, part_no=part_no, bytes=written,
@@ -1308,10 +1343,9 @@ async def ingest_from_url(
       2. **Duplicate URL.** Cheap, and it is the single most likely mistake: a
          double-clicked button or a link already in the list, each costing a
          second download of the same 300 MB.
-      3. **Quota.** Against a configured per-URL ceiling, because the real size
-         is not knowable yet. `fetch-result` re-checks it against the bytes that
-         actually landed — this one only stops an account that is already full
-         from starting a download it could never store.
+      3. **Quota reservation.** Hold the configured per-URL ceiling because the
+         real size is not knowable yet. `fetch-result` verifies the actual bytes
+         fit that hold and converts it to stored usage.
     """
     user = me.email
     db = _get_uploads_db(request)
@@ -1573,8 +1607,8 @@ async def fetch_result(
       2. **The bytes are a video.** The same libmagic gate an upload passes.
          Without it, a downloader that saved an HTML "video unavailable" page
          pushes that into the transcription queue.
-      3. **The quota, for real this time.** `from-url` could only check a
-         configured ceiling; this is the first moment the true size exists.
+      3. **The reservation conversion.** `from-url` held a configured ceiling;
+         this is the first moment the true size exists, so it must fit that hold.
       4. **A transcript says where it came from.** Segments without a known
          provenance are refused outright rather than stored as an unattributed
          transcript — see `_FETCH_TRANSCRIPT_SOURCES`.
@@ -2417,7 +2451,15 @@ async def requeue_job(
                 source, row["bytes"],
             )
 
-    if not await db.requeue_job(file_id, bytes_=source_bytes, refetch=refetch):
+    try:
+        requeued = await db.requeue_job(
+            file_id, bytes_=source_bytes, refetch=refetch,
+        )
+    except BaseException:
+        if refetch_reservation is not None:
+            await storage.release(refetch_reservation)
+        raise
+    if not requeued:
         if refetch_reservation is not None:
             await storage.release(refetch_reservation)
         raise HTTPException(status_code=404, detail="No such file.")

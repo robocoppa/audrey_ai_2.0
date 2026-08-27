@@ -1,7 +1,7 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress. Waves 1A and 1B are Unraid-verified; Wave 1C is
-next.
+**Status:** In progress. Waves 1A and 1B are Unraid-verified; Wave 1C.1 is
+laptop-complete and awaiting its deployment smoke.
 
 ## Goal
 

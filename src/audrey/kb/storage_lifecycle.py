@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from audrey.kb.uploads_db import QuotaDecision, QuotaUsage, UploadsDB
+from audrey.kb.uploads_db import (
+    QuotaDecision,
+    QuotaUsage,
+    UploadsDB,
+    UrlReservationRecovery,
+)
 
 ReservationKind = Literal["single_shot", "chunked", "url_fetch"]
 
@@ -27,8 +32,9 @@ class QuotaExceededError(Exception):
         self.max_user_bytes = decision.max_user_bytes
         super().__init__(
             "storage quota exceeded: "
-            f"{decision.usage.total_bytes} + {decision.requested_bytes} > "
-            f"{decision.max_user_bytes}",
+            f"{decision.usage.total_bytes} bytes currently accounted; cannot "
+            f"reserve {decision.requested_bytes} bytes within the "
+            f"{decision.max_user_bytes}-byte limit",
         )
 
 
@@ -156,7 +162,11 @@ class StorageLifecycle:
         self._require(decision)
         return StorageReservation(file_id, user, "url_fetch", ceiling_bytes)
 
-    async def restore_pending_url_fetches(self, *, ceiling_bytes: int) -> int:
+    async def restore_pending_url_fetches(
+        self,
+        *,
+        ceiling_bytes: int,
+    ) -> UrlReservationRecovery:
         return await self._db.restore_url_fetch_reservations(
             ceiling_bytes=ceiling_bytes,
         )

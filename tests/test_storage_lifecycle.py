@@ -4,15 +4,21 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
+from audrey.auth import AuthedUser, require_user
 from audrey.kb.storage_lifecycle import (
     QuotaExceededError,
     StorageLifecycle,
     StorageReservation,
 )
 from audrey.kb.uploads_db import UploadsDB
+from audrey.kb.user_store import sanitize_user
+from audrey.routes.files import router as files_router
 
 NOW = "2026-08-26T12:00:00+00:00"
 EXPIRED_BEFORE = "2026-08-26T10:00:00+00:00"
@@ -244,3 +250,244 @@ async def test_url_fetch_failure_releases_its_ceiling_once(tmp_path: Path) -> No
     )
     assert (await db.quota_usage(USER)).total_bytes == 0
     db.close()
+
+
+@pytest.mark.asyncio
+async def test_url_fetch_success_converts_ceiling_to_actual_bytes(tmp_path: Path) -> None:
+    db = UploadsDB(tmp_path / "uploads.sqlite")
+    storage = StorageLifecycle(db)
+    await storage.reserve_url_fetch(
+        file_id="fetch-1",
+        user=USER,
+        source_url="https://example.com/video",
+        filename="video",
+        ceiling_bytes=60,
+        max_user_bytes=100,
+        now=NOW,
+        expired_before=EXPIRED_BEFORE,
+    )
+    assert await db.claim_fetch(lease_id="fetch-lease", now=NOW) is not None
+
+    assert await db.complete_fetch(
+        file_id="fetch-1",
+        lease_id="fetch-lease",
+        filename="video.mp4",
+        mime="video/mp4",
+        bytes_=25,
+    )
+
+    usage = await db.quota_usage(USER)
+    assert usage.stored_bytes == 25
+    assert usage.url_fetch_bytes == 0
+    assert usage.total_bytes == 25
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_refetch_ceiling_counts_before_row_moves_to_fetch_queue(
+    tmp_path: Path,
+) -> None:
+    db = UploadsDB(tmp_path / "uploads.sqlite")
+    storage = StorageLifecycle(db)
+    await storage.reserve_url_fetch(
+        file_id="fetch-1",
+        user=USER,
+        source_url="https://example.com/video",
+        filename="video",
+        ceiling_bytes=60,
+        max_user_bytes=100,
+        now=NOW,
+        expired_before=EXPIRED_BEFORE,
+    )
+    assert await db.claim_fetch(lease_id="fetch-lease", now=NOW) is not None
+    assert await db.complete_fetch(
+        file_id="fetch-1",
+        lease_id="fetch-lease",
+        filename="video.mp4",
+        mime="video/mp4",
+        bytes_=25,
+    )
+    assert await db.claim_job(lease_id="ingest-lease", now=NOW) is not None
+    assert await db.complete_job(
+        file_id="fetch-1",
+        lease_id="ingest-lease",
+        collection="kb_user_text_alice",
+        chunks=1,
+        completed_at=NOW,
+    )
+    assert await db.mark_source_freed("fetch-1", freed_at=NOW)
+
+    await storage.reserve_url_refetch(
+        file_id="fetch-1",
+        user=USER,
+        ceiling_bytes=25,
+        max_user_bytes=100,
+        expired_before=EXPIRED_BEFORE,
+    )
+
+    row = await db.get_upload("fetch-1")
+    usage = await db.quota_usage(USER)
+    assert row is not None and row["status"] == "ready"
+    assert usage.stored_bytes == 0
+    assert usage.url_fetch_bytes == 25
+    assert usage.total_bytes == 25
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_final_fetch_lease_expiry_releases_its_ceiling(tmp_path: Path) -> None:
+    db = UploadsDB(tmp_path / "uploads.sqlite")
+    storage = StorageLifecycle(db)
+    await storage.reserve_url_fetch(
+        file_id="fetch-1",
+        user=USER,
+        source_url="https://example.com/video",
+        filename="video",
+        ceiling_bytes=60,
+        max_user_bytes=100,
+        now=NOW,
+        expired_before=EXPIRED_BEFORE,
+    )
+    assert (
+        await db.claim_fetch(
+            lease_id="fetch-lease",
+            now="2026-08-26T09:00:00+00:00",
+        )
+        is not None
+    )
+
+    swept = await db.sweep_expired_leases(
+        expired_before="2026-08-26T10:00:00+00:00",
+        max_attempts=1,
+        stage="fetching",
+    )
+
+    assert swept == {"requeued": 0, "failed": 1}
+    assert (await db.quota_usage(USER)).total_bytes == 0
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_rejected_chunk_retry_preserves_the_previous_part(tmp_path: Path) -> None:
+    db = UploadsDB(tmp_path / "uploads.sqlite")
+    storage = StorageLifecycle(db)
+    await storage.open_chunk_session(
+        upload_id="chunk-1",
+        user=USER,
+        filename="video.mp4",
+        total_bytes=15,
+        part_size=10,
+        parts_total=2,
+        max_user_bytes=100,
+        now=NOW,
+        expired_before=EXPIRED_BEFORE,
+    )
+
+    app = FastAPI()
+    app.include_router(files_router)
+    app.dependency_overrides[require_user] = lambda: AuthedUser(
+        email=USER,
+        role="user",
+        owui_id="user-1",
+    )
+    app.state.uploads_db = db
+    app.state.cfg = SimpleNamespace(
+        raw={"kb": {"upload_root": str(tmp_path / "uploads")}},
+    )
+    app.state.storage_lifecycle = storage
+
+    with TestClient(app) as client:
+        assert (
+            client.put(
+                "/v1/files/upload-sessions/chunk-1/parts/0",
+                content=b"a" * 5,
+            ).status_code
+            == 200
+        )
+        assert (
+            client.put(
+                "/v1/files/upload-sessions/chunk-1/parts/1",
+                content=b"b" * 10,
+            ).status_code
+            == 200
+        )
+        rejected = client.put(
+            "/v1/files/upload-sessions/chunk-1/parts/0",
+            content=b"c" * 10,
+        )
+
+    session_dir = tmp_path / "uploads" / sanitize_user(USER) / ".sessions" / "chunk-1"
+    assert rejected.status_code == 409
+    assert (session_dir / "000000.part").read_bytes() == b"a" * 5
+    assert list(session_dir.glob(".*.incoming")) == []
+    assert await db.session_progress("chunk-1") == (2, 15)
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_startup_repairs_stranded_and_legacy_url_reservations(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "uploads.sqlite"
+    db = UploadsDB(path)
+    storage = StorageLifecycle(db)
+    await storage.reserve_url_fetch(
+        file_id="stranded-refetch",
+        user=USER,
+        source_url="https://example.com/stranded",
+        filename="video",
+        ceiling_bytes=60,
+        max_user_bytes=100,
+        now=NOW,
+        expired_before=EXPIRED_BEFORE,
+    )
+    assert await db.claim_fetch(lease_id="fetch-lease", now=NOW) is not None
+    assert await db.complete_fetch(
+        file_id="stranded-refetch",
+        lease_id="fetch-lease",
+        filename="video.mp4",
+        mime="video/mp4",
+        bytes_=25,
+    )
+    assert await db.claim_job(lease_id="ingest-lease", now=NOW) is not None
+    assert await db.complete_job(
+        file_id="stranded-refetch",
+        lease_id="ingest-lease",
+        collection="kb_user_text_alice",
+        chunks=1,
+        completed_at=NOW,
+    )
+    assert await db.mark_source_freed("stranded-refetch", freed_at=NOW)
+    await storage.reserve_url_refetch(
+        file_id="stranded-refetch",
+        user=USER,
+        ceiling_bytes=25,
+        max_user_bytes=100,
+        expired_before=EXPIRED_BEFORE,
+    )
+    await db.record_url_fetch(
+        file_id="legacy-pending",
+        user=USER,
+        source_url="https://example.com/legacy",
+        filename="legacy",
+        uploaded_at=NOW,
+    )
+    db.close()
+
+    reopened = UploadsDB(path)
+    recovered = await StorageLifecycle(reopened).restore_pending_url_fetches(
+        ceiling_bytes=60,
+    )
+
+    assert recovered.released_stranded == 1
+    assert recovered.restored_pending == 1
+    usage = await reopened.quota_usage(USER)
+    assert usage.url_fetch_bytes == 60
+    assert usage.total_bytes == 60
+
+    repeated = await StorageLifecycle(reopened).restore_pending_url_fetches(
+        ceiling_bytes=60,
+    )
+    assert repeated.released_stranded == 0
+    assert repeated.restored_pending == 0
+    reopened.close()

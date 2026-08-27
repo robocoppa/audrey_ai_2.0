@@ -129,14 +129,15 @@ async def lifespan(app: FastAPI):
         log.warning("uploads_db: reconcile failed: %s (sqlite still usable)", e)
     storage_lifecycle = StorageLifecycle(uploads_db)
     fetch_cfg = kb_cfg.get("fetch", {}) or {}
-    restored_fetches = await storage_lifecycle.restore_pending_url_fetches(
+    fetch_recovery = await storage_lifecycle.restore_pending_url_fetches(
         ceiling_bytes=int(fetch_cfg.get("max_bytes_mb", 2048)) * 1024 * 1024,
     )
-    if restored_fetches:
+    if fetch_recovery.restored_pending or fetch_recovery.released_stranded:
         log.info(
-            "uploads_db: restored quota ceilings for %d pending URL fetch(es)",
-            restored_fetches,
-
+            "uploads_db: URL quota recovery restored=%d pending, "
+            "released=%d stranded",
+            fetch_recovery.restored_pending,
+            fetch_recovery.released_stranded,
         )
     text_embedder = TextEmbedder(
         ollama=ollama,

@@ -25,10 +25,10 @@ After reconciliation, normal request flow keeps both stores in step:
   list     → sqlite only
   quota    → sqlite only
 
-The whole table is a single connection guarded by a per-instance lock,
-because sqlite3's default `check_same_thread=True` and our async wrapper
-runs every call in a thread. Concurrent writers serialize through the
-lock, which is fine — uploads are bursty per user, not high QPS.
+Each `UploadsDB` instance owns one connection guarded by a lock because the
+async wrapper runs calls in worker threads. Atomic quota decisions also use
+`BEGIN IMMEDIATE`: the lock protects one connection, while SQLite's write
+transaction serializes decisions made through separate app/process connections.
 """
 
 from __future__ import annotations
@@ -263,6 +263,12 @@ class QuotaDecision:
     usage: QuotaUsage
     requested_bytes: int
     max_user_bytes: int
+
+
+@dataclass(frozen=True)
+class UrlReservationRecovery:
+    restored_pending: int
+    released_stranded: int
 
 
 #: What a lease sweep does per stage: which status is *held* under a lease, the
@@ -639,8 +645,7 @@ class UploadsDB:
         ).fetchone()
         url_fetch = int(self._conn.execute(
             "SELECT COALESCE(SUM(quota_reserved_bytes), 0) AS total "
-            "FROM uploads WHERE user = ? "
-            "AND status IN ('fetch_pending', 'fetching')",
+            "FROM uploads WHERE user = ? AND quota_reserved_bytes > 0",
             (user,),
         ).fetchone()["total"])
         single = int(self._conn.execute(
@@ -950,21 +955,33 @@ class UploadsDB:
                 True, self._quota_usage_locked(user), ceiling_bytes, max_user_bytes,
             )
 
-    async def restore_url_fetch_reservations(self, *, ceiling_bytes: int) -> int:
-        """Restore ceilings on pre-migration pending fetch rows after restart."""
+    async def restore_url_fetch_reservations(
+        self, *, ceiling_bytes: int,
+    ) -> UrlReservationRecovery:
+        """Repair URL holds after restart and report both idempotent actions."""
         return await asyncio.to_thread(
             self._restore_url_fetch_reservations_sync, ceiling_bytes,
         )
 
-    def _restore_url_fetch_reservations_sync(self, ceiling_bytes: int) -> int:
-        with self._lock:
-            cur = self._conn.execute(
+    def _restore_url_fetch_reservations_sync(
+        self, ceiling_bytes: int,
+    ) -> UrlReservationRecovery:
+        with self._lock, self._transaction_locked():
+            released = self._conn.execute(
+                "UPDATE uploads SET quota_reserved_bytes = 0 "
+                "WHERE status NOT IN ('fetch_pending', 'fetching') "
+                "AND quota_reserved_bytes != 0",
+            ).rowcount
+            restored = self._conn.execute(
                 "UPDATE uploads SET quota_reserved_bytes = ? "
                 "WHERE status IN ('fetch_pending', 'fetching') "
                 "AND quota_reserved_bytes = 0",
                 (ceiling_bytes,),
+            ).rowcount
+            return UrlReservationRecovery(
+                restored_pending=restored,
+                released_stranded=released,
             )
-            return cur.rowcount
 
     async def reserve_url_refetch(
         self,
@@ -1923,4 +1940,10 @@ async def _scroll_user_rows(qdrant, collection: str) -> dict[str, list[dict]]:
     return grouped
 
 
-__all__ = ["UploadsDB", "reconcile_with_qdrant"]
+__all__ = [
+    "QuotaDecision",
+    "QuotaUsage",
+    "UploadsDB",
+    "UrlReservationRecovery",
+    "reconcile_with_qdrant",
+]

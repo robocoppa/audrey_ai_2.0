@@ -652,3 +652,28 @@ class TestRequeueingAReclaimedFetch:
 
         assert not await db.requeue_job("uploaded", refetch=True)
         assert (await db.get_upload("uploaded"))["status"] == "ready"
+
+    async def test_refetch_reservation_releases_if_requeue_write_fails(
+        self,
+        db: UploadsDB,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        await _fetched_video(db, "fetched", completed_hours_ago=48)
+        await db.mark_source_freed("fetched", freed_at=_iso(1))
+
+        async def fail_requeue(*_args, **_kwargs):
+            raise RuntimeError("sqlite write failed")
+
+        monkeypatch.setattr(db, "requeue_job", fail_requeue)
+        client = _client(db, tmp_path / "uploads", {"keep_source": True})
+
+        with pytest.raises(RuntimeError, match="sqlite write failed"):
+            client.post(
+                "/v1/files/fetched/requeue",
+                headers={"X-Audrey-Service-Token": SECRET},
+            )
+
+        usage = await db.quota_usage(USER)
+        assert usage.url_fetch_bytes == 0
+        assert usage.total_bytes == 0
