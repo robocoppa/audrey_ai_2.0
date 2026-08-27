@@ -1230,96 +1230,25 @@ kb:
     max_attempts: 3
 
     # Passed straight to yt-dlp's `--extractor-args`. Empty leaves yt-dlp's own
-    # client selection alone.
+    # client selection alone, which is the production default. YouTube retired
+    # `android_vr` on 2026-08-17; forcing it here kept Audrey on a dead client
+    # even after upstream had moved on. The 2026.08.19 fetcher pin knows the
+    # replacement `visionos` client and removes `android_vr` from its defaults.
     #
-    # **This is the knob for "HTTP Error 403: Forbidden" on the download.** The
-    # tell is a 403 on the *media* URL after a metadata pass that worked
-    # perfectly: nothing is wrong with the video or the link, YouTube has
-    # decided it will not serve the format URLs to the client yt-dlp identified
-    # as. A failure at the *metadata* stage is a different problem — usually an
-    # out-of-date yt-dlp, which says "not available on this app".
+    # Keep this as a LIST: the fetcher can still walk explicit operator
+    # overrides when a site-specific incident warrants them. Do not encode a
+    # remembered YouTube client as the steady-state default; that duplicates
+    # yt-dlp's maintenance policy in a file that changes much less often.
     #
-    # `android_vr` **verified working on the box 2026-08-06** against a real
-    # full download (31.9 MiB, adaptive formats 398+140, merged and remuxed).
-    # Not a guess — see the verification recipe below, and re-run it rather
-    # than trusting this line if downloads start failing.
-    #
-    # ⚠️ **Verify by running the actual download. Nothing smaller works.**
-    # Three probe designs were tried here and the first two both reported the
-    # known-broken client as OK:
-    #
-    #   - `-f worst` picks a small *pre-muxed* stream. The job requests
-    #     adaptive `bv*+ba`, which is a different class of URL and the class
-    #     YouTube actually gates.
-    #   - `--download-sections "*0-3"` hands the fetch to ffmpeg as one range
-    #     request. The job uses yt-dlp's own downloader for a sustained
-    #     multi-minute transfer, and that is where the 403 appears.
-    #
-    # A probe that does not do what the job does is worse than no probe: it
-    # tells you the broken thing works and you act on it. So:
-    #
-    #   FMT='bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/bv*[height<=720]+ba/b[height<=720]/b'
-    #   timeout 300 docker exec media-fetcher yt-dlp \
-    #     --extractor-args "youtube:player_client=android_vr" \
-    #     -f "$FMT" --merge-output-format mp4 --remux-video mp4 \
-    #     --newline -o "/tmp/real.%(ext)s" --force-overwrites \
-    #     -- "<a youtube url>" 2>&1 | tail -25
-    #
-    # **Keep the `2>&1`.** yt-dlp puts the reason on stderr, and every earlier
-    # probe here discarded it — running blind by construction. Warnings about
-    # `nsig` extraction or player JS appear there and say whether a failure is
-    # about the client at all.
-    #
-    # Candidates worth trying if this one stops working:
-    #   android_vr, tv, ios, mweb, web_safari, default
-    #
-    # It rides the claim, so this takes effect on the next claim after
-    # `docker compose restart audrey-ai` — no image rebuild.
-    #
-    # **A list, tried in order, first success wins.** One client is a single
-    # point of failure with a manual fix: when YouTube stops serving it, every
-    # fetch fails at once and stays failed until someone edits this file.
-    # Walking a list turns that into a slower first download and a log line.
-    #
-    # The fetcher advances to the next entry only on failures another client
-    # could plausibly fix — a private video is private to all of them, and
-    # walking the list would spend a lease learning that six times.
-    #
-    # The final "" is yt-dlp's own default, kept last rather than dropped: it
-    # is the entry most likely to start working again after a yt-dlp bump.
+    # A changed extractor arg rides the next claim after recreating audrey-ai.
+    # A new yt-dlp pin requires rebuilding media-fetcher.
     extractor_args:
-      - "youtube:player_client=android_vr"
-      - "youtube:player_client=tv"
-      - "youtube:player_client=ios"
-      - "youtube:player_client=mweb"
-      - "youtube:player_client=web_safari"
       - ""
 
-    # How many of the clients above one job may try before giving up.
-    #
-    # **Low on purpose.** Every extra client is another request made at the
-    # moment something is already wrong, and this deployment's whole risk
-    # posture is not looking like something worth blocking. Two covers the case
-    # that actually happens — one client retired, another still viable — and
-    # stops well short of sweeping the list.
-    #
-    # ⚠️ **Measured 2026-08-06: only `android_vr` works.** `tv`, `ios`, `mweb`
-    # and `web_safari` all failed a real download that day, and `default`
-    # failed on sustained transfers. So the entries below the first are
-    # *insurance against rotation*, not five working options — a client that is
-    # dead today may come back after a yt-dlp bump, which is the case this
-    # setting is buying.
-    #
-    # **Currently 1: fallback is OFF** (user's call, 2026-08-06). One attempt,
-    # a clear reason on the row, and a human edits `extractor_args` when
-    # YouTube moves. For a single-user box where someone notices within hours,
-    # that trade is the right way round — it costs downtime and saves requests
-    # at exactly the moment you least want to be making them.
-    #
-    # The fallback machinery stays in the fetcher and is inert at 1. Raise this
-    # to 2 if downtime starts costing more than the extra requests; nothing
-    # else needs changing, and it takes effect on the next claim after
-    # `docker compose restart audrey-ai`.
+    # One configured entry means one Audrey-level attempt. yt-dlp's own default
+    # may use its maintained internal client fallbacks; that is distinct from
+    # Audrey launching the whole probe-and-download operation again. Raise this
+    # only when `extractor_args` deliberately contains multiple candidates.
     max_client_attempts: 1
 
 # ─── Tools (OpenAPI auto-discovery) ────────────────────────────────────

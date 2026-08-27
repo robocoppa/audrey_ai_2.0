@@ -53,10 +53,11 @@ WORKDIR /app
 # is bumping this line and rebuilding — a deliberate act, on the schedule of
 # whoever runs the box.
 #
-# **That cost came due on the very first fetch, because the pin was wrong when
-# it was written.** 2025.06.30 was thirteen months old the day it shipped, and
-# YouTube answered every request with "The following content is not available
-# on this app" — its response to a client an obsolete yt-dlp impersonates.
+# **That cost has come due twice.** The first pin was thirteen months old when
+# it shipped. Then YouTube retired the explicitly configured `android_vr`
+# client on 2026-08-17: stable 2026.07.04 did not know the replacement
+# `visionos` client, so there was no config-only repair. 2026.08.19 contains
+# yt-dlp's player-client maintenance and removes `android_vr` from its defaults.
 # Pinning is right; pinning to whatever version you happen to remember is not.
 #
 # **Check before bumping**, rather than picking a plausible-looking date:
@@ -65,7 +66,7 @@ WORKDIR /app
 #
 # Expect to do this every few months. A fetch that suddenly fails on every URL,
 # with a reason that sounds like YouTube's opinion of the video, is this.
-ARG YTDLP_VERSION=2026.07.04
+ARG YTDLP_VERSION=2026.08.19
 RUN pip install --no-cache-dir "yt-dlp==${YTDLP_VERSION}"
 
 # Just the three modules it imports, and the version marker their parent needs.

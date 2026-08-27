@@ -32,6 +32,7 @@ from audrey.pipeline.classify import classify
 _ROOT = Path(__file__).resolve().parent.parent
 _CONFIG = _ROOT / "config.yaml"
 _PULL_SCRIPT = _ROOT / "scripts" / "pull-models.sh"
+_MEDIA_FETCHER_DOCKERFILE = _ROOT / "docker" / "media-fetcher.Dockerfile"
 
 _SCRIPTS = _ROOT / "scripts"
 if str(_SCRIPTS) not in sys.path:
@@ -272,6 +273,37 @@ _DuplicateKeyLoader.add_constructor(
 
 def test_config_yaml_has_no_duplicate_keys():
     yaml.load(_CONFIG.read_text(), Loader=_DuplicateKeyLoader)  # noqa: S506
+
+
+# ─── URL fetch client ownership, across config and image ──────────────
+
+def test_url_fetch_uses_the_pinned_ytdlp_default_clients(cfg):
+    """Do not pin a transient YouTube client in the slower-moving config.
+
+    YouTube retired `android_vr` on 2026-08-17. Audrey still forced it after
+    yt-dlp removed it from the defaults, turning upstream's repair into a no-op.
+    An empty extractor argument delegates this volatile choice to the pinned
+    downloader release while preserving Audrey's explicit override mechanism.
+    """
+    fetch = cfg["kb"]["fetch"]
+    assert fetch["extractor_args"] == [""]
+    assert fetch["max_client_attempts"] == 1
+
+
+def test_media_fetcher_pin_knows_the_post_android_vr_clients():
+    """The default-client repair first shipped in stable 2026.08.19."""
+    text = _MEDIA_FETCHER_DOCKERFILE.read_text()
+    match = re.search(
+        r"^ARG YTDLP_VERSION=(\d{4})\.(\d{2})\.(\d{2})$",
+        text,
+        re.MULTILINE,
+    )
+    assert match, "media-fetcher must keep an explicit date-versioned yt-dlp pin"
+    version = tuple(int(part) for part in match.groups())
+    assert version >= (2026, 8, 19), (
+        f"yt-dlp {'.'.join(match.groups())} predates the release that removed "
+        "the retired android_vr client from YouTube defaults"
+    )
 
 
 # ─── Escalation semantics, across two files ────────────────────────────
