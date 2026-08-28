@@ -112,10 +112,9 @@ async def chat_archive_prune(
 ) -> dict:
     """Apply the chat archive's retention policy on demand.
 
-    Honors `CHAT_ARCHIVE_RETENTION_DAYS` (0 means "keep forever" and
-    returns zero counts). Deletes both SQLite rows and Qdrant points for
-    chunks older than the cutoff. The periodic loop is not yet wired —
-    until then, this is the only way to enforce retention.
+    Honors `CHAT_ARCHIVE_RETENTION_DAYS` and also retries an exhausted
+    deletion outbox after an operator has repaired the upstream failure.
+    Scheduled maintenance enforces the same policy between manual calls.
     """
     archive_client = getattr(request.app.state, "archive_client", None)
     registry = request.app.state.tools
@@ -138,11 +137,10 @@ async def chat_archive_stats(
     request: Request,
     _: AuthedUser = Depends(require_admin),
 ) -> dict:
-    """Row counts from the chat archive.
+    """Counts and latest repair state from the chat archive.
 
-    Returns `messages`, `chunks`, and `chunks_unindexed` (chunks present
-    in SQLite but not yet in Qdrant — non-zero indicates embed/upsert
-    failures during write that need reconcile).
+    Includes retryable/exhausted index and deletion counts plus the latest
+    attempt timestamps and bounded error strings.
     """
     archive_client = getattr(request.app.state, "archive_client", None)
     registry = request.app.state.tools

@@ -112,10 +112,19 @@ class Settings(BaseSettings):
     chat_archive_chunk_max_chars: int = Field(default=2500, alias="CHAT_ARCHIVE_CHUNK_MAX_CHARS")
     chat_archive_chunk_overlap_chars: int = Field(default=100, alias="CHAT_ARCHIVE_CHUNK_OVERLAP_CHARS")
     chat_archive_search_threshold: float = Field(default=0.4, alias="CHAT_ARCHIVE_SEARCH_THRESHOLD")
-    # 0 means "keep forever" / "no cap". Wired in from day one so a later
-    # retention policy doesn't need a schema migration.
+    # 0 retention means "keep forever". Maintenance still runs so failed
+    # index writes and already-queued deletions recover after restart.
     chat_archive_retention_days: int = Field(default=0, alias="CHAT_ARCHIVE_RETENTION_DAYS")
     chat_archive_max_bytes: int = Field(default=0, alias="CHAT_ARCHIVE_MAX_BYTES")
+    chat_archive_maintenance_interval_s: float = Field(
+        default=300.0, ge=0.0, alias="CHAT_ARCHIVE_MAINTENANCE_INTERVAL_S",
+    )
+    chat_archive_repair_batch_size: int = Field(
+        default=50, ge=1, le=500, alias="CHAT_ARCHIVE_REPAIR_BATCH_SIZE",
+    )
+    chat_archive_max_retry_attempts: int = Field(
+        default=5, ge=1, le=100, alias="CHAT_ARCHIVE_MAX_RETRY_ATTEMPTS",
+    )
 
     @model_validator(mode="after")
     def _check_chunk_overlap(self) -> Settings:
@@ -131,6 +140,11 @@ class Settings(BaseSettings):
                 f"({self.chat_archive_chunk_overlap_chars}) must be less than "
                 "CHAT_ARCHIVE_CHUNK_MAX_CHARS "
                 f"({self.chat_archive_chunk_max_chars})"
+            )
+        if self.chat_archive_max_bytes:
+            raise ValueError(
+                "CHAT_ARCHIVE_MAX_BYTES is not implemented; leave it at 0 "
+                "instead of configuring an unenforced archive cap"
             )
         return self
 

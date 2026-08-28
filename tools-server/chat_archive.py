@@ -28,11 +28,13 @@ Best-effort writes: the archive must never break chat. The Audrey-side
 client logs and continues on any HTTP failure; this module raises only
 on programmer errors (missing user, etc.) — write-time embedding/Qdrant
 failures are logged and the chunk is left in SQLite with `indexed_at IS
-NULL` so a future reconcile can pick it up.
+NULL`. The scheduled maintainer retries those rows and durable deletion
+outboxes without putting either repair path on the chat request lifecycle.
 """
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import hashlib
 import logging
@@ -269,11 +271,31 @@ CREATE TABLE IF NOT EXISTS archive_chunks (
     message_ids_json TEXT NOT NULL,
     text             TEXT NOT NULL,
     created_at       TEXT NOT NULL,
-    indexed_at       TEXT
+    indexed_at       TEXT,
+    index_attempts   INTEGER NOT NULL DEFAULT 0,
+    index_last_attempt_at TEXT,
+    index_last_error TEXT
+);
+CREATE TABLE IF NOT EXISTS archive_deletion_outbox (
+    chunk_id         TEXT PRIMARY KEY,
+    conversation_id  TEXT NOT NULL,
+    message_ids_json TEXT NOT NULL,
+    point_id         TEXT NOT NULL,
+    requested_at     TEXT NOT NULL,
+    attempts         INTEGER NOT NULL DEFAULT 0,
+    last_attempt_at  TEXT,
+    last_error       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_messages_user_conv ON messages(user, conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_user_created ON messages(user, created_at);
 CREATE INDEX IF NOT EXISTS idx_chunks_user ON archive_chunks(user);
+"""
+
+_REPAIR_INDEXES = """
+CREATE INDEX IF NOT EXISTS idx_chunks_repair
+    ON archive_chunks(indexed_at, index_attempts);
+CREATE INDEX IF NOT EXISTS idx_deletion_repair
+    ON archive_deletion_outbox(attempts, requested_at);
 """
 
 
@@ -308,7 +330,11 @@ class ChatArchiveStore:
         retention_days: int,
         max_bytes: int,
         embed_keep_alive: str = "",
+        repair_batch_size: int = 50,
+        max_retry_attempts: int = 5,
     ) -> None:
+        if max_bytes:
+            raise ValueError("CHAT_ARCHIVE_MAX_BYTES is not implemented; it must be 0")
         self._sqlite_path = sqlite_path
         self._qdrant = AsyncQdrantClient(url=qdrant_url)
         self._http = httpx.AsyncClient(base_url=ollama_url, timeout=embed_timeout_s)
@@ -321,7 +347,12 @@ class ChatArchiveStore:
         self._retention_days = retention_days
         self._embed_keep_alive = embed_keep_alive
         self._max_bytes = max_bytes
+        self._repair_batch_size = max(1, repair_batch_size)
+        self._max_retry_attempts = max(1, max_retry_attempts)
         self._db: aiosqlite.Connection | None = None
+        self._db_lock = asyncio.Lock()
+        self._qdrant_write_lock = asyncio.Lock()
+        self._maintenance_lock = asyncio.Lock()
 
     async def init(self) -> None:
         self._sqlite_path.parent.mkdir(parents=True, exist_ok=True)
@@ -330,12 +361,38 @@ class ChatArchiveStore:
         await self._db.execute("PRAGMA synchronous=NORMAL")
         # `executescript` runs the multi-statement schema in one shot.
         await self._db.executescript(_SCHEMA)
+        await self._migrate_repair_schema()
+        await self._db.executescript(_REPAIR_INDEXES)
         await self._db.commit()
         await self._ensure_collection()
         log.info(
             "chat_archive: ready sqlite=%s qdrant_collection=%s dim=%d retention_days=%d",
             self._sqlite_path, self._collection, self._embed_dim, self._retention_days,
         )
+
+    async def _migrate_repair_schema(self) -> None:
+        """Add repair metadata to databases created before Campaign 3."""
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init() not called")
+        cursor = await self._db.execute("PRAGMA table_info(archive_chunks)")
+        columns = {str(row[1]) for row in await cursor.fetchall()}
+        await cursor.close()
+        additions = {
+            "index_attempts": (
+                "ALTER TABLE archive_chunks ADD COLUMN "
+                "index_attempts INTEGER NOT NULL DEFAULT 0"
+            ),
+            "index_last_attempt_at": (
+                "ALTER TABLE archive_chunks ADD COLUMN "
+                "index_last_attempt_at TEXT"
+            ),
+            "index_last_error": (
+                "ALTER TABLE archive_chunks ADD COLUMN index_last_error TEXT"
+            ),
+        }
+        for name, statement in additions.items():
+            if name not in columns:
+                await self._db.execute(statement)
 
     async def aclose(self) -> None:
         if self._db is not None:
@@ -393,100 +450,73 @@ class ChatArchiveStore:
         user_msg_id = derive_message_id(user, conversation_id, "user", user_content, now)
         asst_msg_id = derive_message_id(user, conversation_id, "assistant", assistant_content, now)
 
-        # Conversation upsert: create on first sight, otherwise bump
-        # last_message_at. We don't fight OWUI for `title` ownership.
-        await self._db.execute(
-            """
-            INSERT INTO conversations (conversation_id, user, title, created_at, updated_at, last_message_at)
-            VALUES (?, ?, NULL, ?, ?, ?)
-            ON CONFLICT(conversation_id) DO UPDATE SET
-                last_message_at = excluded.last_message_at,
-                updated_at = excluded.updated_at
-            """,
-            (conversation_id, user, now, now, now),
-        )
+        async with self._db_lock:
+            # Conversation upsert: create on first sight, otherwise bump
+            # last_message_at. We don't fight OWUI for `title` ownership.
+            await self._db.execute(
+                """
+                INSERT INTO conversations (conversation_id, user, title, created_at, updated_at, last_message_at)
+                VALUES (?, ?, NULL, ?, ?, ?)
+                ON CONFLICT(conversation_id) DO UPDATE SET
+                    last_message_at = excluded.last_message_at,
+                    updated_at = excluded.updated_at
+                """,
+                (conversation_id, user, now, now, now),
+            )
 
-        # Both messages: INSERT OR IGNORE so retries collapse.
-        msg_rows = [
-            (user_msg_id, conversation_id, user, "user", user_content,
-             now, now, 0, virtual_model, concrete_model, prompt_tokens, completion_tokens),
-            (asst_msg_id, conversation_id, user, "assistant", assistant_content,
-             now, now, 1 if partial else 0, virtual_model, concrete_model,
-             prompt_tokens, completion_tokens),
-        ]
-        await self._db.executemany(
-            """
-            INSERT OR IGNORE INTO messages
-            (message_id, conversation_id, user, role, content,
-             created_at, archived_at, partial,
-             virtual_model, concrete_model, prompt_tokens, completion_tokens)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            msg_rows,
-        )
+            # Both messages: INSERT OR IGNORE so retries collapse.
+            msg_rows = [
+                (user_msg_id, conversation_id, user, "user", user_content,
+                 now, now, 0, virtual_model, concrete_model, prompt_tokens, completion_tokens),
+                (asst_msg_id, conversation_id, user, "assistant", assistant_content,
+                 now, now, 1 if partial else 0, virtual_model, concrete_model,
+                 prompt_tokens, completion_tokens),
+            ]
+            await self._db.executemany(
+                """
+                INSERT OR IGNORE INTO messages
+                (message_id, conversation_id, user, role, content,
+                 created_at, archived_at, partial,
+                 virtual_model, concrete_model, prompt_tokens, completion_tokens)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                msg_rows,
+            )
 
-        chunks = build_chunks(
-            user=user,
-            conversation_id=conversation_id,
-            user_message_id=user_msg_id,
-            user_content=user_content,
-            assistant_message_id=asst_msg_id,
-            assistant_content=assistant_content,
-            created_at=now,
-            max_chars=self._chunk_max,
-            overlap_chars=self._chunk_overlap,
-        )
+            chunks = build_chunks(
+                user=user,
+                conversation_id=conversation_id,
+                user_message_id=user_msg_id,
+                user_content=user_content,
+                assistant_message_id=asst_msg_id,
+                assistant_content=assistant_content,
+                created_at=now,
+                max_chars=self._chunk_max,
+                overlap_chars=self._chunk_overlap,
+            )
 
-        chunk_rows = [
-            (c["chunk_id"], c["conversation_id"], c["user"],
-             ",".join(c["message_ids"]), c["text"], c["created_at"], None)
-            for c in chunks
-        ]
-        await self._db.executemany(
-            """
-            INSERT OR REPLACE INTO archive_chunks
-            (chunk_id, conversation_id, user, message_ids_json, text, created_at, indexed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            chunk_rows,
-        )
-        await self._db.commit()
+            chunk_rows = [
+                (c["chunk_id"], c["conversation_id"], c["user"],
+                 ",".join(c["message_ids"]), c["text"], c["created_at"], None)
+                for c in chunks
+            ]
+            await self._db.executemany(
+                """
+                INSERT OR REPLACE INTO archive_chunks
+                (chunk_id, conversation_id, user, message_ids_json, text, created_at, indexed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                chunk_rows,
+            )
+            await self._db.commit()
 
         indexed = 0
         index_failed = 0
         for chunk in chunks:
-            try:
-                vec = await _embed(self._http, self._embed_model, chunk["text"],
-                                   self._embed_keep_alive)
-                await self._qdrant.upsert(
-                    collection_name=self._collection,
-                    points=[
-                        qm.PointStruct(
-                            id=_qdrant_point_id(chunk["chunk_id"]),
-                            vector=vec,
-                            payload={
-                                "user": chunk["user"],
-                                "conversation_id": chunk["conversation_id"],
-                                "chunk_id": chunk["chunk_id"],
-                                "message_ids": chunk["message_ids"],
-                                "created_at": chunk["created_at"],
-                                "text": chunk["text"],
-                            },
-                        )
-                    ],
-                )
-                await self._db.execute(
-                    "UPDATE archive_chunks SET indexed_at = ? WHERE chunk_id = ?",
-                    (_now_iso(), chunk["chunk_id"]),
-                )
+            if await self._index_chunk(chunk["chunk_id"]):
                 indexed += 1
-            except _EmbedError as e:
-                log.warning("chat_archive: embed failed for chunk %s: %s", chunk["chunk_id"], e)
+            else:
                 index_failed += 1
-            except Exception as e:  # noqa: BLE001 — Qdrant client raises a wide tree
-                log.warning("chat_archive: qdrant upsert failed for chunk %s: %s", chunk["chunk_id"], e)
-                index_failed += 1
-        await self._db.commit()
 
         return {
             "conversation_id": conversation_id,
@@ -496,6 +526,160 @@ class ChatArchiveStore:
             "indexed": indexed,
             "index_failed": index_failed,
             "partial": partial,
+        }
+
+    async def _index_chunk(self, chunk_id: str) -> bool:
+        """Index one SQLite chunk.
+
+        The point id is deterministic, so a crash after Qdrant accepts the
+        upsert but before SQLite records `indexed_at` is safe: the next pass
+        overwrites the same point rather than creating a duplicate.
+        """
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init() not called")
+
+        attempted_at = _now_iso()
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                """
+                SELECT c.conversation_id, c.user, c.message_ids_json,
+                       c.text, c.created_at, c.indexed_at, c.index_attempts
+                FROM archive_chunks AS c
+                LEFT JOIN archive_deletion_outbox AS d ON d.chunk_id = c.chunk_id
+                WHERE c.chunk_id = ? AND d.chunk_id IS NULL
+                """,
+                (chunk_id,),
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+            if (
+                row is None
+                or row[5] is not None
+                or int(row[6]) >= self._max_retry_attempts
+            ):
+                return False
+            await self._db.execute(
+                """
+                UPDATE archive_chunks
+                SET index_attempts = index_attempts + 1,
+                    index_last_attempt_at = ?
+                WHERE chunk_id = ?
+                """,
+                (attempted_at, chunk_id),
+            )
+            await self._db.commit()
+
+        conversation_id, user, message_ids_json, chunk_text, created_at = row[:5]
+        try:
+            vec = await _embed(
+                self._http, self._embed_model, str(chunk_text),
+                self._embed_keep_alive,
+            )
+            async with self._qdrant_write_lock:
+                # A retention sweep can tombstone the row while embedding is
+                # in flight. Re-check before upserting so a confirmed delete
+                # can never be followed by a stale-vector resurrection.
+                async with self._db_lock:
+                    cursor = await self._db.execute(
+                        """
+                        SELECT 1 FROM archive_chunks AS c
+                        LEFT JOIN archive_deletion_outbox AS d
+                          ON d.chunk_id = c.chunk_id
+                        WHERE c.chunk_id = ? AND d.chunk_id IS NULL
+                        """,
+                        (chunk_id,),
+                    )
+                    still_live = await cursor.fetchone()
+                    await cursor.close()
+                if still_live is None:
+                    return False
+                await self._qdrant.upsert(
+                    collection_name=self._collection,
+                    points=[
+                        qm.PointStruct(
+                            id=_qdrant_point_id(chunk_id),
+                            vector=vec,
+                            payload={
+                                "user": str(user),
+                                "conversation_id": str(conversation_id),
+                                "chunk_id": chunk_id,
+                                "message_ids": str(message_ids_json).split(","),
+                                "created_at": str(created_at),
+                                "text": str(chunk_text),
+                            },
+                        )
+                    ],
+                )
+            async with self._db_lock:
+                await self._db.execute(
+                    """
+                    UPDATE archive_chunks
+                    SET indexed_at = ?, index_last_error = NULL
+                    WHERE chunk_id = ?
+                    """,
+                    (_now_iso(), chunk_id),
+                )
+                await self._db.commit()
+            return True
+        except Exception as e:  # noqa: BLE001 — embed + Qdrant raise wide trees
+            error = f"{type(e).__name__}: {e}"[:500]
+            async with self._db_lock:
+                await self._db.execute(
+                    "UPDATE archive_chunks SET index_last_error = ? WHERE chunk_id = ?",
+                    (error, chunk_id),
+                )
+                await self._db.commit()
+            log.warning("chat_archive: index failed for chunk %s: %s", chunk_id, error)
+            return False
+
+    async def reindex_pending(
+        self,
+        *,
+        limit: int | None = None,
+        reset_exhausted: bool = False,
+    ) -> dict[str, int]:
+        """Retry a bounded batch of unindexed, non-tombstoned chunks."""
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init() not called")
+        batch = self._repair_batch_size if limit is None else max(1, limit)
+        async with self._db_lock:
+            if reset_exhausted:
+                await self._db.execute(
+                    """
+                    UPDATE archive_chunks
+                    SET index_attempts = 0
+                    WHERE indexed_at IS NULL
+                      AND index_attempts >= ?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM archive_deletion_outbox
+                          WHERE archive_deletion_outbox.chunk_id = archive_chunks.chunk_id
+                      )
+                    """,
+                    (self._max_retry_attempts,),
+                )
+                await self._db.commit()
+            cursor = await self._db.execute(
+                """
+                SELECT c.chunk_id
+                FROM archive_chunks AS c
+                LEFT JOIN archive_deletion_outbox AS d ON d.chunk_id = c.chunk_id
+                WHERE c.indexed_at IS NULL
+                  AND c.index_attempts < ?
+                  AND d.chunk_id IS NULL
+                ORDER BY c.created_at, c.chunk_id
+                LIMIT ?
+                """,
+                (self._max_retry_attempts, batch),
+            )
+            chunk_ids = [str(row[0]) for row in await cursor.fetchall()]
+            await cursor.close()
+        indexed = 0
+        for chunk_id in chunk_ids:
+            indexed += int(await self._index_chunk(chunk_id))
+        return {
+            "attempted": len(chunk_ids),
+            "indexed": indexed,
+            "failed": len(chunk_ids) - indexed,
         }
 
     # ─── Search ────────────────────────────────────────────────────────
@@ -545,93 +729,397 @@ class ChatArchiveStore:
             query_filter=qm.Filter(must=must),
             with_payload=True,
         )
+        payloads = [point.payload or {} for point in result.points]
+        candidate_ids = [
+            str(payload.get("chunk_id", ""))
+            for payload in payloads
+            if payload.get("chunk_id")
+        ]
+        pending_ids: set[str] = set()
+        if candidate_ids:
+            async with self._db_lock:
+                for chunk_id in candidate_ids:
+                    cursor = await self._db.execute(
+                        """
+                        SELECT 1 FROM archive_deletion_outbox
+                        WHERE chunk_id = ?
+                        """,
+                        (chunk_id,),
+                    )
+                    if await cursor.fetchone() is not None:
+                        pending_ids.add(chunk_id)
+                    await cursor.close()
+
         out: list[SearchHit] = []
-        for point in result.points:
-            p = point.payload or {}
+        for point, payload in zip(result.points, payloads, strict=True):
+            chunk_id = str(payload.get("chunk_id", ""))
+            if chunk_id in pending_ids:
+                continue
             out.append(SearchHit(
-                conversation_id=str(p.get("conversation_id", "")),
-                chunk_id=str(p.get("chunk_id", "")),
-                created_at=str(p.get("created_at", "")),
-                snippet=_snippet(str(p.get("text", "")), snippet_chars),
+                conversation_id=str(payload.get("conversation_id", "")),
+                chunk_id=chunk_id,
+                created_at=str(payload.get("created_at", "")),
+                snippet=_snippet(str(payload.get("text", "")), snippet_chars),
                 score=float(point.score or 0.0),
             ))
         return out
 
-    # ─── Prune ────────────────────────────────────────────────────────
+    # ─── Durable repair and retention ─────────────────────────────────
 
-    async def prune(self) -> dict[str, int]:
-        """Apply retention rules. Returns counts deleted.
-
-        Two rules, both opt-in via env:
-          - `retention_days > 0`: delete messages and chunks older than
-            cutoff, drop their Qdrant points.
-          - `max_bytes > 0`: not implemented yet — would require a size
-            estimate. Reserved knob; emits a zero count for now.
-        """
+    async def _queue_retention(self) -> int:
+        """Tombstone one bounded batch without deleting its source rows."""
         if self._db is None:
             raise RuntimeError("ChatArchiveStore.init() not called")
         if self._retention_days <= 0:
-            return {"messages_deleted": 0, "chunks_deleted": 0, "qdrant_deleted": 0}
+            return 0
 
-        cutoff = (_dt.datetime.now(_dt.UTC) - _dt.timedelta(days=self._retention_days)).isoformat(timespec="seconds")
-        # Get chunk ids first so we can delete from Qdrant before SQLite.
-        cursor = await self._db.execute(
-            "SELECT chunk_id FROM archive_chunks WHERE created_at < ?", (cutoff,),
-        )
-        rows = await cursor.fetchall()
-        await cursor.close()
-        chunk_ids = [r[0] for r in rows]
+        cutoff = (
+            _dt.datetime.now(_dt.UTC) - _dt.timedelta(days=self._retention_days)
+        ).isoformat(timespec="seconds")
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                """
+                SELECT c.chunk_id, c.conversation_id, c.message_ids_json
+                FROM archive_chunks AS c
+                LEFT JOIN archive_deletion_outbox AS d ON d.chunk_id = c.chunk_id
+                WHERE c.created_at < ? AND d.chunk_id IS NULL
+                ORDER BY c.created_at, c.chunk_id
+                LIMIT ?
+                """,
+                (cutoff, self._repair_batch_size),
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+            requested_at = _now_iso()
+            await self._db.executemany(
+                """
+                INSERT OR IGNORE INTO archive_deletion_outbox
+                (chunk_id, conversation_id, message_ids_json, point_id, requested_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        str(row[0]), str(row[1]), str(row[2]),
+                        _qdrant_point_id(str(row[0])), requested_at,
+                    )
+                    for row in rows
+                ],
+            )
+            await self._db.commit()
+        return len(rows)
 
-        qdrant_deleted = 0
-        if chunk_ids:
-            point_ids = [_qdrant_point_id(cid) for cid in chunk_ids]
-            try:
-                await self._qdrant.delete(
-                    collection_name=self._collection,
-                    points_selector=qm.PointIdsList(points=point_ids),
-                )
-                qdrant_deleted = len(point_ids)
-            except Exception as e:  # noqa: BLE001
-                log.warning("chat_archive: prune qdrant delete failed: %s", e)
-
-        await self._db.execute("DELETE FROM messages WHERE created_at < ?", (cutoff,))
-        msg_count_cursor = await self._db.execute("SELECT changes()")
-        msgs = (await msg_count_cursor.fetchone())[0]
-        await msg_count_cursor.close()
-
-        await self._db.execute("DELETE FROM archive_chunks WHERE created_at < ?", (cutoff,))
-        chunk_count_cursor = await self._db.execute("SELECT changes()")
-        chunks = (await chunk_count_cursor.fetchone())[0]
-        await chunk_count_cursor.close()
-        await self._db.commit()
-
-        log.info(
-            "chat_archive: prune cutoff=%s messages=%d chunks=%d qdrant=%d",
-            cutoff, msgs, chunks, qdrant_deleted,
-        )
-        return {"messages_deleted": int(msgs), "chunks_deleted": int(chunks), "qdrant_deleted": qdrant_deleted}
-
-    # ─── Stats (for /metrics gauge or admin debug) ─────────────────────
-
-    async def stats(self) -> dict[str, int]:
+    async def _delete_pending(
+        self,
+        *,
+        reset_exhausted: bool = False,
+    ) -> dict[str, int]:
+        """Delete one bounded outbox batch, finalizing SQLite only on ack."""
         if self._db is None:
             raise RuntimeError("ChatArchiveStore.init() not called")
-        cursor = await self._db.execute("SELECT COUNT(*) FROM messages")
-        msgs = (await cursor.fetchone())[0]
-        await cursor.close()
-        cursor = await self._db.execute("SELECT COUNT(*) FROM archive_chunks")
-        chunks = (await cursor.fetchone())[0]
-        await cursor.close()
-        cursor = await self._db.execute(
-            "SELECT COUNT(*) FROM archive_chunks WHERE indexed_at IS NULL"
+
+        async with self._db_lock:
+            if reset_exhausted:
+                await self._db.execute(
+                    """
+                    UPDATE archive_deletion_outbox SET attempts = 0
+                    WHERE attempts >= ?
+                    """,
+                    (self._max_retry_attempts,),
+                )
+                await self._db.commit()
+            cursor = await self._db.execute(
+                """
+                SELECT chunk_id, conversation_id, message_ids_json, point_id
+                FROM archive_deletion_outbox
+                WHERE attempts < ?
+                ORDER BY requested_at, chunk_id
+                LIMIT ?
+                """,
+                (self._max_retry_attempts, self._repair_batch_size),
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+
+        chunks_deleted = 0
+        messages_deleted = 0
+        qdrant_deleted = 0
+        failed = 0
+        for chunk_id, conversation_id, message_ids_json, point_id in rows:
+            attempted_at = _now_iso()
+            async with self._db_lock:
+                await self._db.execute(
+                    """
+                    UPDATE archive_deletion_outbox
+                    SET attempts = attempts + 1, last_attempt_at = ?
+                    WHERE chunk_id = ?
+                    """,
+                    (attempted_at, chunk_id),
+                )
+                await self._db.commit()
+            try:
+                async with self._qdrant_write_lock:
+                    await self._qdrant.delete(
+                        collection_name=self._collection,
+                        points_selector=qm.PointIdsList(points=[str(point_id)]),
+                        wait=True,
+                    )
+                    async with self._db_lock:
+                        await self._db.execute(
+                            "DELETE FROM archive_chunks WHERE chunk_id = ?",
+                            (chunk_id,),
+                        )
+                        cursor = await self._db.execute("SELECT changes()")
+                        chunks_deleted += int((await cursor.fetchone())[0])
+                        await cursor.close()
+
+                        cursor = await self._db.execute(
+                            """
+                            SELECT 1 FROM archive_chunks
+                            WHERE message_ids_json = ? LIMIT 1
+                            """,
+                            (message_ids_json,),
+                        )
+                        messages_still_referenced = await cursor.fetchone()
+                        await cursor.close()
+                        if messages_still_referenced is None:
+                            message_ids = [
+                                value for value in str(message_ids_json).split(",")
+                                if value
+                            ]
+                            for message_id in message_ids:
+                                cursor = await self._db.execute(
+                                    "DELETE FROM messages WHERE message_id = ?",
+                                    (message_id,),
+                                )
+                                messages_deleted += max(0, int(cursor.rowcount))
+                                await cursor.close()
+
+                        await self._db.execute(
+                            """
+                            DELETE FROM conversations
+                            WHERE conversation_id = ?
+                              AND NOT EXISTS (
+                                  SELECT 1 FROM messages
+                                  WHERE conversation_id = ?
+                              )
+                            """,
+                            (conversation_id, conversation_id),
+                        )
+                        await self._db.execute(
+                            "DELETE FROM archive_deletion_outbox WHERE chunk_id = ?",
+                            (chunk_id,),
+                        )
+                        await self._db.commit()
+                qdrant_deleted += 1
+            except Exception as e:  # noqa: BLE001 — SQLite + Qdrant raise wide trees
+                error = f"{type(e).__name__}: {e}"[:500]
+                async with self._db_lock:
+                    await self._db.rollback()
+                    await self._db.execute(
+                        """
+                        UPDATE archive_deletion_outbox
+                        SET last_error = ? WHERE chunk_id = ?
+                        """,
+                        (error, chunk_id),
+                    )
+                    await self._db.commit()
+                failed += 1
+                log.warning(
+                    "chat_archive: delete failed for chunk %s: %s",
+                    chunk_id, error,
+                )
+
+        return {
+            "attempted": len(rows),
+            "chunks_deleted": chunks_deleted,
+            "messages_deleted": messages_deleted,
+            "qdrant_deleted": qdrant_deleted,
+            "failed": failed,
+        }
+
+    async def _deletions_pending(self) -> int:
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init() not called")
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                "SELECT COUNT(*) FROM archive_deletion_outbox"
+            )
+            count = int((await cursor.fetchone())[0])
+            await cursor.close()
+        return count
+
+    async def prune(self, *, retry_exhausted: bool = False) -> dict[str, int]:
+        """Queue expired chunks and process a bounded deletion-outbox batch."""
+        async with self._maintenance_lock:
+            queued = await self._queue_retention()
+            deleted = await self._delete_pending(
+                reset_exhausted=retry_exhausted,
+            )
+            reindexed = await self.reindex_pending(
+                reset_exhausted=retry_exhausted,
+            )
+            pending = await self._deletions_pending()
+        return {
+            "deletions_queued": queued,
+            "messages_deleted": deleted["messages_deleted"],
+            "chunks_deleted": deleted["chunks_deleted"],
+            "qdrant_deleted": deleted["qdrant_deleted"],
+            "delete_failed": deleted["failed"],
+            "deletions_pending": pending,
+            "reindex_attempted": reindexed["attempted"],
+            "reindexed": reindexed["indexed"],
+            "reindex_failed": reindexed["failed"],
+        }
+
+    async def maintain(self) -> dict[str, Any]:
+        """Run one scheduled retention, deletion, and reindex repair pass."""
+        async with self._maintenance_lock:
+            queued = await self._queue_retention()
+            deleted = await self._delete_pending()
+            reindexed = await self.reindex_pending()
+            pending = await self._deletions_pending()
+        result: dict[str, Any] = {
+            "deletions_queued": queued,
+            "deletions_pending": pending,
+            "delete": deleted,
+            "reindex": reindexed,
+        }
+        if queued or deleted["attempted"] or reindexed["attempted"]:
+            log.info("chat_archive: maintenance result=%s", result)
+        return result
+
+    # ─── Stats (for admin visibility) ─────────────────────────────────
+
+    async def stats(self) -> dict[str, Any]:
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init() not called")
+
+        async with self._db_lock:
+            async def scalar(sql: str, params: tuple[Any, ...] = ()) -> int:
+                cursor = await self._db.execute(sql, params)
+                value = int((await cursor.fetchone())[0])
+                await cursor.close()
+                return value
+
+            msgs = await scalar("SELECT COUNT(*) FROM messages")
+            chunks = await scalar("SELECT COUNT(*) FROM archive_chunks")
+            unindexed = await scalar(
+                "SELECT COUNT(*) FROM archive_chunks WHERE indexed_at IS NULL"
+            )
+            reindex_pending = await scalar(
+                """
+                SELECT COUNT(*) FROM archive_chunks AS c
+                LEFT JOIN archive_deletion_outbox AS d ON d.chunk_id = c.chunk_id
+                WHERE c.indexed_at IS NULL
+                  AND c.index_attempts < ?
+                  AND d.chunk_id IS NULL
+                """,
+                (self._max_retry_attempts,),
+            )
+            reindex_exhausted = await scalar(
+                """
+                SELECT COUNT(*) FROM archive_chunks AS c
+                LEFT JOIN archive_deletion_outbox AS d ON d.chunk_id = c.chunk_id
+                WHERE c.indexed_at IS NULL
+                  AND c.index_attempts >= ?
+                  AND d.chunk_id IS NULL
+                """,
+                (self._max_retry_attempts,),
+            )
+            deletions_pending = await scalar(
+                "SELECT COUNT(*) FROM archive_deletion_outbox"
+            )
+            deletions_exhausted = await scalar(
+                """
+                SELECT COUNT(*) FROM archive_deletion_outbox
+                WHERE attempts >= ?
+                """,
+                (self._max_retry_attempts,),
+            )
+
+            cursor = await self._db.execute(
+                """
+                SELECT index_last_attempt_at, index_last_error
+                FROM archive_chunks
+                WHERE indexed_at IS NULL AND index_last_attempt_at IS NOT NULL
+                ORDER BY index_last_attempt_at DESC LIMIT 1
+                """
+            )
+            index_last = await cursor.fetchone()
+            await cursor.close()
+            cursor = await self._db.execute(
+                """
+                SELECT last_attempt_at, last_error
+                FROM archive_deletion_outbox
+                WHERE last_attempt_at IS NOT NULL
+                ORDER BY last_attempt_at DESC LIMIT 1
+                """
+            )
+            delete_last = await cursor.fetchone()
+            await cursor.close()
+
+        return {
+            "messages": msgs,
+            "chunks": chunks,
+            "chunks_unindexed": unindexed,
+            "chunks_reindex_pending": reindex_pending,
+            "chunks_reindex_exhausted": reindex_exhausted,
+            "deletions_pending": deletions_pending,
+            "deletions_exhausted": deletions_exhausted,
+            "index_last_attempt_at": str(index_last[0]) if index_last else "",
+            "index_last_error": str(index_last[1] or "") if index_last else "",
+            "delete_last_attempt_at": str(delete_last[0]) if delete_last else "",
+            "delete_last_error": str(delete_last[1] or "") if delete_last else "",
+        }
+
+
+class ChatArchiveMaintainer:
+    """Own the scheduled archive repair task and cancel it cleanly."""
+
+    def __init__(self, store: ChatArchiveStore, *, interval_s: float) -> None:
+        self._store = store
+        self._interval_s = max(0.0, interval_s)
+        self._task: asyncio.Task[None] | None = None
+
+    async def start(self) -> None:
+        if self._interval_s <= 0:
+            log.info("chat_archive: scheduled maintenance disabled")
+            return
+        if self._task is not None:
+            return
+        self._task = asyncio.create_task(
+            self._run(), name="chat-archive-maintenance"
         )
-        unindexed = (await cursor.fetchone())[0]
-        await cursor.close()
-        return {"messages": int(msgs), "chunks": int(chunks), "chunks_unindexed": int(unindexed)}
+        log.info(
+            "chat_archive: scheduled maintenance every %.0fs",
+            self._interval_s,
+        )
+
+    async def stop(self) -> None:
+        if self._task is None:
+            return
+        self._task.cancel()
+        try:
+            await self._task
+        except asyncio.CancelledError:
+            pass
+        self._task = None
+
+    async def _run(self) -> None:
+        try:
+            while True:
+                try:
+                    await self._store.maintain()
+                except Exception as e:  # noqa: BLE001 — loop must survive a pass
+                    log.warning("chat_archive: maintenance pass failed: %s", e)
+                await asyncio.sleep(self._interval_s)
+        except asyncio.CancelledError:
+            return
 
 
 __all__ = [
     "ArchiveMessage",
+    "ChatArchiveMaintainer",
     "SearchHit",
     "ChatArchiveStore",
     "build_chunks",

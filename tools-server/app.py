@@ -41,7 +41,7 @@ from brave import (
     BraveUpstreamError,
     SearchResult,
 )
-from chat_archive import ChatArchiveStore
+from chat_archive import ChatArchiveMaintainer, ChatArchiveStore
 from db import EmbedError, MemoryEntry, MemoryStore
 from fastapi import FastAPI, HTTPException, status
 from fetch import FetchError, fetch_readable
@@ -100,8 +100,15 @@ async def lifespan(app: FastAPI):
         retention_days=settings.chat_archive_retention_days,
         max_bytes=settings.chat_archive_max_bytes,
         embed_keep_alive=settings.embed_keep_alive,
+        repair_batch_size=settings.chat_archive_repair_batch_size,
+        max_retry_attempts=settings.chat_archive_max_retry_attempts,
     )
     await chat_archive.init()
+    chat_archive_maintainer = ChatArchiveMaintainer(
+        chat_archive,
+        interval_s=settings.chat_archive_maintenance_interval_s,
+    )
+    await chat_archive_maintainer.start()
 
     app.state.brave = brave
     app.state.searxng = searxng
@@ -120,6 +127,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        await chat_archive_maintainer.stop()
         await brave.aclose()
         if searxng is not None:
             await searxng.aclose()
@@ -931,10 +939,10 @@ async def chat_history_archive(req: ArchiveTurnRequest) -> dict[str, Any]:
 @app.post("/chat_history/prune", include_in_schema=False, tags=["internal"])
 async def chat_history_prune() -> dict[str, int]:
     archive: ChatArchiveStore = app.state.chat_archive
-    return await archive.prune()
+    return await archive.prune(retry_exhausted=True)
 
 
 @app.get("/chat_history/stats", include_in_schema=False, tags=["internal"])
-async def chat_history_stats() -> dict[str, int]:
+async def chat_history_stats() -> dict[str, Any]:
     archive: ChatArchiveStore = app.state.chat_archive
     return await archive.stats()
