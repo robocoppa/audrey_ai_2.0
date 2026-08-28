@@ -142,7 +142,7 @@ async def _generate_via_pipeline(
     # Commit the compact local outbox row after generation. Remote HTTP,
     # embedding, and Qdrant indexing belong to the lifecycle-owned worker.
     archive_client: ChatArchiveQueue | None = getattr(app.state, "archive_client", None)
-    if archive_client is not None:
+    if archive_client is not None and not is_owui_task_request(messages):
         await archive_client.archive_turn(
             registry=app.state.tools,
             user_id=user_id,
@@ -248,6 +248,7 @@ async def _stream_via_pipeline(
     collector = StreamCollector()
     chosen_concrete: str = "?"
     is_deep_branch = False  # deep handles its own archive write to skip banners
+    owui_task = is_owui_task_request(messages)
 
     try:
         async with inflight.slot(user_id):
@@ -269,7 +270,6 @@ async def _stream_via_pipeline(
             deep_intent = has_deep_intent(messages, complexity_cfg.get("deep_intent_phrases") or [])
             forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local", "audrey_research")
             forced_fast = payload.model == "audrey_fast"
-            owui_task = is_owui_task_request(messages)
             image_turn = has_image_part(messages)
             if image_turn and not (forced_deep and describe_enabled(cfg)):
                 # An attached image must reach a vision model — force fast.
@@ -576,7 +576,7 @@ async def _stream_via_pipeline(
         # Archive only the fast/tool-capable branches here; deep branch
         # owns its own archive write because banner frames must not be
         # included in the captured assistant text.
-        if not is_deep_branch and archive_client is not None:
+        if not is_deep_branch and not owui_task and archive_client is not None:
             await archive_client.archive_turn(
                 registry=app.state.tools,
                 user_id=user_id,

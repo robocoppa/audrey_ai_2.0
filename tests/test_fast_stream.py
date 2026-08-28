@@ -20,7 +20,10 @@ from audrey.pipeline.fast_path import (
 )
 from audrey.routes.inflight import UserInflightRegistry
 from audrey.routes.openai import pipeline as route_pipeline
-from audrey.routes.openai.pipeline import _stream_via_pipeline
+from audrey.routes.openai.pipeline import (
+    _generate_via_pipeline,
+    _stream_via_pipeline,
+)
 from audrey.routes.openai.schemas import ChatCompletionRequest
 from audrey.routes.openai.streaming import (
     OpenAIStreamSession,
@@ -449,6 +452,20 @@ class _RecordingArchive:
         self.calls.append(kwargs)
 
 
+class _FixedGraph:
+    async def ainvoke(self, _state):
+        return {
+            "content": "utility result",
+            "mode": "fast",
+            "task_type": "general",
+            "classify_reason": "test",
+            "classify_confidence": 1.0,
+            "concrete_model": "a",
+            "prompt_eval_count": 10,
+            "eval_count": 2,
+        }
+
+
 def _route_app(cfg: _Cfg, ollama, archive: _RecordingArchive):
     return SimpleNamespace(state=SimpleNamespace(
         cfg=cfg,
@@ -526,6 +543,74 @@ async def test_route_uses_one_id_one_role_and_the_configured_thinking_policy(
     assert archive.calls[0]["assistant_content"] == "one answer"
     assert archive.calls[0]["partial"] is False
     assert archive.calls[0]["concrete_model"] == "a"
+
+
+async def test_nonstream_owui_utility_turn_is_not_archived():
+    archive = _RecordingArchive()
+    cfg = _Cfg(("a", 100, "local"))
+    app = SimpleNamespace(state=SimpleNamespace(
+        graph=_FixedGraph(),
+        inflight=UserInflightRegistry(max_inflight_per_user=2),
+        archive_client=archive,
+        tools=_NoTools(),
+        cfg=cfg,
+    ))
+    messages = [{"role": "user", "content": "### Task:\nGenerate a title"}]
+    payload = ChatCompletionRequest(
+        model="audrey_fast",
+        messages=messages,
+        stream=False,
+    )
+
+    await _generate_via_pipeline(
+        app,
+        payload,
+        messages,
+        {},
+        user_id="alice@example.com",
+        conversation_id="conversation-1",
+        user_turn_text="### Task:\nGenerate a title",
+    )
+
+    assert archive.calls == []
+
+
+async def test_stream_owui_utility_turn_is_not_archived(monkeypatch):
+    cfg = _Cfg(("a", 100, "local"))
+    ollama = _ScriptedOllama({
+        "a": [{
+            "message": {"content": "utility result"},
+            "done": True,
+        }],
+    })
+
+    async def classify(*args, **kwargs):
+        return "general", "test", 1.0
+
+    archive = _RecordingArchive()
+    monkeypatch.setattr(route_pipeline, "classify_with_registry", classify)
+    app = _route_app(cfg, ollama, archive)
+    messages = [{"role": "user", "content": "### Task:\nGenerate a title"}]
+    payload = ChatCompletionRequest(
+        model="audrey_fast",
+        messages=messages,
+        stream=True,
+    )
+
+    frames = [
+        frame async for frame in _stream_via_pipeline(
+            app,
+            payload,
+            messages,
+            {},
+            user_id="alice@example.com",
+            conversation_id="conversation-1",
+            user_turn_text="### Task:\nGenerate a title",
+        )
+    ]
+
+    assert frames[-1] == "data: [DONE]\n\n"
+    assert archive.calls == []
 
 
 async def test_route_archives_missing_done_as_partial_without_banner_text(

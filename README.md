@@ -141,10 +141,11 @@ datetime injection
 
 Per-user fair scheduling (`FairLocalGate`) round-robins across users at the
 local-GPU bottleneck. Per-user in-flight cap (default 3) prevents one user
-from saturating the queue. Cloud calls bypass the gate. Every chat is first
-committed to Audrey's local durable outbox; one bounded lifecycle-owned worker
-delivers it to the per-user chat archive (SQLite source-of-truth + Qdrant index)
-without putting remote embedding/indexing latency on the response. The model
+from saturating the queue. Cloud calls bypass the gate. Every user-visible chat
+is first committed to Audrey's local durable outbox; one bounded lifecycle-owned
+worker delivers it to the per-user chat archive (SQLite source-of-truth + Qdrant
+index) without putting remote embedding/indexing latency on the response. OWUI
+housekeeping requests such as title and tag generation are excluded. The model
 can search prior conversations via `chat_history_search`.
 
 ## Documentation
