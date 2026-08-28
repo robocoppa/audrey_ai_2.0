@@ -23,6 +23,7 @@ from audrey.config import (
     Config,
     EnvOverrides,
     _load_yaml,
+    _validate_chat_archive,
     _validate_deep_panel_pools,
     _validate_upload_limits,
 )
@@ -304,11 +305,12 @@ def test_committed_config_yaml_passes_boot_validation():
     broken *committed* config (a deep-panel worker absent from the registry, a
     missing synthesizer) slips through `pytest` and only crash-loops on
     deploy — exactly how an unregistered `nemotron3:33b` vl worker took the
-    process down once. This loads the real file and runs the same three steps
+    process down once. This loads the real file and runs the same validators
     `get_config()` does at startup, so that class of bug fails here instead.
     """
     cfg = Config(_load_yaml(_REPO_ROOT / "config.yaml"), EnvOverrides())
     _validate_deep_panel_pools(cfg.raw)  # must not raise
+    _validate_chat_archive(cfg.raw)
 
 
 def test_committed_config_deep_panel_models_are_registered():
@@ -720,6 +722,27 @@ class TestUploadLimitCoherence:
         raw = _load_yaml(_REPO_ROOT / "config.yaml")
         quota = raw["kb"]["max_user_bytes"]
         assert quota >= 10 * 300 * 1024 * 1024
+
+
+# ─── _validate_chat_archive ──────────────────────────────────────────
+
+@pytest.mark.parametrize(
+    ("queue", "field"),
+    [
+        ({"sqlite_path": ""}, "sqlite_path"),
+        ({"maxsize": 0}, "maxsize"),
+        ({"maxsize": True}, "maxsize"),
+        ({"retry_interval_s": 0}, "retry_interval_s"),
+        ({"retry_interval_s": False}, "retry_interval_s"),
+    ],
+)
+def test_invalid_chat_archive_queue_settings_fail_at_boot(queue, field):
+    with pytest.raises(ValueError, match=field):
+        _validate_chat_archive({"chat_archive": {"queue": queue}})
+
+
+def test_committed_chat_archive_queue_settings_are_valid():
+    _validate_chat_archive(_load_yaml(_REPO_ROOT / "config.yaml"))
 
 
 # ─── compress_keep_last, budgeted against TOOL MESSAGES ───────────────

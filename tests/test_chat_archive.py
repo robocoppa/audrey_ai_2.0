@@ -96,6 +96,26 @@ def test_derive_message_id_user_scoped():
     assert a != b
 
 
+def test_derive_message_id_uses_stable_archive_id_across_retry_minutes():
+    a = chat_archive_module.derive_message_id(
+        "alice@example.com",
+        "conv-1",
+        "user",
+        "hello",
+        "2026-05-08T12:34:56+00:00",
+        "delivery-1",
+    )
+    b = chat_archive_module.derive_message_id(
+        "alice@example.com",
+        "conv-1",
+        "user",
+        "hello",
+        "2026-05-08T13:45:01+00:00",
+        "delivery-1",
+    )
+    assert a == b
+
+
 def test_build_chunks_one_pair_one_chunk():
     chunks = chat_archive_module.build_chunks(
         user="alice@example.com",
@@ -211,12 +231,55 @@ def test_resolve_uses_metadata_chat_id():
     assert cid == "meta-xyz"
 
 
+def test_resolve_uses_explicit_client_conversation_id():
+    cid = resolve_conversation_id(
+        user_id="alice@example.com",
+        raw_payload={"conversation_id": " client-thread-7 "},
+        messages=[{"role": "user", "content": "hi"}],
+    )
+    assert cid == "client-thread-7"
+
+
+def test_resolve_uses_validated_message_metadata():
+    cid = resolve_conversation_id(
+        user_id="alice@example.com",
+        raw_payload={},
+        messages=[{
+            "role": "user",
+            "content": "hi",
+            "metadata": {"conversation_id": "message-thread-3"},
+        }],
+    )
+    assert cid == "message-thread-3"
+
+
 def test_resolve_falls_back_to_deterministic_hash():
     msgs = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
     a = resolve_conversation_id(user_id="alice@example.com", raw_payload={}, messages=msgs)
     b = resolve_conversation_id(user_id="alice@example.com", raw_payload={}, messages=msgs)
     assert a == b, "same prefix should hash to the same conversation"
     assert a.startswith("derived-")
+
+
+def test_resolve_fallback_stays_stable_as_history_grows():
+    first_turn = [{"role": "user", "content": "start this thread"}]
+    growing = [
+        *first_turn,
+        {"role": "assistant", "content": "first answer"},
+        {"role": "user", "content": "follow-up"},
+        {"role": "assistant", "content": "second answer"},
+    ]
+    initial = resolve_conversation_id(
+        user_id="alice@example.com",
+        raw_payload={},
+        messages=first_turn,
+    )
+    later = resolve_conversation_id(
+        user_id="alice@example.com",
+        raw_payload={},
+        messages=growing,
+    )
+    assert initial == later
 
 
 def test_resolve_different_users_get_different_ids():
@@ -288,6 +351,8 @@ async def test_archive_client_posts_payload_to_internal_route():
         partial=True,
         virtual_model="audrey_fast",
         concrete_model="qwen3:4b",
+        archive_id="delivery-1",
+        created_at="2026-08-28T12:00:00.000000+00:00",
     )
     assert captured["url"] == "http://tools:8000/chat_history/archive"
     body = captured["json"]
@@ -296,6 +361,8 @@ async def test_archive_client_posts_payload_to_internal_route():
     assert body["partial"] is True
     assert body["virtual_model"] == "audrey_fast"
     assert body["concrete_model"] == "qwen3:4b"
+    assert body["archive_id"] == "delivery-1"
+    assert body["created_at"] == "2026-08-28T12:00:00.000000+00:00"
 
 
 async def test_archive_client_swallows_transport_errors():

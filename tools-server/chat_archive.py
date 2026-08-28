@@ -98,8 +98,15 @@ def _minute_bucket(iso_ts: str) -> str:
     return iso_ts[:16]
 
 
-def derive_message_id(user: str, conversation_id: str, role: str, content: str, created_at: str) -> str:
-    """Deterministic id so retries and full-history re-sends collapse."""
+def derive_message_id(
+    user: str,
+    conversation_id: str,
+    role: str,
+    content: str,
+    created_at: str,
+    archive_id: str = "",
+) -> str:
+    """Deterministic id so local-outbox retries collapse across restarts."""
     h = hashlib.sha256()
     h.update(user.encode("utf-8"))
     h.update(b"|")
@@ -107,9 +114,14 @@ def derive_message_id(user: str, conversation_id: str, role: str, content: str, 
     h.update(b"|")
     h.update(role.encode("utf-8"))
     h.update(b"|")
-    h.update(content.encode("utf-8"))
-    h.update(b"|")
-    h.update(_minute_bucket(created_at).encode("utf-8"))
+    if archive_id:
+        h.update(b"archive|")
+        h.update(archive_id.encode("utf-8"))
+    else:
+        # Backward-compatible id for older callers without a delivery id.
+        h.update(content.encode("utf-8"))
+        h.update(b"|")
+        h.update(_minute_bucket(created_at).encode("utf-8"))
     return h.hexdigest()[:32]
 
 
@@ -286,6 +298,11 @@ CREATE TABLE IF NOT EXISTS archive_deletion_outbox (
     last_attempt_at  TEXT,
     last_error       TEXT
 );
+CREATE TABLE IF NOT EXISTS archive_maintenance_state (
+    operation       TEXT PRIMARY KEY,
+    last_attempt_at TEXT NOT NULL,
+    last_error      TEXT NOT NULL DEFAULT ''
+);
 CREATE INDEX IF NOT EXISTS idx_messages_user_conv ON messages(user, conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_user_created ON messages(user, created_at);
 CREATE INDEX IF NOT EXISTS idx_chunks_user ON archive_chunks(user);
@@ -433,6 +450,8 @@ class ChatArchiveStore:
         concrete_model: str = "",
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
+        archive_id: str = "",
+        created_at: str = "",
     ) -> dict[str, Any]:
         """Archive one user-turn + assistant-turn pair.
 
@@ -446,9 +465,14 @@ class ChatArchiveStore:
         if self._db is None:
             raise RuntimeError("ChatArchiveStore.init() not called")
 
-        now = _now_iso()
-        user_msg_id = derive_message_id(user, conversation_id, "user", user_content, now)
-        asst_msg_id = derive_message_id(user, conversation_id, "assistant", assistant_content, now)
+        now = created_at or _now_iso()
+        archived_at = _now_iso()
+        user_msg_id = derive_message_id(
+            user, conversation_id, "user", user_content, now, archive_id,
+        )
+        asst_msg_id = derive_message_id(
+            user, conversation_id, "assistant", assistant_content, now, archive_id,
+        )
 
         async with self._db_lock:
             # Conversation upsert: create on first sight, otherwise bump
@@ -467,9 +491,10 @@ class ChatArchiveStore:
             # Both messages: INSERT OR IGNORE so retries collapse.
             msg_rows = [
                 (user_msg_id, conversation_id, user, "user", user_content,
-                 now, now, 0, virtual_model, concrete_model, prompt_tokens, completion_tokens),
+                 now, archived_at, 0, virtual_model, concrete_model,
+                 prompt_tokens, completion_tokens),
                 (asst_msg_id, conversation_id, user, "assistant", assistant_content,
-                 now, now, 1 if partial else 0, virtual_model, concrete_model,
+                 now, archived_at, 1 if partial else 0, virtual_model, concrete_model,
                  prompt_tokens, completion_tokens),
             ]
             await self._db.executemany(
@@ -567,6 +592,7 @@ class ChatArchiveStore:
                 """,
                 (attempted_at, chunk_id),
             )
+            await self._record_attempt_locked("index", attempted_at)
             await self._db.commit()
 
         conversation_id, user, message_ids_json, chunk_text, created_at = row[:5]
@@ -628,6 +654,7 @@ class ChatArchiveStore:
                     "UPDATE archive_chunks SET index_last_error = ? WHERE chunk_id = ?",
                     (error, chunk_id),
                 )
+                await self._record_attempt_locked("index", attempted_at, error)
                 await self._db.commit()
             log.warning("chat_archive: index failed for chunk %s: %s", chunk_id, error)
             return False
@@ -855,6 +882,7 @@ class ChatArchiveStore:
                     """,
                     (attempted_at, chunk_id),
                 )
+                await self._record_attempt_locked("delete", attempted_at)
                 await self._db.commit()
             try:
                 async with self._qdrant_write_lock:
@@ -922,6 +950,7 @@ class ChatArchiveStore:
                         """,
                         (error, chunk_id),
                     )
+                    await self._record_attempt_locked("delete", attempted_at, error)
                     await self._db.commit()
                 failed += 1
                 log.warning(
@@ -990,6 +1019,29 @@ class ChatArchiveStore:
 
     # ─── Stats (for admin visibility) ─────────────────────────────────
 
+    async def _record_attempt_locked(
+        self,
+        operation: str,
+        attempted_at: str,
+        error: str = "",
+    ) -> None:
+        """Persist latest operation state while the caller holds `_db_lock`."""
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init() not called")
+        await self._db.execute(
+            """
+            INSERT INTO archive_maintenance_state
+                (operation, last_attempt_at, last_error)
+            VALUES (?, ?, ?)
+            ON CONFLICT(operation) DO UPDATE SET
+                last_attempt_at = excluded.last_attempt_at,
+                last_error = excluded.last_error
+            WHERE excluded.last_attempt_at >=
+                  archive_maintenance_state.last_attempt_at
+            """,
+            (operation, attempted_at, error),
+        )
+
     async def stats(self) -> dict[str, Any]:
         if self._db is None:
             raise RuntimeError("ChatArchiveStore.init() not called")
@@ -1039,10 +1091,9 @@ class ChatArchiveStore:
 
             cursor = await self._db.execute(
                 """
-                SELECT index_last_attempt_at, index_last_error
-                FROM archive_chunks
-                WHERE indexed_at IS NULL AND index_last_attempt_at IS NOT NULL
-                ORDER BY index_last_attempt_at DESC LIMIT 1
+                SELECT last_attempt_at, last_error
+                FROM archive_maintenance_state
+                WHERE operation = 'index'
                 """
             )
             index_last = await cursor.fetchone()
@@ -1050,9 +1101,8 @@ class ChatArchiveStore:
             cursor = await self._db.execute(
                 """
                 SELECT last_attempt_at, last_error
-                FROM archive_deletion_outbox
-                WHERE last_attempt_at IS NOT NULL
-                ORDER BY last_attempt_at DESC LIMIT 1
+                FROM archive_maintenance_state
+                WHERE operation = 'delete'
                 """
             )
             delete_last = await cursor.fetchone()

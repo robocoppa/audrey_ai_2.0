@@ -30,7 +30,7 @@ from audrey.metrics import render as render_metrics
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
-from audrey.pipeline.chat_archive import ChatArchiveClient
+from audrey.pipeline.chat_archive import ChatArchiveClient, ChatArchiveQueue
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.graph import build_graph
 from audrey.routes.admin import router as admin_router
@@ -190,13 +190,30 @@ async def lifespan(app: FastAPI):
     app.state.kb_watcher = watcher
     app.state.kb_reconciler = reconciler
 
-    # Shared httpx client + chat-archive writer. The client is reused
-    # across requests to avoid the per-call connection setup cost; the
-    # archive writer is a thin wrapper that resolves the host server
-    # from the tool registry on each call so a tools-server reload
-    # doesn't strand the writer on a stale URL.
+    # Shared transport + durable chat-archive outbox. Response handlers commit
+    # only the small local source row; this lifecycle-owned worker performs the
+    # remote custom-tools call and resumes unfinished rows after restart.
     archive_http = httpx.AsyncClient(timeout=10.0)
-    archive_client = ChatArchiveClient(archive_http)
+    archive_transport = ChatArchiveClient(archive_http)
+    archive_cfg = cfg.raw.get("chat_archive", {}) or {}
+    archive_queue_cfg = archive_cfg.get("queue", {}) or {}
+    archive_client: ChatArchiveQueue | None = None
+    if bool(archive_cfg.get("enabled", True)):
+        archive_client = ChatArchiveQueue(
+            client=archive_transport,
+            registry=tool_registry,
+            sqlite_path=Path(
+                archive_queue_cfg.get(
+                    "sqlite_path",
+                    "/data/chat_archive_outbox.sqlite",
+                )
+            ),
+            maxsize=int(archive_queue_cfg.get("maxsize", 128)),
+            retry_interval_s=float(
+                archive_queue_cfg.get("retry_interval_s", 30.0)
+            ),
+        )
+        await archive_client.start()
     app.state.archive_http = archive_http
     app.state.archive_client = archive_client
 
@@ -227,6 +244,8 @@ async def lifespan(app: FastAPI):
         uploads_db.close()
         qdrant.close()
         await ollama.aclose()
+        if archive_client is not None:
+            await archive_client.stop()
         await archive_http.aclose()
 
 

@@ -18,7 +18,7 @@ endpoint defined here becomes a tool the models can call.
 
 Internal archive routes are excluded from OpenAPI so models cannot call them:
 
-- `POST /chat_history/archive` — persist and index one Q+A pair
+- `POST /chat_history/archive` — idempotently persist and index one Q+A pair
 - `POST /chat_history/prune` — run retention and reset exhausted repairs
 - `GET /chat_history/stats` — counts, retry state, latest attempts and errors
 
@@ -29,6 +29,10 @@ the interval, bounded batch, and retry ceiling with
 `CHAT_ARCHIVE_MAINTENANCE_INTERVAL_S`, `CHAT_ARCHIVE_REPAIR_BATCH_SIZE`, and
 `CHAT_ARCHIVE_MAX_RETRY_ATTEMPTS`. Nonzero `CHAT_ARCHIVE_MAX_BYTES` is
 rejected at startup because a byte cap is not implemented.
+
+Audrey supplies a stable `archive_id` and `created_at` on this internal write.
+If its local delivery outbox retries after a timeout or restart, message and
+chunk ids collide deliberately instead of duplicating the turn.
 
 ## Adding new tools later
 

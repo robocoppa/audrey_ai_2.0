@@ -1,13 +1,14 @@
 """Chat-archive capture (Audrey side).
 
-Two responsibilities, paired:
+Three responsibilities:
 
   ChatArchiveClient
-    Posts one Q+A pair to custom-tools' internal `/chat_history/archive`
-    route. Best-effort: failures are logged + counted, never raised.
-    Disabled implicitly when `chat_history_search` is absent from the
-    registry (same custom-tools instance owns both, so absence implies
-    archive is unavailable too).
+    Performs one best-effort delivery to custom-tools' internal route.
+
+  ChatArchiveQueue
+    Commits response-time source rows to local SQLite, wakes one bounded
+    lifecycle-owned delivery worker, and retries after failure/restart.
+    Queue saturation is visible but cannot discard the durable row.
 
   StreamCollector
     Wraps an SSE async-generator and accumulates only the assistant
@@ -19,23 +20,34 @@ Conversation id resolution is here too, because both the streaming and
 non-streaming paths need it. Order is documented in
 `docs/campaign-2/phase-01-chat-archive-plan.md`.
 
-This module never raises out of the chat path. If it can't archive, it
-logs and increments `chat_archive_writes_total{result="fail"}`.
+Request-time enqueue never raises out of the chat path. Persistence,
+overflow, delivery, and retry each have bounded metrics and logs.
 """
 
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import hashlib
 import json
 import logging
 import time
 import uuid
+from dataclasses import asdict, dataclass
+from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
+import aiosqlite
 import httpx
 
-from audrey.metrics import chat_archive_write_seconds, chat_archive_writes_total
+from audrey.metrics import (
+    chat_archive_enqueue_seconds,
+    chat_archive_queue_depth,
+    chat_archive_queue_events_total,
+    chat_archive_write_seconds,
+    chat_archive_writes_total,
+)
 from audrey.tools.discovery import ToolRegistry
 
 log = logging.getLogger(__name__)
@@ -62,50 +74,59 @@ def resolve_conversation_id(
 ) -> str:
     """Pick a conversation id, in this order:
 
-      1. `chat_id` at the top of the request body (OWUI sends it here).
-      2. `metadata.chat_id` if OWUI nests it.
-      3. `messages[-1].metadata.chat_id`.
-      4. Deterministic hash of `(user, prefix-hash of message contents)`
-         so a second request in the same OWUI tab still stitches.
-      5. Fresh UUID — last resort.
+      1. Top-level `chat_id` or `conversation_id`.
+      2. Either id nested in top-level `metadata`.
+      3. Either id in validated message metadata, newest first.
+      4. Deterministic hash of the authenticated user and first user turn.
+      5. Fresh UUID when no stable material exists.
 
-    Steps 1–3 are the OWUI fast path. Step 4 lets the archive remain
-    useful even when OWUI changes (or removes) its `chat_id` semantics.
+    The fallback deliberately ignores later history. A client that resends
+    the whole growing thread therefore keeps one id from turn one onward.
     """
-    if raw_payload:
-        cid = raw_payload.get("chat_id")
-        if isinstance(cid, str) and cid.strip():
-            return cid.strip()
-        meta = raw_payload.get("metadata")
-        if isinstance(meta, dict):
-            cid = meta.get("chat_id")
-            if isinstance(cid, str) and cid.strip():
-                return cid.strip()
-    if messages:
-        last = messages[-1]
-        if isinstance(last, dict):
-            meta = last.get("metadata")
-            if isinstance(meta, dict):
-                cid = meta.get("chat_id")
-                if isinstance(cid, str) and cid.strip():
-                    return cid.strip()
+    def explicit_id(source: dict[str, Any] | None) -> str | None:
+        if not isinstance(source, dict):
+            return None
+        for key in ("chat_id", "conversation_id"):
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                cleaned = value.strip()
+                if len(cleaned) <= 200:
+                    return cleaned
+                digest = hashlib.sha256(cleaned.encode("utf-8")).hexdigest()[:32]
+                return f"client-{digest}"
+        return None
 
-    # Step 4: derive from the message-history prefix. Same user resending
-    # the same opening turns lands on the same conversation id, so two
-    # requests in the same OWUI tab stitch even without explicit metadata.
+    if raw_payload:
+        if cid := explicit_id(raw_payload):
+            return cid
+        if cid := explicit_id(raw_payload.get("metadata")):
+            return cid
+    for message in reversed(messages):
+        if not isinstance(message, dict):
+            continue
+        if cid := explicit_id(message.get("metadata")):
+            return cid
+
+    # Step 4: only stable first-turn material participates. Hashing a fixed
+    # slice of the *current* history changed the id while the first six
+    # messages were still accumulating.
     if user_id and messages:
-        h = hashlib.sha256()
-        h.update(user_id.encode("utf-8"))
-        for m in messages[:6]:  # six is enough to pin a thread without being brittle
-            role = str(m.get("role", ""))
-            content = m.get("content", "")
+        first_user = next(
+            (
+                message for message in messages
+                if isinstance(message, dict) and message.get("role") == "user"
+            ),
+            None,
+        )
+        if first_user is not None:
+            content = first_user.get("content", "")
             if not isinstance(content, str):
-                content = json.dumps(content, sort_keys=True)
-            h.update(b"|")
-            h.update(role.encode("utf-8"))
-            h.update(b"|")
+                content = json.dumps(content, sort_keys=True, separators=(",", ":"))
+            h = hashlib.sha256()
+            h.update(user_id.encode("utf-8"))
+            h.update(b"|first-user|")
             h.update(content.encode("utf-8"))
-        return f"derived-{h.hexdigest()[:24]}"
+            return f"derived-{h.hexdigest()[:24]}"
 
     # Step 5.
     return f"fresh-{uuid.uuid4().hex}"
@@ -188,16 +209,89 @@ class StreamCollector:
             self.feed_text(content)
 
 
-# ─── ChatArchiveClient ────────────────────────────────────────────────
+# ─── Durable response-time queue ──────────────────────────────────────
+
+class ArchiveDelivery(StrEnum):
+    """The queue either finalizes or retains one durable source row."""
+
+    DELIVERED = "delivered"
+    RETRY = "retry"
+
+
+@dataclass(frozen=True, slots=True)
+class ArchiveJob:
+    """Serializable archive request with a stable retry identity."""
+
+    archive_id: str
+    created_at: str
+    user_id: str
+    conversation_id: str
+    user_content: str
+    assistant_content: str
+    partial: bool = False
+    virtual_model: str = ""
+    concrete_model: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        user_id: str,
+        conversation_id: str,
+        user_content: str,
+        assistant_content: str,
+        partial: bool = False,
+        virtual_model: str = "",
+        concrete_model: str = "",
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        archive_id: str = "",
+        created_at: str = "",
+    ) -> ArchiveJob:
+        return cls(
+            archive_id=archive_id or uuid.uuid4().hex,
+            created_at=created_at or _now_iso(),
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_content=user_content[:_MAX_CONTENT_CHARS],
+            assistant_content=assistant_content[:_MAX_CONTENT_CHARS],
+            partial=partial,
+            virtual_model=virtual_model,
+            concrete_model=concrete_model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
+
+    def payload(self) -> dict[str, Any]:
+        return {
+            "archive_id": self.archive_id,
+            "created_at": self.created_at,
+            "user": self.user_id,
+            "conversation_id": self.conversation_id,
+            "user_content": self.user_content,
+            "assistant_content": self.assistant_content,
+            "partial": self.partial,
+            "virtual_model": self.virtual_model,
+            "concrete_model": self.concrete_model,
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+        }
+
+
+def _now_iso() -> str:
+    return dt.datetime.now(dt.UTC).isoformat(timespec="microseconds")
+
+
+def _retry_at(seconds: float) -> str:
+    return (
+        dt.datetime.now(dt.UTC) + dt.timedelta(seconds=seconds)
+    ).isoformat(timespec="microseconds")
+
 
 class ChatArchiveClient:
-    """Best-effort writer to custom-tools' internal archive route.
-
-    The client looks up the host server from the registry's
-    `chat_history_search` entry. If that tool isn't registered, archive
-    is treated as disabled — `archive_turn` short-circuits to a
-    `result="skipped"` metric increment.
-    """
+    """Best-effort transport to custom-tools' internal archive route."""
 
     __slots__ = ("_http", "_timeout_s")
 
@@ -213,6 +307,43 @@ class ChatArchiveClient:
             return None
         return spec.server_url
 
+    async def deliver_job(
+        self,
+        *,
+        registry: ToolRegistry | None,
+        job: ArchiveJob,
+    ) -> tuple[ArchiveDelivery, str]:
+        """Attempt one delivery and return whether its source row may clear."""
+        host = self.host_url(registry)
+        if host is None:
+            chat_archive_writes_total.labels(result="deferred").inc()
+            return ArchiveDelivery.RETRY, "chat_history_search is not registered"
+
+        url = f"{host}{_ARCHIVE_WRITE_PATH}"
+        t0 = time.perf_counter()
+        try:
+            response = await self._http.post(
+                url,
+                json=job.payload(),
+                timeout=self._timeout_s,
+            )
+            chat_archive_write_seconds.observe(time.perf_counter() - t0)
+            if response.status_code >= 400:
+                chat_archive_writes_total.labels(result="fail").inc()
+                error = f"HTTP {response.status_code}: {response.text[:200]}"
+                log.warning("chat_archive: write failed %s", error)
+                return ArchiveDelivery.RETRY, error
+            chat_archive_writes_total.labels(
+                result="partial" if job.partial else "ok",
+            ).inc()
+            return ArchiveDelivery.DELIVERED, ""
+        except (httpx.HTTPError, TimeoutError) as exc:
+            chat_archive_write_seconds.observe(time.perf_counter() - t0)
+            chat_archive_writes_total.labels(result="fail").inc()
+            error = f"{type(exc).__name__}: {exc}"[:500]
+            log.warning("chat_archive: write transport error: %s", error)
+            return ArchiveDelivery.RETRY, error
+
     async def archive_turn(
         self,
         *,
@@ -226,53 +357,401 @@ class ChatArchiveClient:
         concrete_model: str = "",
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
+        archive_id: str = "",
+        created_at: str = "",
     ) -> None:
-        """Fire-and-log archive write. Never raises."""
-        if not user_id:
+        """Compatibility direct write. The application uses the queue below."""
+        if not user_id or (not user_content and not assistant_content):
             chat_archive_writes_total.labels(result="skipped").inc()
             return
-        host = self.host_url(registry)
-        if host is None:
+        job = ArchiveJob.create(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_content=user_content,
+            assistant_content=assistant_content,
+            partial=partial,
+            virtual_model=virtual_model,
+            concrete_model=concrete_model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            archive_id=archive_id,
+            created_at=created_at,
+        )
+        await self.deliver_job(registry=registry, job=job)
+
+
+_OUTBOX_SCHEMA = """
+CREATE TABLE IF NOT EXISTS archive_write_outbox (
+    archive_id       TEXT PRIMARY KEY,
+    payload_json     TEXT NOT NULL,
+    created_at       TEXT NOT NULL,
+    attempts         INTEGER NOT NULL DEFAULT 0,
+    last_attempt_at  TEXT,
+    last_error       TEXT,
+    next_attempt_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_archive_write_due
+    ON archive_write_outbox(next_attempt_at, created_at);
+"""
+
+
+class ChatArchiveQueue:
+    """Durable outbox with a bounded in-process wake channel.
+
+    Every response first commits a compact source row to local SQLite. The
+    bounded asyncio queue carries only wake signals, so a full channel never
+    loses the turn: overflow is logged/counted and the worker discovers the
+    durable row on its next scan. Remote HTTP, embedding, and Qdrant work all
+    happen in the lifecycle-owned worker rather than the response path.
+    """
+
+    def __init__(
+        self,
+        *,
+        client: ChatArchiveClient,
+        registry: ToolRegistry,
+        sqlite_path: Path,
+        maxsize: int = 128,
+        retry_interval_s: float = 30.0,
+    ) -> None:
+        if maxsize < 1:
+            raise ValueError("chat archive queue maxsize must be positive")
+        if retry_interval_s <= 0:
+            raise ValueError("chat archive retry interval must be positive")
+        self._client = client
+        self._registry = registry
+        self._sqlite_path = sqlite_path
+        self._retry_interval_s = retry_interval_s
+        self._signals: asyncio.Queue[str] = asyncio.Queue(maxsize=maxsize)
+        self._db: aiosqlite.Connection | None = None
+        self._db_lock = asyncio.Lock()
+        self._worker: asyncio.Task[None] | None = None
+        self._accepting = False
+
+    def host_url(self, registry: ToolRegistry | None) -> str | None:
+        """Preserve the admin routes' host lookup contract."""
+        return self._client.host_url(registry)
+
+    async def start(self) -> None:
+        if self._db is not None:
+            raise RuntimeError("chat archive queue already started")
+        self._sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+        self._db = await aiosqlite.connect(self._sqlite_path)
+        await self._db.execute("PRAGMA journal_mode=WAL")
+        await self._db.execute("PRAGMA synchronous=NORMAL")
+        await self._db.execute("PRAGMA secure_delete=ON")
+        await self._db.executescript(_OUTBOX_SCHEMA)
+        # A restart is an operator-visible retry boundary: the upstream may
+        # have been repaired while Audrey was down, so do not preserve an old
+        # in-process backoff across the new lifecycle.
+        await self._db.execute(
+            "UPDATE archive_write_outbox SET next_attempt_at = ?",
+            (_now_iso(),),
+        )
+        await self._db.commit()
+        pending = await self.pending_count()
+        chat_archive_queue_depth.set(pending)
+        self._accepting = True
+        self._worker = asyncio.create_task(
+            self._run(),
+            name="chat-archive-outbox",
+        )
+        self._signal("startup")
+        log.info(
+            "chat_archive: queue ready sqlite=%s maxsize=%d pending=%d",
+            self._sqlite_path,
+            self._signals.maxsize,
+            pending,
+        )
+
+    async def stop(self) -> None:
+        self._accepting = False
+        if self._worker is not None:
+            self._worker.cancel()
+            try:
+                await self._worker
+            except asyncio.CancelledError:
+                pass
+            self._worker = None
+        if self._db is not None:
+            try:
+                await self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            finally:
+                await self._db.close()
+            self._db = None
+
+    async def archive_turn(
+        self,
+        *,
+        registry: ToolRegistry | None,
+        user_id: str,
+        conversation_id: str,
+        user_content: str,
+        assistant_content: str,
+        partial: bool = False,
+        virtual_model: str = "",
+        concrete_model: str = "",
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        archive_id: str = "",
+        created_at: str = "",
+    ) -> None:
+        """Commit one retryable source row, then wake the delivery worker."""
+        del registry  # the queue owns the live, in-place ToolRegistry
+        if not user_id or (not user_content and not assistant_content):
             chat_archive_writes_total.labels(result="skipped").inc()
             return
-        if not user_content and not assistant_content:
-            chat_archive_writes_total.labels(result="skipped").inc()
+        if not self._accepting or self._db is None:
+            chat_archive_queue_events_total.labels(result="enqueue_fail").inc()
+            log.error("chat_archive: enqueue rejected while queue is stopped")
             return
 
-        url = f"{host}{_ARCHIVE_WRITE_PATH}"
-        payload = {
-            "user": user_id,
-            "conversation_id": conversation_id,
-            "user_content": user_content[:_MAX_CONTENT_CHARS],
-            "assistant_content": assistant_content[:_MAX_CONTENT_CHARS],
-            "partial": partial,
-            "virtual_model": virtual_model,
-            "concrete_model": concrete_model,
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-        }
-        t0 = time.perf_counter()
+        job = ArchiveJob.create(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_content=user_content,
+            assistant_content=assistant_content,
+            partial=partial,
+            virtual_model=virtual_model,
+            concrete_model=concrete_model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            archive_id=archive_id,
+            created_at=created_at,
+        )
+        encoded = json.dumps(asdict(job), sort_keys=True, separators=(",", ":"))
+        started = time.perf_counter()
         try:
-            r = await self._http.post(url, json=payload, timeout=self._timeout_s)
-            chat_archive_write_seconds.observe(time.perf_counter() - t0)
-            if r.status_code >= 400:
-                chat_archive_writes_total.labels(result="fail").inc()
-                log.warning(
-                    "chat_archive: write failed status=%d body=%s",
-                    r.status_code, r.text[:200],
+            async with self._db_lock:
+                cursor = await self._db.execute(
+                    """
+                    INSERT OR IGNORE INTO archive_write_outbox
+                    (archive_id, payload_json, created_at, next_attempt_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (job.archive_id, encoded, job.created_at, job.created_at),
                 )
-                return
-            chat_archive_writes_total.labels(
-                result="partial" if partial else "ok",
-            ).inc()
-        except (httpx.HTTPError, TimeoutError) as e:
-            chat_archive_write_seconds.observe(time.perf_counter() - t0)
-            chat_archive_writes_total.labels(result="fail").inc()
-            log.warning("chat_archive: write transport error: %s: %s", type(e).__name__, e)
+                inserted = cursor.rowcount > 0
+                await cursor.close()
+                await self._db.commit()
+        except Exception as exc:  # noqa: BLE001 — persistence must fail soft
+            try:
+                await self._db.rollback()
+            except Exception:  # noqa: BLE001, S110 — preserve original failure
+                pass
+            chat_archive_enqueue_seconds.observe(time.perf_counter() - started)
+            chat_archive_queue_events_total.labels(result="enqueue_fail").inc()
+            log.error(
+                "chat_archive: durable enqueue failed: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            return
+        chat_archive_enqueue_seconds.observe(time.perf_counter() - started)
+        if inserted:
+            chat_archive_queue_depth.inc()
+
+        if self._signal(job.archive_id):
+            chat_archive_queue_events_total.labels(result="enqueued").inc()
+        else:
+            chat_archive_queue_events_total.labels(result="overflow").inc()
+            log.warning(
+                "chat_archive: wake queue full; durable source retained archive_id=%s",
+                job.archive_id,
+            )
+
+    async def pending_count(self) -> int:
+        if self._db is None:
+            return 0
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                "SELECT COUNT(*) FROM archive_write_outbox"
+            )
+            count = int((await cursor.fetchone())[0])
+            await cursor.close()
+        return count
+
+    async def stats(self) -> dict[str, Any]:
+        """Small operational/test view of the durable source backlog."""
+        if self._db is None:
+            return {
+                "pending": 0,
+                "attempts": 0,
+                "oldest_created_at": "",
+                "last_attempt_at": "",
+                "last_error": "",
+            }
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                """
+                SELECT COUNT(*), COALESCE(SUM(attempts), 0), MIN(created_at)
+                FROM archive_write_outbox
+                """
+            )
+            pending, attempts, oldest_created_at = await cursor.fetchone()
+            await cursor.close()
+            cursor = await self._db.execute(
+                """
+                SELECT last_attempt_at, last_error FROM archive_write_outbox
+                WHERE last_attempt_at IS NOT NULL
+                ORDER BY last_attempt_at DESC LIMIT 1
+                """
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+        return {
+            "pending": int(pending),
+            "attempts": int(attempts),
+            "oldest_created_at": str(oldest_created_at or ""),
+            "last_attempt_at": str(row[0]) if row else "",
+            "last_error": str(row[1] or "") if row else "",
+        }
+
+    def _signal(self, archive_id: str) -> bool:
+        try:
+            self._signals.put_nowait(archive_id)
+        except asyncio.QueueFull:
+            return False
+        return True
+
+    async def _next_due(self) -> ArchiveJob | None:
+        if self._db is None:
+            return None
+        now = _now_iso()
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                """
+                SELECT archive_id, payload_json
+                FROM archive_write_outbox
+                WHERE next_attempt_at <= ?
+                ORDER BY next_attempt_at, created_at
+                LIMIT 1
+                """,
+                (now,),
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+            if row is None:
+                return None
+            archive_id, payload_json = str(row[0]), str(row[1])
+            await self._db.execute(
+                """
+                UPDATE archive_write_outbox
+                SET attempts = attempts + 1, last_attempt_at = ?
+                WHERE archive_id = ?
+                """,
+                (now, archive_id),
+            )
+            await self._db.commit()
+        try:
+            return ArchiveJob(**json.loads(payload_json))
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            await self._defer(archive_id, f"invalid durable payload: {exc}")
+            return None
+
+    async def _finalize(self, archive_id: str) -> None:
+        if self._db is None:
+            return
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                "DELETE FROM archive_write_outbox WHERE archive_id = ?",
+                (archive_id,),
+            )
+            deleted = max(0, cursor.rowcount)
+            await cursor.close()
+            await self._db.commit()
+        if deleted:
+            chat_archive_queue_depth.dec(deleted)
+
+    async def _defer(self, archive_id: str, error: str) -> None:
+        if self._db is None:
+            return
+        async with self._db_lock:
+            await self._db.execute(
+                """
+                UPDATE archive_write_outbox
+                SET last_error = ?, next_attempt_at = ?
+                WHERE archive_id = ?
+                """,
+                (error[:500], _retry_at(self._retry_interval_s), archive_id),
+            )
+            await self._db.commit()
+
+    async def _has_due(self) -> bool:
+        if self._db is None:
+            return False
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                """
+                SELECT 1 FROM archive_write_outbox
+                WHERE next_attempt_at <= ? LIMIT 1
+                """,
+                (_now_iso(),),
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+        return row is not None
+
+    async def _deliver_one(self) -> None:
+        job = await self._next_due()
+        if job is None:
+            return
+        try:
+            outcome, error = await self._client.deliver_job(
+                registry=self._registry,
+                job=job,
+            )
+        except Exception as exc:  # noqa: BLE001 — worker must survive one job
+            outcome = ArchiveDelivery.RETRY
+            error = f"{type(exc).__name__}: {exc}"[:500]
+        if outcome is ArchiveDelivery.DELIVERED:
+            await self._finalize(job.archive_id)
+            chat_archive_queue_events_total.labels(result="delivered").inc()
+        else:
+            await self._defer(job.archive_id, error)
+            chat_archive_queue_events_total.labels(result="retry").inc()
+            log.warning(
+                "chat_archive: durable delivery deferred archive_id=%s error=%s",
+                job.archive_id,
+                error,
+            )
+
+    async def _run(self) -> None:
+        while True:
+            received = False
+            try:
+                try:
+                    await asyncio.wait_for(
+                        self._signals.get(),
+                        timeout=self._retry_interval_s,
+                    )
+                    received = True
+                except TimeoutError:
+                    pass
+                await self._deliver_one()
+                # One signal is enough to begin draining any startup/overflow
+                # backlog. Extra signals remain bounded and harmless.
+                if await self._has_due():
+                    self._signal("backlog")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 — keep the owner alive
+                log.error(
+                    "chat_archive: queue worker iteration failed: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
+                await asyncio.sleep(min(self._retry_interval_s, 5.0))
+            finally:
+                if received:
+                    self._signals.task_done()
 
 
 __all__ = [
+    "ArchiveDelivery",
+    "ArchiveJob",
     "ChatArchiveClient",
+    "ChatArchiveQueue",
     "StreamCollector",
     "resolve_conversation_id",
 ]

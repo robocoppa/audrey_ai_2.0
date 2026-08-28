@@ -15,6 +15,7 @@ real OWUI/Qdrant clients. Same pattern `test_auth.py` uses for
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -215,3 +216,47 @@ async def test_chat_archive_503_when_tool_not_registered(handler_name):
         await handler(request, _fake_admin())
     assert exc.value.status_code == 503
     assert "not_registered" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_chat_archive_stats_include_local_delivery_queue(monkeypatch):
+    from audrey.routes import admin as admin_module
+
+    class _Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"messages": 12, "chunks_reindex_pending": 0}
+
+    class _Http:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url):
+            return _Response()
+
+    monkeypatch.setattr(admin_module.httpx, "AsyncClient", lambda **_kwargs: _Http())
+    queue_stats = AsyncMock(return_value={
+        "pending": 2,
+        "attempts": 3,
+        "last_error": "upstream unavailable",
+    })
+    archive_client = SimpleNamespace(
+        host_url=lambda _registry: "http://custom-tools:8001",
+        stats=queue_stats,
+    )
+    request = _archive_request(archive_client, registry=object())
+
+    result = await admin_module.chat_archive_stats(request, _fake_admin())
+
+    assert result["messages"] == 12
+    assert result["delivery_queue"] == {
+        "pending": 2,
+        "attempts": 3,
+        "last_error": "upstream unavailable",
+    }
+    queue_stats.assert_awaited_once_with()

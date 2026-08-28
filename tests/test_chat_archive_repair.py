@@ -181,6 +181,14 @@ async def test_init_migrates_pre_repair_archive_schema(tmp_path: Path):
         )
         assert await cursor.fetchone() is not None
         await cursor.close()
+        cursor = await store._db.execute(
+            """
+            SELECT name FROM sqlite_master
+            WHERE type = 'table' AND name = 'archive_maintenance_state'
+            """
+        )
+        assert await cursor.fetchone() is not None
+        await cursor.close()
     finally:
         await store.aclose()
 
@@ -215,7 +223,10 @@ async def test_embed_failure_reindexes_after_restart(tmp_path: Path, monkeypatch
             "failed": 0,
         }
         assert len(qdrant.points) == 1
-        assert (await restarted.stats())["chunks_unindexed"] == 0
+        stats = await restarted.stats()
+        assert stats["chunks_unindexed"] == 0
+        assert stats["index_last_attempt_at"]
+        assert stats["index_last_error"] == ""
     finally:
         await restarted.aclose()
 
@@ -236,6 +247,44 @@ async def test_upsert_retry_is_idempotent(tmp_path: Path, monkeypatch):
         assert second["reindex"]["attempted"] == 0
         assert len(qdrant.points) == 1
         assert qdrant.upsert_calls == 2
+    finally:
+        await store.aclose()
+
+
+async def test_repeated_delivery_id_does_not_duplicate_source_rows(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.setattr(archive_module, "_embed", _good_embed)
+    qdrant = _FakeQdrant()
+    store = await _make_store(tmp_path / "archive.db", qdrant)
+    try:
+        kwargs = {
+            "user": "alice@example.com",
+            "conversation_id": "conv-1",
+            "user_content": "same question",
+            "assistant_content": "same answer",
+            "archive_id": "stable-delivery-id",
+        }
+        first = await store.archive_turn(
+            **kwargs,
+            created_at="2026-08-28T12:00:00+00:00",
+        )
+        second = await store.archive_turn(
+            **kwargs,
+            created_at="2026-08-28T13:00:00+00:00",
+        )
+
+        assert first["user_message_id"] == second["user_message_id"]
+        assert first["assistant_message_id"] == second["assistant_message_id"]
+        assert store._db is not None
+        cursor = await store._db.execute("SELECT COUNT(*) FROM messages")
+        assert int((await cursor.fetchone())[0]) == 2
+        await cursor.close()
+        cursor = await store._db.execute("SELECT COUNT(*) FROM archive_chunks")
+        assert int((await cursor.fetchone())[0]) == 1
+        await cursor.close()
+        assert len(qdrant.points) == 1
     finally:
         await store.aclose()
 
@@ -323,6 +372,8 @@ async def test_failed_delete_survives_restart_and_is_hidden_from_search(
         stats = await restarted.stats()
         assert stats["messages"] == 0
         assert stats["chunks"] == 0
+        assert stats["delete_last_attempt_at"]
+        assert stats["delete_last_error"] == ""
         assert qdrant.points == {}
 
         await restarted.maintain()

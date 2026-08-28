@@ -153,7 +153,11 @@ async def chat_archive_stats(
         r = await http.get(f"{host}/chat_history/stats")
     if r.status_code >= 400:
         return {"error": "stats_failed", "status": r.status_code}
-    return r.json()
+    result = r.json()
+    queue_stats = getattr(archive_client, "stats", None)
+    if callable(queue_stats):
+        result["delivery_queue"] = await queue_stats()
+    return result
 
 
 @router.post("/kb/reconcile")

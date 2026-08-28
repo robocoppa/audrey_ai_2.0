@@ -173,7 +173,10 @@ async def _handle_passthrough(
     registry: ModelRegistry = app.state.registry
     concrete, location = _resolve_passthrough_model(payload.model, cfg, registry, me)
 
-    messages = [m.model_dump(exclude_none=True) for m in payload.messages]
+    messages = [
+        message.model_dump(exclude_none=True, exclude={"metadata"})
+        for message in payload.messages
+    ]
     options = _options_from_request(payload)
     timeout_s = float(cfg.timeouts.get("medium", 180))
     inflight = app.state.inflight

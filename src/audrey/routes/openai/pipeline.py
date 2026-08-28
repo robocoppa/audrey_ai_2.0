@@ -43,7 +43,7 @@ from audrey.pipeline.banners import (
     worker_ok,
 )
 from audrey.pipeline.chat_archive import (
-    ChatArchiveClient,
+    ChatArchiveQueue,
     StreamCollector,
 )
 from audrey.pipeline.classify import classify_with_registry
@@ -139,10 +139,9 @@ async def _generate_via_pipeline(
         except OllamaError as e:
             raise HTTPException(status_code=502, detail=f"Ollama error: {e}") from e
 
-    # Archive after the response is produced. Best-effort: never raises,
-    # never delays the response (we await before returning to the client
-    # but the tool-server call is bounded by ChatArchiveClient's timeout).
-    archive_client: ChatArchiveClient | None = getattr(app.state, "archive_client", None)
+    # Commit the compact local outbox row after generation. Remote HTTP,
+    # embedding, and Qdrant indexing belong to the lifecycle-owned worker.
+    archive_client: ChatArchiveQueue | None = getattr(app.state, "archive_client", None)
     if archive_client is not None:
         await archive_client.archive_turn(
             registry=app.state.tools,
@@ -245,7 +244,7 @@ async def _stream_via_pipeline(
     inflight = app.state.inflight
     router_cfg = cfg.router
 
-    archive_client: ChatArchiveClient | None = getattr(app.state, "archive_client", None)
+    archive_client: ChatArchiveQueue | None = getattr(app.state, "archive_client", None)
     collector = StreamCollector()
     chosen_concrete: str = "?"
     is_deep_branch = False  # deep handles its own archive write to skip banners

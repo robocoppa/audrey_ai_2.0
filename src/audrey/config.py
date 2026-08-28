@@ -392,6 +392,36 @@ def _validate_upload_limits(merged: dict[str, Any]) -> None:
         )
 
 
+def _validate_chat_archive(merged: dict[str, Any]) -> None:
+    """Reject archive queue settings that cannot honor their contract."""
+    archive = merged.get("chat_archive")
+    if archive is None:
+        return
+    if not isinstance(archive, dict):
+        raise ValueError("Invalid chat_archive configuration: expected an object")
+    if not isinstance(archive.get("enabled", True), bool):
+        raise ValueError("Invalid chat_archive.enabled: expected true or false")
+    queue = archive.get("queue", {})
+    if not isinstance(queue, dict):
+        raise ValueError("Invalid chat_archive.queue configuration: expected an object")
+
+    sqlite_path = queue.get("sqlite_path", "/data/chat_archive_outbox.sqlite")
+    maxsize = queue.get("maxsize", 128)
+    retry_interval = queue.get("retry_interval_s", 30.0)
+    if not isinstance(sqlite_path, str) or not sqlite_path.strip():
+        raise ValueError("Invalid chat_archive.queue.sqlite_path: expected a path")
+    if isinstance(maxsize, bool) or not isinstance(maxsize, int) or maxsize < 1:
+        raise ValueError("Invalid chat_archive.queue.maxsize: expected a positive integer")
+    if (
+        isinstance(retry_interval, bool)
+        or not isinstance(retry_interval, (int, float))
+        or retry_interval <= 0
+    ):
+        raise ValueError(
+            "Invalid chat_archive.queue.retry_interval_s: expected a positive number"
+        )
+
+
 @lru_cache(maxsize=1)
 def get_config() -> Config:
     """Load config once per process. Tests can call `get_config.cache_clear()`."""
@@ -402,6 +432,7 @@ def get_config() -> Config:
     cfg = Config(yaml_cfg, env)
     _validate_deep_panel_pools(cfg.raw)
     _validate_upload_limits(cfg.raw)
+    _validate_chat_archive(cfg.raw)
     return cfg
 
 

@@ -104,9 +104,9 @@ Message compatibility:
 | `assistant` | Text may be null or omitted when function `tool_calls` are present. Call ids and JSON-string arguments are validated. |
 | `tool` | Requires `tool_call_id`; Audrey resolves it to the matching Ollama `tool_name`. |
 
-Unknown fields inside a message are rejected with HTTP 422. The OWUI
-per-message `metadata` extension is accepted for archive identity but excluded
-from model requests.
+Unknown fields inside a message are rejected with HTTP 422. Per-message
+`metadata` is retained through validation for archive identity, then explicitly
+excluded at each model-provider boundary.
 
 Top-level request compatibility:
 
@@ -117,7 +117,7 @@ Top-level request compatibility:
 | `tools` | Forwarded only for `audrey_passthrough/<concrete>`; pipeline models use Audrey-managed tools. |
 | `user` | Accepted but never trusted for identity; the authenticated OWUI user wins. |
 | `think` | Audrey passthrough extension; applied only when the concrete model declares thinking support. |
-| OWUI `chat_id` / `metadata` | Read from the raw request for archive stitching, not forwarded to a model. |
+| `chat_id`, `conversation_id`, `metadata` | Retained for archive stitching, never forwarded to a model. Explicit ids win; otherwise user + first user turn forms a stable fallback. |
 | `tool_choice`, `parallel_tool_calls`, `response_format`, `seed`, `stop`, penalties, `n`, `logprobs`, `stream_options`, and other unmodelled fields | Accepted for client forward-compatibility but currently ignored. Do not rely on them. |
 
 Function tools are the supported tool type. Assistant call/result relationships
@@ -141,9 +141,11 @@ datetime injection
 
 Per-user fair scheduling (`FairLocalGate`) round-robins across users at the
 local-GPU bottleneck. Per-user in-flight cap (default 3) prevents one user
-from saturating the queue. Cloud calls bypass the gate. Every chat is captured
-to the per-user chat archive (SQLite source-of-truth + Qdrant index) so the
-model can search prior conversations via `chat_history_search`.
+from saturating the queue. Cloud calls bypass the gate. Every chat is first
+committed to Audrey's local durable outbox; one bounded lifecycle-owned worker
+delivers it to the per-user chat archive (SQLite source-of-truth + Qdrant index)
+without putting remote embedding/indexing latency on the response. The model
+can search prior conversations via `chat_history_search`.
 
 ## Documentation
 

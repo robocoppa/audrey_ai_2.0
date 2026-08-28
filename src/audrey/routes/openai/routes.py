@@ -9,7 +9,6 @@ pipeline, and wires streaming vs non-streaming. The heavy lifting lives in
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from typing import Any
@@ -116,7 +115,14 @@ async def chat_completions(
             payload.user, me.email,
         )
 
-    messages = [m.model_dump(exclude_none=True) for m in payload.messages]
+    identity_messages = [
+        message.model_dump(exclude_none=True)
+        for message in payload.messages
+    ]
+    messages = [
+        message.model_dump(exclude_none=True, exclude={"metadata"})
+        for message in payload.messages
+    ]
 
     # Specialist task role, injected once here so it reaches the streaming and
     # non-streaming paths alike and does not depend on memory being enabled or
@@ -141,16 +147,17 @@ async def chat_completions(
         log.info("incoming.payload.content: %s", heads)
     options = _options_from_request(payload)
 
-    # Resolve conversation id once, before pipeline branches. Reads OWUI
-    # `chat_id` from the raw request body when present so a continued OWUI
-    # thread stitches in the archive; falls back to a deterministic hash
-    # of the message-history prefix otherwise.
-    try:
-        raw_payload = await request.json()
-    except (json.JSONDecodeError, ValueError):
-        raw_payload = None
+    # Resolve once from explicitly modelled client ids and the untouched
+    # identity view. The provider view above has metadata removed on purpose.
+    raw_payload = {
+        "chat_id": payload.chat_id,
+        "conversation_id": payload.conversation_id,
+        "metadata": payload.metadata,
+    }
     conversation_id = resolve_conversation_id(
-        user_id=me.email, raw_payload=raw_payload, messages=messages,
+        user_id=me.email,
+        raw_payload=raw_payload,
+        messages=identity_messages,
     )
     user_turn_text = last_user_text(messages)
 
@@ -171,4 +178,3 @@ async def chat_completions(
         conversation_id=conversation_id,
         user_turn_text=user_turn_text,
     )
-

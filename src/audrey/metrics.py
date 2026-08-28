@@ -227,18 +227,35 @@ tool_call_seconds = Histogram(
 # Best-effort archive writes must not be silent failures. Outcome
 # enumerates the cases the operator actually cares about: ok, partial
 # (stream cut short but persisted), fail (HTTP/transport failure),
-# skipped (no user / archive disabled).
+# deferred (host discovery unavailable), skipped (no usable content).
 
 chat_archive_writes_total = Counter(
     "audrey_chat_archive_writes_total",
     "Chat archive write attempts from Audrey to custom-tools.",
-    labelnames=("result",),  # result ∈ {ok, partial, fail, skipped}
+    labelnames=("result",),  # result ∈ {ok, partial, fail, deferred, skipped}
 )
 
 chat_archive_write_seconds = Histogram(
     "audrey_chat_archive_write_seconds",
     "Latency of the archive-write call from Audrey's side.",
     buckets=_TOOL_BUCKETS,
+)
+
+chat_archive_queue_events_total = Counter(
+    "audrey_chat_archive_queue_events_total",
+    "Durable chat-archive queue events inside Audrey.",
+    labelnames=("result",),
+)
+
+chat_archive_queue_depth = Gauge(
+    "audrey_chat_archive_queue_depth",
+    "Durable chat-archive source rows awaiting delivery.",
+)
+
+chat_archive_enqueue_seconds = Histogram(
+    "audrey_chat_archive_enqueue_seconds",
+    "Latency of the local durable chat-archive enqueue.",
+    buckets=(0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0),
 )
 
 
@@ -266,4 +283,7 @@ __all__ = [
     "tool_call_seconds",
     "chat_archive_writes_total",
     "chat_archive_write_seconds",
+    "chat_archive_queue_events_total",
+    "chat_archive_queue_depth",
+    "chat_archive_enqueue_seconds",
 ]

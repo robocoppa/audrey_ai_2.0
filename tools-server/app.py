@@ -909,6 +909,8 @@ async def get_file_text(req: GetFileTextRequest) -> GetFileTextResponse:
 # The model never sees them, only Audrey's archive client and ops.
 
 class ArchiveTurnRequest(BaseModel):
+    archive_id: Annotated[str, Field(max_length=128)] = ""
+    created_at: Annotated[str, Field(max_length=64)] = ""
     user: Annotated[str, Field(min_length=1, max_length=200)]
     conversation_id: Annotated[str, Field(min_length=1, max_length=200)]
     user_content: str
@@ -933,6 +935,8 @@ async def chat_history_archive(req: ArchiveTurnRequest) -> dict[str, Any]:
         concrete_model=req.concrete_model,
         prompt_tokens=req.prompt_tokens,
         completion_tokens=req.completion_tokens,
+        archive_id=req.archive_id,
+        created_at=req.created_at,
     )
 
 

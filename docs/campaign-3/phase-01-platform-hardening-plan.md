@@ -1,7 +1,7 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress. Waves 1A, 1B, and 1C.1 are Unraid-verified; Wave 1C.2
-archive repair is laptop-green and awaiting deployment.
+**Status:** In progress. Waves 1A, 1B, and 1C.1–1C.2 are Unraid-verified; Wave
+1C.3 archive capture is laptop-green and awaiting deployment.
 
 ## Goal
 

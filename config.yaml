@@ -1299,6 +1299,18 @@ fairness:
   max_inflight_per_user: 3               # concurrent requests per user
   max_tracked_users: 1024                # LRU cap on the in-flight registry
 
+# ─── Response-time chat archive capture ──────────────────────────────
+# The response path commits only a compact SQLite source row. One lifecycle-
+# owned worker delivers it to custom-tools, where embedding/Qdrant work can be
+# slow without delaying the client. The in-memory queue contains wake signals,
+# not the source: overflow remains retryable from SQLite and is metric/logged.
+chat_archive:
+  enabled: true
+  queue:
+    sqlite_path: "/data/chat_archive_outbox.sqlite"
+    maxsize: 128
+    retry_interval_s: 30
+
 # ─── Vision sidecar ────────────────────────────────────────────────────
 # Only the models in `model_registry.vl` have a vision encoder. Everything
 # else is text-in/text-out — hand `glm-5.2:cloud` an attached image and it

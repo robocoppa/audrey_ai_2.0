@@ -111,7 +111,7 @@ def test_assistant_tool_call_allows_null_content_and_round_trips():
     assert dumped[2]["tool_call_id"] == "call_weather_1"
 
 
-def test_owui_metadata_extensions_validate_but_do_not_reach_models():
+def test_owui_metadata_extensions_survive_validation_but_can_be_stripped():
     req = ChatCompletionRequest(
         model="audrey_auto",
         messages=[{
@@ -122,7 +122,16 @@ def test_owui_metadata_extensions_validate_but_do_not_reach_models():
         chat_id="owui-chat-1",
     )
     assert req.messages[0].metadata == {"chat_id": "owui-chat-1"}
+    assert req.chat_id == "owui-chat-1"
     assert req.messages[0].model_dump(exclude_none=True) == {
+        "role": "user",
+        "content": "Hello",
+        "metadata": {"chat_id": "owui-chat-1"},
+    }
+    assert req.messages[0].model_dump(
+        exclude_none=True,
+        exclude={"metadata"},
+    ) == {
         "role": "user",
         "content": "Hello",
     }

@@ -21,10 +21,10 @@ class _StrictChatMessage(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # Older OWUI payloads attach conversation metadata to a message. The route
-    # reads it from the raw body for archive identity; model providers must not
-    # receive it as prompt data.
-    metadata: dict[str, Any] | None = Field(default=None, exclude=True)
+    # Older OWUI payloads attach conversation metadata to a message. Preserve
+    # it through validation for archive identity; route adapters explicitly
+    # exclude it at the model-provider boundary.
+    metadata: dict[str, Any] | None = None
 
 
 class SystemChatMessage(_StrictChatMessage):
@@ -100,6 +100,11 @@ class ChatCompletionRequest(BaseModel):
     model: str
     messages: list[ChatMessage] = Field(min_length=1)
     stream: bool = False
+    # Client-owned conversation identity extensions. They are accepted and
+    # retained for archive stitching but never forwarded to model providers.
+    chat_id: str | None = Field(default=None, exclude=True)
+    conversation_id: str | None = Field(default=None, exclude=True)
+    metadata: dict[str, Any] | None = Field(default=None, exclude=True)
     temperature: float | None = None
     top_p: float | None = None
     max_tokens: int | None = None
@@ -170,4 +175,3 @@ class ChatCompletionRequest(BaseModel):
                     )
                 answered.add(message.tool_call_id)
         return self
-
