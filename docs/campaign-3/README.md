@@ -1,7 +1,8 @@
 # Campaign 3 — correctness foundations, Audrey UI, and reusable skills
 
-**Status:** In progress as of 2026-08-28. Waves 1A, 1B, and 1C.1–1C.3 are
-Unraid-verified; Wave 1C.4 is laptop-complete and awaits its Unraid smoke.
+**Status:** In progress as of 2026-08-29. Waves 1A, 1B, and 1C.1–1C.3 are
+Unraid-verified; Wave 1C.4 is deployed with normal deletion verified, and its
+outage/restart recovery smoke remains.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,

@@ -1,8 +1,8 @@
 # Campaign 3 Phase 1 — platform hardening
 
 **Status:** In progress. Waves 1A, 1B, and 1C.1–1C.3 are Unraid-verified; Wave
-1C.4 retryable migration and file deletion is laptop-complete and awaits its
-Unraid smoke.
+1C.4 retryable migration and file deletion is deployed with its normal path
+verified, while the outage/restart recovery smoke remains.
 
 ## Goal
 
@@ -141,7 +141,8 @@ tombstone first, hides pending records from private text/image search, retries
 Qdrant and disk cleanup across restart, and prevents startup reconciliation
 from resurrecting completed deletions. All 2,500 hermetic tests pass; changed-
 file lint, compilation, YAML, and whitespace checks are clean. Deployment and
-failure-recovery evidence remain pending.
+failure-recovery evidence remains pending. On 2026-08-29 the deployed normal
+delete recorded requested=1, completed=1, and pending=0.
 
 Gate:
 
