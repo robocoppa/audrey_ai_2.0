@@ -82,7 +82,11 @@ model_registry:
     # read as proof of what is installed. It is not. `ollama list` is.
     - { name: "qwen3.8:latest",           priority: 100, speed: 60, quality: 95, location: local }
     - { name: "kimi-k2.7-code:cloud",     priority:  92, speed: 90, quality: 94, location: cloud }
-    - { name: "glm-5.2:cloud",            priority:  88, speed: 90, quality: 91, location: cloud }
+    # ⚠️ 2026-08-29: `glm-5.3:cloud` REPLACES `glm-5.2:cloud` at the same
+    # priority in every role glm held. `ollama list` on the box confirms 5.3 is
+    # pulled. ⚠️ `speed`/`quality` are INHERITED FROM 5.2 and are UNMEASURED for
+    # 5.3 — planner hints only; do not quote them as if they were probed.
+    - { name: "glm-5.3:cloud",            priority:  88, speed: 90, quality: 91, location: cloud }
     - { name: "deepseek-v4-pro:cloud",    priority:  82, speed: 80, quality: 95, location: cloud }
     # The sole LOCAL worker on `deep_panel.code` from 2026-08-16. Registered
     # here because `_validate_deep_panel_pools` requires it, at a priority below
@@ -135,7 +139,8 @@ model_registry:
     # docs/testing/MODEL-FACTS.md. ⛔ NOT for a code pool — see below.
     - { name: "ornith-1.5:35b",           priority:  83, speed: 86, quality: 86, location: local }
     - { name: "llama4:latest",            priority:  65, speed: 55, quality: 90, location: local }
-    - { name: "glm-5.2:cloud",            priority:  62, speed: 90, quality: 88, location: cloud }
+    # Inherited from glm-5.2 with the 2026-08-29 swap; speed/quality UNMEASURED.
+    - { name: "glm-5.3:cloud",            priority:  62, speed: 90, quality: 88, location: cloud }
 
   vl:
     # Vision-language pool — image turns on the chat path route here.
@@ -229,7 +234,11 @@ fast_path:
     - "deepseek-v3.2:cloud"
     - "qwen3.5:397b-cloud"
     - "nemotron-3-super:cloud"
-    - "glm-5.2:cloud"
+    # ✅ `ollama show glm-5.3:cloud` declares `tools` (verified against the box
+    # 2026-08-29, alongside `completion` and `thinking`) — inherited from the
+    # 5.2 slot but re-confirmed, not assumed, because this list gates whether
+    # the fast path runs the TOOL loop at all.
+    - "glm-5.3:cloud"
 
 # ─── Deep panel: mixed (audrey_deep) ───────────────────────────────────
 # One local + TWO cloud workers per task (text tasks). The local worker holds
@@ -272,21 +281,21 @@ deep_panel:
     # no second local draft to cover for it.
     workers: ["nemotron-3.5-lightning:latest", "kimi-k2.7-code:cloud",
               "deepseek-v4-pro:cloud"]
-    # glm-5.2 (cloud) primary synth: skips the local cold-load a LOCAL synth
+    # glm-5.3 (cloud) primary synth: skips the local cold-load a LOCAL synth
     # incurs (synth can't co-reside in VRAM with a local worker under
     # GPU_CONCURRENCY=1, so it has to load AFTER the worker unloads). Measured
     # on qwen3.6:35b; the argument is about locality, not the model, so it
     # survives the 2026-08-15 swap. The local model stays as the fallback if
     # the cloud synth call fails.
-    synthesizer: "glm-5.2:cloud"
+    synthesizer: "glm-5.3:cloud"
     fallback_synth: "qwen3.8:latest"
   reasoning:
     workers: ["qwen3.8:latest", "kimi-k2.6:cloud", "deepseek-v4-pro:cloud"]
-    synthesizer: "glm-5.2:cloud"
+    synthesizer: "glm-5.3:cloud"
     fallback_synth: "qwen3.8:latest"
   general:
     workers: ["qwen3.8:latest", "kimi-k2.6:cloud", "deepseek-v4-pro:cloud"]
-    synthesizer: "glm-5.2:cloud"
+    synthesizer: "glm-5.3:cloud"
     fallback_synth: "qwen3.8:latest"
   # vl stays one local + one cloud: the deep path rebuilds prompts text-only,
   # so the cloud workers never see the image — and image turns force the fast
@@ -295,11 +304,12 @@ deep_panel:
   vl:
     workers: ["qwen3-vl:32b", "kimi-k2.6:cloud"]
     synthesizer: "qwen3.8:latest"
-    fallback_synth: "glm-5.2:cloud"
+    fallback_synth: "glm-5.3:cloud"
 
 # ─── Deep panel: cloud-only (audrey_cloud) ─────────────────────────────
 # Both workers run in parallel (Ollama Pro caps at 3 concurrent cloud).
-# glm-5.2 leads and synthesizes (2026-07-30). Each task keeps its existing
+# glm leads and synthesizes (glm-5.2 from 2026-07-30; glm-5.3 took the slot
+# unchanged on 2026-08-29). Each task keeps its existing
 # second worker for vendor diversity, and deepseek-v4-pro — which held both
 # slots before — becomes the degrade target, so a glm outage falls onto a
 # different vendor rather than a second glm call.
@@ -307,7 +317,7 @@ deep_panel_cloud:
   code:
     # 2026-08-17: `kimi-k2.7-code` REPLACES `minimax-m3`, which is off the box.
     # ⚠️ This was a forced swap, not a free one — dropping minimax without a
-    # replacement would have left ONE worker synthesised by ITSELF (`glm-5.2`
+    # replacement would have left ONE worker synthesised by ITSELF (glm
     # holds both slots), which drafts once and then "merges" its own only draft:
     # strictly more latency than answering directly, for nothing. Caught by
     # `test_no_flat_panel_is_degenerate`, which asserts on DISTINCT names.
@@ -325,21 +335,23 @@ deep_panel_cloud:
     # ⚠️⚠️ THREE cloud workers sits EXACTLY ON the cap of 3. A fourth is dropped
     # by `_healthy_workers` — audibly now, but still dropped. Swap, do not add.
     # ▶ On `202130` (5/5, two workers): `kimi-k2.7-code` supplied the winning
-    # code in four of five cases, `glm-5.2` in one.
-    workers: ["glm-5.2:cloud", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud"]
-    synthesizer: "glm-5.2:cloud"
+    # code in four of five cases, `glm-5.2` in one. ⚠️ That run measured 5.2,
+    # which no longer holds this slot — it is the reason the slot exists, not
+    # evidence about `glm-5.3`.
+    workers: ["glm-5.3:cloud", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud"]
+    synthesizer: "glm-5.3:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
   reasoning:
-    workers: ["glm-5.2:cloud", "qwen3.5:397b-cloud"]
-    synthesizer: "glm-5.2:cloud"
+    workers: ["glm-5.3:cloud", "qwen3.5:397b-cloud"]
+    synthesizer: "glm-5.3:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
   general:
-    workers: ["glm-5.2:cloud", "qwen3.5:397b-cloud"]
-    synthesizer: "glm-5.2:cloud"
+    workers: ["glm-5.3:cloud", "qwen3.5:397b-cloud"]
+    synthesizer: "glm-5.3:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
   vl:
-    workers: ["glm-5.2:cloud", "qwen3.5:397b-cloud"]
-    synthesizer: "glm-5.2:cloud"
+    workers: ["glm-5.3:cloud", "qwen3.5:397b-cloud"]
+    synthesizer: "glm-5.3:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
 
 # ─── Deep panel: local-only (audrey_local) ─────────────────────────────
@@ -447,7 +459,8 @@ deep_panel_local:
 # Validated by `_validate_deep_panel_pools` (staged branch). Opt-in only:
 # selecting `audrey_research` is the signal — there is no auto-routing into it.
 #
-# glm-5.2 took `verifier` on 2026-07-30 (it already held researcher + writer).
+# glm took `verifier` on 2026-07-30 (it already held researcher + writer);
+# `glm-5.3` inherited all three unchanged on 2026-08-29.
 # `factchecker` is the deliberate hold-out on deepseek-v4-pro: that stage runs a
 # constrained-decoding pass pinned to the `FactCheckResult` schema, and
 # `ledger.py:203-207` records glm-5.2 as one of the models that returned
@@ -455,6 +468,9 @@ deep_panel_local:
 # is the one stage where a glm regression silently empties the corrections
 # block (`_structure_factcheck_batch` is fail-soft: bad JSON → None → no
 # corrections, no error). Promote it only after a clean research eval.
+# ⚠️ That JSON evidence is about 5.2 and has NOT been re-measured on 5.3. It is
+# the reason for the hold-out, so the hold-out stands until it is — a version
+# bump is not a fix for a defect nobody has re-tested.
 #
 # ⚠️⚠️ ROLE-DOUBLING IS ONLY SAFE WHEN THE ROLES CANNOT DISQUALIFY EACH OTHER.
 # `deepseek-v4-pro` is BOTH a researcher and the factchecker here, and on
@@ -472,45 +488,51 @@ deep_panel_local:
 # disqualify it by the same event), and it must be in
 # `fast_path.tool_capable_models` (the gate tests membership; a model missing
 # from that list silently fails the gate exactly like an unhealthy one).
-# ▶ That second rule is why the fallback is NOT glm-5.2 despite glm already
-# holding verifier + writer + fallback_synth here: glm-5.2 is not tool-capable
-# in this config, so naming it would have looked correct and skipped anyway.
+# ▶ It is the FIRST rule that rules glm out of the fallback despite glm already
+# holding verifier + writer + fallback_synth here: glm is a `researcher` in
+# every one of these pools, so a Stage-1 failure cools it down and disqualifies
+# it from Stage 3 — the exact defect the fallback exists to cover.
+# `test_the_factcheck_fallback_is_not_also_a_researcher` pins that.
+# ⚠️ This paragraph used to give a different reason — "glm is not tool-capable
+# in this config" — and that was STALE: glm has been in
+# `fast_path.tool_capable_models` for some time, so the second rule does not
+# exclude it and never did once it was listed there. Corrected 2026-08-29.
 # `kimi-k2.6` satisfies both, and adds vendor diversity — a DeepSeek-side
 # outage does not reach it. A fallback firing is logged at WARNING
 # ("fact-check FELL BACK to"); the answer looks identical, so that line is the
 # only way to learn the primary is failing.
 deep_panel_research:
   code:
-    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.8:latest"]
-    verifier: "glm-5.2:cloud"
+    researchers: ["deepseek-v4-pro:cloud", "glm-5.3:cloud", "qwen3.8:latest"]
+    verifier: "glm-5.3:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     fallback_factcheck: "kimi-k2.6:cloud"
-    writer: "glm-5.2:cloud"
-    fallback_synth: "glm-5.2:cloud"
+    writer: "glm-5.3:cloud"
+    fallback_synth: "glm-5.3:cloud"
   reasoning:
-    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.8:latest"]
-    verifier: "glm-5.2:cloud"
+    researchers: ["deepseek-v4-pro:cloud", "glm-5.3:cloud", "qwen3.8:latest"]
+    verifier: "glm-5.3:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     fallback_factcheck: "kimi-k2.6:cloud"
-    writer: "glm-5.2:cloud"
-    fallback_synth: "glm-5.2:cloud"
+    writer: "glm-5.3:cloud"
+    fallback_synth: "glm-5.3:cloud"
   general:
-    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud", "qwen3.8:latest"]
-    verifier: "glm-5.2:cloud"
+    researchers: ["deepseek-v4-pro:cloud", "glm-5.3:cloud", "qwen3.8:latest"]
+    verifier: "glm-5.3:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     fallback_factcheck: "kimi-k2.6:cloud"
-    writer: "glm-5.2:cloud"
-    fallback_synth: "glm-5.2:cloud"
+    writer: "glm-5.3:cloud"
+    fallback_synth: "glm-5.3:cloud"
   # vl: the research path grounds with text tools; image turns force fast
   # anyway. Kept here so the pool resolves for every task type, with a
   # text-only researcher set (the deep path rebuilds prompts text-only).
   vl:
-    researchers: ["deepseek-v4-pro:cloud", "glm-5.2:cloud"]
-    verifier: "glm-5.2:cloud"
+    researchers: ["deepseek-v4-pro:cloud", "glm-5.3:cloud"]
+    verifier: "glm-5.3:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     fallback_factcheck: "kimi-k2.6:cloud"
-    writer: "glm-5.2:cloud"
-    fallback_synth: "glm-5.2:cloud"
+    writer: "glm-5.3:cloud"
+    fallback_synth: "glm-5.3:cloud"
 
 # ─── Thinking policy for the deep panel ────────────────────────────────
 #
@@ -987,6 +1009,13 @@ kb:
   # Reconciled against Qdrant at startup.
   uploads_db_path: "/data/uploads.sqlite"
 
+  # A DELETE first writes a durable tombstone, then removes Qdrant points and
+  # disk artifacts. Failed cleanup stays hidden and retries here; completed
+  # tombstones prevent startup reconcile from recreating deleted rows.
+  file_deletion:
+    retry_interval_s: 30
+    batch_size: 50
+
   # Phase 32: chunked upload transport. A single POST cannot carry a large
   # file — cloudflared fronts this app and the CDN edge refuses request
   # bodies past its plan limit (100 MB on Free/Pro/Business) before they
@@ -1083,7 +1112,7 @@ kb:
     # box no GPU at all. Naming a local model here works and puts a summary in
     # the same queue as the chat turn waiting behind it — for a stage nobody
     # is waiting on.
-    summarise_model: "glm-5.2:cloud"
+    summarise_model: "glm-5.3:cloud"
 
     # Characters of transcript + descriptions handed to the summariser. A
     # two-hour transcript is ~100k characters; bounding it here means the cut
@@ -1097,7 +1126,9 @@ kb:
     # out leaves an empty field on a `ready` row.
     summary_timeout_s: 180
 
-    # Tell the summariser not to think. Measured on `glm-5.2:cloud`
+    # Tell the summariser not to think. Measured on `glm-5.2:cloud` (the
+    # predecessor in this slot; not re-measured on 5.3, but the argument is
+    # about the ROLE — the reasoning is never shown to anyone)
     # 2026-08-06, three samples per state:
     #
     #     omitted   27.7s   8994c thinking   2192c summary   2683 eval tok
@@ -1313,7 +1344,7 @@ chat_archive:
 
 # ─── Vision sidecar ────────────────────────────────────────────────────
 # Only the models in `model_registry.vl` have a vision encoder. Everything
-# else is text-in/text-out — hand `glm-5.2:cloud` an attached image and it
+# else is text-in/text-out — hand `glm-5.3:cloud` an attached image and it
 # either errors or answers blind. With this on, a local vision model
 # transcribes the image first and the description is spliced into the
 # message list as text, so the model the caller actually picked is still
@@ -1516,7 +1547,23 @@ passthrough:
     - qwen3.8:27b-mtp-q8_0
     - deepseek-v4-pro:cloud
     - kimi-k2.7-code:cloud
-    - glm-5.2:cloud
+    - glm-5.3:cloud
+    # ── 2026-08-29 arrival, NOT a production role ──
+    # Pulled alongside `glm-5.3:cloud` and exposed here ONLY, so it is
+    # targetable by `eval_research.py --models audrey_passthrough/<name>` and
+    # by nothing else. It holds no `model_registry` slot and sits in no pool —
+    # same shape as the other bake-off arrivals below.
+    # ⚠️ `ollama show` declares `completion, thinking, tools, VISION` (checked
+    # on the box 2026-08-29). The vision capability is the interesting part:
+    # `model_registry.vl` is local-only precisely because it once listed cloud
+    # entries nobody had confirmed accept images. A DECLARED encoder is more
+    # than those had, but it is still a declaration, not a probe — send it real
+    # images before it goes anywhere near the vl pool.
+    # ⛔ And read `deep_panel_local`'s header first: the last glm "flash" here
+    # (`glm-4.7-flash:q8_0`) was retired 2026-08-19 after a 240s deep_worker
+    # ReadTimeout. Different model, different location, but the same family
+    # name earned a probe rather than a promotion.
+    - glm-5.3-flash:cloud
     - kimi-k2.6:cloud
     - deepseek-v4-flash:cloud
     - deepseek-v3.2:cloud

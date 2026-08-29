@@ -422,6 +422,27 @@ def _validate_chat_archive(merged: dict[str, Any]) -> None:
         )
 
 
+def _validate_file_deletion(merged: dict[str, Any]) -> None:
+    kb = merged.get("kb", {}) or {}
+    deletion = kb.get("file_deletion", {}) or {}
+    if not isinstance(deletion, dict):
+        raise ValueError("Invalid kb.file_deletion: expected a mapping")
+    retry_interval = deletion.get("retry_interval_s", 30.0)
+    batch_size = deletion.get("batch_size", 50)
+    if (
+        isinstance(retry_interval, bool)
+        or not isinstance(retry_interval, (int, float))
+        or retry_interval <= 0
+    ):
+        raise ValueError(
+            "Invalid kb.file_deletion.retry_interval_s: expected a positive number"
+        )
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size < 1:
+        raise ValueError(
+            "Invalid kb.file_deletion.batch_size: expected a positive integer"
+        )
+
+
 @lru_cache(maxsize=1)
 def get_config() -> Config:
     """Load config once per process. Tests can call `get_config.cache_clear()`."""
@@ -433,6 +454,7 @@ def get_config() -> Config:
     _validate_deep_panel_pools(cfg.raw)
     _validate_upload_limits(cfg.raw)
     _validate_chat_archive(cfg.raw)
+    _validate_file_deletion(cfg.raw)
     return cfg
 
 

@@ -15,8 +15,8 @@ query, top_k)` is a vector search filtered by `user == <id>` and threshold
 `MEMORY_SIMILARITY_THRESHOLD`.
 
 Startup: if a legacy `memory.db` SQLite file exists, read every row, embed,
-upsert into Qdrant, then rename the file to `memory.db.migrated`. Idempotent
-— running again is a no-op.
+and upsert into Qdrant. Rename the file to `memory.db.migrated` only after
+every row succeeds. Deterministic point ids make a partial retry idempotent.
 """
 
 from __future__ import annotations
@@ -199,25 +199,48 @@ class MemoryStore:
                 log.warning("memory: embed failed for legacy %r: %s", key, e)
                 failed += 1
                 continue
-            await self._qdrant.upsert(
-                collection_name=self._collection,
-                points=[
-                    qm.PointStruct(
-                        id=_point_id(user, key),
-                        vector=vector,
-                        payload={
-                            "key": key, "value": value, "tags": tags,
-                            "user": user, "created_at": created_at,
-                            "updated_at": updated_at,
-                        },
-                    )
-                ],
-            )
+            try:
+                await self._qdrant.upsert(
+                    collection_name=self._collection,
+                    points=[
+                        qm.PointStruct(
+                            id=_point_id(user, key),
+                            vector=vector,
+                            payload={
+                                "key": key, "value": value, "tags": tags,
+                                "user": user, "created_at": created_at,
+                                "updated_at": updated_at,
+                            },
+                        )
+                    ],
+                )
+            except Exception as e:  # noqa: BLE001 — leave source retryable
+                log.warning("memory: upsert failed for legacy %r: %s", key, e)
+                failed += 1
+                continue
             migrated += 1
+
+        if failed:
+            log.warning(
+                "memory: migrated %d rows, failed %d; retaining %s for retry",
+                migrated, failed, src.name,
+            )
+            return
+
         migrated_path = src.with_suffix(src.suffix + ".migrated")
+        if migrated_path.exists():
+            sequence = 1
+            while True:
+                candidate = migrated_path.with_name(f"{migrated_path.name}.{sequence}")
+                if not candidate.exists():
+                    migrated_path = candidate
+                    break
+                sequence += 1
         src.rename(migrated_path)
-        log.info("memory: migrated %d rows, failed %d, renamed %s -> %s",
-                 migrated, failed, src.name, migrated_path.name)
+        log.info(
+            "memory: migrated all %d rows, renamed %s -> %s",
+            migrated, src.name, migrated_path.name,
+        )
 
     # ─── Operations ────────────────────────────────────────────────────
 

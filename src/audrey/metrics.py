@@ -17,6 +17,8 @@ Each metric is tied to a specific operational question:
   audrey_inflight_cap_breached_total — soft cap on tracked users exceeded
   audrey_tool_calls_total          — tool dispatches inside ReAct, by outcome
   audrey_tool_call_seconds         — per-tool dispatch latency
+  audrey_file_deletion_events_total — durable deletion lifecycle outcomes
+  audrey_file_deletion_pending     — tombstones still awaiting full cleanup
 
 Cardinality is bounded by design:
   - `model` labels come from the registry (a few dozen at most)
@@ -258,6 +260,19 @@ chat_archive_enqueue_seconds = Histogram(
     buckets=(0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0),
 )
 
+# ─── Per-user file deletion ─────────────────────────────────────
+
+file_deletion_events_total = Counter(
+    "audrey_file_deletion_events_total",
+    "Durable per-user file deletion lifecycle events.",
+    labelnames=("result",),
+)
+
+file_deletion_pending = Gauge(
+    "audrey_file_deletion_pending",
+    "Durable file-deletion tombstones awaiting complete cleanup.",
+)
+
 
 def render() -> tuple[bytes, str]:
     """Serialize the default registry. Returns (body, content_type)."""
@@ -286,4 +301,6 @@ __all__ = [
     "chat_archive_queue_events_total",
     "chat_archive_queue_depth",
     "chat_archive_enqueue_seconds",
+    "file_deletion_events_total",
+    "file_deletion_pending",
 ]

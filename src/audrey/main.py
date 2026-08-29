@@ -21,6 +21,7 @@ from audrey import __version__
 from audrey.auth import AuthedUser, require_admin
 from audrey.config import get_config
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
+from audrey.kb.file_deletion import FileDeletionWorker, FileOperationLocks
 from audrey.kb.qdrant import QdrantKB
 from audrey.kb.reconcile import KBReconciler
 from audrey.kb.storage_lifecycle import StorageLifecycle
@@ -123,11 +124,22 @@ async def lifespan(app: FastAPI):
     # uploads (see its docstring). The lifespan runs everything before
     # `yield`, so this ordering is structural — don't move the call below.
     uploads_db = UploadsDB(kb_cfg.get("uploads_db_path", "/data/uploads.sqlite"))
+    file_operation_locks = FileOperationLocks()
     try:
         await reconcile_with_qdrant(uploads_db, qdrant)
     except Exception as e:  # noqa: BLE001 — reconciliation is a tune-up, not load-bearing
         log.warning("uploads_db: reconcile failed: %s (sqlite still usable)", e)
     storage_lifecycle = StorageLifecycle(uploads_db)
+    file_deletion_cfg = kb_cfg.get("file_deletion", {}) or {}
+    file_deletions = FileDeletionWorker(
+        db=uploads_db,
+        qdrant=qdrant,
+        upload_root=Path(kb_cfg.get("upload_root", "/data/uploads")),
+        locks=file_operation_locks,
+        retry_interval_s=float(file_deletion_cfg.get("retry_interval_s", 30.0)),
+        batch_size=int(file_deletion_cfg.get("batch_size", 50)),
+    )
+    await file_deletions.start()
     fetch_cfg = kb_cfg.get("fetch", {}) or {}
     fetch_recovery = await storage_lifecycle.restore_pending_url_fetches(
         ceiling_bytes=int(fetch_cfg.get("max_bytes_mb", 2048)) * 1024 * 1024,
@@ -185,6 +197,8 @@ async def lifespan(app: FastAPI):
     app.state.qdrant = qdrant
     app.state.uploads_db = uploads_db
     app.state.storage_lifecycle = storage_lifecycle
+    app.state.file_operation_locks = file_operation_locks
+    app.state.file_deletions = file_deletions
     app.state.text_embedder = text_embedder
     app.state.image_embedder = image_embedder
     app.state.kb_watcher = watcher
@@ -241,6 +255,7 @@ async def lifespan(app: FastAPI):
             await reconciler.stop()
         if watcher is not None:
             await watcher.stop()
+        await file_deletions.stop()
         uploads_db.close()
         qdrant.close()
         await ollama.aclose()

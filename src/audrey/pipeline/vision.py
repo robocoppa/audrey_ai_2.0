@@ -1,7 +1,7 @@
 """Vision sidecar — let text-only models answer about an attached image.
 
 Only the models in the `vl` registry pool carry a vision encoder. Every
-other model Audrey serves (`glm-5.2:cloud`, `qwen3.6:35b`, …) is
+other model Audrey serves (`glm-5.3:cloud`, `qwen3.6:35b`, …) is
 text-in/text-out: hand one an image and Ollama either rejects the request
 or the model answers blind. That left two gaps.
 

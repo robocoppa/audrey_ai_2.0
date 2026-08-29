@@ -25,6 +25,7 @@ from audrey.config import (
     _load_yaml,
     _validate_chat_archive,
     _validate_deep_panel_pools,
+    _validate_file_deletion,
     _validate_upload_limits,
 )
 from audrey.pipeline.deep_panel import pick_panel_timeout, pool_key_for
@@ -743,6 +744,26 @@ def test_invalid_chat_archive_queue_settings_fail_at_boot(queue, field):
 
 def test_committed_chat_archive_queue_settings_are_valid():
     _validate_chat_archive(_load_yaml(_REPO_ROOT / "config.yaml"))
+
+
+# ─── _validate_file_deletion ───────────────────────────────────
+
+@pytest.mark.parametrize(
+    ("deletion", "field"),
+    [
+        ({"retry_interval_s": 0}, "retry_interval_s"),
+        ({"retry_interval_s": True}, "retry_interval_s"),
+        ({"batch_size": 0}, "batch_size"),
+        ({"batch_size": True}, "batch_size"),
+    ],
+)
+def test_invalid_file_deletion_settings_fail_at_boot(deletion, field):
+    with pytest.raises(ValueError, match=field):
+        _validate_file_deletion({"kb": {"file_deletion": deletion}})
+
+
+def test_committed_file_deletion_settings_are_valid():
+    _validate_file_deletion(_load_yaml(_REPO_ROOT / "config.yaml"))
 
 
 # ─── compress_keep_last, budgeted against TOOL MESSAGES ───────────────

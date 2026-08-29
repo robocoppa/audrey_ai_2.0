@@ -157,8 +157,8 @@ class Settings(BaseSettings):
     def memory_db_path(self) -> Path:
         """Legacy SQLite path. Used only for one-shot migration on startup.
 
-        Once migrated, the file is renamed to `memory.db.migrated` and Qdrant
-        becomes the authoritative store.
+        Only after every row migrates, the file is renamed to
+        `memory.db.migrated` and Qdrant becomes the authoritative store.
         """
         return self.data_dir / "memory.db"
 

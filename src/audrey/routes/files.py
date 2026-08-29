@@ -69,6 +69,7 @@ import logging
 import shutil
 import urllib.parse
 import uuid
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
@@ -85,6 +86,7 @@ from audrey.kb.extract import (
     is_video_mime,
     sniff_mime,
 )
+from audrey.kb.file_deletion import FileDeletionWorker, FileOperationLocks
 from audrey.kb.ingest import (
     ingest_frame_descriptions,
     ingest_summary,
@@ -102,7 +104,6 @@ from audrey.kb.uploads_db import UploadsDB
 from audrey.kb.user_store import (
     ensure_user_collections,
     sanitize_user,
-    user_image_collection,
     user_text_collection,
 )
 from audrey.pipeline.summarise import summarise_video
@@ -228,6 +229,7 @@ class ListResponse(BaseModel):
 class DeleteResponse(BaseModel):
     file_id: str
     deleted: bool
+    pending_cleanup: bool = False
 
 
 class JobResultResponse(BaseModel):
@@ -448,6 +450,23 @@ def _get_uploads_db(request: Request) -> UploadsDB:
     if db is None:
         raise HTTPException(status_code=503, detail="Uploads index is not initialized.")
     return db
+
+
+async def _file_operation_guard(
+    file_id: str,
+    request: Request,
+) -> AsyncIterator[None]:
+    """Serialize result handovers with deletion for the same file id."""
+    locks: FileOperationLocks | None = getattr(
+        request.app.state,
+        "file_operation_locks",
+        None,
+    )
+    if locks is None:
+        yield
+        return
+    async with locks.hold(file_id):
+        yield
 
 
 def _get_storage_lifecycle(request: Request) -> StorageLifecycle:
@@ -1592,6 +1611,7 @@ async def fetch_result(
     body: FetchResultRequest,
     request: Request,
     _: None = Depends(require_service),
+    _operation: None = Depends(_file_operation_guard),
 ) -> JobResultResponse:
     """Verify a staged download, move it into place, and queue it for the worker.
 
@@ -2084,6 +2104,7 @@ async def ingest_result(
     body: IngestResultRequest,
     request: Request,
     _: None = Depends(require_service),
+    _operation: None = Depends(_file_operation_guard),
 ) -> JobResultResponse:
     """Take a worker's output, ingest it, and flip the row to 'ready'.
 
@@ -2775,37 +2796,27 @@ async def delete_file(
     file_id: str, request: Request, me: AuthedUser = Depends(require_user),
 ) -> DeleteResponse:
     user = me.email
-    qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
-    if qdrant is None:
-        raise HTTPException(status_code=503, detail="KB is not initialized.")
-    db = _get_uploads_db(request)
-
-    # sqlite first — once the index row is gone, list/quota immediately
-    # reflect the delete even if the qdrant calls below take a beat.
-    deleted_row = await db.delete_upload(file_id, user=user)
-
-    # Delete from both collections; a given file_id only lives in one, but
-    # scoped double-filter on (file_id, user) makes unscoped calls safe.
-    text_col = user_text_collection(user)
-    image_col = user_image_collection(user)
-    await asyncio.gather(
-        qdrant.delete_by_file_id(file_id, user=user, collection=text_col),
-        qdrant.delete_by_file_id(file_id, user=user, collection=image_col),
+    worker: FileDeletionWorker | None = getattr(
+        request.app.state,
+        "file_deletions",
+        None,
     )
+    if worker is None:
+        raise HTTPException(status_code=503, detail="File deletion is not initialized.")
 
-    # Best-effort bytes cleanup. We don't know the extension, so glob.
-    root = _upload_root(request) / sanitize_user(user)
-    for p in root.glob(f"{file_id}.*"):
-        _safe_unlink(p)
-    bare = root / file_id
-    _safe_unlink(bare)
-
-    log.info("files: delete user=%s file_id=%s indexed=%s", user, file_id, deleted_row)
-    # `deleted` reflects whether sqlite had a row to remove. The Qdrant
-    # delete-by-filter and the disk unlink are best-effort cleanup that
-    # both no-op gracefully on missing data, so the sqlite outcome is
-    # the honest signal to the caller.
-    return DeleteResponse(file_id=file_id, deleted=deleted_row)
+    result = await worker.request(file_id, user=user)
+    log.info(
+        "files: delete user=%s file_id=%s known=%s completed=%s",
+        user,
+        file_id,
+        result.known,
+        result.completed,
+    )
+    return DeleteResponse(
+        file_id=file_id,
+        deleted=result.known,
+        pending_cleanup=result.known and not result.completed,
+    )
 
 
 def _safe_unlink(p: Path) -> None:

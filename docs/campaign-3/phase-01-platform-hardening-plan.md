@@ -1,8 +1,8 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress. Waves 1A, 1B, and 1C.1–1C.2 are Unraid-verified. Wave
-1C.3 normal archive delivery is live; its OWUI-utility exclusion and
-fault-recovery gate remain.
+**Status:** In progress. Waves 1A, 1B, and 1C.1–1C.3 are Unraid-verified; Wave
+1C.4 retryable migration and file deletion is laptop-complete and awaits its
+Unraid smoke.
 
 ## Goal
 
@@ -134,6 +134,14 @@ id and storage namespace. Then centralize storage reservations and make
 indexing, retention, migration, archive capture, and deletion retryable. Build
 user-facing memory and chat inspection, correction, export, and deletion only
 on top of those durable primitives.
+
+1C.4 laptop status (2026-08-28): legacy memory migration retains its source
+until every deterministic upsert succeeds. File deletion now writes a durable
+tombstone first, hides pending records from private text/image search, retries
+Qdrant and disk cleanup across restart, and prevents startup reconciliation
+from resurrecting completed deletions. All 2,500 hermetic tests pass; changed-
+file lint, compilation, YAML, and whitespace checks are clean. Deployment and
+failure-recovery evidence remain pending.
 
 Gate:
 

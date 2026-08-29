@@ -69,7 +69,13 @@ CLOUD_MODELS=(
   "deepseek-v3.2:cloud"
   "deepseek-v4-flash:cloud"
   "nemotron-3-super:cloud"
-  "glm-5.2:cloud"
+  # 2026-08-29: `glm-5.3` REPLACES `glm-5.2` in every role glm held (registries,
+  # tool-capable list, both cloud panels, the research pools, the video
+  # summariser). `glm-5.3-flash` is a bake-off arm reachable through
+  # `passthrough.allowed_models` alone — no pool, no registry slot. ▶ If it
+  # loses its bake-off, delete it from BOTH files.
+  "glm-5.3:cloud"
+  "glm-5.3-flash:cloud"
 )
 
 pull_model() {

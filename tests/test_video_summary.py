@@ -149,7 +149,7 @@ class TestSummariseVideo:
             _segments(3), [], filename="v.mp4", duration_s=0.0,
             ollama=ollama, registry=_Registry(), gate=_Gate(), cfg=_cfg())
 
-        assert ollama.calls[0]["model"] == "glm-5.2:cloud"
+        assert ollama.calls[0]["model"] == "glm-5.3:cloud"
 
     @pytest.mark.asyncio
     async def test_a_local_summariser_still_takes_the_gate(self):
@@ -376,7 +376,8 @@ class TestThinkingIsOffForSummaries:
     reasoning that is billed and thrown away: the summary is the product, the
     reasoning is never shown, and `summarise_model` defaults to a cloud model.
 
-    Measured on `glm-5.2:cloud`, three samples per state — 8994c of thinking
+    Measured on `glm-5.2:cloud` (the predecessor in this slot), three
+    samples per state — 8994c of thinking
     and 2683 eval tokens with the field omitted, against 0c and 817 tokens with
     `think=false`, for a *longer* summary. 3.3x fewer billed tokens.
     """

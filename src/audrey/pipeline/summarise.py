@@ -64,7 +64,7 @@ SUMMARY_SYSTEM = (
 #: pool and is roughly 45 minutes of speech.
 DEFAULT_INPUT_BUDGET = 24_000
 
-DEFAULT_MODEL = "glm-5.2:cloud"
+DEFAULT_MODEL = "glm-5.3:cloud"
 DEFAULT_TIMEOUT_S = 180.0
 
 
@@ -215,7 +215,8 @@ async def _think_flag(ollama: Any, model: str, cfg: Any) -> bool | None:
     Summarising is the clearest case in the whole registry of **reasoning that
     is billed and thrown away**: the summary is the product, the reasoning is
     never shown to anyone, and `summarise_model` defaults to a cloud model.
-    Measured on `glm-5.2:cloud` 2026-08-06, three samples per state:
+    Measured on `glm-5.2:cloud` 2026-08-06 (the predecessor in this slot;
+    not re-measured on 5.3), three samples per state:
 
         omitted   27.7s   8994c thinking   2192c summary   2683 eval tok
         false      9.7s*     0c            3542c summary    817 eval tok

@@ -200,8 +200,12 @@ def test_every_factcheck_model_is_tool_capable(cfg):
     A fact-checker missing from that list is not a degraded fact-checker — it
     is no fact-checker at all, permanently, on every research turn. And the
     config reads perfectly: the role is filled, the model is registered, the
-    model is pulled. This is why the fallback is not `glm-5.2` despite glm
-    already holding three roles in these pools.
+    model is pulled.
+
+    ⚠️ This docstring used to cite glm as the example of a model excluded by
+    THIS rule. That was stale — glm has been in `tool_capable_models` for some
+    time, so what actually keeps it out of the fallback is the next test:
+    it is a `researcher` in every one of these pools. Corrected 2026-08-29.
     """
     capable = {str(m) for m in (cfg.get("fast_path", {}).get("tool_capable_models") or [])}
     bad = [

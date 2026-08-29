@@ -160,6 +160,18 @@ CREATE TABLE IF NOT EXISTS uploads (
   quota_reserved_bytes   INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_uploads_user ON uploads(user);
+CREATE TABLE IF NOT EXISTS file_deletions (
+  file_id          TEXT NOT NULL,
+  user             TEXT NOT NULL,
+  requested_at     TEXT NOT NULL,
+  attempts         INTEGER NOT NULL DEFAULT 0,
+  last_attempt_at  TEXT NOT NULL DEFAULT '',
+  last_error       TEXT NOT NULL DEFAULT '',
+  completed_at     TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (file_id, user)
+);
+CREATE INDEX IF NOT EXISTS idx_file_deletions_pending
+  ON file_deletions(completed_at, requested_at);
 -- No index on `status` here. `_SCHEMA` runs before `_migrate`, and on the
 -- deployed database the column does not exist yet — indexing it at this point
 -- fails at boot with "no such column". It is created in `_migrate` instead,
@@ -573,6 +585,193 @@ class UploadsDB:
             )
             return cur.rowcount > 0
 
+    async def request_file_deletion(
+        self,
+        file_id: str,
+        *,
+        user: str,
+        requested_at: str,
+    ) -> bool:
+        """Tombstone a file before any external cleanup starts.
+
+        Returns false only when neither an owned upload row nor an earlier
+        tombstone exists. Repeating a delete against a pending tombstone is an
+        idempotent retry; a completed tombstone stays completed.
+        """
+        return await asyncio.to_thread(
+            self._request_file_deletion_sync,
+            file_id,
+            user,
+            requested_at,
+        )
+
+    def _request_file_deletion_sync(
+        self,
+        file_id: str,
+        user: str,
+        requested_at: str,
+    ) -> bool:
+        with self._lock, self._transaction_locked():
+            row = self._conn.execute(
+                "SELECT 1 FROM uploads WHERE file_id = ? AND user = ?",
+                (file_id, user),
+            ).fetchone()
+            tombstone = self._conn.execute(
+                "SELECT completed_at FROM file_deletions "
+                "WHERE file_id = ? AND user = ?",
+                (file_id, user),
+            ).fetchone()
+            if row is None:
+                return tombstone is not None
+
+            self._conn.execute(
+                """
+                INSERT INTO file_deletions (file_id, user, requested_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(file_id, user) DO UPDATE SET
+                  completed_at = '', last_error = ''
+                """,
+                (file_id, user, requested_at),
+            )
+            self._conn.execute(
+                "UPDATE uploads SET status = 'deleting', lease_id = '', leased_at = '' "
+                "WHERE file_id = ? AND user = ?",
+                (file_id, user),
+            )
+            return True
+
+    async def pending_file_deletions(self, *, limit: int = 50) -> list[dict]:
+        return await asyncio.to_thread(self._pending_file_deletions_sync, limit)
+
+    def _pending_file_deletions_sync(self, limit: int) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT file_id, user, requested_at, attempts, "
+                "       last_attempt_at, last_error "
+                "FROM file_deletions WHERE completed_at = '' "
+                "ORDER BY requested_at, file_id LIMIT ?",
+                (max(1, limit),),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    async def pending_file_deletion_count(self) -> int:
+        return await asyncio.to_thread(self._pending_file_deletion_count_sync)
+
+    def _pending_file_deletion_count_sync(self) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS count FROM file_deletions WHERE completed_at = ''"
+            ).fetchone()
+            return int(row["count"])
+
+    async def file_deletion_keys(self) -> set[tuple[str, str]]:
+        """Every durable tombstone, including completed deletion history."""
+        return await asyncio.to_thread(self._file_deletion_keys_sync)
+
+    def _file_deletion_keys_sync(self) -> set[tuple[str, str]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT file_id, user FROM file_deletions"
+            ).fetchall()
+            return {(str(row["user"]), str(row["file_id"])) for row in rows}
+
+    async def file_deletion_ids(self, user: str) -> set[str]:
+        return await asyncio.to_thread(self._file_deletion_ids_sync, user)
+
+    def _file_deletion_ids_sync(self, user: str) -> set[str]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT file_id FROM file_deletions WHERE user = ?",
+                (user,),
+            ).fetchall()
+            return {str(row["file_id"]) for row in rows}
+
+    async def begin_file_deletion_attempt(
+        self,
+        file_id: str,
+        *,
+        user: str,
+        attempted_at: str,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._begin_file_deletion_attempt_sync,
+            file_id,
+            user,
+            attempted_at,
+        )
+
+    def _begin_file_deletion_attempt_sync(
+        self,
+        file_id: str,
+        user: str,
+        attempted_at: str,
+    ) -> bool:
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE file_deletions "
+                "SET attempts = attempts + 1, last_attempt_at = ?, last_error = '' "
+                "WHERE file_id = ? AND user = ? AND completed_at = ''",
+                (attempted_at, file_id, user),
+            )
+            return cursor.rowcount > 0
+
+    async def fail_file_deletion(
+        self,
+        file_id: str,
+        *,
+        user: str,
+        error: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._fail_file_deletion_sync,
+            file_id,
+            user,
+            error,
+        )
+
+    def _fail_file_deletion_sync(self, file_id: str, user: str, error: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE file_deletions SET last_error = ? "
+                "WHERE file_id = ? AND user = ? AND completed_at = ''",
+                (error[:500], file_id, user),
+            )
+
+    async def complete_file_deletion(
+        self,
+        file_id: str,
+        *,
+        user: str,
+        completed_at: str,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._complete_file_deletion_sync,
+            file_id,
+            user,
+            completed_at,
+        )
+
+    def _complete_file_deletion_sync(
+        self,
+        file_id: str,
+        user: str,
+        completed_at: str,
+    ) -> bool:
+        with self._lock, self._transaction_locked():
+            cursor = self._conn.execute(
+                "UPDATE file_deletions "
+                "SET completed_at = ?, last_error = '' "
+                "WHERE file_id = ? AND user = ? AND completed_at = ''",
+                (completed_at, file_id, user),
+            )
+            if cursor.rowcount == 0:
+                return False
+            self._conn.execute(
+                "DELETE FROM uploads WHERE file_id = ? AND user = ?",
+                (file_id, user),
+            )
+            return True
+
     async def list_user(self, user: str) -> list[dict]:
         return await asyncio.to_thread(self._list_user_sync, user)
 
@@ -590,7 +789,8 @@ class UploadsDB:
                 "       summary, source_freed_at, leased_at, source_url, "
                 "       transcript_source, fetch_downloaded_bytes, "
                 "       fetch_total_bytes "
-                "FROM uploads WHERE user = ? ORDER BY uploaded_at DESC",
+                "FROM uploads WHERE user = ? AND status != 'deleting' "
+                "ORDER BY uploaded_at DESC",
                 (user,),
             )
             return [dict(r) for r in cur.fetchall()]
@@ -1824,6 +2024,11 @@ async def reconcile_with_qdrant(db: UploadsDB, qdrant) -> dict[str, int]:
         user_text_collection,
     )
 
+    # A tombstone outranks Qdrant. Without this set, a crash after the user
+    # requested deletion but before Qdrant acknowledged it would let step 1
+    # recreate the visible row from the very points still awaiting cleanup.
+    deletion_keys = await db.file_deletion_keys()
+
     # 1. Pull every kb_user_* collection from qdrant and backfill sqlite.
     all_collections = await qdrant.list_collections()
     user_to_collections: dict[str, list[str]] = {}
@@ -1839,6 +2044,8 @@ async def reconcile_with_qdrant(db: UploadsDB, qdrant) -> dict[str, int]:
             if col not in user_to_collections[raw_user]:
                 user_to_collections[raw_user].append(col)
             for f in files:
+                if (raw_user, str(f["file_id"])) in deletion_keys:
+                    continue
                 await db.record_upload(
                     file_id=f["file_id"],
                     user=raw_user,

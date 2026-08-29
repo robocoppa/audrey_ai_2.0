@@ -18,9 +18,10 @@ Internal-only (hidden from /openapi.json so the model can't call them):
   GET  /chat_history/stats     — row counts for admin/debug
 
 Memory and chat archive are both Qdrant-backed and embedded with
-nomic-embed-text. On first startup, a legacy `memory.db` SQLite file
-(from an earlier backend) is migrated automatically and renamed to
-`memory.db.migrated`.
+nomic-embed-text. On startup, a legacy `memory.db` SQLite file (from an
+earlier backend) is migrated automatically. Its deterministic point IDs make
+partial retries idempotent, and the source is renamed to `memory.db.migrated`
+only after every row has succeeded.
 
 Each tool endpoint has a clear operation_id so the orchestrator's
 OpenAPI → Ollama-tool converter produces sensible tool names.

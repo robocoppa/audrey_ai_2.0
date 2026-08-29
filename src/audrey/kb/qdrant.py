@@ -102,6 +102,9 @@ class SearchScope:
     # sanitized and can collide, so routes must filter on the exact raw user
     # stored in each point as well as selecting the user collection.
     user: str | None = None
+    # Durable deletion tombstones. Qdrant cleanup may be retrying, so private
+    # reads must hide these ids before the old points are physically gone.
+    excluded_file_ids: list[str] | None = None
 
     def __post_init__(self) -> None:
         if self.file_ids is not None and not self.file_ids:
@@ -111,7 +114,12 @@ class SearchScope:
             )
 
     def is_empty(self) -> bool:
-        return self.file_ids is None and self.artifact is None and self.user is None
+        return (
+            self.file_ids is None
+            and self.artifact is None
+            and self.user is None
+            and self.excluded_file_ids is None
+        )
 
 
 def _as_filter(scope: SearchScope | None) -> qmodels.Filter | None:
@@ -119,6 +127,7 @@ def _as_filter(scope: SearchScope | None) -> qmodels.Filter | None:
     if scope is None or scope.is_empty():
         return None
     must: list[qmodels.FieldCondition] = []
+    must_not: list[qmodels.FieldCondition] = []
     if scope.file_ids:
         must.append(qmodels.FieldCondition(
             key="file_id", match=qmodels.MatchAny(any=list(scope.file_ids)),
@@ -131,7 +140,12 @@ def _as_filter(scope: SearchScope | None) -> qmodels.Filter | None:
         must.append(qmodels.FieldCondition(
             key="user", match=qmodels.MatchValue(value=scope.user),
         ))
-    return qmodels.Filter(must=must)
+    if scope.excluded_file_ids:
+        must_not.append(qmodels.FieldCondition(
+            key="file_id",
+            match=qmodels.MatchAny(any=list(scope.excluded_file_ids)),
+        ))
+    return qmodels.Filter(must=must, must_not=must_not)
 
 
 def point_id(*, source: str, kind: str, idx: int) -> str:

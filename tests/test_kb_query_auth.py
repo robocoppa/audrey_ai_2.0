@@ -170,7 +170,7 @@ def _build_app(monkeypatch, service_token: str = SECRET):
         captured["user"] = user
         return ([], False)
 
-    async def _fake_image_merged(qdrant, vec, *, top_k, user):
+    async def _fake_image_merged(qdrant, vec, *, top_k, user, scope=None):
         captured["user"] = user
         return ([], False)
 

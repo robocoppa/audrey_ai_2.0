@@ -382,6 +382,12 @@ async def kb_query(
                 )
         scope = SearchScope(file_ids=file_ids, artifact=req.artifact)
 
+    scope = await _exclude_deleted_private_files(
+        request,
+        user=effective_user,
+        scope=scope,
+    )
+
     t0 = time.perf_counter()
     vec = await embedder.embed_one(req.query)
     hybrid = _hybrid_cfg(request)
@@ -457,6 +463,24 @@ def _private_search_scope(scope: SearchScope | None, user: str) -> SearchScope:
     if scope is None:
         return SearchScope(user=user)
     return replace(scope, user=user)
+
+
+async def _exclude_deleted_private_files(
+    request: Request,
+    *,
+    user: str | None,
+    scope: SearchScope | None,
+) -> SearchScope | None:
+    """Attach durable tombstones to private collection reads."""
+    db = getattr(request.app.state, "uploads_db", None)
+    if db is None or not user:
+        return scope
+    excluded = sorted(await db.file_deletion_ids(user))
+    if not excluded:
+        return scope
+    if scope is None:
+        return SearchScope(excluded_file_ids=excluded)
+    return replace(scope, excluded_file_ids=excluded)
 
 
 async def _search_text_merged(
@@ -664,6 +688,7 @@ def _one_hit_per_file_first(kept: list[FusedHit]) -> list[FusedHit]:
 
 async def _search_images_merged(
     qdrant: QdrantKB, vec: list[float], *, top_k: int, user: str | None,
+    scope: SearchScope | None = None,
 ) -> tuple[list[KBHit], bool]:
     # Same score-merge precondition as `_search_text_merged`: both image
     # collections use 512-d CLIP ViT-B-32, cosine.
@@ -677,7 +702,7 @@ async def _search_images_merged(
                     vec,
                     top_k=top_k,
                     collection=user_col,
-                    scope=_private_search_scope(None, user),
+                    scope=_private_search_scope(scope, user),
                 )
             )
             had_user = True
@@ -713,7 +738,18 @@ async def kb_query_image(
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"image embed failed: {e}") from e
     effective_user = req.user if caller.is_service else caller.email
-    hits, had_user = await _search_images_merged(qdrant, vec, top_k=req.top_k, user=effective_user)
+    scope = await _exclude_deleted_private_files(
+        request,
+        user=effective_user,
+        scope=None,
+    )
+    hits, had_user = await _search_images_merged(
+        qdrant,
+        vec,
+        top_k=req.top_k,
+        user=effective_user,
+        scope=scope,
+    )
     elapsed = time.perf_counter() - t0
     kb_search_seconds.labels(kind="image", had_user_collection=str(had_user).lower()).observe(elapsed)
     kb_search_hits.labels(kind="image").observe(len(hits))

@@ -31,7 +31,11 @@ from fastapi.testclient import TestClient
 from audrey.kb import qdrant as qdrant_mod
 from audrey.kb.qdrant import KBHit, QdrantKB, SearchScope, _as_filter
 from audrey.kb.uploads_db import UploadsDB
-from audrey.routes.kb import _search_text_hybrid, _search_text_merged
+from audrey.routes.kb import (
+    _exclude_deleted_private_files,
+    _search_text_hybrid,
+    _search_text_merged,
+)
 from audrey.routes.kb import router as kb_router
 
 CFG = {"enabled": True, "rrf_k": 60, "min_term_overlap": 0.0}
@@ -120,6 +124,39 @@ class TestSearchScope:
 
         assert [c.key for c in flt.must] == ["file_id", "artifact", "user"]
         assert flt.must[2].match.value == "alice@example.com"
+
+    def test_deleted_file_ids_are_excluded_from_private_reads(self):
+        flt = _as_filter(SearchScope(
+            user="alice@example.com",
+            excluded_file_ids=["deleted-1", "deleted-2"],
+        ))
+
+        assert [condition.key for condition in flt.must] == ["user"]
+        assert [condition.key for condition in flt.must_not] == ["file_id"]
+        assert flt.must_not[0].match.any == ["deleted-1", "deleted-2"]
+
+
+async def test_private_search_adds_authenticated_users_deletion_tombstones():
+    class _DeletionIndex:
+        async def file_deletion_ids(self, user: str) -> set[str]:
+            assert user == "user-1"
+            return {"deleted-2", "deleted-1"}
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(uploads_db=_DeletionIndex())),
+    )
+    original = SearchScope(file_ids=["kept"], artifact="transcript")
+
+    scope = await _exclude_deleted_private_files(
+        request, user="user-1", scope=original,
+    )
+
+    assert scope == SearchScope(
+        file_ids=["kept"],
+        artifact="transcript",
+        excluded_file_ids=["deleted-1", "deleted-2"],
+    )
+    assert original.excluded_file_ids is None
 
 
 # ─── The trap: both retrievers, or neither ────────────────────────────
