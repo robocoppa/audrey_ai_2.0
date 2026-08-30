@@ -109,7 +109,7 @@ _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
 
 def _now_iso() -> str:
-    return _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+    return _dt.datetime.now(_dt.UTC).isoformat(timespec="microseconds")
 
 
 def _encode_export_cursor(created_at: str, message_id: str) -> str:
@@ -339,6 +339,14 @@ CREATE TABLE IF NOT EXISTS archive_deletion_outbox (
     last_attempt_at  TEXT,
     last_error       TEXT
 );
+CREATE TABLE IF NOT EXISTS archive_conversation_deletions (
+    user             TEXT NOT NULL,
+    conversation_id  TEXT NOT NULL,
+    cutoff_at        TEXT NOT NULL,
+    requested_at     TEXT NOT NULL,
+    completed_at     TEXT,
+    PRIMARY KEY (user, conversation_id)
+);
 CREATE TABLE IF NOT EXISTS archive_maintenance_state (
     operation       TEXT PRIMARY KEY,
     last_attempt_at TEXT NOT NULL,
@@ -354,6 +362,8 @@ CREATE INDEX IF NOT EXISTS idx_chunks_repair
     ON archive_chunks(indexed_at, index_attempts);
 CREATE INDEX IF NOT EXISTS idx_deletion_repair
     ON archive_deletion_outbox(attempts, requested_at);
+CREATE INDEX IF NOT EXISTS idx_conversation_deletion_pending
+    ON archive_conversation_deletions(completed_at, requested_at);
 """
 
 
@@ -516,6 +526,33 @@ class ChatArchiveStore:
         )
 
         async with self._db_lock:
+            cursor = await self._db.execute(
+                """
+                SELECT cutoff_at
+                FROM archive_conversation_deletions
+                WHERE user = ? AND conversation_id = ?
+                """,
+                (user, conversation_id),
+            )
+            tombstone = await cursor.fetchone()
+            await cursor.close()
+            if tombstone is not None and now <= str(tombstone[0]):
+                log.info(
+                    "chat_archive: skipped pre-deletion delivery user=%s conversation=%s",
+                    user,
+                    conversation_id,
+                )
+                return {
+                    "conversation_id": conversation_id,
+                    "user_message_id": user_msg_id,
+                    "assistant_message_id": asst_msg_id,
+                    "chunks": 0,
+                    "indexed": 0,
+                    "index_failed": 0,
+                    "partial": partial,
+                    "skipped_deleted": True,
+                }
+
             # Conversation upsert: create on first sight, otherwise bump
             # last_message_at. We don't fight OWUI for `title` ownership.
             await self._db.execute(
@@ -841,7 +878,7 @@ class ChatArchiveStore:
     ) -> tuple[list[ChatExportMessage], str | None]:
         """Return a stable, current-user-only page from the SQLite source.
 
-        Rows already tombstoned in the deletion outbox are logically deleted
+        Rows already tombstoned in either deletion table are logically deleted
         and stay hidden even while Qdrant is unavailable. The cursor is an
         opaque encoding of the last created_at/message_id keyset pair.
         """
@@ -873,6 +910,13 @@ class ChatArchiveStore:
                       "," || d.message_ids_json || ",",
                       "," || m.message_id || ","
                   ) > 0
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM archive_conversation_deletions AS cd
+                  WHERE cd.user = m.user
+                    AND cd.conversation_id = m.conversation_id
+                    AND m.created_at <= cd.cutoff_at
               )
         """
         params: list[Any] = [user]
@@ -914,6 +958,140 @@ class ChatArchiveStore:
             last = items[-1]
             next_cursor = _encode_export_cursor(last.created_at, last.message_id)
         return items, next_cursor
+
+    async def request_conversation_deletion(
+        self,
+        *,
+        user: str,
+        conversation_id: str,
+    ) -> dict[str, Any] | None:
+        """Durably hide and queue one current-user conversation for deletion."""
+        if not user:
+            raise ValueError("request_conversation_deletion requires a non-empty user")
+        if not conversation_id:
+            raise ValueError("request_conversation_deletion requires a non-empty conversation_id")
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init() not called")
+
+        requested_at = _now_iso()
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                """
+                SELECT 1
+                WHERE EXISTS (
+                    SELECT 1 FROM conversations
+                    WHERE user = ? AND conversation_id = ?
+                )
+                   OR EXISTS (
+                    SELECT 1 FROM messages
+                    WHERE user = ? AND conversation_id = ?
+                )
+                   OR EXISTS (
+                    SELECT 1 FROM archive_chunks
+                    WHERE user = ? AND conversation_id = ?
+                )
+                """,
+                (
+                    user,
+                    conversation_id,
+                    user,
+                    conversation_id,
+                    user,
+                    conversation_id,
+                ),
+            )
+            known = await cursor.fetchone() is not None
+            await cursor.close()
+            if not known:
+                cursor = await self._db.execute(
+                    """
+                    SELECT 1 FROM archive_conversation_deletions
+                    WHERE user = ? AND conversation_id = ?
+                    """,
+                    (user, conversation_id),
+                )
+                known = await cursor.fetchone() is not None
+                await cursor.close()
+            if not known:
+                return None
+
+            await self._db.execute(
+                """
+                INSERT INTO archive_conversation_deletions
+                    (user, conversation_id, cutoff_at, requested_at, completed_at)
+                VALUES (?, ?, ?, ?, NULL)
+                ON CONFLICT(user, conversation_id) DO UPDATE SET
+                    cutoff_at = CASE
+                        WHEN excluded.cutoff_at >
+                             archive_conversation_deletions.cutoff_at
+                        THEN excluded.cutoff_at
+                        ELSE archive_conversation_deletions.cutoff_at
+                    END,
+                    requested_at = excluded.requested_at,
+                    completed_at = NULL
+                """,
+                (user, conversation_id, requested_at, requested_at),
+            )
+            cursor = await self._db.execute(
+                """
+                SELECT c.chunk_id, c.conversation_id, c.message_ids_json
+                FROM archive_chunks AS c
+                LEFT JOIN archive_deletion_outbox AS d ON d.chunk_id = c.chunk_id
+                WHERE c.user = ?
+                  AND c.conversation_id = ?
+                  AND c.created_at <= ?
+                  AND d.chunk_id IS NULL
+                ORDER BY c.created_at, c.chunk_id
+                """,
+                (user, conversation_id, requested_at),
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+            await self._db.executemany(
+                """
+                INSERT OR IGNORE INTO archive_deletion_outbox
+                    (chunk_id, conversation_id, message_ids_json, point_id,
+                     requested_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        str(row[0]),
+                        str(row[1]),
+                        str(row[2]),
+                        _qdrant_point_id(str(row[0])),
+                        requested_at,
+                    )
+                    for row in rows
+                ],
+            )
+            cursor = await self._db.execute(
+                """
+                SELECT COUNT(*) FROM archive_deletion_outbox AS d
+                JOIN archive_chunks AS c ON c.chunk_id = d.chunk_id
+                WHERE c.user = ? AND c.conversation_id = ?
+                """,
+                (user, conversation_id),
+            )
+            pending = int((await cursor.fetchone())[0])
+            await cursor.close()
+            await self._db.commit()
+
+        log.info(
+            "chat_archive: conversation deletion queued user=%s conversation=%s "
+            "chunks_queued=%d pending=%d",
+            user,
+            conversation_id,
+            len(rows),
+            pending,
+        )
+        return {
+            "conversation_id": conversation_id,
+            "requested_at": requested_at,
+            "status": "pending",
+            "chunks_queued": len(rows),
+            "deletions_pending": pending,
+        }
 
     # ─── Durable repair and retention ─────────────────────────────────
 
@@ -1101,6 +1279,74 @@ class ChatArchiveStore:
             await cursor.close()
         return count
 
+    async def _finalize_conversation_deletions(self) -> int:
+        """Finalize source rows only after every old chunk has been acknowledged."""
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init() not called")
+
+        completed = 0
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                """
+                SELECT user, conversation_id, cutoff_at
+                FROM archive_conversation_deletions
+                WHERE completed_at IS NULL
+                ORDER BY requested_at, user, conversation_id
+                LIMIT ?
+                """,
+                (self._repair_batch_size,),
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+            for user, conversation_id, cutoff_at in rows:
+                cursor = await self._db.execute(
+                    """
+                    SELECT 1 FROM archive_chunks
+                    WHERE user = ?
+                      AND conversation_id = ?
+                      AND created_at <= ?
+                    LIMIT 1
+                    """,
+                    (user, conversation_id, cutoff_at),
+                )
+                old_chunk_remains = await cursor.fetchone() is not None
+                await cursor.close()
+                if old_chunk_remains:
+                    continue
+
+                await self._db.execute(
+                    """
+                    DELETE FROM messages
+                    WHERE user = ?
+                      AND conversation_id = ?
+                      AND created_at <= ?
+                    """,
+                    (user, conversation_id, cutoff_at),
+                )
+                await self._db.execute(
+                    """
+                    DELETE FROM conversations
+                    WHERE user = ?
+                      AND conversation_id = ?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM messages
+                          WHERE user = ? AND conversation_id = ?
+                      )
+                    """,
+                    (user, conversation_id, user, conversation_id),
+                )
+                await self._db.execute(
+                    """
+                    UPDATE archive_conversation_deletions
+                    SET completed_at = ?
+                    WHERE user = ? AND conversation_id = ?
+                    """,
+                    (_now_iso(), user, conversation_id),
+                )
+                completed += 1
+            await self._db.commit()
+        return completed
+
     async def prune(self, *, retry_exhausted: bool = False) -> dict[str, int]:
         """Queue expired chunks and process a bounded deletion-outbox batch."""
         async with self._maintenance_lock:
@@ -1108,6 +1354,7 @@ class ChatArchiveStore:
             deleted = await self._delete_pending(
                 reset_exhausted=retry_exhausted,
             )
+            await self._finalize_conversation_deletions()
             reindexed = await self.reindex_pending(
                 reset_exhausted=retry_exhausted,
             )
@@ -1129,6 +1376,7 @@ class ChatArchiveStore:
         async with self._maintenance_lock:
             queued = await self._queue_retention()
             deleted = await self._delete_pending()
+            conversation_deletions_completed = await self._finalize_conversation_deletions()
             reindexed = await self.reindex_pending()
             pending = await self._deletions_pending()
         result: dict[str, Any] = {
@@ -1137,7 +1385,12 @@ class ChatArchiveStore:
             "delete": deleted,
             "reindex": reindexed,
         }
-        if queued or deleted["attempted"] or reindexed["attempted"]:
+        if (
+            queued
+            or deleted["attempted"]
+            or conversation_deletions_completed
+            or reindexed["attempted"]
+        ):
             log.info("chat_archive: maintenance result=%s", result)
         return result
 
@@ -1212,6 +1465,18 @@ class ChatArchiveStore:
                 """,
                 (self._max_retry_attempts,),
             )
+            conversation_deletions_pending = await scalar(
+                """
+                SELECT COUNT(*) FROM archive_conversation_deletions
+                WHERE completed_at IS NULL
+                """
+            )
+            conversation_deletions_completed = await scalar(
+                """
+                SELECT COUNT(*) FROM archive_conversation_deletions
+                WHERE completed_at IS NOT NULL
+                """
+            )
 
             cursor = await self._db.execute(
                 """
@@ -1240,6 +1505,8 @@ class ChatArchiveStore:
             "chunks_reindex_exhausted": reindex_exhausted,
             "deletions_pending": deletions_pending,
             "deletions_exhausted": deletions_exhausted,
+            "conversation_deletions_pending": conversation_deletions_pending,
+            "conversation_deletions_completed": conversation_deletions_completed,
             "index_last_attempt_at": str(index_last[0]) if index_last else "",
             "index_last_error": str(index_last[1] or "") if index_last else "",
             "delete_last_attempt_at": str(delete_last[0]) if delete_last else "",

@@ -184,6 +184,14 @@ async def test_init_migrates_pre_repair_archive_schema(tmp_path: Path):
         cursor = await store._db.execute(
             """
             SELECT name FROM sqlite_master
+            WHERE type = 'table' AND name = 'archive_conversation_deletions'
+            """
+        )
+        assert await cursor.fetchone() is not None
+        await cursor.close()
+        cursor = await store._db.execute(
+            """
+            SELECT name FROM sqlite_master
             WHERE type = 'table' AND name = 'archive_maintenance_state'
             """
         )
@@ -378,6 +386,79 @@ async def test_failed_delete_survives_restart_and_is_hidden_from_search(
 
         await restarted.maintain()
         assert qdrant.delete_calls == 2
+    finally:
+        await restarted.aclose()
+
+
+async def test_user_conversation_delete_converges_after_restart_and_blocks_late_retry(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.setattr(archive_module, "_embed", _good_embed)
+    db_path = tmp_path / "archive.db"
+    qdrant = _FakeQdrant(delete_failures=1)
+    store = await _make_store(db_path, qdrant)
+    await _archive_one(store)
+
+    assert (
+        await store.request_conversation_deletion(
+            user="bob@example.com",
+            conversation_id="conv-1",
+        )
+        is None
+    )
+    receipt = await store.request_conversation_deletion(
+        user="alice@example.com",
+        conversation_id="conv-1",
+    )
+    assert receipt is not None
+    assert receipt["chunks_queued"] == 1
+    assert receipt["deletions_pending"] == 1
+    assert await store.export_user_messages(user="alice@example.com") == ([], None)
+
+    first = await store.maintain()
+    assert first["delete"]["failed"] == 1
+    stats = await store.stats()
+    assert stats["conversation_deletions_pending"] == 1
+    await store.aclose()
+
+    restarted = await _make_store(db_path, qdrant)
+    try:
+        repaired = await restarted.maintain()
+        assert repaired["delete"]["chunks_deleted"] == 1
+        stats = await restarted.stats()
+        assert stats["messages"] == 0
+        assert stats["chunks"] == 0
+        assert stats["conversation_deletions_pending"] == 0
+        assert stats["conversation_deletions_completed"] == 1
+
+        late = await restarted.archive_turn(
+            user="alice@example.com",
+            conversation_id="conv-1",
+            user_content="late retry",
+            assistant_content="must stay deleted",
+            archive_id="late-delivery",
+            created_at="2020-01-01T00:00:00+00:00",
+        )
+        assert late["skipped_deleted"] is True
+        assert (await restarted.stats())["messages"] == 0
+
+        fresh = await restarted.archive_turn(
+            user="alice@example.com",
+            conversation_id="conv-1",
+            user_content="new turn",
+            assistant_content="allowed after deletion",
+            archive_id="fresh-delivery",
+            created_at="2099-01-01T00:00:00+00:00",
+        )
+        assert "skipped_deleted" not in fresh
+        items, _ = await restarted.export_user_messages(
+            user="alice@example.com",
+        )
+        assert [item.content for item in items] == [
+            "new turn",
+            "allowed after deletion",
+        ]
     finally:
         await restarted.aclose()
 

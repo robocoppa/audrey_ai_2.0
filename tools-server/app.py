@@ -14,7 +14,10 @@ Endpoints, OpenAPI auto-discovered by the Audrey orchestrator:
 
 Internal-only (hidden from /openapi.json so the model can't call them):
   POST /user_data/memories/list       — paginated current-user inventory
+  POST /user_data/memories/update     — correct one current-user memory
+  POST /user_data/memories/delete     — delete one current-user memory
   POST /user_data/chat_history/export — paginated current-user source export
+  POST /user_data/chat_history/delete — tombstone one current-user conversation
   POST /chat_history/archive   — write a turn to the chat archive
   POST /chat_history/prune     — apply retention policy
   GET  /chat_history/stats     — row counts for admin/debug
@@ -293,6 +296,36 @@ class UserDataPageRequest(BaseModel):
     user: Annotated[str, Field(min_length=1, max_length=200)]
     limit: Annotated[int, Field(ge=1, le=200)] = 100
     cursor: Annotated[str | None, Field(max_length=512)] = None
+
+
+class MemoryMutationRequest(BaseModel):
+    user: Annotated[str, Field(min_length=1, max_length=200)]
+    key: Annotated[str, Field(min_length=1, max_length=200)]
+    value: Annotated[str, Field(min_length=1, max_length=20_000)]
+    tags: Annotated[str | None, Field(max_length=500)] = None
+
+
+class MemoryDeleteRequest(BaseModel):
+    user: Annotated[str, Field(min_length=1, max_length=200)]
+    key: Annotated[str, Field(min_length=1, max_length=200)]
+
+
+class MemoryDeleteResponse(BaseModel):
+    key: str
+    deleted: bool
+
+
+class ChatDeletionRequest(BaseModel):
+    user: Annotated[str, Field(min_length=1, max_length=200)]
+    conversation_id: Annotated[str, Field(min_length=1, max_length=200)]
+
+
+class ChatDeletionResponse(BaseModel):
+    conversation_id: str
+    requested_at: str
+    status: str
+    chunks_queued: int
+    deletions_pending: int
 
 
 class MemoryListResponse(BaseModel):
@@ -987,6 +1020,51 @@ async def user_data_memories_list(
 
 
 @app.post(
+    "/user_data/memories/update",
+    response_model=MemoryEntryResponse,
+    include_in_schema=False,
+    tags=["internal"],
+)
+async def user_data_memories_update(
+    req: MemoryMutationRequest,
+    _: None = Depends(_require_internal_service),
+) -> MemoryEntryResponse:
+    memory: MemoryStore = app.state.memory
+    item = await memory.update_user(
+        user=req.user,
+        key=req.key,
+        value=req.value,
+        tags=req.tags,
+    )
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="memory_not_found",
+        )
+    return MemoryEntryResponse.from_entry(item)
+
+
+@app.post(
+    "/user_data/memories/delete",
+    response_model=MemoryDeleteResponse,
+    include_in_schema=False,
+    tags=["internal"],
+)
+async def user_data_memories_delete(
+    req: MemoryDeleteRequest,
+    _: None = Depends(_require_internal_service),
+) -> MemoryDeleteResponse:
+    memory: MemoryStore = app.state.memory
+    deleted = await memory.delete_user(user=req.user, key=req.key)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="memory_not_found",
+        )
+    return MemoryDeleteResponse(key=req.key, deleted=True)
+
+
+@app.post(
     "/user_data/chat_history/export",
     response_model=ChatExportResponse,
     include_in_schema=False,
@@ -1009,6 +1087,29 @@ async def user_data_chat_history_export(
         items=[ChatExportMessageResponse.from_entry(item) for item in items],
         next_cursor=next_cursor,
     )
+
+
+@app.post(
+    "/user_data/chat_history/delete",
+    response_model=ChatDeletionResponse,
+    include_in_schema=False,
+    tags=["internal"],
+)
+async def user_data_chat_history_delete(
+    req: ChatDeletionRequest,
+    _: None = Depends(_require_internal_service),
+) -> ChatDeletionResponse:
+    archive: ChatArchiveStore = app.state.chat_archive
+    result = await archive.request_conversation_deletion(
+        user=req.user,
+        conversation_id=req.conversation_id,
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="conversation_not_found",
+        )
+    return ChatDeletionResponse.model_validate(result)
 
 
 # ─── Chat archive: internal write/admin (not in /openapi.json) ────────

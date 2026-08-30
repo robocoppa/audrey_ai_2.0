@@ -87,6 +87,51 @@ def test_model_registry_location_of_defaults_to_local_for_unknown():
     assert registry.location_of("never-registered") == "local"
 
 
+def test_an_unregistered_cloud_tagged_model_is_not_gated_as_local():
+    """Ollama's `:cloud` tag is authoritative about where the weights are.
+
+    The motivating defect (2026-08-29): a `:cloud` model reachable through
+    `passthrough.allowed_models` but holding no registry slot was gated as
+    local, so every request reserved the box's only GPU slot — held for the
+    whole stream — for a call that runs entirely off-box. Nothing errored;
+    local work just queued behind it.
+    """
+    registry = ModelRegistry(_Cfg({"general": []}))
+
+    assert registry.location_of("glm-5.3-flash:cloud") == "cloud"
+    # The qualified form Ollama also uses.
+    assert registry.location_of("qwen3.5:397b-cloud") == "cloud"
+    assert registry.location_of("deepseek-v4-flash:0731-cloud") == "cloud"
+
+
+def test_only_the_tag_decides_not_the_model_name():
+    """A local model whose NAME contains "cloud" must stay gated.
+
+    Inspecting the whole string would turn this inference into the kind of
+    guess the "unknown -> local" default exists to avoid.
+    """
+    registry = ModelRegistry(_Cfg({"general": []}))
+
+    assert registry.location_of("cloudy-vision:34b") == "local"
+    assert registry.location_of("mycloud:latest") == "local"
+    assert registry.location_of("bare-name-no-tag") == "local"
+
+
+def test_a_declared_location_still_beats_the_tag():
+    """Explicit config wins. The tag is a fallback, not an override.
+
+    Without this, a deliberate `location: local` on a cloud-tagged entry
+    would be silently ignored.
+    """
+    registry = ModelRegistry(_Cfg({
+        "general": [
+            {"name": "odd:cloud", "priority": 100, "location": "local"},
+        ],
+    }))
+
+    assert registry.location_of("odd:cloud") == "local"
+
+
 def test_model_registry_location_of_finds_model_across_task_types():
     # A worker can appear in multiple task lists; the lookup walks every
     # task type, so finding the model under any one is enough.

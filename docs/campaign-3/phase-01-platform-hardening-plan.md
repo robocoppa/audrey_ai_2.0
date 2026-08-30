@@ -1,7 +1,7 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress. Waves 1A, 1B, and 1C.1–1C.4 are Unraid-verified;
-1C.5a inspect/export controls are laptop-complete and 1C.5b is next.
+**Status:** In progress. Waves 1A, 1B, and 1C.1–1C.5a are Unraid-verified;
+1C.5b is laptop-complete and its deployment smoke is next.
 
 ## Goal
 
@@ -147,12 +147,24 @@ at pending=1 while Qdrant was unavailable, retried at the configured backoff,
 then completed and returned pending to 0 after Qdrant recovered. 1C.4 is
 Unraid-verified.
 
-1C.5a laptop status (2026-08-29): Audrey exposes authenticated, paginated
+1C.5a status (2026-08-29): Audrey exposes authenticated, paginated
 memory inventory and chat-source export under `/v1/me`. The browser cannot
 select a user; Audrey injects the verified identity into service-token-gated
 sidecar routes that are hidden from model discovery. Chat export omits pending
-deletion tombstones. All 2,510 hermetic tests pass. Memory correction/deletion,
-durable chat deletion, account purge, and status remain in 1C.5b onward.
+deletion tombstones. All 2,510 hermetic tests pass. The Unraid smoke returned
+valid memory and chat pages with opaque continuation cursors, hid internal
+memory scope tags, and rejected an unauthenticated request with HTTP 401.
+1C.5a is Unraid-verified.
+
+1C.5b status (2026-08-29): laptop-complete. Authenticated current-user memory
+correction and deletion wait for Qdrant acknowledgement, preserve ownership,
+and remove caller-supplied scope tags. Per-conversation chat deletion hides
+the conversation immediately, durably retries SQLite/Qdrant cleanup, and
+retains a cutoff tombstone so a late archive delivery cannot resurrect deleted
+history while a new post-delete turn can still be stored. Colliding client
+conversation ids remain user-scoped. All 2,521 hermetic tests pass; scoped
+ruff and compilation are clean. The Unraid deployment smoke is next. Account
+purge and owner/admin repair status remain afterward.
 
 
 Gate:

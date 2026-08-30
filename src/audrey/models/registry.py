@@ -67,18 +67,52 @@ class ModelRegistry:
         return list(self._by_task.keys())
 
     def location_of(self, model: str) -> Location:
-        """Look up the registry-declared location of `model`. Default: local.
+        """Look up the registry-declared location of `model`.
 
         Walks every task list because a model can appear under multiple
         task types with a single location; the first match wins. Used by
         the deep panel and synthesizer to decide whether a chat call
         counts against the local GPU gate or the cloud concurrency cap.
+
+        A declared location always wins. Only when the model is absent from
+        `model_registry` does this fall through to `_location_from_tag`.
         """
         for specs in self._by_task.values():
             for spec in specs:
                 if spec.name == model:
                     return spec.location
+        return _location_from_tag(model)
+
+
+def _location_from_tag(model: str) -> Location:
+    """Infer a location for a model that holds no `model_registry` slot.
+
+    ⚠️ "Unknown -> local" is the SAFE default and stays the default: a typo,
+    or a model dropped from the registry but not from a pool, must go through
+    the GPU gate rather than bypass it as "cloud". Only one thing overrides
+    that, and it is not a guess — Ollama's own tag. A `:cloud` tag means the
+    weights are not on this box and the request leaves it, so gating such a
+    call against `GPU_CONCURRENCY=1` reserves a card nothing will use.
+
+    ⚠️ 2026-08-29, the failure that motivated this: `glm-5.3-flash:cloud` was
+    added to `passthrough.allowed_models` as a bake-off arm and deliberately
+    given no registry slot (an entry there is a production role — it makes the
+    model selectable as a pool failover). An OpenClaw bot then set it as its
+    DEFAULT, and every one of its turns took the box's only GPU slot, held for
+    the whole stream (`pipeline/passthrough.py` keeps the gate across the
+    entire response), for a model running in Ollama Cloud that touches no GPU.
+    Nothing failed — local work simply queued behind a cloud call, invisibly.
+
+    Only the TAG is inspected, never the whole name, so a local model that
+    merely has "cloud" in its name is unaffected. Both forms Ollama uses are
+    covered: a bare `:cloud` tag and a qualified one (`:397b-cloud`).
+    """
+    _, sep, tag = model.rpartition(":")
+    if not sep:
         return "local"
+    if tag == "cloud" or tag.endswith("-cloud"):
+        return "cloud"
+    return "local"
 
 
 def _parse_location(raw: object, *, task: str, model: str) -> Location:

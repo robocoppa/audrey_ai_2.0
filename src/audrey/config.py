@@ -284,11 +284,14 @@ def _validate_deep_panel_pools(merged: dict[str, Any]) -> None:
        (flat: `pick_synthesizer`) or have nothing to dispatch (staged) on the
        first request.
     2. A model name absent from `model_registry`. At request time an unknown
-       model passes `HealthTracker.is_healthy` (unknown → True), defaults to
-       `location="local"` in `ModelRegistry.location_of`, then fails the
-       Ollama call — wasting a GPU-gate slot on a model that can't load before
-       degrading. Catching it here turns a silent dud-fallback into a loud
-       boot failure.
+       model passes `HealthTracker.is_healthy` (unknown → True), then fails
+       the Ollama call — wasting a GPU-gate slot on a model that can't load
+       before degrading. Catching it here turns a silent dud-fallback into a
+       loud boot failure.
+       ⚠️ `ModelRegistry.location_of` falls back to "local" for such a name
+       UNLESS its Ollama tag says `:cloud`; that inference keeps an off-box
+       model off the GPU gate, but it is not a substitute for this check —
+       an unregistered model is still a dud slot wherever it would run.
 
     Same fast-fail posture as `_load_yaml`.
     """

@@ -12,8 +12,8 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ValidationError
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from pydantic import BaseModel, Field, ValidationError
 
 from audrey.auth import AuthedUser, require_user
 
@@ -22,7 +22,10 @@ router = APIRouter(prefix="/v1/me", tags=["user-data"])
 _MEMORY_HOST_TOOL = "memory_search"
 _CHAT_HOST_TOOL = "chat_history_search"
 _MEMORY_LIST_PATH = "/user_data/memories/list"
+_MEMORY_UPDATE_PATH = "/user_data/memories/update"
+_MEMORY_DELETE_PATH = "/user_data/memories/delete"
 _CHAT_EXPORT_PATH = "/user_data/chat_history/export"
+_CHAT_DELETE_PATH = "/user_data/chat_history/delete"
 
 
 class MemoryItem(BaseModel):
@@ -36,6 +39,16 @@ class MemoryItem(BaseModel):
 class MemoryPage(BaseModel):
     items: list[MemoryItem]
     next_cursor: str | None = None
+
+
+class MemoryCorrection(BaseModel):
+    value: Annotated[str, Field(min_length=1, max_length=20_000)]
+    tags: Annotated[str | None, Field(max_length=500)] = None
+
+
+class MemoryDeleteResult(BaseModel):
+    key: str
+    deleted: bool
 
 
 class ChatExportMessage(BaseModel):
@@ -61,6 +74,14 @@ class ChatExportPage(BaseModel):
     next_cursor: str | None = None
 
 
+class ChatDeletionResult(BaseModel):
+    conversation_id: str
+    requested_at: str
+    status: str
+    chunks_queued: int
+    deletions_pending: int
+
+
 def _tool_host(request: Request, tool_name: str) -> str:
     registry = getattr(request.app.state, "tools", None)
     spec = registry.get(tool_name) if registry is not None else None
@@ -69,14 +90,14 @@ def _tool_host(request: Request, tool_name: str) -> str:
     return str(spec.server_url).rstrip("/")
 
 
-async def _request_page(
+async def _request_backend(
     request: Request,
     *,
     tool_name: str,
     path: str,
-    user: str,
-    limit: int,
-    cursor: str | None,
+    body: dict[str, Any],
+    unprocessable_detail: str,
+    not_found_detail: str | None = None,
 ) -> dict[str, Any]:
     client: httpx.AsyncClient | None = getattr(
         request.app.state, "archive_http", None,
@@ -91,9 +112,6 @@ async def _request_page(
             status_code=503,
             detail="user_data_service_auth_unavailable",
         )
-    body: dict[str, Any] = {"user": user, "limit": limit}
-    if cursor is not None:
-        body["cursor"] = cursor
     try:
         response = await client.post(
             f"{_tool_host(request, tool_name)}{path}",
@@ -112,8 +130,10 @@ async def _request_page(
         if response.status_code == 422:
             raise HTTPException(
                 status_code=422,
-                detail="invalid_pagination_cursor",
+                detail=unprocessable_detail,
             )
+        if response.status_code == 404 and not_found_detail is not None:
+            raise HTTPException(status_code=404, detail=not_found_detail)
         status_code = (
             503
             if response.status_code >= 500 or response.status_code == 401
@@ -133,6 +153,27 @@ async def _request_page(
             detail="user_data_backend_invalid_response",
         )
     return value
+
+
+async def _request_page(
+    request: Request,
+    *,
+    tool_name: str,
+    path: str,
+    user: str,
+    limit: int,
+    cursor: str | None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"user": user, "limit": limit}
+    if cursor is not None:
+        body["cursor"] = cursor
+    return await _request_backend(
+        request,
+        tool_name=tool_name,
+        path=path,
+        body=body,
+        unprocessable_detail="invalid_pagination_cursor",
+    )
 
 
 @router.get("/memories", response_model=MemoryPage)
@@ -160,6 +201,62 @@ async def list_memories(
         ) from e
 
 
+@router.put("/memories/{key:path}", response_model=MemoryItem)
+async def correct_memory(
+    request: Request,
+    correction: MemoryCorrection,
+    key: Annotated[str, Path(min_length=1, max_length=200)],
+    me: AuthedUser = Depends(require_user),
+) -> MemoryItem:
+    """Correct one existing memory owned by the authenticated account."""
+    body: dict[str, Any] = {
+        "user": me.email,
+        "key": key,
+        "value": correction.value,
+    }
+    if correction.tags is not None:
+        body["tags"] = correction.tags
+    value = await _request_backend(
+        request,
+        tool_name=_MEMORY_HOST_TOOL,
+        path=_MEMORY_UPDATE_PATH,
+        body=body,
+        unprocessable_detail="invalid_memory_update",
+        not_found_detail="memory_not_found",
+    )
+    try:
+        return MemoryItem.model_validate(value)
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=502,
+            detail="user_data_backend_invalid_response",
+        ) from e
+
+
+@router.delete("/memories/{key:path}", response_model=MemoryDeleteResult)
+async def delete_memory(
+    request: Request,
+    key: Annotated[str, Path(min_length=1, max_length=200)],
+    me: AuthedUser = Depends(require_user),
+) -> MemoryDeleteResult:
+    """Delete one memory owned by the authenticated account."""
+    value = await _request_backend(
+        request,
+        tool_name=_MEMORY_HOST_TOOL,
+        path=_MEMORY_DELETE_PATH,
+        body={"user": me.email, "key": key},
+        unprocessable_detail="invalid_memory_delete",
+        not_found_detail="memory_not_found",
+    )
+    try:
+        return MemoryDeleteResult.model_validate(value)
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=502,
+            detail="user_data_backend_invalid_response",
+        ) from e
+
+
 @router.get("/chat-history/export", response_model=ChatExportPage)
 async def export_chat_history(
     request: Request,
@@ -178,6 +275,34 @@ async def export_chat_history(
     )
     try:
         return ChatExportPage.model_validate(value)
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=502,
+            detail="user_data_backend_invalid_response",
+        ) from e
+
+
+@router.delete(
+    "/chat-history/{conversation_id}",
+    response_model=ChatDeletionResult,
+    status_code=202,
+)
+async def delete_chat_history(
+    request: Request,
+    conversation_id: Annotated[str, Path(min_length=1, max_length=200)],
+    me: AuthedUser = Depends(require_user),
+) -> ChatDeletionResult:
+    """Durably delete one conversation owned by the authenticated account."""
+    value = await _request_backend(
+        request,
+        tool_name=_CHAT_HOST_TOOL,
+        path=_CHAT_DELETE_PATH,
+        body={"user": me.email, "conversation_id": conversation_id},
+        unprocessable_detail="invalid_chat_history_delete",
+        not_found_detail="conversation_not_found",
+    )
+    try:
+        return ChatDeletionResult.model_validate(value)
     except ValidationError as e:
         raise HTTPException(
             status_code=502,
