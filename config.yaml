@@ -97,7 +97,14 @@ model_registry:
     - { name: "nemotron-3.5-lightning:latest", priority: 80, speed: 85, quality: 84, location: local }
     - { name: "kimi-k2.6:cloud",          priority:  78, speed: 90, quality: 92, location: cloud }
     - { name: "deepseek-v4-flash:cloud",  priority:  72, speed: 92, quality: 90, location: cloud }
-    - { name: "deepseek-v3.2:cloud",      priority:  70, speed: 85, quality: 90, location: cloud }
+    # ⚠️ 2026-08-30: `deepseek-v3.2:cloud` (70) REMOVED — named in three places
+    # (here, `fast_path.tool_capable_models`, `passthrough.allowed_models`) and
+    # NOT on the box. Same standing rule as the 2026-08-16 sweep: not pulled
+    # means gone. Found by `check_model_inventory.py` against a live `ollama
+    # list`; no test can catch this, because none of them reach the box.
+    # ▶ It was the worst of the three placements: a phantom in
+    # `tool_capable_models` gates whether the fast path runs the TOOL LOOP at
+    # all, so the damage is a silently tool-less turn, not a visible error.
 
   reasoning:
     # Ranked by the quality column, not by locality: the local entry led this
@@ -231,7 +238,6 @@ fast_path:
     - "kimi-k2.6:cloud"
     - "deepseek-v4-pro:cloud"
     - "deepseek-v4-flash:cloud"
-    - "deepseek-v3.2:cloud"
     - "qwen3.5:397b-cloud"
     - "nemotron-3-super:cloud"
     # ✅ `ollama show glm-5.3:cloud` declares `tools` (verified against the box
@@ -1566,7 +1572,6 @@ passthrough:
     - glm-5.3-flash:cloud
     - kimi-k2.6:cloud
     - deepseek-v4-flash:cloud
-    - deepseek-v3.2:cloud
     - nemotron-3-super:cloud
     - qwen3.5:397b-cloud
     - llama4:latest

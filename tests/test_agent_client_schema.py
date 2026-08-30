@@ -88,14 +88,98 @@ def test_the_whole_replayed_tool_loop_validates():
     assert len(req.messages) == 3
 
 
-def test_genuinely_unknown_fields_are_still_rejected():
-    """The fix widens the schema by two known fields — it does not open it.
+def test_an_unknown_field_is_dropped_not_rejected(caplog):
+    """⚠️ 2026-08-30: this REPLACES a test that asserted the opposite.
 
-    `extra="forbid"` is deliberate; a typo'd field name must still fail loudly
-    rather than be silently dropped on the floor.
+    It used to assert `extra="forbid"` rejected unknown fields, on the
+    reasoning that a typo should fail loudly. In practice "loudly" meant a 422
+    raised before the route body, logged nowhere on Audrey, and surfaced by the
+    client as a generic provider failure — the outage shape that cost an
+    afternoon. The signal is kept as a log line instead; see
+    `_StrictChatMessage`.
+    """
+    import audrey.routes.openai.schemas as sch
+    sch._REPORTED_UNKNOWN_FIELDS.clear()
+
+    with caplog.at_level("WARNING"):
+        req = ChatCompletionRequest(
+            model="audrey_auto",
+            messages=[{"role": "user", "content": "hi", "nonsense_field": 1}],
+        )
+
+    assert req.messages[0].content == "hi"
+    assert "nonsense_field" in caplog.text
+    assert "role=user" in caplog.text
+
+
+def test_an_unknown_field_never_reaches_the_provider():
+    """Dropping was always the safe half — forwarding is allow-list based."""
+    req = ChatCompletionRequest(
+        model="audrey_auto",
+        messages=[{"role": "user", "content": "hi", "nonsense_field": 1}],
+    )
+
+    dumped = req.messages[0].model_dump(exclude_none=True, exclude={"metadata"})
+    assert "nonsense_field" not in dumped
+
+
+def test_an_unknown_field_is_reported_once_per_process(caplog):
+    """Per-request logging would bury the signal on a busy gateway."""
+    import audrey.routes.openai.schemas as sch
+    sch._REPORTED_UNKNOWN_FIELDS.clear()
+
+    with caplog.at_level("WARNING"):
+        for _ in range(3):
+            ChatCompletionRequest(
+                model="audrey_auto",
+                messages=[{"role": "user", "content": "hi", "novel_field": 1}],
+            )
+
+    assert caplog.text.count("novel_field") == 1
+
+
+def test_a_known_field_on_the_wrong_role_is_still_rejected():
+    """The line between lenient and strict, and why it sits here.
+
+    `tool_calls` is not unfamiliar vocabulary — `AssistantChatMessage` models
+    it. A field Audrey understands, arriving on a role that does not carry it,
+    demonstrably means something, so dropping it would discard meaning quietly.
+    That is the failure mode the lenient path is supposed to avoid, not cause.
     """
     with pytest.raises(ValidationError):
         ChatCompletionRequest(
             model="audrey_auto",
-            messages=[{"role": "user", "content": "hi", "nonsense_field": 1}],
+            messages=[{
+                "role": "user",
+                "content": "not an assistant turn",
+                "tool_calls": [{
+                    "id": "c1", "type": "function",
+                    "function": {"name": "t", "arguments": "{}"},
+                }],
+            }],
+        )
+
+
+def test_a_malformed_tool_history_is_still_rejected():
+    """Vocabulary got lenient; MEANING did not.
+
+    A tool result referencing a call that was never made is a genuinely broken
+    message array, not an unrecognised field, and must still 422.
+    """
+    with pytest.raises(ValidationError):
+        ChatCompletionRequest(
+            model="audrey_auto",
+            messages=[
+                {"role": "user", "content": "hi"},
+                {"role": "tool", "tool_call_id": "never-issued", "content": "ok"},
+            ],
+        )
+
+
+def test_an_assistant_turn_still_needs_content_or_tool_calls():
+    """The other semantic invariant, likewise untouched."""
+    with pytest.raises(ValidationError):
+        ChatCompletionRequest(
+            model="audrey_auto",
+            messages=[{"role": "assistant", "content": None}],
         )

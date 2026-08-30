@@ -9,22 +9,105 @@ schemas without pulling in the streaming machinery.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+log = logging.getLogger(__name__)
+
 ChatContent = str | list[dict[str, Any]]
+
+#: Every field declared by ANY concrete role, populated once the classes below
+#: exist. A key in here that appears on the WRONG role is a misplacement, not
+#: unfamiliar vocabulary — it demonstrably carries meaning, because another role
+#: models it — so it is rejected rather than dropped. `tool_calls` on a `user`
+#: message is the case that motivated the split.
+_ALL_ROLE_FIELDS: frozenset[str] = frozenset()
+
+#: Seen (role, field) pairs, so an unknown field is reported the FIRST time a
+#: client sends it and not on every subsequent request. Process-local and
+#: unbounded only in the number of distinct field names a client invents, which
+#: is small. Reset per process, which is what you want — a restart after a
+#: client upgrade should say so again.
+_REPORTED_UNKNOWN_FIELDS: set[tuple[str, str]] = set()
 
 
 class _StrictChatMessage(BaseModel):
-    """Shared extensions accepted on every role without forwarding them."""
+    """Shared extensions accepted on every role without forwarding them.
 
-    model_config = ConfigDict(extra="forbid")
+    ⚠️ `extra="ignore"`, NOT `"forbid"` — changed 2026-08-30, and the reason is
+    worth keeping. Forbidding here made every unknown message field a 422 that
+    Pydantic raises BEFORE the route body runs: nothing dispatched, and
+    **nothing logged by Audrey at all**. The client sees only its own generic
+    "the model provider failed", so a two-field vocabulary gap reads as an
+    outage of the model on a box that never saw the request. That is exactly
+    how `tool.name` and `assistant.reasoning_content` cost an afternoon.
+
+    Dropping an unknown field was always the safe half: messages reach Ollama
+    through `model_dump(exclude_none=True, exclude={"metadata"})`, which is
+    allow-list-based, so an undeclared field could never have been forwarded
+    anyway. Forbidding bought no safety at the provider boundary — it bought
+    VISIBILITY, and then delivered it as an outage.
+
+    So the visibility is kept and the outage is not: `_log_unknown_fields`
+    reports anything undeclared at WARNING, once per (role, field) per process.
+    A new client extension now shows up as one log line the first time it
+    arrives instead of as a phantom failure.
+
+    ⚠️ The trade this accepts: a field that SHOULD have been handled is now
+    dropped quietly rather than rejected loudly. The log line is the mitigation.
+    If a client's content ever goes missing rather than erroring, grep for
+    `unknown message field` before suspecting the model.
+
+    ⚠️ This governs VOCABULARY only. The semantic validators are unchanged and
+    still reject: `require_content_or_tool_calls` below, and
+    `ChatCompletionRequest.validate_tool_result_links`, which catches tool
+    results that reference a call that was never made — a real malformed
+    history, not an unrecognised field.
+    """
+
+    model_config = ConfigDict(extra="ignore")
 
     # Older OWUI payloads attach conversation metadata to a message. Preserve
     # it through validation for archive identity; route adapters explicitly
     # exclude it at the model-provider boundary.
     metadata: dict[str, Any] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _log_unknown_fields(cls, data: Any) -> Any:
+        """Report undeclared fields without rejecting them. Never mutates.
+
+        Runs before validation, so it sees the raw payload — by the time
+        `extra="ignore"` has done its work the extras are gone and there is
+        nothing left to report.
+        """
+        if not isinstance(data, dict):
+            return data
+        unknown = set(data) - set(cls.model_fields)
+        if not unknown:
+            return data
+        role = str(data.get("role", "?"))
+        misplaced = sorted(unknown & _ALL_ROLE_FIELDS)
+        if misplaced:
+            raise ValueError(
+                f"{role} message carries field(s) belonging to another role: "
+                f"{', '.join(misplaced)}. Audrey models these, so dropping them "
+                "would silently discard meaning."
+            )
+        if unknown:
+            for field in sorted(unknown):
+                if (role, field) in _REPORTED_UNKNOWN_FIELDS:
+                    continue
+                _REPORTED_UNKNOWN_FIELDS.add((role, field))
+                log.warning(
+                    "unknown message field dropped: role=%s field=%s — a client "
+                    "sends this and Audrey does not model it. Harmless if it is "
+                    "client bookkeeping; declare it if it carries meaning.",
+                    role, field,
+                )
+        return data
 
 
 class SystemChatMessage(_StrictChatMessage):
@@ -100,6 +183,16 @@ class ToolChatMessage(_StrictChatMessage):
     # ▶ Failure shape to recognise: 422 `extra_forbidden` at
     #   `body.messages[N].tool.name`.
     name: str | None = None
+
+
+_ALL_ROLE_FIELDS = frozenset(
+    field
+    for message_cls in (
+        SystemChatMessage, DeveloperChatMessage, UserChatMessage,
+        AssistantChatMessage, ToolChatMessage,
+    )
+    for field in message_cls.model_fields
+)
 
 
 ChatMessage = Annotated[
