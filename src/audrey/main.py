@@ -41,6 +41,7 @@ from audrey.routes.kb import router as kb_router
 from audrey.routes.media import router as media_router
 from audrey.routes.openai import router as openai_router
 from audrey.routes.upload_ui import router as upload_ui_router
+from audrey.routes.user_data import router as user_data_router
 from audrey.tools.discovery import ToolRegistry, discover_all
 from audrey.tools.dispatch import audit_user_scoping
 
@@ -208,7 +209,10 @@ async def lifespan(app: FastAPI):
     # only the small local source row; this lifecycle-owned worker performs the
     # remote custom-tools call and resumes unfinished rows after restart.
     archive_http = httpx.AsyncClient(timeout=10.0)
-    archive_transport = ChatArchiveClient(archive_http)
+    archive_transport = ChatArchiveClient(
+        archive_http,
+        service_token=cfg.env.kb_service_token,
+    )
     archive_cfg = cfg.raw.get("chat_archive", {}) or {}
     archive_queue_cfg = archive_cfg.get("queue", {}) or {}
     archive_client: ChatArchiveQueue | None = None
@@ -230,6 +234,7 @@ async def lifespan(app: FastAPI):
         await archive_client.start()
     app.state.archive_http = archive_http
     app.state.archive_client = archive_client
+    app.state.kb_service_token = cfg.env.kb_service_token
 
     log.info(
         "ready: ollama=%s; task types=%s; gpu_concurrency=%d; "
@@ -335,6 +340,7 @@ app.include_router(kb_router)
 app.include_router(files_router)
 app.include_router(media_router)
 app.include_router(upload_ui_router)
+app.include_router(user_data_router)
 app.include_router(admin_router)
 
 

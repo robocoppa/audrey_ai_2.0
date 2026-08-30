@@ -13,6 +13,8 @@ Endpoints, OpenAPI auto-discovered by the Audrey orchestrator:
                                  /v1/files/list (service token)
 
 Internal-only (hidden from /openapi.json so the model can't call them):
+  POST /user_data/memories/list       — paginated current-user inventory
+  POST /user_data/chat_history/export — paginated current-user source export
   POST /chat_history/archive   — write a turn to the chat archive
   POST /chat_history/prune     — apply retention policy
   GET  /chat_history/stats     — row counts for admin/debug
@@ -30,6 +32,7 @@ OpenAPI → Ollama-tool converter produces sensible tool names.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
@@ -42,9 +45,9 @@ from brave import (
     BraveUpstreamError,
     SearchResult,
 )
-from chat_archive import ChatArchiveMaintainer, ChatArchiveStore
+from chat_archive import ChatArchiveMaintainer, ChatArchiveStore, ChatExportMessage
 from db import EmbedError, MemoryEntry, MemoryStore
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fetch import FetchError, fetch_readable
 from pydantic import BaseModel, Field
 from searxng import SearxngClient, SearxngError
@@ -284,6 +287,44 @@ class MemoryEntryResponse(BaseModel):
             key=e.key, value=e.value, tags=e.tags,
             created_at=e.created_at, updated_at=e.updated_at,
         )
+
+
+class UserDataPageRequest(BaseModel):
+    user: Annotated[str, Field(min_length=1, max_length=200)]
+    limit: Annotated[int, Field(ge=1, le=200)] = 100
+    cursor: Annotated[str | None, Field(max_length=512)] = None
+
+
+class MemoryListResponse(BaseModel):
+    items: list[MemoryEntryResponse]
+    next_cursor: str | None = None
+
+
+class ChatExportMessageResponse(BaseModel):
+    message_id: str
+    conversation_id: str
+    conversation_title: str
+    conversation_created_at: str
+    conversation_updated_at: str
+    role: str
+    content: str
+    created_at: str
+    archived_at: str
+    partial: bool
+    virtual_model: str
+    concrete_model: str
+    prompt_tokens: int
+    completion_tokens: int
+
+    @classmethod
+    def from_entry(cls, entry: ChatExportMessage) -> ChatExportMessageResponse:
+        return cls(**{name: getattr(entry, name) for name in cls.model_fields})
+
+
+class ChatExportResponse(BaseModel):
+    schema_version: int = 1
+    items: list[ChatExportMessageResponse]
+    next_cursor: str | None = None
 
 
 class MemorySearchResponse(BaseModel):
@@ -903,6 +944,71 @@ async def get_file_text(req: GetFileTextRequest) -> GetFileTextResponse:
     if r.status_code >= 400:
         raise HTTPException(status_code=r.status_code, detail=r.text)
     return GetFileTextResponse(**r.json())
+
+
+async def _require_internal_service(
+    x_audrey_service_token: str | None = Header(default=None),
+) -> None:
+    expected = settings.kb_service_token
+    if (
+        not expected
+        or not x_audrey_service_token
+        or not hmac.compare_digest(x_audrey_service_token, expected)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Service token required.",
+        )
+
+
+@app.post(
+    "/user_data/memories/list",
+    response_model=MemoryListResponse,
+    include_in_schema=False,
+    tags=["internal"],
+)
+async def user_data_memories_list(
+    req: UserDataPageRequest,
+    _: None = Depends(_require_internal_service),
+) -> MemoryListResponse:
+    memory: MemoryStore = app.state.memory
+    try:
+        items, next_cursor = await memory.list_user(
+            user=req.user, limit=req.limit, cursor=req.cursor,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e),
+        ) from e
+    return MemoryListResponse(
+        items=[MemoryEntryResponse.from_entry(item) for item in items],
+        next_cursor=next_cursor,
+    )
+
+
+@app.post(
+    "/user_data/chat_history/export",
+    response_model=ChatExportResponse,
+    include_in_schema=False,
+    tags=["internal"],
+)
+async def user_data_chat_history_export(
+    req: UserDataPageRequest,
+    _: None = Depends(_require_internal_service),
+) -> ChatExportResponse:
+    archive: ChatArchiveStore = app.state.chat_archive
+    try:
+        items, next_cursor = await archive.export_user_messages(
+            user=req.user, limit=req.limit, cursor=req.cursor,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e),
+        ) from e
+    return ChatExportResponse(
+        items=[ChatExportMessageResponse.from_entry(item) for item in items],
+        next_cursor=next_cursor,
+    )
 
 
 # ─── Chat archive: internal write/admin (not in /openapi.json) ────────

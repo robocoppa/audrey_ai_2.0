@@ -81,6 +81,15 @@ def _embedding_text(key: str, value: str, tags: str) -> str:
     return f"{key}: {value}"
 
 
+def _public_tags(tags: str) -> str:
+    """Return user-authored tags without the internal identity token."""
+    return ",".join(
+        token
+        for token in tags.replace(",", " ").split()
+        if not token.startswith(_USER_TAG_PREFIX)
+    )
+
+
 class EmbedError(RuntimeError):
     """Raised when Ollama refuses to produce an embedding."""
 
@@ -312,6 +321,54 @@ class MemoryStore:
             created_at=p.get("created_at", ""),
             updated_at=p.get("updated_at", ""),
         )
+
+    async def list_user(
+        self,
+        *,
+        user: str,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> tuple[list[MemoryEntry], str | None]:
+        """List one user memory scope without embedding or semantic search.
+
+        The Qdrant scroll offset is already a stable point-id cursor. Memory
+        point ids are deterministic UUIDs, so validating the incoming cursor
+        before forwarding it gives callers a clean error instead of an opaque
+        Qdrant failure. The internal user identity tag is an authorization
+        implementation detail and is not part of the user-facing inventory.
+        """
+        if not user:
+            raise ValueError("list_user requires a non-empty user")
+        if limit < 1 or limit > 200:
+            raise ValueError("limit must be between 1 and 200")
+        offset: str | None = None
+        if cursor:
+            try:
+                offset = str(uuid.UUID(cursor))
+            except (ValueError, AttributeError) as e:
+                raise ValueError("invalid memory cursor") from e
+
+        points, next_offset = await self._qdrant.scroll(
+            collection_name=self._collection,
+            scroll_filter=qm.Filter(must=[
+                qm.FieldCondition(key="user", match=qm.MatchValue(value=user)),
+            ]),
+            limit=limit,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        entries: list[MemoryEntry] = []
+        for point in points:
+            payload = point.payload or {}
+            entries.append(MemoryEntry(
+                key=str(payload.get("key", "")),
+                value=str(payload.get("value", "")),
+                tags=_public_tags(str(payload.get("tags", ""))),
+                created_at=str(payload.get("created_at", "")),
+                updated_at=str(payload.get("updated_at", "")),
+            ))
+        return entries, str(next_offset) if next_offset is not None else None
 
     async def search(
         self, *, user: str, query: str, top_k: int = 5,

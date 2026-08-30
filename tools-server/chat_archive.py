@@ -35,8 +35,10 @@ outboxes without putting either repair path on the chat request lifecycle.
 from __future__ import annotations
 
 import asyncio
+import base64
 import datetime as _dt
 import hashlib
+import json
 import logging
 import re
 import uuid
@@ -72,6 +74,25 @@ class ArchiveMessage:
 
 
 @dataclass(slots=True, frozen=True)
+class ChatExportMessage:
+    """One current-user message in a portable archive export page."""
+    message_id: str
+    conversation_id: str
+    conversation_title: str
+    conversation_created_at: str
+    conversation_updated_at: str
+    role: str
+    content: str
+    created_at: str
+    archived_at: str
+    partial: bool
+    virtual_model: str
+    concrete_model: str
+    prompt_tokens: int
+    completion_tokens: int
+
+
+@dataclass(slots=True, frozen=True)
 class SearchHit:
     """One hit from a `chat_history_search` call — snippet-first."""
     conversation_id: str
@@ -89,6 +110,26 @@ _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
 def _now_iso() -> str:
     return _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+
+
+def _encode_export_cursor(created_at: str, message_id: str) -> str:
+    raw = json.dumps([created_at, message_id], separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
+def _decode_export_cursor(cursor: str) -> tuple[str, str]:
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        value = json.loads(base64.urlsafe_b64decode(cursor + padding))
+    except (ValueError, TypeError, json.JSONDecodeError) as e:
+        raise ValueError("invalid chat export cursor") from e
+    if (
+        not isinstance(value, list)
+        or len(value) != 2
+        or not all(isinstance(item, str) and item for item in value)
+    ):
+        raise ValueError("invalid chat export cursor")
+    return value[0], value[1]
 
 
 def _minute_bucket(iso_ts: str) -> str:
@@ -790,6 +831,89 @@ class ChatArchiveStore:
                 score=float(point.score or 0.0),
             ))
         return out
+
+    async def export_user_messages(
+        self,
+        *,
+        user: str,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> tuple[list[ChatExportMessage], str | None]:
+        """Return a stable, current-user-only page from the SQLite source.
+
+        Rows already tombstoned in the deletion outbox are logically deleted
+        and stay hidden even while Qdrant is unavailable. The cursor is an
+        opaque encoding of the last created_at/message_id keyset pair.
+        """
+        if not user:
+            raise ValueError("export_user_messages requires a non-empty user")
+        if limit < 1 or limit > 200:
+            raise ValueError("limit must be between 1 and 200")
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init() not called")
+
+        after_created_at = ""
+        after_message_id = ""
+        if cursor:
+            after_created_at, after_message_id = _decode_export_cursor(cursor)
+
+        sql = """
+            SELECT m.message_id, m.conversation_id, m.role, m.content,
+                   m.created_at, m.archived_at, m.partial, m.virtual_model,
+                   m.concrete_model, m.prompt_tokens, m.completion_tokens,
+                   c.title, c.created_at, c.updated_at
+            FROM messages AS m
+            LEFT JOIN conversations AS c
+              ON c.conversation_id = m.conversation_id AND c.user = m.user
+            WHERE m.user = ?
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM archive_deletion_outbox AS d
+                  WHERE instr(
+                      "," || d.message_ids_json || ",",
+                      "," || m.message_id || ","
+                  ) > 0
+              )
+        """
+        params: list[Any] = [user]
+        if cursor:
+            sql += """
+              AND (m.created_at > ? OR (m.created_at = ? AND m.message_id > ?))
+            """
+            params.extend([after_created_at, after_created_at, after_message_id])
+        sql += " ORDER BY m.created_at, m.message_id LIMIT ?"
+        params.append(limit + 1)
+
+        async with self._db_lock:
+            db_cursor = await self._db.execute(sql, tuple(params))
+            rows = await db_cursor.fetchall()
+            await db_cursor.close()
+
+        page_rows = rows[:limit]
+        items = [
+            ChatExportMessage(
+                message_id=str(row[0]),
+                conversation_id=str(row[1]),
+                role=str(row[2]),
+                content=str(row[3]),
+                created_at=str(row[4]),
+                archived_at=str(row[5]),
+                partial=bool(row[6]),
+                virtual_model=str(row[7] or ""),
+                concrete_model=str(row[8] or ""),
+                prompt_tokens=int(row[9] or 0),
+                completion_tokens=int(row[10] or 0),
+                conversation_title=str(row[11] or ""),
+                conversation_created_at=str(row[12] or ""),
+                conversation_updated_at=str(row[13] or ""),
+            )
+            for row in page_rows
+        ]
+        next_cursor = None
+        if len(rows) > limit and items:
+            last = items[-1]
+            next_cursor = _encode_export_cursor(last.created_at, last.message_id)
+        return items, next_cursor
 
     # ─── Durable repair and retention ─────────────────────────────────
 

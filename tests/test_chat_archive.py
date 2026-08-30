@@ -35,6 +35,7 @@ import pytest
 # directly. The custom-tools service isn't packaged for installation; it
 # runs as a script in its own container.
 _TOOLS_SERVER = Path(__file__).resolve().parent.parent / "tools-server"
+SECRET = "s3cr3t-service-token"  # noqa: S105  (test fixture, not a real secret)
 if str(_TOOLS_SERVER) not in sys.path:
     sys.path.insert(0, str(_TOOLS_SERVER))
 
@@ -334,14 +335,15 @@ async def test_archive_client_skips_when_tool_not_registered():
 async def test_archive_client_posts_payload_to_internal_route():
     captured: dict = {}
 
-    async def fake_post(url, json=None, timeout=None):  # noqa: ASYNC109 — match httpx.AsyncClient.post kwargs
+    async def fake_post(url, json=None, timeout=None, headers=None):  # noqa: ASYNC109 — match httpx.AsyncClient.post kwargs
         captured["url"] = url
         captured["json"] = json
+        captured["headers"] = headers
         return httpx.Response(200, json={"chunks": 1})
 
     http = MagicMock()
     http.post = AsyncMock(side_effect=fake_post)
-    client = ChatArchiveClient(http)
+    client = ChatArchiveClient(http, service_token=SECRET)
     await client.archive_turn(
         registry=_FakeRegistry({"chat_history_search": "http://tools:8000"}),
         user_id="alice@example.com",
@@ -362,6 +364,9 @@ async def test_archive_client_posts_payload_to_internal_route():
     assert body["virtual_model"] == "audrey_fast"
     assert body["concrete_model"] == "qwen3:4b"
     assert body["archive_id"] == "delivery-1"
+    assert captured["headers"] == {
+        "X-Audrey-Service-Token": SECRET,
+    }
     assert body["created_at"] == "2026-08-28T12:00:00.000000+00:00"
 
 

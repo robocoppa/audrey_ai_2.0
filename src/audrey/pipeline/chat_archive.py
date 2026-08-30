@@ -293,11 +293,20 @@ def _retry_at(seconds: float) -> str:
 class ChatArchiveClient:
     """Best-effort transport to custom-tools' internal archive route."""
 
-    __slots__ = ("_http", "_timeout_s")
+    __slots__ = ("_http", "_service_headers", "_timeout_s")
 
-    def __init__(self, http: httpx.AsyncClient, *, timeout_s: float = 5.0) -> None:
+    def __init__(
+        self,
+        http: httpx.AsyncClient,
+        *,
+        timeout_s: float = 5.0,
+        service_token: str = "",
+    ) -> None:
         self._http = http
         self._timeout_s = timeout_s
+        self._service_headers = (
+            {"X-Audrey-Service-Token": service_token} if service_token else {}
+        )
 
     def host_url(self, registry: ToolRegistry | None) -> str | None:
         if registry is None:
@@ -322,11 +331,13 @@ class ChatArchiveClient:
         url = f"{host}{_ARCHIVE_WRITE_PATH}"
         t0 = time.perf_counter()
         try:
-            response = await self._http.post(
-                url,
-                json=job.payload(),
-                timeout=self._timeout_s,
-            )
+            kwargs: dict[str, Any] = {
+                "json": job.payload(),
+                "timeout": self._timeout_s,
+            }
+            if self._service_headers:
+                kwargs["headers"] = self._service_headers
+            response = await self._http.post(url, **kwargs)
             chat_archive_write_seconds.observe(time.perf_counter() - t0)
             if response.status_code >= 400:
                 chat_archive_writes_total.labels(result="fail").inc()

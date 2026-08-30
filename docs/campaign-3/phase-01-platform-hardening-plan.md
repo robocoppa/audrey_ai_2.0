@@ -1,8 +1,7 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress. Waves 1A, 1B, and 1C.1–1C.3 are Unraid-verified; Wave
-1C.4 retryable migration and file deletion is deployed with its normal path
-verified, while the outage/restart recovery smoke remains.
+**Status:** In progress. Waves 1A, 1B, and 1C.1–1C.4 are Unraid-verified;
+1C.5a inspect/export controls are laptop-complete and 1C.5b is next.
 
 ## Goal
 
@@ -140,9 +139,21 @@ until every deterministic upsert succeeds. File deletion now writes a durable
 tombstone first, hides pending records from private text/image search, retries
 Qdrant and disk cleanup across restart, and prevents startup reconciliation
 from resurrecting completed deletions. All 2,500 hermetic tests pass; changed-
-file lint, compilation, YAML, and whitespace checks are clean. Deployment and
-failure-recovery evidence remains pending. On 2026-08-29 the deployed normal
-delete recorded requested=1, completed=1, and pending=0.
+file lint, compilation, YAML, and whitespace checks are clean.
+
+On 2026-08-29 the normal delete recorded requested=1, completed=1, and
+pending=0. During the failure smoke, the tombstone survived an Audrey restart
+at pending=1 while Qdrant was unavailable, retried at the configured backoff,
+then completed and returned pending to 0 after Qdrant recovered. 1C.4 is
+Unraid-verified.
+
+1C.5a laptop status (2026-08-29): Audrey exposes authenticated, paginated
+memory inventory and chat-source export under `/v1/me`. The browser cannot
+select a user; Audrey injects the verified identity into service-token-gated
+sidecar routes that are hidden from model discovery. Chat export omits pending
+deletion tombstones. All 2,510 hermetic tests pass. Memory correction/deletion,
+durable chat deletion, account purge, and status remain in 1C.5b onward.
+
 
 Gate:
 

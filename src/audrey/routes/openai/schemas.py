@@ -68,6 +68,16 @@ class AssistantChatMessage(_StrictChatMessage):
     name: str | None = None
     tool_calls: list[AssistantToolCall] | None = None
 
+    # Thinking models (DeepSeek, GLM) return their reasoning in a sibling
+    # field, and agent clients REPLAY the assistant turn verbatim on the next
+    # request — so it arrives back here on every multi-turn tool loop.
+    # `exclude=True` (not just undeclared) is the point: accept it so the
+    # request validates, then drop it from every `model_dump()` so it reaches
+    # neither Ollama nor the archive. It is the client's own echo, not input.
+    # ⚠️ 2026-08-29: without this, a Hermes agent 422'd on its SECOND call of
+    # any tool turn — see the note on `ToolChatMessage.name` below.
+    reasoning_content: str | None = Field(default=None, exclude=True)
+
     @model_validator(mode="after")
     def require_content_or_tool_calls(self) -> AssistantChatMessage:
         if self.content is None and not self.tool_calls:
@@ -79,6 +89,17 @@ class ToolChatMessage(_StrictChatMessage):
     role: Literal["tool"]
     content: ChatContent
     tool_call_id: str = Field(min_length=1)
+    # ⚠️ THE OTHER FOUR ROLES ALL DECLARED `name`; this one did not, and
+    # `_StrictChatMessage` forbids extras — so a tool result carrying the
+    # tool's name (which OpenAI accepts, and real agent clients send) was a
+    # hard 422. Diagnosed 2026-08-29 from a Hermes bot that failed EVERY
+    # tool-calling turn while plain chat worked: the first call succeeded and
+    # returned `tool_calls`, then the follow-up carrying the result was
+    # rejected before reaching a model. The client surfaced it as a generic
+    # "model provider failed", so it read as an outage, not a schema gap.
+    # ▶ Failure shape to recognise: 422 `extra_forbidden` at
+    #   `body.messages[N].tool.name`.
+    name: str | None = None
 
 
 ChatMessage = Annotated[
