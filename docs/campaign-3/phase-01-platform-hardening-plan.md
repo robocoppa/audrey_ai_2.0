@@ -1,7 +1,7 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress. Waves 1A, 1B, and 1C.1–1C.5a are Unraid-verified;
-1C.5b is laptop-complete and its deployment smoke is next.
+**Status:** In progress. Waves 1A, 1B, and 1C.1–1C.5b are Unraid-verified;
+1C.5c owner repair status is laptop-complete and its deployment smoke is next.
 
 ## Goal
 
@@ -156,15 +156,35 @@ valid memory and chat pages with opaque continuation cursors, hid internal
 memory scope tags, and rejected an unauthenticated request with HTTP 401.
 1C.5a is Unraid-verified.
 
-1C.5b status (2026-08-29): laptop-complete. Authenticated current-user memory
-correction and deletion wait for Qdrant acknowledgement, preserve ownership,
-and remove caller-supplied scope tags. Per-conversation chat deletion hides
-the conversation immediately, durably retries SQLite/Qdrant cleanup, and
-retains a cutoff tombstone so a late archive delivery cannot resurrect deleted
-history while a new post-delete turn can still be stored. Colliding client
-conversation ids remain user-scoped. All 2,521 hermetic tests pass; scoped
-ruff and compilation are clean. The Unraid deployment smoke is next. Account
-purge and owner/admin repair status remain afterward.
+1C.5b status (2026-08-30): complete and Unraid-verified. Authenticated
+current-user memory correction and deletion wait for Qdrant acknowledgement,
+preserve ownership, and remove caller-supplied scope tags. Per-conversation
+chat deletion hides the conversation immediately, durably retries
+SQLite/Qdrant cleanup, and retains a cutoff tombstone so a late archive
+delivery cannot resurrect deleted history while a new post-delete turn can
+still be stored. Colliding client conversation ids remain user-scoped. All
+2,521 hermetic tests pass; scoped ruff and compilation are clean. On Unraid,
+memory correction removed an injected foreign scope tag and memory deletion
+acknowledged the exact key. With Qdrant stopped, one conversation deletion
+stayed durably pending after a failed repair attempt; after recovery it removed
+two messages, one SQLite chunk, and one Qdrant point, returned both pending
+counts to zero, and retained one completed conversation tombstone. OWUI did
+not forward its displayed chat id on this request, so the archive used its
+stable `derived-...` fallback; the native UI contract therefore requires one
+Audrey-issued conversation id to be preserved end to end.
+
+1C.5c status (2026-08-30): laptop-complete. Authenticated
+`GET /v1/me/repair-status` composes exact-current-user counts for durable file
+deletion, Audrey-to-sidecar archive delivery, chat indexing, chat deletion, and
+conversation tombstones. It reports `ready`, `repairing`,
+`attention_required`, or `degraded` without returning payloads, user
+identifiers, raw backend errors, hostnames, or filesystem paths. The sidecar
+status route is service-token protected and hidden from model discovery. User
+filters are applied in every SQLite store rather than after aggregation. The
+focused lifecycle/API matrix passes all 37 tests and the full hermetic suite
+passes all 2,534; scoped ruff, compilation, and whitespace checks are clean,
+and the lesson scan has zero broken links. The Unraid deployment smoke is next.
+Account-wide purge and admin-wide repair controls remain in 1C.5d+.
 
 
 Gate:

@@ -26,6 +26,7 @@ _MEMORY_UPDATE_PATH = "/user_data/memories/update"
 _MEMORY_DELETE_PATH = "/user_data/memories/delete"
 _CHAT_EXPORT_PATH = "/user_data/chat_history/export"
 _CHAT_DELETE_PATH = "/user_data/chat_history/delete"
+_CHAT_STATUS_PATH = "/user_data/chat_history/status"
 
 
 class MemoryItem(BaseModel):
@@ -80,6 +81,54 @@ class ChatDeletionResult(BaseModel):
     status: str
     chunks_queued: int
     deletions_pending: int
+
+
+class RepairQueueStatus(BaseModel):
+    available: bool = True
+    pending: Annotated[int, Field(ge=0)] = 0
+    attempts: Annotated[int, Field(ge=0)] = 0
+    with_error: Annotated[int, Field(ge=0)] = 0
+    exhausted: Annotated[int, Field(ge=0)] = 0
+    completed: Annotated[int, Field(ge=0)] = 0
+
+
+class UserDataRepairStatus(BaseModel):
+    schema_version: int = 1
+    status: str
+    file_deletions: RepairQueueStatus
+    chat_delivery: RepairQueueStatus
+    chat_indexing: RepairQueueStatus
+    chat_deletions: RepairQueueStatus
+    conversation_deletions: RepairQueueStatus
+
+
+def _queue_status(
+    value: dict[str, Any] | None = None,
+    *,
+    available: bool = True,
+) -> RepairQueueStatus:
+    if value is None:
+        if available:
+            raise HTTPException(
+                status_code=502,
+                detail="user_data_backend_invalid_response",
+            )
+        value = {}
+    if not isinstance(value, dict):
+        raise HTTPException(
+            status_code=502,
+            detail="user_data_backend_invalid_response",
+        )
+    try:
+        return RepairQueueStatus.model_validate({
+            **value,
+            "available": available,
+        })
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=502,
+            detail="user_data_backend_invalid_response",
+        ) from e
 
 
 def _tool_host(request: Request, tool_name: str) -> str:
@@ -308,6 +357,73 @@ async def delete_chat_history(
             status_code=502,
             detail="user_data_backend_invalid_response",
         ) from e
+
+
+@router.get("/repair-status", response_model=UserDataRepairStatus)
+async def get_repair_status(
+    request: Request,
+    me: AuthedUser = Depends(require_user),
+) -> UserDataRepairStatus:
+    """Current-user retry state without payloads, raw errors, or user selectors."""
+    uploads_db = getattr(request.app.state, "uploads_db", None)
+    file_stats = getattr(uploads_db, "user_file_deletion_stats", None)
+    if callable(file_stats):
+        file_deletions = _queue_status(await file_stats(me.email))
+    else:
+        file_deletions = _queue_status(available=False)
+
+    archive_client = getattr(request.app.state, "archive_client", None)
+    delivery_stats = getattr(archive_client, "user_stats", None)
+    if callable(delivery_stats):
+        chat_delivery = _queue_status(await delivery_stats(me.email))
+    else:
+        chat_delivery = _queue_status(available=False)
+
+    try:
+        remote = await _request_backend(
+            request,
+            tool_name=_CHAT_HOST_TOOL,
+            path=_CHAT_STATUS_PATH,
+            body={"user": me.email},
+            unprocessable_detail="invalid_repair_status",
+        )
+    except HTTPException as e:
+        if e.status_code != 503:
+            raise
+        chat_indexing = _queue_status(available=False)
+        chat_deletions = _queue_status(available=False)
+        conversation_deletions = _queue_status(available=False)
+    else:
+        chat_indexing = _queue_status(remote.get("indexing"))
+        chat_deletions = _queue_status(remote.get("deletions"))
+        conversation_deletions = _queue_status(
+            remote.get("conversation_deletions")
+        )
+
+    queues = (
+        file_deletions,
+        chat_delivery,
+        chat_indexing,
+        chat_deletions,
+        conversation_deletions,
+    )
+    if any(queue.exhausted for queue in queues):
+        status_value = "attention_required"
+    elif any(not queue.available for queue in queues):
+        status_value = "degraded"
+    elif any(queue.pending for queue in queues):
+        status_value = "repairing"
+    else:
+        status_value = "ready"
+
+    return UserDataRepairStatus(
+        status=status_value,
+        file_deletions=file_deletions,
+        chat_delivery=chat_delivery,
+        chat_indexing=chat_indexing,
+        chat_deletions=chat_deletions,
+        conversation_deletions=conversation_deletions,
+    )
 
 
 __all__ = ["router"]

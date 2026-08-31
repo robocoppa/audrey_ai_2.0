@@ -56,10 +56,15 @@ def _queue(
     )
 
 
-async def _enqueue(queue: ChatArchiveQueue, *, archive_id: str) -> None:
+async def _enqueue(
+    queue: ChatArchiveQueue,
+    *,
+    archive_id: str,
+    user_id: str = "alice@example.com",
+) -> None:
     await queue.archive_turn(
         registry=None,
-        user_id="alice@example.com",
+        user_id=user_id,
         conversation_id="conversation-1",
         user_content="question",
         assistant_content=f"answer {archive_id}",
@@ -171,3 +176,25 @@ async def test_failed_delivery_retries_after_restart_with_same_identity(
         assert recovered.calls[0].created_at == "2026-08-28T12:00:00.000000+00:00"
     finally:
         await restarted.stop()
+
+
+async def test_user_stats_do_not_mix_delivery_backlogs(tmp_path: Path):
+    client = _Client(block=True)
+    queue = _queue(tmp_path / "archive-outbox.sqlite", client)
+    await queue.start()
+    try:
+        await _enqueue(queue, archive_id="alice-job")
+        await asyncio.wait_for(client.started.wait(), timeout=1)
+        await _enqueue(queue, archive_id="bob-job", user_id="bob")
+
+        alice = await queue.user_stats("alice@example.com")
+        bob = await queue.user_stats("bob")
+        missing = await queue.user_stats("missing")
+
+        assert alice["pending"] == 1
+        assert bob["pending"] == 1
+        assert missing["pending"] == 0
+        assert alice["pending"] + bob["pending"] == await queue.pending_count()
+    finally:
+        client.release.set()
+        await queue.stop()

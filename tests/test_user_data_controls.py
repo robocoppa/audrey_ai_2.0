@@ -20,6 +20,7 @@ from audrey.routes.user_data import (
     delete_chat_history,
     delete_memory,
     export_chat_history,
+    get_repair_status,
     list_memories,
     router,
 )
@@ -336,6 +337,91 @@ async def test_chat_delete_is_owned_hidden_immediately_and_blocks_late_delivery(
         await store.aclose()
 
 
+async def test_chat_repair_status_is_exact_user_scoped(tmp_path: Path):
+    store = await _archive_store(tmp_path / "archive.db")
+    try:
+        assert store._db is not None
+        async with store._db_lock:
+            await store._db.executemany(
+                """
+                INSERT INTO archive_chunks
+                    (chunk_id, conversation_id, user, message_ids_json, text,
+                     created_at, indexed_at, index_attempts,
+                     index_last_attempt_at, index_last_error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        "alice-index", "alice-index-conv", "alice", "a1", "text",
+                        "1", None, 3, "2", "index failed",
+                    ),
+                    (
+                        "alice-delete", "alice-delete-conv", "alice", "a2", "text",
+                        "1", "1", 0, None, None,
+                    ),
+                    (
+                        "bob-index", "bob-index-conv", "bob", "b1", "text",
+                        "1", None, 1, "2", None,
+                    ),
+                ],
+            )
+            await store._db.execute(
+                """
+                INSERT INTO archive_deletion_outbox
+                    (chunk_id, conversation_id, message_ids_json, point_id,
+                     requested_at, attempts, last_attempt_at, last_error)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "alice-delete", "alice-delete-conv", "a2", "point-a",
+                    "1", 2, "2", "delete failed",
+                ),
+            )
+            await store._db.executemany(
+                """
+                INSERT INTO archive_conversation_deletions
+                    (user, conversation_id, cutoff_at, requested_at, completed_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    ("alice", "pending", "1", "1", None),
+                    ("alice", "completed", "1", "1", "2"),
+                    ("bob", "pending", "1", "1", None),
+                ],
+            )
+            await store._db.commit()
+
+        assert await store.user_stats(user="alice") == {
+            "indexing": {
+                "pending": 0,
+                "attempts": 3,
+                "with_error": 1,
+                "exhausted": 1,
+                "completed": 0,
+            },
+            "deletions": {
+                "pending": 1,
+                "attempts": 2,
+                "with_error": 1,
+                "exhausted": 0,
+                "completed": 0,
+            },
+            "conversation_deletions": {
+                "pending": 1,
+                "attempts": 0,
+                "with_error": 0,
+                "exhausted": 0,
+                "completed": 1,
+            },
+        }
+        bob = await store.user_stats(user="bob")
+        assert bob["indexing"]["pending"] == 1
+        assert bob["deletions"]["pending"] == 0
+        assert bob["conversation_deletions"]["pending"] == 1
+    finally:
+        await store.aclose()
+
+
 def _request(*, tool: str, response: dict | None = None):
     http = SimpleNamespace(post=AsyncMock(return_value=httpx.Response(200, json=response)))
     registry = SimpleNamespace(
@@ -429,6 +515,103 @@ async def test_mutation_routes_inject_authenticated_user():
     }
 
 
+async def test_repair_status_composes_current_user_queues_without_raw_errors():
+    remote = {
+        "indexing": {
+            "pending": 0,
+            "attempts": 0,
+            "with_error": 0,
+            "exhausted": 0,
+            "completed": 0,
+        },
+        "deletions": {
+            "pending": 0,
+            "attempts": 0,
+            "with_error": 0,
+            "exhausted": 0,
+            "completed": 0,
+        },
+        "conversation_deletions": {
+            "pending": 0,
+            "attempts": 0,
+            "with_error": 0,
+            "exhausted": 0,
+            "completed": 1,
+        },
+    }
+    request, http = _request(tool="chat_history_search", response=remote)
+    file_stats = AsyncMock(return_value={
+        "pending": 1,
+        "attempts": 2,
+        "with_error": 1,
+        "exhausted": 0,
+        "completed": 3,
+    })
+    delivery_stats = AsyncMock(return_value={
+        "pending": 0,
+        "attempts": 0,
+        "with_error": 0,
+        "exhausted": 0,
+        "completed": 0,
+    })
+    request.app.state.uploads_db = SimpleNamespace(
+        user_file_deletion_stats=file_stats,
+    )
+    request.app.state.archive_client = SimpleNamespace(user_stats=delivery_stats)
+    me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
+
+    result = await get_repair_status(request, me=me)
+
+    assert result.status == "repairing"
+    assert result.file_deletions.pending == 1
+    assert result.conversation_deletions.completed == 1
+    file_stats.assert_awaited_once_with(me.email)
+    delivery_stats.assert_awaited_once_with(me.email)
+    assert http.post.await_args.kwargs["json"] == {"user": me.email}
+    assert http.post.await_args.args[0].endswith(
+        "/user_data/chat_history/status"
+    )
+    rendered = result.model_dump_json()
+    assert "private backend detail" not in rendered
+    assert me.email not in rendered
+
+    attention_remote = {
+        **remote,
+        "indexing": {**remote["indexing"], "exhausted": 1},
+    }
+    http.post.return_value = httpx.Response(200, json=attention_remote)
+    attention = await get_repair_status(request, me=me)
+    assert attention.status == "attention_required"
+
+
+async def test_repair_status_reports_remote_backend_degraded():
+    request, _ = _request(tool="chat_history_search", response={})
+    request.app.state.archive_http.post.return_value = httpx.Response(503)
+    empty = {
+        "pending": 0,
+        "attempts": 0,
+        "with_error": 0,
+        "exhausted": 0,
+        "completed": 0,
+    }
+    request.app.state.uploads_db = SimpleNamespace(
+        user_file_deletion_stats=AsyncMock(return_value=empty),
+    )
+    request.app.state.archive_client = SimpleNamespace(
+        user_stats=AsyncMock(return_value=empty),
+    )
+    me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
+
+    result = await get_repair_status(request, me=me)
+
+    assert result.status == "degraded"
+    assert result.file_deletions.available is True
+    assert result.chat_delivery.available is True
+    assert result.chat_indexing.available is False
+    assert result.chat_deletions.available is False
+    assert result.conversation_deletions.available is False
+
+
 async def test_mutation_not_found_is_a_current_user_404():
     request, _ = _request(tool="memory_search", response={})
     request.app.state.archive_http.post.return_value = httpx.Response(404)
@@ -491,6 +674,7 @@ def test_public_routes_do_not_accept_a_user_selector():
         ("/v1/me/memories/{key}", "delete"),
         ("/v1/me/chat-history/export", "get"),
         ("/v1/me/chat-history/{conversation_id}", "delete"),
+        ("/v1/me/repair-status", "get"),
     )
     for path, method in operations:
         operation = schema["paths"][path][method]
@@ -525,3 +709,4 @@ def test_internal_routes_are_hidden_from_model_tool_discovery():
     assert "/user_data/memories/delete" not in paths
     assert "/user_data/chat_history/export" not in paths
     assert "/user_data/chat_history/delete" not in paths
+    assert "/user_data/chat_history/status" not in paths

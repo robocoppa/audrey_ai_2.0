@@ -89,6 +89,10 @@ Open WebUI
 - The server loads canonical conversation history. The browser sends the new
   action, not an editable transcript containing system, assistant, or tool
   messages.
+- Conversation ids are Audrey-issued resource ids. Conversation creation
+  returns the id, and every later run, mutation, archive projection, URL, and
+  deletion carries that exact id; the native path never derives authoritative
+  identity from first-turn text or a separately generated display URL.
 - Files are uploaded once and referenced by durable attachment ids.
 - Every run has stable run, message, and tool-call ids and exactly one terminal
   outcome.

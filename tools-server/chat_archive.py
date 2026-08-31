@@ -1419,6 +1419,139 @@ class ChatArchiveStore:
             (operation, attempted_at, error),
         )
 
+    async def user_stats(self, *, user: str) -> dict[str, dict[str, int]]:
+        """Repair counts for exactly one authenticated archive owner."""
+        if not user:
+            raise ValueError("user_stats requires a non-empty user")
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init() not called")
+
+        async with self._db_lock:
+            async def scalar(sql: str, params: tuple[Any, ...] = ()) -> int:
+                cursor = await self._db.execute(sql, params)
+                value = int((await cursor.fetchone())[0])
+                await cursor.close()
+                return value
+
+            indexing_pending = await scalar(
+                """
+                SELECT COUNT(*) FROM archive_chunks AS c
+                LEFT JOIN archive_deletion_outbox AS d ON d.chunk_id = c.chunk_id
+                WHERE c.user = ?
+                  AND c.indexed_at IS NULL
+                  AND c.index_attempts < ?
+                  AND d.chunk_id IS NULL
+                """,
+                (user, self._max_retry_attempts),
+            )
+            indexing_exhausted = await scalar(
+                """
+                SELECT COUNT(*) FROM archive_chunks AS c
+                LEFT JOIN archive_deletion_outbox AS d ON d.chunk_id = c.chunk_id
+                WHERE c.user = ?
+                  AND c.indexed_at IS NULL
+                  AND c.index_attempts >= ?
+                  AND d.chunk_id IS NULL
+                """,
+                (user, self._max_retry_attempts),
+            )
+            indexing_attempts = await scalar(
+                """
+                SELECT COALESCE(SUM(c.index_attempts), 0)
+                FROM archive_chunks AS c
+                LEFT JOIN archive_deletion_outbox AS d ON d.chunk_id = c.chunk_id
+                WHERE c.user = ?
+                  AND c.indexed_at IS NULL
+                  AND d.chunk_id IS NULL
+                """,
+                (user,),
+            )
+            indexing_with_error = await scalar(
+                """
+                SELECT COUNT(*) FROM archive_chunks AS c
+                LEFT JOIN archive_deletion_outbox AS d ON d.chunk_id = c.chunk_id
+                WHERE c.user = ?
+                  AND c.indexed_at IS NULL
+                  AND c.index_last_error IS NOT NULL
+                  AND length(c.index_last_error) > 0
+                  AND d.chunk_id IS NULL
+                """,
+                (user,),
+            )
+            deletions_pending = await scalar(
+                """
+                SELECT COUNT(*) FROM archive_deletion_outbox AS d
+                JOIN archive_chunks AS c ON c.chunk_id = d.chunk_id
+                WHERE c.user = ?
+                """,
+                (user,),
+            )
+            deletions_exhausted = await scalar(
+                """
+                SELECT COUNT(*) FROM archive_deletion_outbox AS d
+                JOIN archive_chunks AS c ON c.chunk_id = d.chunk_id
+                WHERE c.user = ? AND d.attempts >= ?
+                """,
+                (user, self._max_retry_attempts),
+            )
+            deletion_attempts = await scalar(
+                """
+                SELECT COALESCE(SUM(d.attempts), 0)
+                FROM archive_deletion_outbox AS d
+                JOIN archive_chunks AS c ON c.chunk_id = d.chunk_id
+                WHERE c.user = ?
+                """,
+                (user,),
+            )
+            deletion_with_error = await scalar(
+                """
+                SELECT COUNT(*) FROM archive_deletion_outbox AS d
+                JOIN archive_chunks AS c ON c.chunk_id = d.chunk_id
+                WHERE c.user = ?
+                  AND d.last_error IS NOT NULL
+                  AND length(d.last_error) > 0
+                """,
+                (user,),
+            )
+            conversation_pending = await scalar(
+                """
+                SELECT COUNT(*) FROM archive_conversation_deletions
+                WHERE user = ? AND completed_at IS NULL
+                """,
+                (user,),
+            )
+            conversation_completed = await scalar(
+                """
+                SELECT COUNT(*) FROM archive_conversation_deletions
+                WHERE user = ? AND completed_at IS NOT NULL
+                """,
+                (user,),
+            )
+
+        return {
+            "indexing": {
+                "pending": indexing_pending,
+                "attempts": indexing_attempts,
+                "with_error": indexing_with_error,
+                "exhausted": indexing_exhausted,
+                "completed": 0,
+            },
+            "deletions": {
+                "pending": deletions_pending,
+                "attempts": deletion_attempts,
+                "with_error": deletion_with_error,
+                "exhausted": deletions_exhausted,
+                "completed": 0,
+            },
+            "conversation_deletions": {
+                "pending": conversation_pending,
+                "attempts": 0,
+                "with_error": 0,
+                "exhausted": 0,
+                "completed": conversation_completed,
+            },
+        }
+
     async def stats(self) -> dict[str, Any]:
         if self._db is None:
             raise RuntimeError("ChatArchiveStore.init() not called")

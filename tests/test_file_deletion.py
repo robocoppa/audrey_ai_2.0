@@ -223,3 +223,73 @@ async def test_full_failed_batch_waits_instead_of_hammering_qdrant(tmp_path: Pat
     assert len(qdrant.delete_calls) == 2
     assert len(await db.pending_file_deletions()) == 1
     db.close()
+
+
+async def test_user_file_deletion_stats_are_owner_scoped(tmp_path: Path):
+    db = UploadsDB(tmp_path / "uploads.sqlite")
+    other_user = "bob"
+    await _record(db)
+    await db.record_upload(
+        file_id="other-file",
+        user=other_user,
+        filename="other.txt",
+        mime="text/plain",
+        bytes_=5,
+        kind="text",
+        collection=user_text_collection(other_user),
+        chunks=1,
+        uploaded_at="2026-08-30T00:00:00+00:00",
+    )
+    await db.request_file_deletion(
+        FILE_ID,
+        user=USER,
+        requested_at="2026-08-30T00:00:00+00:00",
+    )
+    await db.request_file_deletion(
+        "other-file",
+        user=other_user,
+        requested_at="2026-08-30T00:00:00+00:00",
+    )
+    await db.begin_file_deletion_attempt(
+        FILE_ID,
+        user=USER,
+        attempted_at="2026-08-30T00:01:00+00:00",
+    )
+    await db.fail_file_deletion(
+        FILE_ID,
+        user=USER,
+        error="private backend detail",
+    )
+    await db.begin_file_deletion_attempt(
+        "other-file",
+        user=other_user,
+        attempted_at="2026-08-30T00:01:00+00:00",
+    )
+    await db.complete_file_deletion(
+        "other-file",
+        user=other_user,
+        completed_at="2026-08-30T00:02:00+00:00",
+    )
+
+    assert await db.user_file_deletion_stats(USER) == {
+        "pending": 1,
+        "attempts": 1,
+        "with_error": 1,
+        "exhausted": 0,
+        "completed": 0,
+    }
+    assert await db.user_file_deletion_stats(other_user) == {
+        "pending": 0,
+        "attempts": 0,
+        "with_error": 0,
+        "exhausted": 0,
+        "completed": 1,
+    }
+    assert await db.user_file_deletion_stats("missing") == {
+        "pending": 0,
+        "attempts": 0,
+        "with_error": 0,
+        "exhausted": 0,
+        "completed": 0,
+    }
+    db.close()

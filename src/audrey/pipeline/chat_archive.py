@@ -582,6 +582,41 @@ class ChatArchiveQueue:
             await cursor.close()
         return count
 
+    async def user_stats(self, user_id: str) -> dict[str, int]:
+        """Current-user delivery backlog without returning payloads or errors."""
+        empty = {
+            "pending": 0,
+            "attempts": 0,
+            "with_error": 0,
+            "exhausted": 0,
+            "completed": 0,
+        }
+        if self._db is None:
+            return empty
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                """
+                SELECT payload_json, attempts, last_error
+                FROM archive_write_outbox
+                """
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+
+        result = dict(empty)
+        for payload_json, attempts, last_error in rows:
+            try:
+                payload = json.loads(str(payload_json))
+            except (TypeError, ValueError):
+                continue
+            if payload.get("user_id") != user_id:
+                continue
+            result["pending"] += 1
+            result["attempts"] += int(attempts)
+            if last_error:
+                result["with_error"] += 1
+        return result
+
     async def stats(self) -> dict[str, Any]:
         """Small operational/test view of the durable source backlog."""
         if self._db is None:

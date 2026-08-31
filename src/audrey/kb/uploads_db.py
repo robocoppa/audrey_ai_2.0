@@ -664,6 +664,40 @@ class UploadsDB:
             ).fetchone()
             return int(row["count"])
 
+    async def user_file_deletion_stats(self, user: str) -> dict[str, int]:
+        """Current-user repair counts without exposing another owner or errors."""
+        return await asyncio.to_thread(
+            self._user_file_deletion_stats_sync,
+            user,
+        )
+
+    def _user_file_deletion_stats_sync(self, user: str) -> dict[str, int]:
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT
+                  COALESCE(SUM(CASE WHEN length(completed_at) = 0
+                                    THEN 1 ELSE 0 END), 0) AS pending,
+                  COALESCE(SUM(CASE WHEN length(completed_at) = 0
+                                    THEN attempts ELSE 0 END), 0) AS attempts,
+                  COALESCE(SUM(CASE WHEN length(completed_at) = 0
+                                      AND length(last_error) > 0
+                                    THEN 1 ELSE 0 END), 0) AS with_error,
+                  COALESCE(SUM(CASE WHEN length(completed_at) > 0
+                                    THEN 1 ELSE 0 END), 0) AS completed
+                FROM file_deletions
+                WHERE user = ?
+                """,
+                (user,),
+            ).fetchone()
+        return {
+            "pending": int(row["pending"]),
+            "attempts": int(row["attempts"]),
+            "with_error": int(row["with_error"]),
+            "exhausted": 0,
+            "completed": int(row["completed"]),
+        }
+
     async def file_deletion_keys(self) -> set[tuple[str, str]]:
         """Every durable tombstone, including completed deletion history."""
         return await asyncio.to_thread(self._file_deletion_keys_sync)

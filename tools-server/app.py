@@ -18,6 +18,7 @@ Internal-only (hidden from /openapi.json so the model can't call them):
   POST /user_data/memories/delete     — delete one current-user memory
   POST /user_data/chat_history/export — paginated current-user source export
   POST /user_data/chat_history/delete — tombstone one current-user conversation
+  POST /user_data/chat_history/status — current-user repair counts
   POST /chat_history/archive   — write a turn to the chat archive
   POST /chat_history/prune     — apply retention policy
   GET  /chat_history/stats     — row counts for admin/debug
@@ -326,6 +327,24 @@ class ChatDeletionResponse(BaseModel):
     status: str
     chunks_queued: int
     deletions_pending: int
+
+
+class UserDataStatusRequest(BaseModel):
+    user: Annotated[str, Field(min_length=1, max_length=200)]
+
+
+class RepairQueueResponse(BaseModel):
+    pending: int = 0
+    attempts: int = 0
+    with_error: int = 0
+    exhausted: int = 0
+    completed: int = 0
+
+
+class ChatRepairStatusResponse(BaseModel):
+    indexing: RepairQueueResponse
+    deletions: RepairQueueResponse
+    conversation_deletions: RepairQueueResponse
 
 
 class MemoryListResponse(BaseModel):
@@ -1110,6 +1129,22 @@ async def user_data_chat_history_delete(
             detail="conversation_not_found",
         )
     return ChatDeletionResponse.model_validate(result)
+
+
+@app.post(
+    "/user_data/chat_history/status",
+    response_model=ChatRepairStatusResponse,
+    include_in_schema=False,
+    tags=["internal"],
+)
+async def user_data_chat_history_status(
+    req: UserDataStatusRequest,
+    _: None = Depends(_require_internal_service),
+) -> ChatRepairStatusResponse:
+    archive: ChatArchiveStore = app.state.chat_archive
+    return ChatRepairStatusResponse.model_validate(
+        await archive.user_stats(user=req.user)
+    )
 
 
 # ─── Chat archive: internal write/admin (not in /openapi.json) ────────
