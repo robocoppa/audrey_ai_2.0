@@ -67,7 +67,7 @@ class FileDeletionResult:
     error: str = ""
 
 
-def _delete_disk_files(upload_root: Path, file_id: str, user: str) -> list[str]:
+def delete_disk_files(upload_root: Path, file_id: str, user: str) -> list[str]:
     """Remove source, sidecars, and fetch staging files for one file id."""
     errors: list[str] = []
     directories = (
@@ -162,6 +162,10 @@ class FileDeletionWorker:
         file_deletion_pending.set(await self._db.pending_file_deletion_count())
         return result
 
+    def wake(self) -> None:
+        """Wake the durable worker after another owner queues bulk deletions."""
+        self._wake.set()
+
     async def drain_once(self) -> int:
         rows = await self._db.pending_file_deletions(limit=self._batch_size)
         for row in rows:
@@ -229,7 +233,7 @@ class FileDeletionWorker:
                 if isinstance(outcome, BaseException)
             ]
             disk_errors = await asyncio.to_thread(
-                _delete_disk_files,
+                delete_disk_files,
                 self._upload_root,
                 file_id,
                 user,
@@ -267,6 +271,7 @@ class FileDeletionWorker:
 
 
 __all__ = [
+    "delete_disk_files",
     "FileDeletionResult",
     "FileDeletionWorker",
     "FileOperationLocks",

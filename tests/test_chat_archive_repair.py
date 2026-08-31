@@ -140,6 +140,18 @@ async def _age_all_rows(store: archive_module.ChatArchiveStore) -> None:
         await store._db.commit()
 
 
+class _PurgeMemory:
+    def __init__(self, *, failures: int = 0) -> None:
+        self.failures = failures
+        self.calls: list[tuple[str, str]] = []
+
+    async def delete_user_before(self, *, user: str, cutoff_at: str) -> None:
+        self.calls.append((user, cutoff_at))
+        if self.failures:
+            self.failures -= 1
+            raise RuntimeError("injected memory delete failure")
+
+
 async def test_init_migrates_pre_repair_archive_schema(tmp_path: Path):
     db_path = tmp_path / "archive.db"
     db = await aiosqlite.connect(db_path)
@@ -523,3 +535,150 @@ def test_nonzero_archive_max_bytes_is_rejected():
             _env_file=None,
             CHAT_ARCHIVE_MAX_BYTES=1,
         )
+
+
+async def test_account_purge_is_owned_cutoff_based_and_idempotent(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.setattr(archive_module, "_embed", _good_embed)
+    qdrant = _FakeQdrant()
+    store = await _make_store(tmp_path / "purge.db", qdrant)
+    memory = _PurgeMemory()
+    cutoff = "2026-01-01T00:00:00.000000+00:00"
+    try:
+        await _archive_one(store)
+        await store.archive_turn(
+            user="bob@example.com",
+            conversation_id="bob-conv",
+            user_content="Bob old question",
+            assistant_content="Bob old answer",
+        )
+        await _age_all_rows(store)
+
+        receipt = await store.request_user_purge(
+            user="alice@example.com",
+            purge_id="purge-alice-1",
+            cutoff_at=cutoff,
+            memory_store=memory,
+        )
+
+        assert receipt["status"] == "pending"
+        assert receipt["memory"] == {
+            "completed": True,
+            "attempts": 1,
+            "with_error": False,
+            "exhausted": False,
+        }
+        assert receipt["chat"]["pending"] == 1
+        assert memory.calls == [("alice@example.com", cutoff)]
+        assert await store.user_purge_cutoff(user="alice@example.com") == cutoff
+        assert await store.user_purge_cutoff(user="bob@example.com") == ""
+
+        alice_hidden, _ = await store.export_user_messages(user="alice@example.com")
+        bob_visible, _ = await store.export_user_messages(user="bob@example.com")
+        assert alice_hidden == []
+        assert len(bob_visible) == 2
+
+        late = await store.archive_turn(
+            user="alice@example.com",
+            conversation_id="conv-late",
+            user_content="late old question",
+            assistant_content="late old answer",
+            created_at="2025-12-01T00:00:00.000000+00:00",
+        )
+        assert late["skipped_deleted"] is True
+
+        fresh = await store.archive_turn(
+            user="alice@example.com",
+            conversation_id="conv-fresh",
+            user_content="fresh question",
+            assistant_content="fresh answer",
+            created_at="2027-01-01T00:00:00.000000+00:00",
+        )
+        assert "skipped_deleted" not in fresh
+
+        repeated = await store.request_user_purge(
+            user="alice@example.com",
+            purge_id="purge-alice-1",
+            cutoff_at=cutoff,
+            memory_store=memory,
+        )
+        assert repeated["purge_id"] == "purge-alice-1"
+        assert memory.calls == [("alice@example.com", cutoff)]
+        with pytest.raises(ValueError, match="already bound"):
+            await store.request_user_purge(
+                user="bob@example.com",
+                purge_id="purge-alice-1",
+                cutoff_at=cutoff,
+                memory_store=memory,
+            )
+
+        await store.maintain(memory_store=memory)
+        completed = await store.user_purge_status(
+            user="alice@example.com",
+            purge_id="purge-alice-1",
+        )
+        assert completed is not None
+        assert completed["status"] == "completed"
+        assert completed["chat"]["pending"] == 0
+        fresh_only, _ = await store.export_user_messages(user="alice@example.com")
+        assert {item.content for item in fresh_only} == {
+            "fresh question",
+            "fresh answer",
+        }
+    finally:
+        await store.aclose()
+
+
+async def test_account_purge_recovers_after_restart_and_backend_outage(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.setattr(archive_module, "_embed", _good_embed)
+    db_path = tmp_path / "purge-restart.db"
+    cutoff = "2026-01-01T00:00:00.000000+00:00"
+    failing_memory = _PurgeMemory(failures=1)
+    first = await _make_store(db_path, _FakeQdrant(delete_failures=1))
+    try:
+        await _archive_one(first)
+        await _age_all_rows(first)
+        receipt = await first.request_user_purge(
+            user="alice@example.com",
+            purge_id="purge-restart",
+            cutoff_at=cutoff,
+            memory_store=failing_memory,
+        )
+        assert receipt["status"] == "pending"
+        assert receipt["memory"]["with_error"] is True
+        hidden, _ = await first.export_user_messages(user="alice@example.com")
+        assert hidden == []
+    finally:
+        await first.aclose()
+
+    recovered_memory = _PurgeMemory()
+    restarted = await _make_store(db_path, _FakeQdrant())
+    try:
+        hidden, _ = await restarted.export_user_messages(user="alice@example.com")
+        assert hidden == []
+        before = await restarted.user_purge_status(
+            user="alice@example.com",
+            purge_id="purge-restart",
+        )
+        assert before is not None
+        assert before["memory"]["attempts"] == 1
+        assert before["memory"]["with_error"] is True
+
+        await restarted.maintain(memory_store=recovered_memory)
+
+        after = await restarted.user_purge_status(
+            user="alice@example.com",
+            purge_id="purge-restart",
+        )
+        assert after is not None
+        assert after["status"] == "completed"
+        assert after["memory"]["attempts"] == 2
+        assert after["memory"]["with_error"] is False
+        assert recovered_memory.calls == [("alice@example.com", cutoff)]
+    finally:
+        await restarted.aclose()

@@ -1,7 +1,8 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress. Waves 1A, 1B, and 1C.1–1C.5b are Unraid-verified;
-1C.5c owner repair status is laptop-complete and its deployment smoke is next.
+**Status:** In progress. Waves 1A, 1B, and 1C.1–1C.5c are Unraid-verified;
+1C.5d account purge is laptop-verified and awaiting its disposable-account
+Unraid smoke.
 
 ## Goal
 
@@ -173,18 +174,38 @@ not forward its displayed chat id on this request, so the archive used its
 stable `derived-...` fallback; the native UI contract therefore requires one
 Audrey-issued conversation id to be preserved end to end.
 
-1C.5c status (2026-08-30): laptop-complete. Authenticated
+1C.5c status (2026-08-31): complete and Unraid-verified. Authenticated
 `GET /v1/me/repair-status` composes exact-current-user counts for durable file
 deletion, Audrey-to-sidecar archive delivery, chat indexing, chat deletion, and
 conversation tombstones. It reports `ready`, `repairing`,
 `attention_required`, or `degraded` without returning payloads, user
 identifiers, raw backend errors, hostnames, or filesystem paths. The sidecar
-status route is service-token protected and hidden from model discovery. User
-filters are applied in every SQLite store rather than after aggregation. The
-focused lifecycle/API matrix passes all 37 tests and the full hermetic suite
-passes all 2,534; scoped ruff, compilation, and whitespace checks are clean,
-and the lesson scan has zero broken links. The Unraid deployment smoke is next.
-Account-wide purge and admin-wide repair controls remain in 1C.5d+.
+status route is service-token protected and hidden from model discovery. Each
+store filters the authenticated user before returning counts; global totals
+are never reused as an owner view. The focused lifecycle/API matrix passes all
+37 tests and the full hermetic suite passes all 2,534; scoped ruff,
+compilation, and whitespace checks are clean, and the lesson scan has zero
+broken links. On Unraid, the endpoint reported `ready` with zero pending or
+exhausted work, changed to `degraded` only for the three sidecar-owned
+components while custom-tools was stopped, and returned to `ready` after
+restart. Local file-deletion and archive-delivery status remained available
+throughout, and the completed conversation tombstone remained visible.
+Admin-wide repair controls remain after the account-purge slice.
+
+1C.5d laptop status (2026-08-31): Audrey exposes an authenticated
+`POST /v1/me/data-purge` with an exact confirmation phrase, optional scoped
+idempotency key, and an exact-owner progress receipt. One durable cutoff
+coordinates upload records and disk artifacts, private text/image points,
+local archive delivery, sidecar chat source/index rows, and durable memory.
+Pre-cutoff records become logically unavailable before physical cleanup, while
+post-cutoff activity is preserved. The coordinator retries across dependency
+outages and process restarts; a durable acknowledgement gate prevents memory
+or chat reads during sidecar handoff. Maintenance-only archive storage remains
+purgeable even when ordinary archive delivery is disabled. Cross-user,
+cutoff, idempotency, migration, outage, and restart tests pass; the full
+hermetic suite passes all 2,549 tests. Scoped ruff and compilation are clean,
+and the lesson scan has zero broken links. A disposable-account Unraid
+outage/recovery smoke remains before 1C.5d is called Unraid-verified.
 
 
 Gate:

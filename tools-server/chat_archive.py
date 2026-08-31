@@ -112,6 +112,20 @@ def _now_iso() -> str:
     return _dt.datetime.now(_dt.UTC).isoformat(timespec="microseconds")
 
 
+def _canonical_cutoff(value: str) -> str:
+    """Require an aware, non-future cutoff and normalize it to UTC."""
+    try:
+        parsed = _dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as e:
+        raise ValueError("cutoff_at must be an ISO-8601 timestamp") from e
+    if parsed.tzinfo is None:
+        raise ValueError("cutoff_at must include a timezone")
+    parsed = parsed.astimezone(_dt.UTC)
+    if parsed > _dt.datetime.now(_dt.UTC):
+        raise ValueError("cutoff_at cannot be in the future")
+    return parsed.isoformat(timespec="microseconds")
+
+
 def _encode_export_cursor(created_at: str, message_id: str) -> str:
     raw = json.dumps([created_at, message_id], separators=(",", ":")).encode()
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
@@ -347,6 +361,17 @@ CREATE TABLE IF NOT EXISTS archive_conversation_deletions (
     completed_at     TEXT,
     PRIMARY KEY (user, conversation_id)
 );
+CREATE TABLE IF NOT EXISTS archive_user_purges (
+    purge_id               TEXT PRIMARY KEY,
+    user                   TEXT NOT NULL,
+    cutoff_at              TEXT NOT NULL,
+    requested_at           TEXT NOT NULL,
+    memory_completed_at    TEXT,
+    memory_attempts        INTEGER NOT NULL DEFAULT 0,
+    memory_last_attempt_at TEXT,
+    memory_last_error      TEXT,
+    completed_at           TEXT
+);
 CREATE TABLE IF NOT EXISTS archive_maintenance_state (
     operation       TEXT PRIMARY KEY,
     last_attempt_at TEXT NOT NULL,
@@ -364,6 +389,10 @@ CREATE INDEX IF NOT EXISTS idx_deletion_repair
     ON archive_deletion_outbox(attempts, requested_at);
 CREATE INDEX IF NOT EXISTS idx_conversation_deletion_pending
     ON archive_conversation_deletions(completed_at, requested_at);
+CREATE INDEX IF NOT EXISTS idx_user_purge_owner
+    ON archive_user_purges(user, cutoff_at);
+CREATE INDEX IF NOT EXISTS idx_user_purge_pending
+    ON archive_user_purges(completed_at, requested_at);
 """
 
 
@@ -489,6 +518,21 @@ class ChatArchiveStore:
 
     # ─── Writes ────────────────────────────────────────────────────────
 
+    async def user_purge_cutoff(self, *, user: str) -> str:
+        """Return the newest durable account-purge cutoff for one user."""
+        if not user:
+            raise ValueError("user_purge_cutoff requires a non-empty user")
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init() not called")
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                "SELECT MAX(cutoff_at) FROM archive_user_purges WHERE user = ?",
+                (user,),
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+        return str(row[0]) if row and row[0] else ""
+
     async def archive_turn(
         self,
         *,
@@ -528,17 +572,24 @@ class ChatArchiveStore:
         async with self._db_lock:
             cursor = await self._db.execute(
                 """
-                SELECT cutoff_at
-                FROM archive_conversation_deletions
-                WHERE user = ? AND conversation_id = ?
+                SELECT MAX(cutoff_at)
+                FROM (
+                    SELECT cutoff_at
+                    FROM archive_conversation_deletions
+                    WHERE user = ? AND conversation_id = ?
+                    UNION ALL
+                    SELECT cutoff_at
+                    FROM archive_user_purges
+                    WHERE user = ?
+                )
                 """,
-                (user, conversation_id),
+                (user, conversation_id, user),
             )
             tombstone = await cursor.fetchone()
             await cursor.close()
-            if tombstone is not None and now <= str(tombstone[0]):
+            if tombstone is not None and tombstone[0] and now <= str(tombstone[0]):
                 log.info(
-                    "chat_archive: skipped pre-deletion delivery user=%s conversation=%s",
+                    "chat_archive: skipped pre-purge delivery user=%s conversation=%s",
                     user,
                     conversation_id,
                 )
@@ -650,6 +701,10 @@ class ChatArchiveStore:
                 FROM archive_chunks AS c
                 LEFT JOIN archive_deletion_outbox AS d ON d.chunk_id = c.chunk_id
                 WHERE c.chunk_id = ? AND d.chunk_id IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM archive_user_purges AS p
+                      WHERE p.user = c.user AND c.created_at <= p.cutoff_at
+                  )
                 """,
                 (chunk_id,),
             )
@@ -690,6 +745,10 @@ class ChatArchiveStore:
                         LEFT JOIN archive_deletion_outbox AS d
                           ON d.chunk_id = c.chunk_id
                         WHERE c.chunk_id = ? AND d.chunk_id IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM archive_user_purges AS p
+                      WHERE p.user = c.user AND c.created_at <= p.cutoff_at
+                  )
                         """,
                         (chunk_id,),
                     )
@@ -771,6 +830,10 @@ class ChatArchiveStore:
                 WHERE c.indexed_at IS NULL
                   AND c.index_attempts < ?
                   AND d.chunk_id IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM archive_user_purges AS p
+                      WHERE p.user = c.user AND c.created_at <= p.cutoff_at
+                  )
                 ORDER BY c.created_at, c.chunk_id
                 LIMIT ?
                 """,
@@ -811,6 +874,7 @@ class ChatArchiveStore:
             raise ValueError("search requires a non-empty user")
         if not query.strip():
             return []
+        cutoff_at = await self.user_purge_cutoff(user=user)
         try:
             qvec = await _embed(self._http, self._embed_model, query, self._embed_keep_alive)
         except _EmbedError as e:
@@ -824,6 +888,11 @@ class ChatArchiveStore:
             must.append(qm.FieldCondition(
                 key="created_at",
                 range=qm.DatetimeRange(gte=date_from, lte=date_to),
+            ))
+        if cutoff_at:
+            must.append(qm.FieldCondition(
+                key="created_at",
+                range=qm.DatetimeRange(gt=cutoff_at),
             ))
 
         result = await self._qdrant.query_points(
@@ -858,12 +927,13 @@ class ChatArchiveStore:
         out: list[SearchHit] = []
         for point, payload in zip(result.points, payloads, strict=True):
             chunk_id = str(payload.get("chunk_id", ""))
-            if chunk_id in pending_ids:
+            created_at = str(payload.get("created_at", ""))
+            if chunk_id in pending_ids or (cutoff_at and not created_at > cutoff_at):
                 continue
             out.append(SearchHit(
                 conversation_id=str(payload.get("conversation_id", "")),
                 chunk_id=chunk_id,
-                created_at=str(payload.get("created_at", "")),
+                created_at=created_at,
                 snippet=_snippet(str(payload.get("text", "")), snippet_chars),
                 score=float(point.score or 0.0),
             ))
@@ -917,6 +987,12 @@ class ChatArchiveStore:
                   WHERE cd.user = m.user
                     AND cd.conversation_id = m.conversation_id
                     AND m.created_at <= cd.cutoff_at
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM archive_user_purges AS p
+                  WHERE p.user = m.user
+                    AND m.created_at <= p.cutoff_at
               )
         """
         params: list[Any] = [user]
@@ -1091,6 +1167,341 @@ class ChatArchiveStore:
             "status": "pending",
             "chunks_queued": len(rows),
             "deletions_pending": pending,
+        }
+
+    async def request_user_purge(
+        self,
+        *,
+        user: str,
+        purge_id: str,
+        cutoff_at: str,
+        memory_store: Any,
+    ) -> dict[str, Any]:
+        """Create one idempotent account tombstone and begin physical cleanup."""
+        if not user:
+            raise ValueError("request_user_purge requires a non-empty user")
+        if not purge_id:
+            raise ValueError("request_user_purge requires a non-empty purge_id")
+        if not cutoff_at:
+            raise ValueError("request_user_purge requires a non-empty cutoff_at")
+        cutoff_at = _canonical_cutoff(cutoff_at)
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init() not called")
+
+        requested_at = _now_iso()
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                "SELECT user, cutoff_at FROM archive_user_purges WHERE purge_id = ?",
+                (purge_id,),
+            )
+            existing = await cursor.fetchone()
+            await cursor.close()
+            if existing is not None:
+                if str(existing[0]) != user or str(existing[1]) != cutoff_at:
+                    raise ValueError("purge_id is already bound to another request")
+            else:
+                await self._db.execute(
+                    """
+                    INSERT INTO archive_user_purges
+                        (purge_id, user, cutoff_at, requested_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (purge_id, user, cutoff_at, requested_at),
+                )
+                await self._db.commit()
+
+        await self._queue_user_purge_chunks(purge_id=purge_id)
+        await self._repair_user_purge_memories(
+            memory_store=memory_store,
+            purge_id=purge_id,
+        )
+        await self._finalize_user_purges()
+        result = await self.user_purge_status(user=user, purge_id=purge_id)
+        if result is None:
+            raise RuntimeError("account purge disappeared after creation")
+        return result
+
+    async def _queue_user_purge_chunks(self, *, purge_id: str = "") -> int:
+        """Queue one bounded batch of pre-cutoff chat vectors for deletion."""
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init() not called")
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                """
+                SELECT DISTINCT c.chunk_id, c.conversation_id, c.message_ids_json
+                FROM archive_user_purges AS p
+                JOIN archive_chunks AS c
+                  ON c.user = p.user AND c.created_at <= p.cutoff_at
+                LEFT JOIN archive_deletion_outbox AS d ON d.chunk_id = c.chunk_id
+                WHERE p.completed_at IS NULL
+                  AND (? = '' OR p.purge_id = ?)
+                  AND d.chunk_id IS NULL
+                ORDER BY c.created_at, c.chunk_id
+                LIMIT ?
+                """,
+                (purge_id, purge_id, self._repair_batch_size),
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+            requested_at = _now_iso()
+            await self._db.executemany(
+                """
+                INSERT OR IGNORE INTO archive_deletion_outbox
+                    (chunk_id, conversation_id, message_ids_json, point_id,
+                     requested_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        str(row[0]),
+                        str(row[1]),
+                        str(row[2]),
+                        _qdrant_point_id(str(row[0])),
+                        requested_at,
+                    )
+                    for row in rows
+                ],
+            )
+            await self._db.commit()
+        return len(rows)
+
+    async def _repair_user_purge_memories(
+        self,
+        *,
+        memory_store: Any,
+        purge_id: str = "",
+    ) -> dict[str, int]:
+        """Retry acknowledged Qdrant memory deletion for pending purges."""
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init() not called")
+        if memory_store is None:
+            return {"attempted": 0, "completed": 0, "failed": 0}
+
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                """
+                SELECT purge_id, user, cutoff_at
+                FROM archive_user_purges
+                WHERE memory_completed_at IS NULL
+                  AND memory_attempts < ?
+                  AND (? = '' OR purge_id = ?)
+                ORDER BY requested_at, purge_id
+                LIMIT ?
+                """,
+                (
+                    self._max_retry_attempts,
+                    purge_id,
+                    purge_id,
+                    self._repair_batch_size,
+                ),
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+
+        completed = 0
+        failed = 0
+        for row_purge_id, user, cutoff_at in rows:
+            attempted_at = _now_iso()
+            async with self._db_lock:
+                await self._db.execute(
+                    """
+                    UPDATE archive_user_purges
+                    SET memory_attempts = memory_attempts + 1,
+                        memory_last_attempt_at = ?
+                    WHERE purge_id = ? AND memory_completed_at IS NULL
+                    """,
+                    (attempted_at, row_purge_id),
+                )
+                await self._db.commit()
+            try:
+                await memory_store.delete_user_before(
+                    user=str(user),
+                    cutoff_at=str(cutoff_at),
+                )
+            except Exception as e:  # noqa: BLE001 — Qdrant raises a wide tree
+                error = f"{type(e).__name__}: {e}"[:500]
+                async with self._db_lock:
+                    await self._db.execute(
+                        """
+                        UPDATE archive_user_purges
+                        SET memory_last_error = ?
+                        WHERE purge_id = ?
+                        """,
+                        (error, row_purge_id),
+                    )
+                    await self._db.commit()
+                failed += 1
+                log.warning(
+                    "chat_archive: account purge memory delete deferred purge=%s",
+                    row_purge_id,
+                )
+                continue
+
+            async with self._db_lock:
+                await self._db.execute(
+                    """
+                    UPDATE archive_user_purges
+                    SET memory_completed_at = ?, memory_last_error = NULL
+                    WHERE purge_id = ?
+                    """,
+                    (_now_iso(), row_purge_id),
+                )
+                await self._db.commit()
+            completed += 1
+
+        return {
+            "attempted": len(rows),
+            "completed": completed,
+            "failed": failed,
+        }
+
+    async def _finalize_user_purges(self) -> int:
+        """Finalize SQLite source rows after memory and chat vector acks."""
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init() not called")
+
+        completed = 0
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                """
+                SELECT purge_id, user, cutoff_at
+                FROM archive_user_purges
+                WHERE completed_at IS NULL AND memory_completed_at IS NOT NULL
+                ORDER BY requested_at, purge_id
+                LIMIT ?
+                """,
+                (self._repair_batch_size,),
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+            for purge_id, user, cutoff_at in rows:
+                cursor = await self._db.execute(
+                    """
+                    SELECT 1 FROM archive_chunks
+                    WHERE user = ? AND created_at <= ?
+                    LIMIT 1
+                    """,
+                    (user, cutoff_at),
+                )
+                old_chunk_remains = await cursor.fetchone() is not None
+                await cursor.close()
+                if old_chunk_remains:
+                    continue
+
+                await self._db.execute(
+                    "DELETE FROM messages WHERE user = ? AND created_at <= ?",
+                    (user, cutoff_at),
+                )
+                await self._db.execute(
+                    """
+                    DELETE FROM conversations
+                    WHERE user = ?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM messages
+                          WHERE messages.user = conversations.user
+                            AND messages.conversation_id = conversations.conversation_id
+                      )
+                    """,
+                    (user,),
+                )
+                await self._db.execute(
+                    "UPDATE archive_user_purges SET completed_at = ? WHERE purge_id = ?",
+                    (_now_iso(), purge_id),
+                )
+                completed += 1
+            await self._db.commit()
+        return completed
+
+    async def user_purge_status(
+        self,
+        *,
+        user: str,
+        purge_id: str,
+    ) -> dict[str, Any] | None:
+        """Return sanitized progress for one exact-owner purge receipt."""
+        if not user:
+            raise ValueError("user_purge_status requires a non-empty user")
+        if not purge_id:
+            raise ValueError("user_purge_status requires a non-empty purge_id")
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init() not called")
+
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                """
+                SELECT cutoff_at, requested_at, memory_completed_at,
+                       memory_attempts, memory_last_error, completed_at
+                FROM archive_user_purges
+                WHERE user = ? AND purge_id = ?
+                """,
+                (user, purge_id),
+            )
+            row = await cursor.fetchone()
+            await cursor.close()
+            if row is None:
+                return None
+            cutoff_at = str(row[0])
+
+            cursor = await self._db.execute(
+                """
+                SELECT COUNT(*)
+                FROM archive_chunks
+                WHERE user = ? AND created_at <= ?
+                """,
+                (user, cutoff_at),
+            )
+            chat_pending = int((await cursor.fetchone())[0])
+            await cursor.close()
+            cursor = await self._db.execute(
+                """
+                SELECT COALESCE(SUM(d.attempts), 0),
+                       COALESCE(SUM(CASE WHEN d.last_error IS NOT NULL
+                                           AND length(d.last_error) > 0
+                                         THEN 1 ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN d.attempts >= ? THEN 1 ELSE 0 END), 0)
+                FROM archive_deletion_outbox AS d
+                JOIN archive_chunks AS c ON c.chunk_id = d.chunk_id
+                WHERE c.user = ? AND c.created_at <= ?
+                """,
+                (self._max_retry_attempts, user, cutoff_at),
+            )
+            delete_row = await cursor.fetchone()
+            await cursor.close()
+
+        memory_completed = bool(row[2])
+        memory_attempts = int(row[3] or 0)
+        memory_with_error = bool(row[4])
+        memory_exhausted = (
+            not memory_completed and memory_attempts >= self._max_retry_attempts
+        )
+        chat_attempts = int(delete_row[0] or 0)
+        chat_with_error = int(delete_row[1] or 0)
+        chat_exhausted = int(delete_row[2] or 0)
+        completed_at = str(row[5] or "")
+        if completed_at:
+            purge_status = "completed"
+        elif memory_exhausted or chat_exhausted:
+            purge_status = "attention_required"
+        else:
+            purge_status = "pending"
+        return {
+            "purge_id": purge_id,
+            "cutoff_at": cutoff_at,
+            "requested_at": str(row[1]),
+            "status": purge_status,
+            "completed_at": completed_at,
+            "memory": {
+                "completed": memory_completed,
+                "attempts": memory_attempts,
+                "with_error": memory_with_error,
+                "exhausted": memory_exhausted,
+            },
+            "chat": {
+                "pending": chat_pending,
+                "attempts": chat_attempts,
+                "with_error": chat_with_error,
+                "exhausted": chat_exhausted,
+            },
         }
 
     # ─── Durable repair and retention ─────────────────────────────────
@@ -1347,14 +1758,22 @@ class ChatArchiveStore:
             await self._db.commit()
         return completed
 
-    async def prune(self, *, retry_exhausted: bool = False) -> dict[str, int]:
+    async def prune(
+        self,
+        *,
+        retry_exhausted: bool = False,
+        memory_store: Any = None,
+    ) -> dict[str, int]:
         """Queue expired chunks and process a bounded deletion-outbox batch."""
         async with self._maintenance_lock:
+            await self._queue_user_purge_chunks()
+            await self._repair_user_purge_memories(memory_store=memory_store)
             queued = await self._queue_retention()
             deleted = await self._delete_pending(
                 reset_exhausted=retry_exhausted,
             )
             await self._finalize_conversation_deletions()
+            await self._finalize_user_purges()
             reindexed = await self.reindex_pending(
                 reset_exhausted=retry_exhausted,
             )
@@ -1371,12 +1790,17 @@ class ChatArchiveStore:
             "reindex_failed": reindexed["failed"],
         }
 
-    async def maintain(self) -> dict[str, Any]:
+    async def maintain(self, *, memory_store: Any = None) -> dict[str, Any]:
         """Run one scheduled retention, deletion, and reindex repair pass."""
         async with self._maintenance_lock:
+            purge_queued = await self._queue_user_purge_chunks()
+            purge_memories = await self._repair_user_purge_memories(
+                memory_store=memory_store,
+            )
             queued = await self._queue_retention()
             deleted = await self._delete_pending()
             conversation_deletions_completed = await self._finalize_conversation_deletions()
+            user_purges_completed = await self._finalize_user_purges()
             reindexed = await self.reindex_pending()
             pending = await self._deletions_pending()
         result: dict[str, Any] = {
@@ -1387,8 +1811,11 @@ class ChatArchiveStore:
         }
         if (
             queued
+            or purge_queued
+            or purge_memories["attempted"]
             or deleted["attempted"]
             or conversation_deletions_completed
+            or user_purges_completed
             or reindexed["attempted"]
         ):
             log.info("chat_archive: maintenance result=%s", result)
@@ -1650,8 +2077,15 @@ class ChatArchiveStore:
 class ChatArchiveMaintainer:
     """Own the scheduled archive repair task and cancel it cleanly."""
 
-    def __init__(self, store: ChatArchiveStore, *, interval_s: float) -> None:
+    def __init__(
+        self,
+        store: ChatArchiveStore,
+        *,
+        interval_s: float,
+        memory_store: Any = None,
+    ) -> None:
         self._store = store
+        self._memory_store = memory_store
         self._interval_s = max(0.0, interval_s)
         self._task: asyncio.Task[None] | None = None
 
@@ -1683,7 +2117,10 @@ class ChatArchiveMaintainer:
         try:
             while True:
                 try:
-                    await self._store.maintain()
+                    if self._memory_store is None:
+                        await self._store.maintain()
+                    else:
+                        await self._store.maintain(memory_store=self._memory_store)
                 except Exception as e:  # noqa: BLE001 — loop must survive a pass
                     log.warning("chat_archive: maintenance pass failed: %s", e)
                 await asyncio.sleep(self._interval_s)

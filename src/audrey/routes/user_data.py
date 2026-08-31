@@ -9,13 +9,15 @@ not become model-callable tools.
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+import uuid
+from typing import Annotated, Any, Literal
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field, ValidationError
 
 from audrey.auth import AuthedUser, require_user
+from audrey.user_data_visibility import remote_personal_reads_blocked
 
 router = APIRouter(prefix="/v1/me", tags=["user-data"])
 
@@ -100,6 +102,42 @@ class UserDataRepairStatus(BaseModel):
     chat_indexing: RepairQueueStatus
     chat_deletions: RepairQueueStatus
     conversation_deletions: RepairQueueStatus
+    account_purges: RepairQueueStatus
+
+
+class AccountPurgeRequest(BaseModel):
+    confirmation: Literal["DELETE ALL MY AUDREY DATA"]
+
+
+class PurgeQueueStatus(BaseModel):
+    pending: Annotated[int, Field(ge=0)]
+    attempts: Annotated[int, Field(ge=0)]
+    with_error: Annotated[int, Field(ge=0)]
+    completed: Annotated[int, Field(ge=0)]
+
+
+class PurgeComponentStatus(BaseModel):
+    completed: bool
+    attempts: Annotated[int, Field(ge=0)]
+    with_error: bool
+
+
+class PurgeSidecarStatus(PurgeComponentStatus):
+    acknowledged: bool
+    status: str
+
+
+class AccountPurgeStatus(BaseModel):
+    schema_version: int = 1
+    purge_id: str
+    cutoff_at: str
+    requested_at: str
+    status: str
+    completed_at: str
+    files: PurgeQueueStatus
+    paths: PurgeQueueStatus
+    local_delivery: PurgeComponentStatus
+    sidecar: PurgeSidecarStatus
 
 
 def _queue_status(
@@ -204,6 +242,14 @@ async def _request_backend(
     return value
 
 
+def _ensure_remote_personal_reads_available(user: str) -> None:
+    if remote_personal_reads_blocked(user):
+        raise HTTPException(
+            status_code=409,
+            detail="personal_data_purge_in_progress",
+        )
+
+
 async def _request_page(
     request: Request,
     *,
@@ -233,6 +279,7 @@ async def list_memories(
     me: AuthedUser = Depends(require_user),
 ) -> MemoryPage:
     """List only the authenticated account-owned durable memories."""
+    _ensure_remote_personal_reads_available(me.email)
     value = await _request_page(
         request,
         tool_name=_MEMORY_HOST_TOOL,
@@ -314,6 +361,7 @@ async def export_chat_history(
     me: AuthedUser = Depends(require_user),
 ) -> ChatExportPage:
     """Export one portable page of the authenticated account-owned chat source."""
+    _ensure_remote_personal_reads_available(me.email)
     value = await _request_page(
         request,
         tool_name=_CHAT_HOST_TOOL,
@@ -359,6 +407,75 @@ async def delete_chat_history(
         ) from e
 
 
+def _purge_coordinator(request: Request):
+    coordinator = getattr(request.app.state, "user_data_purges", None)
+    if coordinator is None:
+        raise HTTPException(status_code=503, detail="user_data_purge_unavailable")
+    return coordinator
+
+
+@router.post(
+    "/data-purge",
+    response_model=AccountPurgeStatus,
+    status_code=202,
+)
+async def request_account_purge(
+    request: Request,
+    body: AccountPurgeRequest,
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key", max_length=128),
+    ] = None,
+    me: AuthedUser = Depends(require_user),
+) -> AccountPurgeStatus:
+    """Durably purge the authenticated account snapshot after exact confirmation."""
+    del body
+    purge_id = ""
+    if idempotency_key:
+        purge_id = str(uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"audrey-purge|{me.email}|{idempotency_key}",
+        ))
+    try:
+        value = await _purge_coordinator(request).request(
+            user=me.email,
+            purge_id=purge_id,
+        )
+        return AccountPurgeStatus.model_validate(value)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail="purge_id_conflict") from e
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=502,
+            detail="user_data_backend_invalid_response",
+        ) from e
+
+
+@router.get(
+    "/data-purge/{purge_id}",
+    response_model=AccountPurgeStatus,
+)
+async def get_account_purge(
+    request: Request,
+    purge_id: Annotated[str, Path(min_length=1, max_length=128)],
+    me: AuthedUser = Depends(require_user),
+) -> AccountPurgeStatus:
+    """Return one exact-owner purge receipt without raw backend errors."""
+    value = await _purge_coordinator(request).status(
+        user=me.email,
+        purge_id=purge_id,
+    )
+    if value is None:
+        raise HTTPException(status_code=404, detail="purge_not_found")
+    try:
+        return AccountPurgeStatus.model_validate(value)
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=502,
+            detail="user_data_backend_invalid_response",
+        ) from e
+
+
 @router.get("/repair-status", response_model=UserDataRepairStatus)
 async def get_repair_status(
     request: Request,
@@ -371,6 +488,12 @@ async def get_repair_status(
         file_deletions = _queue_status(await file_stats(me.email))
     else:
         file_deletions = _queue_status(available=False)
+
+    purge_stats = getattr(uploads_db, "user_data_purge_stats", None)
+    if callable(purge_stats):
+        account_purges = _queue_status(await purge_stats(me.email))
+    else:
+        account_purges = _queue_status(available=False)
 
     archive_client = getattr(request.app.state, "archive_client", None)
     delivery_stats = getattr(archive_client, "user_stats", None)
@@ -406,6 +529,7 @@ async def get_repair_status(
         chat_indexing,
         chat_deletions,
         conversation_deletions,
+        account_purges,
     )
     if any(queue.exhausted for queue in queues):
         status_value = "attention_required"
@@ -423,6 +547,7 @@ async def get_repair_status(
         chat_indexing=chat_indexing,
         chat_deletions=chat_deletions,
         conversation_deletions=conversation_deletions,
+        account_purges=account_purges,
     )
 
 

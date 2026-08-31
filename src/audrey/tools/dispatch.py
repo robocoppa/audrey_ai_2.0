@@ -29,6 +29,7 @@ import httpx
 
 from audrey.metrics import tool_call_seconds, tool_calls_total
 from audrey.tools.discovery import ToolRegistry
+from audrey.user_data_visibility import remote_personal_reads_blocked
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +77,12 @@ _USER_SCOPED_TOOLS: frozenset[str] = frozenset({
     "get_file_text",
 })
 
+
+_PURGE_GATED_REMOTE_READS: frozenset[str] = frozenset({
+    "memory_recall",
+    "memory_search",
+    "chat_history_search",
+})
 
 def audit_user_scoping(registry: ToolRegistry) -> list[str]:
     """Name every discovered tool that takes a `user` argument but isn't scoped.
@@ -256,6 +263,26 @@ async def dispatch_one(
             args["tags"] = _force_user_tag(str(args.get("tags") or ""), user_id)
         else:
             args["user"] = user_id
+
+    if (
+        user_id
+        and name in _PURGE_GATED_REMOTE_READS
+        and remote_personal_reads_blocked(user_id)
+    ):
+        tool_calls_total.labels(tool=name, outcome="error").inc()
+        return ToolResult(
+            name=name,
+            call_id=call_id,
+            content=json.dumps({
+                "error": "personal_data_purge_in_progress",
+                "detail": (
+                    "Stored memory and chat history are temporarily unavailable "
+                    "while their purge cutoff is being installed."
+                ),
+            }),
+            elapsed_s=0.0,
+            is_error=True,
+        )
 
     spec = registry.get(name)
     if spec is None:

@@ -57,6 +57,7 @@ log = logging.getLogger(__name__)
 # live on the same server but aren't in the OpenAPI tool surface.
 _ARCHIVE_HOST_TOOL = "chat_history_search"
 _ARCHIVE_WRITE_PATH = "/chat_history/archive"
+_USER_PURGE_PATH = "/user_data/purge"
 
 # Cap stored content so a single runaway response can't blow up the
 # archive row size. Long answers still get archived — just clipped at
@@ -355,6 +356,38 @@ class ChatArchiveClient:
             log.warning("chat_archive: write transport error: %s", error)
             return ArchiveDelivery.RETRY, error
 
+    async def request_user_purge(
+        self,
+        *,
+        registry: ToolRegistry | None,
+        user: str,
+        purge_id: str,
+        cutoff_at: str,
+    ) -> dict[str, Any]:
+        """Create or poll one idempotent sidecar purge receipt."""
+        host = self.host_url(registry)
+        if host is None:
+            raise RuntimeError("chat_history_search is not registered")
+        kwargs: dict[str, Any] = {
+            "json": {
+                "user": user,
+                "purge_id": purge_id,
+                "cutoff_at": cutoff_at,
+            },
+            "timeout": self._timeout_s,
+        }
+        if self._service_headers:
+            kwargs["headers"] = self._service_headers
+        response = await self._http.post(f"{host}{_USER_PURGE_PATH}", **kwargs)
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"sidecar purge returned HTTP {response.status_code}"
+            )
+        value = response.json()
+        if not isinstance(value, dict):
+            raise RuntimeError("sidecar purge returned an invalid response")
+        return value
+
     async def archive_turn(
         self,
         *,
@@ -395,6 +428,7 @@ _OUTBOX_SCHEMA = """
 CREATE TABLE IF NOT EXISTS archive_write_outbox (
     archive_id       TEXT PRIMARY KEY,
     payload_json     TEXT NOT NULL,
+    user_id          TEXT NOT NULL DEFAULT '',
     created_at       TEXT NOT NULL,
     attempts         INTEGER NOT NULL DEFAULT 0,
     last_attempt_at  TEXT,
@@ -403,6 +437,12 @@ CREATE TABLE IF NOT EXISTS archive_write_outbox (
 );
 CREATE INDEX IF NOT EXISTS idx_archive_write_due
     ON archive_write_outbox(next_attempt_at, created_at);
+CREATE TABLE IF NOT EXISTS archive_user_purges (
+    user       TEXT PRIMARY KEY,
+    cutoff_at  TEXT NOT NULL,
+    purge_id   TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -443,7 +483,7 @@ class ChatArchiveQueue:
         """Preserve the admin routes' host lookup contract."""
         return self._client.host_url(registry)
 
-    async def start(self) -> None:
+    async def start(self, *, run_worker: bool = True) -> None:
         if self._db is not None:
             raise RuntimeError("chat archive queue already started")
         self._sqlite_path.parent.mkdir(parents=True, exist_ok=True)
@@ -452,6 +492,7 @@ class ChatArchiveQueue:
         await self._db.execute("PRAGMA synchronous=NORMAL")
         await self._db.execute("PRAGMA secure_delete=ON")
         await self._db.executescript(_OUTBOX_SCHEMA)
+        await self._migrate_schema()
         # A restart is an operator-visible retry boundary: the upstream may
         # have been repaired while Audrey was down, so do not preserve an old
         # in-process backoff across the new lifecycle.
@@ -462,18 +503,54 @@ class ChatArchiveQueue:
         await self._db.commit()
         pending = await self.pending_count()
         chat_archive_queue_depth.set(pending)
-        self._accepting = True
-        self._worker = asyncio.create_task(
-            self._run(),
-            name="chat-archive-outbox",
-        )
-        self._signal("startup")
+        self._accepting = run_worker
+        if run_worker:
+            self._worker = asyncio.create_task(
+                self._run(),
+                name="chat-archive-outbox",
+            )
+            self._signal("startup")
         log.info(
-            "chat_archive: queue ready sqlite=%s maxsize=%d pending=%d",
+            "chat_archive: queue ready sqlite=%s maxsize=%d pending=%d worker=%s",
             self._sqlite_path,
             self._signals.maxsize,
             pending,
+            "on" if run_worker else "off",
         )
+
+    async def _migrate_schema(self) -> None:
+        """Add exact-user projection to outboxes created before account purge."""
+        if self._db is None:
+            raise RuntimeError("chat archive queue is not started")
+        cursor = await self._db.execute("PRAGMA table_info(archive_write_outbox)")
+        columns = {str(row[1]) for row in await cursor.fetchall()}
+        await cursor.close()
+        if "user_id" not in columns:
+            await self._db.execute(
+                "ALTER TABLE archive_write_outbox "
+                "ADD COLUMN user_id TEXT NOT NULL DEFAULT ''"
+            )
+        cursor = await self._db.execute(
+            "SELECT archive_id, payload_json FROM archive_write_outbox "
+            "WHERE user_id = ''"
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
+        for archive_id, payload_json in rows:
+            try:
+                user_id = str(json.loads(str(payload_json)).get("user_id") or "")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                user_id = ""
+            if user_id:
+                await self._db.execute(
+                    "UPDATE archive_write_outbox SET user_id = ? WHERE archive_id = ?",
+                    (user_id, archive_id),
+                )
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_archive_write_user "
+            "ON archive_write_outbox(user_id, created_at)"
+        )
+        await self._db.commit()
 
     async def stop(self) -> None:
         self._accepting = False
@@ -535,12 +612,27 @@ class ChatArchiveQueue:
         try:
             async with self._db_lock:
                 cursor = await self._db.execute(
+                    "SELECT cutoff_at FROM archive_user_purges WHERE user = ?",
+                    (job.user_id,),
+                )
+                purge = await cursor.fetchone()
+                await cursor.close()
+                if purge is not None and job.created_at <= str(purge[0]):
+                    chat_archive_queue_events_total.labels(result="purged").inc()
+                    return
+                cursor = await self._db.execute(
                     """
                     INSERT OR IGNORE INTO archive_write_outbox
-                    (archive_id, payload_json, created_at, next_attempt_at)
-                    VALUES (?, ?, ?, ?)
+                    (archive_id, payload_json, user_id, created_at, next_attempt_at)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
-                    (job.archive_id, encoded, job.created_at, job.created_at),
+                    (
+                        job.archive_id,
+                        encoded,
+                        job.user_id,
+                        job.created_at,
+                        job.created_at,
+                    ),
                 )
                 inserted = cursor.rowcount > 0
                 await cursor.close()
@@ -571,6 +663,50 @@ class ChatArchiveQueue:
                 job.archive_id,
             )
 
+    async def purge_user_before(
+        self,
+        *,
+        user_id: str,
+        cutoff_at: str,
+        purge_id: str,
+    ) -> int:
+        """Durably block and remove pre-cutoff local archive deliveries."""
+        if not user_id or not cutoff_at or not purge_id:
+            raise ValueError("local archive purge requires user, cutoff, and purge id")
+        if self._db is None:
+            raise RuntimeError("chat archive queue is not started")
+        async with self._db_lock:
+            await self._db.execute(
+                """
+                INSERT INTO archive_user_purges (user, cutoff_at, purge_id, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user) DO UPDATE SET
+                    cutoff_at = CASE
+                        WHEN excluded.cutoff_at > archive_user_purges.cutoff_at
+                        THEN excluded.cutoff_at ELSE archive_user_purges.cutoff_at
+                    END,
+                    purge_id = CASE
+                        WHEN excluded.cutoff_at >= archive_user_purges.cutoff_at
+                        THEN excluded.purge_id ELSE archive_user_purges.purge_id
+                    END,
+                    updated_at = excluded.updated_at
+                """,
+                (user_id, cutoff_at, purge_id, _now_iso()),
+            )
+            cursor = await self._db.execute(
+                """
+                DELETE FROM archive_write_outbox
+                WHERE user_id = ? AND created_at <= ?
+                """,
+                (user_id, cutoff_at),
+            )
+            deleted = max(0, cursor.rowcount)
+            await cursor.close()
+            await self._db.commit()
+        if deleted:
+            chat_archive_queue_depth.dec(deleted)
+        return deleted
+
     async def pending_count(self) -> int:
         if self._db is None:
             return 0
@@ -596,21 +732,17 @@ class ChatArchiveQueue:
         async with self._db_lock:
             cursor = await self._db.execute(
                 """
-                SELECT payload_json, attempts, last_error
+                SELECT attempts, last_error
                 FROM archive_write_outbox
-                """
+                WHERE user_id = ?
+                """,
+                (user_id,),
             )
             rows = await cursor.fetchall()
             await cursor.close()
 
         result = dict(empty)
-        for payload_json, attempts, last_error in rows:
-            try:
-                payload = json.loads(str(payload_json))
-            except (TypeError, ValueError):
-                continue
-            if payload.get("user_id") != user_id:
-                continue
+        for attempts, last_error in rows:
             result["pending"] += 1
             result["attempts"] += int(attempts)
             if last_error:

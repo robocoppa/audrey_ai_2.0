@@ -37,11 +37,23 @@ class _StubMemory:
         self.outcome = outcome
         self.calls: list[dict] = []
 
-    async def search(self, *, user: str, query: str, top_k: int = 5):
+    async def search(
+        self,
+        *,
+        user: str,
+        query: str,
+        top_k: int = 5,
+        visible_after: str = "",
+    ):
         self.calls.append({"user": user, "query": query, "top_k": top_k})
         if isinstance(self.outcome, Exception):
             raise self.outcome
         return self.outcome
+
+
+class _StubArchive:
+    async def user_purge_cutoff(self, *, user: str) -> str:
+        return ""
 
 
 @pytest.fixture
@@ -60,6 +72,7 @@ def post(monkeypatch):
 
     def _post(memory, body: dict):
         monkeypatch.setattr(app.state, "memory", memory, raising=False)
+        monkeypatch.setattr(app.state, "chat_archive", _StubArchive(), raising=False)
         with TestClient(app) as c:
             return c.post("/memory_search", json=body)
 

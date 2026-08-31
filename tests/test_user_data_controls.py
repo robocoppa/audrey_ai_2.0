@@ -12,17 +12,25 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
+from pydantic import ValidationError
 
 from audrey.auth import AuthedUser, require_user
 from audrey.routes.user_data import (
+    AccountPurgeRequest,
     MemoryCorrection,
     correct_memory,
     delete_chat_history,
     delete_memory,
     export_chat_history,
+    get_account_purge,
     get_repair_status,
     list_memories,
+    request_account_purge,
     router,
+)
+from audrey.user_data_visibility import (
+    block_remote_personal_reads,
+    unblock_remote_personal_reads,
 )
 
 _TOOLS_SERVER = Path(__file__).resolve().parent.parent / "tools-server"
@@ -166,6 +174,55 @@ async def test_memory_correction_and_delete_are_exact_user_scoped():
     )
     assert qdrant.point_id not in qdrant.points
     assert qdrant.delete_calls == [{"collection_name": "kb_memory", "wait": True}]
+
+
+class _MemoryPurgeQdrant:
+    def __init__(self) -> None:
+        self.delete_call: dict | None = None
+
+    async def delete(self, **kwargs) -> None:
+        self.delete_call = kwargs
+
+
+async def test_memory_purge_filter_is_exact_user_cutoff_and_acknowledged():
+    qdrant = _MemoryPurgeQdrant()
+    store = memory_module.MemoryStore.__new__(memory_module.MemoryStore)
+    store._qdrant = qdrant
+    store._collection = "kb_memory"
+    cutoff = "2026-01-01T00:00:00.000000+00:00"
+
+    await store.delete_user_before(
+        user="alice@example.com",
+        cutoff_at=cutoff,
+    )
+
+    assert qdrant.delete_call is not None
+    assert qdrant.delete_call["collection_name"] == "kb_memory"
+    assert qdrant.delete_call["wait"] is True
+    selector = qdrant.delete_call["points_selector"].filter
+    assert selector.must[0].key == "user"
+    assert selector.must[0].match.value == "alice@example.com"
+    assert selector.must_not[0].key == "updated_at"
+    assert selector.must_not[0].range.gt.isoformat() == "2026-01-01T00:00:00+00:00"
+
+
+async def test_memory_inventory_applies_post_purge_visibility_cutoff():
+    qdrant = _MemoryQdrant()
+    store = memory_module.MemoryStore.__new__(memory_module.MemoryStore)
+    store._qdrant = qdrant
+    store._collection = "kb_memory"
+    cutoff = "2026-01-01T00:00:00.000000+00:00"
+
+    await store.list_user(
+        user="alice@example.com",
+        visible_after=cutoff,
+    )
+
+    conditions = qdrant.calls[0]["scroll_filter"].must
+    assert conditions[0].key == "user"
+    assert conditions[0].match.value == "alice@example.com"
+    assert conditions[1].key == "updated_at"
+    assert conditions[1].range.gt.isoformat() == "2026-01-01T00:00:00+00:00"
 
 
 class _NoopQdrant:
@@ -457,6 +514,24 @@ async def test_memory_route_injects_authenticated_user_not_browser_identity():
     }
 
 
+async def test_remote_inventory_is_hidden_until_purge_cutoff_is_acknowledged():
+    request, http = _request(
+        tool="memory_search",
+        response={"items": [{"value": "old data"}], "next_cursor": None},
+    )
+    me = AuthedUser(email="purge-gate@example.com", role="user", owui_id="a")
+    block_remote_personal_reads(user=me.email, purge_id="purge-gate")
+    try:
+        with pytest.raises(HTTPException) as exc:
+            await list_memories(request, limit=10, cursor=None, me=me)
+        assert exc.value.status_code == 409
+        assert exc.value.detail == "personal_data_purge_in_progress"
+        http.post.assert_not_awaited()
+    finally:
+        unblock_remote_personal_reads(user=me.email, purge_id="purge-gate")
+
+
+
 async def test_mutation_routes_inject_authenticated_user():
     me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
 
@@ -556,6 +631,13 @@ async def test_repair_status_composes_current_user_queues_without_raw_errors():
     })
     request.app.state.uploads_db = SimpleNamespace(
         user_file_deletion_stats=file_stats,
+        user_data_purge_stats=AsyncMock(return_value={
+            "pending": 0,
+            "attempts": 0,
+            "with_error": 0,
+            "exhausted": 0,
+            "completed": 1,
+        }),
     )
     request.app.state.archive_client = SimpleNamespace(user_stats=delivery_stats)
     me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
@@ -565,6 +647,7 @@ async def test_repair_status_composes_current_user_queues_without_raw_errors():
     assert result.status == "repairing"
     assert result.file_deletions.pending == 1
     assert result.conversation_deletions.completed == 1
+    assert result.account_purges.completed == 1
     file_stats.assert_awaited_once_with(me.email)
     delivery_stats.assert_awaited_once_with(me.email)
     assert http.post.await_args.kwargs["json"] == {"user": me.email}
@@ -596,6 +679,7 @@ async def test_repair_status_reports_remote_backend_degraded():
     }
     request.app.state.uploads_db = SimpleNamespace(
         user_file_deletion_stats=AsyncMock(return_value=empty),
+        user_data_purge_stats=AsyncMock(return_value=empty),
     )
     request.app.state.archive_client = SimpleNamespace(
         user_stats=AsyncMock(return_value=empty),
@@ -610,6 +694,95 @@ async def test_repair_status_reports_remote_backend_degraded():
     assert result.chat_indexing.available is False
     assert result.chat_deletions.available is False
     assert result.conversation_deletions.available is False
+    assert result.account_purges.available is True
+
+
+def test_account_purge_requires_exact_confirmation_phrase():
+    with pytest.raises(ValidationError):
+        AccountPurgeRequest(confirmation="delete my data")  # type: ignore[arg-type]
+
+
+
+def _purge_status(*, purge_id: str = "purge-a") -> dict:
+    return {
+        "schema_version": 1,
+        "purge_id": purge_id,
+        "cutoff_at": "2026-01-01T00:00:00.000000+00:00",
+        "requested_at": "2026-01-01T00:00:00.000000+00:00",
+        "status": "pending",
+        "completed_at": "",
+        "files": {
+            "pending": 0,
+            "attempts": 0,
+            "with_error": 0,
+            "completed": 0,
+        },
+        "paths": {
+            "pending": 0,
+            "attempts": 0,
+            "with_error": 0,
+            "completed": 0,
+        },
+        "local_delivery": {
+            "completed": True,
+            "attempts": 1,
+            "with_error": False,
+        },
+        "sidecar": {
+            "acknowledged": True,
+            "status": "pending",
+            "completed": False,
+            "attempts": 1,
+            "with_error": False,
+        },
+    }
+
+
+async def test_account_purge_uses_verified_owner_and_scoped_idempotency_key():
+    coordinator = SimpleNamespace(request=AsyncMock(return_value=_purge_status()))
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(user_data_purges=coordinator)),
+    )
+    me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
+
+    result = await request_account_purge(
+        request,
+        AccountPurgeRequest(confirmation="DELETE ALL MY AUDREY DATA"),
+        idempotency_key="same-operation",
+        me=me,
+    )
+
+    expected_id = str(uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        "audrey-purge|alice@example.com|same-operation",
+    ))
+    assert result.purge_id == "purge-a"
+    coordinator.request.assert_awaited_once_with(
+        user="alice@example.com",
+        purge_id=expected_id,
+    )
+
+
+async def test_account_purge_status_is_exact_owner_and_not_found_is_404():
+    coordinator = SimpleNamespace(
+        status=AsyncMock(side_effect=[_purge_status(), None]),
+    )
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(user_data_purges=coordinator)),
+    )
+    me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
+
+    found = await get_account_purge(request, purge_id="purge-a", me=me)
+    assert found.purge_id == "purge-a"
+
+    with pytest.raises(HTTPException) as exc:
+        await get_account_purge(request, purge_id="missing", me=me)
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "purge_not_found"
+    assert coordinator.status.await_args_list[0].kwargs == {
+        "user": "alice@example.com",
+        "purge_id": "purge-a",
+    }
 
 
 async def test_mutation_not_found_is_a_current_user_404():
@@ -675,6 +848,8 @@ def test_public_routes_do_not_accept_a_user_selector():
         ("/v1/me/chat-history/export", "get"),
         ("/v1/me/chat-history/{conversation_id}", "delete"),
         ("/v1/me/repair-status", "get"),
+        ("/v1/me/data-purge", "post"),
+        ("/v1/me/data-purge/{purge_id}", "get"),
     )
     for path, method in operations:
         operation = schema["paths"][path][method]
@@ -710,3 +885,5 @@ def test_internal_routes_are_hidden_from_model_tool_discovery():
     assert "/user_data/chat_history/export" not in paths
     assert "/user_data/chat_history/delete" not in paths
     assert "/user_data/chat_history/status" not in paths
+    assert "/user_data/purge" not in paths
+    assert "/user_data/purge/status" not in paths

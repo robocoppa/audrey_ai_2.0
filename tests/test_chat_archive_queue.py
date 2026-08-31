@@ -61,6 +61,7 @@ async def _enqueue(
     *,
     archive_id: str,
     user_id: str = "alice@example.com",
+    created_at: str = "2026-08-28T12:00:00.000000+00:00",
 ) -> None:
     await queue.archive_turn(
         registry=None,
@@ -71,7 +72,7 @@ async def _enqueue(
         virtual_model="audrey_fast",
         concrete_model="qwen-test",
         archive_id=archive_id,
-        created_at="2026-08-28T12:00:00.000000+00:00",
+        created_at=created_at,
     )
 
 
@@ -198,3 +199,86 @@ async def test_user_stats_do_not_mix_delivery_backlogs(tmp_path: Path):
     finally:
         client.release.set()
         await queue.stop()
+
+
+async def test_user_purge_removes_old_rows_blocks_late_delivery_and_survives_restart(
+    tmp_path: Path,
+):
+    path = tmp_path / "archive-outbox.sqlite"
+    blocked = _Client(block=True)
+    queue = _queue(path, blocked)
+    await queue.start()
+    try:
+        await _enqueue(queue, archive_id="alice-old")
+        await asyncio.wait_for(blocked.started.wait(), timeout=1)
+        await _enqueue(queue, archive_id="bob-old", user_id="bob")
+        await _enqueue(
+            queue,
+            archive_id="alice-new",
+            created_at="2026-09-01T12:00:00.000000+00:00",
+        )
+
+        deleted = await queue.purge_user_before(
+            user_id="alice@example.com",
+            cutoff_at="2026-08-29T00:00:00.000000+00:00",
+            purge_id="purge-1",
+        )
+
+        assert deleted == 1
+        assert (await queue.user_stats("alice@example.com"))["pending"] == 1
+        assert (await queue.user_stats("bob"))["pending"] == 1
+        await _enqueue(queue, archive_id="alice-late-old")
+        assert (await queue.user_stats("alice@example.com"))["pending"] == 1
+    finally:
+        blocked.release.set()
+        await queue.stop()
+
+    restarted_client = _Client(block=True)
+    restarted = _queue(path, restarted_client)
+    await restarted.start()
+    try:
+        before = await restarted.pending_count()
+        await _enqueue(restarted, archive_id="alice-restart-late")
+        assert await restarted.pending_count() == before
+        await _enqueue(
+            restarted,
+            archive_id="alice-restart-new",
+            created_at="2026-09-02T12:00:00.000000+00:00",
+        )
+        assert (await restarted.user_stats("alice@example.com"))["pending"] >= 1
+    finally:
+        restarted_client.release.set()
+        await restarted.stop()
+
+async def test_maintenance_only_queue_purges_without_delivering(
+    tmp_path: Path,
+):
+    path = tmp_path / "archive-outbox.sqlite"
+    blocked = _Client(block=True)
+    active = _queue(path, blocked)
+    await active.start()
+    try:
+        await _enqueue(active, archive_id="old-job")
+        await asyncio.wait_for(blocked.started.wait(), timeout=1)
+    finally:
+        await active.stop()
+
+    maintenance_client = _Client()
+    maintenance = _queue(path, maintenance_client)
+    await maintenance.start(run_worker=False)
+    try:
+        await asyncio.sleep(0)
+        assert maintenance_client.calls == []
+        assert await maintenance.pending_count() == 1
+
+        deleted = await maintenance.purge_user_before(
+            user_id="alice@example.com",
+            cutoff_at="2026-08-29T00:00:00.000000+00:00",
+            purge_id="maintenance-purge",
+        )
+
+        assert deleted == 1
+        assert await maintenance.pending_count() == 0
+        assert maintenance_client.calls == []
+    finally:
+        await maintenance.stop()

@@ -217,6 +217,46 @@ CREATE TABLE IF NOT EXISTS storage_reservations (
 );
 CREATE INDEX IF NOT EXISTS idx_storage_reservations_user ON storage_reservations(user);
 CREATE INDEX IF NOT EXISTS idx_storage_reservations_updated ON storage_reservations(updated_at);
+
+CREATE TABLE IF NOT EXISTS user_data_purges (
+  purge_id                    TEXT PRIMARY KEY,
+  user                        TEXT NOT NULL,
+  cutoff_at                   TEXT NOT NULL,
+  requested_at                TEXT NOT NULL,
+  local_delivery_completed_at TEXT NOT NULL DEFAULT '',
+  local_delivery_attempts     INTEGER NOT NULL DEFAULT 0,
+  local_delivery_last_error   TEXT NOT NULL DEFAULT '',
+  sidecar_acknowledged_at     TEXT NOT NULL DEFAULT '',
+  sidecar_completed_at        TEXT NOT NULL DEFAULT '',
+  sidecar_status              TEXT NOT NULL DEFAULT 'pending',
+  sidecar_attempts            INTEGER NOT NULL DEFAULT 0,
+  sidecar_last_error          TEXT NOT NULL DEFAULT '',
+  completed_at                TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_user_data_purges_owner
+  ON user_data_purges(user, requested_at);
+CREATE INDEX IF NOT EXISTS idx_user_data_purges_pending
+  ON user_data_purges(completed_at, requested_at);
+
+CREATE TABLE IF NOT EXISTS user_data_purge_files (
+  purge_id TEXT NOT NULL,
+  file_id  TEXT NOT NULL,
+  user     TEXT NOT NULL,
+  PRIMARY KEY (purge_id, file_id, user)
+);
+CREATE TABLE IF NOT EXISTS user_data_purge_paths (
+  purge_id       TEXT NOT NULL,
+  user           TEXT NOT NULL,
+  kind           TEXT NOT NULL,
+  object_id      TEXT NOT NULL,
+  attempts       INTEGER NOT NULL DEFAULT 0,
+  last_attempt_at TEXT NOT NULL DEFAULT '',
+  last_error     TEXT NOT NULL DEFAULT '',
+  completed_at   TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (purge_id, kind, object_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_data_purge_paths_pending
+  ON user_data_purge_paths(completed_at, purge_id);
 """
 
 
@@ -246,7 +286,6 @@ _UPLOADS_ADDED_COLUMNS: tuple[tuple[str, str], ...] = (
 @dataclass(frozen=True)
 class QuotaUsage:
     """One user's storage budget, split by lifecycle state."""
-
     stored_bytes: int
     chunk_declared_bytes: int
     chunk_part_bytes: int
@@ -352,6 +391,26 @@ class UploadsDB:
             # on status and orders by uploaded_at, and a worker polls it.
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_uploads_status ON uploads(status)",
+            )
+            purge_cols = {
+                r["name"]
+                for r in self._conn.execute(
+                    "PRAGMA table_info(user_data_purges)"
+                ).fetchall()
+            }
+            if "sidecar_acknowledged_at" not in purge_cols:
+                self._conn.execute(
+                    "ALTER TABLE user_data_purges ADD COLUMN "
+                    "sidecar_acknowledged_at TEXT NOT NULL DEFAULT ''"
+                )
+                log.info(
+                    "uploads_db: migrated user_data_purges table — "
+                    "added `sidecar_acknowledged_at`"
+                )
+            self._conn.execute(
+                "UPDATE user_data_purges SET sidecar_acknowledged_at = "
+                "sidecar_completed_at WHERE length(sidecar_acknowledged_at) = 0 "
+                "AND length(sidecar_completed_at) > 0"
             )
 
     @contextmanager
@@ -803,6 +862,624 @@ class UploadsDB:
             self._conn.execute(
                 "DELETE FROM uploads WHERE file_id = ? AND user = ?",
                 (file_id, user),
+            )
+            return True
+
+    async def user_data_purge_stats(self, user: str) -> dict[str, int]:
+        """Current-user account-purge repair counts without raw errors."""
+        return await asyncio.to_thread(self._user_data_purge_stats_sync, user)
+
+    def _user_data_purge_stats_sync(self, user: str) -> dict[str, int]:
+        with self._lock:
+            purge = self._conn.execute(
+                """
+                SELECT
+                  COALESCE(SUM(CASE WHEN length(completed_at) = 0
+                                    THEN 1 ELSE 0 END), 0) AS pending,
+                  COALESCE(SUM(local_delivery_attempts + sidecar_attempts), 0)
+                    AS attempts,
+                  COALESCE(SUM(CASE WHEN length(local_delivery_last_error) > 0
+                                      OR length(sidecar_last_error) > 0
+                                    THEN 1 ELSE 0 END), 0) AS with_error,
+                  COALESCE(SUM(CASE WHEN length(completed_at) = 0
+                                      AND sidecar_status = ?
+                                    THEN 1 ELSE 0 END), 0) AS exhausted,
+                  COALESCE(SUM(CASE WHEN length(completed_at) > 0
+                                    THEN 1 ELSE 0 END), 0) AS completed
+                FROM user_data_purges
+                WHERE user = ?
+                """,
+                ("attention_required", user),
+            ).fetchone()
+            paths = self._conn.execute(
+                """
+                SELECT COALESCE(SUM(p.attempts), 0) AS attempts,
+                       COALESCE(SUM(CASE WHEN length(p.last_error) > 0
+                                         THEN 1 ELSE 0 END), 0) AS with_error
+                FROM user_data_purge_paths AS p
+                JOIN user_data_purges AS u ON u.purge_id = p.purge_id
+                WHERE u.user = ? AND length(u.completed_at) = 0
+                """,
+                (user,),
+            ).fetchone()
+            files = self._conn.execute(
+                """
+                SELECT COALESCE(SUM(d.attempts), 0) AS attempts,
+                       COALESCE(SUM(CASE WHEN length(d.last_error) > 0
+                                         THEN 1 ELSE 0 END), 0) AS with_error
+                FROM user_data_purge_files AS p
+                JOIN user_data_purges AS u ON u.purge_id = p.purge_id
+                LEFT JOIN file_deletions AS d
+                  ON d.file_id = p.file_id AND d.user = p.user
+                WHERE u.user = ? AND length(u.completed_at) = 0
+                """,
+                (user,),
+            ).fetchone()
+        return {
+            "pending": int(purge["pending"]),
+            "attempts": (
+                int(purge["attempts"])
+                + int(paths["attempts"])
+                + int(files["attempts"])
+            ),
+            "with_error": (
+                int(purge["with_error"])
+                + int(paths["with_error"])
+                + int(files["with_error"])
+            ),
+            "exhausted": int(purge["exhausted"]),
+            "completed": int(purge["completed"]),
+        }
+
+    async def request_user_data_purge(
+        self,
+        *,
+        purge_id: str,
+        user: str,
+        cutoff_at: str,
+        requested_at: str,
+    ) -> dict[str, int]:
+        """Atomically create a receipt and tombstone every local pre-cutoff row."""
+        return await asyncio.to_thread(
+            self._request_user_data_purge_sync,
+            purge_id,
+            user,
+            cutoff_at,
+            requested_at,
+        )
+
+    def _request_user_data_purge_sync(
+        self,
+        purge_id: str,
+        user: str,
+        cutoff_at: str,
+        requested_at: str,
+    ) -> dict[str, int]:
+        with self._lock, self._transaction_locked():
+            existing = self._conn.execute(
+                "SELECT user, cutoff_at FROM user_data_purges WHERE purge_id = ?",
+                (purge_id,),
+            ).fetchone()
+            if existing is not None:
+                if str(existing["user"]) != user or str(existing["cutoff_at"]) != cutoff_at:
+                    raise ValueError("purge_id is already bound to another request")
+                return {"files": 0, "paths": 0, "created": 0}
+
+            self._conn.execute(
+                "INSERT INTO user_data_purges "
+                "(purge_id, user, cutoff_at, requested_at) VALUES (?, ?, ?, ?)",
+                (purge_id, user, cutoff_at, requested_at),
+            )
+            files = self._conn.execute(
+                "SELECT file_id FROM uploads WHERE user = ? AND uploaded_at <= ?",
+                (user, cutoff_at),
+            ).fetchall()
+            self._conn.executemany(
+                "INSERT OR IGNORE INTO user_data_purge_files "
+                "(purge_id, file_id, user) VALUES (?, ?, ?)",
+                [(purge_id, str(row["file_id"]), user) for row in files],
+            )
+            for row in files:
+                self._conn.execute(
+                    """
+                    INSERT INTO file_deletions (file_id, user, requested_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(file_id, user) DO UPDATE SET
+                      completed_at = ?, last_error = ?
+                    """,
+                    (str(row["file_id"]), user, requested_at, "", ""),
+                )
+            self._conn.execute(
+                "UPDATE uploads SET status = ?, lease_id = ?, leased_at = ? "
+                "WHERE user = ? AND uploaded_at <= ?",
+                ("deleting", "", "", user, cutoff_at),
+            )
+
+            sessions = self._conn.execute(
+                "SELECT upload_id FROM upload_sessions "
+                "WHERE user = ? AND created_at <= ?",
+                (user, cutoff_at),
+            ).fetchall()
+            reservations = self._conn.execute(
+                "SELECT reservation_id FROM storage_reservations "
+                "WHERE user = ? AND created_at <= ?",
+                (user, cutoff_at),
+            ).fetchall()
+            path_rows = [
+                (purge_id, user, "session", str(row["upload_id"]))
+                for row in sessions
+            ] + [
+                (purge_id, user, "file_prefix", str(row["reservation_id"]))
+                for row in reservations
+            ]
+            self._conn.executemany(
+                "INSERT OR IGNORE INTO user_data_purge_paths "
+                "(purge_id, user, kind, object_id) VALUES (?, ?, ?, ?)",
+                path_rows,
+            )
+            self._conn.executemany(
+                "DELETE FROM upload_parts WHERE upload_id = ?",
+                [(str(row["upload_id"]),) for row in sessions],
+            )
+            self._conn.execute(
+                "DELETE FROM upload_sessions WHERE user = ? AND created_at <= ?",
+                (user, cutoff_at),
+            )
+            self._conn.execute(
+                "DELETE FROM storage_reservations WHERE user = ? AND created_at <= ?",
+                (user, cutoff_at),
+            )
+            return {
+                "files": len(files),
+                "paths": len(path_rows),
+                "created": 1,
+            }
+
+    async def pending_user_data_purges(self, *, limit: int = 50) -> list[dict]:
+        return await asyncio.to_thread(self._pending_user_data_purges_sync, limit)
+
+    def _pending_user_data_purges_sync(self, limit: int) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM user_data_purges WHERE length(completed_at) = 0 "
+                "ORDER BY requested_at, purge_id LIMIT ?",
+                (max(1, limit),),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    async def unacknowledged_user_data_purges(self) -> list[dict]:
+        """Receipts whose sidecar cutoff is not yet known to be installed."""
+        return await asyncio.to_thread(
+            self._unacknowledged_user_data_purges_sync
+        )
+
+    def _unacknowledged_user_data_purges_sync(self) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT purge_id, user FROM user_data_purges "
+                "WHERE length(completed_at) = 0 "
+                "AND length(sidecar_acknowledged_at) = 0 "
+                "ORDER BY requested_at, purge_id"
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    async def get_user_data_purge(self, purge_id: str) -> dict | None:
+        return await asyncio.to_thread(self._get_user_data_purge_sync, purge_id)
+
+    def _get_user_data_purge_sync(self, purge_id: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM user_data_purges WHERE purge_id = ?",
+                (purge_id,),
+            ).fetchone()
+            return dict(row) if row is not None else None
+
+    async def begin_user_data_purge_component(
+        self,
+        purge_id: str,
+        *,
+        component: str,
+        attempted_at: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._begin_user_data_purge_component_sync,
+            purge_id,
+            component,
+            attempted_at,
+        )
+
+    def _begin_user_data_purge_component_sync(
+        self,
+        purge_id: str,
+        component: str,
+        attempted_at: str,
+    ) -> None:
+        if component == "local_delivery":
+            sql = (
+                "UPDATE user_data_purges SET local_delivery_attempts = "
+                "local_delivery_attempts + 1, local_delivery_last_error = ? "
+                "WHERE purge_id = ?"
+            )
+        elif component == "sidecar":
+            sql = (
+                "UPDATE user_data_purges SET sidecar_attempts = "
+                "sidecar_attempts + 1, sidecar_last_error = ? WHERE purge_id = ?"
+            )
+        else:
+            raise ValueError("unknown purge component")
+        with self._lock:
+            self._conn.execute(sql, ("", purge_id))
+
+    async def finish_user_data_purge_component(
+        self,
+        purge_id: str,
+        *,
+        component: str,
+        completed_at: str,
+        status: str = "completed",
+    ) -> None:
+        await asyncio.to_thread(
+            self._finish_user_data_purge_component_sync,
+            purge_id,
+            component,
+            completed_at,
+            status,
+        )
+
+    def _finish_user_data_purge_component_sync(
+        self,
+        purge_id: str,
+        component: str,
+        completed_at: str,
+        status: str,
+    ) -> None:
+        if component == "local_delivery":
+            sql = (
+                "UPDATE user_data_purges SET local_delivery_completed_at = ?, "
+                "local_delivery_last_error = ? WHERE purge_id = ?"
+            )
+            params = (completed_at, "", purge_id)
+        elif component == "sidecar":
+            sql = (
+                "UPDATE user_data_purges SET sidecar_acknowledged_at = ?, "
+                "sidecar_completed_at = ?, "
+                "sidecar_status = ?, sidecar_last_error = ? WHERE purge_id = ?"
+            )
+            params = (completed_at, completed_at, status, "", purge_id)
+        else:
+            raise ValueError("unknown purge component")
+        with self._lock:
+            self._conn.execute(sql, params)
+
+    async def acknowledge_user_data_purge_sidecar(
+        self,
+        purge_id: str,
+        *,
+        acknowledged_at: str,
+        status: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._acknowledge_user_data_purge_sidecar_sync,
+            purge_id,
+            acknowledged_at,
+            status,
+        )
+
+    def _acknowledge_user_data_purge_sidecar_sync(
+        self,
+        purge_id: str,
+        acknowledged_at: str,
+        status: str,
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE user_data_purges SET sidecar_acknowledged_at = ?, "
+                "sidecar_status = ?, sidecar_last_error = ? WHERE purge_id = ?",
+                (acknowledged_at, status, "", purge_id),
+            )
+
+    async def fail_user_data_purge_component(
+        self,
+        purge_id: str,
+        *,
+        component: str,
+        error: str,
+        status: str = "pending",
+    ) -> None:
+        await asyncio.to_thread(
+            self._fail_user_data_purge_component_sync,
+            purge_id,
+            component,
+            error,
+            status,
+        )
+
+    def _fail_user_data_purge_component_sync(
+        self,
+        purge_id: str,
+        component: str,
+        error: str,
+        status: str,
+    ) -> None:
+        if component == "local_delivery":
+            sql = (
+                "UPDATE user_data_purges SET local_delivery_last_error = ? "
+                "WHERE purge_id = ?"
+            )
+            params = (error[:500], purge_id)
+        elif component == "sidecar":
+            sql = (
+                "UPDATE user_data_purges SET sidecar_status = ?, "
+                "sidecar_last_error = ? WHERE purge_id = ?"
+            )
+            params = (status, error[:500], purge_id)
+        else:
+            raise ValueError("unknown purge component")
+        with self._lock:
+            self._conn.execute(sql, params)
+
+    async def pending_user_data_purge_paths(
+        self,
+        purge_id: str,
+        *,
+        limit: int = 50,
+    ) -> list[dict]:
+        return await asyncio.to_thread(
+            self._pending_user_data_purge_paths_sync,
+            purge_id,
+            limit,
+        )
+
+    def _pending_user_data_purge_paths_sync(
+        self,
+        purge_id: str,
+        limit: int,
+    ) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM user_data_purge_paths "
+                "WHERE purge_id = ? AND length(completed_at) = 0 "
+                "ORDER BY kind, object_id LIMIT ?",
+                (purge_id, max(1, limit)),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    async def begin_user_data_purge_path(
+        self,
+        purge_id: str,
+        *,
+        kind: str,
+        object_id: str,
+        attempted_at: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._begin_user_data_purge_path_sync,
+            purge_id,
+            kind,
+            object_id,
+            attempted_at,
+        )
+
+    def _begin_user_data_purge_path_sync(
+        self,
+        purge_id: str,
+        kind: str,
+        object_id: str,
+        attempted_at: str,
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE user_data_purge_paths SET attempts = attempts + 1, "
+                "last_attempt_at = ?, last_error = ? "
+                "WHERE purge_id = ? AND kind = ? AND object_id = ? "
+                "AND length(completed_at) = 0",
+                (attempted_at, "", purge_id, kind, object_id),
+            )
+
+    async def finish_user_data_purge_path(
+        self,
+        purge_id: str,
+        *,
+        kind: str,
+        object_id: str,
+        completed_at: str,
+        error: str = "",
+    ) -> None:
+        await asyncio.to_thread(
+            self._finish_user_data_purge_path_sync,
+            purge_id,
+            kind,
+            object_id,
+            completed_at,
+            error,
+        )
+
+    def _finish_user_data_purge_path_sync(
+        self,
+        purge_id: str,
+        kind: str,
+        object_id: str,
+        completed_at: str,
+        error: str,
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE user_data_purge_paths SET completed_at = ?, last_error = ? "
+                "WHERE purge_id = ? AND kind = ? AND object_id = ?",
+                (completed_at, error[:500], purge_id, kind, object_id),
+            )
+
+    async def fail_user_data_purge_path(
+        self,
+        purge_id: str,
+        *,
+        kind: str,
+        object_id: str,
+        error: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._fail_user_data_purge_path_sync,
+            purge_id,
+            kind,
+            object_id,
+            error,
+        )
+
+    def _fail_user_data_purge_path_sync(
+        self,
+        purge_id: str,
+        kind: str,
+        object_id: str,
+        error: str,
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE user_data_purge_paths SET last_error = ? "
+                "WHERE purge_id = ? AND kind = ? AND object_id = ?",
+                (error[:500], purge_id, kind, object_id),
+            )
+
+    async def user_data_purge_status(
+        self,
+        *,
+        user: str,
+        purge_id: str,
+    ) -> dict | None:
+        return await asyncio.to_thread(
+            self._user_data_purge_status_sync,
+            user,
+            purge_id,
+        )
+
+    def _user_data_purge_status_sync(
+        self,
+        user: str,
+        purge_id: str,
+    ) -> dict | None:
+        with self._lock:
+            purge = self._conn.execute(
+                "SELECT * FROM user_data_purges WHERE user = ? AND purge_id = ?",
+                (user, purge_id),
+            ).fetchone()
+            if purge is None:
+                return None
+            files = self._conn.execute(
+                """
+                SELECT COUNT(*) AS total,
+                       COALESCE(SUM(CASE WHEN d.completed_at IS NULL
+                                          OR length(d.completed_at) = 0
+                                         THEN 1 ELSE 0 END), 0) AS pending,
+                       COALESCE(SUM(d.attempts), 0) AS attempts,
+                       COALESCE(SUM(CASE WHEN length(d.last_error) > 0
+                                         THEN 1 ELSE 0 END), 0) AS with_error
+                FROM user_data_purge_files AS p
+                LEFT JOIN file_deletions AS d
+                  ON d.file_id = p.file_id AND d.user = p.user
+                WHERE p.purge_id = ? AND p.user = ?
+                """,
+                (purge_id, user),
+            ).fetchone()
+            paths = self._conn.execute(
+                """
+                SELECT COUNT(*) AS total,
+                       COALESCE(SUM(CASE WHEN length(completed_at) = 0
+                                         THEN 1 ELSE 0 END), 0) AS pending,
+                       COALESCE(SUM(attempts), 0) AS attempts,
+                       COALESCE(SUM(CASE WHEN length(last_error) > 0
+                                         THEN 1 ELSE 0 END), 0) AS with_error
+                FROM user_data_purge_paths
+                WHERE purge_id = ? AND user = ?
+                """,
+                (purge_id, user),
+            ).fetchone()
+
+        completed_at = str(purge["completed_at"] or "")
+        sidecar_status = str(purge["sidecar_status"] or "pending")
+        if completed_at:
+            status = "completed"
+        elif sidecar_status == "attention_required":
+            status = "attention_required"
+        else:
+            status = "pending"
+        return {
+            "schema_version": 1,
+            "purge_id": purge_id,
+            "cutoff_at": str(purge["cutoff_at"]),
+            "requested_at": str(purge["requested_at"]),
+            "status": status,
+            "completed_at": completed_at,
+            "files": {
+                "pending": int(files["pending"]),
+                "attempts": int(files["attempts"]),
+                "with_error": int(files["with_error"]),
+                "completed": int(files["total"]) - int(files["pending"]),
+            },
+            "paths": {
+                "pending": int(paths["pending"]),
+                "attempts": int(paths["attempts"]),
+                "with_error": int(paths["with_error"]),
+                "completed": int(paths["total"]) - int(paths["pending"]),
+            },
+            "local_delivery": {
+                "completed": bool(purge["local_delivery_completed_at"]),
+                "attempts": int(purge["local_delivery_attempts"]),
+                "with_error": bool(purge["local_delivery_last_error"]),
+            },
+            "sidecar": {
+                "acknowledged": bool(purge["sidecar_acknowledged_at"]),
+                "completed": bool(purge["sidecar_completed_at"]),
+                "status": sidecar_status,
+                "attempts": int(purge["sidecar_attempts"]),
+                "with_error": bool(purge["sidecar_last_error"]),
+            },
+        }
+
+    async def finalize_user_data_purge(
+        self,
+        purge_id: str,
+        *,
+        completed_at: str,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._finalize_user_data_purge_sync,
+            purge_id,
+            completed_at,
+        )
+
+    def _finalize_user_data_purge_sync(
+        self,
+        purge_id: str,
+        completed_at: str,
+    ) -> bool:
+        with self._lock, self._transaction_locked():
+            row = self._conn.execute(
+                "SELECT local_delivery_completed_at, sidecar_completed_at "
+                "FROM user_data_purges WHERE purge_id = ?",
+                (purge_id,),
+            ).fetchone()
+            if row is None or not row["local_delivery_completed_at"] or not row["sidecar_completed_at"]:
+                return False
+            file_pending = int(self._conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM user_data_purge_files AS p
+                LEFT JOIN file_deletions AS d
+                  ON d.file_id = p.file_id AND d.user = p.user
+                WHERE p.purge_id = ?
+                  AND (d.completed_at IS NULL OR length(d.completed_at) = 0)
+                """,
+                (purge_id,),
+            ).fetchone()["count"])
+            path_pending = int(self._conn.execute(
+                "SELECT COUNT(*) AS count FROM user_data_purge_paths "
+                "WHERE purge_id = ? AND length(completed_at) = 0",
+                (purge_id,),
+            ).fetchone()["count"])
+            if file_pending or path_pending:
+                return False
+            self._conn.execute(
+                "UPDATE user_data_purges SET completed_at = ? WHERE purge_id = ?",
+                (completed_at, purge_id),
             )
             return True
 

@@ -96,6 +96,24 @@ def _scoped_tags(user: str, tags: str) -> str:
     return f"{_USER_TAG_PREFIX}{user},{public}" if public else f"{_USER_TAG_PREFIX}{user}"
 
 
+def _user_filter(user: str, *, visible_after: str = "") -> qm.Filter:
+    """Build the exact-user filter, optionally hiding a purge snapshot.
+
+    Memories written or corrected after the cutoff are new activity and remain
+    visible. Missing or malformed legacy timestamps do not satisfy the range
+    condition, so they stay hidden once a cutoff exists.
+    """
+    must: list[qm.FieldCondition] = [
+        qm.FieldCondition(key="user", match=qm.MatchValue(value=user)),
+    ]
+    if visible_after:
+        must.append(qm.FieldCondition(
+            key="updated_at",
+            range=qm.DatetimeRange(gt=visible_after),
+        ))
+    return qm.Filter(must=must)
+
+
 class EmbedError(RuntimeError):
     """Raised when Ollama refuses to produce an embedding."""
 
@@ -267,7 +285,7 @@ class MemoryStore:
             # scopes. Callers should always include `user:<id>` in tags.
             raise ValueError("memory_store requires a 'user:<id>' token in tags")
 
-        now = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+        now = _dt.datetime.now(_dt.UTC).isoformat(timespec="microseconds")
         vector = await self._embed(_embedding_text(key, value, tags))
         point_id = _point_id(user, key)
 
@@ -299,7 +317,13 @@ class MemoryStore:
             created_at=created_at, updated_at=now,
         )
 
-    async def recall(self, key: str, *, user: str) -> MemoryEntry | None:
+    async def recall(
+        self,
+        key: str,
+        *,
+        user: str,
+        visible_after: str = "",
+    ) -> MemoryEntry | None:
         """Exact-key lookup, scoped to a single user.
 
         Both `key` AND `user` must match — never relax the `user` filter,
@@ -310,8 +334,8 @@ class MemoryStore:
         result = await self._qdrant.scroll(
             collection_name=self._collection,
             scroll_filter=qm.Filter(must=[
+                *_user_filter(user, visible_after=visible_after).must,
                 qm.FieldCondition(key="key", match=qm.MatchValue(value=key)),
-                qm.FieldCondition(key="user", match=qm.MatchValue(value=user)),
             ]),
             limit=10, with_payload=True, with_vectors=False,
         )
@@ -334,6 +358,7 @@ class MemoryStore:
         user: str,
         limit: int = 100,
         cursor: str | None = None,
+        visible_after: str = "",
     ) -> tuple[list[MemoryEntry], str | None]:
         """List one user memory scope without embedding or semantic search.
 
@@ -356,9 +381,7 @@ class MemoryStore:
 
         points, next_offset = await self._qdrant.scroll(
             collection_name=self._collection,
-            scroll_filter=qm.Filter(must=[
-                qm.FieldCondition(key="user", match=qm.MatchValue(value=user)),
-            ]),
+            scroll_filter=_user_filter(user, visible_after=visible_after),
             limit=limit,
             offset=offset,
             with_payload=True,
@@ -406,7 +429,7 @@ class MemoryStore:
             str(payload.get("tags", "")) if tags is None else tags,
         )
         stored_tags = _scoped_tags(user, public_tags)
-        now = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+        now = _dt.datetime.now(_dt.UTC).isoformat(timespec="microseconds")
         created_at = str(payload.get("created_at", "") or now)
         vector = await self._embed(_embedding_text(key, value, stored_tags))
         await self._qdrant.upsert(
@@ -460,8 +483,44 @@ class MemoryStore:
         )
         return True
 
+    async def delete_user_before(self, *, user: str, cutoff_at: str) -> None:
+        """Delete one user purge snapshot while preserving newer activity.
+
+        `must_not updated_at > cutoff` deliberately includes legacy points
+        whose timestamp is absent or malformed. The selector is evaluated by
+        Qdrant at deletion time, so a same-key post-cutoff correction cannot be
+        deleted from a stale client-side id list.
+        """
+        if not user:
+            raise ValueError("delete_user_before requires a non-empty user")
+        if not cutoff_at:
+            raise ValueError("delete_user_before requires a non-empty cutoff_at")
+        await self._qdrant.delete(
+            collection_name=self._collection,
+            points_selector=qm.FilterSelector(filter=qm.Filter(
+                must=[
+                    qm.FieldCondition(
+                        key="user",
+                        match=qm.MatchValue(value=user),
+                    ),
+                ],
+                must_not=[
+                    qm.FieldCondition(
+                        key="updated_at",
+                        range=qm.DatetimeRange(gt=cutoff_at),
+                    ),
+                ],
+            )),
+            wait=True,
+        )
+
     async def search(
-        self, *, user: str, query: str, top_k: int = 5,
+        self,
+        *,
+        user: str,
+        query: str,
+        top_k: int = 5,
+        visible_after: str = "",
     ) -> list[MemoryEntry]:
         """Semantic search scoped to a user.
 
@@ -483,9 +542,7 @@ class MemoryStore:
             query=qvec,
             limit=top_k,
             score_threshold=self._threshold,
-            query_filter=qm.Filter(must=[
-                qm.FieldCondition(key="user", match=qm.MatchValue(value=user)),
-            ]),
+            query_filter=_user_filter(user, visible_after=visible_after),
             with_payload=True,
         )
         out: list[MemoryEntry] = []

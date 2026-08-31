@@ -44,6 +44,7 @@ from audrey.routes.upload_ui import router as upload_ui_router
 from audrey.routes.user_data import router as user_data_router
 from audrey.tools.discovery import ToolRegistry, discover_all
 from audrey.tools.dispatch import audit_user_scoping
+from audrey.user_data_purge import UserDataPurgeCoordinator
 
 logging.basicConfig(
     level=logging.INFO,
@@ -132,10 +133,11 @@ async def lifespan(app: FastAPI):
         log.warning("uploads_db: reconcile failed: %s (sqlite still usable)", e)
     storage_lifecycle = StorageLifecycle(uploads_db)
     file_deletion_cfg = kb_cfg.get("file_deletion", {}) or {}
+    upload_root = Path(kb_cfg.get("upload_root", "/data/uploads"))
     file_deletions = FileDeletionWorker(
         db=uploads_db,
         qdrant=qdrant,
-        upload_root=Path(kb_cfg.get("upload_root", "/data/uploads")),
+        upload_root=upload_root,
         locks=file_operation_locks,
         retry_interval_s=float(file_deletion_cfg.get("retry_interval_s", 30.0)),
         batch_size=int(file_deletion_cfg.get("batch_size", 50)),
@@ -215,26 +217,42 @@ async def lifespan(app: FastAPI):
     )
     archive_cfg = cfg.raw.get("chat_archive", {}) or {}
     archive_queue_cfg = archive_cfg.get("queue", {}) or {}
-    archive_client: ChatArchiveQueue | None = None
-    if bool(archive_cfg.get("enabled", True)):
-        archive_client = ChatArchiveQueue(
-            client=archive_transport,
-            registry=tool_registry,
-            sqlite_path=Path(
-                archive_queue_cfg.get(
-                    "sqlite_path",
-                    "/data/chat_archive_outbox.sqlite",
-                )
-            ),
-            maxsize=int(archive_queue_cfg.get("maxsize", 128)),
-            retry_interval_s=float(
-                archive_queue_cfg.get("retry_interval_s", 30.0)
-            ),
-        )
-        await archive_client.start()
+    archive_enabled = bool(archive_cfg.get("enabled", True))
+    archive_queue = ChatArchiveQueue(
+        client=archive_transport,
+        registry=tool_registry,
+        sqlite_path=Path(
+            archive_queue_cfg.get(
+                "sqlite_path",
+                "/data/chat_archive_outbox.sqlite",
+            )
+        ),
+        maxsize=int(archive_queue_cfg.get("maxsize", 128)),
+        retry_interval_s=float(
+            archive_queue_cfg.get("retry_interval_s", 30.0)
+        ),
+    )
+    await archive_queue.start(run_worker=archive_enabled)
+    archive_client: ChatArchiveQueue | None = (
+        archive_queue if archive_enabled else None
+    )
     app.state.archive_http = archive_http
     app.state.archive_client = archive_client
     app.state.kb_service_token = cfg.env.kb_service_token
+
+    purge_cfg = ((cfg.raw.get("user_data", {}) or {}).get("purge", {}) or {})
+    user_data_purges = UserDataPurgeCoordinator(
+        db=uploads_db,
+        file_deletions=file_deletions,
+        archive_queue=archive_queue,
+        archive_transport=archive_transport,
+        registry=tool_registry,
+        upload_root=upload_root,
+        retry_interval_s=float(purge_cfg.get("retry_interval_s", 30.0)),
+        batch_size=int(purge_cfg.get("batch_size", 50)),
+    )
+    await user_data_purges.start()
+    app.state.user_data_purges = user_data_purges
 
     log.info(
         "ready: ollama=%s; task types=%s; gpu_concurrency=%d; "
@@ -260,12 +278,12 @@ async def lifespan(app: FastAPI):
             await reconciler.stop()
         if watcher is not None:
             await watcher.stop()
+        await user_data_purges.stop()
+        await archive_queue.stop()
         await file_deletions.stop()
         uploads_db.close()
         qdrant.close()
         await ollama.aclose()
-        if archive_client is not None:
-            await archive_client.stop()
         await archive_http.aclose()
 
 

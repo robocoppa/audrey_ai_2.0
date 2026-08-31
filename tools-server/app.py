@@ -115,6 +115,7 @@ async def lifespan(app: FastAPI):
     chat_archive_maintainer = ChatArchiveMaintainer(
         chat_archive,
         interval_s=settings.chat_archive_maintenance_interval_s,
+        memory_store=memory,
     )
     await chat_archive_maintainer.start()
 
@@ -345,6 +346,41 @@ class ChatRepairStatusResponse(BaseModel):
     indexing: RepairQueueResponse
     deletions: RepairQueueResponse
     conversation_deletions: RepairQueueResponse
+
+
+class UserDataPurgeCreateRequest(BaseModel):
+    user: Annotated[str, Field(min_length=1, max_length=200)]
+    purge_id: Annotated[str, Field(min_length=1, max_length=128)]
+    cutoff_at: Annotated[str, Field(min_length=1, max_length=64)]
+
+
+class UserDataPurgeStatusRequest(BaseModel):
+    user: Annotated[str, Field(min_length=1, max_length=200)]
+    purge_id: Annotated[str, Field(min_length=1, max_length=128)]
+
+
+class PurgeMemoryStatusResponse(BaseModel):
+    completed: bool
+    attempts: int
+    with_error: bool
+    exhausted: bool
+
+
+class PurgeChatStatusResponse(BaseModel):
+    pending: int
+    attempts: int
+    with_error: int
+    exhausted: int
+
+
+class UserDataPurgeResponse(BaseModel):
+    purge_id: str
+    cutoff_at: str
+    requested_at: str
+    status: str
+    completed_at: str
+    memory: PurgeMemoryStatusResponse
+    chat: PurgeChatStatusResponse
 
 
 class MemoryListResponse(BaseModel):
@@ -707,7 +743,13 @@ async def memory_store(req: MemoryStoreRequest) -> MemoryEntryResponse:
 )
 async def memory_recall(req: MemoryRecallRequest) -> MemoryEntryResponse:
     memory: MemoryStore = app.state.memory
-    entry = await memory.recall(req.key, user=req.user)
+    archive: ChatArchiveStore = app.state.chat_archive
+    cutoff_at = await archive.user_purge_cutoff(user=req.user)
+    entry = await memory.recall(
+        req.key,
+        user=req.user,
+        visible_after=cutoff_at,
+    )
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No memory for key: {req.key!r}")
     return MemoryEntryResponse.from_entry(entry)
@@ -729,8 +771,15 @@ async def memory_recall(req: MemoryRecallRequest) -> MemoryEntryResponse:
 )
 async def memory_search(req: MemorySearchRequest) -> MemorySearchResponse:
     memory: MemoryStore = app.state.memory
+    archive: ChatArchiveStore = app.state.chat_archive
+    cutoff_at = await archive.user_purge_cutoff(user=req.user)
     try:
-        hits = await memory.search(user=req.user, query=req.query, top_k=req.top_k)
+        hits = await memory.search(
+            user=req.user,
+            query=req.query,
+            top_k=req.top_k,
+            visible_after=cutoff_at,
+        )
     except EmbedError as e:
         # 503, not an empty result set. "I could not search" and "you have no
         # memories about this" are different answers, and the caller can only
@@ -1025,8 +1074,13 @@ async def user_data_memories_list(
 ) -> MemoryListResponse:
     memory: MemoryStore = app.state.memory
     try:
+        archive: ChatArchiveStore = app.state.chat_archive
+        cutoff_at = await archive.user_purge_cutoff(user=req.user)
         items, next_cursor = await memory.list_user(
-            user=req.user, limit=req.limit, cursor=req.cursor,
+            user=req.user,
+            limit=req.limit,
+            cursor=req.cursor,
+            visible_after=cutoff_at,
         )
     except ValueError as e:
         raise HTTPException(
@@ -1147,6 +1201,55 @@ async def user_data_chat_history_status(
     )
 
 
+@app.post(
+    "/user_data/purge",
+    response_model=UserDataPurgeResponse,
+    include_in_schema=False,
+    tags=["internal"],
+)
+async def user_data_purge(
+    req: UserDataPurgeCreateRequest,
+    _: None = Depends(_require_internal_service),
+) -> UserDataPurgeResponse:
+    archive: ChatArchiveStore = app.state.chat_archive
+    try:
+        result = await archive.request_user_purge(
+            user=req.user,
+            purge_id=req.purge_id,
+            cutoff_at=req.cutoff_at,
+            memory_store=app.state.memory,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e),
+        ) from e
+    return UserDataPurgeResponse.model_validate(result)
+
+
+@app.post(
+    "/user_data/purge/status",
+    response_model=UserDataPurgeResponse,
+    include_in_schema=False,
+    tags=["internal"],
+)
+async def user_data_purge_status(
+    req: UserDataPurgeStatusRequest,
+    _: None = Depends(_require_internal_service),
+) -> UserDataPurgeResponse:
+    archive: ChatArchiveStore = app.state.chat_archive
+    result = await archive.user_purge_status(
+        user=req.user,
+        purge_id=req.purge_id,
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="purge_not_found",
+        )
+    return UserDataPurgeResponse.model_validate(result)
+
+
 # ─── Chat archive: internal write/admin (not in /openapi.json) ────────
 # `include_in_schema=False` keeps these out of OpenAPI tool discovery.
 # The model never sees them, only Audrey's archive client and ops.
@@ -1186,7 +1289,10 @@ async def chat_history_archive(req: ArchiveTurnRequest) -> dict[str, Any]:
 @app.post("/chat_history/prune", include_in_schema=False, tags=["internal"])
 async def chat_history_prune() -> dict[str, int]:
     archive: ChatArchiveStore = app.state.chat_archive
-    return await archive.prune(retry_exhausted=True)
+    return await archive.prune(
+        retry_exhausted=True,
+        memory_store=app.state.memory,
+    )
 
 
 @app.get("/chat_history/stats", include_in_schema=False, tags=["internal"])

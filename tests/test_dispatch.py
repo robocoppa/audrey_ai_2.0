@@ -33,6 +33,10 @@ from audrey.tools.dispatch import (
     dispatch_one,
     to_tool_message,
 )
+from audrey.user_data_visibility import (
+    block_remote_personal_reads,
+    unblock_remote_personal_reads,
+)
 
 # Same pattern as test_web_fetch.py: put tools-server on the path at import
 # time so the module itself can be imported lazily inside the one test that
@@ -121,6 +125,37 @@ async def test_dispatch_one_overwrites_user_for_scoped_tool():
         )
     assert seen["body"]["user"] == "alice@example.com"
     assert seen["body"]["query"] == "secrets"
+
+
+async def test_dispatch_blocks_remote_personal_reads_until_purge_acknowledged():
+    called = False
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json={"results": ["old data"]})
+
+    user = "purge-gate@example.com"
+    block_remote_personal_reads(user=user, purge_id="purge-gate")
+    try:
+        registry = _registry([_spec("memory_search")])
+        async with _client(handler) as http:
+            result = await dispatch_one(
+                http,
+                registry,
+                _call("memory_search", {"query": "old data"}),
+                max_result_chars=2000,
+                timeout_s=5.0,
+                user_id=user,
+            )
+        assert called is False
+        assert result.is_error is True
+        assert json.loads(result.content)["error"] == (
+            "personal_data_purge_in_progress"
+        )
+    finally:
+        unblock_remote_personal_reads(user=user, purge_id="purge-gate")
+
 
 
 async def test_dispatch_one_overwrites_memory_store_tags():
