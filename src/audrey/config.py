@@ -446,6 +446,47 @@ def _validate_file_deletion(merged: dict[str, Any]) -> None:
         )
 
 
+_READINESS_COMPONENTS = {
+    "ollama",
+    "qdrant",
+    "custom_tools",
+    "chat_archive",
+    "kb_watcher",
+    "kb_reconciler",
+}
+
+
+def _validate_readiness(merged: dict[str, Any]) -> None:
+    readiness = merged.get("readiness", {}) or {}
+    if not isinstance(readiness, dict):
+        raise ValueError("Invalid readiness: expected a mapping")
+    required = readiness.get("required_components", ["ollama"])
+    if not isinstance(required, list) or any(
+        not isinstance(item, str) for item in required
+    ):
+        raise ValueError(
+            "Invalid readiness.required_components: expected a list of names"
+        )
+    unknown = sorted(set(required) - _READINESS_COMPONENTS)
+    if unknown:
+        raise ValueError(
+            "Invalid readiness.required_components: unknown "
+            + ", ".join(unknown)
+        )
+    for key, default in (("probe_timeout_s", 2.0), ("cache_ttl_s", 5.0)):
+        value = readiness.get(key, default)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or value < 0
+            or (key == "probe_timeout_s" and value == 0)
+        ):
+            qualifier = "positive" if key == "probe_timeout_s" else "non-negative"
+            raise ValueError(
+                f"Invalid readiness.{key}: expected a {qualifier} number"
+            )
+
+
 @lru_cache(maxsize=1)
 def get_config() -> Config:
     """Load config once per process. Tests can call `get_config.cache_clear()`."""
@@ -458,6 +499,7 @@ def get_config() -> Config:
     _validate_upload_limits(cfg.raw)
     _validate_chat_archive(cfg.raw)
     _validate_file_deletion(cfg.raw)
+    _validate_readiness(cfg.raw)
     return cfg
 
 
@@ -467,4 +509,10 @@ def reload_config() -> Config:
     return get_config()
 
 
-__all__ = ["Config", "EnvOverrides", "get_config", "reload_config"]
+__all__ = [
+    "Config",
+    "EnvOverrides",
+    "_validate_readiness",
+    "get_config",
+    "reload_config",
+]

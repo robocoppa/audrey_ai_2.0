@@ -144,6 +144,25 @@ class UserInflightRegistry:
         """
         return dict(list(self._inuse.items()))
 
+    def pressure_snapshot(self) -> dict[str, int]:
+        """Aggregate in-flight pressure without returning user buckets."""
+        reservations = dict(list(self._reservations.items()))
+        in_use = dict(list(self._inuse.items()))
+        return {
+            "max_per_user": self._max_per_user,
+            "tracked_users": len(self._sems),
+            "active_users": sum(value > 0 for value in reservations.values()),
+            "saturated_users": sum(
+                in_use.get(bucket, 0) >= self._max_per_user
+                for bucket in reservations
+            ),
+            "in_use": sum(in_use.values()),
+            "waiting": sum(
+                max(0, value - in_use.get(bucket, 0))
+                for bucket, value in reservations.items()
+            ),
+        }
+
 
 def _safe_bucket(bucket: str) -> str:
     """Don't dump full email addresses to logs — log a short prefix."""

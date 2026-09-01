@@ -1322,6 +1322,16 @@ debug:
   log_incoming_payload: false            # when true, log role+content-length for every incoming chat message (Phase 6a OWUI shape investigation)
   log_incoming_payload_content: false    # when true, log first 500 chars of every incoming chat message — PII-bearing, leave off in normal operation
 
+# ─── Operational readiness ─────────────────────────────────────────────
+# Only these components can turn the authenticated admin readiness route
+# into HTTP 503. Optional component failures remain visible as degraded
+# while independent chat and tools continue serving.
+readiness:
+  required_components:
+    - ollama
+  probe_timeout_s: 2
+  cache_ttl_s: 5
+
 # ─── GPU concurrency ───────────────────────────────────────────────────
 gpu:
   concurrency: 1                         # local-model semaphore; cloud bypasses

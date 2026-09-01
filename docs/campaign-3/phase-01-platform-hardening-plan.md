@@ -262,6 +262,29 @@ custom-tools was stopped returned an empty registry with HTTP 200 while Audrey
 `/health` remained HTTP 200; restarting the sidecar and rediscovering restored
 all ten tools without restarting Audrey.
 
+**1D.3 status (2026-09-01): complete and Unraid-verified.** Custom-tools now
+starts and remains live with Qdrant unavailable. The live degraded registry
+contained exactly the four independent tools and reported 4 of 10 declarations;
+a direct stateful call returned structured HTTP 503 with `Retry-After: 5` and
+the unavailable `memory`/`qdrant` components, while direct web fetch and an
+ordinary OWUI chat succeeded. After Qdrant returned, asynchronous supervision
+and Audrey rediscovery converged from the initial 4 of 10 snapshot to all 10 of
+10 without restarting Audrey. The affected 366-test matrix and all 2,575
+hermetic tests pass.
+
+**1D.4 laptop status (2026-09-01): implemented; Unraid smoke pending.**
+Admin-only `GET /v1/admin/readiness` reports one sanitized snapshot spanning
+required/optional component probes, tool policy/discovery/availability and
+capability failures, archive delivery/index/delete backlogs, media-processing
+and fetch queue age, watcher/reconciler activity, and aggregate GPU/in-flight
+pressure. `/health` remains shallow process liveness. The same cached snapshot
+publishes bounded-cardinality Prometheus gauges; only configured required
+components produce `unready` and HTTP 503, while optional failures report
+`degraded`. The default required component is Ollama and the policy is validated
+at startup. All 2,586 hermetic tests pass; scoped ruff, compilation, YAML parsing,
+and diff checks are clean. The lesson link scan has zero broken cites; existing
+drift remains deferred.
+
 Represent model-visible capabilities and their dependencies declaratively.
 Make discovery resilient per source, allow independent capabilities to degrade
 independently, and expose component-level readiness and repair status.

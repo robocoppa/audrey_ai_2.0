@@ -14,6 +14,7 @@ Endpoints:
                                        without disturbing other users.
   GET  /v1/admin/auth/status         — cache size visibility.
   GET  /v1/admin/repair-status       — aggregate durable repair counts.
+  GET  /v1/admin/readiness           — components, queues, workers, pressure.
   POST /v1/admin/repair              — wake local repair owners and run one
                                        bounded sidecar repair pass.
   POST /v1/admin/chat_archive/prune  — apply the chat archive's retention
@@ -42,7 +43,7 @@ import logging
 from typing import Literal
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ValidationError
 
 from audrey.auth import (
@@ -53,6 +54,7 @@ from audrey.auth import (
     require_admin,
 )
 from audrey.kb.reconcile import reconcile_once
+from audrey.readiness import ReadinessStatus
 from audrey.routes.user_data import RepairQueueStatus, UserDataRepairStatus
 
 log = logging.getLogger(__name__)
@@ -150,6 +152,22 @@ async def auth_clear_for_user(
 async def auth_status(_: AuthedUser = Depends(require_admin)) -> AuthStatusResponse:
     """Quick visibility: how many entries the auth cache currently holds."""
     return AuthStatusResponse(cached_entries=cache_size())
+
+
+@router.get("/readiness", response_model=ReadinessStatus)
+async def readiness_status(
+    request: Request,
+    response: Response,
+    _: AuthedUser = Depends(require_admin),
+) -> ReadinessStatus:
+    """Current sanitized readiness; 503 only for required component failure."""
+    collector = getattr(request.app.state, "readiness", None)
+    if collector is None:
+        raise HTTPException(status_code=503, detail="readiness_unavailable")
+    snapshot = await collector.collect(force=True)
+    if snapshot.status == "unready":
+        response.status_code = 503
+    return snapshot
 
 
 @router.get("/repair-status", response_model=UserDataRepairStatus)
@@ -377,11 +395,16 @@ async def kb_reconcile(
     independently — calling this endpoint doesn't reset its timer.
     """
     qdrant = request.app.state.qdrant
-    result = await reconcile_once(
-        qdrant,
-        text_collection=qdrant.text_collection,
-        image_collection=qdrant.image_collection,
-    )
+    reconciler = getattr(request.app.state, "kb_reconciler", None)
+    run_once = getattr(reconciler, "run_once", None)
+    if callable(run_once):
+        result = await run_once()
+    else:
+        result = await reconcile_once(
+            qdrant,
+            text_collection=qdrant.text_collection,
+            image_collection=qdrant.image_collection,
+        )
     log.warning("admin: kb reconcile triggered by %s; orphans_deleted=%d",
                 me.email, result.total_orphans_deleted)
     return result.to_dict()

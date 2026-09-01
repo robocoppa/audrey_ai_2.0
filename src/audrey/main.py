@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import Response
 
 from audrey import __version__
@@ -34,6 +34,7 @@ from audrey.models.registry import ModelRegistry
 from audrey.pipeline.chat_archive import ChatArchiveClient, ChatArchiveQueue
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.graph import build_graph
+from audrey.readiness import ReadinessCollector
 from audrey.routes.admin import router as admin_router
 from audrey.routes.files import router as files_router
 from audrey.routes.inflight import UserInflightRegistry
@@ -246,6 +247,7 @@ async def lifespan(app: FastAPI):
         archive_queue if archive_enabled else None
     )
     app.state.archive_http = archive_http
+    app.state.archive_queue = archive_queue
     app.state.archive_client = archive_client
     app.state.archive_transport = archive_transport
     app.state.kb_service_token = cfg.env.kb_service_token
@@ -263,6 +265,19 @@ async def lifespan(app: FastAPI):
     )
     await user_data_purges.start()
     app.state.user_data_purges = user_data_purges
+
+    readiness_cfg = cfg.raw.get("readiness", {}) or {}
+    required_components = set(
+        readiness_cfg.get("required_components", ["ollama"]) or []
+    )
+    readiness = ReadinessCollector(
+        app,
+        required_components=required_components,
+        probe_timeout_s=float(readiness_cfg.get("probe_timeout_s", 2.0)),
+        cache_ttl_s=float(readiness_cfg.get("cache_ttl_s", 5.0)),
+    )
+    app.state.readiness = readiness
+    await readiness.collect(force=True)
 
     log.info(
         "ready: ollama=%s; task types=%s; gpu_concurrency=%d; "
@@ -389,13 +404,19 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/metrics", tags=["system"], include_in_schema=False)
-async def metrics() -> Response:
+async def metrics(request: Request) -> Response:
     """Prometheus text-format exposition.
 
     Unauthenticated by design — Prometheus convention, and we don't
     publish the route via cloudflared, so it's effectively LAN-only
     (Unraid scrapes from the same docker network as audrey-ai).
     """
+    readiness = getattr(request.app.state, "readiness", None)
+    if readiness is not None:
+        try:
+            await readiness.collect()
+        except Exception as exc:  # noqa: BLE001 — metrics must stay scrapeable
+            log.warning("readiness: metrics refresh failed: %s", exc)
     body, content_type = render_metrics()
     return Response(content=body, media_type=content_type)
 

@@ -2250,6 +2250,53 @@ class UploadsDB:
             )
             return {str(r["file_id"]) for r in cur.fetchall()}
 
+    async def work_queue_stats(self) -> dict[str, dict[str, int | str]]:
+        """Aggregate media/fetch queue pressure without exposing owners."""
+        return await asyncio.to_thread(self._work_queue_stats_sync)
+
+    def _work_queue_stats_sync(self) -> dict[str, dict[str, int | str]]:
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT
+                  COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0)
+                    AS processing_pending,
+                  COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0)
+                    AS processing_active,
+                  COALESCE(MIN(CASE WHEN status = ? THEN uploaded_at END), ?)
+                    AS processing_oldest,
+                  COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0)
+                    AS fetch_pending,
+                  COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0)
+                    AS fetch_active,
+                  COALESCE(MIN(CASE WHEN status = ? THEN uploaded_at END), ?)
+                    AS fetch_oldest
+                FROM uploads
+                """,
+                (
+                    "pending",
+                    "processing",
+                    "pending",
+                    "",
+                    "fetch_pending",
+                    "fetching",
+                    "fetch_pending",
+                    "",
+                ),
+            ).fetchone()
+        return {
+            "media_processing": {
+                "pending": int(row["processing_pending"]),
+                "active": int(row["processing_active"]),
+                "oldest_pending_at": str(row["processing_oldest"] or ""),
+            },
+            "media_fetch": {
+                "pending": int(row["fetch_pending"]),
+                "active": int(row["fetch_active"]),
+                "oldest_pending_at": str(row["fetch_oldest"] or ""),
+            },
+        }
+
     # ── Video job lifecycle (Phase 33) ────────────────────────────────
 
     async def get_upload(self, file_id: str) -> dict | None:

@@ -125,6 +125,9 @@ class KBWatcher:
         self._observer: Observer | None = None
         self._task: asyncio.Task | None = None
         self._queue: asyncio.Queue[tuple[EventKind, Path]] | None = None
+        self._last_activity_at = 0.0
+        self._last_success_at = 0.0
+        self._last_failure_at = 0.0
 
     async def start(self) -> None:
         if not self._roots:
@@ -188,6 +191,7 @@ class KBWatcher:
             for key in due:
                 pending.pop(key, None)
                 kind, path = key
+                self._last_activity_at = time.monotonic()
                 if kind == "delete":
                     await self._delete_vectors(path)
                 else:
@@ -209,7 +213,9 @@ class KBWatcher:
             elif suffix in IMAGE_SUFFIXES and self._image is not None:
                 ok = await ingest_image_file(path, qdrant=self._qdrant, embedder=self._image)
                 log.info("kb.watcher: reingested image %s -> %s", path, "ok" if ok else "failed")
+            self._last_success_at = time.monotonic()
         except Exception as e:  # noqa: BLE001 — watcher must stay alive
+            self._last_failure_at = time.monotonic()
             log.warning("kb.watcher: %s failed: %s", path, e)
 
     async def _delete_vectors(self, path: Path) -> None:
@@ -248,8 +254,29 @@ class KBWatcher:
                     src, collection=self._qdrant.text_collection,
                 )
             log.info("kb.watcher: requested delete of vectors for %s", path)
+            self._last_success_at = time.monotonic()
         except Exception as e:  # noqa: BLE001 — watcher must stay alive
+            self._last_failure_at = time.monotonic()
             log.warning("kb.watcher: delete %s failed: %s", path, e)
+
+    def snapshot(self) -> dict[str, int | float | bool]:
+        """Identity-free worker activity for operational readiness."""
+        now = time.monotonic()
+
+        def age(value: float) -> float:
+            return round(max(0.0, now - value), 3) if value else 0.0
+
+        task_running = self._task is not None and not self._task.done()
+        observer_running = (
+            self._observer is not None and self._observer.is_alive()
+        )
+        return {
+            "running": task_running and observer_running,
+            "queue_depth": self._queue.qsize() if self._queue is not None else 0,
+            "last_activity_age_seconds": age(self._last_activity_at),
+            "last_success_age_seconds": age(self._last_success_at),
+            "last_failure_age_seconds": age(self._last_failure_at),
+        }
 
 
 __all__ = ["KBWatcher"]

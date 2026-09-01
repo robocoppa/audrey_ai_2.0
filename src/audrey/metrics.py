@@ -39,6 +39,8 @@ package path — find it and fix the import, don't add a unregister hack.
 
 from __future__ import annotations
 
+from typing import Any
+
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     Counter,
@@ -274,6 +276,165 @@ file_deletion_pending = Gauge(
 )
 
 
+# ─── Operational readiness ───────────────────────────────────────────
+# Every label value comes from a fixed component/capability/queue catalogue.
+# No URL, model response, error string, or user identity enters these series.
+
+readiness_state = Gauge(
+    "audrey_readiness_state",
+    "Current readiness state as a one-hot gauge.",
+    labelnames=("state",),
+)
+
+readiness_component_available = Gauge(
+    "audrey_readiness_component_available",
+    "Whether an operational component is currently available.",
+    labelnames=("component",),
+)
+
+readiness_component_required = Gauge(
+    "audrey_readiness_component_required",
+    "Whether an operational component is required by deployment policy.",
+    labelnames=("component",),
+)
+
+readiness_component_enabled = Gauge(
+    "audrey_readiness_component_enabled",
+    "Whether an operational component is enabled by deployment policy.",
+    labelnames=("component",),
+)
+
+readiness_tools = Gauge(
+    "audrey_readiness_tools",
+    "Tool policy, discovery, and availability counts.",
+    labelnames=("kind",),
+)
+
+readiness_capability_available = Gauge(
+    "audrey_readiness_capability_available",
+    "Whether a declared tool capability is currently available.",
+    labelnames=("capability",),
+)
+
+readiness_queue_depth = Gauge(
+    "audrey_readiness_queue_depth",
+    "Current durable or worker queue depth.",
+    labelnames=("queue",),
+)
+
+readiness_queue_active = Gauge(
+    "audrey_readiness_queue_active",
+    "Current active leases in a worker queue.",
+    labelnames=("queue",),
+)
+
+readiness_queue_available = Gauge(
+    "audrey_readiness_queue_available",
+    "Whether a queue source is currently readable.",
+    labelnames=("queue",),
+)
+
+readiness_queue_attempts = Gauge(
+    "audrey_readiness_queue_attempts",
+    "Accumulated attempts for pending repair work.",
+    labelnames=("queue",),
+)
+
+readiness_queue_with_error = Gauge(
+    "audrey_readiness_queue_with_error",
+    "Pending queue rows carrying a sanitized error state.",
+    labelnames=("queue",),
+)
+
+readiness_queue_exhausted = Gauge(
+    "audrey_readiness_queue_exhausted",
+    "Pending queue rows requiring operator attention.",
+    labelnames=("queue",),
+)
+
+readiness_queue_oldest_age_seconds = Gauge(
+    "audrey_readiness_queue_oldest_age_seconds",
+    "Age of the oldest waiting item, or zero when the queue is empty.",
+    labelnames=("queue",),
+)
+
+readiness_worker_running = Gauge(
+    "audrey_readiness_worker_running",
+    "Whether a configured background worker task is running.",
+    labelnames=("worker",),
+)
+
+readiness_worker_enabled = Gauge(
+    "audrey_readiness_worker_enabled",
+    "Whether a background worker is enabled by deployment policy.",
+    labelnames=("worker",),
+)
+
+readiness_worker_last_success_age_seconds = Gauge(
+    "audrey_readiness_worker_last_success_age_seconds",
+    "Age of a worker last successful activity, or zero when unobserved.",
+    labelnames=("worker",),
+)
+
+readiness_worker_last_failure_age_seconds = Gauge(
+    "audrey_readiness_worker_last_failure_age_seconds",
+    "Age of a worker last failed activity, or zero when unobserved.",
+    labelnames=("worker",),
+)
+
+readiness_pressure = Gauge(
+    "audrey_readiness_pressure",
+    "Current aggregate scheduler pressure without per-user labels.",
+    labelnames=("scheduler", "kind"),
+)
+
+
+def publish_readiness(snapshot: Any) -> None:
+    """Mirror one readiness snapshot into bounded Prometheus gauges."""
+    for state in ("ready", "degraded", "unready"):
+        readiness_state.labels(state=state).set(int(snapshot.status == state))
+    for name, component in snapshot.components.items():
+        readiness_component_available.labels(component=name).set(
+            int(component.status == "available")
+        )
+        readiness_component_required.labels(component=name).set(
+            int(component.required)
+        )
+        readiness_component_enabled.labels(component=name).set(
+            int(component.status != "disabled")
+        )
+    readiness_tools.labels(kind="policy").set(snapshot.tools.policy_count)
+    readiness_tools.labels(kind="discovered").set(snapshot.tools.discovered_count)
+    readiness_tools.labels(kind="available").set(snapshot.tools.available_count)
+    for capability in snapshot.tools.capabilities:
+        readiness_capability_available.labels(capability=capability.name).set(
+            int(capability.available)
+        )
+    for name, queue in snapshot.queues.items():
+        readiness_queue_depth.labels(queue=name).set(queue.depth)
+        readiness_queue_active.labels(queue=name).set(queue.active)
+        readiness_queue_available.labels(queue=name).set(int(queue.available))
+        readiness_queue_attempts.labels(queue=name).set(queue.attempts)
+        readiness_queue_with_error.labels(queue=name).set(queue.with_error)
+        readiness_queue_exhausted.labels(queue=name).set(queue.exhausted)
+        readiness_queue_oldest_age_seconds.labels(queue=name).set(
+            queue.oldest_age_seconds
+        )
+    for name, worker in snapshot.workers.items():
+        readiness_worker_running.labels(worker=name).set(int(worker.running))
+        readiness_worker_enabled.labels(worker=name).set(int(worker.enabled))
+        readiness_worker_last_failure_age_seconds.labels(worker=name).set(
+            worker.last_failure_age_seconds
+        )
+        readiness_worker_last_success_age_seconds.labels(worker=name).set(
+            worker.last_success_age_seconds
+        )
+    for kind, value in snapshot.pressure.gpu_gate.model_dump().items():
+        readiness_pressure.labels(scheduler="gpu_gate", kind=kind).set(value)
+    for kind, value in snapshot.pressure.user_inflight.model_dump().items():
+        readiness_pressure.labels(scheduler="user_inflight", kind=kind).set(value)
+
+
 def render() -> tuple[bytes, str]:
     """Serialize the default registry. Returns (body, content_type)."""
     return generate_latest(), CONTENT_TYPE_LATEST
@@ -303,4 +464,23 @@ __all__ = [
     "chat_archive_enqueue_seconds",
     "file_deletion_events_total",
     "file_deletion_pending",
+    "publish_readiness",
+    "readiness_state",
+    "readiness_component_available",
+    "readiness_component_required",
+    "readiness_component_enabled",
+    "readiness_tools",
+    "readiness_capability_available",
+    "readiness_queue_depth",
+    "readiness_queue_active",
+    "readiness_queue_available",
+    "readiness_queue_attempts",
+    "readiness_queue_with_error",
+    "readiness_queue_exhausted",
+    "readiness_queue_oldest_age_seconds",
+    "readiness_worker_running",
+    "readiness_worker_enabled",
+    "readiness_worker_last_success_age_seconds",
+    "readiness_worker_last_failure_age_seconds",
+    "readiness_pressure",
 ]

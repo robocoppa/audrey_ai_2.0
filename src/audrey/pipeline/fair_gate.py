@@ -214,5 +214,15 @@ class FairLocalGate:
         """
         return {bucket: len(dq) for bucket, dq in list(self._waiters.items())}
 
+    def pressure_snapshot(self) -> dict[str, int]:
+        """Aggregate gate pressure without exposing queue bucket identities."""
+        waiters = list(self._waiters.values())
+        return {
+            "capacity": self._concurrency,
+            "in_use": max(0, self._concurrency - self._available),
+            "waiting": sum(len(queue) for queue in waiters),
+            "waiting_users": sum(bool(queue) for queue in waiters),
+        }
+
 
 __all__ = ["FairLocalGate", "ANON_USER_BUCKET"]

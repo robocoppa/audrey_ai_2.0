@@ -245,6 +245,9 @@ class KBReconciler:
         self._text_collection = text_collection
         self._image_collection = image_collection
         self._task: asyncio.Task[None] | None = None
+        self._last_activity_at = 0.0
+        self._last_success_at = 0.0
+        self._last_failure_at = 0.0
 
     async def start(self) -> None:
         if self._interval_s <= 0:
@@ -262,6 +265,37 @@ class KBReconciler:
                 pass
             self._task = None
 
+    async def run_once(self, *, quiet_httpx: bool = False) -> ReconcileResult:
+        """Run one tracked sweep for periodic and operator-triggered paths."""
+        self._last_activity_at = time.monotonic()
+        try:
+            result = await reconcile_once(
+                self._qdrant,
+                text_collection=self._text_collection,
+                image_collection=self._image_collection,
+                quiet_httpx=quiet_httpx,
+            )
+        except Exception:
+            self._last_failure_at = time.monotonic()
+            raise
+        self._last_success_at = time.monotonic()
+        return result
+
+    def snapshot(self) -> dict[str, int | float | bool]:
+        """Identity-free periodic-worker activity for readiness."""
+        now = time.monotonic()
+
+        def age(value: float) -> float:
+            return round(max(0.0, now - value), 3) if value else 0.0
+
+        return {
+            "running": self._task is not None and not self._task.done(),
+            "queue_depth": 0,
+            "last_activity_age_seconds": age(self._last_activity_at),
+            "last_success_age_seconds": age(self._last_success_at),
+            "last_failure_age_seconds": age(self._last_failure_at),
+        }
+
     async def _run(self) -> None:
         # Run one sweep immediately at startup, then settle into the
         # periodic cadence. The startup sweep catches drift that
@@ -272,23 +306,13 @@ class KBReconciler:
         # remains available for ad-hoc sweeps between intervals.
         try:
             try:
-                await reconcile_once(
-                    self._qdrant,
-                    text_collection=self._text_collection,
-                    image_collection=self._image_collection,
-                    quiet_httpx=True,
-                )
+                await self.run_once(quiet_httpx=True)
             except Exception as e:  # noqa: BLE001 — loop must survive a bad sweep
                 log.warning("kb.reconcile: startup sweep raised: %s", e)
             while True:
                 await asyncio.sleep(self._interval_s)
                 try:
-                    await reconcile_once(
-                        self._qdrant,
-                        text_collection=self._text_collection,
-                        image_collection=self._image_collection,
-                        quiet_httpx=True,
-                    )
+                    await self.run_once(quiet_httpx=True)
                 except Exception as e:  # noqa: BLE001 — loop must survive a bad sweep
                     log.warning("kb.reconcile: sweep raised: %s", e)
         except asyncio.CancelledError:

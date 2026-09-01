@@ -1,7 +1,7 @@
 # Campaign 3 — correctness foundations, Audrey UI, and reusable skills
 
 **Status:** In progress as of 2026-09-01. Waves 1A, 1B, and 1C are complete
-and Unraid-verified. Wave 1D.1–1D.2 are Unraid-verified; Wave 1D.3 is
+and Unraid-verified. Wave 1D.1–1D.3 are Unraid-verified; Wave 1D.4 is
 laptop-verified and awaits its Unraid smoke.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
@@ -13,7 +13,7 @@ and finally adds the first general skills layer on that owned surface.
 
 | Phase | Plan | Outcome | Entry gate | Status |
 |---|---|---|---|---|
-| 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | In progress (1D.3 laptop-verified) |
+| 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | In progress (1D.4 laptop-verified) |
 | 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | Planned |
 | 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | Planned |
 

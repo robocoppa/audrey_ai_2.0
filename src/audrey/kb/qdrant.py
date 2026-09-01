@@ -171,6 +171,11 @@ class QdrantKB:
     async def ensure_collections(self) -> None:
         await asyncio.to_thread(self._ensure_sync)
 
+    async def probe(self) -> None:
+        """Perform the same lightweight service read used by startup checks."""
+        await asyncio.to_thread(self._client.get_collections)
+
+
     def _ensure_sync(self) -> None:
         existing = {c.name for c in self._client.get_collections().collections}
         if self.text_collection not in existing:
