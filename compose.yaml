@@ -38,10 +38,10 @@ services:
     labels:
       net.unraid.docker.icon: "${AUDREY_REPO_DIR:-/mnt/user/appdata/audrey_ai_2.0}/images/audrey2.png"
     restart: unless-stopped
-    # Audrey discovers tools at startup by GETting custom-tools'
-    # /openapi.json. If audrey starts before custom-tools is ready,
-    # discovery returns 0 tools and never re-tries (until manual
-    # `POST /v1/tools/rediscover`). Wait for custom-tools to be healthy.
+    # Audrey discovers tools at startup from custom-tools /openapi.json.
+    # Process health is deliberately shallow: optional backend failures leave
+    # the sidecar healthy, publish per-capability state, and trigger Audrey's
+    # bounded rediscovery instead of blocking ordinary chat.
     depends_on:
       custom-tools:
         condition: service_healthy

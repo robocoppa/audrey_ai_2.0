@@ -21,6 +21,7 @@ every row succeeds. Deterministic point ids make a partial retry idempotent.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import logging
 import time as _time
@@ -157,11 +158,25 @@ class MemoryStore:
 
     async def init(self) -> None:
         """Ensure the collection exists and migrate any legacy SQLite rows."""
-        await self._ensure_collection()
-        await self._migrate_sqlite_if_present()
+        await self.init_qdrant()
         await self.warm_embedder()
 
-    async def warm_embedder(self) -> None:
+    async def probe_qdrant(self, *, timeout_s: float) -> None:
+        """Prove Qdrant is reachable without changing any collection.
+
+        Capability discovery needs to distinguish an unavailable Qdrant from
+        a problem specific to the memory collection.  The explicit timeout
+        bounds cold-start degradation when DNS or the service is unavailable.
+        """
+        async with asyncio.timeout(timeout_s):
+            await self._qdrant.get_collections()
+
+    async def init_qdrant(self) -> None:
+        """Initialize only the Qdrant-backed part of durable memory."""
+        await self._ensure_collection()
+        await self._migrate_sqlite_if_present()
+
+    async def warm_embedder(self) -> bool:
         """Pay the embedder's cold load at startup instead of on a request.
 
         `keep_alive` keeps the model resident once it is loaded, but a restart
@@ -170,7 +185,8 @@ class MemoryStore:
         here moves that cost to a moment when nobody is waiting.
 
         Never raises: an unreachable Ollama must not stop custom-tools serving
-        the tools that don't need it.
+        the tools that don't need it.  The boolean lets runtime capability
+        discovery hide only the embedding-dependent tools until recovery.
         """
         started = _time.monotonic()
         try:
@@ -181,9 +197,10 @@ class MemoryStore:
         except Exception as e:  # noqa: BLE001 — best-effort warm-up
             log.warning("memory: embedder warm-up failed in %.2fs: %s",
                         _time.monotonic() - started, e)
-            return
+            return False
         log.info("memory: embedder warm in %.2fs (keep_alive=%s)",
                  _time.monotonic() - started, self._embed_keep_alive or "ollama default")
+        return True
 
     async def _ensure_collection(self) -> None:
         existing = {c.name for c in (await self._qdrant.get_collections()).collections}

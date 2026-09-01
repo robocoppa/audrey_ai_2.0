@@ -1,8 +1,8 @@
 # Campaign 3 Phase 1 — platform hardening
 
 **Status:** In progress. Waves 1A, 1B, and 1C are complete and
-Unraid-verified. Wave 1D.1–1D.2 are laptop-complete; their Unraid smoke is
-next.
+Unraid-verified. Wave 1D.1–1D.2 are Unraid-verified; Wave 1D.3 is
+laptop-verified and awaits its Unraid smoke.
 
 ## Goal
 
@@ -246,7 +246,7 @@ Gate: **Passed on Unraid 2026-08-31.**
 
 ## Wave 1D — capability policy and readiness
 
-**1D.1–1D.2 status (2026-08-31): laptop-complete; Unraid smoke pending.**
+**1D.1–1D.2 status (2026-09-01): complete and Unraid-verified.**
 One catalogue declares all ten model tools, including visibility, identity
 binding, dependencies, purge gating, availability, and dispatch metadata. The
 registry exposes only available model-visible records. Discovery requires an
@@ -255,7 +255,12 @@ isolates HTTP, JSON, schema, or unexpected coroutine failures per server.
 Dispatch consumes the same identity and purge policy instead of duplicate name
 sets. The discovery/dispatch matrix passes 44 tests and all 2,565 hermetic tests
 pass; scoped ruff and compilation are clean, lesson conventions pass, the link
-scan has zero broken cites, and the diff check is clean.
+scan has zero broken cites, and the diff check is clean. On Unraid, the live
+registry exposed exactly the ten declared tools with the expected visibility,
+identity binding, dependencies, and availability. Rediscovery while
+custom-tools was stopped returned an empty registry with HTTP 200 while Audrey
+`/health` remained HTTP 200; restarting the sidecar and rediscovering restored
+all ten tools without restarting Audrey.
 
 Represent model-visible capabilities and their dependencies declaratively.
 Make discovery resilient per source, allow independent capabilities to degrade

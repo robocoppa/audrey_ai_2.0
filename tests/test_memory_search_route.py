@@ -25,8 +25,12 @@ _TOOLS_SERVER = Path(__file__).resolve().parent.parent / "tools-server"
 if str(_TOOLS_SERVER) not in sys.path:
     sys.path.insert(0, str(_TOOLS_SERVER))
 
-from app import app  # noqa: E402
+from app import CapabilityRegistry, app  # noqa: E402
 from db import EmbedError, MemoryEntry  # noqa: E402
+
+
+def tools_app_capabilities() -> CapabilityRegistry:
+    return CapabilityRegistry.all_available()
 
 
 class _StubMemory:
@@ -69,6 +73,12 @@ def post(monkeypatch):
         yield
 
     monkeypatch.setattr(app.router, "lifespan_context", _noop)
+    monkeypatch.setattr(
+        app.state,
+        "capabilities",
+        tools_app_capabilities(),
+        raising=False,
+    )
 
     def _post(memory, body: dict):
         monkeypatch.setattr(app.state, "memory", memory, raising=False)

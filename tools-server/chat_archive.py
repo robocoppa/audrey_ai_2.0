@@ -452,19 +452,38 @@ class ChatArchiveStore:
         self._maintenance_lock = asyncio.Lock()
 
     async def init(self) -> None:
+        """Initialize the durable SQLite source and searchable vector index."""
+        await self.init_source()
+        await self.init_index()
+
+    async def init_source(self) -> None:
+        """Open and migrate SQLite without requiring Qdrant to be reachable."""
+        if self._db is not None:
+            return
         self._sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         self._db = await aiosqlite.connect(self._sqlite_path)
-        await self._db.execute("PRAGMA journal_mode=WAL")
-        await self._db.execute("PRAGMA synchronous=NORMAL")
-        # `executescript` runs the multi-statement schema in one shot.
-        await self._db.executescript(_SCHEMA)
-        await self._migrate_repair_schema()
-        await self._db.executescript(_REPAIR_INDEXES)
-        await self._db.commit()
+        try:
+            await self._db.execute("PRAGMA journal_mode=WAL")
+            await self._db.execute("PRAGMA synchronous=NORMAL")
+            # `executescript` runs the multi-statement schema in one shot.
+            await self._db.executescript(_SCHEMA)
+            await self._migrate_repair_schema()
+            await self._db.executescript(_REPAIR_INDEXES)
+            await self._db.commit()
+        except BaseException:
+            await self._db.close()
+            self._db = None
+            raise
+        log.info("chat_archive: source ready sqlite=%s", self._sqlite_path)
+
+    async def init_index(self) -> None:
+        """Ensure only the Qdrant search index for the archive."""
+        if self._db is None:
+            raise RuntimeError("ChatArchiveStore.init_source() not called")
         await self._ensure_collection()
         log.info(
-            "chat_archive: ready sqlite=%s qdrant_collection=%s dim=%d retention_days=%d",
-            self._sqlite_path, self._collection, self._embed_dim, self._retention_days,
+            "chat_archive: index ready collection=%s dim=%d retention_days=%d",
+            self._collection, self._embed_dim, self._retention_days,
         )
 
     async def _migrate_repair_schema(self) -> None:

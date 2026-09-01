@@ -1,7 +1,8 @@
 # custom-tools
 
-Minimal FastAPI service that Audrey auto-discovers via `/openapi.json`. Any
-endpoint defined here becomes a tool the models can call.
+Minimal FastAPI service that Audrey auto-discovers via `/openapi.json`. A
+model-visible endpoint requires both the explicit `tools` OpenAPI tag and a
+matching declaration in Audrey's central capability policy.
 
 ## Endpoints
 
@@ -30,11 +31,18 @@ the interval, bounded batch, and retry ceiling with
 `CHAT_ARCHIVE_MAX_RETRY_ATTEMPTS`. Nonzero `CHAT_ARCHIVE_MAX_BYTES` is
 rejected at startup because a byte cap is not implemented.
 
+Runtime component state is published in `/openapi.json`. Qdrant failure leaves
+the process health endpoint, stateless web tools, file catalogue, artifact
+reads, and the SQLite archive source available. Qdrant-dependent model routes
+return a component-specific HTTP 503 and disappear from Audrey's callable set
+until the background supervisor and Audrey rediscovery observe recovery.
+
 Audrey supplies a stable `archive_id` and `created_at` on this internal write.
 If its local delivery outbox retries after a timeout or restart, message and
 chunk ids collide deliberately instead of duplicating the turn.
 
 ## Adding new tools later
 
-Append a route to `app.py`, re-hit `POST /v1/tools/rediscover` on the
-orchestrator, done. See `../docs/future-tools.md`.
+Add the tagged route to `app.py`, declare its identity and dependencies in
+`src/audrey/tools/discovery.py`, extend the catalogue/discovery tests, then call
+`POST /v1/tools/rediscover` on the orchestrator. See `../docs/future-tools.md`.

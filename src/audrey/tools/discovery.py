@@ -106,18 +106,20 @@ TOOL_DECLARATIONS: dict[str, ToolDeclaration] = {
         _declare(
             "memory_store",
             user_scope=ToolUserScope.TAGS,
-            dependencies=("qdrant", "text_embedding"),
+            dependencies=("memory", "qdrant", "text_embedding"),
         ),
         _declare(
             "memory_recall",
             user_scope=ToolUserScope.ARGUMENT,
-            dependencies=("qdrant",),
+            dependencies=("chat_archive_source", "memory", "qdrant"),
             purge_gated=True,
         ),
         _declare(
             "memory_search",
             user_scope=ToolUserScope.ARGUMENT,
-            dependencies=("qdrant", "text_embedding"),
+            dependencies=(
+                "chat_archive_source", "memory", "qdrant", "text_embedding",
+            ),
             purge_gated=True,
         ),
         _declare(
@@ -267,6 +269,23 @@ def _strip_unsupported_keywords(schema: dict[str, Any]) -> dict[str, Any]:
     return clean(schema)
 
 
+def _capability_status(openapi: dict[str, Any]) -> dict[str, tuple[bool, str]]:
+    """Validate the optional live component snapshot from a tool server."""
+    raw = openapi.get("x-audrey-capabilities", {}) or {}
+    if not isinstance(raw, dict):
+        raise ToolPolicyError("x-audrey-capabilities is not an object")
+    states: dict[str, tuple[bool, str]] = {}
+    for name, value in raw.items():
+        if not isinstance(name, str) or not isinstance(value, dict):
+            raise ToolPolicyError("capability entries must be named objects")
+        available = value.get("available")
+        reason = value.get("reason", "")
+        if not isinstance(available, bool) or not isinstance(reason, str):
+            raise ToolPolicyError(f"{name}: malformed capability state")
+        states[name] = (available, reason)
+    return states
+
+
 def _build_tool_from_operation(
     *,
     operation_id: str,
@@ -275,6 +294,7 @@ def _build_tool_from_operation(
     server_url: str,
     components: dict[str, Any],
     declaration: ToolDeclaration,
+    capability_status: dict[str, tuple[bool, str]],
 ) -> ToolSpec | None:
     """Convert one OpenAPI POST operation into a ToolSpec, or None if unsuitable."""
     request_body = op.get("requestBody") or {}
@@ -316,6 +336,12 @@ def _build_tool_from_operation(
         )
 
     description = (op.get("description") or op.get("summary") or operation_id).strip()
+    unavailable = sorted(
+        dependency
+        for dependency in declaration.dependencies
+        if dependency in capability_status
+        and not capability_status[dependency][0]
+    )
     return ToolSpec(
         name=operation_id,
         description=description,
@@ -326,6 +352,12 @@ def _build_tool_from_operation(
         user_scope=declaration.user_scope,
         dependencies=declaration.dependencies,
         purge_gated=declaration.purge_gated,
+        available=not unavailable,
+        unavailable_reason=(
+            f"dependency_unavailable:{','.join(unavailable)}"
+            if unavailable
+            else None
+        ),
     )
 
 
@@ -357,6 +389,7 @@ async def discover_one(
         components = component_root.get("schemas", {}) or {}
         if not isinstance(components, dict):
             raise ToolPolicyError("OpenAPI component schemas is not an object")
+        capability_status = _capability_status(spec)
 
         tools: list[ToolSpec] = []
         for path, methods in paths.items():
@@ -395,6 +428,7 @@ async def discover_one(
                 server_url=base,
                 components=components,
                 declaration=declaration,
+                capability_status=capability_status,
             )
             if tool is not None:
                 tools.append(tool)

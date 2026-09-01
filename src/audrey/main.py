@@ -91,14 +91,23 @@ async def lifespan(app: FastAPI):
         tool_registry = ToolRegistry()
         log.info("tools: disabled or no servers configured")
 
-    # If the first discovery came up empty despite servers being configured,
-    # custom-tools probably wasn't healthy yet (depends_on race, slow Qdrant
-    # init, etc.). Retry in the background so Audrey doesn't sit at tools=0
-    # for the whole session and silently skip everything that needs a tool.
+    # If first discovery is empty or partially degraded, custom-tools is not
+    # fully ready yet. Retry in the background so the live registry can recover
+    # without an Audrey restart.
     # The graph closes over the same ToolRegistry instance, so in-place
     # mutation is enough — no rebuild needed.
     tools_retry_task: asyncio.Task[None] | None = None
-    if tools_enabled and tool_servers and not tool_registry.by_name:
+    if (
+        tools_enabled
+        and tool_servers
+        and (
+            not tool_registry.by_name
+            or any(
+                not spec.available
+                for spec in tool_registry.policy_records()
+            )
+        )
+    ):
         tools_retry_task = asyncio.create_task(
             _retry_tool_discovery(tool_registry, tool_servers),
             name="audrey.tools.retry_discovery",
@@ -295,16 +304,16 @@ async def _retry_tool_discovery(
     attempts: int = 30,
     interval_s: float = 4.0,
 ) -> None:
-    """Retry `discover_all` in the background when initial discovery was empty.
+    """Retry discovery while the initial registry is empty or degraded.
 
-    Custom-tools may not be healthy yet when Audrey starts (depends_on
-    races, slow Qdrant init). Without this retry the live registry sits
-    at zero tools until somebody hits `/v1/tools/rediscover`, and every
-    request that wanted a tool quietly skips.
+    Custom-tools may be missing or may have optional dependencies still
+    recovering when Audrey starts. Without this retry the live registry would
+    stay empty or partial until somebody calls `/v1/tools/rediscover`.
 
-    The loop bails out the moment any tool is discovered, so it costs
-    nothing on a healthy startup. Bounded so a permanently-broken
-    custom-tools doesn't generate retries forever — after the window
+    The loop bails out when every declared tool is available, so it costs
+    nothing on a healthy startup and also recovers a partially degraded set.
+    Bounded so a permanently broken custom-tools does not generate retries
+    forever — after the window
     expires, manual rediscover stays available. Default window:
     30 × 4s = 2 minutes, which covers the worst observed cold-start.
     """
@@ -321,9 +330,20 @@ async def _retry_tool_discovery(
         registry.by_name.clear()
         registry.by_name.update(fresh.by_name)
         audit_user_scoping(registry)
+        unavailable = sorted(
+            spec.name
+            for spec in registry.policy_records()
+            if not spec.available
+        )
+        if unavailable:
+            log.info(
+                "tools: retry %d/%d still degraded; unavailable=%s",
+                attempt, attempts, unavailable,
+            )
+            continue
         log.info(
             "tools: retry %d/%d succeeded -> %d tool(s): %s",
-            attempt, attempts, len(registry.by_name), registry.names(),
+            attempt, attempts, len(registry.names()), registry.names(),
         )
         return
     log.warning(
@@ -399,7 +419,7 @@ async def list_tools() -> dict[str, list[dict]]:
                 "unavailable_reason": s.unavailable_reason,
                 "parameters": s.parameters,
             }
-            for s in reg.specs()
+            for s in reg.policy_records()
         ],
     }
 
@@ -421,8 +441,15 @@ async def rediscover_tools(
     reg.by_name.clear()
     reg.by_name.update(fresh.by_name)
     audit_user_scoping(reg)
-    log.info("tools: rediscover -> %d tool(s): %s", len(reg.by_name), reg.names())
-    return {"tools": reg.names(), "count": len(reg.by_name)}
+    log.info(
+        "tools: rediscover -> %d/%d available: %s",
+        len(reg.names()), len(reg.by_name), reg.names(),
+    )
+    return {
+        "tools": reg.names(),
+        "count": len(reg.names()),
+        "declared_count": len(reg.by_name),
+    }
 
 
 def run() -> None:

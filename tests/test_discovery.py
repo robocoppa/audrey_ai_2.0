@@ -303,6 +303,65 @@ async def test_discover_one_resolves_refs_in_request_body():
     }
 
 
+async def test_discovery_marks_only_dependency_affected_tools_unavailable():
+    doc = _openapi({
+        "/web_search": _post(
+            "web_search",
+            tags=["tools"],
+            schema={"type": "object", "properties": {"query": {"type": "string"}}},
+        ),
+        "/kb_search": _post(
+            "kb_search",
+            tags=["tools"],
+            schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "user": {"type": "string"},
+                },
+            },
+        ),
+    })
+    doc["x-audrey-capabilities"] = {
+        "qdrant": {"available": False, "reason": "connection_failed"},
+        "web_search": {"available": True, "reason": ""},
+    }
+
+    async with _client_with_doc(doc) as client:
+        tools = await discover_one(client, "http://server.test")
+
+    by_name = {tool.name: tool for tool in tools}
+    assert by_name["web_search"].available is True
+    assert by_name["kb_search"].available is False
+    assert by_name["kb_search"].unavailable_reason == (
+        "dependency_unavailable:qdrant"
+    )
+    registry = ToolRegistry(by_name=by_name)
+    assert registry.names() == ["web_search"]
+    assert {tool.name for tool in registry.policy_records()} == {
+        "kb_search",
+        "web_search",
+    }
+
+
+async def test_discovery_rejects_malformed_capability_state():
+    doc = _openapi({
+        "/web_search": _post(
+            "web_search",
+            tags=["tools"],
+            schema={"type": "object", "properties": {"query": {"type": "string"}}},
+        ),
+    })
+    doc["x-audrey-capabilities"] = {
+        "qdrant": {"available": "sometimes", "reason": "bad shape"},
+    }
+
+    async with _client_with_doc(doc) as client:
+        tools = await discover_one(client, "http://server.test")
+
+    assert tools == []
+
+
 def test_registry_exposes_only_available_model_records():
     available = ToolSpec(
         name="web_search",

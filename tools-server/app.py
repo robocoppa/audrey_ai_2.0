@@ -51,9 +51,11 @@ from brave import (
     BraveUpstreamError,
     SearchResult,
 )
+from capabilities import CapabilityRegistry, CapabilitySupervisor
 from chat_archive import ChatArchiveMaintainer, ChatArchiveStore, ChatExportMessage
 from db import EmbedError, MemoryEntry, MemoryStore
 from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi.openapi.utils import get_openapi
 from fetch import FetchError, fetch_readable
 from pydantic import BaseModel, Field
 from searxng import SearxngClient, SearxngError
@@ -71,12 +73,12 @@ def _service_headers(token: str) -> dict[str, str]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    capabilities = CapabilityRegistry()
     brave = BraveClient(
         api_key=settings.brave_api_key,
         cache_ttl_seconds=settings.brave_cache_ttl_hours * 3600,
     )
-    # Keyless fallback used when Brave is quota-exhausted (402) or rate-limited.
-    # Optional: only built when SEARXNG_URL is set (else no fallback → 503).
+    # Keyless fallback used when Brave is quota-exhausted or rate-limited.
     searxng = SearxngClient(settings.searxng_url) if settings.searxng_url else None
     memory = MemoryStore(
         qdrant_url=settings.qdrant_url,
@@ -85,12 +87,10 @@ async def lifespan(app: FastAPI):
         embed_model=settings.memory_embed_model,
         embed_dim=settings.memory_embed_dim,
         similarity_threshold=settings.memory_similarity_threshold,
-        # Its own rung, not the shared 10s — see `memory_embed_timeout_s`.
         embed_timeout_s=settings.memory_embed_timeout_s,
         legacy_sqlite_path=settings.memory_db_path,
         embed_keep_alive=settings.embed_keep_alive,
     )
-    await memory.init()
     audrey = httpx.AsyncClient(
         base_url=settings.audrey_url,
         timeout=settings.audrey_kb_timeout_seconds,
@@ -113,32 +113,38 @@ async def lifespan(app: FastAPI):
         repair_batch_size=settings.chat_archive_repair_batch_size,
         max_retry_attempts=settings.chat_archive_max_retry_attempts,
     )
-    await chat_archive.init()
     chat_archive_maintainer = ChatArchiveMaintainer(
         chat_archive,
         interval_s=settings.chat_archive_maintenance_interval_s,
         memory_store=memory,
     )
-    await chat_archive_maintainer.start()
 
     app.state.brave = brave
     app.state.searxng = searxng
     app.state.memory = memory
     app.state.audrey = audrey
     app.state.chat_archive = chat_archive
+    app.state.capabilities = capabilities
+    capability_supervisor = CapabilitySupervisor(
+        registry=capabilities,
+        memory=memory,
+        archive=chat_archive,
+        archive_maintainer=chat_archive_maintainer,
+        retry_interval_s=settings.capability_retry_interval_s,
+        probe_timeout_s=settings.capability_probe_timeout_s,
+    )
+    await capability_supervisor.start()
     log.info(
-        "custom-tools ready. brave=%s searxng=%s audrey=%s qdrant=%s memory=%s archive=%s",
+        "custom-tools ready. brave=%s searxng=%s audrey=%s capabilities=%s",
         "configured" if settings.brave_api_key else "UNSET",
         settings.searxng_url or "UNSET",
         settings.audrey_url,
-        settings.qdrant_url,
-        settings.memory_collection,
-        settings.chat_archive_collection,
+        capabilities.openapi_status(),
     )
     try:
         yield
     finally:
-        await chat_archive_maintainer.stop()
+        await capability_supervisor.stop()
         await brave.aclose()
         if searxng is not None:
             await searxng.aclose()
@@ -156,6 +162,55 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+
+# FastAPI caches its generated schema by default.  Capability state is live,
+# so regenerate the small document for every discovery request and attach the
+# component snapshot Audrey combines with its own dependency catalogue.
+app.state.capabilities = CapabilityRegistry.all_available()
+
+
+def _dynamic_openapi() -> dict[str, Any]:
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    capabilities: CapabilityRegistry = app.state.capabilities
+    schema["x-audrey-capabilities"] = capabilities.openapi_status()
+    return schema
+
+
+app.openapi = _dynamic_openapi
+
+
+def _require_capabilities(*names: str) -> None:
+    capabilities: CapabilityRegistry = app.state.capabilities
+    unavailable = capabilities.unavailable(list(names))
+    if unavailable:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "capability_unavailable",
+                "components": unavailable,
+            },
+            headers={"Retry-After": "5"},
+        )
+
+
+def _memory_store() -> MemoryStore:
+    _require_capabilities("qdrant", "memory")
+    return app.state.memory
+
+
+def _archive_source() -> ChatArchiveStore:
+    _require_capabilities("chat_archive_source")
+    return app.state.chat_archive
+
+
+def _searchable_archive() -> ChatArchiveStore:
+    _require_capabilities("qdrant", "chat_archive", "text_embedding")
+    return app.state.chat_archive
 
 
 # ─── Schemas ──────────────────────────────────────────────────────────
@@ -567,6 +622,7 @@ async def _search_with_fallback(
     ),
 )
 async def web_search(req: WebSearchRequest) -> WebSearchResponse:
+    _require_capabilities("web_search")
     brave: BraveClient = app.state.brave
     searxng: SearxngClient | None = app.state.searxng
 
@@ -615,6 +671,7 @@ async def web_search(req: WebSearchRequest) -> WebSearchResponse:
     ),
 )
 async def web_fetch(req: WebFetchRequest) -> WebFetchResponse:
+    _require_capabilities("web_fetch")
     try:
         final_url, text = await fetch_readable(req.url, max_chars=req.max_chars)
     except FetchError as e:
@@ -652,6 +709,7 @@ async def web_fetch(req: WebFetchRequest) -> WebFetchResponse:
     ),
 )
 async def kb_search(req: KBSearchRequest) -> KBSearchResponse:
+    _require_capabilities("audrey_kb", "qdrant", "text_embedding")
     client: httpx.AsyncClient = app.state.audrey
     payload: dict[str, Any] = {"query": req.query, "top_k": req.top_k}
     if req.user:
@@ -691,6 +749,7 @@ async def kb_search(req: KBSearchRequest) -> KBSearchResponse:
     ),
 )
 async def kb_image_search(req: KBImageSearchRequest) -> KBSearchResponse:
+    _require_capabilities("audrey_kb", "qdrant", "image_embedding")
     if not req.query and not req.image_url and not req.image_b64:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -734,7 +793,8 @@ async def kb_image_search(req: KBImageSearchRequest) -> KBSearchResponse:
     ),
 )
 async def memory_store(req: MemoryStoreRequest) -> MemoryEntryResponse:
-    memory: MemoryStore = app.state.memory
+    _require_capabilities("text_embedding")
+    memory = _memory_store()
     try:
         entry = await memory.store(key=req.key, value=req.value, tags=req.tags)
     except ValueError as e:
@@ -756,8 +816,8 @@ async def memory_store(req: MemoryStoreRequest) -> MemoryEntryResponse:
     description="Fetch a previously-stored memory by its exact key. Returns 404 if the key is unknown.",
 )
 async def memory_recall(req: MemoryRecallRequest) -> MemoryEntryResponse:
-    memory: MemoryStore = app.state.memory
-    archive: ChatArchiveStore = app.state.chat_archive
+    memory = _memory_store()
+    archive = _archive_source()
     cutoff_at = await archive.user_purge_cutoff(user=req.user)
     entry = await memory.recall(
         req.key,
@@ -784,8 +844,9 @@ async def memory_recall(req: MemoryRecallRequest) -> MemoryEntryResponse:
     ),
 )
 async def memory_search(req: MemorySearchRequest) -> MemorySearchResponse:
-    memory: MemoryStore = app.state.memory
-    archive: ChatArchiveStore = app.state.chat_archive
+    _require_capabilities("text_embedding")
+    memory = _memory_store()
+    archive = _archive_source()
     cutoff_at = await archive.user_purge_cutoff(user=req.user)
     try:
         hits = await memory.search(
@@ -856,7 +917,7 @@ class ChatHistorySearchResponse(BaseModel):
     ),
 )
 async def chat_history_search(req: ChatHistorySearchRequest) -> ChatHistorySearchResponse:
-    archive: ChatArchiveStore = app.state.chat_archive
+    archive = _searchable_archive()
     hits = await archive.search(
         user=req.user, query=req.query, limit=req.limit,
         date_from=req.date_from, date_to=req.date_to,
@@ -964,6 +1025,7 @@ class ListMyFilesResponse(BaseModel):
     ),
 )
 async def list_my_files(req: ListMyFilesRequest) -> ListMyFilesResponse:
+    _require_capabilities("audrey_files")
     client: httpx.AsyncClient = app.state.audrey
     try:
         r = await client.post("/v1/files/list", json={"user": req.user})
@@ -1044,6 +1106,7 @@ async def get_file_text(req: GetFileTextRequest) -> GetFileTextResponse:
     exact failure the paging exists to prevent, reintroduced one layer up. A
     model-supplied limit could not respect a cap it cannot see.
     """
+    _require_capabilities("audrey_files")
     client: httpx.AsyncClient = app.state.audrey
     try:
         r = await client.post("/v1/files/artifact", json={
@@ -1086,9 +1149,9 @@ async def user_data_memories_list(
     req: UserDataPageRequest,
     _: None = Depends(_require_internal_service),
 ) -> MemoryListResponse:
-    memory: MemoryStore = app.state.memory
+    memory = _memory_store()
     try:
-        archive: ChatArchiveStore = app.state.chat_archive
+        archive = _archive_source()
         cutoff_at = await archive.user_purge_cutoff(user=req.user)
         items, next_cursor = await memory.list_user(
             user=req.user,
@@ -1116,7 +1179,8 @@ async def user_data_memories_update(
     req: MemoryMutationRequest,
     _: None = Depends(_require_internal_service),
 ) -> MemoryEntryResponse:
-    memory: MemoryStore = app.state.memory
+    _require_capabilities("text_embedding")
+    memory = _memory_store()
     item = await memory.update_user(
         user=req.user,
         key=req.key,
@@ -1141,7 +1205,7 @@ async def user_data_memories_delete(
     req: MemoryDeleteRequest,
     _: None = Depends(_require_internal_service),
 ) -> MemoryDeleteResponse:
-    memory: MemoryStore = app.state.memory
+    memory = _memory_store()
     deleted = await memory.delete_user(user=req.user, key=req.key)
     if not deleted:
         raise HTTPException(
@@ -1161,7 +1225,7 @@ async def user_data_chat_history_export(
     req: UserDataPageRequest,
     _: None = Depends(_require_internal_service),
 ) -> ChatExportResponse:
-    archive: ChatArchiveStore = app.state.chat_archive
+    archive = _archive_source()
     try:
         items, next_cursor = await archive.export_user_messages(
             user=req.user, limit=req.limit, cursor=req.cursor,
@@ -1186,7 +1250,7 @@ async def user_data_chat_history_delete(
     req: ChatDeletionRequest,
     _: None = Depends(_require_internal_service),
 ) -> ChatDeletionResponse:
-    archive: ChatArchiveStore = app.state.chat_archive
+    archive = _archive_source()
     result = await archive.request_conversation_deletion(
         user=req.user,
         conversation_id=req.conversation_id,
@@ -1209,7 +1273,7 @@ async def user_data_chat_history_status(
     req: UserDataStatusRequest,
     _: None = Depends(_require_internal_service),
 ) -> ChatRepairStatusResponse:
-    archive: ChatArchiveStore = app.state.chat_archive
+    archive = _archive_source()
     return ChatRepairStatusResponse.model_validate(
         await archive.user_stats(user=req.user)
     )
@@ -1224,7 +1288,7 @@ async def user_data_chat_history_status(
 async def user_data_repair_status(
     _: None = Depends(_require_internal_service),
 ) -> ChatRepairStatusResponse:
-    archive: ChatArchiveStore = app.state.chat_archive
+    archive = _archive_source()
     return ChatRepairStatusResponse.model_validate(await archive.repair_stats())
 
 
@@ -1237,7 +1301,7 @@ async def user_data_repair_status(
 async def user_data_repair_run(
     _: None = Depends(_require_internal_service),
 ) -> ArchiveRepairRunResponse:
-    archive: ChatArchiveStore = app.state.chat_archive
+    archive = _archive_source()
     result = await archive.prune(
         retry_exhausted=True,
         memory_store=app.state.memory,
@@ -1255,7 +1319,7 @@ async def user_data_purge(
     req: UserDataPurgeCreateRequest,
     _: None = Depends(_require_internal_service),
 ) -> UserDataPurgeResponse:
-    archive: ChatArchiveStore = app.state.chat_archive
+    archive = _archive_source()
     try:
         result = await archive.request_user_purge(
             user=req.user,
@@ -1281,7 +1345,7 @@ async def user_data_purge_status(
     req: UserDataPurgeStatusRequest,
     _: None = Depends(_require_internal_service),
 ) -> UserDataPurgeResponse:
-    archive: ChatArchiveStore = app.state.chat_archive
+    archive = _archive_source()
     result = await archive.user_purge_status(
         user=req.user,
         purge_id=req.purge_id,
@@ -1314,7 +1378,7 @@ class ArchiveTurnRequest(BaseModel):
 
 @app.post("/chat_history/archive", include_in_schema=False, tags=["internal"])
 async def chat_history_archive(req: ArchiveTurnRequest) -> dict[str, Any]:
-    archive: ChatArchiveStore = app.state.chat_archive
+    archive = _archive_source()
     return await archive.archive_turn(
         user=req.user,
         conversation_id=req.conversation_id,
@@ -1332,7 +1396,7 @@ async def chat_history_archive(req: ArchiveTurnRequest) -> dict[str, Any]:
 
 @app.post("/chat_history/prune", include_in_schema=False, tags=["internal"])
 async def chat_history_prune() -> dict[str, int]:
-    archive: ChatArchiveStore = app.state.chat_archive
+    archive = _archive_source()
     return await archive.prune(
         retry_exhausted=True,
         memory_store=app.state.memory,
@@ -1341,5 +1405,5 @@ async def chat_history_prune() -> dict[str, int]:
 
 @app.get("/chat_history/stats", include_in_schema=False, tags=["internal"])
 async def chat_history_stats() -> dict[str, Any]:
-    archive: ChatArchiveStore = app.state.chat_archive
+    archive = _archive_source()
     return await archive.stats()

@@ -70,6 +70,12 @@ class Settings(BaseSettings):
 
     # Memory (Qdrant-backed, semantic search via nomic-embed-text)
     qdrant_url: str = Field(default="http://qdrant:6333", alias="QDRANT_URL")
+    capability_probe_timeout_s: float = Field(
+        default=2.0, ge=0.1, alias="CAPABILITY_PROBE_TIMEOUT_S",
+    )
+    capability_retry_interval_s: float = Field(
+        default=5.0, ge=0.1, alias="CAPABILITY_RETRY_INTERVAL_S",
+    )
     memory_collection: str = Field(default="kb_memory", alias="MEMORY_COLLECTION")
     memory_embed_model: str = Field(default="nomic-embed-text", alias="MEMORY_EMBED_MODEL")
     memory_embed_dim: int = Field(default=768, alias="MEMORY_EMBED_DIM")
