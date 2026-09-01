@@ -1213,15 +1213,15 @@ def _fetch_stage_dir(request: Request) -> Path:
     maps everything outside `[a-z0-9_]` to an underscore and strips the edges,
     so no sanitized user id can begin with one.
 
-    Mode 0777 because the two containers do not share a uid — audrey-ai runs as
-    root and the fetcher deliberately does not. The directory is inside the
-    uploads volume, reachable only by containers that already have the mount.
+    Mode 0770 because Audrey and the fetcher deliberately share the deployment's
+    numeric uid/gid while the fetcher still mounts only this directory. Keeping
+    the write bridge private removes the old world-writable exception.
     """
     stage = _upload_root(request) / ".staging"
     stage.mkdir(parents=True, exist_ok=True)
     with contextlib.suppress(OSError):
         # Best effort: fails harmlessly if some other uid created it first.
-        stage.chmod(0o777)
+        stage.chmod(0o770)
     return stage
 
 

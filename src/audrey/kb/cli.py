@@ -79,7 +79,7 @@ async def _run(args: argparse.Namespace) -> int:
     if not args.no_images:
         image_embedder = ImageEmbedder(
             model_name=kb_cfg.get("image_model", "clip-ViT-B-32"),
-            cache_folder="/root/.cache/clip",
+            cache_folder=kb_cfg.get("image_cache_folder", "/home/audrey/.cache/clip"),
         )
 
     roots = [Path(p) for p in (args.paths or kb_cfg.get("dataset_paths") or [])]

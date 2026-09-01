@@ -1,8 +1,7 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress. Waves 1A, 1B, and 1C are complete and
-Unraid-verified. Wave 1D.1–1D.2 are Unraid-verified; Wave 1D.3 is
-laptop-verified and awaits its Unraid smoke.
+**Status:** In progress as of 2026-09-01. Waves 1A through 1D are complete and
+Unraid-verified. Wave 1E.1 is implemented; its Unraid gate is next.
 
 ## Goal
 
@@ -272,7 +271,7 @@ and Audrey rediscovery converged from the initial 4 of 10 snapshot to all 10 of
 10 without restarting Audrey. The affected 366-test matrix and all 2,575
 hermetic tests pass.
 
-**1D.4 laptop status (2026-09-01): implemented; Unraid smoke pending.**
+**1D.4 status (2026-09-01): complete and Unraid-verified.**
 Admin-only `GET /v1/admin/readiness` reports one sanitized snapshot spanning
 required/optional component probes, tool policy/discovery/availability and
 capability failures, archive delivery/index/delete backlogs, media-processing
@@ -283,7 +282,13 @@ components produce `unready` and HTTP 503, while optional failures report
 `degraded`. The default required component is Ollama and the policy is validated
 at startup. All 2,586 hermetic tests pass; scoped ruff, compilation, YAML parsing,
 and diff checks are clean. The lesson link scan has zero broken cites; existing
-drift remains deferred.
+drift remains deferred. On Unraid, the healthy stack returned `ready`, HTTP 200,
+and 10/10 tools with matching metrics. Stopping optional Qdrant returned
+`degraded`, HTTP 200, and the four independent tools; its six dependent tools
+reported precise dependency failures. Recovery converged from 4/10 to 10/10
+without restarting Audrey. Stopping required Ollama returned `unready` and HTTP
+503 while shallow `/health` remained reachable; recovery returned `ready` and
+HTTP 200. The readiness JSON and bounded metrics agreed in every state.
 
 Represent model-visible capabilities and their dependencies declaratively.
 Make discovery resilient per source, allow independent capabilities to degrade
@@ -302,6 +307,18 @@ Gate:
 Build Python services from the committed lockfile, finish non-root container
 operation, remove blocking hot-path file work, reuse long-lived clients, and
 bring configuration/documentation back in line with runtime behavior.
+
+**1E.1 implementation status (2026-09-01): hermetically verified; Unraid build
+and ownership smoke pending.** Audrey and custom-tools now select their exact
+workspace member from committed `uv.lock` with `uv sync --locked`; dependency
+changes fail the build until the lock is updated. Both services run non-root as
+Unraid's numeric 99:100 identity. The media fetcher uses the same identity for
+its one writable staging mount, allowing the former 0777 bridge to become 0770.
+The persistent CLIP cache moved from `/root` to Audrey's home, and knowledge is
+mounted read-only. Contract tests pin the lock, users, mounts, cache path, and
+staging mode. All 2,590 hermetic tests pass; scoped ruff, compilation, YAML,
+offline lock, and diff checks are clean. Docker is unavailable on the laptop,
+so the real image build and bind-mount ownership transition remain the live gate.
 
 Gate:
 

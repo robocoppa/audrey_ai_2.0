@@ -171,7 +171,7 @@ async def lifespan(app: FastAPI):
     )
     image_embedder = ImageEmbedder(
         model_name=kb_cfg.get("image_model", "clip-ViT-B-32"),
-        cache_folder="/root/.cache/clip",
+        cache_folder=kb_cfg.get("image_cache_folder", "/home/audrey/.cache/clip"),
     )
 
     watcher: KBWatcher | None = None

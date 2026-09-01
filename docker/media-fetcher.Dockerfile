@@ -82,10 +82,13 @@ COPY src/audrey/media/service.py      /app/src/audrey/media/service.py
 COPY src/audrey/media/fetch.py        /app/src/audrey/media/fetch.py
 COPY src/audrey/media/fetcher.py      /app/src/audrey/media/fetcher.py
 
-# Non-root — but unlike media-worker this one WRITES to the shared mount, so
-# the uid matters rather than being hygiene. It must be able to create files
-# under the uploads root that audrey-ai can then read and unlink.
-RUN useradd --system --create-home --uid 10002 fetcher
+# This writer shares Audrey's Unraid 99:100 identity. It still mounts only the
+# staging directory, but the handoff no longer requires a world-writable 0777
+# bridge between root-owned Audrey files and a second uid.
+ARG APP_UID=99
+ARG APP_GID=100
+RUN useradd --no-log-init --system --create-home --uid "${APP_UID}" --gid "${APP_GID}" \
+        --shell /usr/sbin/nologin fetcher
 USER fetcher
 
 # No healthcheck. A polling sidecar with no listening socket has nothing to

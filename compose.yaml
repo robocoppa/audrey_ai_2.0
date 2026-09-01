@@ -86,8 +86,8 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - /mnt/user/appdata/runtime:/data
-      - /mnt/user/appdata/clip-cache:/root/.cache/clip
-      - /mnt/user/knowledge:/datasets
+      - /mnt/user/appdata/clip-cache:/home/audrey/.cache/clip
+      - /mnt/user/knowledge:/datasets:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
       interval: 30s
@@ -269,9 +269,8 @@ services:
       # The path inside the container must equal the `stage_dir` audrey-ai
       # reports on the claim, which is `<kb.upload_root>/.staging`.
       #
-      # Create it before the first `up`, or the daemon makes it root-owned and
-      # the first download fails on permissions until audrey-ai's next claim
-      # chmods it:
+      # Audrey and the fetcher both run as Unraid 99:100. Create/chown this
+      # before the first non-root `up`; the route keeps it group-writable 0770:
       #   mkdir -p /mnt/user/appdata/runtime/uploads/.staging
       - /mnt/user/appdata/runtime/uploads/.staging:/data/uploads/.staging
     # yt-dlp is network-bound; the CPU here is ffmpeg remuxing the merged

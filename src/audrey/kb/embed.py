@@ -6,7 +6,7 @@ Two flavors:
 
 Text embeddings are async-native; the CLIP model is a sync torch pipeline
 wrapped in `asyncio.to_thread`. The CLIP model weights are ~380 MB and
-cache to `/root/.cache/clip` (bind-mounted on Unraid).
+cache to the configured non-root CLIP cache (bind-mounted on Unraid).
 
 Both embedders normalize outputs to unit length — Qdrant cosine search
 on a unit-vector index is equivalent to dot-product, which is what Qdrant

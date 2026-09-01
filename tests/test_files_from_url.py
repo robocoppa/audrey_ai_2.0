@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import stat
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -264,6 +265,7 @@ class TestClaim:
         # `sanitize_user` strips the edges of what it produces, so no sanitized
         # user id begins with one.
         assert stage.name.startswith(".")
+        assert stat.S_IMODE(stage.stat().st_mode) == 0o770
 
     async def test_claiming_moves_the_row_out_of_the_queue(self, client, db):
         client.post("/v1/files/from-url", json={"url": URL})

@@ -18,8 +18,9 @@ FROM python:3.12-slim@sha256:46cb7cc2877e60fbd5e21a9ae6115c30ace7a077b9f8772da87
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    UV_SYSTEM_PYTHON=1 \
     UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    PATH="/opt/venv/bin:${PATH}" \
     AUDREY_CONFIG=/app/config.yaml
 
 # System packages needed for some Python wheels (lxml, pillow) and diagnostics
@@ -37,57 +38,40 @@ COPY --from=ghcr.io/astral-sh/uv@sha256:3b7b60a81d3c57ef471703e5c83fd4aaa33abcd4
 
 WORKDIR /app
 
-# Phase 21: install from pyproject.toml so deps live in one place. Adding
-# a new runtime dep is now a single edit to pyproject.toml — no Dockerfile
-# change needed. Bit us pre-Phase-21 with aiosqlite (Phase 15) and
-# prometheus-client (Phase 17): adding a dep to pyproject alone, while the
-# Dockerfile kept a separate hardcoded list, crashed the container at
-# import time.
-#
-# Phase 24b: split the install into two layers so source-only edits don't
-# re-resolve all deps:
-#   Layer 1 (deps)    — cache key is `pyproject.toml` content. Reruns only
-#                       when deps change.
-#   Layer 2 (package) — cache key is the `src/audrey/` tree + README.md.
-#                       Reruns on every code edit, but cheap (~5-10s) since
-#                       it skips dep resolution via `--no-deps`.
-# Pre-Phase-24b a single source edit re-resolved the full dep tree (~30-60s
-# warm, ~3min cold) AND produced a fresh ~10 GB layer in build cache. After
-# the split, source edits add ~MB-scale layers and run in seconds.
-#
-# Layout note: the wheel is built with `[tool.hatch.build] packages =
-# ["src/audrey"]`, which expects the source at /app/src/audrey at build time.
-# We copy it there for the build, then expose it at /app/audrey via symlink
-# so the historical PYTHONPATH=/app + `import audrey` still resolves the
-# live source. (PYTHONPATH wins over site-packages — runtime edits to
-# /app/audrey/* are reflected without rebuilding the wheel.)
+# The workspace lock is the dependency authority. `--locked` refuses a stale
+# lock instead of silently resolving whatever satisfies pyproject today. The
+# first sync installs only third-party dependencies, preserving the fast source
+# edit layer; the second adds Audrey itself without changing the resolution.
 
-# ── Layer 1: deps only ───────────────────────────────────────────────
-# Compile pyproject.toml's deps to a frozen list, then install them.
-# The COPY's cache key is pyproject.toml's contents; this whole layer is
-# cached unless deps change.
-COPY pyproject.toml /app/pyproject.toml
-RUN uv pip compile --quiet /app/pyproject.toml -o /tmp/requirements.txt \
-    && uv pip install --system --no-cache -r /tmp/requirements.txt \
-    && rm /tmp/requirements.txt
+# ── Layer 1: deps only ──────────────────────────────
+COPY pyproject.toml uv.lock /app/
+COPY tools-server/pyproject.toml /app/tools-server/pyproject.toml
+RUN uv sync --locked --no-dev --package audrey \
+        --no-install-workspace --no-cache
 
-# ── Layer 2: audrey package only ─────────────────────────────────────
-# Build + install the audrey wheel without re-resolving deps. README is
-# required because pyproject.toml's `readme = "README.md"` field tells
-# hatchling to embed it in the wheel metadata at build time.
+# ── Layer 2: audrey package only ────────────────────────────
 COPY README.md  /app/README.md
 COPY src/audrey /app/src/audrey
-RUN uv pip install --system --no-deps --no-cache /app \
-    && ln -sf /app/src/audrey /app/audrey
+RUN uv sync --locked --no-dev --package audrey --no-editable --no-cache
 
 COPY config.yaml /app/config.yaml
+
+# UID/GID 99:100 is Unraid's normal nobody:users ownership. Bind mounts replace
+# these image directories at runtime, so the host paths must carry the same
+# numeric owner before the first non-root start.
+ARG APP_UID=99
+ARG APP_GID=100
+RUN useradd --no-log-init --system --create-home --uid "${APP_UID}" --gid "${APP_GID}" \
+        --shell /usr/sbin/nologin audrey \
+    && install -d -o "${APP_UID}" -g "${APP_GID}" /data /home/audrey/.cache/clip
+
+ENV HOME=/home/audrey
+USER audrey
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8000/health >/dev/null || exit 1
 
-# PYTHONPATH so `audrey.*` resolves without an editable install
-ENV PYTHONPATH=/app
 
 CMD ["uvicorn", "audrey.main:app", "--host", "0.0.0.0", "--port", "8000"]

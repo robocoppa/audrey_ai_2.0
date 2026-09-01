@@ -979,6 +979,7 @@ kb:
     - "/datasets/mma"
     - "/datasets/powerapps"
     - "/datasets/servicenow"
+  image_cache_folder: "/home/audrey/.cache/clip"
   watcher_debounce_seconds: 2
 
   # Periodic reconcile pass for the global kb_text + kb_images
