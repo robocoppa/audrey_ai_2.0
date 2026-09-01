@@ -24,6 +24,8 @@ import httpx
 from audrey.tools.discovery import (
     ToolRegistry,
     ToolSpec,
+    ToolUserScope,
+    ToolVisibility,
     _resolve_refs,
     _strip_unsupported_keywords,
     discover_all,
@@ -147,6 +149,11 @@ async def test_discover_one_finds_tools_tag():
     }
     assert tools[0].server_url == "http://server.test"
     assert tools[0].path == "/web_search"
+    assert tools[0].visibility is ToolVisibility.MODEL
+    assert tools[0].user_scope is ToolUserScope.NONE
+    assert tools[0].dependencies == frozenset({"web_search"})
+    assert tools[0].available is True
+    assert tools[0].unavailable_reason is None
 
 
 async def test_discover_one_skips_endpoints_without_tools_tag():
@@ -161,6 +168,11 @@ async def test_discover_one_skips_endpoints_without_tools_tag():
                 "responses": {"200": {"description": "OK"}},
             }
         },
+        "/untagged": _post(
+            "web_fetch",
+            tags=[],
+            schema={"type": "object", "properties": {"url": {"type": "string"}}},
+        ),
         "/web_search": _post(
             "web_search",
             tags=["tools"],
@@ -172,8 +184,8 @@ async def test_discover_one_skips_endpoints_without_tools_tag():
     assert [t.name for t in tools] == ["web_search"]
 
 
-async def test_discover_one_skips_endpoint_with_missing_operation_id():
-    """Endpoints without an operationId are unusable; skip them silently."""
+async def test_discover_one_rejects_tools_tag_without_operation_id():
+    """A public route without dispatch identity invalidates that server."""
     doc = _openapi({
         "/anon": {
             "post": {
@@ -193,7 +205,7 @@ async def test_discover_one_skips_non_object_schema():
     String/array/number top-level schemas get dropped."""
     doc = _openapi({
         "/bare_string": _post(
-            "bare_string",
+            "web_search",
             tags=["tools"],
             schema={"type": "string"},
         ),
@@ -213,11 +225,63 @@ async def test_discover_one_returns_empty_on_unreachable_server():
     assert tools == []
 
 
+async def test_discover_one_rejects_invalid_json():
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"not-json")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        tools = await discover_one(client, "http://broken.test")
+    assert tools == []
+
+
+async def test_discover_one_rejects_non_object_openapi():
+    async with _client_with_doc(["not", "an", "object"]) as client:
+        tools = await discover_one(client, "http://broken.test")
+    assert tools == []
+
+
+async def test_discover_one_rejects_undeclared_public_tool():
+    doc = _openapi({
+        "/web_search": _post(
+            "web_search",
+            tags=["tools"],
+            schema={"type": "object", "properties": {"q": {"type": "string"}}},
+        ),
+        "/surprise": _post(
+            "surprise_tool",
+            tags=["tools"],
+            schema={"type": "object", "properties": {"q": {"type": "string"}}},
+        ),
+    })
+    async with _client_with_doc(doc) as client:
+        tools = await discover_one(client, "http://server.test")
+    assert tools == []
+
+
+async def test_discover_one_rejects_user_schema_without_scope_policy():
+    doc = _openapi({
+        "/web_search": _post(
+            "web_search",
+            tags=["tools"],
+            schema={
+                "type": "object",
+                "properties": {
+                    "q": {"type": "string"},
+                    "user": {"type": "string"},
+                },
+            },
+        ),
+    })
+    async with _client_with_doc(doc) as client:
+        tools = await discover_one(client, "http://server.test")
+    assert tools == []
+
+
 async def test_discover_one_resolves_refs_in_request_body():
     doc = _openapi(
         paths={
             "/echo": _post(
-                "echo",
+                "web_fetch",
                 tags=["tools"],
                 schema={"$ref": "#/components/schemas/EchoRequest"},
             ),
@@ -237,6 +301,48 @@ async def test_discover_one_resolves_refs_in_request_body():
         "properties": {"msg": {"type": "string"}},
         "required": ["msg"],
     }
+
+
+def test_registry_exposes_only_available_model_records():
+    available = ToolSpec(
+        name="web_search",
+        description="search",
+        parameters={"type": "object", "properties": {"q": {"type": "string"}}},
+        server_url="http://server.test",
+        path="/web_search",
+    )
+    unavailable = ToolSpec(
+        name="web_fetch",
+        description="fetch",
+        parameters={"type": "object", "properties": {"url": {"type": "string"}}},
+        server_url="http://server.test",
+        path="/web_fetch",
+        available=False,
+        unavailable_reason="dependency_unavailable",
+    )
+    internal = ToolSpec(
+        name="repair",
+        description="repair",
+        parameters={"type": "object", "properties": {"run": {"type": "boolean"}}},
+        server_url="http://server.test",
+        path="/repair",
+        visibility=ToolVisibility.INTERNAL,
+    )
+    registry = ToolRegistry(
+        by_name={spec.name: spec for spec in (available, unavailable, internal)}
+    )
+
+    assert registry.names() == ["web_search"]
+    assert registry.get("web_fetch") is None
+    assert registry.get("repair") is None
+    assert {spec.name for spec in registry.policy_records()} == {
+        "repair",
+        "web_fetch",
+        "web_search",
+    }
+    assert [tool["function"]["name"] for tool in registry.to_ollama_tools()] == [
+        "web_search"
+    ]
 
 
 # ─── discover_all + ToolRegistry ──────────────────────────────────────
@@ -356,3 +462,26 @@ async def test_discover_all_concurrent_fetch_preserves_first_server_on_no_collis
 
     registry = await discover_all(["http://a.test", "http://b.test"])
     assert sorted(registry.names()) == ["tool_a", "tool_b"]
+
+
+async def test_discover_all_isolates_unexpected_server_exception(monkeypatch):
+    """One broken server cannot prevent a healthy server from registering."""
+    from audrey.tools import discovery as discovery_mod
+
+    async def fake_discover_one(client, url, *, timeout_s=10.0):
+        if url == "http://broken.test":
+            raise RuntimeError("broken parser")
+        return [ToolSpec(
+            name="web_search",
+            description="search",
+            parameters={"type": "object", "properties": {"q": {"type": "string"}}},
+            server_url=url,
+            path="/web_search",
+        )]
+
+    monkeypatch.setattr(discovery_mod, "discover_one", fake_discover_one)
+
+    registry = await discover_all(["http://broken.test", "http://healthy.test"])
+
+    assert registry.names() == ["web_search"]
+    assert registry.get("web_search").server_url == "http://healthy.test"

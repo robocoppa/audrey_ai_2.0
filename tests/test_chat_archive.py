@@ -14,8 +14,8 @@ Coverage:
     fallback for steps 1–3 misses; UUID last resort.
   - ChatArchiveClient: skipped metric on missing user / missing tool;
     posts payload otherwise; never raises on transport failure.
-  - dispatch._USER_SCOPED_TOOLS includes chat_history_search and the
-    dispatcher overwrites a model-supplied user.
+  - the chat_history_search capability policy binds the authenticated user and
+    the dispatcher overwrites a model-supplied user.
 """
 
 from __future__ import annotations
@@ -387,7 +387,8 @@ async def test_archive_client_swallows_transport_errors():
 # ─── dispatcher: chat_history_search is user-scoped ───────────────────
 
 
-def test_chat_history_search_in_user_scoped_set():
-    from audrey.tools.dispatch import _USER_SCOPED_TOOLS
+def test_chat_history_search_has_argument_scope_policy():
+    from audrey.tools.discovery import TOOL_DECLARATIONS, ToolUserScope
 
-    assert "chat_history_search" in _USER_SCOPED_TOOLS
+    policy = TOOL_DECLARATIONS["chat_history_search"]
+    assert policy.user_scope is ToolUserScope.ARGUMENT

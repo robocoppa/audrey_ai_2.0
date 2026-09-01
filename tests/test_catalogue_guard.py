@@ -28,7 +28,7 @@ import httpx
 import pytest
 
 from audrey.pipeline.react import _catalogue_rows, _unread_fetch, run_react
-from audrey.tools.discovery import ToolRegistry, ToolSpec
+from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, ToolSpec
 from audrey.tools.dispatch import ToolResult
 
 GRACIE = "Roger Gracie VS Rafael Lovato Jr _ World Championship 2009.mp4"
@@ -185,10 +185,21 @@ class _FakeOllama:
 
 
 def _registry() -> ToolRegistry:
-    mk = lambda n: ToolSpec(  # noqa: E731
-        name=n, description=n, parameters={"type": "object", "properties": {}},
-        server_url="http://tools", path=f"/{n}")
-    return ToolRegistry(by_name={n: mk(n) for n in ("list_my_files", "get_file_text")})
+    def make_spec(name: str) -> ToolSpec:
+        declaration = TOOL_DECLARATIONS[name]
+        return ToolSpec(
+            name=name,
+            description=name,
+            parameters={"type": "object", "properties": {}},
+            server_url="http://tools",
+            path=f"/{name}",
+            user_scope=declaration.user_scope,
+            dependencies=declaration.dependencies,
+            purge_gated=declaration.purge_gated,
+        )
+
+    names = ("list_my_files", "get_file_text")
+    return ToolRegistry(by_name={name: make_spec(name) for name in names})
 
 
 @pytest.fixture

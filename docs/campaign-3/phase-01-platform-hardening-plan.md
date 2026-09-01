@@ -1,8 +1,8 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress. Waves 1A, 1B, and 1C.1–1C.5d are Unraid-verified.
-Admin-wide repair controls are laptop-complete; their Unraid smoke remains
-before Wave 1C closes.
+**Status:** In progress. Waves 1A, 1B, and 1C are complete and
+Unraid-verified. Wave 1D.1–1D.2 are laptop-complete; their Unraid smoke is
+next.
 
 ## Goal
 
@@ -224,11 +224,14 @@ or raw errors. The sidecar controls require the service token and remain hidden
 from model discovery; a sidecar outage produces a partial/degraded result while
 local repair owners still run. The focused matrix passes 63 tests and the full
 hermetic suite passes all 2,559; scoped ruff and compilation are clean, and the
-lesson scan has zero broken links. Normal, outage, and recovery smoke remains
-on Unraid before Wave 1C closes.
+lesson scan has zero broken links. On Unraid, aggregate status reported `ready`
+and the trigger `accepted`; with custom-tools stopped they became `degraded`
+and `partial` while every local repair owner stayed available. Restarting the
+sidecar restored `ready` and `accepted`. Wave 1C is complete and
+Unraid-verified.
 
 
-Gate:
+Gate: **Passed on Unraid 2026-08-31.**
 
 - concurrent mixed uploads honor configured storage limits;
 - changing an email or authentication provider does not silently move or merge
@@ -242,6 +245,17 @@ Gate:
 - disposable-user export and deletion are verified across stores on Unraid.
 
 ## Wave 1D — capability policy and readiness
+
+**1D.1–1D.2 status (2026-08-31): laptop-complete; Unraid smoke pending.**
+One catalogue declares all ten model tools, including visibility, identity
+binding, dependencies, purge gating, availability, and dispatch metadata. The
+registry exposes only available model-visible records. Discovery requires an
+explicit `tools` tag and known declaration, validates user-bearing schemas, and
+isolates HTTP, JSON, schema, or unexpected coroutine failures per server.
+Dispatch consumes the same identity and purge policy instead of duplicate name
+sets. The discovery/dispatch matrix passes 44 tests and all 2,565 hermetic tests
+pass; scoped ruff and compilation are clean, lesson conventions pass, the link
+scan has zero broken cites, and the diff check is clean.
 
 Represent model-visible capabilities and their dependencies declaratively.
 Make discovery resilient per source, allow independent capabilities to degrade

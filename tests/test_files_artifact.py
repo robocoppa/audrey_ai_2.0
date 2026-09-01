@@ -34,7 +34,7 @@ from fastapi.testclient import TestClient
 
 from audrey.kb.uploads_db import UploadsDB
 from audrey.routes.files import router as files_router
-from audrey.tools.dispatch import _USER_SCOPED_TOOLS
+from audrey.tools.discovery import TOOL_DECLARATIONS, ToolUserScope
 
 SECRET = "s3cr3t-service-token"  # noqa: S105  (test fixture, not a real secret)
 ME = "a@b.c"
@@ -284,11 +284,9 @@ class TestIsolation:
         # for anybody else.
         assert r.status_code == 404
 
-    def test_the_tool_is_user_scoped_in_the_dispatcher(self):
-        # The other half of the security property. `audit_user_scoping` only
-        # warns about a missing entry, and a warning is not a gate — so this
-        # is the gate.
-        assert "get_file_text" in _USER_SCOPED_TOOLS
+    def test_the_tool_has_argument_scope_policy(self):
+        policy = TOOL_DECLARATIONS["get_file_text"]
+        assert policy.user_scope is ToolUserScope.ARGUMENT
 
     async def test_duplicate_filenames_resolve_newest_and_say_so(
             self, client, db, tmp_path):

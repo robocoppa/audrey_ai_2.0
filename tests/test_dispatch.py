@@ -26,7 +26,13 @@ from pathlib import Path
 
 import httpx
 
-from audrey.tools.discovery import ToolRegistry, ToolSpec, discover_one
+from audrey.tools.discovery import (
+    TOOL_DECLARATIONS,
+    ToolRegistry,
+    ToolSpec,
+    ToolUserScope,
+    discover_one,
+)
 from audrey.tools.dispatch import (
     _force_user_tag,
     audit_user_scoping,
@@ -56,12 +62,18 @@ def _registry(specs: list[ToolSpec]) -> ToolRegistry:
 
 
 def _spec(name: str, server: str = "http://server.test", path: str | None = None) -> ToolSpec:
+    declaration = TOOL_DECLARATIONS.get(name)
     return ToolSpec(
         name=name,
         description=f"{name} tool",
         parameters={"type": "object", "properties": {}},
         server_url=server,
         path=path or f"/{name}",
+        user_scope=(
+            declaration.user_scope if declaration else ToolUserScope.NONE
+        ),
+        dependencies=(declaration.dependencies if declaration else frozenset()),
+        purge_gated=(declaration.purge_gated if declaration else False),
     )
 
 
@@ -185,7 +197,7 @@ async def test_dispatch_one_overwrites_memory_store_tags():
 
 
 async def test_dispatch_one_does_not_overwrite_unscoped_tool():
-    """Tools not in `_USER_SCOPED_TOOLS` (e.g. `web_search`) leave the
+    """Tools declared with no user scope (e.g. `web_search`) leave the
     model's arguments alone — there's no user identity to overwrite for
     an anonymous web search."""
     seen: dict = {}
@@ -231,31 +243,32 @@ async def test_dispatch_one_overwrites_user_for_list_my_files():
     assert seen["body"]["user"] == "alice@example.com"
 
 
-# ─── Scoping audit (the check the set's own comment asked for) ────────
+# ─── Scoping-policy compatibility audit ──────────────────────────────
 
 
 def _user_spec(name: str) -> ToolSpec:
     """A spec whose request schema declares a `user` property."""
+    declaration = TOOL_DECLARATIONS.get(name)
     return ToolSpec(
         name=name,
         description=f"{name} tool",
         parameters={"type": "object", "properties": {"user": {"type": "string"}}},
         server_url="http://server.test",
         path=f"/{name}",
+        user_scope=(
+            declaration.user_scope if declaration else ToolUserScope.NONE
+        ),
     )
 
 
-def test_audit_flags_a_user_taking_tool_missing_from_the_set():
-    """The failure this exists to catch: a new tools-server route with a
-    `user` field, shipped without the matching `_USER_SCOPED_TOOLS` entry.
-    Nothing else in the system notices — the dispatcher just forwards
-    whatever the model wrote."""
+def test_audit_flags_a_user_schema_without_scope_policy():
+    """Direct-built extensions still fail the schema/policy compatibility audit."""
     assert audit_user_scoping(_registry([_user_spec("list_their_files")])) == [
         "list_their_files"
     ]
 
 
-def test_audit_is_quiet_for_a_tool_already_in_the_set():
+def test_audit_is_quiet_for_a_declared_user_scoped_tool():
     assert audit_user_scoping(_registry([_user_spec("list_my_files")])) == []
 
 
@@ -266,12 +279,9 @@ def test_audit_ignores_tools_that_take_no_user():
 async def test_every_user_taking_tool_on_the_real_server_is_scoped():
     """The one that would actually have caught it.
 
-    The three above audit synthetic specs, which only prove the function
-    works. This runs the **real** tools-server OpenAPI document through the
-    **real** discovery path and asserts the set covers everything it finds —
-    so adding a `user`-taking route to `tools-server/app.py` and forgetting
-    `_USER_SCOPED_TOOLS` fails here, on a laptop, rather than silently in
-    production where the symptom is one user reading another's data.
+    The synthetic checks only prove the compatibility audit. This runs the real
+    tools-server OpenAPI document through the real discovery and declaration
+    boundary, so a new public route cannot appear without explicit policy.
     """
     import app as tools_server  # lazily, so a heavy import can't break collection
 
@@ -284,7 +294,8 @@ async def test_every_user_taking_tool_on_the_real_server_is_scoped():
         specs = await discover_one(http, "http://custom-tools:8000")
 
     registry = _registry(specs)
-    assert "list_my_files" in registry.by_name, "phase 40's tool is not being discovered"
+    assert set(registry.by_name) == set(TOOL_DECLARATIONS)
+    assert "list_my_files" in registry.by_name
     assert audit_user_scoping(registry) == []
 
 

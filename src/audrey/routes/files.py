@@ -55,8 +55,9 @@ anything — see the Phase 41 section for why the bytes are somebody else's job.
 `POST /v1/files/list` is the same exception for the same reason, and one step
 more dangerous: it *names* its user in the body, so it is only safe while the
 sole caller holding the service token — the tools-server — has that argument
-overwritten by `tools/dispatch.py`'s `_USER_SCOPED_TOOLS`. The route and that
-set are one mechanism in two files.
+overwritten according to the capability policy consumed by tool discovery and
+dispatch. The service-token gate and declared identity binding form one
+mechanism.
 """
 
 from __future__ import annotations
@@ -2552,9 +2553,9 @@ async def list_files_for_user(
 
     That property alone is not sufficient, because the tools-server passes the
     tool's `user` argument through to this body. The other half lives in
-    `tools/dispatch.py`, whose `_USER_SCOPED_TOOLS` set overwrites the
+    the declarative tool policy, whose argument binding overwrites the
     model-supplied `user` with the authenticated pipeline user. **Both halves
-    are required.** Without the dispatcher's overwrite, a prompt naming another
+    are required.** Without that policy binding, a prompt naming another
     user's email reaches their file list through this route.
 
     POST rather than GET because the target is an email address: a query string
@@ -2653,7 +2654,7 @@ async def read_artifact(
 
     `require_service` and a user named in the body, exactly like
     `POST /v1/files/list` — and with exactly the same second half: the
-    dispatcher's `_USER_SCOPED_TOOLS` overwrites the model-supplied `user`.
+    declared capability policy overwrites the model-supplied `user`.
     **Both halves are required.** This route hands back a user's document
     contents verbatim, so without the dispatcher's overwrite a prompt naming
     another address reads their transcripts.

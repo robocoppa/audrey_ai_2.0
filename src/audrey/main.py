@@ -391,6 +391,12 @@ async def list_tools() -> dict[str, list[dict]]:
                 "description": s.description,
                 "server_url": s.server_url,
                 "path": s.path,
+                "visibility": s.visibility.value,
+                "user_scoped": s.user_scoped,
+                "user_scope": s.user_scope.value,
+                "dependencies": sorted(s.dependencies),
+                "available": s.available,
+                "unavailable_reason": s.unavailable_reason,
                 "parameters": s.parameters,
             }
             for s in reg.specs()

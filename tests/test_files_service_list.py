@@ -10,7 +10,7 @@ The security shape is worth stating because it is unusual for this codebase:
 **this route names its target user in the request body.** Every other user
 endpoint derives identity from a validated token and cannot be pointed
 elsewhere. The property that keeps it safe lives in a different file — the
-dispatcher's `_USER_SCOPED_TOOLS` overwrite, pinned in `test_dispatch.py`.
+declarative capability policy, pinned in `test_dispatch.py`.
 What is pinned here is the half this file owns: a user JWT must not reach it,
 and the rows it returns must be the named user's and nobody else's.
 """
