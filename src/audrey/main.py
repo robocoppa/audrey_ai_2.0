@@ -238,6 +238,7 @@ async def lifespan(app: FastAPI):
     )
     app.state.archive_http = archive_http
     app.state.archive_client = archive_client
+    app.state.archive_transport = archive_transport
     app.state.kb_service_token = cfg.env.kb_service_token
 
     purge_cfg = ((cfg.raw.get("user_data", {}) or {}).get("purge", {}) or {})

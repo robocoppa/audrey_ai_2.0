@@ -1,8 +1,8 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress. Waves 1A, 1B, and 1C.1–1C.5c are Unraid-verified;
-1C.5d account purge is laptop-verified and awaiting its disposable-account
-Unraid smoke.
+**Status:** In progress. Waves 1A, 1B, and 1C.1–1C.5d are Unraid-verified.
+Admin-wide repair controls are laptop-complete; their Unraid smoke remains
+before Wave 1C closes.
 
 ## Goal
 
@@ -190,22 +190,42 @@ exhausted work, changed to `degraded` only for the three sidecar-owned
 components while custom-tools was stopped, and returned to `ready` after
 restart. Local file-deletion and archive-delivery status remained available
 throughout, and the completed conversation tombstone remained visible.
-Admin-wide repair controls remain after the account-purge slice.
+Admin-wide repair controls are implemented below; their Unraid smoke remains.
 
-1C.5d laptop status (2026-08-31): Audrey exposes an authenticated
-`POST /v1/me/data-purge` with an exact confirmation phrase, optional scoped
-idempotency key, and an exact-owner progress receipt. One durable cutoff
-coordinates upload records and disk artifacts, private text/image points,
-local archive delivery, sidecar chat source/index rows, and durable memory.
-Pre-cutoff records become logically unavailable before physical cleanup, while
-post-cutoff activity is preserved. The coordinator retries across dependency
-outages and process restarts; a durable acknowledgement gate prevents memory
-or chat reads during sidecar handoff. Maintenance-only archive storage remains
-purgeable even when ordinary archive delivery is disabled. Cross-user,
-cutoff, idempotency, migration, outage, and restart tests pass; the full
-hermetic suite passes all 2,549 tests. Scoped ruff and compilation are clean,
-and the lesson scan has zero broken links. A disposable-account Unraid
-outage/recovery smoke remains before 1C.5d is called Unraid-verified.
+1C.5d status (2026-08-31): complete and Unraid-verified. Audrey exposes
+an authenticated `POST /v1/me/data-purge` with an exact confirmation phrase,
+optional scoped idempotency key, and an exact-owner progress receipt. One
+durable cutoff coordinates upload records and disk artifacts, private
+text/image points, local archive delivery, sidecar chat source/index rows,
+and durable memory. Pre-cutoff records become logically unavailable before
+physical cleanup, while post-cutoff activity is preserved. The coordinator
+retries across dependency outages and process restarts; a durable
+acknowledgement gate prevents memory or chat reads during sidecar handoff.
+Maintenance-only archive storage remains purgeable even when ordinary
+archive delivery is disabled. Cross-user, cutoff, idempotency, migration,
+outage, and restart tests pass; the full hermetic suite passes all 2,549
+tests. Scoped ruff and compilation are clean, and the lesson scan has zero
+broken links. On Unraid, a normal purge deleted two pre-cutoff uploads and
+converged with empty memory and chat owner views. A second purge, seeded with
+a file, durable memory, and archived conversation, was requested while
+Qdrant and custom-tools were unavailable. The receipt survived an Audrey
+restart, and reads returned the purge-in-progress gate before sidecar
+acknowledgement. Restoring dependencies completed the queued file deletion
+and sidecar cleanup without manual replay. Final owner inventories were
+empty, and repair status returned `ready` with two completed account purges
+and no pending, errored, or exhausted work.
+
+Admin-wide repair status and bounded retry (2026-08-31): implementation and
+laptop gates are complete. Admin-only `GET /v1/admin/repair-status` returns
+aggregate queue health, and `POST /v1/admin/repair` wakes each local durable
+owner plus one bounded service-authenticated sidecar maintenance pass. Neither
+route accepts a user selector or returns identities, content, paths, hostnames,
+or raw errors. The sidecar controls require the service token and remain hidden
+from model discovery; a sidecar outage produces a partial/degraded result while
+local repair owners still run. The focused matrix passes 63 tests and the full
+hermetic suite passes all 2,559; scoped ruff and compilation are clean, and the
+lesson scan has zero broken links. Normal, outage, and recovery smoke remains
+on Unraid before Wave 1C closes.
 
 
 Gate:

@@ -15,7 +15,7 @@ real OWUI/Qdrant clients. Same pattern `test_auth.py` uses for
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import HTTPException
@@ -260,3 +260,139 @@ async def test_chat_archive_stats_include_local_delivery_queue(monkeypatch):
         "last_error": "upstream unavailable",
     }
     queue_stats.assert_awaited_once_with()
+
+
+# Admin-wide repair controls
+
+def _repair_counts(**overrides):
+    value = {
+        "pending": 0,
+        "attempts": 0,
+        "with_error": 0,
+        "exhausted": 0,
+        "completed": 0,
+    }
+    value.update(overrides)
+    return value
+
+
+def _repair_request(*, remote_error: Exception | None = None):
+    file_wake = Mock()
+    purge_wake = Mock()
+    retry_now = AsyncMock(return_value=2)
+    remote = {
+        "indexing": _repair_counts(),
+        "deletions": _repair_counts(),
+        "conversation_deletions": _repair_counts(completed=3),
+    }
+    repair_status = AsyncMock(
+        side_effect=remote_error,
+        return_value=None if remote_error else remote,
+    )
+    repair = AsyncMock(
+        side_effect=remote_error,
+        return_value={} if not remote_error else None,
+    )
+    state = SimpleNamespace(
+        uploads_db=SimpleNamespace(
+            file_deletion_stats=AsyncMock(
+                return_value=_repair_counts(completed=4),
+            ),
+            data_purge_stats=AsyncMock(
+                return_value=_repair_counts(completed=2),
+            ),
+        ),
+        archive_client=SimpleNamespace(
+            repair_stats=AsyncMock(return_value=_repair_counts()),
+            retry_now=retry_now,
+        ),
+        archive_transport=SimpleNamespace(
+            repair_status=repair_status,
+            repair=repair,
+        ),
+        file_deletions=SimpleNamespace(wake=file_wake),
+        user_data_purges=SimpleNamespace(wake=purge_wake),
+        tools=object(),
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=state))
+    return request, file_wake, retry_now, purge_wake, repair_status, repair
+
+
+@pytest.mark.asyncio
+async def test_admin_repair_status_is_global_sanitized_and_ready():
+    from audrey.routes import admin as admin_module
+
+    request, *_ = _repair_request()
+    result = await admin_module.repair_status(request, _fake_admin())
+
+    assert result.status == "ready"
+    assert result.file_deletions.completed == 4
+    assert result.conversation_deletions.completed == 3
+    assert result.account_purges.completed == 2
+    rendered = result.model_dump_json()
+    assert "user" not in rendered
+    assert "last_error" not in rendered
+
+
+@pytest.mark.asyncio
+async def test_admin_repair_status_degrades_only_remote_components():
+    from audrey.routes import admin as admin_module
+
+    request, *_ = _repair_request(remote_error=RuntimeError("private upstream"))
+    result = await admin_module.repair_status(request, _fake_admin())
+
+    assert result.status == "degraded"
+    assert result.file_deletions.available is True
+    assert result.chat_delivery.available is True
+    assert result.account_purges.available is True
+    assert result.chat_indexing.available is False
+    assert result.chat_deletions.available is False
+    assert result.conversation_deletions.available is False
+    assert "private upstream" not in result.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_admin_repair_wakes_all_owners_and_runs_bounded_sidecar_pass():
+    from audrey.routes import admin as admin_module
+
+    request, file_wake, retry_now, purge_wake, _, remote_repair = _repair_request()
+    result = await admin_module.repair(request, _fake_admin())
+
+    assert result.status == "accepted"
+    assert result.file_deletions.accepted is True
+    assert result.chat_delivery.accepted is True
+    assert result.chat_archive.accepted is True
+    assert result.account_purges.accepted is True
+    file_wake.assert_called_once_with()
+    retry_now.assert_awaited_once_with()
+    purge_wake.assert_called_once_with()
+    remote_repair.assert_awaited_once_with(registry=request.app.state.tools)
+
+
+@pytest.mark.asyncio
+async def test_admin_repair_is_partial_but_local_work_still_wakes_on_sidecar_outage():
+    from audrey.routes import admin as admin_module
+
+    request, file_wake, retry_now, purge_wake, _, _ = _repair_request(
+        remote_error=RuntimeError("private upstream"),
+    )
+    result = await admin_module.repair(request, _fake_admin())
+
+    assert result.status == "partial"
+    assert result.chat_archive.available is False
+    assert result.chat_archive.accepted is False
+    file_wake.assert_called_once_with()
+    retry_now.assert_awaited_once_with()
+    purge_wake.assert_called_once_with()
+
+
+def test_admin_repair_routes_require_admin_and_accept_no_user_selector():
+    from audrey.auth import require_admin
+    from audrey.routes import admin as admin_module
+
+    paths = {route.path: route for route in admin_module.router.routes}
+    for path in ("/v1/admin/repair-status", "/v1/admin/repair"):
+        route = paths[path]
+        assert require_admin in {item.call for item in route.dependant.dependencies}
+        assert all(parameter.name != "user" for parameter in route.dependant.query_params)
+        assert all(parameter.name != "user" for parameter in route.dependant.path_params)

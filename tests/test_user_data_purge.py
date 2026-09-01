@@ -293,3 +293,94 @@ async def test_uploads_db_migrates_existing_purge_acknowledgement(
         assert await db.unacknowledged_user_data_purges() == []
     finally:
         db.close()
+
+
+async def test_admin_repair_stats_aggregate_without_returning_user_rows(
+    tmp_path: Path,
+):
+    db = UploadsDB(tmp_path / "uploads.sqlite")
+    try:
+        await _record(db, file_id="alice-file", user=ALICE, uploaded_at=OLD)
+        await _record(db, file_id="bob-file", user=BOB, uploaded_at=OLD)
+        await db.request_file_deletion(
+            "alice-file",
+            user=ALICE,
+            requested_at=OLD,
+        )
+        await db.request_file_deletion(
+            "bob-file",
+            user=BOB,
+            requested_at=OLD,
+        )
+        await db.begin_file_deletion_attempt(
+            "alice-file",
+            user=ALICE,
+            attempted_at=OLD,
+        )
+        await db.fail_file_deletion(
+            "alice-file",
+            user=ALICE,
+            error="private qdrant detail",
+        )
+        await db.complete_file_deletion(
+            "bob-file",
+            user=BOB,
+            completed_at=NEW,
+        )
+
+        assert await db.file_deletion_stats() == {
+            "pending": 1,
+            "attempts": 1,
+            "with_error": 1,
+            "exhausted": 0,
+            "completed": 1,
+        }
+
+        for purge_id, user in (("purge-a", ALICE), ("purge-b", BOB)):
+            await db.request_user_data_purge(
+                purge_id=purge_id,
+                user=user,
+                cutoff_at="1900-01-01T00:00:00+00:00",
+                requested_at=OLD,
+            )
+            await db.begin_user_data_purge_component(
+                purge_id,
+                component="local_delivery",
+                attempted_at=OLD,
+            )
+            await db.finish_user_data_purge_component(
+                purge_id,
+                component="local_delivery",
+                completed_at=NEW,
+            )
+            await db.begin_user_data_purge_component(
+                purge_id,
+                component="sidecar",
+                attempted_at=OLD,
+            )
+
+        await db.fail_user_data_purge_component(
+            "purge-a",
+            component="sidecar",
+            error="private sidecar detail",
+        )
+        await db.finish_user_data_purge_component(
+            "purge-b",
+            component="sidecar",
+            completed_at=NEW,
+        )
+        assert await db.finalize_user_data_purge("purge-b", completed_at=NEW)
+
+        stats = await db.data_purge_stats()
+        assert stats == {
+            "pending": 1,
+            "attempts": 4,
+            "with_error": 1,
+            "exhausted": 0,
+            "completed": 1,
+        }
+        assert ALICE not in str(stats)
+        assert BOB not in str(stats)
+        assert "private" not in str(stats)
+    finally:
+        db.close()

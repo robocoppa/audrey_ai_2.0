@@ -885,5 +885,71 @@ def test_internal_routes_are_hidden_from_model_tool_discovery():
     assert "/user_data/chat_history/export" not in paths
     assert "/user_data/chat_history/delete" not in paths
     assert "/user_data/chat_history/status" not in paths
+    assert "/user_data/repair/status" not in paths
+    assert "/user_data/repair/run" not in paths
     assert "/user_data/purge" not in paths
     assert "/user_data/purge/status" not in paths
+
+
+def test_internal_repair_routes_use_service_only_dependency():
+    routes = {route.path: route for route in tools_app_module.app.routes}
+    for path in ("/user_data/repair/status", "/user_data/repair/run"):
+        dependencies = {
+            item.call for item in routes[path].dependant.dependencies
+        }
+        assert tools_app_module._require_internal_service in dependencies
+
+
+async def test_internal_repair_routes_delegate_to_bounded_store_pass(monkeypatch):
+    repair_counts = {
+        "indexing": {
+            "pending": 1,
+            "attempts": 2,
+            "with_error": 1,
+            "exhausted": 0,
+            "completed": 0,
+        },
+        "deletions": {
+            "pending": 0,
+            "attempts": 0,
+            "with_error": 0,
+            "exhausted": 0,
+            "completed": 0,
+        },
+        "conversation_deletions": {
+            "pending": 0,
+            "attempts": 0,
+            "with_error": 0,
+            "exhausted": 0,
+            "completed": 1,
+        },
+    }
+    run_result = {
+        "deletions_queued": 0,
+        "messages_deleted": 0,
+        "chunks_deleted": 0,
+        "qdrant_deleted": 0,
+        "delete_failed": 0,
+        "deletions_pending": 0,
+        "reindex_attempted": 1,
+        "reindexed": 1,
+        "reindex_failed": 0,
+    }
+    archive = SimpleNamespace(
+        repair_stats=AsyncMock(return_value=repair_counts),
+        prune=AsyncMock(return_value=run_result),
+    )
+    memory = object()
+    monkeypatch.setattr(tools_app_module.app.state, "chat_archive", archive, raising=False)
+    monkeypatch.setattr(tools_app_module.app.state, "memory", memory, raising=False)
+
+    status_result = await tools_app_module.user_data_repair_status(None)
+    run_response = await tools_app_module.user_data_repair_run(None)
+
+    assert status_result.indexing.pending == 1
+    assert run_response.reindexed == 1
+    archive.repair_stats.assert_awaited_once_with()
+    archive.prune.assert_awaited_once_with(
+        retry_exhausted=True,
+        memory_store=memory,
+    )

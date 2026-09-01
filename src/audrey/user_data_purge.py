@@ -139,6 +139,10 @@ class UserDataPurgeCoordinator:
             purge_id=purge_id,
         )
 
+    def wake(self) -> None:
+        """Wake the durable coordinator after an operator repairs dependencies."""
+        self._wake.set()
+
     async def drain_once(self) -> int:
         rows = await self._db.pending_user_data_purges(limit=self._batch_size)
         for row in rows:

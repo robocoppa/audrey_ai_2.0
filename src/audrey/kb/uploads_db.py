@@ -723,6 +723,35 @@ class UploadsDB:
             ).fetchone()
             return int(row["count"])
 
+    async def file_deletion_stats(self) -> dict[str, int]:
+        """Global repair counts for the authenticated admin surface."""
+        return await asyncio.to_thread(self._file_deletion_stats_sync)
+
+    def _file_deletion_stats_sync(self) -> dict[str, int]:
+        with self._lock:
+            row = self._conn.execute(
+                """
+                SELECT
+                  COALESCE(SUM(CASE WHEN length(completed_at) = 0
+                                    THEN 1 ELSE 0 END), 0) AS pending,
+                  COALESCE(SUM(CASE WHEN length(completed_at) = 0
+                                    THEN attempts ELSE 0 END), 0) AS attempts,
+                  COALESCE(SUM(CASE WHEN length(completed_at) = 0
+                                      AND length(last_error) > 0
+                                    THEN 1 ELSE 0 END), 0) AS with_error,
+                  COALESCE(SUM(CASE WHEN length(completed_at) > 0
+                                    THEN 1 ELSE 0 END), 0) AS completed
+                FROM file_deletions
+                """
+            ).fetchone()
+        return {
+            "pending": int(row["pending"]),
+            "attempts": int(row["attempts"]),
+            "with_error": int(row["with_error"]),
+            "exhausted": 0,
+            "completed": int(row["completed"]),
+        }
+
     async def user_file_deletion_stats(self, user: str) -> dict[str, int]:
         """Current-user repair counts without exposing another owner or errors."""
         return await asyncio.to_thread(
@@ -868,6 +897,69 @@ class UploadsDB:
     async def user_data_purge_stats(self, user: str) -> dict[str, int]:
         """Current-user account-purge repair counts without raw errors."""
         return await asyncio.to_thread(self._user_data_purge_stats_sync, user)
+
+    async def data_purge_stats(self) -> dict[str, int]:
+        """Global account-purge repair counts for authenticated admins."""
+        return await asyncio.to_thread(self._data_purge_stats_sync)
+
+    def _data_purge_stats_sync(self) -> dict[str, int]:
+        with self._lock:
+            purge = self._conn.execute(
+                """
+                SELECT
+                  COALESCE(SUM(CASE WHEN length(completed_at) = 0
+                                    THEN 1 ELSE 0 END), 0) AS pending,
+                  COALESCE(SUM(local_delivery_attempts + sidecar_attempts), 0)
+                    AS attempts,
+                  COALESCE(SUM(CASE WHEN length(local_delivery_last_error) > 0
+                                      OR length(sidecar_last_error) > 0
+                                    THEN 1 ELSE 0 END), 0) AS with_error,
+                  COALESCE(SUM(CASE WHEN length(completed_at) = 0
+                                      AND sidecar_status = ?
+                                    THEN 1 ELSE 0 END), 0) AS exhausted,
+                  COALESCE(SUM(CASE WHEN length(completed_at) > 0
+                                    THEN 1 ELSE 0 END), 0) AS completed
+                FROM user_data_purges
+                """,
+                ("attention_required",),
+            ).fetchone()
+            paths = self._conn.execute(
+                """
+                SELECT COALESCE(SUM(p.attempts), 0) AS attempts,
+                       COALESCE(SUM(CASE WHEN length(p.last_error) > 0
+                                         THEN 1 ELSE 0 END), 0) AS with_error
+                FROM user_data_purge_paths AS p
+                JOIN user_data_purges AS u ON u.purge_id = p.purge_id
+                WHERE length(u.completed_at) = 0
+                """
+            ).fetchone()
+            files = self._conn.execute(
+                """
+                SELECT COALESCE(SUM(d.attempts), 0) AS attempts,
+                       COALESCE(SUM(CASE WHEN length(d.last_error) > 0
+                                         THEN 1 ELSE 0 END), 0) AS with_error
+                FROM user_data_purge_files AS p
+                JOIN user_data_purges AS u ON u.purge_id = p.purge_id
+                LEFT JOIN file_deletions AS d
+                  ON d.file_id = p.file_id AND d.user = p.user
+                WHERE length(u.completed_at) = 0
+                """
+            ).fetchone()
+        return {
+            "pending": int(purge["pending"]),
+            "attempts": (
+                int(purge["attempts"])
+                + int(paths["attempts"])
+                + int(files["attempts"])
+            ),
+            "with_error": (
+                int(purge["with_error"])
+                + int(paths["with_error"])
+                + int(files["with_error"])
+            ),
+            "exhausted": int(purge["exhausted"]),
+            "completed": int(purge["completed"]),
+        }
 
     def _user_data_purge_stats_sync(self, user: str) -> dict[str, int]:
         with self._lock:

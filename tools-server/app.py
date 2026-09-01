@@ -19,6 +19,8 @@ Internal-only (hidden from /openapi.json so the model can't call them):
   POST /user_data/chat_history/export — paginated current-user source export
   POST /user_data/chat_history/delete — tombstone one current-user conversation
   POST /user_data/chat_history/status — current-user repair counts
+  POST /user_data/repair/status      — aggregate repair counts (service-only)
+  POST /user_data/repair/run         — one bounded repair pass (service-only)
   POST /chat_history/archive   — write a turn to the chat archive
   POST /chat_history/prune     — apply retention policy
   GET  /chat_history/stats     — row counts for admin/debug
@@ -346,6 +348,18 @@ class ChatRepairStatusResponse(BaseModel):
     indexing: RepairQueueResponse
     deletions: RepairQueueResponse
     conversation_deletions: RepairQueueResponse
+
+
+class ArchiveRepairRunResponse(BaseModel):
+    deletions_queued: int
+    messages_deleted: int
+    chunks_deleted: int
+    qdrant_deleted: int
+    delete_failed: int
+    deletions_pending: int
+    reindex_attempted: int
+    reindexed: int
+    reindex_failed: int
 
 
 class UserDataPurgeCreateRequest(BaseModel):
@@ -1199,6 +1213,36 @@ async def user_data_chat_history_status(
     return ChatRepairStatusResponse.model_validate(
         await archive.user_stats(user=req.user)
     )
+
+
+@app.post(
+    "/user_data/repair/status",
+    response_model=ChatRepairStatusResponse,
+    include_in_schema=False,
+    tags=["internal"],
+)
+async def user_data_repair_status(
+    _: None = Depends(_require_internal_service),
+) -> ChatRepairStatusResponse:
+    archive: ChatArchiveStore = app.state.chat_archive
+    return ChatRepairStatusResponse.model_validate(await archive.repair_stats())
+
+
+@app.post(
+    "/user_data/repair/run",
+    response_model=ArchiveRepairRunResponse,
+    include_in_schema=False,
+    tags=["internal"],
+)
+async def user_data_repair_run(
+    _: None = Depends(_require_internal_service),
+) -> ArchiveRepairRunResponse:
+    archive: ChatArchiveStore = app.state.chat_archive
+    result = await archive.prune(
+        retry_exhausted=True,
+        memory_store=app.state.memory,
+    )
+    return ArchiveRepairRunResponse.model_validate(result)
 
 
 @app.post(

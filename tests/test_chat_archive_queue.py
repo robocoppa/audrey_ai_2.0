@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from audrey.metrics import chat_archive_queue_events_total
 from audrey.pipeline.chat_archive import (
     ArchiveDelivery,
     ArchiveJob,
+    ChatArchiveClient,
     ChatArchiveQueue,
 )
 
@@ -282,3 +285,73 @@ async def test_maintenance_only_queue_purges_without_delivering(
         assert maintenance_client.calls == []
     finally:
         await maintenance.stop()
+
+
+async def test_admin_retry_makes_bounded_delivery_due_and_sanitizes_stats(
+    tmp_path: Path,
+):
+    client = _Client(
+        outcome=ArchiveDelivery.RETRY,
+        error="private upstream detail",
+    )
+    queue = _queue(
+        tmp_path / "archive-outbox.sqlite",
+        client,
+        retry_interval_s=3600.0,
+    )
+    await queue.start()
+    try:
+        await _enqueue(queue, archive_id="repair-job")
+        await _wait_for_attempt(queue)
+        for _ in range(200):
+            status = await queue.repair_stats()
+            if status["with_error"] == 1:
+                break
+            await asyncio.sleep(0.01)
+        else:
+            raise AssertionError("archive queue did not persist repair status")
+
+        assert status == {
+            "pending": 1,
+            "attempts": 1,
+            "with_error": 1,
+            "exhausted": 0,
+            "completed": 0,
+        }
+        assert "private upstream detail" not in str(status)
+
+        client.outcome = ArchiveDelivery.DELIVERED
+        client.error = ""
+        assert await queue.retry_now(limit=1) == 1
+        await _wait_for_pending(queue, 0)
+    finally:
+        await queue.stop()
+
+
+async def test_admin_sidecar_controls_use_hidden_paths_and_service_token():
+    response = SimpleNamespace(
+        status_code=200,
+        json=lambda: {"indexing": {}, "deletions": {}},
+    )
+    http = SimpleNamespace(post=AsyncMock(return_value=response))
+    credential = "test-value"
+    client = ChatArchiveClient(
+        http,  # type: ignore[arg-type]
+        service_token=credential,
+    )
+    registry = SimpleNamespace(
+        get=lambda _name: SimpleNamespace(server_url="http://custom-tools:8001"),
+    )
+
+    await client.repair_status(registry=registry)
+    await client.repair(registry=registry)
+
+    assert [call.args[0] for call in http.post.await_args_list] == [
+        "http://custom-tools:8001/user_data/repair/status",
+        "http://custom-tools:8001/user_data/repair/run",
+    ]
+    for call in http.post.await_args_list:
+        assert call.kwargs["headers"] == {
+            "X-Audrey-Service-Token": credential,
+        }
+        assert call.kwargs["json"] == {}

@@ -231,6 +231,17 @@ async def test_embed_failure_reindexes_after_restart(tmp_path: Path, monkeypatch
     assert result["index_failed"] == 1
     stats = await store.stats()
     assert stats["chunks_reindex_pending"] == 1
+    assert stats["chunks_reindex_attempts"] == 1
+    assert stats["chunks_reindex_with_error"] == 1
+    repair_status = await store.repair_stats()
+    assert repair_status["indexing"] == {
+        "pending": 1,
+        "attempts": 1,
+        "with_error": 1,
+        "exhausted": 0,
+        "completed": 0,
+    }
+    assert "last_error" not in str(repair_status)
     assert "injected embed failure" in stats["index_last_error"]
     await store.aclose()
 
@@ -368,6 +379,12 @@ async def test_failed_delete_survives_restart_and_is_hidden_from_search(
     assert stats["messages"] == 2
     assert stats["chunks"] == 1
     assert stats["deletions_pending"] == 1
+    assert stats["deletion_attempts"] == 1
+    assert stats["deletions_with_error"] == 1
+    repair_status = await store.repair_stats()
+    assert repair_status["deletions"]["pending"] == 1
+    assert repair_status["deletions"]["attempts"] == 1
+    assert repair_status["deletions"]["with_error"] == 1
     assert "injected delete failure" in stats["delete_last_error"]
     assert (
         await store.search(

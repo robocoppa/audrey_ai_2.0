@@ -13,6 +13,9 @@ Endpoints:
                                        OWUI; surgically clears their sessions
                                        without disturbing other users.
   GET  /v1/admin/auth/status         — cache size visibility.
+  GET  /v1/admin/repair-status       — aggregate durable repair counts.
+  POST /v1/admin/repair              — wake local repair owners and run one
+                                       bounded sidecar repair pass.
   POST /v1/admin/chat_archive/prune  — apply the chat archive's retention
                                        policy on demand (SQLite rows + Qdrant
                                        points older than the cutoff).
@@ -36,10 +39,11 @@ forget; the targeted endpoint cuts that to ~0s for a known-deleted user.
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from audrey.auth import (
     AuthedUser,
@@ -49,6 +53,7 @@ from audrey.auth import (
     require_admin,
 )
 from audrey.kb.reconcile import reconcile_once
+from audrey.routes.user_data import RepairQueueStatus, UserDataRepairStatus
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +73,48 @@ class AuthClearForUserResponse(BaseModel):
 
 class AuthStatusResponse(BaseModel):
     cached_entries: int
+
+
+class RepairTriggerComponent(BaseModel):
+    available: bool
+    accepted: bool
+
+
+class AdminRepairTriggerResponse(BaseModel):
+    schema_version: int = 1
+    status: Literal["accepted", "partial"]
+    file_deletions: RepairTriggerComponent
+    chat_delivery: RepairTriggerComponent
+    chat_archive: RepairTriggerComponent
+    account_purges: RepairTriggerComponent
+
+
+def _repair_queue(
+    value: dict | None = None,
+    *,
+    available: bool = True,
+) -> RepairQueueStatus:
+    if not available:
+        return RepairQueueStatus(available=False)
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=502, detail="repair_backend_invalid_response")
+    try:
+        return RepairQueueStatus.model_validate(value)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="repair_backend_invalid_response",
+        ) from exc
+
+
+def _repair_state(queues: tuple[RepairQueueStatus, ...]) -> str:
+    if any(queue.exhausted for queue in queues):
+        return "attention_required"
+    if any(not queue.available for queue in queues):
+        return "degraded"
+    if any(queue.pending for queue in queues):
+        return "repairing"
+    return "ready"
 
 
 @router.post("/auth/clear", response_model=AuthClearResponse)
@@ -103,6 +150,156 @@ async def auth_clear_for_user(
 async def auth_status(_: AuthedUser = Depends(require_admin)) -> AuthStatusResponse:
     """Quick visibility: how many entries the auth cache currently holds."""
     return AuthStatusResponse(cached_entries=cache_size())
+
+
+@router.get("/repair-status", response_model=UserDataRepairStatus)
+async def repair_status(
+    request: Request,
+    _: AuthedUser = Depends(require_admin),
+) -> UserDataRepairStatus:
+    """Global repair counts without user identities, payloads, or raw errors."""
+    uploads_db = getattr(request.app.state, "uploads_db", None)
+    file_stats = getattr(uploads_db, "file_deletion_stats", None)
+    file_deletions = (
+        _repair_queue(await file_stats())
+        if callable(file_stats)
+        else _repair_queue(available=False)
+    )
+    purge_stats = getattr(uploads_db, "data_purge_stats", None)
+    account_purges = (
+        _repair_queue(await purge_stats())
+        if callable(purge_stats)
+        else _repair_queue(available=False)
+    )
+
+    archive_queue = getattr(request.app.state, "archive_client", None)
+    delivery_stats = getattr(archive_queue, "repair_stats", None)
+    chat_delivery = (
+        _repair_queue(await delivery_stats())
+        if callable(delivery_stats)
+        else _repair_queue(available=False)
+    )
+
+    transport = getattr(request.app.state, "archive_transport", None)
+    remote_status = getattr(transport, "repair_status", None)
+    if callable(remote_status):
+        try:
+            remote = await remote_status(registry=request.app.state.tools)
+        except (httpx.HTTPError, RuntimeError, TimeoutError, ValueError):
+            remote = None
+    else:
+        remote = None
+    if remote is None:
+        chat_indexing = _repair_queue(available=False)
+        chat_deletions = _repair_queue(available=False)
+        conversation_deletions = _repair_queue(available=False)
+    else:
+        chat_indexing = _repair_queue(remote.get("indexing"))
+        chat_deletions = _repair_queue(remote.get("deletions"))
+        conversation_deletions = _repair_queue(
+            remote.get("conversation_deletions")
+        )
+
+    queues = (
+        file_deletions,
+        chat_delivery,
+        chat_indexing,
+        chat_deletions,
+        conversation_deletions,
+        account_purges,
+    )
+    return UserDataRepairStatus(
+        status=_repair_state(queues),
+        file_deletions=file_deletions,
+        chat_delivery=chat_delivery,
+        chat_indexing=chat_indexing,
+        chat_deletions=chat_deletions,
+        conversation_deletions=conversation_deletions,
+        account_purges=account_purges,
+    )
+
+
+@router.post(
+    "/repair",
+    response_model=AdminRepairTriggerResponse,
+    status_code=202,
+)
+async def repair(
+    request: Request,
+    me: AuthedUser = Depends(require_admin),
+) -> AdminRepairTriggerResponse:
+    """Wake local owners and run one bounded sidecar repair pass."""
+    file_worker = getattr(request.app.state, "file_deletions", None)
+    file_wake = getattr(file_worker, "wake", None)
+    file_component = RepairTriggerComponent(
+        available=callable(file_wake),
+        accepted=callable(file_wake),
+    )
+    if callable(file_wake):
+        file_wake()
+
+    archive_queue = getattr(request.app.state, "archive_client", None)
+    retry_delivery = getattr(archive_queue, "retry_now", None)
+    delivery_component = RepairTriggerComponent(
+        available=callable(retry_delivery),
+        accepted=callable(retry_delivery),
+    )
+    if callable(retry_delivery):
+        await retry_delivery()
+
+    purge_coordinator = getattr(request.app.state, "user_data_purges", None)
+    purge_wake = getattr(purge_coordinator, "wake", None)
+    purge_component = RepairTriggerComponent(
+        available=callable(purge_wake),
+        accepted=callable(purge_wake),
+    )
+    if callable(purge_wake):
+        purge_wake()
+
+    transport = getattr(request.app.state, "archive_transport", None)
+    remote_repair = getattr(transport, "repair", None)
+    remote_available = callable(remote_repair)
+    remote_accepted = False
+    if callable(remote_repair):
+        try:
+            await remote_repair(registry=request.app.state.tools)
+        except (httpx.HTTPError, RuntimeError, TimeoutError, ValueError):
+            pass
+        else:
+            remote_accepted = True
+    remote_component = RepairTriggerComponent(
+        available=remote_available and remote_accepted,
+        accepted=remote_accepted,
+    )
+
+    components = (
+        file_component,
+        delivery_component,
+        remote_component,
+        purge_component,
+    )
+    status_value = (
+        "accepted"
+        if all(item.available and item.accepted for item in components)
+        else "partial"
+    )
+    log.warning(
+        "admin: repair triggered by %s status=%s local_file=%s "
+        "local_delivery=%s sidecar=%s account_purge=%s",
+        me.email,
+        status_value,
+        file_component.accepted,
+        delivery_component.accepted,
+        remote_component.accepted,
+        purge_component.accepted,
+    )
+    return AdminRepairTriggerResponse(
+        status=status_value,
+        file_deletions=file_component,
+        chat_delivery=delivery_component,
+        chat_archive=remote_component,
+        account_purges=purge_component,
+    )
 
 
 @router.post("/chat_archive/prune")

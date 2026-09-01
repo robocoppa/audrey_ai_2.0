@@ -2015,6 +2015,24 @@ class ChatArchiveStore:
                 """,
                 (self._max_retry_attempts,),
             )
+            reindex_attempts = await scalar(
+                """
+                SELECT COALESCE(SUM(c.index_attempts), 0)
+                FROM archive_chunks AS c
+                LEFT JOIN archive_deletion_outbox AS d ON d.chunk_id = c.chunk_id
+                WHERE c.indexed_at IS NULL AND d.chunk_id IS NULL
+                """
+            )
+            reindex_with_error = await scalar(
+                """
+                SELECT COUNT(*) FROM archive_chunks AS c
+                LEFT JOIN archive_deletion_outbox AS d ON d.chunk_id = c.chunk_id
+                WHERE c.indexed_at IS NULL
+                  AND c.index_last_error IS NOT NULL
+                  AND length(c.index_last_error) > 0
+                  AND d.chunk_id IS NULL
+                """
+            )
             deletions_pending = await scalar(
                 "SELECT COUNT(*) FROM archive_deletion_outbox"
             )
@@ -2024,6 +2042,16 @@ class ChatArchiveStore:
                 WHERE attempts >= ?
                 """,
                 (self._max_retry_attempts,),
+            )
+            deletion_attempts = await scalar(
+                "SELECT COALESCE(SUM(attempts), 0) "
+                "FROM archive_deletion_outbox"
+            )
+            deletions_with_error = await scalar(
+                """
+                SELECT COUNT(*) FROM archive_deletion_outbox
+                WHERE last_error IS NOT NULL AND length(last_error) > 0
+                """
             )
             conversation_deletions_pending = await scalar(
                 """
@@ -2063,14 +2091,45 @@ class ChatArchiveStore:
             "chunks_unindexed": unindexed,
             "chunks_reindex_pending": reindex_pending,
             "chunks_reindex_exhausted": reindex_exhausted,
+            "chunks_reindex_attempts": reindex_attempts,
+            "chunks_reindex_with_error": reindex_with_error,
             "deletions_pending": deletions_pending,
             "deletions_exhausted": deletions_exhausted,
+            "deletion_attempts": deletion_attempts,
+            "deletions_with_error": deletions_with_error,
             "conversation_deletions_pending": conversation_deletions_pending,
             "conversation_deletions_completed": conversation_deletions_completed,
             "index_last_attempt_at": str(index_last[0]) if index_last else "",
             "index_last_error": str(index_last[1] or "") if index_last else "",
             "delete_last_attempt_at": str(delete_last[0]) if delete_last else "",
             "delete_last_error": str(delete_last[1] or "") if delete_last else "",
+        }
+
+    async def repair_stats(self) -> dict[str, dict[str, int]]:
+        """Global queue counts for the admin surface, without raw errors."""
+        stats = await self.stats()
+        return {
+            "indexing": {
+                "pending": stats["chunks_reindex_pending"],
+                "attempts": stats["chunks_reindex_attempts"],
+                "with_error": stats["chunks_reindex_with_error"],
+                "exhausted": stats["chunks_reindex_exhausted"],
+                "completed": 0,
+            },
+            "deletions": {
+                "pending": stats["deletions_pending"],
+                "attempts": stats["deletion_attempts"],
+                "with_error": stats["deletions_with_error"],
+                "exhausted": stats["deletions_exhausted"],
+                "completed": 0,
+            },
+            "conversation_deletions": {
+                "pending": stats["conversation_deletions_pending"],
+                "attempts": 0,
+                "with_error": 0,
+                "exhausted": 0,
+                "completed": stats["conversation_deletions_completed"],
+            },
         }
 
 

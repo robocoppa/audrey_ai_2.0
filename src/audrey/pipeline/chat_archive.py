@@ -58,6 +58,8 @@ log = logging.getLogger(__name__)
 _ARCHIVE_HOST_TOOL = "chat_history_search"
 _ARCHIVE_WRITE_PATH = "/chat_history/archive"
 _USER_PURGE_PATH = "/user_data/purge"
+_REPAIR_STATUS_PATH = "/user_data/repair/status"
+_REPAIR_RUN_PATH = "/user_data/repair/run"
 
 # Cap stored content so a single runaway response can't blow up the
 # archive row size. Long answers still get archived — just clipped at
@@ -388,6 +390,56 @@ class ChatArchiveClient:
             raise RuntimeError("sidecar purge returned an invalid response")
         return value
 
+    async def _request_repair_control(
+        self,
+        *,
+        registry: ToolRegistry | None,
+        path: str,
+        operation: str,
+    ) -> dict[str, Any]:
+        host = self.host_url(registry)
+        if host is None:
+            raise RuntimeError("chat_history_search is not registered")
+        kwargs: dict[str, Any] = {
+            "json": {},
+            "timeout": self._timeout_s,
+        }
+        if self._service_headers:
+            kwargs["headers"] = self._service_headers
+        response = await self._http.post(f"{host}{path}", **kwargs)
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"sidecar {operation} returned HTTP {response.status_code}"
+            )
+        value = response.json()
+        if not isinstance(value, dict):
+            raise RuntimeError(f"sidecar {operation} returned an invalid response")
+        return value
+
+    async def repair_status(
+        self,
+        *,
+        registry: ToolRegistry | None,
+    ) -> dict[str, Any]:
+        """Return global sidecar repair counts through service authentication."""
+        return await self._request_repair_control(
+            registry=registry,
+            path=_REPAIR_STATUS_PATH,
+            operation="repair status",
+        )
+
+    async def repair(
+        self,
+        *,
+        registry: ToolRegistry | None,
+    ) -> dict[str, Any]:
+        """Run one bounded sidecar repair pass, including exhausted work."""
+        return await self._request_repair_control(
+            registry=registry,
+            path=_REPAIR_RUN_PATH,
+            operation="repair",
+        )
+
     async def archive_turn(
         self,
         *,
@@ -717,6 +769,58 @@ class ChatArchiveQueue:
             count = int((await cursor.fetchone())[0])
             await cursor.close()
         return count
+
+    async def retry_now(self, *, limit: int = 50) -> int:
+        """Make one bounded delivery batch due now and wake its sole worker."""
+        if self._db is None or not self._accepting:
+            return 0
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                "SELECT archive_id FROM archive_write_outbox "
+                "ORDER BY next_attempt_at, created_at LIMIT ?",
+                (max(1, limit),),
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+            if rows:
+                await self._db.executemany(
+                    "UPDATE archive_write_outbox SET next_attempt_at = ? "
+                    "WHERE archive_id = ?",
+                    [(_now_iso(), str(row[0])) for row in rows],
+                )
+                await self._db.commit()
+        if rows:
+            self._signal("admin-repair")
+        return len(rows)
+
+    async def repair_stats(self) -> dict[str, int]:
+        """Global delivery repair counts without payloads or raw errors."""
+        empty = {
+            "pending": 0,
+            "attempts": 0,
+            "with_error": 0,
+            "exhausted": 0,
+            "completed": 0,
+        }
+        if self._db is None:
+            return empty
+        async with self._db_lock:
+            cursor = await self._db.execute(
+                """
+                SELECT COUNT(*), COALESCE(SUM(attempts), 0),
+                       COALESCE(SUM(CASE WHEN length(last_error) > 0
+                                         THEN 1 ELSE 0 END), 0)
+                FROM archive_write_outbox
+                """
+            )
+            pending, attempts, with_error = await cursor.fetchone()
+            await cursor.close()
+        return {
+            **empty,
+            "pending": int(pending),
+            "attempts": int(attempts),
+            "with_error": int(with_error),
+        }
 
     async def user_stats(self, user_id: str) -> dict[str, int]:
         """Current-user delivery backlog without returning payloads or errors."""
