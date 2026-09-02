@@ -81,19 +81,20 @@ def _isolate_cache():
     clear_auth_cache()
 
 
-def _fake_request(owui_url: str = "http://open-webui:8080"):
+def _fake_request(
+    owui_url: str = "http://open-webui:8080",
+    *,
+    application_store=None,
+):
     # FastAPI passes a `Request` whose `.app.state.cfg.env.owui_url`
     # is the OWUI base URL. Build the smallest object graph that exposes
     # that attribute path.
-    return SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                cfg=SimpleNamespace(
-                    env=SimpleNamespace(owui_url=owui_url)
-                )
-            )
-        )
+    state = SimpleNamespace(
+        cfg=SimpleNamespace(env=SimpleNamespace(owui_url=owui_url))
     )
+    if application_store is not None:
+        state.application_store = application_store
+    return SimpleNamespace(app=SimpleNamespace(state=state))
 
 
 # ─── AuthedUser shape (Phase 26 regression) ────────────────────────────
@@ -240,6 +241,54 @@ async def test_require_user_caches_subsequent_calls(monkeypatch):
     await require_user(req, authorization="Bearer same-token")
     await require_user(req, authorization="Bearer same-token")
     assert call_count == 1, "second call should be served from cache"
+
+
+async def test_require_user_binds_stable_audrey_principal(monkeypatch, tmp_path):
+    from audrey.app_state import ApplicationStore
+
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    _patch_async_client(monkeypatch, _FakeResponse(200, body={
+        "id": "owui-stable-subject",
+        "email": "alice@example.com",
+        "name": "Alice",
+        "role": "user",
+    }))
+    try:
+        me = await require_user(
+            _fake_request(application_store=store),
+            authorization="Bearer identity-token",
+        )
+    finally:
+        store.close()
+
+    assert me.principal is not None
+    assert me.principal.user_id.startswith("usr_")
+    assert me.principal.storage_namespace == "alice@example.com"
+    assert me.principal.provider_subject == "owui-stable-subject"
+
+
+async def test_require_user_rejects_missing_stable_subject_when_store_is_active(
+    monkeypatch,
+    tmp_path,
+):
+    from audrey.app_state import ApplicationStore
+
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    _patch_async_client(monkeypatch, _FakeResponse(200, body={
+        "email": "alice@example.com",
+        "role": "user",
+    }))
+    try:
+        with pytest.raises(HTTPException) as exc:
+            await require_user(
+                _fake_request(application_store=store),
+                authorization="Bearer missing-subject-token",
+            )
+    finally:
+        store.close()
+
+    assert exc.value.status_code == 502
+    assert exc.value.detail == "Auth provider response missing stable subject."
 
 
 # ─── require_admin ─────────────────────────────────────────────────────

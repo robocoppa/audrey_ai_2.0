@@ -357,6 +357,19 @@ def _validate_deep_panel_pools(merged: dict[str, Any]) -> None:
         raise ValueError(f"Invalid deep-panel configuration:{bullets}")
 
 
+def _validate_application(merged: dict[str, Any]) -> None:
+    """Reject native application-state settings that cannot be opened safely."""
+
+    application = merged.get("application")
+    if application is None:
+        return
+    if not isinstance(application, dict):
+        raise ValueError("Invalid application configuration: expected an object")
+    sqlite_path = application.get("sqlite_path", "/data/audrey_app.sqlite")
+    if not isinstance(sqlite_path, str) or not sqlite_path.strip():
+        raise ValueError("Invalid application.sqlite_path: expected a path")
+
+
 def _validate_upload_limits(merged: dict[str, Any]) -> None:
     """Reject a per-user quota smaller than the largest permitted single upload.
 
@@ -497,6 +510,7 @@ def get_config() -> Config:
     yaml_cfg = _load_yaml(cfg_path)
     cfg = Config(yaml_cfg, env)
     _validate_deep_panel_pools(cfg.raw)
+    _validate_application(cfg.raw)
     _validate_upload_limits(cfg.raw)
     _validate_chat_archive(cfg.raw)
     _validate_file_deletion(cfg.raw)
@@ -513,6 +527,7 @@ def reload_config() -> Config:
 __all__ = [
     "Config",
     "EnvOverrides",
+    "_validate_application",
     "_validate_readiness",
     "get_config",
     "reload_config",

@@ -63,6 +63,14 @@ router:
   # honored. Set 0 to always call the router. Conservative default.
   skip_llm_under_tokens: 8
 
+# ─── Native application state ─────────────────────────────────────────
+# Additive Phase 2 authority for stable Audrey users and provider bindings.
+# Existing OWUI users keep their exact current email as storage_namespace, so
+# this database can be removed on rollback without renaming deployed files,
+# collections, memories, or archive rows.
+application:
+  sqlite_path: "/data/audrey_app.sqlite"
+
 # ─── Model registry ────────────────────────────────────────────────────
 # Per task type, ranked by priority (higher = preferred when healthy).
 # Speed/quality are informational hints used by the planner when building panels.

@@ -1,6 +1,6 @@
 # Campaign 3 Phase 2 — Audrey application and web UI
 
-**Status:** Planned. Begins after the Campaign 3 Phase 1 completion gate.
+**Status:** In progress. Milestone 2A began on 2026-09-02; slice 2A.1 is laptop-complete and awaits its user-run Unraid smoke.
 
 ## Goal
 
@@ -11,6 +11,32 @@ The native web client should make chat, tools, files, memory, modes, sources,
 and later skills feel like one Audrey system. Open WebUI remains a migration
 client while the native surface reaches parity; it is not the future source of
 identity, conversation state, prompt behavior, or tool continuation.
+
+## Current implementation slice
+
+### 2A.1 — provider-neutral identity foundation
+
+Laptop implementation and verification are complete; deployed verification is
+still pending. This slice adds:
+
+- a frozen `Principal` with Audrey-owned user and storage identifiers;
+- an Audrey application database with versioned SQLite/WAL migrations for users
+  and external provider identities;
+- an OWUI migration adapter keyed by OWUI subject rather than email similarity;
+- exact legacy email namespaces for first-seen OWUI users, stable across later
+  email changes, with implicit account merges refused;
+- authenticated `GET /api/me` exposing the stable Audrey id and safe profile
+  fields without provider subjects or storage namespaces; and
+- fail-fast validation for the application database path.
+
+Existing `/v1` routes remain email-keyed in this rollback-safe first slice. No
+files, memories, collections, archives, or OpenAI-compatible behavior have been
+migrated yet. The local gate is 2,613 passing tests, scoped ruff and compilation
+clean, valid YAML, and a lesson-link scan with zero broken links.
+
+The next gate is a two-account Unraid smoke proving stable repeat identity,
+dot-versus-dash separation, restart persistence, and unchanged `/v1` file
+behavior.
 
 ## Decision
 

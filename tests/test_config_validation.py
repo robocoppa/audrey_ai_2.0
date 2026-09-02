@@ -23,6 +23,7 @@ from audrey.config import (
     Config,
     EnvOverrides,
     _load_yaml,
+    _validate_application,
     _validate_chat_archive,
     _validate_deep_panel_pools,
     _validate_file_deletion,
@@ -311,6 +312,7 @@ def test_committed_config_yaml_passes_boot_validation():
     """
     cfg = Config(_load_yaml(_REPO_ROOT / "config.yaml"), EnvOverrides())
     _validate_deep_panel_pools(cfg.raw)  # must not raise
+    _validate_application(cfg.raw)
     _validate_chat_archive(cfg.raw)
 
 
@@ -723,6 +725,18 @@ class TestUploadLimitCoherence:
         raw = _load_yaml(_REPO_ROOT / "config.yaml")
         quota = raw["kb"]["max_user_bytes"]
         assert quota >= 10 * 300 * 1024 * 1024
+
+
+# ─── _validate_application ───────────────────────────────────────────
+
+@pytest.mark.parametrize("application", ["not-an-object", "", [], {"sqlite_path": ""}, {"sqlite_path": 42}])
+def test_invalid_application_settings_fail_at_boot(application):
+    with pytest.raises(ValueError, match="application"):
+        _validate_application({"application": application})
+
+
+def test_committed_application_settings_are_valid():
+    _validate_application(_load_yaml(_REPO_ROOT / "config.yaml"))
 
 
 # ─── _validate_chat_archive ──────────────────────────────────────────

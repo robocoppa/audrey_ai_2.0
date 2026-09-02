@@ -1,8 +1,8 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress as of 2026-09-01. Waves 1A through 1E.2 are
-complete and Unraid-verified. Wave 1E.3 is implemented and hermetically
-verified; its Unraid configuration/inventory gate is next.
+**Status:** Complete as of 2026-09-01. Every runtime-changing wave is
+Unraid-verified; Wave 1F closed by bounded re-audit without another source
+refactor.
 
 ## Goal
 
@@ -336,15 +336,19 @@ shared-client chat returned exactly `1E2-READY`, and archive delivery converged
 at 1/1 with depth zero. Scoped ruff, compilation, offline lock, and diff checks
 are clean; lesson links remain at zero broken with existing drift deferred.
 
-**1E.3 implementation status (2026-09-01): hermetically verified; Unraid
-configuration/inventory smoke pending.** The example environment now leaves
+**1E.3 status (2026-09-01): complete and Unraid-verified.** The example
+environment now leaves
 YAML-owned settings as commented opt-ins and removes inert or superseded knobs.
 The README points to the live OpenAPI-derived tool inventory, its complete
 virtual-model table is source-guarded, and FastAPI derives its model count from
 the route constant. Stale discovery, latency, network-surface, and security-plan
 statements are corrected. Three new drift guards pass with all 2,595 hermetic
 tests; scoped ruff, compilation, YAML, offline lock, and diff checks are clean.
-Lesson links remain at zero broken with existing drift deferred.
+Lesson links remain at zero broken with existing drift deferred. On Unraid, the
+active override audit and startup override log were empty, readiness returned
+`ready` with 10/10 available tools and empty queues, all seven virtual models
+were present, rediscovery returned 10 declared and 10 discovered tools, and the
+generated OpenAPI description reported the source-derived seven-model count.
 
 Gate:
 
@@ -364,6 +368,18 @@ an overly generic framework.
 
 This wave is complete when the affected behavior tests pass unchanged and the
 result reduces duplicate state transitions or policy declarations.
+
+**Status (2026-09-01): complete; no additional production refactor.** The
+re-audit found the justified reductions already landed with the repaired
+behavior: `StorageLifecycle` owns quota/reservation transitions,
+`StreamStageRunner` owns deep/research task and terminal mechanics, the tool
+catalogue owns capability policy, and unsupported archive sizing is rejected
+by configuration validation. A mechanical split of `routes/files.py` or
+`deep_panel.py` would relocate stable policy without removing another defect,
+so it is explicitly not part of this wave. The 49 focused lifecycle, stream,
+configuration, and archive contracts pass, followed by all 2,595 hermetic
+tests. There is no separate Unraid deploy for a no-runtime-delta review; each
+constituent abstraction already passed its owning wave live gate.
 
 ## Sequence
 
@@ -385,9 +401,16 @@ accepted with a documented disposition in the private engineering record.
 
 ## Phase 1 completion gate
 
+**Passed 2026-09-01.** Every H/M finding is closed, all runtime-changing waves
+have user-confirmed deployment evidence, and the final hermetic suite passes.
+The existing lesson-citation drift has zero broken links and remains an
+explicit user-directed documentation follow-up rather than an implicit
+platform or UI boundary deferral.
+
 - All planned waves have laptop and user-confirmed deployment evidence.
 - Full hermetic tests and changed-file lint pass.
-- Lesson-link checks report no required drift fixes.
+- Lesson-link checks have zero broken links; existing citation drift has the
+  explicit user-directed disposition above.
 - Restart, cancellation, and failure-injection paths converge cleanly.
 - Runtime status, configuration, and public documentation agree.
 - No unresolved platform-boundary item is being deferred implicitly into the

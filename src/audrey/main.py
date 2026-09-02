@@ -18,6 +18,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import Response
 
 from audrey import __version__
+from audrey.app_state import ApplicationStore
 from audrey.auth import AuthedUser, require_admin
 from audrey.config import get_config
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
@@ -36,6 +37,7 @@ from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.graph import build_graph
 from audrey.readiness import ReadinessCollector
 from audrey.routes.admin import router as admin_router
+from audrey.routes.app import router as application_router
 from audrey.routes.files import router as files_router
 from audrey.routes.inflight import UserInflightRegistry
 from audrey.routes.kb import router as kb_router
@@ -71,6 +73,16 @@ async def lifespan(app: FastAPI):
                     ", ".join(f"{k}={v!r}" for k, v in sorted(overrides.items())))
     else:
         log.info("config: no env overrides; config.yaml is authoritative")
+
+    application_cfg = cfg.raw.get("application", {}) or {}
+    application_store = ApplicationStore(
+        application_cfg.get("sqlite_path", "/data/audrey_app.sqlite")
+    )
+    log.info(
+        "application_store: ready sqlite=%s schema=%d",
+        application_store.path,
+        application_store.schema_version,
+    )
 
     default_timeout = float(cfg.timeouts.get("medium", 180))
     ollama = OllamaClient(cfg.env.ollama_host, default_timeout_s=default_timeout)
@@ -206,6 +218,7 @@ async def lifespan(app: FastAPI):
         await reconciler.start()
 
     app.state.cfg = cfg
+    app.state.application_store = application_store
     app.state.ollama = ollama
     app.state.registry = registry
     app.state.health = health
@@ -311,6 +324,7 @@ async def lifespan(app: FastAPI):
         await user_data_purges.stop()
         await archive_queue.stop()
         await file_deletions.stop()
+        application_store.close()
         uploads_db.close()
         qdrant.close()
         await ollama.aclose()
@@ -383,7 +397,8 @@ app = FastAPI(
         "Tool dispatch uses the declarative catalogue at authenticated "
         "/v1/tools, discovered from custom-tools OpenAPI. Per-user fair "
         "scheduling at the local-GPU "
-        "gate, OWUI-backed auth, Prometheus metrics at `/metrics`, KB "
+        "gate, provider-neutral Audrey identity with an OWUI migration "
+        "adapter, Prometheus metrics at `/metrics`, KB "
         "watcher + periodic reconcile keeping global collections drift-free, "
         "streaming progress banners + per-worker tools-used footer on "
         "streamed responses."
@@ -392,6 +407,7 @@ app = FastAPI(
 )
 
 app.include_router(openai_router)
+app.include_router(application_router)
 app.include_router(kb_router)
 app.include_router(files_router)
 app.include_router(media_router)

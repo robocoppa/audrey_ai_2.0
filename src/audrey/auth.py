@@ -1,9 +1,10 @@
-"""OWUI-backed authentication.
+"""Authentication adapters and provider-neutral Audrey principal resolution.
 
 Validates `Authorization: Bearer <jwt>` tokens by proxying them to
-Open WebUI's session endpoint (`GET /api/v1/auths/`, trailing slash
-load-bearing — OWUI 0.9.2 specifically). OWUI is the single source of
-identity truth; Audrey never issues or signs its own tokens.
+Open WebUI session endpoint (`GET /api/v1/auths/`, trailing slash
+load-bearing — OWUI 0.9.2 specifically). During native-application migration,
+OWUI proves the external identity while Audrey owns the stable user id and
+private-storage namespace.
 
 Flow:
     browser --Bearer <jwt>--> cloudflared --same-origin--> audrey
@@ -16,7 +17,12 @@ Flow:
                                                             ▼
                                               {id, email, role, ...}
                                                             │
-                                            AuthedUser(email, role, owui_id)
+                                                            ▼
+                                              ApplicationStore resolves
+                                              provider subject -> user_id
+                                                            │
+                                                            ▼
+                                              AuthedUser(..., principal)
 
 Token results are cached per-token for `_TTL_S` seconds (default 30s)
 to spare OWUI on bursty dashboards. The cache is a plain dict with an
@@ -46,6 +52,8 @@ from dataclasses import dataclass
 import httpx
 from fastapi import Depends, Header, HTTPException, Request
 
+from audrey.app_state import IdentityConflictError, InvalidIdentityError
+from audrey.identity import Principal
 from audrey.metrics import auth_cache_size as _auth_cache_size_gauge
 
 log = logging.getLogger(__name__)
@@ -63,15 +71,18 @@ _ALLOWED_ROLES: frozenset[str] = frozenset({"user", "admin"})
 
 @dataclass(slots=True)
 class AuthedUser:
-    """Identity returned from OWUI. `email` is the canonical user id.
+    """Compatibility identity returned from the current OWUI adapter.
 
-    Per-user memory and per-user uploads both key on this email; never
-    introduce an `id` field on this dataclass — `email` is load-bearing.
+    Existing `/v1` memory and upload routes still key on exact ``email`` during
+    migration. Native `/api` resources consume ``principal`` and its stable
+    Audrey user id. There is deliberately no ambiguous ``id`` field here.
     """
 
     email: str
     role: str
     owui_id: str
+    display_name: str = ""
+    principal: Principal | None = None
 
 
 @dataclass(slots=True)
@@ -127,7 +138,47 @@ async def _probe_owui(owui_url: str, token: str) -> AuthedUser:
         email=str(email),
         role=role,
         owui_id=str(body.get("id") or ""),
+        display_name=str(body.get("name") or body.get("display_name") or ""),
     )
+
+
+async def _bind_audrey_principal(
+    request: Request,
+    user: AuthedUser,
+) -> AuthedUser:
+    """Map OWUI evidence to one durable Audrey account when the store exists."""
+
+    store = getattr(request.app.state, "application_store", None)
+    if store is None:
+        return user
+    if not user.owui_id:
+        raise HTTPException(
+            status_code=502,
+            detail="Auth provider response missing stable subject.",
+        )
+    try:
+        user.principal = await store.resolve_external_identity(
+            provider="owui",
+            subject=user.owui_id,
+            email=user.email,
+            display_name=user.display_name,
+            role=user.role,
+            auth_method="owui_bearer",
+            legacy_storage_namespace=user.email,
+        )
+    except InvalidIdentityError as exc:
+        log.error("auth: invalid identity evidence from OWUI: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail="Auth provider returned invalid identity evidence.",
+        ) from exc
+    except IdentityConflictError as exc:
+        log.error("auth: refusing implicit account merge: %s", exc)
+        raise HTTPException(
+            status_code=409,
+            detail="Audrey identity binding conflict.",
+        ) from exc
+    return user
 
 
 async def require_user(
@@ -152,13 +203,31 @@ async def require_user(
         return cached[1]
 
     owui_url = request.app.state.cfg.env.owui_url
-    user = await _probe_owui(owui_url, token)
+    user = await _bind_audrey_principal(
+        request,
+        await _probe_owui(owui_url, token),
+    )
 
     _cache[token] = (now, user)
     _auth_cache_size_gauge.set(len(_cache))
     if len(_cache) > _SWEEP_AT:
         _sweep_cache(now)
     return user
+
+
+async def require_principal(
+    me: AuthedUser = Depends(require_user),
+) -> Principal:
+    """Resolve native application routes to one active Audrey principal."""
+
+    if me.principal is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Audrey application identity is not initialized.",
+        )
+    if me.principal.status != "active":
+        raise HTTPException(status_code=403, detail="Audrey account is disabled.")
+    return me.principal
 
 
 async def require_admin(me: AuthedUser = Depends(require_user)) -> AuthedUser:
@@ -251,7 +320,7 @@ def cache_size() -> int:
 
 
 __all__ = [
-    "AuthedUser", "KBCaller", "require_user", "require_admin",
+    "AuthedUser", "KBCaller", "require_user", "require_principal", "require_admin",
     "verify_service_token", "resolve_kb_caller", "require_service",
     "clear_auth_cache", "clear_auth_cache_for_email", "cache_size",
 ]
