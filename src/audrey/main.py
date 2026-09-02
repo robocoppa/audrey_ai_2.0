@@ -40,6 +40,7 @@ from audrey.routes.files import router as files_router
 from audrey.routes.inflight import UserInflightRegistry
 from audrey.routes.kb import router as kb_router
 from audrey.routes.media import router as media_router
+from audrey.routes.openai import VIRTUAL_MODELS
 from audrey.routes.openai import router as openai_router
 from audrey.routes.upload_ui import router as upload_ui_router
 from audrey.routes.user_data import router as user_data_router
@@ -377,14 +378,11 @@ app = FastAPI(
     description=(
         "OpenAI-compatible orchestrator over Ollama (local + cloud-bridge "
         "models) with a shared LangGraph pipeline: classify → complexity "
-        "gate → fast path or planner → deep panel → synth → reflect. Six "
-        "virtual models — `audrey_deep`/`audrey_cloud`/`audrey_local` (always "
-        "deep, different pools), `audrey_research` (always deep, staged "
-        "research → verify → write for grounded answers), `audrey_auto` "
-        "(adaptive), `audrey_fast` (always fast, no escalation). Tool dispatch "
-        "via custom-tools (Brave "
-        "web search, Qdrant text + CLIP-image KB, per-user memory, per-user "
-        "chat-history search). Per-user fair scheduling at the local-GPU "
+        "gate → fast path or planner → deep panel → synth → reflect. "
+        f"{len(VIRTUAL_MODELS)} virtual models are listed by /v1/models. "
+        "Tool dispatch uses the declarative catalogue at authenticated "
+        "/v1/tools, discovered from custom-tools OpenAPI. Per-user fair "
+        "scheduling at the local-GPU "
         "gate, OWUI-backed auth, Prometheus metrics at `/metrics`, KB "
         "watcher + periodic reconcile keeping global collections drift-free, "
         "streaming progress banners + per-worker tools-used footer on "

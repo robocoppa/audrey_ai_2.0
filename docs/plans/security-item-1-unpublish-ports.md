@@ -1,12 +1,16 @@
 # Security Remediation — Item 1: Unpublish host ports
 
-_Status: **IN PROGRESS** — started 2026-07-18_
+_Status: **CLOSED / SUPERSEDED** — the original no-port strategy was not the final design._
+
+Audrey port 8000 was later restored for authenticated LAN clients such as
+Hermes after the KB routes gained user/service-token authentication.
+custom-tools remains unpublished. The working log below records the discarded
+Strategy A and is retained only as history, not as a deploy runbook.
 
 This is the working log for Item 1 of the security review remediation plan
 ([`security-review-remediation-plan.md`](security-review-remediation-plan.md) —
 the master index of all four findings and their sequencing). It captures the
-plan, the decisions, the exact changes, and the verification steps. Update it as
-work proceeds — it doubles as the deploy runbook for this change.
+plan, the decisions, the exact changes, and the verification steps. It originally doubled as the deploy runbook for that discarded change.
 
 ## Finding being addressed
 

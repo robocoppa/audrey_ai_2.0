@@ -4,9 +4,10 @@ Merges two sources (env wins):
   1. `config.yaml` at the repo root (or `AUDREY_CONFIG` env var)
   2. Environment variables listed in `EnvOverrides` (12-factor friendly)
 
-`config.yaml` is the source of truth for the model registry and pipeline
-knobs — see the top of that file for the authoritative schema. Env vars
-are only for deployment-specific things (ports, URLs, secrets).
+config.yaml is the source of truth for the model registry and pipeline
+knobs. Explicit environment overrides exist for deployment addresses and
+short-lived experiments; every override that displaces YAML is recorded and
+logged at startup.
 """
 
 from __future__ import annotations

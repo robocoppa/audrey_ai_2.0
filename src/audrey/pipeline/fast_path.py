@@ -493,8 +493,9 @@ async def run_fast_path(
     # tool selection is 5/5 in ALL THREE thinking states, so thinking buys
     # nothing on the ReAct branch and costs ~0.7s PER ROUND. On prose it buys
     # qwen3.8 +4/125 (116 thinking-on vs 112 off, both suites, --repeat 5) for
-    # ~0.7s ONCE, including the `9.11 > 9.9` flip it makes 3/5 with thinking
-    # off. ⛔ Do not collapse these back into one flag without re-measuring
+    # ~4.0s once (6.25s vs 2.29s mean total), including the 9.11 > 9.9
+    # flip it makes 3/5 with thinking off. ⛔ Do not collapse these back into
+    # one flag without re-measuring
     # BOTH branches — a prose-only probe justified the wrong thing once already
     # (see `_think`).
     # Defaults to `no_thinking` so a config predating `no_thinking_prose` keeps

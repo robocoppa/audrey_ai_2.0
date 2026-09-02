@@ -2,12 +2,21 @@
 
 _Created 2026-07-18. Source: whole-project security review, 2026-07-18._
 
+**Current status (2026-09-01): closed as an active plan.** The controls are
+complete and Unraid-verified: Audrey port 8000 is deliberately LAN-published
+for authenticated clients after its KB routes gained user/service-token auth;
+custom-tools remains unpublished; exact-user collection filtering is enforced;
+and the writable services run as non-root UID 99:GID 100. The image-fetch DNS
+rebinding gap remains an accepted low-risk residual behind authenticated access.
+The original sequence below is retained as historical decision context and is
+not the current deploy runbook.
+
 This is the master plan for the security review findings. Each work item has
 its own detail doc as it's picked up; this file is the index + sequencing +
 risk assessment. Per-item docs:
 
 - Item 1 → [`security-item-1-unpublish-ports.md`](security-item-1-unpublish-ports.md)
-  (**IN PROGRESS** — working-tree changes done, awaiting on-box verification)
+  (**CLOSED** — final network and route controls are deployed and verified)
 
 ## Threat model context
 

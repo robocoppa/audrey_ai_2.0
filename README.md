@@ -49,11 +49,8 @@ Open WebUI ──[Cloudflare Tunnel]──> audrey-ai ─────> Ollama (l
                                        │             │
                                        │             └─ both 3090 Ti GPUs
                                        │
-                                       ├─> custom-tools (7 OpenAPI endpoints)
-                                       │     web_search, kb_search,
-                                       │     kb_image_search, memory_store,
-                                       │     memory_recall, memory_search,
-                                       │     chat_history_search
+                                       ├─> custom-tools (OpenAPI-discovered model tools;
+                                       │     live inventory at GET /v1/tools)
                                        │
                                        ├─> Qdrant (text vectors + CLIP images,
                                        │   per-user collections + global KB
@@ -68,20 +65,26 @@ Open WebUI ──[Cloudflare Tunnel]──> audrey-ai ─────> Ollama (l
                                   + OWUI-backed auth on all routes
 ```
 
-All containers sit on Docker network `ollama-net`. Only Open WebUI is exposed
-publicly via the Cloudflare Tunnel; every other service is internal.
+All containers sit on Docker network `ollama-net`. Open WebUI is the only
+internet-facing service. Audrey is also published on LAN port 8000 for
+authenticated API clients such as Hermes; custom-tools and the remaining
+backends stay internal.
 
 ## Virtual models
 
-Five virtual models, each a different routing mode over the same registry:
+`GET /v1/models` is the authoritative runtime inventory; it derives
+pipeline models from `VIRTUAL_MODELS` and passthrough entries from
+config.yaml.
 
-| Model            | Routing                                                                  |
-|------------------|--------------------------------------------------------------------------|
-| `audrey_auto`    | Adaptive: fast path on short prompts, deep panel on long ones.           |
-| `audrey_fast`    | Always fast path; never escalates, even on long prompts.                 |
-| `audrey_deep`    | Always deep panel, mixed cloud + local pool.                             |
-| `audrey_cloud`   | Always deep panel, cloud-only pool (up to 3 parallel workers).           |
-| `audrey_local`   | Always deep panel, local-only pool (serialized through GPU gate).        |
+| Model | Routing |
+|---|---|
+| `audrey_deep` | Always deep panel, mixed cloud and local pool. |
+| `audrey_cloud` | Always deep panel, cloud-only pool. |
+| `audrey_local` | Always deep panel, local-only pool. |
+| `audrey_research` | Staged grounded research, verification, fact-checking, and writing. |
+| `audrey_auto` | Adaptive: fast for short prompts, deep for complex or long prompts. |
+| `audrey_fast` | Always fast path; never escalates, even on long prompts. |
+| `audrey_video` | Adaptive like auto, with a task role that scopes work to uploaded video. |
 
 Streaming responses (when the client sends `stream: true`) emit progress
 banners during each phase (Thinking / Planning / Dispatching / Synthesizing)

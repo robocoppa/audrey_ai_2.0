@@ -1,12 +1,7 @@
 """OpenAI-compatible routes (package).
 
-Exposes six virtual models plus `/v1/chat/completions`:
-  audrey_deep     — always deep (mixed pool)
-  audrey_cloud    — always deep (cloud-only pool)
-  audrey_local    — always deep (local-only pool)
-  audrey_research — always deep, staged: research → verify → write
-  audrey_auto     — adaptive: fast for short prompts, deep for long ones
-  audrey_fast     — always fast (no escalation, even on long prompts)
+Exposes the virtual models declared by VIRTUAL_MODELS plus
+/v1/chat/completions. /v1/models is the authoritative runtime inventory.
 
 Plus an opt-in passthrough family selected via a model-string prefix:
   audrey_passthrough/<concrete>  — forward straight to Ollama, no

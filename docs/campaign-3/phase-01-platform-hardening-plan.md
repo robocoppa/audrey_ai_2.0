@@ -1,8 +1,8 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress as of 2026-09-01. Waves 1A through 1D and 1E.1 are
-complete and Unraid-verified. Wave 1E.2 is implemented and hermetically verified;
-its Unraid gate is next.
+**Status:** In progress as of 2026-09-01. Waves 1A through 1E.2 are
+complete and Unraid-verified. Wave 1E.3 is implemented and hermetically
+verified; its Unraid configuration/inventory gate is next.
 
 ## Goal
 
@@ -324,17 +324,27 @@ ran as 99:100, the intended mounts passed their access checks, readiness exposed
 by exact private KB marker, archive delivery converged at 1/1 with depth zero,
 and deletion completed synchronously.
 
-**1E.2 implementation status (2026-09-01): hermetically verified; Unraid
-responsiveness smoke pending.** Single-shot and chunked uploads now share one
-bounded AnyIO writer that awaits each disk write before reading more request
-data. MIME detection, document parsing/tokenization, watcher scans, and ingest
-metadata run outside the event loop. Memory recall requires the lifespan-owned
-HTTP client already shared with archive delivery instead of opening a client per
-request. Deterministic slow-write coverage proves unrelated async work proceeds
-while a 500 ms write is blocked. The expanded focused matrix passes 507 tests;
-all 2,592 hermetic tests pass, with scoped ruff, compilation, offline lock, and
-diff checks clean. The lesson scan has zero broken links; existing drift remains
-deferred.
+**1E.2 status (2026-09-01): complete and Unraid-verified.** Single-shot
+and chunked uploads share one bounded AnyIO writer that awaits each disk write
+before reading more request data. MIME detection, document parsing/tokenization,
+watcher scans, and ingest metadata run outside the event loop. Memory recall
+uses the lifespan-owned HTTP client shared with archive delivery. Deterministic
+slow-write coverage passes with 507 focused and all 2,592 hermetic tests. On
+Unraid, all 20 health calls stayed between 0.76 and 1.19 ms during an active,
+rate-limited 8 MiB upload. The rejected scratch file removed its session, the
+shared-client chat returned exactly `1E2-READY`, and archive delivery converged
+at 1/1 with depth zero. Scoped ruff, compilation, offline lock, and diff checks
+are clean; lesson links remain at zero broken with existing drift deferred.
+
+**1E.3 implementation status (2026-09-01): hermetically verified; Unraid
+configuration/inventory smoke pending.** The example environment now leaves
+YAML-owned settings as commented opt-ins and removes inert or superseded knobs.
+The README points to the live OpenAPI-derived tool inventory, its complete
+virtual-model table is source-guarded, and FastAPI derives its model count from
+the route constant. Stale discovery, latency, network-surface, and security-plan
+statements are corrected. Three new drift guards pass with all 2,595 hermetic
+tests; scoped ruff, compilation, YAML, offline lock, and diff checks are clean.
+Lesson links remain at zero broken with existing drift deferred.
 
 Gate:
 

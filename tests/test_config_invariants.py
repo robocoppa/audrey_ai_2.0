@@ -28,11 +28,15 @@ import pytest
 import yaml
 
 from audrey.pipeline.classify import classify
+from audrey.routes.openai.routes import VIRTUAL_MODELS
 
 _ROOT = Path(__file__).resolve().parent.parent
 _CONFIG = _ROOT / "config.yaml"
 _PULL_SCRIPT = _ROOT / "scripts" / "pull-models.sh"
 _MEDIA_FETCHER_DOCKERFILE = _ROOT / "docker" / "media-fetcher.Dockerfile"
+_ENV_EXAMPLE = _ROOT / ".env.example"
+_CONFIG_SOURCE = _ROOT / "src" / "audrey" / "config.py"
+_README = _ROOT / "README.md"
 
 _SCRIPTS = _ROOT / "scripts"
 if str(_SCRIPTS) not in sys.path:
@@ -419,3 +423,56 @@ class TestASetupFailureStillNotifies:
         text = self._text()
         fn = text[text.index("notify_setup_failure() {"):text.index("die() {")]
         assert 'return 0' in fn and "|| true" in fn
+
+
+# ─── Operational documentation must follow executable sources ────────
+
+
+class TestOperationalDocumentation:
+    def test_env_example_does_not_activate_yaml_overrides(self):
+        text = _ENV_EXAMPLE.read_text()
+        active = {
+            line.split("=", 1)[0]
+            for line in text.splitlines()
+            if line and line[0].isupper() and "=" in line
+        }
+        quote = chr(34)
+        override_names = set(re.findall(
+            f"self[.]_set[(] *{quote}([A-Z0-9_]+){quote}",
+            _CONFIG_SOURCE.read_text(),
+        ))
+        unexpected = sorted(active & override_names)
+        assert not unexpected, (
+            f".env.example actively overrides config.yaml: {unexpected}. "
+            "Document supported overrides as commented opt-ins."
+        )
+
+    def test_retired_example_settings_do_not_return(self):
+        retired = {
+            "AUDREY_PORT",
+            "AUDREY_LOG_LEVEL",
+            "AUDREY_CONFIG_PATH",
+            "CLIP_CACHE_DIR",
+            "AUDREY_UPLOAD_ROOT",
+            "AUDREY_MAX_UPLOAD_MB",
+            "AUDREY_MAX_USER_BYTES",
+            "FAST_PATH_CONFIDENCE",
+            "CACHE_SIZE",
+            "CACHE_TTL_SECONDS",
+        }
+        text = _ENV_EXAMPLE.read_text()
+        declared = {
+            line.lstrip("# ").split("=", 1)[0]
+            for line in text.splitlines()
+            if "=" in line
+        }
+        present = sorted(retired & declared)
+        assert not present, f"inert or superseded example settings: {present}"
+
+    def test_readme_virtual_model_table_matches_the_route_source(self):
+        section = _README.read_text().partition("## Virtual models")[2]
+        section = section.partition("## Chat Completions compatibility")[0]
+        documented = set(re.findall(
+            r"[|] [`](audrey_[a-z_]+)[`] [|]", section,
+        ))
+        assert documented == set(VIRTUAL_MODELS)

@@ -1,8 +1,8 @@
 # Campaign 3 — correctness foundations, Audrey UI, and reusable skills
 
-**Status:** In progress as of 2026-09-01. Waves 1A through 1D and 1E.1 are
-complete and Unraid-verified. Wave 1E.2 is implemented and hermetically verified;
-its Unraid gate is next.
+**Status:** In progress as of 2026-09-01. Waves 1A through 1E.2 are
+complete and Unraid-verified. Wave 1E.3 is implemented and hermetically
+verified; its Unraid configuration/inventory gate is next.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,
@@ -13,7 +13,7 @@ and finally adds the first general skills layer on that owned surface.
 
 | Phase | Plan | Outcome | Entry gate | Status |
 |---|---|---|---|---|
-| 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | In progress (1E.2 Unraid gate next) |
+| 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | In progress (1E.3 Unraid gate next) |
 | 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | Planned |
 | 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | Planned |
 
