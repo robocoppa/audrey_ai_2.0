@@ -212,6 +212,9 @@ def test_vl_pool_falls_back_to_llava_when_primary_unhealthy():
 # ─── The routing fork: pin to vl, or transcribe and keep the pick ──────
 
 
+_HTTP = object()
+
+
 class _NoTools:
     def all_specs(self) -> list:
         return []
@@ -238,7 +241,7 @@ async def _complexity_node(monkeypatch, *, describe_returns=None):
     ollama = OllamaClient(base_url="http://unused")
     compiled = gmod.build_graph(
         cfg, ollama, ModelRegistry(cfg), HealthTracker(),
-        FairLocalGate(concurrency=1), _NoTools(),
+        FairLocalGate(concurrency=1), _NoTools(), _HTTP,
     )
     return compiled.nodes["complexity"].bound, calls, ollama
 

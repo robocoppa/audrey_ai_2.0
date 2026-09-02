@@ -114,7 +114,12 @@ async def lifespan(app: FastAPI):
             name="audrey.tools.retry_discovery",
         )
 
-    graph = build_graph(cfg, ollama, registry, health, gate, tool_registry)
+    # One lifespan-owned custom-tools transport is reused by memory recall and
+    # durable archive delivery. Per-call timeouts remain owned by each caller.
+    archive_http = httpx.AsyncClient(timeout=10.0)
+    graph = build_graph(
+        cfg, ollama, registry, health, gate, tool_registry, archive_http,
+    )
 
     # ─── KB stack ────────────────────────────────────────────────────
     kb_cfg = cfg.raw.get("kb", {}) or {}
@@ -217,10 +222,9 @@ async def lifespan(app: FastAPI):
     app.state.kb_watcher = watcher
     app.state.kb_reconciler = reconciler
 
-    # Shared transport + durable chat-archive outbox. Response handlers commit
-    # only the small local source row; this lifecycle-owned worker performs the
-    # remote custom-tools call and resumes unfinished rows after restart.
-    archive_http = httpx.AsyncClient(timeout=10.0)
+    # Durable chat-archive outbox. Response handlers commit only the small
+    # local source row; this lifecycle-owned worker performs the remote
+    # custom-tools call and resumes unfinished rows after restart.
     archive_transport = ChatArchiveClient(
         archive_http,
         service_token=cfg.env.kb_service_token,

@@ -73,6 +73,7 @@ import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+import anyio
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
 
@@ -363,26 +364,39 @@ def _max_user_bytes(request: Request) -> int:
     return int(kb_cfg.get("max_user_bytes", 1024 * 1024 * 1024))
 
 
-async def _stream_to_disk(upload: UploadFile, dest: Path, *, limit_bytes: int) -> int:
-    """Stream upload bytes to disk, stopping at limit_bytes. Returns written size.
+async def _write_chunks_to_disk(
+    chunks: AsyncIterator[bytes],
+    dest: Path,
+    *,
+    limit_bytes: int,
+) -> int:
+    """Write an async byte stream through the bounded AnyIO worker pool.
 
-    Returns -1 if the cap would be exceeded (caller should 413 and unlink dest).
-    Checks the cap *before* extending — a single oversized chunk can't push
-    `written` past the limit. Same defense-in-depth pattern we use in
-    `kb/embed._fetch_image`.
+    Each write is awaited before the producer reads another chunk, so the
+    request cannot outrun a slow Unraid mount. Returns -1 before writing the
+    chunk that would exceed `limit_bytes`.
     """
+    await anyio.to_thread.run_sync(lambda: dest.parent.mkdir(parents=True, exist_ok=True))
     written = 0
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    with dest.open("wb") as f:
-        while True:
-            chunk = await upload.read(1024 * 1024)
+    async with await anyio.open_file(dest, "wb") as file:
+        async for chunk in chunks:
             if not chunk:
-                break
+                continue
             if written + len(chunk) > limit_bytes:
                 return -1
+            await file.write(chunk)
             written += len(chunk)
-            f.write(chunk)
     return written
+
+
+async def _stream_to_disk(upload: UploadFile, dest: Path, *, limit_bytes: int) -> int:
+    """Stream one multipart upload through the shared bounded disk writer."""
+
+    async def chunks() -> AsyncIterator[bytes]:
+        while chunk := await upload.read(1024 * 1024):
+            yield chunk
+
+    return await _write_chunks_to_disk(chunks(), dest, limit_bytes=limit_bytes)
 
 
 def _waiting_for_s(row: dict, *, now: _dt.datetime) -> float:
@@ -612,7 +626,7 @@ async def _validate_and_ingest(
     every failure path — the caller owns nothing once this is entered.
     """
     # Mime gate. Trust the sniffed bytes, not the client-declared type.
-    mime = sniff_mime(dest)
+    mime = await anyio.to_thread.run_sync(sniff_mime, dest)
     if mime not in ALLOWED_MIMES:
         _safe_unlink(dest)
         raise HTTPException(
@@ -936,27 +950,21 @@ async def upload_part(
 
     part_size = int(session["part_size"])
     dest = _session_dir(request, user, upload_id) / f"{part_no:06d}.part"
-    dest.parent.mkdir(parents=True, exist_ok=True)
     # Keep a valid prior part intact until both the bytes and the reservation
     # update succeed. The final replace is atomic because both paths are siblings.
     incoming = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.incoming")
 
-    # Cap each part at the negotiated size. Without this a client could send
-    # one enormous "part" and walk straight past the whole-file ceiling that
-    # `open_upload_session` enforced against the declared total.
-    written = 0
+    # The shared writer awaits every bounded-pool disk write before it accepts
+    # another request chunk, and returns before writing a chunk over the cap.
     try:
-        with incoming.open("wb") as f:
-            async for chunk in request.stream():
-                if not chunk:
-                    continue
-                if written + len(chunk) > part_size:
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"Part exceeds the negotiated {part_size} byte size.",
-                    )
-                written += len(chunk)
-                f.write(chunk)
+        written = await _write_chunks_to_disk(
+            request.stream(), incoming, limit_bytes=part_size,
+        )
+        if written < 0:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Part exceeds the negotiated {part_size} byte size.",
+            )
     except HTTPException:
         _safe_unlink(incoming)
         raise

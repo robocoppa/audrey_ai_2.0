@@ -24,6 +24,8 @@ from audrey.pipeline.memory import (
 from audrey.tools.discovery import ToolRegistry, ToolSpec
 from audrey.tools.dispatch import ToolResult
 
+_HTTP = object()
+
 # ─── Fixtures ─────────────────────────────────────────────────────────
 
 
@@ -61,6 +63,7 @@ async def test_recall_skipped_when_user_id_empty():
     """No user → no recall. Direct-curl callers without auth land here."""
     out = await recall_for_request(
         _registry_with_memory_search(),
+        http=_HTTP,
         user_id="",
         messages=[_user_msg("hello")],
     )
@@ -72,6 +75,7 @@ async def test_recall_skipped_when_registry_is_none():
     """custom-tools unreachable at boot → registry is None → no recall."""
     out = await recall_for_request(
         None,
+        http=_HTTP,
         user_id="alice@example.com",
         messages=[_user_msg("hello")],
     )
@@ -83,6 +87,7 @@ async def test_recall_skipped_when_memory_search_not_in_registry():
     """Tools came up but memory_search isn't one of them → no recall."""
     out = await recall_for_request(
         ToolRegistry(),  # empty registry
+        http=_HTTP,
         user_id="alice@example.com",
         messages=[_user_msg("hello")],
     )
@@ -94,6 +99,7 @@ async def test_recall_skipped_when_last_user_text_empty():
     """Empty user turn → no recall query to send."""
     out = await recall_for_request(
         _registry_with_memory_search(),
+        http=_HTTP,
         user_id="alice@example.com",
         messages=[{"role": "user", "content": "   "}],
     )
@@ -108,6 +114,7 @@ async def test_recall_returns_hits_on_success(monkeypatch):
     captured = {}
 
     async def fake_dispatch(http, registry, call, **kwargs):
+        captured["http"] = http
         captured["args"] = call["function"]["arguments"]
         return _result(json.dumps({"results": [
             {"key": "favorite_color", "value": "blue"},
@@ -117,12 +124,14 @@ async def test_recall_returns_hits_on_success(monkeypatch):
     monkeypatch.setattr(memory_mod, "dispatch_one", fake_dispatch)
     out = await recall_for_request(
         _registry_with_memory_search(),
+        http=_HTTP,
         user_id="alice@example.com",
         messages=[_user_msg("what's my favorite color?")],
     )
     assert len(out) == 2
     assert out[0]["key"] == "favorite_color"
-    # Verify the dispatcher was handed the user id, query, and top_k.
+    # The exact caller-owned client reaches dispatch; recall creates no transport.
+    assert captured["http"] is _HTTP
     assert captured["args"]["user"] == "alice@example.com"
     assert captured["args"]["query"] == "what's my favorite color?"
     assert captured["args"]["top_k"] == 3
@@ -145,6 +154,7 @@ async def test_recall_clamps_long_query(monkeypatch):
     long_text = "x" * (MAX_QUERY_CHARS + 100)
     await recall_for_request(
         _registry_with_memory_search(),
+        http=_HTTP,
         user_id="alice@example.com",
         messages=[_user_msg(long_text)],
     )
@@ -160,6 +170,7 @@ async def test_recall_returns_empty_on_dispatch_error(monkeypatch):
     monkeypatch.setattr(memory_mod, "dispatch_one", fake_dispatch)
     out = await recall_for_request(
         _registry_with_memory_search(),
+        http=_HTTP,
         user_id="alice@example.com",
         messages=[_user_msg("hello")],
     )
@@ -179,6 +190,7 @@ async def test_recall_error_is_logged_at_warning_with_its_cost(monkeypatch, capl
     with caplog.at_level("WARNING", logger="audrey.pipeline.memory"):
         out = await recall_for_request(
             _registry_with_memory_search(),
+            http=_HTTP,
             user_id="alice@example.com",
             messages=[_user_msg("hello")],
         )
@@ -198,6 +210,7 @@ async def test_recall_returns_empty_on_non_json_body(monkeypatch):
     monkeypatch.setattr(memory_mod, "dispatch_one", fake_dispatch)
     out = await recall_for_request(
         _registry_with_memory_search(),
+        http=_HTTP,
         user_id="alice@example.com",
         messages=[_user_msg("hello")],
     )
@@ -213,6 +226,7 @@ async def test_recall_returns_empty_when_results_not_list(monkeypatch):
     monkeypatch.setattr(memory_mod, "dispatch_one", fake_dispatch)
     out = await recall_for_request(
         _registry_with_memory_search(),
+        http=_HTTP,
         user_id="alice@example.com",
         messages=[_user_msg("hello")],
     )

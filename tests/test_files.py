@@ -19,11 +19,15 @@ Three regression areas pinned here:
 from __future__ import annotations
 
 import asyncio
+import builtins
 import sqlite3
+import threading
+import time
 from pathlib import Path
 
 import pytest
 
+from audrey.kb import ingest as ingest_mod
 from audrey.kb.extract import (
     ALLOWED_EXTENSIONS,
     ALLOWED_IMAGE_MIMES,
@@ -103,6 +107,73 @@ async def test_stream_to_disk_rejects_when_cumulative_size_would_overflow(
     assert result == -1
     # First chunk wrote; second was rejected pre-write.
     assert dest.read_bytes() == b"x" * 60
+
+
+@pytest.mark.asyncio
+async def test_slow_disk_write_does_not_block_event_loop(
+    monkeypatch, tmp_path: Path,
+):
+    """A slow Unraid-style write must not delay unrelated async work."""
+    dest = tmp_path / "slow.bin"
+    real_open = builtins.open
+    write_started = threading.Event()
+
+    class SlowWriter:
+        def __init__(self, wrapped):
+            self._wrapped = wrapped
+
+        def write(self, data):
+            write_started.set()
+            time.sleep(0.5)
+            return self._wrapped.write(data)
+
+        def __getattr__(self, name):
+            return getattr(self._wrapped, name)
+
+    def slow_open(file, *args, **kwargs):
+        opened = real_open(file, *args, **kwargs)
+        if str(file) == str(dest) and args and "w" in str(args[0]):
+            return SlowWriter(opened)
+        return opened
+
+    monkeypatch.setattr(builtins, "open", slow_open)
+    write_task = asyncio.create_task(
+        _stream_to_disk(_ChunkedUpload([b"abc"]), dest, limit_bytes=100),
+    )
+    assert await asyncio.to_thread(write_started.wait, 1.0)
+
+    started = time.perf_counter()
+    await asyncio.sleep(0.02)
+    assert time.perf_counter() - started < 0.2
+    assert await write_task == 3
+    assert dest.read_bytes() == b"abc"
+
+
+@pytest.mark.asyncio
+async def test_user_text_parse_and_stat_run_off_event_loop(
+    monkeypatch, tmp_path: Path,
+):
+    event_loop_thread = threading.get_ident()
+    captured = {}
+
+    def fake_prepare(path, **kwargs):
+        captured["thread"] = threading.get_ident()
+        return [], str(path), 0.0, 0
+
+    monkeypatch.setattr(ingest_mod, "_prepare_user_text_file", fake_prepare)
+    result = await ingest_mod.ingest_user_text_file(
+        tmp_path / "notes.txt",
+        qdrant=object(),
+        embedder=object(),
+        collection="c",
+        user="alice@example.com",
+        file_id="f1",
+        filename="notes.txt",
+        mime="text/plain",
+    )
+
+    assert result == 0
+    assert captured["thread"] != event_loop_thread
 
 
 # ─── Filename cap at NAME_MAX (255) ───────────────────────────────────

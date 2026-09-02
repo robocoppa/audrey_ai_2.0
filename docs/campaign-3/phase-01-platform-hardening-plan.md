@@ -1,7 +1,8 @@
 # Campaign 3 Phase 1 — platform hardening
 
-**Status:** In progress as of 2026-09-01. Waves 1A through 1D are complete and
-Unraid-verified. Wave 1E.1 is implemented; its Unraid gate is next.
+**Status:** In progress as of 2026-09-01. Waves 1A through 1D and 1E.1 are
+complete and Unraid-verified. Wave 1E.2 is implemented and hermetically verified;
+its Unraid gate is next.
 
 ## Goal
 
@@ -308,8 +309,8 @@ Build Python services from the committed lockfile, finish non-root container
 operation, remove blocking hot-path file work, reuse long-lived clients, and
 bring configuration/documentation back in line with runtime behavior.
 
-**1E.1 implementation status (2026-09-01): hermetically verified; Unraid build
-and ownership smoke pending.** Audrey and custom-tools now select their exact
+**1E.1 status (2026-09-01): complete and Unraid-verified.** Audrey and
+custom-tools now select their exact
 workspace member from committed `uv.lock` with `uv sync --locked`; dependency
 changes fail the build until the lock is updated. Both services run non-root as
 Unraid's numeric 99:100 identity. The media fetcher uses the same identity for
@@ -317,8 +318,23 @@ its one writable staging mount, allowing the former 0777 bridge to become 0770.
 The persistent CLIP cache moved from `/root` to Audrey's home, and knowledge is
 mounted read-only. Contract tests pin the lock, users, mounts, cache path, and
 staging mode. All 2,590 hermetic tests pass; scoped ruff, compilation, YAML,
-offline lock, and diff checks are clean. Docker is unavailable on the laptop,
-so the real image build and bind-mount ownership transition remain the live gate.
+offline lock, and diff checks are clean. On Unraid, all three writable services
+ran as 99:100, the intended mounts passed their access checks, readiness exposed
+10/10 tools with empty queues, a text upload landed as 99:100 and was retrieved
+by exact private KB marker, archive delivery converged at 1/1 with depth zero,
+and deletion completed synchronously.
+
+**1E.2 implementation status (2026-09-01): hermetically verified; Unraid
+responsiveness smoke pending.** Single-shot and chunked uploads now share one
+bounded AnyIO writer that awaits each disk write before reading more request
+data. MIME detection, document parsing/tokenization, watcher scans, and ingest
+metadata run outside the event loop. Memory recall requires the lifespan-owned
+HTTP client already shared with archive delivery instead of opening a client per
+request. Deterministic slow-write coverage proves unrelated async work proceeds
+while a 500 ms write is blocked. The expanded focused matrix passes 507 tests;
+all 2,592 hermetic tests pass, with scoped ruff, compilation, offline lock, and
+diff checks clean. The lesson scan has zero broken links; existing drift remains
+deferred.
 
 Gate:
 

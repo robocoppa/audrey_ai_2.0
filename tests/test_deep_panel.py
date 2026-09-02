@@ -322,6 +322,9 @@ async def test_run_panel_streaming_emits_only_final_when_no_workers():
 # `test_config_validation.py`; here we prove the synth node forwards its value.
 
 
+_HTTP = object()
+
+
 class _NoTools:
     def all_specs(self) -> list:
         return []
@@ -346,7 +349,7 @@ async def _captured_synth_timeout_for(virtual_model: str) -> float | None:
         return {"final_answer": "ok", "synthesizer_model": "m"}
 
     with patch.object(gmod, "synthesize_fn", _fake_synth):
-        compiled = gmod.build_graph(cfg, ollama, registry, health, gate, _NoTools())
+        compiled = gmod.build_graph(cfg, ollama, registry, health, gate, _NoTools(), _HTTP)
         node = compiled.nodes["synthesize"].bound
         await node.ainvoke({
             "virtual_model": virtual_model,
@@ -396,7 +399,8 @@ def _route_after_reflect():
     ollama = OllamaClient(base_url="http://unused")
     registry = ModelRegistry(cfg)
     compiled = gmod.build_graph(
-        cfg, ollama, registry, HealthTracker(), FairLocalGate(concurrency=1), _NoTools()
+        cfg, ollama, registry, HealthTracker(), FairLocalGate(concurrency=1),
+        _NoTools(), _HTTP,
     )
     branch = compiled.builder.branches["reflect"]["route_after_reflect"]
     return branch.path.func
@@ -451,7 +455,7 @@ def _route_deep_kind():
     cfg = get_config()
     compiled = gmod.build_graph(
         cfg, OllamaClient(base_url="http://unused"), ModelRegistry(cfg),
-        HealthTracker(), FairLocalGate(concurrency=1), _NoTools(),
+        HealthTracker(), FairLocalGate(concurrency=1), _NoTools(), _HTTP,
     )
     branch = compiled.builder.branches["planner"]["route_deep_kind"]
     return branch.path.func
@@ -471,7 +475,7 @@ async def test_node_complexity_forces_deep_for_research():
     ollama = OllamaClient(base_url="http://unused")
     compiled = gmod.build_graph(
         cfg, ollama, ModelRegistry(cfg), HealthTracker(),
-        FairLocalGate(concurrency=1), _NoTools(),
+        FairLocalGate(concurrency=1), _NoTools(), _HTTP,
     )
     node = compiled.nodes["complexity"].bound
     out = await node.ainvoke({

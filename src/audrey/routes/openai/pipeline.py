@@ -671,7 +671,8 @@ async def _stream_deep_with_banners(
         async with PhaseTicker(BANNER_PLANNING, emit):
             think_task = runner.own(
                 _phase_thinking(
-                    ollama=ollama, tools=tools, user_id=user_id, messages=messages,
+                    ollama=ollama, tools=tools, http=app.state.archive_http,
+                    user_id=user_id, messages=messages,
                     memory_enabled=memory_enabled, memory_top_k=memory_top_k,
                     memory_timeout_s=memory_timeout_s,
                     planning_enabled=planning_enabled,
@@ -987,7 +988,8 @@ async def _stream_research_with_banners(
         async with PhaseTicker(BANNER_PLANNING, emit):
             think_task = runner.own(
                 _phase_thinking(
-                    ollama=ollama, tools=tools, user_id=user_id, messages=messages,
+                    ollama=ollama, tools=tools, http=app.state.archive_http,
+                    user_id=user_id, messages=messages,
                     memory_enabled=memory_enabled,
                     memory_top_k=int(memory_cfg.get("top_k", 3)),
                     memory_timeout_s=float(memory_cfg.get("timeout_s", 5)),
@@ -1274,7 +1276,7 @@ async def _drain_q_now(
 
 
 async def _phase_thinking(
-    *, ollama, tools, user_id: str, messages,
+    *, ollama, tools, http, user_id: str, messages,
     memory_enabled, memory_top_k, memory_timeout_s,
     planning_enabled, planning_min_tokens, planning_max_subtasks,
     prompt_tokens, router_cfg, cfg=None,
@@ -1296,7 +1298,7 @@ async def _phase_thinking(
     msgs = [datetime_system_message(), *messages]
     if memory_enabled and user_id.strip():
         hits = await recall_for_request(
-            tools, user_id=user_id, messages=messages,
+            tools, http=http, user_id=user_id, messages=messages,
             top_k=memory_top_k, timeout_s=memory_timeout_s,
         )
         include_store_hint = tools is not None and MEMORY_STORE_TOOL in tools.by_name

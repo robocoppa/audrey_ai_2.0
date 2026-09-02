@@ -116,6 +116,7 @@ def _fake_app(responses: dict[str, str], *, tool_capable: list[str] | None = Non
         health=HealthTracker(),
         gate=FairLocalGate(concurrency=1),
         tools=_kb_registry() if tool_capable else _NoTools(),
+        archive_http=object(),
     )
     return SimpleNamespace(state=state)
 

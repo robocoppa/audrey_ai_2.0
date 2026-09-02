@@ -107,6 +107,7 @@ def _fake_app(responses: dict[str, str], *, factchecker: str | None = None):
         health=HealthTracker(),
         gate=FairLocalGate(concurrency=1),
         tools=_one_tool_registry() if factchecker else _FakeTools(),
+        archive_http=object(),
         # archive_client intentionally absent → getattr default None.
     )
     return SimpleNamespace(state=state)

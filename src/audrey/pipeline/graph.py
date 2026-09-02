@@ -45,6 +45,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import httpx
 from langgraph.graph import END, StateGraph
 
 from audrey.config import Config
@@ -184,6 +185,7 @@ def build_graph(
     health: HealthTracker,
     gate: FairLocalGate,
     tools: ToolRegistry,
+    tool_http: httpx.AsyncClient,
 ):
     """Compile the LangGraph StateGraph for this process."""
     router_cfg = cfg.router
@@ -279,7 +281,7 @@ def build_graph(
         if not user_id:
             return {}
         hits = await recall_for_request(
-            tools, user_id=user_id, messages=state["messages"],
+            tools, http=tool_http, user_id=user_id, messages=state["messages"],
             top_k=memory_top_k, timeout_s=memory_timeout_s,
         )
         include_store_hint = tools is not None and MEMORY_STORE_TOOL in tools.by_name

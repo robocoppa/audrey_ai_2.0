@@ -73,11 +73,12 @@ async def ingest_path(
 ) -> IngestStats:
     """Recursively ingest every supported file under `root`."""
     stats = IngestStats()
-    if not root.exists():
+    if not await asyncio.to_thread(root.exists):
         stats.errors.append(f"root does not exist: {root}")
         return stats
 
-    for path in sorted(_iter_files(root)):
+    paths = await asyncio.to_thread(lambda: sorted(_iter_files(root)))
+    for path in paths:
         stats.files_seen += 1
         suffix = path.suffix.lower()
         try:
@@ -116,14 +117,16 @@ async def ingest_text_file(
     chunk_tokens: int,
     overlap_tokens: int,
 ) -> int:
-    raw = load_text(path)
+    raw = await asyncio.to_thread(load_text, path)
     if not raw:
         return 0
-    chunks: list[Chunk] = chunk_text(raw, chunk_tokens=chunk_tokens, overlap_tokens=overlap_tokens)
+    chunks: list[Chunk] = await asyncio.to_thread(
+        chunk_text, raw, chunk_tokens=chunk_tokens, overlap_tokens=overlap_tokens,
+    )
     if not chunks:
         return 0
     source = normalize_source(path)
-    mtime = path.stat().st_mtime
+    mtime, _ = await asyncio.to_thread(_file_metadata, path)
     vectors = await embedder.embed_many([c.text for c in chunks])
     # Clear any stale points from a previous larger ingest; the upsert
     # below rewrites the current range with deterministic IDs.
@@ -147,7 +150,7 @@ async def ingest_image_file(
     embedder: ImageEmbedder,
 ) -> bool:
     source = normalize_source(path)
-    mtime = path.stat().st_mtime
+    mtime, _ = await asyncio.to_thread(_file_metadata, path)
     try:
         vec = await embedder.embed_path(path)
     except Exception as e:  # noqa: BLE001 — bad image shouldn't poison the crawl
@@ -203,6 +206,23 @@ async def ingest_many(
     return merged
 
 
+def _file_metadata(path: Path) -> tuple[float, int]:
+    stat = path.stat()
+    return stat.st_mtime, stat.st_size
+
+
+def _prepare_user_text_file(
+    path: Path, *, chunk_tokens: int, overlap_tokens: int,
+) -> tuple[list[Chunk], str, float, int]:
+    """Parse, tokenize, and stat one upload entirely off the event loop."""
+    raw = extract_text(path)
+    chunks = chunk_text(
+        raw, chunk_tokens=chunk_tokens, overlap_tokens=overlap_tokens,
+    )
+    mtime, size_bytes = _file_metadata(path)
+    return chunks, normalize_source(path), mtime, size_bytes
+
+
 async def ingest_user_text_file(
     path: Path,
     *,
@@ -223,14 +243,14 @@ async def ingest_user_text_file(
     `kb_user_text_bart_proton_me`) with user/file metadata in the payload.
     Delete-before-upsert clears any prior points for the same file_id.
     """
-    raw = extract_text(path)  # raises EmptyExtractionError on scanned PDFs etc.
-    chunks: list[Chunk] = chunk_text(raw, chunk_tokens=chunk_tokens, overlap_tokens=overlap_tokens)
+    chunks, source, mtime, size_bytes = await asyncio.to_thread(
+        _prepare_user_text_file,
+        path,
+        chunk_tokens=chunk_tokens,
+        overlap_tokens=overlap_tokens,
+    )
     if not chunks:
         return 0
-
-    source = normalize_source(path)
-    mtime = path.stat().st_mtime
-    size_bytes = path.stat().st_size
     stamp = uploaded_at or _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
     vectors = await embedder.embed_many([c.text for c in chunks])
 
@@ -302,7 +322,7 @@ async def ingest_transcript_segments(
 
     source = normalize_source(sidecar)
     # One stat, not one per chunk — it was inside the comprehension below.
-    stat = sidecar.stat()
+    stat = await asyncio.to_thread(sidecar.stat)
     stamp = uploaded_at or _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
     vectors = await embedder.embed_many([c.text for c in chunks])
 
@@ -378,10 +398,10 @@ async def ingest_summary(
     if not text:
         return 0
 
-    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(sidecar.parent.mkdir, parents=True, exist_ok=True)
     await asyncio.to_thread(sidecar.write_text, text, "utf-8")
     source = normalize_source(sidecar)
-    stat = sidecar.stat()
+    stat = await asyncio.to_thread(sidecar.stat)
     stamp = uploaded_at or _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
     vectors = await embedder.embed_many([text])
 
@@ -459,7 +479,7 @@ async def ingest_frame_descriptions(
         return 0
 
     source = normalize_source(sidecar)
-    stat = sidecar.stat()
+    stat = await asyncio.to_thread(sidecar.stat)
     stamp = uploaded_at or _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
     vectors = await embedder.embed_many([c.text for c, _ in prepared])
 
@@ -512,8 +532,7 @@ async def ingest_user_image_file(
     uploaded_at: str | None = None,
 ) -> bool:
     source = normalize_source(path)
-    mtime = path.stat().st_mtime
-    size_bytes = path.stat().st_size
+    mtime, size_bytes = await asyncio.to_thread(_file_metadata, path)
     stamp = uploaded_at or _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
     try:
         vec = await embedder.embed_path(path)

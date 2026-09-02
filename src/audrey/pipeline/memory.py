@@ -60,6 +60,7 @@ def _format_memory_hint(hits: list[dict[str, Any]]) -> str:
 async def recall_for_request(
     registry: ToolRegistry | None,
     *,
+    http: httpx.AsyncClient,
     user_id: str,
     messages: list[dict[str, Any]],
     top_k: int = DEFAULT_TOP_K,
@@ -84,12 +85,11 @@ async def recall_for_request(
         }
     }
     started = time.monotonic()
-    async with httpx.AsyncClient() as http:
-        result = await dispatch_one(
-            http, registry, call,
-            max_result_chars=10_000,   # don't truncate the JSON body here
-            timeout_s=timeout_s,
-        )
+    result = await dispatch_one(
+        http, registry, call,
+        max_result_chars=10_000,   # keep the complete JSON body for parsing
+        timeout_s=timeout_s,
+    )
     elapsed = time.monotonic() - started
     if result.is_error:
         # WARNING, with the cost attached. Recall is best-effort, but a skip
