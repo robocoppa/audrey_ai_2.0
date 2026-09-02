@@ -1,4 +1,4 @@
-"""Versioned SQLite authority for Audrey users and provider identities.
+"""Versioned SQLite authority for Audrey users, identities, and access tokens.
 
 The native application database is authoritative for stable user ownership.
 External providers prove who authenticated; they do not choose Audrey resource
@@ -11,14 +11,27 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import hashlib
+import hmac
+import json
+import re
+import secrets
 import sqlite3
 import threading
 import uuid
+from collections.abc import Iterable
 from pathlib import Path
 
-from audrey.identity import Principal
+from audrey.identity import (
+    TOKEN_SCOPES,
+    IssuedPersonalToken,
+    PersonalTokenSummary,
+    Principal,
+)
 
 _ALLOWED_ROLES = frozenset({"user", "admin"})
+_TOKEN_RE = re.compile(r"\Aaud_(pat_[0-9a-f]{32})\.([A-Za-z0-9_-]{32,})\Z")
+_LAST_USED_WRITE_INTERVAL = dt.timedelta(minutes=5)
 
 _MIGRATIONS: tuple[tuple[int, str], ...] = (
     (
@@ -51,6 +64,26 @@ _MIGRATIONS: tuple[tuple[int, str], ...] = (
           ON external_identities(user_id);
         """,
     ),
+    (
+        2,
+        """
+        CREATE TABLE IF NOT EXISTS personal_access_tokens (
+          token_id       TEXT PRIMARY KEY,
+          user_id        TEXT NOT NULL,
+          name           TEXT NOT NULL,
+          secret_hash    TEXT NOT NULL UNIQUE,
+          scopes_json    TEXT NOT NULL,
+          created_at     TEXT NOT NULL,
+          expires_at     TEXT NOT NULL,
+          last_used_at   TEXT,
+          revoked_at     TEXT,
+          FOREIGN KEY (user_id) REFERENCES app_users(user_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_personal_access_tokens_user
+          ON personal_access_tokens(user_id);
+        """,
+    ),
 )
 
 
@@ -60,6 +93,10 @@ class InvalidIdentityError(ValueError):
 
 class IdentityConflictError(RuntimeError):
     """A provider binding would implicitly merge two Audrey accounts."""
+
+
+class PersonalTokenAuthenticationError(ValueError):
+    """A personal token is malformed, invalid, expired, revoked, or disabled."""
 
 
 class ApplicationStore:
@@ -84,9 +121,7 @@ class ApplicationStore:
         )
         applied = {
             int(row["version"])
-            for row in self._conn.execute(
-                "SELECT version FROM app_schema_migrations"
-            ).fetchall()
+            for row in self._conn.execute("SELECT version FROM app_schema_migrations").fetchall()
         }
         for version, sql in _MIGRATIONS:
             if version in applied:
@@ -109,8 +144,7 @@ class ApplicationStore:
     def schema_version(self) -> int:
         with self._lock:
             row = self._conn.execute(
-                "SELECT COALESCE(MAX(version), 0) AS version "
-                "FROM app_schema_migrations"
+                "SELECT COALESCE(MAX(version), 0) AS version FROM app_schema_migrations"
             ).fetchone()
             return int(row["version"])
 
@@ -231,6 +265,208 @@ class ApplicationStore:
             (provider, subject),
         ).fetchone()
 
+    async def create_personal_token(
+        self,
+        *,
+        user_id: str,
+        name: str,
+        scopes: Iterable[str],
+        expires_at: str,
+    ) -> IssuedPersonalToken:
+        """Create a high-entropy bearer token and persist only its digest."""
+
+        return await asyncio.to_thread(
+            self._create_personal_token_sync,
+            user_id,
+            name,
+            scopes,
+            expires_at,
+        )
+
+    def _create_personal_token_sync(
+        self,
+        user_id: str,
+        name: str,
+        scopes: Iterable[str],
+        expires_at: str,
+    ) -> IssuedPersonalToken:
+        user_id = _required(user_id, "user id")
+        name = _required(name, "token name")
+        if len(name) > 80:
+            raise InvalidIdentityError("token name must be at most 80 characters")
+        normalized_scopes = _normalize_scopes(scopes)
+        normalized_expiry = _normalize_expiry(expires_at, require_future=True)
+        token_id = f"pat_{uuid.uuid4().hex}"
+        raw_token = f"aud_{token_id}.{secrets.token_urlsafe(32)}"
+        secret_hash = _token_hash(raw_token)
+        now = _utc_now()
+
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                owner = self._conn.execute(
+                    "SELECT status FROM app_users WHERE user_id = ?",
+                    (user_id,),
+                ).fetchone()
+                if owner is None:
+                    raise InvalidIdentityError("token owner does not exist")
+                if str(owner["status"]) != "active":
+                    raise InvalidIdentityError("token owner is disabled")
+                self._conn.execute(
+                    "INSERT INTO personal_access_tokens "
+                    "(token_id, user_id, name, secret_hash, scopes_json, "
+                    "created_at, expires_at, last_used_at, revoked_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
+                    (
+                        token_id,
+                        user_id,
+                        name,
+                        secret_hash,
+                        json.dumps(normalized_scopes, separators=(",", ":")),
+                        now,
+                        normalized_expiry,
+                    ),
+                )
+                row = self._token_row_for_owner_locked(user_id, token_id)
+                assert row is not None
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+
+        return IssuedPersonalToken(
+            token=raw_token,
+            record=_token_summary_from_row(row),
+        )
+
+    async def list_personal_tokens(
+        self,
+        *,
+        user_id: str,
+    ) -> tuple[PersonalTokenSummary, ...]:
+        return await asyncio.to_thread(self._list_personal_tokens_sync, user_id)
+
+    def _list_personal_tokens_sync(
+        self,
+        user_id: str,
+    ) -> tuple[PersonalTokenSummary, ...]:
+        user_id = _required(user_id, "user id")
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT token_id, name, scopes_json, created_at, expires_at, "
+                "last_used_at, revoked_at FROM personal_access_tokens "
+                "WHERE user_id = ? ORDER BY created_at DESC, token_id DESC",
+                (user_id,),
+            ).fetchall()
+        return tuple(_token_summary_from_row(row) for row in rows)
+
+    async def revoke_personal_token(
+        self,
+        *,
+        user_id: str,
+        token_id: str,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._revoke_personal_token_sync,
+            user_id,
+            token_id,
+        )
+
+    def _revoke_personal_token_sync(
+        self,
+        user_id: str,
+        token_id: str,
+    ) -> bool:
+        user_id = _required(user_id, "user id")
+        token_id = _required(token_id, "token id")
+        with self._lock:
+            row = self._token_row_for_owner_locked(user_id, token_id)
+            if row is None:
+                return False
+            if not str(row["revoked_at"] or ""):
+                self._conn.execute(
+                    "UPDATE personal_access_tokens SET revoked_at = ? "
+                    "WHERE user_id = ? AND token_id = ?",
+                    (_utc_now(), user_id, token_id),
+                )
+                self._conn.commit()
+        return True
+
+    async def authenticate_personal_token(self, token: str) -> Principal:
+        """Resolve a bearer secret without caching revocation or account state."""
+
+        return await asyncio.to_thread(
+            self._authenticate_personal_token_sync,
+            token,
+        )
+
+    def _authenticate_personal_token_sync(self, token: str) -> Principal:
+        match = _TOKEN_RE.fullmatch(str(token or ""))
+        if match is None:
+            raise PersonalTokenAuthenticationError("invalid personal token")
+        token_id = match.group(1)
+        now_dt = dt.datetime.now(dt.UTC)
+
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT t.token_id, t.secret_hash, t.scopes_json, t.expires_at, "
+                "t.last_used_at, t.revoked_at, u.user_id, u.storage_namespace, "
+                "u.current_email, u.display_name, u.role, u.status "
+                "FROM personal_access_tokens AS t "
+                "JOIN app_users AS u ON u.user_id = t.user_id "
+                "WHERE t.token_id = ?",
+                (token_id,),
+            ).fetchone()
+            if row is None or not hmac.compare_digest(
+                str(row["secret_hash"]),
+                _token_hash(token),
+            ):
+                raise PersonalTokenAuthenticationError("invalid personal token")
+            if str(row["revoked_at"] or ""):
+                raise PersonalTokenAuthenticationError("invalid personal token")
+            try:
+                expiry = _parse_utc(str(row["expires_at"] or ""))
+                scopes = frozenset(_scopes_from_json(str(row["scopes_json"])))
+                last_used = _parse_utc(str(row["last_used_at"] or ""))
+            except ValueError as exc:
+                raise PersonalTokenAuthenticationError("invalid personal token") from exc
+            if expiry is None or expiry <= now_dt:
+                raise PersonalTokenAuthenticationError("invalid personal token")
+            if str(row["status"]) != "active":
+                raise PersonalTokenAuthenticationError("invalid personal token")
+            if last_used is None or now_dt - last_used >= _LAST_USED_WRITE_INTERVAL:
+                self._conn.execute(
+                    "UPDATE personal_access_tokens SET last_used_at = ? WHERE token_id = ?",
+                    (now_dt.isoformat(timespec="microseconds"), token_id),
+                )
+                self._conn.commit()
+
+        return Principal(
+            user_id=str(row["user_id"]),
+            storage_namespace=str(row["storage_namespace"]),
+            provider="audrey",
+            provider_subject=token_id,
+            email=str(row["current_email"]),
+            display_name=str(row["display_name"]),
+            role=str(row["role"]),
+            status=str(row["status"]),
+            auth_method="personal_token",
+            token_id=token_id,
+            scopes=scopes,
+        )
+
+    def _token_row_for_owner_locked(
+        self,
+        user_id: str,
+        token_id: str,
+    ) -> sqlite3.Row | None:
+        return self._conn.execute(
+            "SELECT token_id, name, scopes_json, created_at, expires_at, "
+            "last_used_at, revoked_at FROM personal_access_tokens "
+            "WHERE user_id = ? AND token_id = ?",
+            (user_id, token_id),
+        ).fetchone()
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()
@@ -261,8 +497,72 @@ def _principal_from_row(row: sqlite3.Row, *, auth_method: str) -> Principal:
     )
 
 
+def _normalize_scopes(scopes: Iterable[str]) -> tuple[str, ...]:
+    if isinstance(scopes, (str, bytes)):
+        raise InvalidIdentityError("token scopes must be a collection")
+    clean = tuple(sorted({str(scope).strip() for scope in scopes if str(scope).strip()}))
+    if not clean:
+        raise InvalidIdentityError("at least one token scope is required")
+    unknown = sorted(set(clean) - TOKEN_SCOPES)
+    if unknown:
+        raise InvalidIdentityError("unsupported token scope: " + ", ".join(unknown))
+    return clean
+
+
+def _normalize_expiry(value: str, *, require_future: bool) -> str:
+    if not str(value or "").strip():
+        raise InvalidIdentityError("token expiry is required")
+    try:
+        parsed = _parse_utc(str(value))
+    except ValueError as exc:
+        raise InvalidIdentityError("token expiry must be an ISO-8601 UTC timestamp") from exc
+    assert parsed is not None
+    if require_future and parsed <= dt.datetime.now(dt.UTC):
+        raise InvalidIdentityError("token expiry must be in the future")
+    return parsed.isoformat(timespec="microseconds")
+
+
+def _parse_utc(value: str) -> dt.datetime | None:
+    clean = value.strip()
+    if not clean:
+        return None
+    if clean.endswith("Z"):
+        clean = clean[:-1] + "+00:00"
+    parsed = dt.datetime.fromisoformat(clean)
+    if parsed.tzinfo is None:
+        raise ValueError("timestamp has no timezone")
+    return parsed.astimezone(dt.UTC)
+
+
+def _scopes_from_json(value: str) -> tuple[str, ...]:
+    decoded = json.loads(value)
+    if not isinstance(decoded, list):
+        raise ValueError("token scopes are not a list")
+    try:
+        return _normalize_scopes(decoded)
+    except InvalidIdentityError as exc:
+        raise ValueError("invalid stored token scopes") from exc
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _token_summary_from_row(row: sqlite3.Row) -> PersonalTokenSummary:
+    return PersonalTokenSummary(
+        token_id=str(row["token_id"]),
+        name=str(row["name"]),
+        scopes=_scopes_from_json(str(row["scopes_json"])),
+        created_at=str(row["created_at"]),
+        expires_at=str(row["expires_at"] or ""),
+        last_used_at=str(row["last_used_at"] or ""),
+        revoked_at=str(row["revoked_at"] or ""),
+    )
+
+
 __all__ = [
     "ApplicationStore",
     "IdentityConflictError",
     "InvalidIdentityError",
+    "PersonalTokenAuthenticationError",
 ]

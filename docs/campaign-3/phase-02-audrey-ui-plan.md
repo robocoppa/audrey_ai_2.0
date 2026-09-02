@@ -1,6 +1,6 @@
 # Campaign 3 Phase 2 — Audrey application and web UI
 
-**Status:** In progress. Milestone 2A began on 2026-09-02; slice 2A.1 is laptop-complete and awaits its user-run Unraid smoke.
+**Status:** In progress. Slice 2A.1 is complete and Unraid-verified. Slice 2A.2 is laptop-complete and awaits its user-run Unraid smoke.
 
 ## Goal
 
@@ -16,8 +16,9 @@ identity, conversation state, prompt behavior, or tool continuation.
 
 ### 2A.1 — provider-neutral identity foundation
 
-Laptop implementation and verification are complete; deployed verification is
-still pending. This slice adds:
+Laptop implementation and verification are complete. The deployed two-account
+identity, restart-persistence, and existing-file compatibility checks all pass.
+This slice adds:
 
 - a frozen `Principal` with Audrey-owned user and storage identifiers;
 - an Audrey application database with versioned SQLite/WAL migrations for users
@@ -34,9 +35,31 @@ files, memories, collections, archives, or OpenAI-compatible behavior have been
 migrated yet. The local gate is 2,613 passing tests, scoped ruff and compilation
 clean, valid YAML, and a lesson-link scan with zero broken links.
 
-The next gate is a two-account Unraid smoke proving stable repeat identity,
-dot-versus-dash separation, restart persistence, and unchanged `/v1` file
-behavior.
+The two-account Unraid smoke proves distinct identities, stable repeat identity,
+restart persistence, active status, the safe `/api/me` projection, and unchanged
+`/v1/files` behavior. Slice 2A.1 is complete.
+
+### 2A.2 — Audrey personal access tokens
+
+Laptop implementation and verification are complete; deployed verification is
+pending. This slice adds:
+
+- application schema v2 with owner-bound personal-token records;
+- 256-bit random bearer secrets stored only as SHA-256 digests;
+- explicit `account:read` and coarse `compat:full` scopes, mandatory expiry
+  defaulting to 90 days and bounded to 1–365 days, last-use tracking, idempotent revocation, and one-time secret display;
+- provider-authenticated create/list/revoke resources at `/api/tokens`;
+- local token resolution through the same stable `Principal`, without sending
+  Audrey tokens to OWUI or placing them in the OWUI auth cache; and
+- compatibility access through the stable storage namespace while keeping
+  admin routes and credential management provider-authenticated.
+
+The additive v1-to-v2 migration preserves existing users and identifiers. The
+local gate is 2,628 passing tests, scoped ruff and compilation clean, and a
+lesson-link scan with zero broken links. The Unraid gate must prove migration,
+one-time display, native and compatibility use, restart persistence, and
+immediate revocation with a disposable token.
+
 
 ## Decision
 

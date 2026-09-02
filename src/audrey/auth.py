@@ -1,6 +1,7 @@
 """Authentication adapters and provider-neutral Audrey principal resolution.
 
-Validates `Authorization: Bearer <jwt>` tokens by proxying them to
+Accepts `Authorization: Bearer <credential>`. Audrey personal tokens use an
+`aud_pat_` discriminator and resolve locally; other bearers are proxied to the
 Open WebUI session endpoint (`GET /api/v1/auths/`, trailing slash
 load-bearing — OWUI 0.9.2 specifically). During native-application migration,
 OWUI proves the external identity while Audrey owns the stable user id and
@@ -24,7 +25,7 @@ Flow:
                                                             ▼
                                               AuthedUser(..., principal)
 
-Token results are cached per-token for `_TTL_S` seconds (default 30s)
+OWUI results are cached per-token for `_TTL_S` seconds (default 30s)
 to spare OWUI on bursty dashboards. The cache is a plain dict with an
 opportunistic sweep at 1024 entries — fine for our scale (dozens of
 users, not thousands).
@@ -36,7 +37,8 @@ localStorage, so we never *need* the cookie; (2) accepting cookies
 opens a CSRF path from any logged-in OWUI user's browser. Requiring
 the explicit header closes that.
 
-401 propagates from OWUI as-is. 502 on any other OWUI error — we want
+Invalid, expired, revoked, and disabled-account personal tokens return 401 and
+are never cached. OWUI 401 propagates as-is. 502 on any other OWUI error — we want
 the client to see "auth is broken" distinctly from "you're not logged
 in." Timeouts are short (5s); OWUI lives on `ollama-net` at sub-ms
 latency, so a 5s ceiling means OWUI is actually down, not slow.
@@ -52,7 +54,11 @@ from dataclasses import dataclass
 import httpx
 from fastapi import Depends, Header, HTTPException, Request
 
-from audrey.app_state import IdentityConflictError, InvalidIdentityError
+from audrey.app_state import (
+    IdentityConflictError,
+    InvalidIdentityError,
+    PersonalTokenAuthenticationError,
+)
 from audrey.identity import Principal
 from audrey.metrics import auth_cache_size as _auth_cache_size_gauge
 
@@ -61,6 +67,7 @@ log = logging.getLogger(__name__)
 _TTL_S: float = 30.0
 _SWEEP_AT: int = 1024
 _PROBE_TIMEOUT_S: float = 5.0
+_PERSONAL_TOKEN_PREFIX = "aud_pat_"  # noqa: S105 — public format discriminator
 
 # Roles allowed past the gate. OWUI emits these as lowercase. `pending` —
 # a user the admin hasn't activated — has a valid JWT but no chat access
@@ -142,6 +149,45 @@ async def _probe_owui(owui_url: str, token: str) -> AuthedUser:
     )
 
 
+async def _resolve_personal_token(
+    request: Request,
+    token: str,
+) -> AuthedUser:
+    """Resolve an Audrey bearer locally and enforce compatibility policy.
+
+    Personal tokens never inherit provider-admin authority on `/v1`; that
+    avoids stale admin access if the external provider later demotes a user.
+    """
+
+    store = getattr(request.app.state, "application_store", None)
+    if store is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Audrey application identity is not initialized.",
+        )
+    try:
+        principal = await store.authenticate_personal_token(token)
+    except PersonalTokenAuthenticationError as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="Personal access token is invalid.",
+        ) from exc
+
+    if request.url.path.startswith("/v1/") and "compat:full" not in principal.scopes:
+        raise HTTPException(
+            status_code=403,
+            detail="Personal access token lacks compat:full scope.",
+        )
+
+    return AuthedUser(
+        email=principal.storage_namespace,
+        role="user",
+        owui_id="",
+        display_name=principal.display_name,
+        principal=principal,
+    )
+
+
 async def _bind_audrey_principal(
     request: Request,
     user: AuthedUser,
@@ -197,6 +243,9 @@ async def require_user(
     if not token:
         raise HTTPException(status_code=401, detail="Empty bearer token.")
 
+    if token.startswith(_PERSONAL_TOKEN_PREFIX):
+        return await _resolve_personal_token(request, token)
+
     now = time.monotonic()
     cached = _cache.get(token)
     if cached is not None and now - cached[0] < _TTL_S:
@@ -228,6 +277,35 @@ async def require_principal(
     if me.principal.status != "active":
         raise HTTPException(status_code=403, detail="Audrey account is disabled.")
     return me.principal
+
+
+def require_scope(scope: str):
+    """Build a dependency that enforces scopes only for personal tokens."""
+
+    async def _dependency(
+        principal: Principal = Depends(require_principal),
+    ) -> Principal:
+        if principal.auth_method == "personal_token" and scope not in principal.scopes:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Personal access token lacks {scope} scope.",
+            )
+        return principal
+
+    return _dependency
+
+
+async def require_provider_principal(
+    principal: Principal = Depends(require_principal),
+) -> Principal:
+    """Require external-provider authentication for credential management."""
+
+    if principal.auth_method == "personal_token":
+        raise HTTPException(
+            status_code=403,
+            detail="External provider authentication is required to manage access tokens.",
+        )
+    return principal
 
 
 async def require_admin(me: AuthedUser = Depends(require_user)) -> AuthedUser:
@@ -320,7 +398,17 @@ def cache_size() -> int:
 
 
 __all__ = [
-    "AuthedUser", "KBCaller", "require_user", "require_principal", "require_admin",
-    "verify_service_token", "resolve_kb_caller", "require_service",
-    "clear_auth_cache", "clear_auth_cache_for_email", "cache_size",
+    "AuthedUser",
+    "KBCaller",
+    "require_user",
+    "require_principal",
+    "require_scope",
+    "require_provider_principal",
+    "require_admin",
+    "verify_service_token",
+    "resolve_kb_caller",
+    "require_service",
+    "clear_auth_cache",
+    "clear_auth_cache_for_email",
+    "cache_size",
 ]
