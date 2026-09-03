@@ -31,6 +31,8 @@ from audrey.routes.openai.streaming import (
     StreamOutcome,
     StreamTerminal,
 )
+from audrey.tools.discovery import ToolRegistry, ToolSpec
+from audrey.tools.dispatch import ToolResult
 
 
 class _Cfg:
@@ -468,6 +470,50 @@ class _FixedGraph:
         }
 
 
+class _ObservedGraph:
+    def __init__(self) -> None:
+        self.observer_seen: bool | None = None
+
+    async def ainvoke(self, state):
+        observer = state["tool_observer"]
+        self.observer_seen = observer is not None
+        if observer is not None:
+            call_id = observer.started({
+                "function": {
+                    "name": "web_search",
+                    "arguments": {
+                        "query": "coffee history",
+                        "api_key": "private-argument",
+                    },
+                },
+            })
+            observer.finished(
+                call_id,
+                ToolResult(
+                    name="web_search",
+                    call_id=None,
+                    content='{"provider_debug":"private-result-body"}',
+                    elapsed_s=0.01,
+                    is_error=False,
+                ),
+                sources=[{
+                    "title": "Coffee history",
+                    "url": "https://example.com/coffee?token=private",
+                    "tool": "web_search",
+                }],
+            )
+        return {
+            "content": "fast observed answer",
+            "mode": "fast",
+            "task_type": "general",
+            "classify_reason": "test",
+            "classify_confidence": 1.0,
+            "concrete_model": "a",
+            "prompt_eval_count": 10,
+            "eval_count": 2,
+        }
+
+
 def _route_app(cfg: _Cfg, ollama, archive: _RecordingArchive):
     return SimpleNamespace(state=SimpleNamespace(
         cfg=cfg,
@@ -572,6 +618,122 @@ async def test_route_uses_one_id_one_role_and_the_configured_thinking_policy(
     )
     usage = next(event for event in events if event.type == "usage.reported")
     assert (usage.prompt_tokens, usage.completion_tokens) == (0, 0)
+
+
+async def test_fast_tool_route_emits_native_observations_without_leaking_to_v1(
+    monkeypatch,
+):
+    cfg = _Cfg(("a", 100, "local"))
+    cfg.raw["fast_path"]["tool_capable_models"] = ["a"]
+    archive = _RecordingArchive()
+    app = _route_app(cfg, _ScriptedOllama({}), archive)
+    app.state.tools = ToolRegistry(by_name={
+        "web_search": ToolSpec(
+            name="web_search",
+            description="search",
+            parameters={"type": "object", "properties": {}},
+            server_url="http://unused",
+            path="/web_search",
+        ),
+    })
+    graph = _ObservedGraph()
+    app.state.graph = graph
+
+    async def classify(*args, **kwargs):
+        return "general", "test", 1.0
+
+    monkeypatch.setattr(route_pipeline, "classify_with_registry", classify)
+    messages = [{"role": "user", "content": "search coffee history"}]
+    payload = ChatCompletionRequest(
+        model="audrey_fast",
+        messages=messages,
+        stream=True,
+    )
+    events: list[RunEvent] = []
+
+    frames = [
+        frame async for frame in _stream_via_pipeline(
+            app,
+            payload,
+            messages,
+            {},
+            user_id="alice@example.com",
+            conversation_id="conversation-fast-tool",
+            user_turn_text="search coffee history",
+            event_context=RunEventContext(
+                run_id="run-fast-tool",
+                conversation_id="conversation-fast-tool",
+                assistant_message_id="message-fast-tool",
+                mode="fast",
+                sink=events.append,
+            ),
+        )
+    ]
+
+    assert graph.observer_seen is True
+    observed = [
+        event for event in events
+        if event.type.startswith("tool.") or event.type == "source.observed"
+    ]
+    assert [event.type for event in observed] == [
+        "tool.started",
+        "tool.arguments",
+        "tool.finished",
+        "source.observed",
+    ]
+    assert observed[1].arguments["api_key"] == "[redacted]"
+    assert observed[-1].url == "https://example.com/coffee"
+    rendered = "".join(frames)
+    assert "fast observed answer" in rendered
+    assert "private-argument" not in rendered
+    assert "private-result-body" not in rendered
+    assert "token=private" not in rendered
+    assert frames[-1] == "data: [DONE]\n\n"
+
+
+async def test_compatibility_tool_route_does_not_create_native_observer(monkeypatch):
+    cfg = _Cfg(("a", 100, "local"))
+    cfg.raw["fast_path"]["tool_capable_models"] = ["a"]
+    app = _route_app(cfg, _ScriptedOllama({}), _RecordingArchive())
+    app.state.tools = ToolRegistry(by_name={
+        "web_search": ToolSpec(
+            name="web_search",
+            description="search",
+            parameters={"type": "object", "properties": {}},
+            server_url="http://unused",
+            path="/web_search",
+        ),
+    })
+    graph = _ObservedGraph()
+    app.state.graph = graph
+
+    async def classify(*args, **kwargs):
+        return "general", "test", 1.0
+
+    monkeypatch.setattr(route_pipeline, "classify_with_registry", classify)
+    messages = [{"role": "user", "content": "search coffee history"}]
+    payload = ChatCompletionRequest(
+        model="audrey_fast",
+        messages=messages,
+        stream=True,
+    )
+
+    frames = [
+        frame async for frame in _stream_via_pipeline(
+            app,
+            payload,
+            messages,
+            {},
+            user_id="alice@example.com",
+            conversation_id="conversation-fast-tool",
+            user_turn_text="search coffee history",
+        )
+    ]
+
+    assert graph.observer_seen is False
+    rendered = "".join(frames)
+    assert "fast observed answer" in rendered
+    assert frames[-1] == "data: [DONE]\n\n"
 
 
 async def test_nonstream_owui_utility_turn_is_not_archived():

@@ -70,6 +70,7 @@ from audrey.pipeline.prompts import (
     prompt_from_config,
 )
 from audrey.pipeline.react import ReactResult, run_react
+from audrey.pipeline.run_observations import RunEventToolObserver
 from audrey.pipeline.state import TaskType, WorkerDraft
 from audrey.tools.discovery import ToolRegistry
 
@@ -360,6 +361,7 @@ async def _run_one_worker(
     user_id: str | None = None,
     cfg: Any = None,
     subtask: str = "",
+    tool_observer: RunEventToolObserver | None = None,
 ) -> WorkerDraft:
     """Execute one worker. Always returns a WorkerDraft — never raises.
 
@@ -400,6 +402,7 @@ async def _run_one_worker(
                     location=location,
                     cfg=cfg,
                     think=think,
+                    tool_observer=tool_observer,
                 )
                 elapsed = round(time.monotonic() - start, 2)
                 stripped = _strip_think(react.content)
@@ -565,6 +568,7 @@ def _prepare_panel(
     react_compress_keep_last: int,
     react_max_web_searches: int,
     user_id: str | None,
+    tool_observer: RunEventToolObserver | None = None,
 ) -> tuple[list[tuple[str, str]], list[Any]]:
     """Select workers and build their coroutines — shared by both run_panel variants.
 
@@ -647,6 +651,7 @@ def _prepare_panel(
             user_id=user_id,
             cfg=cfg,
             subtask=per_worker_subtask[i],
+            tool_observer=tool_observer,
         )
         for i, (name, loc) in enumerate(workers)
     ]
@@ -676,6 +681,7 @@ async def run_panel(
     react_compress_keep_last: int = 1,
     react_max_web_searches: int = 0,
     user_id: str | None = None,
+    tool_observer: RunEventToolObserver | None = None,
 ) -> tuple[list[WorkerDraft], list[str]]:
     """Run the panel and return (drafts, attempted_models).
 
@@ -695,6 +701,7 @@ async def run_panel(
         react_dispatch_timeout_s=react_dispatch_timeout_s,
         react_compress_keep_last=react_compress_keep_last,
         react_max_web_searches=react_max_web_searches, user_id=user_id,
+        tool_observer=tool_observer,
     )
     if not coros:
         return [], []
@@ -726,6 +733,7 @@ async def run_panel_streaming(
     react_compress_keep_last: int = 1,
     react_max_web_searches: int = 0,
     user_id: str | None = None,
+    tool_observer: RunEventToolObserver | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Streaming variant of `run_panel`.
 
@@ -755,6 +763,7 @@ async def run_panel_streaming(
         react_dispatch_timeout_s=react_dispatch_timeout_s,
         react_compress_keep_last=react_compress_keep_last,
         react_max_web_searches=react_max_web_searches, user_id=user_id,
+        tool_observer=tool_observer,
     )
     if not coros:
         yield {"type": "final", "drafts": [], "attempted": []}
@@ -1844,6 +1853,7 @@ async def run_research_pipeline_streaming(
     tools: ToolRegistry | None = None,
     tool_capable_models: set[str] | None = None,
     user_id: str | None = None,
+    tool_observer: RunEventToolObserver | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Run the staged research pipeline, yielding stage events.
 
@@ -1907,6 +1917,7 @@ async def run_research_pipeline_streaming(
                 react_max_web_searches=budget["max_web_searches"],
                 user_id=user_id,
                 cfg=cfg,
+                tool_observer=tool_observer,
             )
             for name, loc in researchers
         ]
@@ -2085,6 +2096,7 @@ async def run_research_pipeline_streaming(
                     gate=None,  # gate held for the whole stage (as deep panel does)
                     location=registry.location_of(factchecker),
                     cfg=cfg,
+                    tool_observer=tool_observer,
                 )
             corrections = (fc.content or "").strip()
             # Structure the fact-check against the claim ledger.
@@ -2252,6 +2264,7 @@ async def run_research_pipeline(
     tools: ToolRegistry | None = None,
     tool_capable_models: set[str] | None = None,
     user_id: str | None = None,
+    tool_observer: RunEventToolObserver | None = None,
 ) -> dict[str, Any]:
     """Non-streaming staged research pipeline. Returns a dict to merge into state.
 
@@ -2267,6 +2280,7 @@ async def run_research_pipeline(
         task=task, messages=messages, options=options,
         timeout_s=timeout_s, max_researchers_cloud=max_researchers_cloud,
         tools=tools, tool_capable_models=tool_capable_models, user_id=user_id,
+        tool_observer=tool_observer,
     ):
         if evt.get("type") == "done":
             final = evt

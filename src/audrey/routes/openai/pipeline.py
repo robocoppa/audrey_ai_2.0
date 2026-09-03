@@ -79,6 +79,7 @@ from audrey.pipeline.prompts import (
     without_task_role,
 )
 from audrey.pipeline.run_events import RunEventContext
+from audrey.pipeline.run_observations import RunEventToolObserver
 from audrey.pipeline.streaming import (
     StreamArchiveTarget,
     StreamStageRunner,
@@ -370,6 +371,11 @@ async def _stream_via_pipeline(
                 fingerprint_model=payload.model,
                 **_event_session_kwargs(event_context),
             )
+            tool_observer = (
+                RunEventToolObserver(fast_stream.run_event_emitter)
+                if event_context is not None
+                else None
+            )
             yield fast_stream.role_frame()
             fast_stream.stage_started("thinking", label="Thinking")
             yield fast_stream.status_frame(BANNER_THINKING, stage="thinking")
@@ -420,6 +426,7 @@ async def _stream_via_pipeline(
                     "top_p": payload.top_p,
                     "max_tokens": payload.max_tokens,
                     "user_id": user_id,
+                    "tool_observer": tool_observer,
                 }
                 banner_q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=128)
 
@@ -700,6 +707,11 @@ async def _stream_deep_with_banners(
         terminal=runner.terminal,
         **_event_session_kwargs(event_context),
     )
+    tool_observer = (
+        RunEventToolObserver(session.run_event_emitter)
+        if event_context is not None
+        else None
+    )
     _delta_frame = session.content_frame
 
     # The banner emitter routes string fragments through a queue so the
@@ -796,6 +808,7 @@ async def _stream_deep_with_banners(
                     react_compress_keep_last=deep_react_compress_keep_last,
                     react_max_web_searches=deep_react_max_web_searches,
                     user_id=user_id or None,
+                    tool_observer=tool_observer,
                     ticker=ticker,
                 ),
                 name="deep-panel",
@@ -1064,6 +1077,11 @@ async def _stream_research_with_banners(
         terminal=runner.terminal,
         **_event_session_kwargs(event_context),
     )
+    tool_observer = (
+        RunEventToolObserver(session.run_event_emitter)
+        if event_context is not None
+        else None
+    )
     _delta_frame = session.content_frame
 
     banner_q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=128)
@@ -1132,6 +1150,7 @@ async def _stream_research_with_banners(
                 timeout_s=timeout_s, max_researchers_cloud=max_researchers_cloud,
                 tools=tools, tool_capable_models=tool_capable_models,
                 user_id=user_id or None,
+                tool_observer=tool_observer,
             ),
             maxsize=256,
             name="research-pipeline",
@@ -1473,7 +1492,7 @@ async def _phase_dispatch(
     react_max_rounds, react_compress_after,
     react_max_tool_chars, react_dispatch_timeout_s,
     react_compress_keep_last, react_max_web_searches,
-    user_id, ticker: PhaseTicker,
+    user_id, tool_observer, ticker: PhaseTicker,
 ):
     """Run the panel and feed per-worker results to the ticker. Returns drafts."""
     drafts: list[dict[str, Any]] = []
@@ -1490,6 +1509,7 @@ async def _phase_dispatch(
         react_compress_keep_last=react_compress_keep_last,
         react_max_web_searches=react_max_web_searches,
         user_id=user_id,
+        tool_observer=tool_observer,
     ):
         if evt["type"] == "worker_done":
             ticker.append_tail(worker_ok(evt["model"]) if evt["ok"] else worker_fail(evt["model"]))

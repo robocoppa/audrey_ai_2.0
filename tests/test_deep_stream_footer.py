@@ -38,11 +38,12 @@ from audrey.metrics import pipeline_total
 from audrey.models.health import HealthTracker
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
-from audrey.pipeline.run_events import RunEvent, RunEventContext
+from audrey.pipeline.run_events import RunEvent, RunEventContext, dump_run_event
 from audrey.routes.openai import pipeline as route_pipeline
 from audrey.routes.openai.pipeline import _stream_deep_with_banners
 from audrey.routes.openai.schemas import ChatCompletionRequest
 from audrey.tools.discovery import ToolRegistry, ToolSpec
+from audrey.tools.dispatch import ToolResult
 
 # Read at import: the cross-path wording check runs inside an async test, and
 # blocking file IO there trips ASYNC240.
@@ -179,6 +180,55 @@ async def test_deep_stream_emits_typed_lifecycle_and_answer_only_deltas():
     assert events[-2].type == "message.finished"
     assert events[-1].type == "run.finished"
     assert events[-1].status == "succeeded"
+
+
+async def test_deep_stream_projects_real_tool_activity_and_deduped_sources(
+    monkeypatch,
+):
+    result_body = json.dumps({
+        "results": [{
+            "title": "London System",
+            "url": "https://example.com/london?token=private",
+            "snippet": "private-result-body",
+        }],
+    })
+
+    async def _search(http, registry, tc, *, max_result_chars, timeout_s, user_id=None):
+        return ToolResult(
+            name="kb_search",
+            call_id=tc.get("id"),
+            content=result_body,
+            elapsed_s=0.01,
+            is_error=False,
+        )
+
+    monkeypatch.setattr("audrey.pipeline.react.dispatch_one", _search)
+    events: list[RunEvent] = []
+    app = _fake_app(
+        {"w1": "draft one", "w2": "draft two", "s": "Deep answer."},
+        tool_capable=["w1", "w2"],
+    )
+
+    await _collect(app, events)
+
+    observed = [
+        event for event in events
+        if event.type.startswith("tool.") or event.type == "source.observed"
+    ]
+    assert [event.type for event in observed].count("tool.started") == 2
+    assert [event.type for event in observed].count("tool.arguments") == 2
+    assert [event.type for event in observed].count("tool.finished") == 2
+    sources = [event for event in observed if event.type == "source.observed"]
+    assert len(sources) == 1
+    assert sources[0].url == "https://example.com/london"
+    assert all(
+        event.status == "succeeded"
+        for event in observed
+        if event.type == "tool.finished"
+    )
+    wire = json.dumps([dump_run_event(event) for event in events])
+    assert "private-result-body" not in wire
+    assert "token=private" not in wire
 
 
 async def test_deep_stream_renders_the_tools_used_footer():

@@ -4,8 +4,9 @@
 the optional, default-disabled Cloudflare Access identity adapter. Milestone 2B
 is underway; its first owner-bound conversation/history API slice is
 complete and Unraid-verified. The universal run-event/native-run slice is also
-complete and Unraid-verified. The AG-UI boundary adapter is laptop-complete and
-awaits its Unraid gate.
+complete and Unraid-verified. The AG-UI boundary adapter is also complete and
+Unraid-verified. Pipeline tool/source observation wiring is laptop-complete and
+awaiting its Unraid gate.
 
 ## Goal
 
@@ -241,14 +242,43 @@ The focused adapter/native gate is 24 passing tests, the broader affected gate
 is 128 passing tests, and the full hermetic suite is 2,710 passing tests.
 Changed-file ruff, compilation, and diff checks are clean. The lesson-link scan
 has zero broken links; the existing citation-drift backlog remains deferred by
-user direction. The remaining gate is an owner/cross-owner, reconnect,
-cancellation, compatibility, and cleanup smoke on Unraid.
+user direction. On Unraid, a Fast run produced standard data-only AG-UI frames,
+the exact reconstructed answer, successful terminal usage, and ordered
+composite ids. Reconnect after the answer returned only later events; an admin
+identity received the owner-hiding `404`. Cancellation mapped to sanitized
+`RUN_ERROR`/`cancelled_by_user`, `/v1` still returned its exact answer, and
+three projection chunks plus the canonical conversation were deleted before
+all repair queues returned to `ready`. Slice 2B.3 is complete and
+Unraid-verified.
 
 This slice does not accept browser-authored AG-UI transcripts or make an
-external client the owner of Audrey's tool loop. Mapping the remaining private
-Fast/Deep/Research tool and source observations into the already-typed Audrey
-events, plus archive import/rebuild behavior, remain subsequent Milestone 2B
-work.
+external client the owner of Audrey's tool loop. Archive import/rebuild
+behavior remains subsequent Milestone 2B work.
+
+### 2B.4 — pipeline tool and source observations
+
+Implementation is laptop-complete. One observer at the shared ReAct dispatch
+seam now projects real Fast, Deep, and Research activity into Audrey's existing
+typed run-event spine. Each dispatch emits a unique tool lifecycle; successful
+web and KB retrieval emits deduplicated source records. The native and AG-UI
+adapters therefore report what actually happened without parsing display text,
+and tool execution remains server-owned.
+
+The projection is deliberately narrower than the model's working context.
+Allowlisted search/file arguments are bounded, identity and newly introduced
+fields default to redacted, URL credentials/query/fragment data are removed,
+raw result bodies never cross the event boundary, and failures expose only
+stable error codes. The model still receives the complete dispatch result, so
+the safety boundary does not weaken grounding. Compatibility requests create
+no observer, and `/v1/chat/completions` retains its existing payload and banner
+behavior.
+
+The focused Fast/Deep/Research and projection gate is 96 passing tests; the
+broader affected gate is 316 passing tests; and the full hermetic suite is
+2,721 passing tests with the existing FastAPI deprecation warning. Changed-file
+ruff, compilation, and diff checks are clean. The lesson-link scan has zero
+broken links; the existing citation-drift backlog remains deferred by user
+direction. Unraid verification remains open.
 
 
 ## Decision

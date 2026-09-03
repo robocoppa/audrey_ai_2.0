@@ -31,6 +31,7 @@ from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry, ModelSpec, TaskType
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.react import ReactResult, run_react
+from audrey.pipeline.run_observations import RunEventToolObserver
 from audrey.pipeline.streaming import StreamOutcome, StreamTerminal
 from audrey.tools.discovery import ToolRegistry
 
@@ -471,6 +472,7 @@ async def run_fast_path(
     cfg: Any = None,
     no_thinking: bool = False,
     no_thinking_prose: bool | None = None,
+    tool_observer: RunEventToolObserver | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Return (concrete_model, response_like_dict).
 
@@ -576,6 +578,7 @@ async def run_fast_path(
         location=spec.location,
         cfg=cfg,
         think=await _think(ollama, spec.name, no_thinking),
+        tool_observer=tool_observer,
     )
     return spec.name, {
         "message": {"role": "assistant", "content": react.content},

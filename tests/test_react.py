@@ -32,6 +32,8 @@ from audrey.pipeline.react import (
     _without_web_search,
     run_react,
 )
+from audrey.pipeline.run_events import RunEvent, RunEventEmitter, dump_run_event
+from audrey.pipeline.run_observations import RunEventToolObserver
 from audrey.tools.discovery import ToolRegistry, ToolSpec
 from audrey.tools.dispatch import ToolResult
 
@@ -371,6 +373,108 @@ def fake_dispatch(monkeypatch):
 
     monkeypatch.setattr("audrey.pipeline.react.dispatch_one", _fake)
     return dispatched
+
+
+async def test_real_dispatch_projects_sanitized_tool_and_source_events(monkeypatch):
+    result_body = json.dumps({
+        "results": [{
+            "title": "Coffee history",
+            "url": "https://example.com/coffee",
+            "snippet": "private-result-body",
+        }],
+        "provider_debug": "bearer secret-token",
+    })
+
+    async def _search(http, registry, tc, *, max_result_chars, timeout_s, user_id=None):
+        return ToolResult(
+            name="web_search",
+            call_id=tc.get("id"),
+            content=result_body,
+            elapsed_s=0.01,
+            is_error=False,
+        )
+
+    monkeypatch.setattr("audrey.pipeline.react.dispatch_one", _search)
+    ollama = _FakeOllama([
+        {"message": {"tool_calls": [{
+            "id": "model-call-id",
+            "function": {
+                "name": "web_search",
+                "arguments": {
+                    "query": "coffee history",
+                    "user": "forged@example.com",
+                    "api_key": "secret-argument",
+                },
+            },
+        }]}},
+        {"message": {"content": "grounded answer"}},
+    ])
+    events: list[RunEvent] = []
+    emitter = RunEventEmitter(
+        run_id="run-react",
+        conversation_id="conversation-react",
+        assistant_message_id="message-react",
+        mode="fast",
+        virtual_model="audrey_fast",
+        sink=events.append,
+    )
+    emitter.run_started()
+    emitter.message_started()
+
+    out = await run_react(
+        ollama,
+        _FakeHealth(),
+        _registry_ws_kb(),
+        model="m",
+        messages=[{"role": "user", "content": "q"}],
+        options={},
+        timeout_s=5,
+        max_rounds=2,
+        compress_after_round=99,
+        max_tool_result_chars=1000,
+        tool_dispatch_timeout_s=5,
+        location="cloud",
+        max_web_searches=1,
+        tool_observer=RunEventToolObserver(emitter),
+    )
+    emitter.message_finished(status="completed")
+    emitter.run_finished(status="succeeded", concrete_model="m")
+
+    assert out.content == "grounded answer"
+    tool_types = [
+        event.type for event in events
+        if event.type.startswith("tool.") or event.type == "source.observed"
+    ]
+    assert tool_types == [
+        "tool.started",
+        "tool.arguments",
+        "tool.finished",
+        "source.observed",
+    ]
+    arguments = next(event for event in events if event.type == "tool.arguments")
+    assert arguments.arguments == {
+        "query": "coffee history",
+        "user": "[redacted]",
+        "api_key": "[redacted]",
+    }
+    source = next(event for event in events if event.type == "source.observed")
+    assert (source.title, source.url, source.source_type) == (
+        "Coffee history",
+        "https://example.com/coffee",
+        "web_search",
+    )
+    # ReAct still gives the model the complete tool body. Only the UI event
+    # projection is redacted; observation must never weaken grounding.
+    assert result_body in [
+        message["content"]
+        for message in ollama.calls[1]["messages"]
+        if message.get("role") == "tool"
+    ]
+    wire = json.dumps([dump_run_event(event) for event in events])
+    assert "private-result-body" not in wire
+    assert "secret-token" not in wire
+    assert "secret-argument" not in wire
+    assert "forged@example.com" not in wire
 
 
 async def test_web_search_cap_stubs_overflow_and_stops_offering(fake_dispatch):

@@ -23,18 +23,26 @@ from audrey.metrics import pipeline_total
 from audrey.models.health import HealthTracker
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
-from audrey.pipeline.run_events import RunEvent, RunEventContext
+from audrey.pipeline.run_events import RunEvent, RunEventContext, dump_run_event
 from audrey.routes.openai import pipeline as route_pipeline
 from audrey.routes.openai.pipeline import _stream_research_with_banners
 from audrey.routes.openai.schemas import ChatCompletionRequest
+from audrey.tools.dispatch import ToolResult
 
 
 class _FakeOllama:
     """Returns canned content per model for chat (researchers/verifier) and
     chat_stream (writer). Mirrors the stub in test_deep_panel.py."""
 
-    def __init__(self, responses: dict[str, str]):
+    def __init__(
+        self,
+        responses: dict[str, str],
+        *,
+        tool_call_models: set[str] | None = None,
+    ):
         self.responses = responses
+        self.tool_call_models = tool_call_models or set()
+        self._called: set[str] = set()
 
     async def chat(self, *, model, messages, options=None, timeout_s=0, tools=None,
                    format=None, think=None):
@@ -44,6 +52,21 @@ class _FakeOllama:
         # TypeError escaped `_run_one_worker` and the streaming test HUNG rather
         # than failed, which is far more expensive to diagnose than a red test.
         # `tools=` is likewise here so the fact-checker's run_react loop can call us.
+        if model in self.tool_call_models and model not in self._called:
+            self._called.add(model)
+            return {
+                "message": {
+                    "content": "",
+                    "tool_calls": [{
+                        "function": {
+                            "name": "web_search",
+                            "arguments": {"query": "euclid"},
+                        },
+                    }],
+                },
+                "prompt_eval_count": 1,
+                "eval_count": 1,
+            }
         return {"message": {"content": self.responses.get(model, "")},
                 "prompt_eval_count": 1, "eval_count": 1}
 
@@ -74,7 +97,12 @@ def _one_tool_registry():
     return ToolRegistry(by_name={"web_search": spec})
 
 
-def _fake_app(responses: dict[str, str], *, factchecker: str | None = None):
+def _fake_app(
+    responses: dict[str, str],
+    *,
+    factchecker: str | None = None,
+    tool_call_models: set[str] | None = None,
+):
     # Build a FRESH Config from a deep-copied raw so mutating the research
     # pool can't leak into the shared `get_config()` singleton other tests use.
     base = get_config()
@@ -93,21 +121,23 @@ def _fake_app(responses: dict[str, str], *, factchecker: str | None = None):
         {"name": "w", "priority": 70, "location": "local"},
         {"name": "fb", "priority": 60, "location": "cloud"},
     ]
+    capable = set(tool_call_models or set())
     if factchecker:
         body["factchecker"] = factchecker
         reg_models.append({"name": factchecker, "priority": 75, "location": "cloud"})
         # The fact-checker must be tool-capable for the stage to run.
-        cfg.raw.setdefault("fast_path", {})["tool_capable_models"] = [factchecker]
+        capable.add(factchecker)
+    cfg.raw.setdefault("fast_path", {})["tool_capable_models"] = sorted(capable)
     cfg.raw["deep_panel_research"] = {"reasoning": body}
     cfg.raw.setdefault("model_registry", {})["reasoning"] = reg_models
     registry = ModelRegistry(cfg)
     state = SimpleNamespace(
         cfg=cfg,
-        ollama=_FakeOllama(responses),
+        ollama=_FakeOllama(responses, tool_call_models=tool_call_models),
         registry=registry,
         health=HealthTracker(),
         gate=FairLocalGate(concurrency=1),
-        tools=_one_tool_registry() if factchecker else _FakeTools(),
+        tools=_one_tool_registry() if capable else _FakeTools(),
         archive_http=object(),
         # archive_client intentionally absent → getattr default None.
     )
@@ -208,6 +238,58 @@ async def test_research_stream_emits_typed_lifecycle_and_writer_usage():
     assert (usage.prompt_tokens, usage.completion_tokens) == (1, 1)
     assert events[-1].type == "run.finished"
     assert events[-1].status == "succeeded"
+
+
+async def test_research_stream_projects_researcher_tool_and_source_events(
+    monkeypatch,
+):
+    result_body = json.dumps({
+        "results": [{
+            "title": "Euclid",
+            "url": "https://example.com/euclid?token=private",
+            "snippet": "private-result-body",
+        }],
+    })
+
+    async def _search(http, registry, tc, *, max_result_chars, timeout_s, user_id=None):
+        return ToolResult(
+            name="web_search",
+            call_id=tc.get("id"),
+            content=result_body,
+            elapsed_s=0.01,
+            is_error=False,
+        )
+
+    monkeypatch.setattr("audrey.pipeline.react.dispatch_one", _search)
+    events: list[RunEvent] = []
+    app = _fake_app(
+        {
+            "r1": "fact A",
+            "r2": "fact B",
+            "v": "looks fine",
+            "w": "Research answer.",
+        },
+        tool_call_models={"r1"},
+    )
+
+    await _collect(app, events=events)
+
+    observed = [
+        event for event in events
+        if event.type.startswith("tool.") or event.type == "source.observed"
+    ]
+    assert [event.type for event in observed] == [
+        "tool.started",
+        "tool.arguments",
+        "tool.finished",
+        "source.observed",
+    ]
+    source = observed[-1]
+    assert source.url == "https://example.com/euclid"
+    assert source.source_type == "web_search"
+    wire = json.dumps([dump_run_event(event) for event in events])
+    assert "private-result-body" not in wire
+    assert "token=private" not in wire
 
 
 async def test_research_stream_factcheck_banner_in_order():

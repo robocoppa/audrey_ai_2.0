@@ -425,6 +425,7 @@ def build_graph(
             cfg=cfg,
             no_thinking=fast_no_thinking,
             no_thinking_prose=fast_no_thinking_prose,
+            tool_observer=state.get("tool_observer"),
         )
         msg = resp.get("message", {}) or {}
         react_meta = resp.get("_react") or {}
@@ -477,6 +478,7 @@ def build_graph(
             react_compress_keep_last=deep_react_compress_keep_last,
             react_max_web_searches=deep_react_max_web_searches,
             user_id=(state.get("user_id") or None),
+            tool_observer=state.get("tool_observer"),
         )
         ok = sum(1 for d in drafts if (d.get("content") or "").strip())
         grounded = sum(1 for d in drafts if int(d.get("tool_rounds", 0) or 0) > 0)
@@ -528,6 +530,7 @@ def build_graph(
             tools=tools,
             tool_capable_models=tool_capable_models,
             user_id=(state.get("user_id") or None),
+            tool_observer=state.get("tool_observer"),
         )
         drafts = list(result.get("drafts") or [])
         ok = sum(1 for d in drafts if (d.get("content") or "").strip())

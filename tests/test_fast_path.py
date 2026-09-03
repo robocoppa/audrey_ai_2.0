@@ -22,6 +22,7 @@ the transport level so a per-model success/failure script is easy to express.
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import patch
 
 from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaError
@@ -32,6 +33,7 @@ from audrey.pipeline.fast_path import (
     _healthy_fast_candidates,
     run_fast_path,
 )
+from audrey.pipeline.react import ReactResult
 from audrey.tools.discovery import ToolRegistry, ToolSpec
 
 
@@ -243,6 +245,44 @@ async def test_fast_path_tools_branch_does_not_fall_back():
     assert not health.is_healthy("a")
 
 
+async def test_fast_path_forwards_native_tool_observer_to_react():
+    registry = _registry(("a", 100, "local"))
+    tools = ToolRegistry(by_name={
+        "web_search": ToolSpec(
+            name="web_search",
+            description="d",
+            parameters={"type": "object", "properties": {}},
+            server_url="http://t",
+            path="/web_search",
+        ),
+    })
+    observer = object()
+    captured: dict[str, Any] = {}
+
+    async def _react(*args, **kwargs):
+        captured.update(kwargs)
+        return ReactResult(content="observed", tool_rounds=1)
+
+    with patch("audrey.pipeline.fast_path.run_react", _react):
+        concrete, response = await run_fast_path(
+            _ScriptedOllama({}),
+            registry,
+            HealthTracker(),
+            _gate(),  # type: ignore[arg-type]
+            task="general",
+            messages=[{"role": "user", "content": "q"}],
+            options={},
+            timeout_s=5.0,
+            tools=tools,
+            tool_capable_models={"a"},
+            tool_observer=observer,  # type: ignore[arg-type]
+        )
+
+    assert concrete == "a"
+    assert response["message"]["content"] == "observed"
+    assert captured["tool_observer"] is observer
+
+
 class TestThinkingOnTheFastPath:
     """2026-08-07. Measured with TOOLS=1 on `qwen3.6:35b`: tool selection was
     3/3 with `think=false`, matching `think=true` and beating the current
@@ -356,6 +396,7 @@ def test_the_two_flags_are_not_collapsed_back_into_one():
     selection accuracy it already had at 5/5.
     """
     import inspect
+
     from audrey.pipeline import fast_path as fp
     src = inspect.getsource(fp.run_fast_path)
     assert "prose_no_thinking" in src, (

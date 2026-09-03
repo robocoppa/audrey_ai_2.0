@@ -121,6 +121,12 @@ class OpenAIStreamSession:
             created=self.created,
         )
 
+    @property
+    def run_event_emitter(self) -> RunEventEmitter:
+        """The shared emitter used by native-only observation adapters."""
+
+        return self._events
+
     def role_frame(self) -> str:
         if self._adapter._role_emitted:
             raise RuntimeError("assistant role frame already emitted")

@@ -46,6 +46,7 @@ from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.prompts import REACT_FINAL_ANSWER_USER, prompt_from_config
+from audrey.pipeline.run_observations import RunEventToolObserver
 from audrey.tools.discovery import ToolRegistry
 from audrey.tools.dispatch import ToolResult, dispatch_one, to_tool_message
 
@@ -449,6 +450,7 @@ async def run_react(
     cfg: Any = None,
     compress_keep_last: int = 1,
     max_web_searches: int = 0,
+    tool_observer: RunEventToolObserver | None = None,
     #: Forwarded to every chat call in this loop. `None` omits the field, which
     #: is the pre-2026-08-07 behaviour and the only universally safe request.
     #:
@@ -542,7 +544,7 @@ async def run_react(
                     filename, artifact = fetch
                     log.info("catalogue-guard: %s answered from the catalogue "
                              "alone about %r; fetching %s", model, filename, artifact)
-                    forced = await dispatch_one(
+                    forced = await _dispatch_observed(
                         http, registry,
                         {"function": {"name": "get_file_text", "arguments": {
                             "filename": filename, "artifact": artifact,
@@ -550,6 +552,7 @@ async def run_react(
                         max_result_chars=max_tool_result_chars,
                         timeout_s=tool_dispatch_timeout_s,
                         user_id=user_id,
+                        observer=tool_observer,
                     )
                     if not forced.is_error:
                         # ⚠️ A `role=tool` message must follow an assistant turn
@@ -629,11 +632,12 @@ async def run_react(
 
             # Dispatch concurrently.
             results = await asyncio.gather(*[
-                dispatch_one(
+                _dispatch_observed(
                     http, registry, tc,
                     max_result_chars=max_tool_result_chars,
                     timeout_s=tool_dispatch_timeout_s,
                     user_id=user_id,
+                    observer=tool_observer,
                 )
                 for tc in to_dispatch
             ])
@@ -699,6 +703,43 @@ async def run_react(
             retrieved=_retrieved_sources(all_results),
             done_reason=str(final.get("done_reason") or ""),
         )
+
+
+async def _dispatch_observed(
+    http: httpx.AsyncClient,
+    registry: ToolRegistry,
+    tool_call: dict[str, Any],
+    *,
+    max_result_chars: int,
+    timeout_s: float,
+    user_id: str | None,
+    observer: RunEventToolObserver | None,
+) -> ToolResult:
+    event_call_id = observer.started(tool_call) if observer is not None else ""
+    try:
+        result = await dispatch_one(
+            http,
+            registry,
+            tool_call,
+            max_result_chars=max_result_chars,
+            timeout_s=timeout_s,
+            user_id=user_id,
+        )
+    except asyncio.CancelledError:
+        if observer is not None:
+            observer.interrupted(event_call_id, code="cancelled")
+        raise
+    except BaseException:
+        if observer is not None:
+            observer.interrupted(event_call_id, code="dispatch_error")
+        raise
+    if observer is not None:
+        observer.finished(
+            event_call_id,
+            result,
+            sources=_retrieved_sources([result]),
+        )
+    return result
 
 
 __all__ = ["run_react", "ReactResult"]

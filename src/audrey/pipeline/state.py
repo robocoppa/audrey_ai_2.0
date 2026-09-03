@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
+from audrey.pipeline.run_observations import RunEventToolObserver
+
 TaskType = Literal["code", "reasoning", "general", "vl"]
 PipelineMode = Literal["fast", "deep"]
 
@@ -48,6 +50,7 @@ class PipelineState(TypedDict, total=False):
     top_p: float | None
     max_tokens: int | None
     user_id: str                     # OpenAI-spec `user` field; "" if unset. Required to enable memory.
+    tool_observer: RunEventToolObserver  # native-only transient event projection
 
     # Memory (per-user, keyword-match via custom-tools /memory_search)
     memory_hits: list[dict]          # recalled entries shown to the model as a system hint
