@@ -26,6 +26,14 @@ from audrey.app_state import (
 )
 from audrey.auth import require_scope
 from audrey.identity import Principal
+from audrey.pipeline.agui import (
+    AgUiCursor,
+    AgUiCursorError,
+    AgUiRunEventAdapter,
+    dump_agui_event,
+    format_agui_cursor,
+    parse_agui_cursor,
+)
 from audrey.pipeline.run_events import (
     RunEvent,
     RunEventContext,
@@ -92,6 +100,7 @@ class RunCreateResponse(RunResponse):
     user_message_id: str
     assistant_message_id: str
     events_url: str
+    agui_events_url: str
     cancel_url: str
 
 
@@ -470,6 +479,7 @@ async def create_run(
         user_message_id=started.user_message.message_id,
         assistant_message_id=started.assistant_message.message_id,
         events_url=f"/api/runs/{started.run.run_id}/events",
+        agui_events_url=f"/api/runs/{started.run.run_id}/ag-ui-events",
         cancel_url=f"/api/runs/{started.run.run_id}/cancel",
     )
 
@@ -550,6 +560,105 @@ async def stream_run_events(
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def _resolve_agui_cursor(*, after: str, last_event_id: str | None) -> AgUiCursor:
+    try:
+        query_cursor = parse_agui_cursor(after)
+        if last_event_id is None:
+            return query_cursor
+        header_cursor = parse_agui_cursor(last_event_id)
+    except AgUiCursorError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if after != "0" and header_cursor != query_cursor:
+        raise HTTPException(status_code=422, detail="AG-UI event cursor is inconsistent.")
+    return header_cursor
+
+
+def _validate_agui_fanout_cursor(
+    *,
+    live: _LiveRun,
+    cursor: AgUiCursor,
+    adapter: AgUiRunEventAdapter,
+) -> None:
+    if cursor.part is None:
+        return
+    source = next(
+        (event for event in live.events if event.sequence == cursor.source_sequence),
+        None,
+    )
+    if source is None:
+        raise HTTPException(status_code=422, detail="AG-UI event cursor is unavailable.")
+    if cursor.part > len(adapter.adapt(source)):
+        raise HTTPException(status_code=422, detail="AG-UI event cursor is invalid.")
+
+
+@router.get("/runs/{run_id}/ag-ui-events")
+async def stream_run_agui_events(
+    run_id: str,
+    request: Request,
+    principal: Principal = Depends(_run_access),
+    after: Annotated[str, Query(min_length=1, max_length=64)] = "0",
+    last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
+) -> StreamingResponse:
+    """Adapt one owner-bound live run to the current AG-UI SSE vocabulary."""
+
+    cursor = _resolve_agui_cursor(after=after, last_event_id=last_event_id)
+    manager = _manager(request)
+    try:
+        live = await manager.open_events(
+            user_id=principal.user_id,
+            run_id=run_id,
+            after_sequence=cursor.native_after_sequence,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Run not found.") from exc
+    except NativeRunUnavailableError as exc:
+        raise HTTPException(
+            status_code=410,
+            detail="Run events are no longer available; read the persisted run and messages.",
+        ) from exc
+    except NativeRunCursorExpiredError as exc:
+        raise HTTPException(status_code=409, detail="Run event cursor has expired.") from exc
+
+    adapter = AgUiRunEventAdapter(
+        thread_id=live.started.conversation.conversation_id,
+        run_id=live.started.run.run_id,
+        assistant_message_id=live.started.assistant_message.message_id,
+        latest_usage=live.latest_usage,
+    )
+    _validate_agui_fanout_cursor(live=live, cursor=cursor, adapter=adapter)
+
+    async def _events() -> AsyncIterator[str]:
+        async for event in manager.iter_events(
+            live,
+            after_sequence=cursor.native_after_sequence,
+        ):
+            if event is None:
+                yield ": keep-alive\n\n"
+                continue
+            for part, agui_event in enumerate(adapter.adapt(event), start=1):
+                if cursor.consumed(source_sequence=event.sequence, part=part):
+                    continue
+                event_cursor = format_agui_cursor(
+                    source_sequence=event.sequence,
+                    part=part,
+                )
+                data = json.dumps(
+                    dump_agui_event(agui_event),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                yield f"id: {event_cursor}\ndata: {data}\n\n"
+
+    return StreamingResponse(
+        _events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-store",
             "X-Accel-Buffering": "no",
         },
     )

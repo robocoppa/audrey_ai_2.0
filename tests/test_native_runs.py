@@ -107,6 +107,19 @@ def _sse_events(body: str) -> list[dict[str, Any]]:
     return events
 
 
+def _agui_sse_events(body: str) -> list[tuple[str, dict[str, Any]]]:
+    events = []
+    for block in body.split("\n\n"):
+        if not block or block.startswith(":"):
+            continue
+        lines = block.splitlines()
+        assert not any(line.startswith("event:") for line in lines)
+        cursor = next(line[4:] for line in lines if line.startswith("id: "))
+        data = json.loads(next(line[6:] for line in lines if line.startswith("data: ")))
+        events.append((cursor, data))
+    return events
+
+
 def test_native_run_create_stream_persist_and_resume_are_canonical(tmp_path):
     app, store, owner, _manager = _native_app(tmp_path)
     conversation = asyncio.run(
@@ -126,6 +139,7 @@ def test_native_run_create_stream_persist_and_resume_are_canonical(tmp_path):
             run = created.json()
             assert run["status"] == "running"
             assert run["events_url"] == f"/api/runs/{run['id']}/events"
+            assert run["agui_events_url"] == f"/api/runs/{run['id']}/ag-ui-events"
             assert "user_id" not in created.text
 
             streamed = client.get(run["events_url"])
@@ -153,6 +167,51 @@ def test_native_run_create_stream_persist_and_resume_are_canonical(tmp_path):
                 7,
                 8,
                 9,
+            ]
+            agui = client.get(run["agui_events_url"])
+            assert agui.status_code == 200
+            assert agui.headers["content-type"].startswith("text/event-stream")
+            assert agui.headers["cache-control"] == "no-store"
+            agui_events = _agui_sse_events(agui.text)
+            assert [cursor for cursor, _event in agui_events] == [
+                "1.1",
+                "2.1",
+                "3.1",
+                "4.1",
+                "5.1",
+                "6.1",
+                "7.1",
+                "8.1",
+                "9.1",
+            ]
+            assert [event["type"] for _cursor, event in agui_events] == [
+                "RUN_STARTED",
+                "TEXT_MESSAGE_START",
+                "STEP_STARTED",
+                "CUSTOM",
+                "TEXT_MESSAGE_CONTENT",
+                "STEP_FINISHED",
+                "CUSTOM",
+                "TEXT_MESSAGE_END",
+                "RUN_FINISHED",
+            ]
+            assert agui_events[0][1]["threadId"] == conversation.conversation_id
+            assert agui_events[4][1]["delta"] == "native answer"
+            assert agui_events[-1][1]["usage"][0] == {
+                "model": "qwen-test",
+                "inputTokens": 7,
+                "outputTokens": 3,
+                "totalTokens": 10,
+            }
+            agui_resumed = client.get(
+                run["agui_events_url"],
+                headers={"Last-Event-ID": "5.1"},
+            )
+            assert [cursor for cursor, _event in _agui_sse_events(agui_resumed.text)] == [
+                "6.1",
+                "7.1",
+                "8.1",
+                "9.1",
             ]
             persisted = client.get(f"/api/runs/{run['id']}")
             assert persisted.status_code == 200
@@ -228,6 +287,7 @@ def test_native_run_routes_hide_cross_owner_and_reject_archived_or_active(tmp_pa
             app.dependency_overrides[require_principal] = lambda: bob
             assert client.get(f"/api/runs/{run_id}").status_code == 404
             assert client.get(f"/api/runs/{run_id}/events").status_code == 404
+            assert client.get(f"/api/runs/{run_id}/ag-ui-events").status_code == 404
             assert client.post(f"/api/runs/{run_id}/cancel").status_code == 404
 
             app.dependency_overrides[require_principal] = lambda: alice
@@ -239,6 +299,74 @@ def test_native_run_routes_hide_cross_owner_and_reject_archived_or_active(tmp_pa
             assert isinstance(events[-1], dict)
             assert events[-1]["type"] == "run.finished"
             assert events[-1]["status"] == "cancelled"
+            agui_events = _agui_sse_events(
+                client.get(f"/api/runs/{run_id}/ag-ui-events").text
+            )
+            assert agui_events[-1][1]["type"] == "RUN_ERROR"
+            assert agui_events[-1][1]["code"] == "cancelled_by_user"
+    finally:
+        store.close()
+
+
+def test_agui_tool_fanout_cursor_resumes_without_duplication(tmp_path):
+    async def tool_stream(
+        _app,
+        _payload,
+        _messages,
+        _options,
+        *,
+        event_context,
+        **_kwargs,
+    ):
+        emitter = event_context.emitter
+        assert emitter is not None
+        emitter.run_started()
+        emitter.message_started()
+        emitter.tool_started("call_1", name="kb_search")
+        emitter.tool_arguments("call_1", arguments={"query": "test"})
+        emitter.tool_finished("call_1", status="succeeded", result={"matches": 1})
+        emitter.message_finished(status="completed")
+        emitter.run_finished(status="succeeded", finish_reason="stop")
+        yield "ignored"
+
+    app, store, owner, _manager = _native_app(tmp_path, stream_factory=tool_stream)
+    conversation = asyncio.run(store.conversations.create(user_id=owner.user_id))
+    try:
+        with TestClient(app) as client:
+            created = client.post(
+                f"/api/conversations/{conversation.conversation_id}/runs",
+                json={"content": "Use a tool."},
+            ).json()
+            agui_url = created["agui_events_url"]
+            events = _agui_sse_events(client.get(agui_url).text)
+            assert [cursor for cursor, _event in events] == [
+                "1.1",
+                "2.1",
+                "3.1",
+                "4.1",
+                "5.1",
+                "5.2",
+                "6.1",
+                "7.1",
+            ]
+            assert [event["type"] for _cursor, event in events[4:6]] == [
+                "TOOL_CALL_END",
+                "TOOL_CALL_RESULT",
+            ]
+
+            resumed = _agui_sse_events(
+                client.get(agui_url, headers={"Last-Event-ID": "5.1"}).text
+            )
+            assert [cursor for cursor, _event in resumed] == ["5.2", "6.1", "7.1"]
+            assert resumed[0][1]["type"] == "TOOL_CALL_RESULT"
+            assert client.get(
+                agui_url,
+                headers={"Last-Event-ID": "5.3"},
+            ).status_code == 422
+            assert client.get(
+                f"{agui_url}?after=4",
+                headers={"Last-Event-ID": "5.1"},
+            ).status_code == 422
     finally:
         store.close()
 

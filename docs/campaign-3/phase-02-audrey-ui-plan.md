@@ -3,8 +3,9 @@
 **Status:** In progress. Milestone 2A is complete and Unraid-verified, including
 the optional, default-disabled Cloudflare Access identity adapter. Milestone 2B
 is underway; its first owner-bound conversation/history API slice is
-complete and Unraid-verified. The universal run-event/native-run slice is
-laptop-complete and awaits its Unraid gate.
+complete and Unraid-verified. The universal run-event/native-run slice is also
+complete and Unraid-verified. The AG-UI boundary adapter is laptop-complete and
+awaits its Unraid gate.
 
 ## Goal
 
@@ -206,8 +207,48 @@ the AG-UI adapter remain subsequent Milestone 2B work.
 
 The focused affected gate is 229 passing tests. The full hermetic suite is
 2,690 passing tests; changed-file ruff, compilation, and diff checks are clean,
-and the lesson-link scan has zero broken links. Slice 2B.2 is laptop-complete
-and awaits its Unraid smoke before it is called complete.
+and the lesson-link scan has zero broken links. On Unraid, a test owner created,
+streamed, resumed, read, cancelled, and deleted native runs and conversation
+state while the admin owner received `404` for the test run. Event ids were
+ordered, replay honored its cursor, exact answer content and usage persisted,
+and cancellation left an explicit incomplete assistant message. A SIGKILL
+proved startup recovery terminalizes an interrupted run as
+`failed`/`server_restart`; its expired process-local stream returned `410`.
+The OpenAI compatibility endpoint still returned valid SSE through `[DONE]`,
+and the owner-scoped archive cleanup queue drained to ready. Slice 2B.2 is
+complete and Unraid-verified.
+
+### 2B.3 — AG-UI boundary adapter
+
+Implementation is laptop-complete. This slice keeps Audrey's typed `RunEvent`
+vocabulary authoritative and adds a narrow protocol adapter that emits the
+current AG-UI lifecycle, step, text-message, tool-call, usage, error, and custom
+event shapes. AG-UI field names and transport framing remain isolated at the
+HTTP boundary so upstream protocol churn cannot leak into pipeline producers
+or canonical storage.
+
+The first endpoint is an owner-bound, read-only sibling of the native event
+stream at `GET /api/runs/{run_id}/ag-ui-events`, advertised when the run is
+created. It reuses the same live-run buffer and authorization rules, emits
+standard `data:` SSE frames, and preserves Audrey's cursor/reconnect guarantee
+with explicit composite SSE ids. Composite ids let a client reconnect between
+the end and result frames produced from one tool event without duplication.
+Stage progress and source attribution use documented AG-UI custom events
+because neither is a core text-message event. Successful terminal events carry
+numeric usage; failed and cancelled runs use sanitized, stable error codes.
+
+The focused adapter/native gate is 24 passing tests, the broader affected gate
+is 128 passing tests, and the full hermetic suite is 2,710 passing tests.
+Changed-file ruff, compilation, and diff checks are clean. The lesson-link scan
+has zero broken links; the existing citation-drift backlog remains deferred by
+user direction. The remaining gate is an owner/cross-owner, reconnect,
+cancellation, compatibility, and cleanup smoke on Unraid.
+
+This slice does not accept browser-authored AG-UI transcripts or make an
+external client the owner of Audrey's tool loop. Mapping the remaining private
+Fast/Deep/Research tool and source observations into the already-typed Audrey
+events, plus archive import/rebuild behavior, remain subsequent Milestone 2B
+work.
 
 
 ## Decision
