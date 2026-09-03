@@ -435,7 +435,7 @@ async def request_account_purge(
     application_store = getattr(request.app.state, "application_store", None)
     if application_store is None:
         raise HTTPException(status_code=503, detail="application_store_unavailable")
-    await application_store.delete_personal_tokens(user_id=principal.user_id)
+    await application_store.purge_local_user_data(user_id=principal.user_id)
     purge_id = ""
     if idempotency_key:
         purge_id = str(uuid.uuid5(

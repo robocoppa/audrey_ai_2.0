@@ -1,8 +1,8 @@
 # Campaign 3 Phase 2 — Audrey application and web UI
 
-**Status:** In progress. Slices 2A.1 and 2A.2 passed their primary Unraid gates.
-A 2A.2 purge-lifecycle corrective is laptop-complete and awaits its live smoke
-before slice 2A.3 canonical application state begins.
+**Status:** In progress. Slices 2A.1 and 2A.2, including the account-purge
+lifecycle corrective, are complete and Unraid-verified. Slice 2A.3 canonical
+application state is laptop-complete and awaits its Unraid gate.
 
 ## Goal
 
@@ -67,7 +67,35 @@ removed personal-token records nor excluded a `compat:full` token from starting
 the destructive operation. The corrective requires provider authentication for
 account-wide purge and erases every personal token owned by that account before
 the existing durable purge begins. Its local gate is 2,630 passing tests with
-the same clean static checks; deployed verification remains pending.
+the same clean static checks. On Unraid, a PAT received `403` before the purge
+coordinator ran; provider-authenticated purge then completed without component
+errors, erased all token records, and invalidated the bearer immediately.
+Slice 2A.2 is complete.
+
+### 2A.3 — canonical application state
+
+Laptop implementation and verification are complete. This slice adds:
+
+- additive schema v3 tables for user preferences, conversations, messages, and
+  runs, kept separate from the existing sidecar archive projection;
+- typed preference and conversation repositories keyed only by stable Audrey
+  user ids, with validated IANA timezones and JSON response preferences;
+- Audrey-issued `con_`, `run_`, and `msg_` identifiers plus transactionally
+  assigned per-conversation message sequence numbers;
+- one transaction that creates a running run, its completed user message, and
+  its in-progress assistant message before streaming begins;
+- one transaction that retains assistant output and records success,
+  cancellation, or failure, with both repository-level race handling and
+  schema-level terminal-outcome immutability;
+- composite foreign keys that reject cross-user conversation/run/message
+  linkage even under direct SQL; and
+- owner-bound local purge that removes tokens and canonical conversation state
+  and resets preferences before the existing durable remote purge starts.
+
+No native conversation routes or compatibility dual-write are enabled in this
+slice. The local gate is 2,642 passing tests, scoped ruff and compilation clean,
+and a lesson-link scan with zero broken links. Deployed schema, restart,
+repository, isolation, and purge verification remain pending.
 
 
 ## Decision

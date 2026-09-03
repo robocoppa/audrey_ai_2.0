@@ -1,9 +1,9 @@
 # Campaign 3 — correctness foundations, Audrey UI, and reusable skills
 
 **Status:** Campaign 3 Phase 1 is complete. Campaign 3 Phase 2 is in
-progress; identity slices 2A.1 and 2A.2 passed their primary Unraid gates. A
-2A.2 purge-lifecycle corrective is laptop-complete and awaits its live smoke
-before slice 2A.3 begins.
+progress; identity slices 2A.1 and 2A.2, including the account-purge lifecycle
+corrective, are complete and Unraid-verified. Slice 2A.3 canonical application
+state is laptop-complete and awaits its Unraid gate.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,
@@ -15,7 +15,7 @@ and finally adds the first general skills layer on that owned surface.
 | Phase | Plan | Outcome | Entry gate | Status |
 |---|---|---|---|---|
 | 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | Complete |
-| 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (2A.2 corrective pending live smoke) |
+| 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (2A.3 pending live smoke) |
 | 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | Planned |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1,

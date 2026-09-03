@@ -1,4 +1,4 @@
-"""Versioned SQLite authority for Audrey users, identities, and access tokens.
+"""Versioned SQLite authority for Audrey's canonical application records.
 
 The native application database is authoritative for stable user ownership.
 External providers prove who authenticated; they do not choose Audrey resource
@@ -22,6 +22,9 @@ import uuid
 from collections.abc import Iterable
 from pathlib import Path
 
+from audrey.app_state.migrations import MIGRATIONS
+from audrey.app_state.records import LocalUserDataPurge
+from audrey.app_state.repositories import ConversationsRepository, PreferencesRepository
 from audrey.identity import (
     TOKEN_SCOPES,
     IssuedPersonalToken,
@@ -32,60 +35,6 @@ from audrey.identity import (
 _ALLOWED_ROLES = frozenset({"user", "admin"})
 _TOKEN_RE = re.compile(r"\Aaud_(pat_[0-9a-f]{32})\.([A-Za-z0-9_-]{32,})\Z")
 _LAST_USED_WRITE_INTERVAL = dt.timedelta(minutes=5)
-
-_MIGRATIONS: tuple[tuple[int, str], ...] = (
-    (
-        1,
-        """
-        CREATE TABLE IF NOT EXISTS app_users (
-          user_id            TEXT PRIMARY KEY,
-          storage_namespace  TEXT NOT NULL UNIQUE,
-          current_email      TEXT NOT NULL,
-          display_name       TEXT NOT NULL DEFAULT '',
-          role               TEXT NOT NULL CHECK (role IN ('user', 'admin')),
-          status             TEXT NOT NULL DEFAULT 'active'
-                             CHECK (status IN ('active', 'disabled')),
-          created_at         TEXT NOT NULL,
-          updated_at         TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS external_identities (
-          provider       TEXT NOT NULL,
-          subject        TEXT NOT NULL,
-          user_id        TEXT NOT NULL,
-          email          TEXT NOT NULL,
-          created_at     TEXT NOT NULL,
-          last_seen_at   TEXT NOT NULL,
-          PRIMARY KEY (provider, subject),
-          FOREIGN KEY (user_id) REFERENCES app_users(user_id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_external_identities_user
-          ON external_identities(user_id);
-        """,
-    ),
-    (
-        2,
-        """
-        CREATE TABLE IF NOT EXISTS personal_access_tokens (
-          token_id       TEXT PRIMARY KEY,
-          user_id        TEXT NOT NULL,
-          name           TEXT NOT NULL,
-          secret_hash    TEXT NOT NULL UNIQUE,
-          scopes_json    TEXT NOT NULL,
-          created_at     TEXT NOT NULL,
-          expires_at     TEXT NOT NULL,
-          last_used_at   TEXT,
-          revoked_at     TEXT,
-          FOREIGN KEY (user_id) REFERENCES app_users(user_id) ON DELETE CASCADE
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_personal_access_tokens_user
-          ON personal_access_tokens(user_id);
-        """,
-    ),
-)
-
 
 class InvalidIdentityError(ValueError):
     """Authentication evidence is incomplete or outside Audrey policy."""
@@ -113,6 +62,8 @@ class ApplicationStore:
             self._conn.execute("PRAGMA busy_timeout = 5000")
             self._conn.execute("PRAGMA journal_mode = WAL")
             self._migrate_locked()
+        self.preferences = PreferencesRepository(self._conn, self._lock)
+        self.conversations = ConversationsRepository(self._conn, self._lock)
 
     def _migrate_locked(self) -> None:
         self._conn.execute(
@@ -123,7 +74,7 @@ class ApplicationStore:
             int(row["version"])
             for row in self._conn.execute("SELECT version FROM app_schema_migrations").fetchall()
         }
-        for version, sql in _MIGRATIONS:
+        for version, sql in MIGRATIONS:
             if version in applied:
                 continue
             stamp = _utc_now()
@@ -235,6 +186,12 @@ class ApplicationStore:
                         "role, status, created_at, updated_at) "
                         "VALUES (?, ?, ?, ?, ?, 'active', ?, ?)",
                         (user_id, namespace, email, display_name, role, now, now),
+                    )
+                    self._conn.execute(
+                        "INSERT INTO user_preferences "
+                        "(user_id, timezone, persona, response_preferences_json, "
+                        "created_at, updated_at) VALUES (?, 'UTC', '', '{}', ?, ?)",
+                        (user_id, now, now),
                     )
                     self._conn.execute(
                         "INSERT INTO external_identities "
@@ -482,6 +439,66 @@ class ApplicationStore:
             self._conn.commit()
             return max(0, int(cursor.rowcount))
 
+    async def purge_local_user_data(self, *, user_id: str) -> LocalUserDataPurge:
+        """Atomically erase tokens and canonical app data while retaining identity."""
+
+        return await asyncio.to_thread(self._purge_local_user_data_sync, user_id)
+
+    def _purge_local_user_data_sync(self, user_id: str) -> LocalUserDataPurge:
+        user_id = _required(user_id, "user id")
+        now = _utc_now()
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                owner = self._conn.execute(
+                    "SELECT 1 FROM app_users WHERE user_id = ?",
+                    (user_id,),
+                ).fetchone()
+                if owner is None:
+                    raise InvalidIdentityError("purge owner does not exist")
+                messages_deleted = _owned_count(
+                    self._conn,
+                    "app_messages",
+                    user_id,
+                )
+                runs_deleted = _owned_count(self._conn, "app_runs", user_id)
+                conversations_deleted = _owned_count(
+                    self._conn,
+                    "app_conversations",
+                    user_id,
+                )
+                token_cursor = self._conn.execute(
+                    "DELETE FROM personal_access_tokens WHERE user_id = ?",
+                    (user_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM app_conversations WHERE user_id = ?",
+                    (user_id,),
+                )
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO user_preferences "
+                    "(user_id, timezone, persona, response_preferences_json, "
+                    "created_at, updated_at) VALUES (?, 'UTC', '', '{}', ?, ?)",
+                    (user_id, now, now),
+                )
+                self._conn.execute(
+                    "UPDATE user_preferences SET timezone = 'UTC', persona = '', "
+                    "response_preferences_json = '{}', updated_at = ? WHERE user_id = ?",
+                    (now, user_id),
+                )
+                self._conn.commit()
+            except BaseException:
+                if self._conn.in_transaction:
+                    self._conn.rollback()
+                raise
+        return LocalUserDataPurge(
+            tokens_deleted=max(0, int(token_cursor.rowcount)),
+            conversations_deleted=conversations_deleted,
+            messages_deleted=messages_deleted,
+            runs_deleted=runs_deleted,
+            preferences_reset=True,
+        )
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()
@@ -573,6 +590,16 @@ def _token_summary_from_row(row: sqlite3.Row) -> PersonalTokenSummary:
         last_used_at=str(row["last_used_at"] or ""),
         revoked_at=str(row["revoked_at"] or ""),
     )
+
+
+def _owned_count(connection: sqlite3.Connection, table: str, user_id: str) -> int:
+    if table not in {"app_conversations", "app_messages", "app_runs"}:
+        raise ValueError("unsupported application-state table")
+    row = connection.execute(
+        f"SELECT COUNT(*) AS total FROM {table} WHERE user_id = ?",  # noqa: S608
+        (user_id,),
+    ).fetchone()
+    return int(row["total"])
 
 
 __all__ = [

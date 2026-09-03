@@ -1,0 +1,499 @@
+"""Contracts for Audrey's canonical preferences, conversations, messages, and runs."""
+
+from __future__ import annotations
+
+import asyncio
+import datetime as dt
+import sqlite3
+
+import pytest
+
+from audrey.app_state import (
+    ApplicationStore,
+    InvalidApplicationStateError,
+    PersonalTokenAuthenticationError,
+    RunAlreadyTerminalError,
+)
+
+
+async def _resolve(
+    store: ApplicationStore,
+    *,
+    subject: str = "owui-alice",
+    email: str = "alice@example.com",
+):
+    return await store.resolve_external_identity(
+        provider="owui",
+        subject=subject,
+        email=email,
+        display_name=email.split("@", maxsplit=1)[0].title(),
+        role="user",
+        auth_method="owui_bearer",
+        legacy_storage_namespace=email,
+    )
+
+
+async def test_v2_upgrade_backfills_preferences_without_changing_identity_or_token(tmp_path):
+    path = tmp_path / "app.sqlite"
+    current = ApplicationStore(path)
+    owner = await _resolve(current)
+    issued = await current.create_personal_token(
+        user_id=owner.user_id,
+        name="Migration token",
+        scopes=["account:read"],
+        expires_at=(dt.datetime.now(dt.UTC) + dt.timedelta(days=30)).isoformat(),
+    )
+    current.close()
+
+    with sqlite3.connect(path) as conn:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("DROP TABLE app_messages")
+        conn.execute("DROP TABLE app_runs")
+        conn.execute("DROP TABLE app_conversations")
+        conn.execute("DROP TABLE user_preferences")
+        conn.execute("DELETE FROM app_schema_migrations WHERE version = 3")
+        conn.commit()
+
+    upgraded = ApplicationStore(path)
+    try:
+        after = await _resolve(upgraded)
+        preferences = await upgraded.preferences.get(user_id=owner.user_id)
+        assert upgraded.schema_version == 3
+        assert after.user_id == owner.user_id
+        assert preferences is not None
+        assert preferences.timezone == "UTC"
+        assert preferences.persona == ""
+        assert preferences.response_preferences == {}
+        assert (await upgraded.authenticate_personal_token(issued.token)).user_id == owner.user_id
+    finally:
+        upgraded.close()
+
+
+async def test_preferences_are_validated_owner_bound_and_persisted(tmp_path):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
+    alice = await _resolve(store)
+    bob = await _resolve(store, subject="owui-bob", email="bob@example.com")
+    try:
+        defaults = await store.preferences.get(user_id=alice.user_id)
+        assert defaults is not None
+        assert defaults.timezone == "UTC"
+        assert defaults.response_preferences == {}
+
+        replaced = await store.preferences.replace(
+            user_id=alice.user_id,
+            timezone="America/Denver",
+            persona="Be concise.",
+            response_preferences={"citations": "inline", "detail": 3},
+        )
+        assert replaced is not None
+        assert replaced.timezone == "America/Denver"
+        assert replaced.response_preferences == {"citations": "inline", "detail": 3}
+        assert (await store.preferences.get(user_id=bob.user_id)).timezone == "UTC"
+        assert await store.preferences.replace(
+            user_id="usr_missing",
+            timezone="UTC",
+            persona="",
+            response_preferences={},
+        ) is None
+        with pytest.raises(InvalidApplicationStateError, match="IANA"):
+            await store.preferences.replace(
+                user_id=alice.user_id,
+                timezone="Mountain Time",
+                persona="",
+                response_preferences={},
+            )
+        with pytest.raises(InvalidApplicationStateError, match="valid JSON"):
+            await store.preferences.replace(
+                user_id=alice.user_id,
+                timezone="UTC",
+                persona="",
+                response_preferences={"invalid": object()},
+            )
+    finally:
+        store.close()
+
+    reopened = ApplicationStore(path)
+    try:
+        persisted = await reopened.preferences.get(user_id=alice.user_id)
+        assert persisted is not None
+        assert persisted.timezone == "America/Denver"
+        assert persisted.persona == "Be concise."
+    finally:
+        reopened.close()
+
+
+async def test_conversation_and_run_ids_are_server_owned_and_transactional(tmp_path):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
+    owner = await _resolve(store)
+    try:
+        conversation = await store.conversations.create(
+            user_id=owner.user_id,
+            title="Canonical chat",
+            default_mode="deep",
+        )
+        started = await store.conversations.begin_run(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="Explain the result.",
+        )
+        assert conversation.conversation_id.startswith("con_")
+        assert started is not None
+        assert started.run.run_id.startswith("run_")
+        assert started.run.mode == "deep"
+        assert started.run.status == "running"
+        assert started.user_message.message_id.startswith("msg_")
+        assert started.assistant_message.message_id.startswith("msg_")
+        assert (started.user_message.sequence_no, started.assistant_message.sequence_no) == (1, 2)
+        assert started.user_message.status == "completed"
+        assert started.assistant_message.status == "in_progress"
+
+        finished = await store.conversations.finish_run(
+            user_id=owner.user_id,
+            run_id=started.run.run_id,
+            outcome="succeeded",
+            assistant_content="Here is the explanation.",
+            finish_reason="stop",
+            virtual_model="audrey_deep",
+            concrete_model="qwen3.8:latest",
+            prompt_tokens=12,
+            completion_tokens=8,
+        )
+        assert finished is not None
+        assert finished.run.status == "succeeded"
+        assert finished.run.completed_at is not None
+        assert finished.run.prompt_tokens == 12
+        assert finished.assistant_message.status == "completed"
+        assert finished.assistant_message.content == "Here is the explanation."
+        with pytest.raises(RunAlreadyTerminalError):
+            await store.conversations.finish_run(
+                user_id=owner.user_id,
+                run_id=started.run.run_id,
+                outcome="failed",
+                assistant_content="second ending",
+            )
+    finally:
+        store.close()
+
+    reopened = ApplicationStore(path)
+    try:
+        messages = await reopened.conversations.list_messages(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+        )
+        assert messages is not None
+        assert [message.sequence_no for message in messages] == [1, 2]
+        assert messages[1].content == "Here is the explanation."
+        assert (await reopened.conversations.get_run(
+            user_id=owner.user_id,
+            run_id=started.run.run_id,
+        )).status == "succeeded"
+    finally:
+        reopened.close()
+
+
+@pytest.mark.parametrize("outcome", ["cancelled", "failed"])
+async def test_non_success_terminal_outcomes_retain_explicit_partial_content(tmp_path, outcome):
+    store = ApplicationStore(tmp_path / f"{outcome}.sqlite")
+    owner = await _resolve(store)
+    try:
+        conversation = await store.conversations.create(user_id=owner.user_id)
+        started = await store.conversations.begin_run(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="Start.",
+        )
+        assert started is not None
+        finished = await store.conversations.finish_run(
+            user_id=owner.user_id,
+            run_id=started.run.run_id,
+            outcome=outcome,
+            assistant_content="Partial answer",
+            error_code="client_cancelled" if outcome == "cancelled" else "provider_error",
+        )
+        assert finished is not None
+        assert finished.run.status == outcome
+        assert finished.assistant_message.status == "incomplete"
+        assert finished.assistant_message.content == "Partial answer"
+    finally:
+        store.close()
+
+
+async def test_two_store_connections_assign_contiguous_message_order(tmp_path):
+    path = tmp_path / "app.sqlite"
+    left = ApplicationStore(path)
+    owner = await _resolve(left)
+    conversation = await left.conversations.create(user_id=owner.user_id)
+    right = ApplicationStore(path)
+    try:
+        starts = await asyncio.gather(
+            left.conversations.begin_run(
+                user_id=owner.user_id,
+                conversation_id=conversation.conversation_id,
+                user_content="left",
+            ),
+            right.conversations.begin_run(
+                user_id=owner.user_id,
+                conversation_id=conversation.conversation_id,
+                user_content="right",
+            ),
+        )
+        assert all(start is not None for start in starts)
+        messages = await left.conversations.list_messages(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+        )
+        assert messages is not None
+        assert [message.sequence_no for message in messages] == [1, 2, 3, 4]
+        for start in starts:
+            assert start is not None
+            assert start.assistant_message.sequence_no == start.user_message.sequence_no + 1
+    finally:
+        left.close()
+        right.close()
+
+
+async def test_two_store_connections_allow_exactly_one_terminal_transition(tmp_path):
+    path = tmp_path / "app.sqlite"
+    left = ApplicationStore(path)
+    owner = await _resolve(left)
+    conversation = await left.conversations.create(user_id=owner.user_id)
+    started = await left.conversations.begin_run(
+        user_id=owner.user_id,
+        conversation_id=conversation.conversation_id,
+        user_content="Race the finish.",
+    )
+    assert started is not None
+    right = ApplicationStore(path)
+    try:
+        results = await asyncio.gather(
+            left.conversations.finish_run(
+                user_id=owner.user_id,
+                run_id=started.run.run_id,
+                outcome="succeeded",
+                assistant_content="first candidate",
+            ),
+            right.conversations.finish_run(
+                user_id=owner.user_id,
+                run_id=started.run.run_id,
+                outcome="failed",
+                assistant_content="second candidate",
+            ),
+            return_exceptions=True,
+        )
+        assert sum(not isinstance(result, BaseException) for result in results) == 1
+        assert sum(isinstance(result, RunAlreadyTerminalError) for result in results) == 1
+        run = await left.conversations.get_run(user_id=owner.user_id, run_id=started.run.run_id)
+        messages = await left.conversations.list_messages(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+        )
+        assert run is not None and run.status in {"succeeded", "failed"}
+        assert messages is not None
+        assert messages[1].status == ("completed" if run.status == "succeeded" else "incomplete")
+    finally:
+        left.close()
+        right.close()
+
+
+async def test_cross_user_reads_and_mutations_are_indistinguishable_from_missing(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    alice = await _resolve(store)
+    bob = await _resolve(store, subject="owui-bob", email="bob@example.com")
+    try:
+        conversation = await store.conversations.create(user_id=alice.user_id)
+        started = await store.conversations.begin_run(
+            user_id=alice.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="Private turn",
+        )
+        assert started is not None
+        assert await store.conversations.get(
+            user_id=bob.user_id,
+            conversation_id=conversation.conversation_id,
+        ) is None
+        assert await store.conversations.list_messages(
+            user_id=bob.user_id,
+            conversation_id=conversation.conversation_id,
+        ) is None
+        assert await store.conversations.get_run(
+            user_id=bob.user_id,
+            run_id=started.run.run_id,
+        ) is None
+        assert await store.conversations.begin_run(
+            user_id=bob.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="intrusion",
+        ) is None
+        assert await store.conversations.finish_run(
+            user_id=bob.user_id,
+            run_id=started.run.run_id,
+            outcome="failed",
+            assistant_content="intrusion",
+        ) is None
+        assert (await store.conversations.get_run(
+            user_id=alice.user_id,
+            run_id=started.run.run_id,
+        )).status == "running"
+    finally:
+        store.close()
+
+
+async def test_schema_rejects_cross_user_run_linkage(tmp_path):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
+    alice = await _resolve(store)
+    bob = await _resolve(store, subject="owui-bob", email="bob@example.com")
+    conversation = await store.conversations.create(user_id=alice.user_id)
+    store.close()
+
+    with sqlite3.connect(path) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY"):
+            conn.execute(
+                "INSERT INTO app_runs "
+                "(run_id, conversation_id, user_id, mode, status, started_at) "
+                "VALUES ('run_cross_user', ?, ?, 'auto', 'running', 'now')",
+                (conversation.conversation_id, bob.user_id),
+            )
+
+
+async def test_schema_rejects_incomplete_or_rewritten_terminal_outcomes(tmp_path):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
+    owner = await _resolve(store)
+    conversation = await store.conversations.create(user_id=owner.user_id)
+    started = await store.conversations.begin_run(
+        user_id=owner.user_id,
+        conversation_id=conversation.conversation_id,
+        user_content="Finish once.",
+    )
+    assert started is not None
+    store.close()
+
+    with sqlite3.connect(path) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+            conn.execute(
+                "UPDATE app_runs SET status = 'failed' WHERE run_id = ?",
+                (started.run.run_id,),
+            )
+        conn.execute(
+            "UPDATE app_runs SET status = 'succeeded', completed_at = 'now' WHERE run_id = ?",
+            (started.run.run_id,),
+        )
+        conn.commit()
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            conn.execute(
+                "UPDATE app_runs SET status = 'failed', completed_at = 'later' WHERE run_id = ?",
+                (started.run.run_id,),
+            )
+
+
+async def test_local_purge_is_atomic_owner_bound_and_idempotent(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    alice = await _resolve(store)
+    bob = await _resolve(store, subject="owui-bob", email="bob@example.com")
+    try:
+        await store.preferences.replace(
+            user_id=alice.user_id,
+            timezone="America/Denver",
+            persona="Private persona",
+            response_preferences={"detail": 9},
+        )
+        alice_conversation = await store.conversations.create(user_id=alice.user_id)
+        alice_run = await store.conversations.begin_run(
+            user_id=alice.user_id,
+            conversation_id=alice_conversation.conversation_id,
+            user_content="Erase me",
+        )
+        bob_conversation = await store.conversations.create(user_id=bob.user_id)
+        bob_run = await store.conversations.begin_run(
+            user_id=bob.user_id,
+            conversation_id=bob_conversation.conversation_id,
+            user_content="Keep me",
+        )
+        token = await store.create_personal_token(
+            user_id=alice.user_id,
+            name="Erase me",
+            scopes=["compat:full"],
+            expires_at=(dt.datetime.now(dt.UTC) + dt.timedelta(days=30)).isoformat(),
+        )
+        assert alice_run is not None and bob_run is not None
+
+        result = await store.purge_local_user_data(user_id=alice.user_id)
+        assert result.tokens_deleted == 1
+        assert result.conversations_deleted == 1
+        assert result.messages_deleted == 2
+        assert result.runs_deleted == 1
+        assert result.preferences_reset
+        with pytest.raises(PersonalTokenAuthenticationError):
+            await store.authenticate_personal_token(token.token)
+        assert await store.conversations.get(
+            user_id=alice.user_id,
+            conversation_id=alice_conversation.conversation_id,
+        ) is None
+        preferences = await store.preferences.get(user_id=alice.user_id)
+        assert preferences is not None
+        assert (preferences.timezone, preferences.persona, preferences.response_preferences) == (
+            "UTC",
+            "",
+            {},
+        )
+        bob_after = await store.conversations.get(
+            user_id=bob.user_id,
+            conversation_id=bob_conversation.conversation_id,
+        )
+        assert bob_after is not None
+        assert bob_after.conversation_id == bob_conversation.conversation_id
+        assert bob_after.last_message_at is not None
+        assert (await store.conversations.get_run(
+            user_id=bob.user_id,
+            run_id=bob_run.run.run_id,
+        )).status == "running"
+
+        repeated = await store.purge_local_user_data(user_id=alice.user_id)
+        assert repeated.tokens_deleted == 0
+        assert repeated.conversations_deleted == 0
+        assert repeated.messages_deleted == 0
+        assert repeated.runs_deleted == 0
+        assert repeated.preferences_reset
+    finally:
+        store.close()
+
+
+async def test_repository_rejects_invalid_modes_and_terminal_metadata(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    owner = await _resolve(store)
+    try:
+        with pytest.raises(InvalidApplicationStateError, match="mode"):
+            await store.conversations.create(user_id=owner.user_id, default_mode="video")
+        conversation = await store.conversations.create(user_id=owner.user_id)
+        started = await store.conversations.begin_run(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="Hello",
+        )
+        assert started is not None
+        with pytest.raises(InvalidApplicationStateError, match="outcome"):
+            await store.conversations.finish_run(
+                user_id=owner.user_id,
+                run_id=started.run.run_id,
+                outcome="stopped",
+                assistant_content="",
+            )
+        with pytest.raises(InvalidApplicationStateError, match="negative"):
+            await store.conversations.finish_run(
+                user_id=owner.user_id,
+                run_id=started.run.run_id,
+                outcome="succeeded",
+                assistant_content="",
+                completion_tokens=-1,
+            )
+        assert (await store.conversations.get_run(
+            user_id=owner.user_id,
+            run_id=started.run.run_id,
+        )).status == "running"
+    finally:
+        store.close()
