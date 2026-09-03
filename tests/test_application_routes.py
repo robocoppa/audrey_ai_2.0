@@ -225,3 +225,196 @@ def test_personal_token_authenticates_through_native_me_route(tmp_path):
     assert response.status_code == 200
     assert response.json()["id"] == owner.user_id
     assert response.json()["auth_provider"] == "audrey"
+
+
+def _conversation_app(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    app = FastAPI()
+    app.state.application_store = store
+    app.include_router(router)
+    owner = _persist_principal(store, _principal())
+    app.dependency_overrides[require_principal] = lambda: owner
+    return app, store, owner
+
+
+def test_conversation_routes_create_update_archive_list_and_delete(tmp_path):
+    app, store, _ = _conversation_app(tmp_path)
+    try:
+        with TestClient(app) as client:
+            created = client.post(
+                "/api/conversations",
+                json={"title": "Native chat", "default_mode": "deep"},
+            )
+            assert created.status_code == 201
+            conversation = created.json()
+            conversation_id = conversation["id"]
+            assert conversation["title"] == "Native chat"
+            assert conversation["default_mode"] == "deep"
+            assert "user_id" not in created.text
+
+            fetched = client.get(f"/api/conversations/{conversation_id}")
+            assert fetched.status_code == 200
+            assert fetched.json() == conversation
+
+            changed = client.patch(
+                f"/api/conversations/{conversation_id}",
+                json={"title": "Renamed", "default_mode": "research"},
+            )
+            assert changed.status_code == 200
+            assert changed.json()["title"] == "Renamed"
+            assert changed.json()["default_mode"] == "research"
+
+            archived = client.patch(
+                f"/api/conversations/{conversation_id}",
+                json={"archived": True},
+            )
+            assert archived.status_code == 200
+            assert archived.json()["archived_at"] is not None
+            assert client.get("/api/conversations").json()["items"] == []
+            archived_list = client.get("/api/conversations?archived=true").json()
+            assert [item["id"] for item in archived_list["items"]] == [conversation_id]
+
+            deleted = client.delete(f"/api/conversations/{conversation_id}")
+            assert deleted.status_code == 204
+            assert client.get(f"/api/conversations/{conversation_id}").status_code == 404
+    finally:
+        store.close()
+
+
+def test_conversation_and_message_routes_paginate_without_overlap(tmp_path):
+    app, store, owner = _conversation_app(tmp_path)
+    try:
+        conversation_ids = [
+            asyncio.run(
+                store.conversations.create(user_id=owner.user_id, title=f"Chat {index}")
+            ).conversation_id
+            for index in range(3)
+        ]
+        target_id = conversation_ids[0]
+        for prompt, answer in (("one", "first"), ("two", "second")):
+            started = asyncio.run(
+                store.conversations.begin_run(
+                    user_id=owner.user_id,
+                    conversation_id=target_id,
+                    user_content=prompt,
+                )
+            )
+            assert started is not None
+            asyncio.run(
+                store.conversations.finish_run(
+                    user_id=owner.user_id,
+                    run_id=started.run.run_id,
+                    outcome="succeeded",
+                    assistant_content=answer,
+                )
+            )
+
+        with TestClient(app) as client:
+            first = client.get("/api/conversations?limit=2")
+            assert first.status_code == 200
+            first_body = first.json()
+            assert len(first_body["items"]) == 2
+            assert first_body["next_cursor"]
+            second = client.get(
+                "/api/conversations",
+                params={"limit": 2, "cursor": first_body["next_cursor"]},
+            )
+            assert second.status_code == 200
+            listed_ids = [item["id"] for item in first_body["items"] + second.json()["items"]]
+            assert len(listed_ids) == len(set(listed_ids)) == 3
+            assert set(listed_ids) == set(conversation_ids)
+
+            messages = client.get(f"/api/conversations/{target_id}/messages?limit=3")
+            assert messages.status_code == 200
+            first_messages = messages.json()
+            assert [item["sequence"] for item in first_messages["items"]] == [1, 2, 3]
+            assert first_messages["next_cursor"]
+            remaining = client.get(
+                f"/api/conversations/{target_id}/messages",
+                params={"limit": 3, "cursor": first_messages["next_cursor"]},
+            )
+            assert remaining.status_code == 200
+            assert [item["sequence"] for item in remaining.json()["items"]] == [4]
+            assert "user_id" not in messages.text
+    finally:
+        store.close()
+
+
+def test_conversation_routes_hide_cross_owner_resources(tmp_path):
+    app, store, alice = _conversation_app(tmp_path)
+    bob_template = Principal(
+        user_id="ignored",
+        storage_namespace="bob@example.com",
+        provider="owui",
+        provider_subject="owui-bob",
+        email="bob@example.com",
+        display_name="Bob",
+        role="user",
+        status="active",
+        auth_method="owui_bearer",
+    )
+    bob = _persist_principal(store, bob_template)
+    conversation = asyncio.run(store.conversations.create(user_id=alice.user_id))
+    app.dependency_overrides[require_principal] = lambda: bob
+    try:
+        with TestClient(app) as client:
+            conversation_path = f"/api/conversations/{conversation.conversation_id}"
+            assert client.get(conversation_path).status_code == 404
+            assert client.patch(conversation_path, json={"title": "Intrusion"}).status_code == 404
+            assert client.delete(conversation_path).status_code == 404
+            assert client.get(f"{conversation_path}/messages").status_code == 404
+            assert client.get("/api/conversations").json()["items"] == []
+    finally:
+        store.close()
+
+
+def test_conversation_routes_guard_active_runs_and_reject_bad_cursors(tmp_path):
+    app, store, owner = _conversation_app(tmp_path)
+    conversation = asyncio.run(store.conversations.create(user_id=owner.user_id))
+    started = asyncio.run(
+        store.conversations.begin_run(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="Still running",
+        )
+    )
+    assert started is not None
+    try:
+        with TestClient(app) as client:
+            path = f"/api/conversations/{conversation.conversation_id}"
+            assert client.patch(path, json={"archived": True}).status_code == 409
+            assert client.delete(path).status_code == 409
+            assert client.get("/api/conversations?cursor=not-base64").status_code == 422
+            assert client.get(f"{path}/messages?cursor=not-base64").status_code == 422
+            assert client.patch(path, json={}).status_code == 422
+    finally:
+        store.close()
+
+
+def test_conversation_routes_require_auth_and_compat_scope(tmp_path):
+    unauthenticated = FastAPI()
+    unauthenticated.include_router(router)
+    assert TestClient(unauthenticated).get("/api/conversations").status_code == 401
+
+    app, store, owner = _conversation_app(tmp_path)
+    personal = Principal(
+        user_id=owner.user_id,
+        storage_namespace=owner.storage_namespace,
+        provider="audrey",
+        provider_subject="pat_missing_scope",
+        email=owner.email,
+        display_name=owner.display_name,
+        role="user",
+        status="active",
+        auth_method="personal_token",
+        scopes=frozenset({"account:read"}),
+    )
+    app.dependency_overrides[require_principal] = lambda: personal
+    try:
+        response = TestClient(app).get("/api/conversations")
+        assert response.status_code == 403
+        assert response.json()["detail"] == (
+            "Personal access token lacks compat:full scope."
+        )
+    finally:
+        store.close()

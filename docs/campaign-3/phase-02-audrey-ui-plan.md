@@ -1,8 +1,9 @@
 # Campaign 3 Phase 2 — Audrey application and web UI
 
-**Status:** In progress. Slices 2A.1, 2A.2, and 2A.3 are complete and
-Unraid-verified. Slice 2A.4's optional Cloudflare Access identity adapter is
-laptop-complete and awaiting its default-disabled Unraid smoke.
+**Status:** In progress. Milestone 2A is complete and Unraid-verified, including
+the optional, default-disabled Cloudflare Access identity adapter. Milestone 2B
+is underway; its first owner-bound conversation/history API slice is
+laptop-complete and awaits the Unraid smoke.
 
 ## Goal
 
@@ -131,8 +132,39 @@ The local gate is 2,669 passing tests, including real generated RSA signatures,
 HTTP header extraction, key rotation, invalid claims, service-token rejection,
 provider outage behavior, role/profile ownership, email-match isolation, and
 the disabled fallback. Scoped ruff, compilation, lockfile, and diff checks are
-clean; the lesson-link scan has zero broken links. The default-disabled Unraid
-smoke remains before slice 2A.4 and Milestone 2A can close.
+clean; the lesson-link scan has zero broken links. On Unraid, Audrey started
+with the adapter disabled, schema v3 ready, and PyJWT 2.13.0 installed. Both
+existing OWUI accounts retained their exact Audrey ids, roles, and provider;
+an invalid Access assertion on one authenticated request was ignored as the
+disabled contract requires. Slice 2A.4 and Milestone 2A are complete.
+
+### 2B.1 — owner-bound conversation resources and history reads
+
+Laptop implementation and verification are complete. This slice adds:
+
+- native create, list, read, rename, mode-change, archive, unarchive, and
+  delete resources under `/api/conversations`;
+- cursor-paginated active/archived conversation views ordered by durable
+  activity plus cursor-paginated, ascending message history;
+- repository transactions that refuse archive or deletion while a run is
+  active, then rely on the existing foreign-key cascade once deletion is safe;
+- stable-Audrey-id ownership on every query and mutation, with missing and
+  cross-owner resources returning the same `404`; and
+- provider access plus `compat:full` personal-token access, while response
+  models exclude internal owner and provider identifiers.
+
+This is deliberately a read/history and conversation-lifecycle slice. It does
+not expose native run creation, cancellation, or event streaming, and it does
+not alter `/v1` OpenAI-compatible behavior. The event audit also found that
+Wave 1B supplied reusable terminal/stage/channel primitives but not yet one
+universal typed event vocabulary: Deep and research still produce ad-hoc event
+dictionaries. The next slice must establish that shared spine before adding
+the native run and AG-UI adapters.
+
+The focused repository and HTTP gate is 27 passing tests. The full hermetic
+suite is 2,677 passing tests; changed-file ruff, compilation, and diff checks
+are clean, and the lesson-link scan has zero broken links. The two-account
+Unraid smoke remains outstanding, so slice 2B.1 is not yet runtime-verified.
 
 
 ## Decision
@@ -416,8 +448,7 @@ and rich artifacts are non-goals for the first cutover.
 Gate: focused tests, the full hermetic suite, disposable/copy migrations, and a
 user-run two-account Unraid smoke.
 
-Implementation status: All Milestone 2A code is laptop-complete. The 2A.4
-default-disabled Unraid smoke is the remaining gate.
+Implementation status: Complete and Unraid-verified.
 
 ### Milestone 2B — conversation, run, and event APIs
 

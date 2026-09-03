@@ -32,6 +32,10 @@ class RunAlreadyTerminalError(RuntimeError):
     """A caller attempted a second terminal transition for the same run."""
 
 
+class ConversationHasActiveRunError(RuntimeError):
+    """A destructive conversation mutation raced an active generation."""
+
+
 class PreferencesRepository:
     """Owner-keyed access to durable user preferences."""
 
@@ -191,6 +195,169 @@ class ConversationsRepository:
     ) -> tuple[ConversationRecord, ...]:
         return await asyncio.to_thread(self._list_for_user_sync, user_id, limit)
 
+    async def list_page(
+        self,
+        *,
+        user_id: str,
+        archived: bool,
+        limit: int,
+        before_activity_at: str | None = None,
+        before_conversation_id: str | None = None,
+    ) -> tuple[ConversationRecord, ...]:
+        """List one stable keyset page for an active or archived view."""
+
+        return await asyncio.to_thread(
+            self._list_page_sync,
+            user_id,
+            archived,
+            limit,
+            before_activity_at,
+            before_conversation_id,
+        )
+
+    def _list_page_sync(
+        self,
+        user_id: str,
+        archived: bool,
+        limit: int,
+        before_activity_at: str | None,
+        before_conversation_id: str | None,
+    ) -> tuple[ConversationRecord, ...]:
+        user_id = _required(user_id, "user id")
+        if not 1 <= limit <= 200:
+            raise InvalidApplicationStateError("conversation limit must be between 1 and 200")
+        if (before_activity_at is None) != (before_conversation_id is None):
+            raise InvalidApplicationStateError("conversation cursor is incomplete")
+
+        if before_activity_at is not None and before_conversation_id is not None:
+            before_activity_at = _required(before_activity_at, "cursor activity")
+            before_conversation_id = _required(
+                before_conversation_id,
+                "cursor conversation id",
+            )
+
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT conversation_id, user_id, title, default_mode, created_at, "
+                "updated_at, last_message_at, archived_at FROM app_conversations "
+                "WHERE user_id = ? "
+                "AND ((? = 1 AND archived_at IS NOT NULL) "
+                "OR (? = 0 AND archived_at IS NULL)) "
+                "AND (? IS NULL OR COALESCE(last_message_at, created_at) < ? "
+                "OR (COALESCE(last_message_at, created_at) = ? "
+                "AND conversation_id < ?)) "
+                "ORDER BY COALESCE(last_message_at, created_at) DESC, "
+                "conversation_id DESC LIMIT ?",
+                (
+                    user_id,
+                    int(archived),
+                    int(archived),
+                    before_activity_at,
+                    before_activity_at,
+                    before_activity_at,
+                    before_conversation_id,
+                    limit,
+                ),
+            ).fetchall()
+        return tuple(_conversation_from_row(row) for row in rows)
+
+    async def update(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        title: str | None = None,
+        default_mode: str | None = None,
+        archived: bool | None = None,
+    ) -> ConversationRecord | None:
+        return await asyncio.to_thread(
+            self._update_sync,
+            user_id,
+            conversation_id,
+            title,
+            default_mode,
+            archived,
+        )
+
+    def _update_sync(
+        self,
+        user_id: str,
+        conversation_id: str,
+        title: str | None,
+        default_mode: str | None,
+        archived: bool | None,
+    ) -> ConversationRecord | None:
+        user_id = _required(user_id, "user id")
+        conversation_id = _required(conversation_id, "conversation id")
+        if title is None and default_mode is None and archived is None:
+            raise InvalidApplicationStateError("conversation update has no fields")
+
+        normalized_title = _normalize_title(title) if title is not None else ""
+        normalized_mode = _normalize_mode(default_mode) if default_mode is not None else "auto"
+        now = _utc_now()
+
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                if archived is True and self._has_active_run_locked(user_id, conversation_id):
+                    raise ConversationHasActiveRunError(
+                        "conversation cannot be archived while a run is active"
+                    )
+                cursor = self._conn.execute(
+                    "UPDATE app_conversations SET "
+                    "title = CASE WHEN ? = 1 THEN ? ELSE title END, "
+                    "default_mode = CASE WHEN ? = 1 THEN ? ELSE default_mode END, "
+                    "archived_at = CASE WHEN ? = 1 THEN ? ELSE archived_at END, "
+                    "updated_at = ? "
+                    "WHERE user_id = ? AND conversation_id = ?",
+                    (
+                        int(title is not None),
+                        normalized_title,
+                        int(default_mode is not None),
+                        normalized_mode,
+                        int(archived is not None),
+                        now if archived else None,
+                        now,
+                        user_id,
+                        conversation_id,
+                    ),
+                )
+                if cursor.rowcount == 0:
+                    self._conn.rollback()
+                    return None
+                row = self._conversation_row_locked(user_id, conversation_id)
+                assert row is not None
+                self._conn.commit()
+            except BaseException:
+                if self._conn.in_transaction:
+                    self._conn.rollback()
+                raise
+        return _conversation_from_row(row)
+
+    async def delete(self, *, user_id: str, conversation_id: str) -> bool:
+        return await asyncio.to_thread(self._delete_sync, user_id, conversation_id)
+
+    def _delete_sync(self, user_id: str, conversation_id: str) -> bool:
+        user_id = _required(user_id, "user id")
+        conversation_id = _required(conversation_id, "conversation id")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                if self._has_active_run_locked(user_id, conversation_id):
+                    raise ConversationHasActiveRunError(
+                        "conversation cannot be deleted while a run is active"
+                    )
+                cursor = self._conn.execute(
+                    "DELETE FROM app_conversations WHERE user_id = ? AND conversation_id = ?",
+                    (user_id, conversation_id),
+                )
+                self._conn.commit()
+            except BaseException:
+                if self._conn.in_transaction:
+                    self._conn.rollback()
+                raise
+        return cursor.rowcount == 1
+
     def _list_for_user_sync(
         self,
         user_id: str,
@@ -232,6 +399,49 @@ class ConversationsRepository:
                 "role, status, content, created_at, updated_at FROM app_messages "
                 "WHERE user_id = ? AND conversation_id = ? ORDER BY sequence_no",
                 (user_id, conversation_id),
+            ).fetchall()
+        return tuple(_message_from_row(row) for row in rows)
+
+    async def list_message_page(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        after_sequence: int,
+        limit: int,
+    ) -> tuple[MessageRecord, ...] | None:
+        """List one ascending message page, hidden when the owner does not match."""
+
+        return await asyncio.to_thread(
+            self._list_message_page_sync,
+            user_id,
+            conversation_id,
+            after_sequence,
+            limit,
+        )
+
+    def _list_message_page_sync(
+        self,
+        user_id: str,
+        conversation_id: str,
+        after_sequence: int,
+        limit: int,
+    ) -> tuple[MessageRecord, ...] | None:
+        user_id = _required(user_id, "user id")
+        conversation_id = _required(conversation_id, "conversation id")
+        if after_sequence < 0:
+            raise InvalidApplicationStateError("message cursor cannot be negative")
+        if not 1 <= limit <= 200:
+            raise InvalidApplicationStateError("message limit must be between 1 and 200")
+        with self._lock:
+            if self._conversation_row_locked(user_id, conversation_id) is None:
+                return None
+            rows = self._conn.execute(
+                "SELECT message_id, conversation_id, user_id, run_id, sequence_no, "
+                "role, status, content, created_at, updated_at FROM app_messages "
+                "WHERE user_id = ? AND conversation_id = ? AND sequence_no > ? "
+                "ORDER BY sequence_no LIMIT ?",
+                (user_id, conversation_id, after_sequence, limit),
             ).fetchall()
         return tuple(_message_from_row(row) for row in rows)
 
@@ -497,6 +707,13 @@ class ConversationsRepository:
             (user_id, run_id),
         ).fetchone()
 
+    def _has_active_run_locked(self, user_id: str, conversation_id: str) -> bool:
+        return self._conn.execute(
+            "SELECT 1 FROM app_runs WHERE user_id = ? AND conversation_id = ? "
+            "AND status = 'running' LIMIT 1",
+            (user_id, conversation_id),
+        ).fetchone() is not None
+
 
 def _required(value: str | None, label: str) -> str:
     clean = str(value or "").strip()
@@ -616,6 +833,7 @@ def _run_from_row(row: sqlite3.Row) -> RunRecord:
 
 
 __all__ = [
+    "ConversationHasActiveRunError",
     "ConversationsRepository",
     "InvalidApplicationStateError",
     "PreferencesRepository",

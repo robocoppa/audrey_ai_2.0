@@ -10,6 +10,7 @@ import pytest
 
 from audrey.app_state import (
     ApplicationStore,
+    ConversationHasActiveRunError,
     InvalidApplicationStateError,
     PersonalTokenAuthenticationError,
     RunAlreadyTerminalError,
@@ -336,6 +337,186 @@ async def test_cross_user_reads_and_mutations_are_indistinguishable_from_missing
             user_id=alice.user_id,
             run_id=started.run.run_id,
         )).status == "running"
+    finally:
+        store.close()
+
+
+async def test_conversation_metadata_archive_and_delete_are_owner_bound(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    alice = await _resolve(store)
+    bob = await _resolve(store, subject="owui-bob", email="bob@example.com")
+    try:
+        conversation = await store.conversations.create(
+            user_id=alice.user_id,
+            title="First title",
+        )
+        updated = await store.conversations.update(
+            user_id=alice.user_id,
+            conversation_id=conversation.conversation_id,
+            title="Renamed",
+            default_mode="research",
+        )
+        assert updated is not None
+        assert (updated.title, updated.default_mode) == ("Renamed", "research")
+
+        assert await store.conversations.update(
+            user_id=bob.user_id,
+            conversation_id=conversation.conversation_id,
+            title="Intrusion",
+        ) is None
+        assert not await store.conversations.delete(
+            user_id=bob.user_id,
+            conversation_id=conversation.conversation_id,
+        )
+
+        archived = await store.conversations.update(
+            user_id=alice.user_id,
+            conversation_id=conversation.conversation_id,
+            archived=True,
+        )
+        assert archived is not None and archived.archived_at is not None
+        assert await store.conversations.list_page(
+            user_id=alice.user_id,
+            archived=False,
+            limit=10,
+        ) == ()
+        assert [record.conversation_id for record in await store.conversations.list_page(
+            user_id=alice.user_id,
+            archived=True,
+            limit=10,
+        )] == [conversation.conversation_id]
+
+        restored = await store.conversations.update(
+            user_id=alice.user_id,
+            conversation_id=conversation.conversation_id,
+            archived=False,
+        )
+        assert restored is not None and restored.archived_at is None
+        assert await store.conversations.delete(
+            user_id=alice.user_id,
+            conversation_id=conversation.conversation_id,
+        )
+        assert await store.conversations.get(
+            user_id=alice.user_id,
+            conversation_id=conversation.conversation_id,
+        ) is None
+    finally:
+        store.close()
+
+
+async def test_active_run_blocks_archive_and_delete_until_terminal(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    owner = await _resolve(store)
+    try:
+        conversation = await store.conversations.create(user_id=owner.user_id)
+        started = await store.conversations.begin_run(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="Keep this conversation alive.",
+        )
+        assert started is not None
+
+        with pytest.raises(ConversationHasActiveRunError, match="archived"):
+            await store.conversations.update(
+                user_id=owner.user_id,
+                conversation_id=conversation.conversation_id,
+                archived=True,
+            )
+        with pytest.raises(ConversationHasActiveRunError, match="deleted"):
+            await store.conversations.delete(
+                user_id=owner.user_id,
+                conversation_id=conversation.conversation_id,
+            )
+
+        await store.conversations.finish_run(
+            user_id=owner.user_id,
+            run_id=started.run.run_id,
+            outcome="cancelled",
+            assistant_content="Partial response",
+        )
+        assert await store.conversations.delete(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+        )
+        assert await store.conversations.get_run(
+            user_id=owner.user_id,
+            run_id=started.run.run_id,
+        ) is None
+    finally:
+        store.close()
+
+
+async def test_conversation_and_message_pages_use_stable_owner_bound_cursors(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    alice = await _resolve(store)
+    bob = await _resolve(store, subject="owui-bob", email="bob@example.com")
+    try:
+        conversations = [
+            await store.conversations.create(user_id=alice.user_id, title=f"Chat {index}")
+            for index in range(5)
+        ]
+        expected = await store.conversations.list_page(
+            user_id=alice.user_id,
+            archived=False,
+            limit=100,
+        )
+        pages = []
+        activity = None
+        conversation_id = None
+        for _ in range(3):
+            page = await store.conversations.list_page(
+                user_id=alice.user_id,
+                archived=False,
+                limit=2,
+                before_activity_at=activity,
+                before_conversation_id=conversation_id,
+            )
+            pages.extend(page)
+            if not page:
+                break
+            last = page[-1]
+            activity = last.last_message_at or last.created_at
+            conversation_id = last.conversation_id
+        assert [record.conversation_id for record in pages] == [
+            record.conversation_id for record in expected
+        ]
+        assert len({record.conversation_id for record in pages}) == len(conversations)
+
+        target = conversations[0]
+        for prompt, answer in (("one", "first"), ("two", "second")):
+            started = await store.conversations.begin_run(
+                user_id=alice.user_id,
+                conversation_id=target.conversation_id,
+                user_content=prompt,
+            )
+            assert started is not None
+            await store.conversations.finish_run(
+                user_id=alice.user_id,
+                run_id=started.run.run_id,
+                outcome="succeeded",
+                assistant_content=answer,
+            )
+        first = await store.conversations.list_message_page(
+            user_id=alice.user_id,
+            conversation_id=target.conversation_id,
+            after_sequence=0,
+            limit=3,
+        )
+        assert first is not None
+        second = await store.conversations.list_message_page(
+            user_id=alice.user_id,
+            conversation_id=target.conversation_id,
+            after_sequence=first[-1].sequence_no,
+            limit=3,
+        )
+        assert second is not None
+        assert [message.sequence_no for message in (*first, *second)] == [1, 2, 3, 4]
+        assert await store.conversations.list_message_page(
+            user_id=bob.user_id,
+            conversation_id=target.conversation_id,
+            after_sequence=0,
+            limit=3,
+        ) is None
     finally:
         store.close()
 
