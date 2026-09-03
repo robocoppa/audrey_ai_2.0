@@ -78,6 +78,7 @@ from audrey.pipeline.prompts import (
     task_role_for,
     without_task_role,
 )
+from audrey.pipeline.run_events import RunEventContext
 from audrey.pipeline.streaming import (
     StreamArchiveTarget,
     StreamStageRunner,
@@ -92,6 +93,19 @@ from audrey.routes.openai.streaming import (
 )
 
 log = logging.getLogger(__name__)
+
+
+def _event_session_kwargs(context: RunEventContext | None) -> dict[str, Any]:
+    if context is None:
+        return {}
+    return {
+        "run_id": context.run_id,
+        "conversation_id": context.conversation_id,
+        "assistant_message_id": context.assistant_message_id,
+        "mode": context.mode,
+        "event_sink": context.sink,
+        "event_emitter": context.emitter,
+    }
 
 
 async def _run_graph_with_metrics(graph, state: dict[str, Any]) -> dict[str, Any]:
@@ -217,6 +231,7 @@ async def _generate_via_pipeline(
 async def _stream_via_pipeline(
     app, payload: ChatCompletionRequest, messages, options,
     *, user_id: str, conversation_id: str, user_turn_text: str,
+    event_context: RunEventContext | None = None,
 ):
     """Streaming path.
 
@@ -330,12 +345,14 @@ async def _stream_via_pipeline(
                     async for frame in _stream_research_with_banners(
                         app, payload, messages, options, task=task, conf=conf, user_id=user_id,
                         conversation_id=conversation_id, user_turn_text=user_turn_text,
+                        event_context=event_context,
                     ):
                         yield frame
                     return
                 async for frame in _stream_deep_with_banners(
                     app, payload, messages, options, task=task, conf=conf, user_id=user_id,
                     conversation_id=conversation_id, user_turn_text=user_turn_text,
+                    event_context=event_context,
                 ):
                     yield frame
                 return
@@ -351,9 +368,11 @@ async def _stream_via_pipeline(
             fast_stream = OpenAIStreamSession(
                 virtual_model=payload.model,
                 fingerprint_model=payload.model,
+                **_event_session_kwargs(event_context),
             )
             yield fast_stream.role_frame()
-            yield fast_stream.content_frame(BANNER_THINKING)
+            fast_stream.stage_started("thinking", label="Thinking")
+            yield fast_stream.status_frame(BANNER_THINKING, stage="thinking")
 
             # Now classify (model selection). Image turns are pinned to vl
             # regardless of wording — the text classifier can't see the image.
@@ -416,7 +435,12 @@ async def _stream_via_pipeline(
                             _run_graph_with_metrics(graph, state)
                         )
                         async for frame in _drain_q_until_task(
-                            banner_q, graph_task, fast_stream.content_frame,
+                            banner_q,
+                            graph_task,
+                            lambda text: fast_stream.status_frame(
+                                text,
+                                stage="thinking",
+                            ),
                         ):
                             yield frame
                         final = graph_task.result()
@@ -433,10 +457,16 @@ async def _stream_via_pipeline(
                     # identity (a fresh _emit_single_message would emit a second
                     # role frame and break the chunk sequence).
                     async for frame in _drain_q_now(
-                        banner_q, fast_stream.content_frame,
+                        banner_q,
+                        lambda text: fast_stream.status_frame(text, stage="thinking"),
                     ):
                         yield frame
-                    yield fast_stream.content_frame(BANNER_SEPARATOR)
+                    fast_stream.stage_finished(
+                        "thinking",
+                        status="failed",
+                        detail="model request failed",
+                    )
+                    yield fast_stream.status_frame(BANNER_SEPARATOR)
                     yield fast_stream.content_frame(f"[ollama error: {e}]")
                     fast_stream.terminal.finish(
                         StreamOutcome.ERROR, finish_reason="stop",
@@ -446,13 +476,16 @@ async def _stream_via_pipeline(
                     return
                 # Drain the closing ✅\n that PhaseTicker pushed on exit.
                 async for frame in _drain_q_now(
-                    banner_q, fast_stream.content_frame,
+                    banner_q,
+                    lambda text: fast_stream.status_frame(text, stage="thinking"),
                 ):
                     yield frame
+                fast_stream.stage_finished("thinking")
 
                 concrete = final.get("concrete_model", spec.name)
                 chosen_concrete = concrete
-                content = final.get("content", "") or "[empty]"
+                fast_stream.set_concrete_model(str(concrete))
+                answer_content = str(final.get("content", "") or "[empty]")
                 # Per-worker tool-usage footer. Fast path is one worker —
                 # `tool_calls_log` is its full call list. Skipped when the ReAct
                 # loop ran zero tool calls.
@@ -474,8 +507,6 @@ async def _stream_via_pipeline(
                     + [(str(d.get("model") or "?"), list(d.get("tool_calls") or []))
                        for d in (final.get("drafts") or [])]
                 )
-                if footer:
-                    content = content + footer
                 # Debug/eval: an ESCALATED turn was answered by the panel, not
                 # by the fast model — `node_mark_escalated` sets `mode: deep`.
                 # Both other paths already append the drafts block behind
@@ -487,21 +518,28 @@ async def _stream_via_pipeline(
                 # ⚠️ Appended to `content` AFTER `collector.feed_text` below
                 # takes the raw answer, so the chat archive never carries it —
                 # same contract as the footer above and as the deep branch.
+                drafts_debug = ""
                 if final.get("mode") == "deep":
                     agentic_cfg = cfg.raw.get("agentic", {}) or {}
                     if bool(agentic_cfg.get("debug_panel_drafts", False)):
                         drafts_debug = panel_drafts_block(list(final.get("drafts") or []))
-                        if drafts_debug:
-                            content = content + drafts_debug
                 # Separator between banner and answer body — matches deep.
-                yield fast_stream.content_frame(BANNER_SEPARATOR)
+                yield fast_stream.status_frame(BANNER_SEPARATOR)
                 # Tool-capable fast path emits the answer in one chunk under the
                 # already-open stream identity (the role frame went out before
                 # classify). Feed the answer text directly into the collector —
                 # the SSE-frame parser would also catch it, but feeding text is
                 # cheaper and unambiguous.
                 collector.feed_text(str(final.get("content", "") or ""))
-                yield fast_stream.content_frame(content)
+                yield fast_stream.content_frame(answer_content)
+                if footer:
+                    yield fast_stream.status_frame(footer)
+                if drafts_debug:
+                    yield fast_stream.status_frame(drafts_debug)
+                fast_stream.usage_reported(
+                    prompt_tokens=int(final.get("prompt_eval_count", 0) or 0),
+                    completion_tokens=int(final.get("eval_count", 0) or 0),
+                )
                 fast_stream.terminal.finish(
                     StreamOutcome.OK, finish_reason="stop",
                 )
@@ -540,29 +578,50 @@ async def _stream_via_pipeline(
                 elif event.type == FastStreamEventType.STARTED:
                     chosen_concrete = event.model
                     if banner_open:
-                        yield fast_stream.content_frame(
-                            worker_ok(event.model) + "\n"
+                        yield fast_stream.status_frame(
+                            worker_ok(event.model) + "\n",
+                            stage="thinking",
                         )
-                        yield fast_stream.content_frame(BANNER_SEPARATOR)
+                        fast_stream.stage_finished("thinking")
+                        yield fast_stream.status_frame(BANNER_SEPARATOR)
                         banner_open = False
                 elif event.type == FastStreamEventType.TEXT:
                     collector.feed_text(event.text)
                     yield fast_stream.content_frame(event.text)
+                elif event.type == FastStreamEventType.USAGE:
+                    fast_stream.usage_reported(
+                        prompt_tokens=event.prompt_tokens,
+                        completion_tokens=event.completion_tokens,
+                    )
                 elif event.type == FastStreamEventType.ERROR:
                     if event.model:
                         chosen_concrete = event.model
                     if banner_open:
                         failed = worker_fail(event.model) if event.model else "  ❌"
-                        yield fast_stream.content_frame(failed + "\n")
-                        yield fast_stream.content_frame(BANNER_SEPARATOR)
+                        yield fast_stream.status_frame(
+                            failed + "\n",
+                            stage="thinking",
+                        )
+                        fast_stream.stage_finished(
+                            "thinking",
+                            status="failed",
+                            detail="model stream failed",
+                        )
+                        yield fast_stream.status_frame(BANNER_SEPARATOR)
                         banner_open = False
                     yield fast_stream.content_frame(event.text)
 
             if fast_stream.terminal.outcome != StreamOutcome.OK:
                 collector.mark_partial()
             if banner_open:
-                yield fast_stream.content_frame("  ❌\n")
-                yield fast_stream.content_frame(BANNER_SEPARATOR)
+                yield fast_stream.status_frame("  ❌\n", stage="thinking")
+                fast_stream.stage_finished(
+                    "thinking",
+                    status="failed",
+                    detail="model stream did not start",
+                )
+                yield fast_stream.status_frame(BANNER_SEPARATOR)
+            fast_stream.set_concrete_model(chosen_concrete)
             yield fast_stream.terminal_frame()
             yield fast_stream.done_frame()
     except asyncio.CancelledError:
@@ -595,6 +654,7 @@ async def _stream_deep_with_banners(
     *, task: str, conf: float, user_id: str,
     conversation_id: str = "",
     user_turn_text: str = "",
+    event_context: RunEventContext | None = None,
 ):
     """Streaming deep path with progress banners.
 
@@ -638,6 +698,7 @@ async def _stream_deep_with_banners(
         virtual_model=payload.model,
         fingerprint_model=concrete,
         terminal=runner.terminal,
+        **_event_session_kwargs(event_context),
     )
     _delta_frame = session.content_frame
 
@@ -656,6 +717,7 @@ async def _stream_deep_with_banners(
 
     try:
         yield session.role_frame()
+        session.stage_started("planning", label="Planning")
         # ── Stage 1: Planning (memory recall + planner) ─────────────────
         memory_cfg = agentic.get("memory", {}) or {}
         memory_enabled = bool(memory_cfg.get("enabled", True))
@@ -684,11 +746,19 @@ async def _stream_deep_with_banners(
                 ),
                 name="deep-planning",
             )
-            async for frame in _drain_q_until_task(banner_q, think_task, _delta_frame):
+            async for frame in _drain_q_until_task(
+                banner_q,
+                think_task,
+                lambda text: session.status_frame(text, stage="planning"),
+            ):
                 yield frame
             messages_with_memory, subtasks = think_task.result()
-        async for frame in _drain_q_now(banner_q, _delta_frame):
+        async for frame in _drain_q_now(
+            banner_q,
+            lambda text: session.status_frame(text, stage="planning"),
+        ):
             yield frame
+        session.stage_finished("planning")
 
         # ── Stage 2: Dispatching panel ──────────────────────────────────
         pool_key = pool_key_for(payload.model)
@@ -710,6 +780,7 @@ async def _stream_deep_with_banners(
         deep_react_max_web_searches = int(deep_react_cfg.get("max_web_searches",
             int(react_cfg.get("max_web_searches", 0))))
 
+        session.stage_started("dispatching", label="Dispatching panel")
         async with PhaseTicker(BANNER_DISPATCHING, emit) as ticker:
             panel_task = runner.own(
                 _phase_dispatch(
@@ -729,17 +800,26 @@ async def _stream_deep_with_banners(
                 ),
                 name="deep-panel",
             )
-            async for frame in _drain_q_until_task(banner_q, panel_task, _delta_frame):
+            async for frame in _drain_q_until_task(
+                banner_q,
+                panel_task,
+                lambda text: session.status_frame(text, stage="dispatching"),
+            ):
                 yield frame
             drafts = panel_task.result()
-        async for frame in _drain_q_now(banner_q, _delta_frame):
+        async for frame in _drain_q_now(
+            banner_q,
+            lambda text: session.status_frame(text, stage="dispatching"),
+        ):
             yield frame
+        session.stage_finished("dispatching")
 
         # ── Stage 3: Synthesizing (streaming) ───────────────────────────
         # Synth tokens stream live. The Synthesizing banner runs while we
         # wait for the first token; on first_token we close the banner with
         # ✅, emit the separator, and then forward each delta straight to
         # the client. Mid-stream errors are surfaced inline.
+        session.stage_started("synthesizing", label="Synthesizing")
         synth_done: dict[str, Any] = {}
         synth_events = runner.start_events(
             synthesize_stream(
@@ -767,7 +847,10 @@ async def _stream_deep_with_banners(
                     while not banner_q.empty():
                         item = banner_q.get_nowait()
                         if item is not None:
-                            yield _delta_frame(item)
+                            yield session.status_frame(
+                                item,
+                                stage="synthesizing",
+                            )
                             drained = True
                     try:
                         evt = await synth_events.poll()
@@ -807,11 +890,14 @@ async def _stream_deep_with_banners(
                         synth_done = evt
                         break
             # Banner exited with ✅. Drain the closing fragment.
-            async for frame in _drain_q_now(banner_q, _delta_frame):
+            async for frame in _drain_q_now(
+                banner_q,
+                lambda text: session.status_frame(text, stage="synthesizing"),
+            ):
                 yield frame
 
             # Separator goes between banner and answer body.
-            yield _delta_frame(BANNER_SEPARATOR)
+            yield session.status_frame(BANNER_SEPARATOR)
 
             # If a delta was consumed pre-first-token (defensive path),
             # emit it now so we don't drop content.
@@ -856,6 +942,11 @@ async def _stream_deep_with_banners(
             else:
                 final_content = "[empty]"
                 outcome = StreamOutcome.ERROR
+            session.stage_finished(
+                "synthesizing",
+                status="succeeded" if outcome is StreamOutcome.OK else "failed",
+                detail="" if outcome is StreamOutcome.OK else outcome.value,
+            )
 
             # Per-worker tool-usage footer. Only renders rows for workers
             # that actually called tools; empty when no tools fired.
@@ -864,7 +955,7 @@ async def _stream_deep_with_banners(
                 for d in drafts
             ])
             if footer:
-                yield _delta_frame(footer)
+                yield session.status_frame(footer)
 
             # Debug/eval: append every worker's full draft (opt-in via
             # `agentic.debug_panel_drafts`) so draft-vs-synth quality can be
@@ -873,9 +964,15 @@ async def _stream_deep_with_banners(
             if bool(agentic.get("debug_panel_drafts", False)):
                 drafts_debug = panel_drafts_block(drafts)
                 if drafts_debug:
-                    yield _delta_frame(drafts_debug)
+                    yield session.status_frame(drafts_debug)
+
+            session.usage_reported(
+                prompt_tokens=int(synth_done.get("prompt_eval_count", 0) or 0),
+                completion_tokens=int(synth_done.get("eval_count", 0) or 0),
+            )
 
             runner.terminal.finish(outcome, finish_reason="stop")
+            session.set_concrete_model(synth_model)
             yield session.terminal_frame()
             yield session.done_frame()
         finally:
@@ -889,13 +986,13 @@ async def _stream_deep_with_banners(
     except OllamaError as e:
         runner.terminal.finish_if_unset(StreamOutcome.ERROR, finish_reason="stop")
         log.warning("stream deep: ollama error: %s", e)
-        yield _delta_frame(f"\n\n[ollama error: {e}]")
+        yield session.status_frame(f"\n\n[ollama error: {e}]")
         yield session.terminal_frame()
         yield session.done_frame()
     except Exception:
         runner.terminal.finish_if_unset(StreamOutcome.ERROR, finish_reason="stop")
         log.exception("stream deep: unexpected error")
-        yield _delta_frame("\n\n[internal error]")
+        yield session.status_frame("\n\n[internal error]")
         yield session.terminal_frame()
         yield session.done_frame()
     finally:
@@ -928,6 +1025,7 @@ async def _stream_research_with_banners(
     *, task: str, conf: float, user_id: str,
     conversation_id: str = "",
     user_turn_text: str = "",
+    event_context: RunEventContext | None = None,
 ):
     """Streaming `audrey_research` path: Planning → Researching → Verifying → Writing.
 
@@ -964,6 +1062,7 @@ async def _stream_research_with_banners(
         virtual_model=payload.model,
         fingerprint_model=concrete,
         terminal=runner.terminal,
+        **_event_session_kwargs(event_context),
     )
     _delta_frame = session.content_frame
 
@@ -978,6 +1077,7 @@ async def _stream_research_with_banners(
 
     try:
         yield session.role_frame()
+        session.stage_started("planning", label="Planning")
         # ── Stage 0: Planning (memory recall + planner, reused verbatim) ──
         memory_cfg = agentic.get("memory", {}) or {}
         memory_enabled = bool(memory_cfg.get("enabled", True))
@@ -1002,13 +1102,21 @@ async def _stream_research_with_banners(
                 ),
                 name="research-planning",
             )
-            async for frame in _drain_q_until_task(banner_q, think_task, _delta_frame):
+            async for frame in _drain_q_until_task(
+                banner_q,
+                think_task,
+                lambda text: session.status_frame(text, stage="planning"),
+            ):
                 yield frame
             # Research workers answer the full prompt; planner subtasks are not
             # used (the research fan-out grounds the whole question).
             messages_with_memory, _subtasks = think_task.result()
-        async for frame in _drain_q_now(banner_q, _delta_frame):
+        async for frame in _drain_q_now(
+            banner_q,
+            lambda text: session.status_frame(text, stage="planning"),
+        ):
             yield frame
+        session.stage_finished("planning")
 
         # Drive the whole staged pipeline as one background task; its events
         # feed the three phase banners and the live answer stream.
@@ -1031,13 +1139,14 @@ async def _stream_research_with_banners(
         pipe_task = research_events.producer_task
 
         # ── Stage 1: Researching (banner; tails per researcher) ───────────
+        session.stage_started("researching", label="Researching")
         async with PhaseTicker(BANNER_RESEARCHING, emit) as ticker:
             while True:
                 # Surface any banner dots queued by the ticker.
                 while not banner_q.empty():
                     item = banner_q.get_nowait()
                     if item is not None:
-                        yield _delta_frame(item)
+                        yield session.status_frame(item, stage="researching")
                 try:
                     evt = await research_events.poll()
                 except TimeoutError:
@@ -1051,8 +1160,12 @@ async def _stream_research_with_banners(
                     )
                 elif etype == "findings_ready":
                     break
-        async for frame in _drain_q_now(banner_q, _delta_frame):
+        async for frame in _drain_q_now(
+            banner_q,
+            lambda text: session.status_frame(text, stage="researching"),
+        ):
             yield frame
+        session.stage_finished("researching")
 
         # ── Stage 2: Verifying → Stage 3: Fact-checking → Stage 4: Writing ─
         # Event order after findings_ready is: optionally `verify_done`,
@@ -1079,11 +1192,12 @@ async def _stream_research_with_banners(
         # Verifying: open until we see factcheck_done, the first write_delta,
         # or done. verify_done just confirms the stage finished (keep waiting).
         pending: dict[str, Any] | None = None
+        session.stage_started("verifying", label="Verifying")
         async with PhaseTicker(BANNER_VERIFYING, emit):
             while True:
                 kind, item = await _next_event()
                 if kind == "banner":
-                    yield _delta_frame(item)
+                    yield session.status_frame(item, stage="verifying")
                     continue
                 if item is None:
                     break
@@ -1091,37 +1205,50 @@ async def _stream_research_with_banners(
                     continue
                 pending = item
                 break
-        async for frame in _drain_q_now(banner_q, _delta_frame):
+        async for frame in _drain_q_now(
+            banner_q,
+            lambda text: session.status_frame(text, stage="verifying"),
+        ):
             yield frame
+        session.stage_finished("verifying")
 
         # Fact-checking: only if the verify wait ended on `factcheck_done`.
         # Otherwise the stage was skipped (no grounding / no factchecker) and
         # `pending` is already the first write_delta or done — skip the banner.
         first_write: dict[str, Any] | None = None
         if pending is not None and pending.get("type") == "factcheck_done":
+            session.stage_started("fact_checking", label="Fact-checking")
             async with PhaseTicker(BANNER_FACTCHECKING, emit):
                 while True:
                     kind, item = await _next_event()
                     if kind == "banner":
-                        yield _delta_frame(item)
+                        yield session.status_frame(item, stage="fact_checking")
                         continue
                     if item is None:
                         break
                     first_write = item  # first write_delta or done
                     break
-            async for frame in _drain_q_now(banner_q, _delta_frame):
+            async for frame in _drain_q_now(
+                banner_q,
+                lambda text: session.status_frame(text, stage="fact_checking"),
+            ):
                 yield frame
+            session.stage_finished("fact_checking")
         else:
             first_write = pending
 
         # Writing banner: it closes as soon as we have the first answer token.
+        session.stage_started("writing", label="Writing")
         async with PhaseTicker(BANNER_WRITING, emit):
             # `first_write` already in hand — close immediately. A brief tick
             # may queue; drain it after exit.
             pass
-        async for frame in _drain_q_now(banner_q, _delta_frame):
+        async for frame in _drain_q_now(
+            banner_q,
+            lambda text: session.status_frame(text, stage="writing"),
+        ):
             yield frame
-        yield _delta_frame(BANNER_SEPARATOR)
+        yield session.status_frame(BANNER_SEPARATOR)
 
         # Emit the first write chunk (if any), then stream the rest.
         def _consume(evt: dict[str, Any]) -> str:
@@ -1164,13 +1291,18 @@ async def _stream_research_with_banners(
         else:
             final_content = "[empty]"
             outcome = StreamOutcome.ERROR
+        session.stage_finished(
+            "writing",
+            status="succeeded" if outcome is StreamOutcome.OK else "failed",
+            detail="" if outcome is StreamOutcome.OK else outcome.value,
+        )
 
         footer = tool_summary_block([
             (str(d.get("model") or "?"), list(d.get("tool_calls") or []))
             for d in drafts
         ])
         if footer:
-            yield _delta_frame(footer)
+            yield session.status_frame(footer)
 
         # Debug/eval: append the staged-pipeline trace (researcher notes,
         # ledger, verifier critique, fact-check verdicts, writer guidance) —
@@ -1187,9 +1319,15 @@ async def _stream_research_with_banners(
                 dispositions=str(done_evt.get("dispositions") or ""),
             )
             if trace:
-                yield _delta_frame(trace)
+                yield session.status_frame(trace)
+
+        session.usage_reported(
+            prompt_tokens=int(done_evt.get("prompt_eval_count", 0) or 0),
+            completion_tokens=int(done_evt.get("eval_count", 0) or 0),
+        )
 
         runner.terminal.finish(outcome, finish_reason="stop")
+        session.set_concrete_model(writer_model)
         yield session.terminal_frame()
         yield session.done_frame()
 
@@ -1199,13 +1337,13 @@ async def _stream_research_with_banners(
     except OllamaError as e:
         runner.terminal.finish_if_unset(StreamOutcome.ERROR, finish_reason="stop")
         log.warning("stream research: ollama error: %s", e)
-        yield _delta_frame(f"\n\n[ollama error: {e}]")
+        yield session.status_frame(f"\n\n[ollama error: {e}]")
         yield session.terminal_frame()
         yield session.done_frame()
     except Exception:
         runner.terminal.finish_if_unset(StreamOutcome.ERROR, finish_reason="stop")
         log.exception("stream research: unexpected error")
-        yield _delta_frame("\n\n[internal error]")
+        yield session.status_frame("\n\n[internal error]")
         yield session.terminal_frame()
         yield session.done_frame()
     finally:

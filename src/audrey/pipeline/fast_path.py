@@ -132,6 +132,7 @@ class FastStreamEventType(StrEnum):
     ATTEMPT = "attempt"
     STARTED = "started"
     TEXT = "text"
+    USAGE = "usage"
     ERROR = "error"
 
 
@@ -142,6 +143,8 @@ class FastStreamEvent:
     type: FastStreamEventType
     model: str = ""
     text: str = ""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 class _InlineThinkFilter:
@@ -333,6 +336,16 @@ async def stream_fast_path(
                                     model=candidate.name,
                                     text=tail,
                                 )
+                            yield FastStreamEvent(
+                                FastStreamEventType.USAGE,
+                                model=candidate.name,
+                                prompt_tokens=int(
+                                    chunk.get("prompt_eval_count", 0) or 0
+                                ),
+                                completion_tokens=int(
+                                    chunk.get("eval_count", 0) or 0
+                                ),
+                            )
                             finish_reason = (
                                 "length"
                                 if chunk.get("done_reason") == "length"

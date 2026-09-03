@@ -3,7 +3,8 @@
 **Status:** In progress. Milestone 2A is complete and Unraid-verified, including
 the optional, default-disabled Cloudflare Access identity adapter. Milestone 2B
 is underway; its first owner-bound conversation/history API slice is
-laptop-complete and awaits the Unraid smoke.
+complete and Unraid-verified. The universal run-event/native-run slice is
+laptop-complete and awaits its Unraid gate.
 
 ## Goal
 
@@ -163,8 +164,50 @@ the native run and AG-UI adapters.
 
 The focused repository and HTTP gate is 27 passing tests. The full hermetic
 suite is 2,677 passing tests; changed-file ruff, compilation, and diff checks
-are clean, and the lesson-link scan has zero broken links. The two-account
-Unraid smoke remains outstanding, so slice 2B.1 is not yet runtime-verified.
+are clean, and the lesson-link scan has zero broken links. On Unraid, two
+accounts created independent conversations and received identical `404`s for
+cross-owner reads. Four persisted messages paginated in ascending sequence;
+active-run archive and delete returned `409`; and rename, mode change,
+archive/list, deletion, and post-delete `404` checks passed after the run was
+terminalized. Only the two disposable smoke conversations were deleted. Slice
+2B.1 is complete and Unraid-verified.
+
+### 2B.2 — universal run events and native run lifecycle
+
+Laptop implementation and verification are complete. This slice adds:
+
+- one typed, client-neutral vocabulary for run, stage, assistant-message,
+  answer-delta, tool, source, usage, and terminal events, with a sequenced
+  emitter that rejects invalid lifecycle transitions;
+- an OpenAI compatibility adapter over those events, while Fast, Deep, and
+  Research now distinguish display-only progress from answer text and report
+  final-model usage through the shared spine;
+- owner-bound native run creation at
+  `POST /api/conversations/{conversation_id}/runs`, persisted run reads,
+  cancellation, and a typed SSE endpoint with event ids and
+  `Last-Event-ID`/cursor replay;
+- server-loaded canonical history: The client supplies only the new user text
+  and optional product mode/sampling controls, never a prior transcript or
+  browser-authored system prompt;
+- atomic one-active-run and archived-conversation guards, with missing and
+  cross-owner resources remaining indistinguishable `404`s; and
+- durable success, cancellation, shutdown, and failure finalization. Startup
+  marks rows interrupted by a previous process as failed, and bounded event
+  retention cannot truncate the authoritative assistant message.
+
+The first-release reconnect window is intentionally process-local. A completed
+or active run can replay retained events while this Audrey process owns it; a
+later request for an evicted stream receives `410` and reads the durable run
+and messages instead. A restart preserves canonical state and explicitly
+terminalizes interrupted rows, but it does not pretend the transient event
+buffer survived. The event schema includes tool and source activity; mapping
+the remaining internal tool/source observations into the browser protocol and
+the AG-UI adapter remain subsequent Milestone 2B work.
+
+The focused affected gate is 229 passing tests. The full hermetic suite is
+2,690 passing tests; changed-file ruff, compilation, and diff checks are clean,
+and the lesson-link scan has zero broken links. Slice 2B.2 is laptop-complete
+and awaits its Unraid smoke before it is called complete.
 
 
 ## Decision

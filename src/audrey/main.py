@@ -39,6 +39,7 @@ from audrey.pipeline.graph import build_graph
 from audrey.readiness import ReadinessCollector
 from audrey.routes.admin import router as admin_router
 from audrey.routes.app import router as application_router
+from audrey.routes.app.runs import NativeRunManager
 from audrey.routes.files import router as files_router
 from audrey.routes.inflight import UserInflightRegistry
 from audrey.routes.kb import router as kb_router
@@ -97,6 +98,12 @@ async def lifespan(app: FastAPI):
         application_store.path,
         application_store.schema_version,
     )
+    recovered_runs = await application_store.conversations.recover_interrupted_runs()
+    if recovered_runs:
+        log.warning(
+            "application_store: recovered %d interrupted native run(s)",
+            recovered_runs,
+        )
 
     default_timeout = float(cfg.timeouts.get("medium", 180))
     ollama = OllamaClient(cfg.env.ollama_host, default_timeout_s=default_timeout)
@@ -299,6 +306,9 @@ async def lifespan(app: FastAPI):
     await user_data_purges.start()
     app.state.user_data_purges = user_data_purges
 
+    native_runs = NativeRunManager(app=app, store=application_store)
+    app.state.native_runs = native_runs
+
     readiness_cfg = cfg.raw.get("readiness", {}) or {}
     required_components = set(
         readiness_cfg.get("required_components", ["ollama"]) or []
@@ -326,6 +336,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        await native_runs.stop()
         if tools_retry_task is not None and not tools_retry_task.done():
             tools_retry_task.cancel()
             try:

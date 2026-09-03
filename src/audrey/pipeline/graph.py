@@ -548,6 +548,8 @@ def build_graph(
             "synthesizer_model": result.get("writer_model", "none"),
             "synth_error": result.get("error", ""),
             "concrete_model": result.get("writer_model", "none"),
+            "prompt_eval_count": int(result.get("prompt_eval_count", 0) or 0),
+            "eval_count": int(result.get("eval_count", 0) or 0),
         }
 
     async def node_reflect(state: PipelineState) -> dict[str, Any]:

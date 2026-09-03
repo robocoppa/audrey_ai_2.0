@@ -18,6 +18,7 @@ from audrey.pipeline.fast_path import (
     FastStreamEventType,
     stream_fast_path,
 )
+from audrey.pipeline.run_events import RunEvent, RunEventContext
 from audrey.routes.inflight import UserInflightRegistry
 from audrey.routes.openai import pipeline as route_pipeline
 from audrey.routes.openai.pipeline import (
@@ -200,6 +201,7 @@ async def test_plain_fast_success_has_one_terminal_and_matching_metrics(
         FastStreamEventType.ATTEMPT,
         FastStreamEventType.STARTED,
         FastStreamEventType.TEXT,
+        FastStreamEventType.USAGE,
     ]
     assert "".join(event.text for event in events) == "hello"
     assert terminal.outcome == StreamOutcome.OK
@@ -505,6 +507,7 @@ async def test_route_uses_one_id_one_role_and_the_configured_thinking_policy(
         messages=messages,
         stream=True,
     )
+    events: list[RunEvent] = []
 
     frames = [
         frame async for frame in _stream_via_pipeline(
@@ -515,6 +518,13 @@ async def test_route_uses_one_id_one_role_and_the_configured_thinking_policy(
             user_id="alice@example.com",
             conversation_id="conversation-1",
             user_turn_text="hello",
+            event_context=RunEventContext(
+                run_id="run-fast",
+                conversation_id="conversation-1",
+                assistant_message_id="message-fast",
+                mode="fast",
+                sink=events.append,
+            ),
         )
     ]
     chunks = [
@@ -543,6 +553,25 @@ async def test_route_uses_one_id_one_role_and_the_configured_thinking_policy(
     assert archive.calls[0]["assistant_content"] == "one answer"
     assert archive.calls[0]["partial"] is False
     assert archive.calls[0]["concrete_model"] == "a"
+    assert [event.type for event in events] == [
+        "run.started",
+        "message.started",
+        "stage.started",
+        "stage.progress",
+        "stage.progress",
+        "stage.finished",
+        "stage.progress",
+        "text.delta",
+        "text.delta",
+        "usage.reported",
+        "message.finished",
+        "run.finished",
+    ]
+    assert "".join(event.delta for event in events if event.type == "text.delta") == (
+        "one answer"
+    )
+    usage = next(event for event in events if event.type == "usage.reported")
+    assert (usage.prompt_tokens, usage.completion_tokens) == (0, 0)
 
 
 async def test_nonstream_owui_utility_turn_is_not_archived():

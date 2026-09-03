@@ -38,6 +38,7 @@ from audrey.metrics import pipeline_total
 from audrey.models.health import HealthTracker
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.pipeline.run_events import RunEvent, RunEventContext
 from audrey.routes.openai import pipeline as route_pipeline
 from audrey.routes.openai.pipeline import _stream_deep_with_banners
 from audrey.routes.openai.schemas import ChatCompletionRequest
@@ -132,15 +133,52 @@ def _joined_content(frames: list[str]) -> str:
     return "".join(out)
 
 
-async def _collect(app):
+async def _collect(app, events: list[RunEvent] | None = None):
     msgs = [{"role": "user", "content": "what do my videos say about the london system"}]
     payload = ChatCompletionRequest(model="audrey_deep", messages=msgs, stream=True)
     return [
         frame async for frame in _stream_deep_with_banners(
             app, payload, msgs, {}, task="reasoning", conf=0.9,
             user_id="", conversation_id="", user_turn_text=msgs[0]["content"],
+            event_context=(
+                RunEventContext(
+                    run_id="run-deep",
+                    conversation_id="conversation-deep",
+                    assistant_message_id="message-deep",
+                    mode="deep",
+                    sink=events.append,
+                )
+                if events is not None
+                else None
+            ),
         )
     ]
+
+
+async def test_deep_stream_emits_typed_lifecycle_and_answer_only_deltas():
+    events: list[RunEvent] = []
+    app = _fake_app({"w1": "draft one", "w2": "draft two", "s": "Deep answer."})
+
+    await _collect(app, events)
+
+    assert [event.stage for event in events if event.type == "stage.started"] == [
+        "planning",
+        "dispatching",
+        "synthesizing",
+    ]
+    assert [event.stage for event in events if event.type == "stage.finished"] == [
+        "planning",
+        "dispatching",
+        "synthesizing",
+    ]
+    assert "".join(event.delta for event in events if event.type == "text.delta") == (
+        "Deep answer."
+    )
+    usage = next(event for event in events if event.type == "usage.reported")
+    assert (usage.prompt_tokens, usage.completion_tokens) == (1, 1)
+    assert events[-2].type == "message.finished"
+    assert events[-1].type == "run.finished"
+    assert events[-1].status == "succeeded"
 
 
 async def test_deep_stream_renders_the_tools_used_footer():

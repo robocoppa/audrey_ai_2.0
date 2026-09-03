@@ -36,6 +36,10 @@ class ConversationHasActiveRunError(RuntimeError):
     """A destructive conversation mutation raced an active generation."""
 
 
+class ConversationArchivedError(RuntimeError):
+    """A caller attempted to start a run in an archived conversation."""
+
+
 class PreferencesRepository:
     """Owner-keyed access to durable user preferences."""
 
@@ -497,6 +501,14 @@ class ConversationsRepository:
                 if conversation_row is None:
                     self._conn.rollback()
                     return None
+                if conversation_row["archived_at"] is not None:
+                    raise ConversationArchivedError(
+                        "conversation must be unarchived before starting a run"
+                    )
+                if self._has_active_run_locked(user_id, conversation_id):
+                    raise ConversationHasActiveRunError(
+                        "conversation already has an active run"
+                    )
                 selected_mode = _normalize_mode(mode or str(conversation_row["default_mode"]))
                 next_row = self._conn.execute(
                     "SELECT COALESCE(MAX(sequence_no), 0) + 1 AS next_sequence "
@@ -686,6 +698,41 @@ class ConversationsRepository:
             assistant_message=_message_from_row(message_row),
         )
 
+    async def recover_interrupted_runs(self) -> int:
+        """Fail rows left running by a previous process before serving traffic."""
+
+        return await asyncio.to_thread(self._recover_interrupted_runs_sync)
+
+    def _recover_interrupted_runs_sync(self) -> int:
+        now = _utc_now()
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                rows = self._conn.execute(
+                    "SELECT run_id FROM app_runs WHERE status = 'running'"
+                ).fetchall()
+                if not rows:
+                    self._conn.commit()
+                    return 0
+                self._conn.execute(
+                    "UPDATE app_messages SET status = 'incomplete', updated_at = ? "
+                    "WHERE role = 'assistant' AND status = 'in_progress' "
+                    "AND run_id IN (SELECT run_id FROM app_runs WHERE status = 'running')",
+                    (now,),
+                )
+                cursor = self._conn.execute(
+                    "UPDATE app_runs SET status = 'failed', completed_at = ?, "
+                    "finish_reason = 'error', error_code = 'server_restart' "
+                    "WHERE status = 'running'",
+                    (now,),
+                )
+                self._conn.commit()
+            except BaseException:
+                if self._conn.in_transaction:
+                    self._conn.rollback()
+                raise
+        return cursor.rowcount
+
     def _conversation_row_locked(
         self,
         user_id: str,
@@ -833,6 +880,7 @@ def _run_from_row(row: sqlite3.Row) -> RunRecord:
 
 
 __all__ = [
+    "ConversationArchivedError",
     "ConversationHasActiveRunError",
     "ConversationsRepository",
     "InvalidApplicationStateError",

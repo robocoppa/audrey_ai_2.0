@@ -10,6 +10,7 @@ from audrey.app_state.records import (
     UserPreferences,
 )
 from audrey.app_state.repositories import (
+    ConversationArchivedError,
     ConversationHasActiveRunError,
     ConversationsRepository,
     InvalidApplicationStateError,
@@ -25,6 +26,7 @@ from audrey.app_state.store import (
 
 __all__ = [
     "ApplicationStore",
+    "ConversationArchivedError",
     "ConversationRecord",
     "ConversationHasActiveRunError",
     "ConversationsRepository",

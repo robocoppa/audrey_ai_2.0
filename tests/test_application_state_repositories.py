@@ -10,6 +10,7 @@ import pytest
 
 from audrey.app_state import (
     ApplicationStore,
+    ConversationArchivedError,
     ConversationHasActiveRunError,
     InvalidApplicationStateError,
     PersonalTokenAuthenticationError,
@@ -221,14 +222,14 @@ async def test_non_success_terminal_outcomes_retain_explicit_partial_content(tmp
         store.close()
 
 
-async def test_two_store_connections_assign_contiguous_message_order(tmp_path):
+async def test_two_store_connections_allow_one_active_run_and_keep_message_order(tmp_path):
     path = tmp_path / "app.sqlite"
     left = ApplicationStore(path)
     owner = await _resolve(left)
     conversation = await left.conversations.create(user_id=owner.user_id)
     right = ApplicationStore(path)
     try:
-        starts = await asyncio.gather(
+        results = await asyncio.gather(
             left.conversations.begin_run(
                 user_id=owner.user_id,
                 conversation_id=conversation.conversation_id,
@@ -239,20 +240,123 @@ async def test_two_store_connections_assign_contiguous_message_order(tmp_path):
                 conversation_id=conversation.conversation_id,
                 user_content="right",
             ),
+            return_exceptions=True,
         )
-        assert all(start is not None for start in starts)
+        starts = [result for result in results if not isinstance(result, BaseException)]
+        failures = [result for result in results if isinstance(result, BaseException)]
+        assert len(starts) == 1
+        assert len(failures) == 1
+        assert isinstance(failures[0], ConversationHasActiveRunError)
+        start = starts[0]
+        assert start is not None
         messages = await left.conversations.list_messages(
             user_id=owner.user_id,
             conversation_id=conversation.conversation_id,
         )
         assert messages is not None
-        assert [message.sequence_no for message in messages] == [1, 2, 3, 4]
-        for start in starts:
-            assert start is not None
-            assert start.assistant_message.sequence_no == start.user_message.sequence_no + 1
+        assert [message.sequence_no for message in messages] == [1, 2]
+        assert start.assistant_message.sequence_no == start.user_message.sequence_no + 1
+
+        await left.conversations.finish_run(
+            user_id=owner.user_id,
+            run_id=start.run.run_id,
+            outcome="succeeded",
+            assistant_content="first answer",
+        )
+        next_start = await right.conversations.begin_run(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="after terminal",
+        )
+        assert next_start is not None
+        assert (next_start.user_message.sequence_no, next_start.assistant_message.sequence_no) == (
+            3,
+            4,
+        )
     finally:
         left.close()
         right.close()
+
+
+async def test_archived_conversation_rejects_new_run(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    owner = await _resolve(store)
+    try:
+        conversation = await store.conversations.create(user_id=owner.user_id)
+        archived = await store.conversations.update(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+            archived=True,
+        )
+        assert archived is not None and archived.archived_at is not None
+
+        with pytest.raises(ConversationArchivedError, match="unarchived"):
+            await store.conversations.begin_run(
+                user_id=owner.user_id,
+                conversation_id=conversation.conversation_id,
+                user_content="Do not start.",
+            )
+        assert await store.conversations.list_messages(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+        ) == ()
+    finally:
+        store.close()
+
+
+async def test_restart_recovery_terminalizes_interrupted_runs_once(tmp_path):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
+    alice = await _resolve(store)
+    bob = await _resolve(store, subject="owui-bob", email="bob@example.com")
+    try:
+        alice_conversation = await store.conversations.create(user_id=alice.user_id)
+        bob_conversation = await store.conversations.create(user_id=bob.user_id)
+        alice_run = await store.conversations.begin_run(
+            user_id=alice.user_id,
+            conversation_id=alice_conversation.conversation_id,
+            user_content="First interrupted turn",
+        )
+        bob_run = await store.conversations.begin_run(
+            user_id=bob.user_id,
+            conversation_id=bob_conversation.conversation_id,
+            user_content="Second interrupted turn",
+        )
+        assert alice_run is not None and bob_run is not None
+        with sqlite3.connect(path) as connection:
+            connection.execute(
+                "UPDATE app_messages SET content = ? WHERE message_id = ?",
+                ("partial response", alice_run.assistant_message.message_id),
+            )
+            connection.commit()
+
+        assert await store.conversations.recover_interrupted_runs() == 2
+        assert await store.conversations.recover_interrupted_runs() == 0
+
+        for owner, started in ((alice, alice_run), (bob, bob_run)):
+            recovered = await store.conversations.get_run(
+                user_id=owner.user_id,
+                run_id=started.run.run_id,
+            )
+            assert recovered is not None
+            assert recovered.status == "failed"
+            assert recovered.completed_at is not None
+            assert recovered.finish_reason == "error"
+            assert recovered.error_code == "server_restart"
+            messages = await store.conversations.list_messages(
+                user_id=owner.user_id,
+                conversation_id=started.conversation.conversation_id,
+            )
+            assert messages is not None
+            assert messages[-1].status == "incomplete"
+        alice_messages = await store.conversations.list_messages(
+            user_id=alice.user_id,
+            conversation_id=alice_conversation.conversation_id,
+        )
+        assert alice_messages is not None
+        assert alice_messages[-1].content == "partial response"
+    finally:
+        store.close()
 
 
 async def test_two_store_connections_allow_exactly_one_terminal_transition(tmp_path):

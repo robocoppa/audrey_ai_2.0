@@ -1864,7 +1864,7 @@ async def run_research_pipeline_streaming(
       {"type": "done", "content": str, "writer_model": str, "drafts": list,
        "findings": str, "critique": str, "corrections": str,
        "ledger": dict | None, "factcheck": dict | None, "dispositions": str,
-       "error": str}
+       "error": str, "prompt_eval_count": int, "eval_count": int}
           Always emitted last. `error` is "" on success, or "no_writer" /
           "write_failed" when the write stage could not produce an answer.
           `ledger`/`factcheck` are the structured intermediates as plain
@@ -2146,6 +2146,8 @@ async def run_research_pipeline_streaming(
     accumulated = ""
     writer_model = ""
     write_error = "no_writer" if not candidates else "write_failed"
+    writer_prompt_tokens = 0
+    writer_completion_tokens = 0
 
     # Stage 4: deterministic per-claim hedging guidance (opt-in, separate flag).
     # Computed from the ledger's surviving claims + their source types — empty
@@ -2182,6 +2184,12 @@ async def run_research_pipeline_streaming(
                         accumulated += text
                         yield {"type": "write_delta", "text": text}
                     if chunk.get("done"):
+                        writer_prompt_tokens = int(
+                            chunk.get("prompt_eval_count", 0) or 0
+                        )
+                        writer_completion_tokens = int(
+                            chunk.get("eval_count", 0) or 0
+                        )
                         break
             health.record_success(model)
             if accumulated.strip():
@@ -2224,6 +2232,8 @@ async def run_research_pipeline_streaming(
         "factcheck": fc_result.model_dump() if fc_result is not None else None,
         "dispositions": dispositions,
         "error": write_error,
+        "prompt_eval_count": writer_prompt_tokens,
+        "eval_count": writer_completion_tokens,
     }
 
 
@@ -2247,8 +2257,9 @@ async def run_research_pipeline(
 
     Keys: content, writer_model, drafts, research_findings, research_critique,
     research_factcheck, research_ledger, research_factcheck_ledger,
-    research_dispositions, error. Drains the streaming variant so the two
-    paths share one implementation and can't drift.
+    research_dispositions, error, prompt_eval_count, eval_count. Drains the
+    streaming variant so the two paths share one implementation and can't
+    drift.
     """
     final: dict[str, Any] = {}
     async for evt in run_research_pipeline_streaming(
@@ -2270,6 +2281,8 @@ async def run_research_pipeline(
         "research_factcheck_ledger": final.get("factcheck"),
         "research_dispositions": final.get("dispositions", ""),
         "error": final.get("error", ""),
+        "prompt_eval_count": int(final.get("prompt_eval_count", 0) or 0),
+        "eval_count": int(final.get("eval_count", 0) or 0),
     }
 
 

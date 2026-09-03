@@ -23,6 +23,7 @@ from audrey.metrics import pipeline_total
 from audrey.models.health import HealthTracker
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.pipeline.run_events import RunEvent, RunEventContext
 from audrey.routes.openai import pipeline as route_pipeline
 from audrey.routes.openai.pipeline import _stream_research_with_banners
 from audrey.routes.openai.schemas import ChatCompletionRequest
@@ -126,7 +127,11 @@ def _content_frames(frames: list[str]) -> list[str]:
     return out
 
 
-async def _collect(app, model="audrey_research"):
+async def _collect(
+    app,
+    model="audrey_research",
+    events: list[RunEvent] | None = None,
+):
     # The route receives `messages` as plain dicts (the caller converts the
     # pydantic request into dicts before dispatching), so pass dicts here.
     msgs = [{"role": "user", "content": "tell me about euclid"}]
@@ -135,6 +140,17 @@ async def _collect(app, model="audrey_research"):
         frame async for frame in _stream_research_with_banners(
             app, payload, msgs, {}, task="reasoning", conf=0.9,
             user_id="", conversation_id="", user_turn_text="tell me about euclid",
+            event_context=(
+                RunEventContext(
+                    run_id="run-research",
+                    conversation_id="conversation-research",
+                    assistant_message_id="message-research",
+                    mode="research",
+                    sink=events.append,
+                )
+                if events is not None
+                else None
+            ),
         )
     ]
     return frames
@@ -160,6 +176,38 @@ async def test_research_stream_banner_order_and_answer():
 
     # Terminates with stop + DONE.
     assert frames[-1] == "data: [DONE]\n\n"
+
+
+async def test_research_stream_emits_typed_lifecycle_and_writer_usage():
+    events: list[RunEvent] = []
+    app = _fake_app({
+        "r1": "fact A",
+        "r2": "fact B",
+        "v": "looks fine",
+        "w": "Research answer.",
+    })
+
+    await _collect(app, events=events)
+
+    assert [event.stage for event in events if event.type == "stage.started"] == [
+        "planning",
+        "researching",
+        "verifying",
+        "writing",
+    ]
+    assert [event.stage for event in events if event.type == "stage.finished"] == [
+        "planning",
+        "researching",
+        "verifying",
+        "writing",
+    ]
+    assert "".join(event.delta for event in events if event.type == "text.delta") == (
+        "Research answer."
+    )
+    usage = next(event for event in events if event.type == "usage.reported")
+    assert (usage.prompt_tokens, usage.completion_tokens) == (1, 1)
+    assert events[-1].type == "run.finished"
+    assert events[-1].status == "succeeded"
 
 
 async def test_research_stream_factcheck_banner_in_order():
