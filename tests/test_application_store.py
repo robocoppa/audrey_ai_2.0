@@ -306,6 +306,40 @@ async def test_personal_token_owner_boundaries_and_scope_validation(tmp_path):
         store.close()
 
 
+async def test_personal_token_bulk_delete_is_owner_bound_and_invalidates_secrets(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    try:
+        alice = await _resolve(store, subject="owui-alice")
+        bob = await _resolve(
+            store,
+            subject="owui-bob",
+            email="bob@example.com",
+            namespace="bob@example.com",
+        )
+        alice_token = await store.create_personal_token(
+            user_id=alice.user_id,
+            name="Alice token",
+            scopes=["compat:full"],
+            expires_at=(dt.datetime.now(dt.UTC) + dt.timedelta(days=30)).isoformat(),
+        )
+        bob_token = await store.create_personal_token(
+            user_id=bob.user_id,
+            name="Bob token",
+            scopes=["compat:full"],
+            expires_at=(dt.datetime.now(dt.UTC) + dt.timedelta(days=30)).isoformat(),
+        )
+
+        assert await store.delete_personal_tokens(user_id=alice.user_id) == 1
+        assert await store.list_personal_tokens(user_id=alice.user_id) == ()
+        assert len(await store.list_personal_tokens(user_id=bob.user_id)) == 1
+        with pytest.raises(PersonalTokenAuthenticationError):
+            await store.authenticate_personal_token(alice_token.token)
+        assert await store.authenticate_personal_token(bob_token.token)
+        assert await store.delete_personal_tokens(user_id=alice.user_id) == 0
+    finally:
+        store.close()
+
+
 async def test_v1_database_migrates_additively_without_changing_user_id(tmp_path):
     path = tmp_path / "app.sqlite"
     first = ApplicationStore(path)

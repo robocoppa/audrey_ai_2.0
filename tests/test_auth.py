@@ -475,7 +475,7 @@ async def test_personal_token_cannot_manage_credentials(tmp_path):
 
     assert exc.value.status_code == 403
     assert exc.value.detail == (
-        "External provider authentication is required to manage access tokens."
+        "External provider authentication is required for this operation."
     )
 
 

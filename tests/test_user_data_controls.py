@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
 import uuid
@@ -12,8 +13,10 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from audrey.app_state import ApplicationStore, PersonalTokenAuthenticationError
 from audrey.auth import AuthedUser, require_user
 from audrey.routes.user_data import (
     AccountPurgeRequest,
@@ -738,19 +741,52 @@ def _purge_status(*, purge_id: str = "purge-a") -> dict:
     }
 
 
-async def test_account_purge_uses_verified_owner_and_scoped_idempotency_key():
+async def test_account_purge_uses_verified_owner_and_scoped_idempotency_key(tmp_path):
     coordinator = SimpleNamespace(request=AsyncMock(return_value=_purge_status()))
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    principal = await store.resolve_external_identity(
+        provider="owui",
+        subject="owui-alice",
+        email="alice@example.com",
+        display_name="Alice",
+        role="user",
+        auth_method="owui_bearer",
+        legacy_storage_namespace="alice@example.com",
+    )
+    issued = await store.create_personal_token(
+        user_id=principal.user_id,
+        name="Delete with purge",
+        scopes=["compat:full"],
+        expires_at="2099-01-01T00:00:00+00:00",
+    )
     request = SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(user_data_purges=coordinator)),
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                application_store=store,
+                user_data_purges=coordinator,
+            )
+        ),
     )
-    me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
+    me = AuthedUser(
+        email="alice@example.com",
+        role="user",
+        owui_id="a",
+        principal=principal,
+    )
 
-    result = await request_account_purge(
-        request,
-        AccountPurgeRequest(confirmation="DELETE ALL MY AUDREY DATA"),
-        idempotency_key="same-operation",
-        me=me,
-    )
+    try:
+        result = await request_account_purge(
+            request,
+            AccountPurgeRequest(confirmation="DELETE ALL MY AUDREY DATA"),
+            idempotency_key="same-operation",
+            me=me,
+            principal=principal,
+        )
+        assert await store.list_personal_tokens(user_id=principal.user_id) == ()
+        with pytest.raises(PersonalTokenAuthenticationError):
+            await store.authenticate_personal_token(issued.token)
+    finally:
+        store.close()
 
     expected_id = str(uuid.uuid5(
         uuid.NAMESPACE_URL,
@@ -761,6 +797,49 @@ async def test_account_purge_uses_verified_owner_and_scoped_idempotency_key():
         user="alice@example.com",
         purge_id=expected_id,
     )
+
+
+def test_account_purge_rejects_personal_token(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    principal = asyncio.run(
+        store.resolve_external_identity(
+            provider="owui",
+            subject="owui-alice",
+            email="alice@example.com",
+            display_name="Alice",
+            role="user",
+            auth_method="owui_bearer",
+            legacy_storage_namespace="alice@example.com",
+        )
+    )
+    issued = asyncio.run(
+        store.create_personal_token(
+            user_id=principal.user_id,
+            name="No destructive access",
+            scopes=["compat:full"],
+            expires_at="2099-01-01T00:00:00+00:00",
+        )
+    )
+    coordinator = SimpleNamespace(request=AsyncMock(return_value=_purge_status()))
+    app = FastAPI()
+    app.state.application_store = store
+    app.state.user_data_purges = coordinator
+    app.include_router(router)
+
+    try:
+        response = TestClient(app).post(
+            "/v1/me/data-purge",
+            headers={"Authorization": f"Bearer {issued.token}"},
+            json={"confirmation": "DELETE ALL MY AUDREY DATA"},
+        )
+    finally:
+        store.close()
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == (
+        "External provider authentication is required for this operation."
+    )
+    coordinator.request.assert_not_awaited()
 
 
 async def test_account_purge_status_is_exact_owner_and_not_found_is_404():

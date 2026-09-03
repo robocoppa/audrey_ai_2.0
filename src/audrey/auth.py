@@ -303,7 +303,7 @@ async def require_provider_principal(
     if principal.auth_method == "personal_token":
         raise HTTPException(
             status_code=403,
-            detail="External provider authentication is required to manage access tokens.",
+            detail="External provider authentication is required for this operation.",
         )
     return principal
 

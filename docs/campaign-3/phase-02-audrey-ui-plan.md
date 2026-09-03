@@ -1,6 +1,8 @@
 # Campaign 3 Phase 2 — Audrey application and web UI
 
-**Status:** In progress. Slice 2A.1 is complete and Unraid-verified. Slice 2A.2 is laptop-complete and awaits its user-run Unraid smoke.
+**Status:** In progress. Slices 2A.1 and 2A.2 passed their primary Unraid gates.
+A 2A.2 purge-lifecycle corrective is laptop-complete and awaits its live smoke
+before slice 2A.3 canonical application state begins.
 
 ## Goal
 
@@ -41,8 +43,7 @@ restart persistence, active status, the safe `/api/me` projection, and unchanged
 
 ### 2A.2 — Audrey personal access tokens
 
-Laptop implementation and verification are complete; deployed verification is
-pending. This slice adds:
+Laptop and deployed verification are complete. This slice adds:
 
 - application schema v2 with owner-bound personal-token records;
 - 256-bit random bearer secrets stored only as SHA-256 digests;
@@ -56,9 +57,17 @@ pending. This slice adds:
 
 The additive v1-to-v2 migration preserves existing users and identifiers. The
 local gate is 2,628 passing tests, scoped ruff and compilation clean, and a
-lesson-link scan with zero broken links. The Unraid gate must prove migration,
-one-time display, native and compatibility use, restart persistence, and
-immediate revocation with a disposable token.
+lesson-link scan with zero broken links. The Unraid gate proved schema migration,
+ordinary-user issuance, one-time secret handling, native and compatibility use,
+restart persistence, owner-bound management, and immediate revocation. Slice
+2A.2 passed its primary gate.
+
+A post-gate lifecycle audit found that the existing account-wide purge neither
+removed personal-token records nor excluded a `compat:full` token from starting
+the destructive operation. The corrective requires provider authentication for
+account-wide purge and erases every personal token owned by that account before
+the existing durable purge begins. Its local gate is 2,630 passing tests with
+the same clean static checks; deployed verification remains pending.
 
 
 ## Decision

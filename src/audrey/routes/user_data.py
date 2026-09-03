@@ -16,7 +16,8 @@ import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field, ValidationError
 
-from audrey.auth import AuthedUser, require_user
+from audrey.auth import AuthedUser, require_provider_principal, require_user
+from audrey.identity import Principal
 from audrey.user_data_visibility import remote_personal_reads_blocked
 
 router = APIRouter(prefix="/v1/me", tags=["user-data"])
@@ -427,9 +428,14 @@ async def request_account_purge(
         Header(alias="Idempotency-Key", max_length=128),
     ] = None,
     me: AuthedUser = Depends(require_user),
+    principal: Principal = Depends(require_provider_principal),
 ) -> AccountPurgeStatus:
-    """Durably purge the authenticated account snapshot after exact confirmation."""
+    """Durably purge one provider-authenticated account snapshot."""
     del body
+    application_store = getattr(request.app.state, "application_store", None)
+    if application_store is None:
+        raise HTTPException(status_code=503, detail="application_store_unavailable")
+    await application_store.delete_personal_tokens(user_id=principal.user_id)
     purge_id = ""
     if idempotency_key:
         purge_id = str(uuid.uuid5(
@@ -552,4 +558,3 @@ async def get_repair_status(
 
 
 __all__ = ["router"]
-

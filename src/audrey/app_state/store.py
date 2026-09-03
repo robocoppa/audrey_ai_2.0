@@ -467,6 +467,21 @@ class ApplicationStore:
             (user_id, token_id),
         ).fetchone()
 
+    async def delete_personal_tokens(self, *, user_id: str) -> int:
+        """Erase every personal-token record owned by one Audrey account."""
+
+        return await asyncio.to_thread(self._delete_personal_tokens_sync, user_id)
+
+    def _delete_personal_tokens_sync(self, user_id: str) -> int:
+        user_id = _required(user_id, "user id")
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM personal_access_tokens WHERE user_id = ?",
+                (user_id,),
+            )
+            self._conn.commit()
+            return max(0, int(cursor.rowcount))
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()
