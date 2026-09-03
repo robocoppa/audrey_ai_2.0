@@ -21,6 +21,7 @@ from audrey import __version__
 from audrey.app_state import ApplicationStore
 from audrey.auth import AuthedUser, require_admin
 from audrey.config import get_config
+from audrey.identity import build_cloudflare_access_verifier
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
 from audrey.kb.file_deletion import FileDeletionWorker, FileOperationLocks
 from audrey.kb.qdrant import QdrantKB
@@ -73,6 +74,19 @@ async def lifespan(app: FastAPI):
                     ", ".join(f"{k}={v!r}" for k, v in sorted(overrides.items())))
     else:
         log.info("config: no env overrides; config.yaml is authoritative")
+
+    cloudflare_access_verifier = build_cloudflare_access_verifier(
+        enabled=cfg.env.cloudflare_access_enabled,
+        team_domain=cfg.env.cloudflare_access_team_domain,
+        audience=cfg.env.cloudflare_access_audience,
+    )
+    if cloudflare_access_verifier is not None:
+        log.info(
+            "auth: Cloudflare Access enabled team_domain=%s",
+            cloudflare_access_verifier.team_domain,
+        )
+    else:
+        log.info("auth: Cloudflare Access disabled")
 
     application_cfg = cfg.raw.get("application", {}) or {}
     application_store = ApplicationStore(
@@ -219,6 +233,7 @@ async def lifespan(app: FastAPI):
 
     app.state.cfg = cfg
     app.state.application_store = application_store
+    app.state.cloudflare_access_verifier = cloudflare_access_verifier
     app.state.ollama = ollama
     app.state.registry = registry
     app.state.health = health

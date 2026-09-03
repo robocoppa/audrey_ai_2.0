@@ -1,8 +1,8 @@
 # Campaign 3 Phase 2 — Audrey application and web UI
 
-**Status:** In progress. Slices 2A.1 and 2A.2, including the account-purge
-lifecycle corrective, are complete and Unraid-verified. Slice 2A.3 canonical
-application state is laptop-complete and awaits its Unraid gate.
+**Status:** In progress. Slices 2A.1, 2A.2, and 2A.3 are complete and
+Unraid-verified. Slice 2A.4's optional Cloudflare Access identity adapter is
+laptop-complete and awaiting its default-disabled Unraid smoke.
 
 ## Goal
 
@@ -94,8 +94,45 @@ Laptop implementation and verification are complete. This slice adds:
 
 No native conversation routes or compatibility dual-write are enabled in this
 slice. The local gate is 2,642 passing tests, scoped ruff and compilation clean,
-and a lesson-link scan with zero broken links. Deployed schema, restart,
-repository, isolation, and purge verification remain pending.
+and a lesson-link scan with zero broken links. On Unraid, schema v3 migrated;
+canonical state and preferences survived restart; cross-user reads returned no
+resource; a second terminal transition was rejected; and owner purge removed
+one conversation, two messages, and one run while resetting preferences. Slice
+2A.3 is complete.
+
+### 2A.4 — optional Cloudflare Access identity adapter
+
+Laptop implementation and verification are complete. This slice adds:
+
+- a strict RS256 verifier for Cloudflare Access's
+  `Cf-Access-Jwt-Assertion` application token, including signature, issuer,
+  application audience, expiry, not-before, subject, email, and token-type
+  checks;
+- a one-hour JWKS cache with refresh on an unknown signing-key id and a bounded
+  refresh interval so attacker-controlled key ids cannot amplify requests to
+  Cloudflare;
+- fail-fast validation for the HTTPS `*.cloudflareaccess.com` team origin and
+  application audience when the adapter is enabled;
+- provider-neutral resolution keyed by the verified Cloudflare subject, with a
+  new opaque storage namespace and no implicit merge with an OWUI account that
+  happens to share the same email;
+- Audrey-owned roles and display names: Cloudflare creates an ordinary user and
+  cannot promote, demote, or overwrite an existing Audrey profile; and
+- strict provider precedence: When enabled and present, an invalid Access
+  assertion fails closed rather than falling through to a bearer token.
+
+The adapter is off by default. With `CLOUDFLARE_ACCESS_ENABLED` unset or false,
+the assertion header is ignored and the existing OWUI/PAT path is unchanged.
+Audrey never accepts the Access cookie. Enabling the adapter also requires
+`CLOUDFLARE_ACCESS_TEAM_DOMAIN` and `CLOUDFLARE_ACCESS_AUDIENCE`; no token or
+private key is stored in Audrey configuration.
+
+The local gate is 2,669 passing tests, including real generated RSA signatures,
+HTTP header extraction, key rotation, invalid claims, service-token rejection,
+provider outage behavior, role/profile ownership, email-match isolation, and
+the disabled fallback. Scoped ruff, compilation, lockfile, and diff checks are
+clean; the lesson-link scan has zero broken links. The default-disabled Unraid
+smoke remains before slice 2A.4 and Milestone 2A can close.
 
 
 ## Decision
@@ -260,6 +297,14 @@ described in Cloudflare's
 The assertion proves authentication; Audrey still decides status, roles,
 quotas, and resource access.
 
+The deployment decision is to use Access on Audrey's public hostname, including
+from LAN browsers when online. A direct LAN connection does not traverse
+Cloudflare and therefore does not receive an Access assertion; OWUI and Audrey
+personal tokens remain the migration paths for direct access. Do not treat the
+mere presence of a forwarded header as proof—the origin always verifies the
+signature and claims. A self-hosted OIDC adapter remains the fallback if a
+future offline-LAN browser requirement makes the public hostname unsuitable.
+
 If Access is unsuitable for LAN-only use, select a self-hosted OIDC provider
 through the same adapter. Do not add a local password database as a shortcut.
 
@@ -371,6 +416,9 @@ and rich artifacts are non-goals for the first cutover.
 Gate: focused tests, the full hermetic suite, disposable/copy migrations, and a
 user-run two-account Unraid smoke.
 
+Implementation status: All Milestone 2A code is laptop-complete. The 2A.4
+default-disabled Unraid smoke is the remaining gate.
+
 ### Milestone 2B — conversation, run, and event APIs
 
 - Land the client-neutral event spine from Wave 1B.
@@ -458,8 +506,10 @@ than rewriting data.
 
 ## Decision gates before implementation
 
-1. Confirm Cloudflare Access supports public and practical LAN access; otherwise
-   use the same principal boundary with a self-hosted OIDC provider.
+1. Decided: Use Cloudflare Access on the public Audrey hostname. Direct LAN
+   traffic does not traverse Access, so keep OWUI/PAT migration access and retain
+   the same principal boundary for a future self-hosted OIDC adapter if offline
+   LAN browser access becomes a requirement.
 2. Spike assistant-ui plus AG-UI against text, stage, source, and tool events.
    Retain it only if no core Audrey state is lost.
 3. Benchmark SQLite WAL with representative run, archive, and upload writes.

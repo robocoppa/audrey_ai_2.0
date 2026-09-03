@@ -109,13 +109,17 @@ class ApplicationStore:
         role: str,
         auth_method: str,
         legacy_storage_namespace: str | None = None,
+        sync_role: bool = True,
+        sync_display_name: bool = True,
     ) -> Principal:
         """Resolve or create one stable principal from provider evidence.
 
         Existing OWUI users pass their exact current email as
         ``legacy_storage_namespace`` so deployed collections and disk paths are
         not renamed. The provider subject, never a similar-looking email,
-        controls whether a later login is the same Audrey account.
+        controls whether a later login is the same Audrey account. Providers
+        without Audrey role authority pass ``sync_role=False`` so a login can
+        refresh profile evidence without granting or removing local access.
         """
 
         return await asyncio.to_thread(
@@ -127,6 +131,8 @@ class ApplicationStore:
             role,
             auth_method,
             legacy_storage_namespace,
+            sync_role,
+            sync_display_name,
         )
 
     def _resolve_external_identity_sync(
@@ -138,6 +144,8 @@ class ApplicationStore:
         role: str,
         auth_method: str,
         legacy_storage_namespace: str | None,
+        sync_role: bool,
+        sync_display_name: bool,
     ) -> Principal:
         provider = _required(provider, "provider").lower()
         subject = _required(subject, "provider subject")
@@ -156,9 +164,19 @@ class ApplicationStore:
                 if row is not None:
                     user_id = str(row["user_id"])
                     self._conn.execute(
-                        "UPDATE app_users SET current_email = ?, display_name = ?, "
-                        "role = ?, updated_at = ? WHERE user_id = ?",
-                        (email, display_name, role, now, user_id),
+                        "UPDATE app_users SET current_email = ?, "
+                        "display_name = CASE WHEN ? THEN ? ELSE display_name END, "
+                        "role = CASE WHEN ? THEN ? ELSE role END, updated_at = ? "
+                        "WHERE user_id = ?",
+                        (
+                            email,
+                            sync_display_name,
+                            display_name,
+                            sync_role,
+                            role,
+                            now,
+                            user_id,
+                        ),
                     )
                     self._conn.execute(
                         "UPDATE external_identities SET email = ?, last_seen_at = ? "

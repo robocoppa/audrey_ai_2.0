@@ -15,11 +15,13 @@ Critical regression guards:
 """
 
 import datetime as dt
+import sqlite3
 from types import SimpleNamespace
 
 import httpx
 import pytest
-from fastapi import HTTPException
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
 from audrey import auth as auth_module
 from audrey.app_state import ApplicationStore
@@ -31,6 +33,11 @@ from audrey.auth import (
     require_admin,
     require_provider_principal,
     require_user,
+)
+from audrey.identity import (
+    CloudflareAccessClaims,
+    CloudflareAccessTokenError,
+    CloudflareAccessUnavailableError,
 )
 
 # ─── Test helpers ──────────────────────────────────────────────────────
@@ -91,12 +98,16 @@ def _fake_request(
     owui_url: str = "http://open-webui:8080",
     *,
     application_store=None,
+    cloudflare_access_verifier=None,
     path: str = "/v1/chat/completions",
 ):
     # FastAPI passes a `Request` whose `.app.state.cfg.env.owui_url`
     # is the OWUI base URL. Build the smallest object graph that exposes
     # that attribute path.
-    state = SimpleNamespace(cfg=SimpleNamespace(env=SimpleNamespace(owui_url=owui_url)))
+    state = SimpleNamespace(
+        cfg=SimpleNamespace(env=SimpleNamespace(owui_url=owui_url)),
+        cloudflare_access_verifier=cloudflare_access_verifier,
+    )
     if application_store is not None:
         state.application_store = application_store
     return SimpleNamespace(
@@ -362,6 +373,218 @@ async def test_require_user_rejects_missing_stable_subject_when_store_is_active(
 
     assert exc.value.status_code == 502
     assert exc.value.detail == "Auth provider response missing stable subject."
+
+
+async def test_owui_binding_rejects_a_disabled_audrey_account(monkeypatch, tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    await store.resolve_external_identity(
+        provider="owui",
+        subject="disabled-subject",
+        email="alice@example.com",
+        display_name="Alice",
+        role="user",
+        auth_method="owui_bearer",
+        legacy_storage_namespace="alice@example.com",
+    )
+    with sqlite3.connect(store.path) as connection:
+        connection.execute(
+            "UPDATE app_users SET status = 'disabled' WHERE current_email = ?",
+            ("alice@example.com",),
+        )
+    _patch_async_client(
+        monkeypatch,
+        _FakeResponse(
+            200,
+            body={
+                "id": "disabled-subject",
+                "email": "alice@example.com",
+                "role": "user",
+            },
+        ),
+    )
+    try:
+        with pytest.raises(HTTPException) as exc:
+            await require_user(
+                _fake_request(application_store=store),
+                authorization="Bearer disabled-account-token",
+            )
+    finally:
+        store.close()
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "Audrey account is disabled."
+
+
+class _CloudflareVerifier:
+    def __init__(self, result):
+        self.result = result
+        self.tokens: list[str] = []
+
+    async def verify(self, token):
+        self.tokens.append(token)
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+async def test_cloudflare_header_creates_provider_neutral_principal_without_owui(
+    monkeypatch,
+    tmp_path,
+):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    verifier = _CloudflareVerifier(
+        CloudflareAccessClaims(subject="cf-subject", email="alice@example.com")
+    )
+
+    def _unexpected_owui(*args, **kwargs):
+        raise AssertionError("Cloudflare identity must never be forwarded to OWUI")
+
+    monkeypatch.setattr(auth_module.httpx, "AsyncClient", _unexpected_owui)
+    try:
+        me = await require_user(
+            _fake_request(
+                application_store=store,
+                cloudflare_access_verifier=verifier,
+            ),
+            authorization=None,
+            cloudflare_access_jwt="signed-access-token",
+        )
+    finally:
+        store.close()
+
+    assert verifier.tokens == ["signed-access-token"]
+    assert me.principal is not None
+    assert me.principal.provider == "cloudflare_access"
+    assert me.principal.provider_subject == "cf-subject"
+    assert me.principal.auth_method == "cloudflare_access"
+    assert me.principal.role == "user"
+    assert me.email.startswith("ns_")
+    assert me.email != "alice@example.com"
+
+
+def test_fastapi_reads_cloudflare_access_assertion_header(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    verifier = _CloudflareVerifier(
+        CloudflareAccessClaims(subject="cf-http-subject", email="alice@example.com")
+    )
+    app = FastAPI()
+    app.state.application_store = store
+    app.state.cloudflare_access_verifier = verifier
+
+    @app.get("/probe")
+    async def probe(me: AuthedUser = Depends(require_user)):
+        return {"user_id": me.principal.user_id}
+
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/probe",
+                headers={"Cf-Access-Jwt-Assertion": "http-access-token"},
+            )
+    finally:
+        store.close()
+
+    assert response.status_code == 200
+    assert response.json()["user_id"].startswith("usr_")
+    assert verifier.tokens == ["http-access-token"]
+
+
+async def test_cloudflare_email_match_does_not_implicitly_merge_owui_account(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    owui = await store.resolve_external_identity(
+        provider="owui",
+        subject="owui-subject",
+        email="alice@example.com",
+        display_name="Alice",
+        role="user",
+        auth_method="owui_bearer",
+        legacy_storage_namespace="alice@example.com",
+    )
+    verifier = _CloudflareVerifier(
+        CloudflareAccessClaims(subject="cf-subject", email="alice@example.com")
+    )
+    try:
+        me = await require_user(
+            _fake_request(
+                application_store=store,
+                cloudflare_access_verifier=verifier,
+            ),
+            authorization=None,
+            cloudflare_access_jwt="signed-access-token",
+        )
+    finally:
+        store.close()
+
+    assert me.principal is not None
+    assert me.principal.user_id != owui.user_id
+    assert me.principal.storage_namespace != owui.storage_namespace
+
+
+async def test_invalid_cloudflare_header_never_falls_back_to_valid_owui_bearer(
+    monkeypatch,
+    tmp_path,
+):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    verifier = _CloudflareVerifier(CloudflareAccessTokenError("bad signature"))
+
+    def _unexpected_owui(*args, **kwargs):
+        raise AssertionError("invalid Access evidence must fail closed")
+
+    monkeypatch.setattr(auth_module.httpx, "AsyncClient", _unexpected_owui)
+    try:
+        with pytest.raises(HTTPException) as exc:
+            await require_user(
+                _fake_request(
+                    application_store=store,
+                    cloudflare_access_verifier=verifier,
+                ),
+                authorization="Bearer otherwise-valid-owui-token",
+                cloudflare_access_jwt="invalid-access-token",
+            )
+    finally:
+        store.close()
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Cloudflare Access token is invalid."
+
+
+async def test_cloudflare_provider_outage_returns_distinct_gateway_error(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    verifier = _CloudflareVerifier(CloudflareAccessUnavailableError("offline"))
+    try:
+        with pytest.raises(HTTPException) as exc:
+            await require_user(
+                _fake_request(
+                    application_store=store,
+                    cloudflare_access_verifier=verifier,
+                ),
+                authorization=None,
+                cloudflare_access_jwt="signed-access-token",
+            )
+    finally:
+        store.close()
+
+    assert exc.value.status_code == 502
+    assert exc.value.detail == "Auth provider verification unavailable."
+
+
+async def test_disabled_cloudflare_adapter_ignores_header_and_preserves_owui(monkeypatch):
+    _patch_async_client(
+        monkeypatch,
+        _FakeResponse(
+            200,
+            body={"id": "owui-subject", "email": "alice@example.com", "role": "user"},
+        ),
+    )
+
+    me = await require_user(
+        _fake_request(cloudflare_access_verifier=None),
+        authorization="Bearer owui-token",
+        cloudflare_access_jwt="ignored-while-disabled",
+    )
+
+    assert me.email == "alice@example.com"
+    assert me.owui_id == "owui-subject"
 
 
 async def _issue_token(

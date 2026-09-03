@@ -60,6 +60,22 @@ class EnvOverrides(BaseSettings):
     # in the address bar to reach OWUI, e.g. `https://chat.example.com`.
     owui_public_url: str = Field(default="", alias="OWUI_PUBLIC_URL")
 
+    # Optional native-browser identity provider. Off by default so adding the
+    # adapter cannot alter the current OWUI/PAT authentication path. When it is
+    # enabled, startup validates both values before serving traffic.
+    cloudflare_access_enabled: bool = Field(
+        default=False,
+        alias="CLOUDFLARE_ACCESS_ENABLED",
+    )
+    cloudflare_access_team_domain: str = Field(
+        default="",
+        alias="CLOUDFLARE_ACCESS_TEAM_DOMAIN",
+    )
+    cloudflare_access_audience: str = Field(
+        default="",
+        alias="CLOUDFLARE_ACCESS_AUDIENCE",
+    )
+
     kb_service_token: str = Field(default="", alias="KB_SERVICE_TOKEN")
 
     # Search

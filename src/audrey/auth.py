@@ -1,11 +1,11 @@
 """Authentication adapters and provider-neutral Audrey principal resolution.
 
-Accepts `Authorization: Bearer <credential>`. Audrey personal tokens use an
-`aud_pat_` discriminator and resolve locally; other bearers are proxied to the
-Open WebUI session endpoint (`GET /api/v1/auths/`, trailing slash
-load-bearing — OWUI 0.9.2 specifically). During native-application migration,
-OWUI proves the external identity while Audrey owns the stable user id and
-private-storage namespace.
+Accepts `Authorization: Bearer <credential>` and, when explicitly enabled,
+Cloudflare Access's `Cf-Access-Jwt-Assertion` header. Audrey personal tokens
+use an `aud_pat_` discriminator and resolve locally; other bearers are proxied
+to the Open WebUI session endpoint (`GET /api/v1/auths/`, trailing slash
+load-bearing — OWUI 0.9.2 specifically). External providers prove identity
+while Audrey owns the stable user id, role, and private-storage namespace.
 
 Flow:
     browser --Bearer <jwt>--> cloudflared --same-origin--> audrey
@@ -30,7 +30,7 @@ to spare OWUI on bursty dashboards. The cache is a plain dict with an
 opportunistic sweep at 1024 entries — fine for our scale (dozens of
 users, not thousands).
 
-We only ever read the `Authorization` header. OWUI also sets an
+We never authenticate from cookies. OWUI also sets an
 HttpOnly `token` cookie on same-origin responses — we ignore it.
 Reasoning: (1) the upload page carries the token explicitly from
 localStorage, so we never *need* the cookie; (2) accepting cookies
@@ -50,6 +50,7 @@ import hmac
 import logging
 import time
 from dataclasses import dataclass
+from typing import Annotated
 
 import httpx
 from fastapi import Depends, Header, HTTPException, Request
@@ -59,7 +60,11 @@ from audrey.app_state import (
     InvalidIdentityError,
     PersonalTokenAuthenticationError,
 )
-from audrey.identity import Principal
+from audrey.identity import (
+    CloudflareAccessTokenError,
+    CloudflareAccessUnavailableError,
+    Principal,
+)
 from audrey.metrics import auth_cache_size as _auth_cache_size_gauge
 
 log = logging.getLogger(__name__)
@@ -224,12 +229,80 @@ async def _bind_audrey_principal(
             status_code=409,
             detail="Audrey identity binding conflict.",
         ) from exc
+    if user.principal.status != "active":
+        raise HTTPException(status_code=403, detail="Audrey account is disabled.")
     return user
+
+
+async def _resolve_cloudflare_access(
+    request: Request,
+    token: str,
+) -> AuthedUser:
+    """Verify Access evidence and bind it without trusting email or role."""
+
+    verifier = getattr(request.app.state, "cloudflare_access_verifier", None)
+    if verifier is None:
+        raise HTTPException(status_code=401, detail="Cloudflare Access authentication is disabled.")
+    try:
+        claims = await verifier.verify(token)
+    except CloudflareAccessTokenError as exc:
+        raise HTTPException(status_code=401, detail="Cloudflare Access token is invalid.") from exc
+    except CloudflareAccessUnavailableError as exc:
+        log.warning("auth: Cloudflare Access verification unavailable: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail="Auth provider verification unavailable.",
+        ) from exc
+
+    store = getattr(request.app.state, "application_store", None)
+    if store is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Audrey application identity is not initialized.",
+        )
+    try:
+        principal = await store.resolve_external_identity(
+            provider="cloudflare_access",
+            subject=claims.subject,
+            email=claims.email,
+            display_name="",
+            role="user",
+            auth_method="cloudflare_access",
+            legacy_storage_namespace=None,
+            sync_role=False,
+            sync_display_name=False,
+        )
+    except InvalidIdentityError as exc:
+        log.error("auth: invalid identity evidence from Cloudflare Access: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail="Auth provider returned invalid identity evidence.",
+        ) from exc
+    except IdentityConflictError as exc:
+        log.error("auth: refusing implicit account merge: %s", exc)
+        raise HTTPException(
+            status_code=409,
+            detail="Audrey identity binding conflict.",
+        ) from exc
+
+    if principal.status != "active":
+        raise HTTPException(status_code=403, detail="Audrey account is disabled.")
+    return AuthedUser(
+        email=principal.storage_namespace,
+        role=principal.role,
+        owui_id="",
+        display_name=principal.display_name,
+        principal=principal,
+    )
 
 
 async def require_user(
     request: Request,
     authorization: str | None = Header(default=None),
+    cloudflare_access_jwt: Annotated[
+        str | None,
+        Header(alias="Cf-Access-Jwt-Assertion"),
+    ] = None,
 ) -> AuthedUser:
     """FastAPI dependency — inject `AuthedUser` into route handlers.
 
@@ -237,6 +310,12 @@ async def require_user(
     missing/invalid token, 502 if OWUI is down. Every route that writes
     or lists user-scoped data MUST depend on this.
     """
+    verifier = getattr(request.app.state, "cloudflare_access_verifier", None)
+    if verifier is not None and cloudflare_access_jwt:
+        # A bad Access assertion must fail closed. Never fall through to a
+        # bearer that might happen to be present on the same request.
+        return await _resolve_cloudflare_access(request, cloudflare_access_jwt)
+
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token.")
     token = authorization.split(" ", 1)[1].strip()

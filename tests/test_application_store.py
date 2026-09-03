@@ -106,6 +106,38 @@ async def test_new_nonlegacy_identity_receives_opaque_namespace(tmp_path):
         store.close()
 
 
+async def test_provider_without_role_authority_cannot_demote_or_promote_existing_user(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    try:
+        before = await store.resolve_external_identity(
+            provider="cloudflare_access",
+            subject="cf-subject",
+            email="admin@example.com",
+            display_name="",
+            role="admin",
+            auth_method="cloudflare_access",
+            sync_role=True,
+            sync_display_name=True,
+        )
+        after = await store.resolve_external_identity(
+            provider="cloudflare_access",
+            subject="cf-subject",
+            email="renamed@example.com",
+            display_name="Untrusted Provider Name",
+            role="user",
+            auth_method="cloudflare_access",
+            sync_role=False,
+            sync_display_name=False,
+        )
+    finally:
+        store.close()
+
+    assert before.role == "admin"
+    assert after.role == "admin"
+    assert after.email == "renamed@example.com"
+    assert after.display_name == ""
+
+
 async def test_concurrent_first_login_creates_one_account(tmp_path):
     path = tmp_path / "app.sqlite"
     left = ApplicationStore(path)
