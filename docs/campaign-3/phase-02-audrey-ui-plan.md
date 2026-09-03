@@ -280,6 +280,13 @@ ruff, compilation, and diff checks are clean. The lesson-link scan has zero
 broken links; the existing citation-drift backlog remains deferred by user
 direction. Unraid verification remains open.
 
+The final live gate is packaged in `scripts/smoke_native_tool_events.py`
+instead of a transient shell sequence. It creates one disposable test-owned
+conversation, cancels a native Deep run after observing a real active tool,
+checks balanced native and AG-UI cancellation events, proves an unchanged
+`/v1` request still dispatches `web_search`, deletes its own canonical and
+archive state, and waits for the repair queues to return to `ready`.
+
 
 ## Decision
 
