@@ -154,6 +154,7 @@ def _run_cancellation(conversation_id: str) -> dict[str, Any]:
             ),
             "mode": "deep",
         },
+        expected=frozenset({202}),
     )
 
     tool_started = threading.Event()
@@ -298,7 +299,7 @@ def _cleanup(conversation_id: str) -> dict[str, Any]:
         f"/v1/me/chat-history/{conversation_id}",
         token=USER_TOKEN,
         method="DELETE",
-        expected=frozenset({200, 404}),
+        expected=frozenset({202, 404}),
     )
     canonical_status, _ = _request(
         f"/api/conversations/{conversation_id}",
@@ -331,6 +332,7 @@ def main() -> int:
             token=USER_TOKEN,
             method="POST",
             payload={"title": "C3 2B4 TOOL EVENTS", "default_mode": "deep"},
+            expected=frozenset({201}),
         )
         conversation_id = str(conversation["id"])
         result["conversation_id"] = conversation_id
