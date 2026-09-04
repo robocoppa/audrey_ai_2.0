@@ -1,6 +1,8 @@
 """Audrey-owned transactional application state."""
 
 from audrey.app_state.records import (
+    ChatProjectionDeletionRecord,
+    ChatProjectionRecord,
     ConversationRecord,
     FinishedRun,
     LocalUserDataPurge,
@@ -10,6 +12,7 @@ from audrey.app_state.records import (
     UserPreferences,
 )
 from audrey.app_state.repositories import (
+    ChatProjectionsRepository,
     ConversationArchivedError,
     ConversationHasActiveRunError,
     ConversationsRepository,
@@ -26,6 +29,9 @@ from audrey.app_state.store import (
 
 __all__ = [
     "ApplicationStore",
+    "ChatProjectionDeletionRecord",
+    "ChatProjectionRecord",
+    "ChatProjectionsRepository",
     "ConversationArchivedError",
     "ConversationRecord",
     "ConversationHasActiveRunError",

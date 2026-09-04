@@ -1366,6 +1366,13 @@ chat_archive:
     sqlite_path: "/data/chat_archive_outbox.sqlite"
     maxsize: 128
     retry_interval_s: 30
+  # Canonical native runs commit a receipt in audrey_app.sqlite in the same
+  # transaction as their terminal state. This worker promotes those receipts
+  # into the delivery queue above; retry/rebuild never makes the sidecar an
+  # authority for conversation content.
+  projection:
+    batch_size: 50
+    retry_interval_s: 30
 
 # ─── Vision sidecar ────────────────────────────────────────────────────
 # Only the models in `model_registry.vl` have a vision encoder. Everything

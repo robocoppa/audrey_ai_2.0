@@ -595,10 +595,7 @@ async def test_route_uses_one_id_one_role_and_the_configured_thinking_policy(
     assert answer.count("one answer") == 1
     assert frames[-1] == "data: [DONE]\n\n"
     assert ollama.calls[0]["think"] is None
-    assert len(archive.calls) == 1
-    assert archive.calls[0]["assistant_content"] == "one answer"
-    assert archive.calls[0]["partial"] is False
-    assert archive.calls[0]["concrete_model"] == "a"
+    assert archive.calls == []
     assert [event.type for event in events] == [
         "run.started",
         "message.started",

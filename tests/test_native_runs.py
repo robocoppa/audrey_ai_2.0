@@ -75,6 +75,7 @@ def _native_app(
     tmp_path,
     *,
     stream_factory=_successful_stream,
+    archive_wake=None,
 ) -> tuple[FastAPI, ApplicationStore, Principal, NativeRunManager]:
     store = ApplicationStore(tmp_path / "app.sqlite")
     owner = _principal_sync(store)
@@ -84,6 +85,7 @@ def _native_app(
         app=app,
         store=store,
         stream_factory=stream_factory,
+        archive_wake=archive_wake,
     )
     app.state.native_runs = manager
     app.include_router(router)
@@ -121,7 +123,11 @@ def _agui_sse_events(body: str) -> list[tuple[str, dict[str, Any]]]:
 
 
 def test_native_run_create_stream_persist_and_resume_are_canonical(tmp_path):
-    app, store, owner, _manager = _native_app(tmp_path)
+    archive_wakes: list[bool] = []
+    app, store, owner, _manager = _native_app(
+        tmp_path,
+        archive_wake=lambda: archive_wakes.append(True),
+    )
     conversation = asyncio.run(
         store.conversations.create(
             user_id=owner.user_id,
@@ -227,6 +233,7 @@ def test_native_run_create_stream_persist_and_resume_are_canonical(tmp_path):
                 "native answer",
             ]
             assert messages[-1]["status"] == "completed"
+            assert archive_wakes == [True]
     finally:
         store.close()
 

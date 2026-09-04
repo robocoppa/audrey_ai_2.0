@@ -5,8 +5,9 @@ the optional, default-disabled Cloudflare Access identity adapter. Milestone 2B
 is underway; its first owner-bound conversation/history API slice is
 complete and Unraid-verified. The universal run-event/native-run slice is also
 complete and Unraid-verified. The AG-UI boundary adapter is also complete and
-Unraid-verified. Pipeline tool/source observation wiring is laptop-complete and
-awaiting its Unraid gate.
+Unraid-verified. Pipeline tool/source observation wiring is also complete and
+Unraid-verified. Archive import/dual-write and rebuildable chat-search
+projection are next.
 
 ## Goal
 
@@ -257,12 +258,12 @@ behavior remains subsequent Milestone 2B work.
 
 ### 2B.4 — pipeline tool and source observations
 
-Implementation is laptop-complete. One observer at the shared ReAct dispatch
-seam now projects real Fast, Deep, and Research activity into Audrey's existing
-typed run-event spine. Each dispatch emits a unique tool lifecycle; successful
-web and KB retrieval emits deduplicated source records. The native and AG-UI
-adapters therefore report what actually happened without parsing display text,
-and tool execution remains server-owned.
+Implementation is complete and Unraid-verified. One observer at the shared
+ReAct dispatch seam now projects real Fast, Deep, and Research activity into
+Audrey's existing typed run-event spine. Each dispatch emits a unique tool
+lifecycle; successful web and KB retrieval emits deduplicated source records.
+The native and AG-UI adapters therefore report what actually happened without
+parsing display text, and tool execution remains server-owned.
 
 The projection is deliberately narrower than the model's working context.
 Allowlisted search/file arguments are bounded, identity and newly introduced
@@ -278,7 +279,13 @@ broader affected gate is 316 passing tests; and the full hermetic suite is
 2,721 passing tests with the existing FastAPI deprecation warning. Changed-file
 ruff, compilation, and diff checks are clean. The lesson-link scan has zero
 broken links; the existing citation-drift backlog remains deferred by user
-direction. Unraid verification remains open.
+direction. On Unraid, Fast, Deep, and Research produced matched native and
+AG-UI tool lifecycles and deduplicated sources; sanitized tool failure and
+cursor reconnect behavior passed. The final live gate cancelled four active
+tools with balanced lifecycle events, mapped the terminal to native
+`cancelled_by_user` and AG-UI `RUN_ERROR`, measured one real `web_search`
+through unchanged `/v1`, found no typed-event leakage, deleted its archive and
+canonical test state, and returned every repair queue to `ready`.
 
 The final live gate is packaged in `scripts/smoke_native_tool_events.py`
 instead of a transient shell sequence. It creates one disposable test-owned
@@ -286,6 +293,40 @@ conversation, cancels a native Deep run after observing a real active tool,
 checks balanced native and AG-UI cancellation events, proves an unchanged
 `/v1` request still dispatches `web_search`, deletes its own canonical and
 archive state, and waits for the repair queues to return to `ready`.
+
+### 2B.5 — canonical archive projection and repair
+
+Laptop implementation and verification are complete; the Unraid gate is
+pending. Schema v4 adds durable projection receipts owned by the canonical
+application database. A native run's terminal transaction now commits its run,
+assistant message, and search-projection receipt atomically. A lifecycle-owned
+promoter hands that receipt to the existing local archive outbox with a stable
+`native:{run_id}` identity, making retries and administrative replay
+idempotent across either process crashing.
+
+Native conversation deletion uses the same ownership rule. Its canonical
+transaction records a durable deletion tombstone before removing the
+conversation. Promotion serializes that delete behind any active archive write,
+discards undelivered writes for the conversation, and hands the owner-scoped
+delete to the sidecar's existing durable cleanup queue. Readiness, per-user
+repair status, and global repair now include both sides of this handoff. An
+admin-only rebuild endpoint resets canonical receipts for bounded replay.
+
+The compatibility boundary is unchanged: Ordinary `/v1/chat/completions`
+requests retain their existing archive hook, while native runs suppress that
+hook because their canonical terminal transaction is authoritative. Schema-v3
+terminal runs are deliberately not replayed during upgrade: Their pre-v4
+archive writes used unrecorded random identities, so automatic replay would
+duplicate history. Existing sidecar history remains intact and the explicit
+historical import/migration in Milestone 2E owns that older-data boundary.
+
+The full hermetic suite is 2,738 passing tests with the existing FastAPI
+deprecation warning. Changed-file ruff, compilation, and diff checks are clean.
+`scripts/smoke_native_chat_projection.py` packages the live gate: It creates
+one disposable test-owned native turn, verifies the two projected messages,
+replays all canonical receipts without duplication, deletes only that native
+conversation, verifies its projection disappears, and waits for repair to
+return to `ready`.
 
 
 ## Decision

@@ -24,7 +24,11 @@ from pathlib import Path
 
 from audrey.app_state.migrations import MIGRATIONS
 from audrey.app_state.records import LocalUserDataPurge
-from audrey.app_state.repositories import ConversationsRepository, PreferencesRepository
+from audrey.app_state.repositories import (
+    ChatProjectionsRepository,
+    ConversationsRepository,
+    PreferencesRepository,
+)
 from audrey.identity import (
     TOKEN_SCOPES,
     IssuedPersonalToken,
@@ -64,6 +68,7 @@ class ApplicationStore:
             self._migrate_locked()
         self.preferences = PreferencesRepository(self._conn, self._lock)
         self.conversations = ConversationsRepository(self._conn, self._lock)
+        self.chat_projections = ChatProjectionsRepository(self._conn, self._lock)
 
     def _migrate_locked(self) -> None:
         self._conn.execute(
@@ -487,6 +492,10 @@ class ApplicationStore:
                 )
                 token_cursor = self._conn.execute(
                     "DELETE FROM personal_access_tokens WHERE user_id = ?",
+                    (user_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM app_chat_projection_deletions WHERE user_id = ?",
                     (user_id,),
                 )
                 self._conn.execute(

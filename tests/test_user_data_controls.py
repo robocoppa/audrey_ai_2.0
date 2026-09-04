@@ -18,6 +18,7 @@ from pydantic import ValidationError
 
 from audrey.app_state import ApplicationStore, PersonalTokenAuthenticationError
 from audrey.auth import AuthedUser, require_user
+from audrey.identity import Principal
 from audrey.routes.user_data import (
     AccountPurgeRequest,
     MemoryCorrection,
@@ -668,6 +669,55 @@ async def test_repair_status_composes_current_user_queues_without_raw_errors():
     http.post.return_value = httpx.Response(200, json=attention_remote)
     attention = await get_repair_status(request, me=me)
     assert attention.status == "attention_required"
+
+
+async def test_repair_status_uses_stable_native_owner_and_storage_namespace():
+    empty = {
+        "pending": 0,
+        "attempts": 0,
+        "with_error": 0,
+        "exhausted": 0,
+        "completed": 0,
+    }
+    remote = {
+        "indexing": dict(empty),
+        "deletions": dict(empty),
+        "conversation_deletions": dict(empty),
+    }
+    request, _ = _request(tool="chat_history_search", response=remote)
+    request.app.state.uploads_db = SimpleNamespace(
+        user_file_deletion_stats=AsyncMock(return_value=dict(empty)),
+        user_data_purge_stats=AsyncMock(return_value=dict(empty)),
+    )
+    delivery_stats = AsyncMock(return_value={**empty, "pending": 1})
+    projection_stats = AsyncMock(return_value={**empty, "pending": 2})
+    request.app.state.archive_client = SimpleNamespace(user_stats=delivery_stats)
+    request.app.state.archive_projector = SimpleNamespace(
+        user_stats=projection_stats
+    )
+    principal = Principal(
+        user_id="usr_stable",
+        storage_namespace="private-storage-namespace",
+        provider="owui",
+        provider_subject="subject",
+        email="renamed@example.com",
+        display_name="Alice",
+        role="user",
+        status="active",
+        auth_method="owui_bearer",
+    )
+    me = AuthedUser(
+        email="renamed@example.com",
+        role="user",
+        owui_id="subject",
+        principal=principal,
+    )
+
+    result = await get_repair_status(request, me=me)
+
+    assert result.chat_delivery.pending == 3
+    projection_stats.assert_awaited_once_with("usr_stable")
+    delivery_stats.assert_awaited_once_with("private-storage-namespace")
 
 
 async def test_repair_status_reports_remote_backend_degraded():

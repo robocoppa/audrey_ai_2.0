@@ -20,6 +20,7 @@ from fastapi.responses import Response
 from audrey import __version__
 from audrey.app_state import ApplicationStore
 from audrey.auth import AuthedUser, require_admin
+from audrey.chat_projection import ChatProjectionPromoter
 from audrey.config import get_config
 from audrey.identity import build_cloudflare_access_verifier
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
@@ -267,6 +268,7 @@ async def lifespan(app: FastAPI):
     )
     archive_cfg = cfg.raw.get("chat_archive", {}) or {}
     archive_queue_cfg = archive_cfg.get("queue", {}) or {}
+    archive_projection_cfg = archive_cfg.get("projection", {}) or {}
     archive_enabled = bool(archive_cfg.get("enabled", True))
     archive_queue = ChatArchiveQueue(
         client=archive_transport,
@@ -292,6 +294,17 @@ async def lifespan(app: FastAPI):
     app.state.archive_transport = archive_transport
     app.state.kb_service_token = cfg.env.kb_service_token
 
+    archive_projector = ChatProjectionPromoter(
+        store=application_store,
+        archive_queue=archive_queue,
+        retry_interval_s=float(
+            archive_projection_cfg.get("retry_interval_s", 30.0)
+        ),
+        batch_size=int(archive_projection_cfg.get("batch_size", 50)),
+    )
+    await archive_projector.start(run_worker=archive_enabled)
+    app.state.archive_projector = archive_projector
+
     purge_cfg = ((cfg.raw.get("user_data", {}) or {}).get("purge", {}) or {})
     user_data_purges = UserDataPurgeCoordinator(
         db=uploads_db,
@@ -306,7 +319,11 @@ async def lifespan(app: FastAPI):
     await user_data_purges.start()
     app.state.user_data_purges = user_data_purges
 
-    native_runs = NativeRunManager(app=app, store=application_store)
+    native_runs = NativeRunManager(
+        app=app,
+        store=application_store,
+        archive_wake=archive_projector.wake if archive_enabled else None,
+    )
     app.state.native_runs = native_runs
 
     readiness_cfg = cfg.raw.get("readiness", {}) or {}
@@ -348,6 +365,7 @@ async def lifespan(app: FastAPI):
         if watcher is not None:
             await watcher.stop()
         await user_data_purges.stop()
+        await archive_projector.stop()
         await archive_queue.stop()
         await file_deletions.stop()
         application_store.close()

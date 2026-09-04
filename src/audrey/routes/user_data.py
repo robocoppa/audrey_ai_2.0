@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Requ
 from pydantic import BaseModel, Field, ValidationError
 
 from audrey.auth import AuthedUser, require_provider_principal, require_user
+from audrey.chat_projection import combine_repair_stats
 from audrey.identity import Principal
 from audrey.user_data_visibility import remote_personal_reads_blocked
 
@@ -503,8 +504,22 @@ async def get_repair_status(
 
     archive_client = getattr(request.app.state, "archive_client", None)
     delivery_stats = getattr(archive_client, "user_stats", None)
+    projector = getattr(request.app.state, "archive_projector", None)
+    projection_stats = getattr(projector, "user_stats", None)
+    local_delivery_stats = []
+    if callable(projection_stats) and me.principal is not None:
+        local_delivery_stats.append(await projection_stats(me.principal.user_id))
     if callable(delivery_stats):
-        chat_delivery = _queue_status(await delivery_stats(me.email))
+        storage_namespace = (
+            me.principal.storage_namespace
+            if me.principal is not None
+            else me.email
+        )
+        local_delivery_stats.append(await delivery_stats(storage_namespace))
+    if local_delivery_stats:
+        chat_delivery = _queue_status(
+            combine_repair_stats(*local_delivery_stats)
+        )
     else:
         chat_delivery = _queue_status(available=False)
 

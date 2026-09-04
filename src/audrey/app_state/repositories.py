@@ -12,6 +12,8 @@ from collections.abc import Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from audrey.app_state.records import (
+    ChatProjectionDeletionRecord,
+    ChatProjectionRecord,
     ConversationRecord,
     FinishedRun,
     MessageRecord,
@@ -344,6 +346,7 @@ class ConversationsRepository:
     def _delete_sync(self, user_id: str, conversation_id: str) -> bool:
         user_id = _required(user_id, "user id")
         conversation_id = _required(conversation_id, "conversation id")
+        now = _utc_now()
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
@@ -351,6 +354,19 @@ class ConversationsRepository:
                     raise ConversationHasActiveRunError(
                         "conversation cannot be deleted while a run is active"
                     )
+                self._conn.execute(
+                    """
+                    INSERT OR IGNORE INTO app_chat_projection_deletions
+                      (deletion_id, user_id, conversation_id, requested_at,
+                       completed_at, attempts, last_attempt_at, last_error,
+                       next_attempt_at)
+                    SELECT 'conversation:' || conversation_id, user_id,
+                           conversation_id, ?, NULL, 0, NULL, '', ?
+                    FROM app_conversations
+                    WHERE user_id = ? AND conversation_id = ?
+                    """,
+                    (now, now, user_id, conversation_id),
+                )
                 cursor = self._conn.execute(
                     "DELETE FROM app_conversations WHERE user_id = ? AND conversation_id = ?",
                     (user_id, conversation_id),
@@ -688,6 +704,7 @@ class ConversationsRepository:
                     (user_id, run_id),
                 ).fetchone()
                 assert run_row is not None and message_row is not None
+                self._insert_native_projection_locked(run_id)
                 self._conn.commit()
             except BaseException:
                 if self._conn.in_transaction:
@@ -726,12 +743,50 @@ class ConversationsRepository:
                     "WHERE status = 'running'",
                     (now,),
                 )
+                for row in rows:
+                    self._insert_native_projection_locked(str(row["run_id"]))
                 self._conn.commit()
             except BaseException:
                 if self._conn.in_transaction:
                     self._conn.rollback()
                 raise
         return cursor.rowcount
+
+    def _insert_native_projection_locked(self, run_id: str) -> None:
+        self._conn.execute(
+            """
+            INSERT OR IGNORE INTO app_chat_projections
+              (projection_id, user_id, conversation_id, user_message_id,
+               assistant_message_id, partial, virtual_model, concrete_model,
+               prompt_tokens, completion_tokens, created_at, enqueued_at,
+               attempts, last_attempt_at, last_error, next_attempt_at)
+            SELECT
+              'native:' || r.run_id,
+              r.user_id,
+              r.conversation_id,
+              user_message.message_id,
+              assistant_message.message_id,
+              CASE WHEN r.status = 'succeeded' THEN 0 ELSE 1 END,
+              r.virtual_model,
+              r.concrete_model,
+              r.prompt_tokens,
+              r.completion_tokens,
+              r.started_at,
+              NULL,
+              0,
+              NULL,
+              '',
+              COALESCE(r.completed_at, r.started_at)
+            FROM app_runs AS r
+            JOIN app_messages AS user_message
+              ON user_message.run_id = r.run_id AND user_message.role = 'user'
+            JOIN app_messages AS assistant_message
+              ON assistant_message.run_id = r.run_id
+             AND assistant_message.role = 'assistant'
+            WHERE r.run_id = ? AND r.status != 'running'
+            """,
+            (run_id,),
+        )
 
     def _conversation_row_locked(
         self,
@@ -760,6 +815,335 @@ class ConversationsRepository:
             "AND status = 'running' LIMIT 1",
             (user_id, conversation_id),
         ).fetchone() is not None
+
+
+class ChatProjectionsRepository:
+    """Durable promotion receipts derived from canonical conversation turns."""
+
+    def __init__(self, connection: sqlite3.Connection, lock: threading.RLock) -> None:
+        self._conn = connection
+        self._lock = lock
+
+    async def due(self, *, limit: int = 50) -> tuple[ChatProjectionRecord, ...]:
+        return await asyncio.to_thread(self._due_sync, limit)
+
+    def _due_sync(self, limit: int) -> tuple[ChatProjectionRecord, ...]:
+        if not 1 <= limit <= 200:
+            raise InvalidApplicationStateError(
+                "chat projection limit must be between 1 and 200"
+            )
+        now = _utc_now()
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT p.projection_id, p.user_id, u.storage_namespace,
+                       p.conversation_id, COALESCE(user_message.content, ''),
+                       COALESCE(assistant_message.content, ''), p.partial,
+                       p.virtual_model, p.concrete_model, p.prompt_tokens,
+                       p.completion_tokens, p.created_at, p.attempts
+                FROM app_chat_projections AS p
+                JOIN app_users AS u ON u.user_id = p.user_id
+                LEFT JOIN app_messages AS user_message
+                  ON user_message.message_id = p.user_message_id
+                LEFT JOIN app_messages AS assistant_message
+                  ON assistant_message.message_id = p.assistant_message_id
+                WHERE p.enqueued_at IS NULL AND p.next_attempt_at <= ?
+                ORDER BY p.next_attempt_at, p.created_at, p.projection_id
+                LIMIT ?
+                """,
+                (now, limit),
+            ).fetchall()
+        return tuple(_chat_projection_from_row(row) for row in rows)
+
+    async def mark_enqueued(self, *, projection_id: str) -> bool:
+        return await asyncio.to_thread(self._mark_enqueued_sync, projection_id)
+
+    def _mark_enqueued_sync(self, projection_id: str) -> bool:
+        projection_id = _required(projection_id, "projection id")
+        now = _utc_now()
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE app_chat_projections SET enqueued_at = ?, attempts = attempts + 1, "
+                "last_attempt_at = ?, last_error = '' "
+                "WHERE projection_id = ? AND enqueued_at IS NULL",
+                (now, now, projection_id),
+            )
+            self._conn.commit()
+        return cursor.rowcount == 1
+
+    async def mark_failed(
+        self,
+        *,
+        projection_id: str,
+        error: str,
+        retry_interval_s: float,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._mark_failed_sync,
+            projection_id,
+            error,
+            retry_interval_s,
+        )
+
+    def _mark_failed_sync(
+        self,
+        projection_id: str,
+        error: str,
+        retry_interval_s: float,
+    ) -> bool:
+        projection_id = _required(projection_id, "projection id")
+        if retry_interval_s <= 0:
+            raise InvalidApplicationStateError(
+                "chat projection retry interval must be positive"
+            )
+        now = dt.datetime.now(dt.UTC)
+        retry_at = (now + dt.timedelta(seconds=retry_interval_s)).isoformat(
+            timespec="microseconds"
+        )
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE app_chat_projections SET attempts = attempts + 1, "
+                "last_attempt_at = ?, last_error = ?, next_attempt_at = ? "
+                "WHERE projection_id = ? AND enqueued_at IS NULL",
+                (
+                    now.isoformat(timespec="microseconds"),
+                    str(error)[:500],
+                    retry_at,
+                    projection_id,
+                ),
+            )
+            self._conn.commit()
+        return cursor.rowcount == 1
+
+    async def retry_now(self, *, limit: int = 200) -> int:
+        return await asyncio.to_thread(self._retry_now_sync, limit)
+
+    def _retry_now_sync(self, limit: int) -> int:
+        if not 1 <= limit <= 10_000:
+            raise InvalidApplicationStateError(
+                "chat projection retry limit must be between 1 and 10000"
+            )
+        now = _utc_now()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT projection_id FROM app_chat_projections "
+                "WHERE enqueued_at IS NULL "
+                "ORDER BY next_attempt_at, created_at, projection_id LIMIT ?",
+                (limit,),
+            ).fetchall()
+            if rows:
+                self._conn.executemany(
+                    "UPDATE app_chat_projections SET next_attempt_at = ? "
+                    "WHERE projection_id = ? AND enqueued_at IS NULL",
+                    [(now, str(row[0])) for row in rows],
+                )
+                self._conn.commit()
+        return len(rows)
+
+    async def reset_all(self) -> int:
+        return await asyncio.to_thread(self._reset_all_sync)
+
+    def _reset_all_sync(self) -> int:
+        now = _utc_now()
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE app_chat_projections SET enqueued_at = NULL, attempts = 0, "
+                "last_attempt_at = NULL, last_error = '', next_attempt_at = ?",
+                (now,),
+            )
+            self._conn.commit()
+        return max(0, int(cursor.rowcount))
+
+    async def due_deletions(
+        self,
+        *,
+        limit: int = 50,
+    ) -> tuple[ChatProjectionDeletionRecord, ...]:
+        return await asyncio.to_thread(self._due_deletions_sync, limit)
+
+    def _due_deletions_sync(
+        self,
+        limit: int,
+    ) -> tuple[ChatProjectionDeletionRecord, ...]:
+        if not 1 <= limit <= 200:
+            raise InvalidApplicationStateError(
+                "chat projection deletion limit must be between 1 and 200"
+            )
+        now = _utc_now()
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT d.deletion_id, d.user_id, u.storage_namespace,
+                       d.conversation_id, d.requested_at, d.attempts
+                FROM app_chat_projection_deletions AS d
+                JOIN app_users AS u ON u.user_id = d.user_id
+                WHERE d.completed_at IS NULL AND d.next_attempt_at <= ?
+                ORDER BY d.next_attempt_at, d.requested_at, d.deletion_id
+                LIMIT ?
+                """,
+                (now, limit),
+            ).fetchall()
+        return tuple(_chat_projection_deletion_from_row(row) for row in rows)
+
+    async def mark_deletion_completed(self, *, deletion_id: str) -> bool:
+        return await asyncio.to_thread(
+            self._mark_deletion_completed_sync,
+            deletion_id,
+        )
+
+    def _mark_deletion_completed_sync(self, deletion_id: str) -> bool:
+        deletion_id = _required(deletion_id, "chat projection deletion id")
+        now = _utc_now()
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE app_chat_projection_deletions "
+                "SET completed_at = ?, attempts = attempts + 1, "
+                "last_attempt_at = ?, last_error = '' "
+                "WHERE deletion_id = ? AND completed_at IS NULL",
+                (now, now, deletion_id),
+            )
+            self._conn.commit()
+        return cursor.rowcount == 1
+
+    async def mark_deletion_failed(
+        self,
+        *,
+        deletion_id: str,
+        error: str,
+        retry_interval_s: float,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._mark_deletion_failed_sync,
+            deletion_id,
+            error,
+            retry_interval_s,
+        )
+
+    def _mark_deletion_failed_sync(
+        self,
+        deletion_id: str,
+        error: str,
+        retry_interval_s: float,
+    ) -> bool:
+        deletion_id = _required(deletion_id, "chat projection deletion id")
+        if retry_interval_s <= 0:
+            raise InvalidApplicationStateError(
+                "chat projection deletion retry interval must be positive"
+            )
+        now = dt.datetime.now(dt.UTC)
+        retry_at = (now + dt.timedelta(seconds=retry_interval_s)).isoformat(
+            timespec="microseconds"
+        )
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE app_chat_projection_deletions "
+                "SET attempts = attempts + 1, last_attempt_at = ?, "
+                "last_error = ?, next_attempt_at = ? "
+                "WHERE deletion_id = ? AND completed_at IS NULL",
+                (
+                    now.isoformat(timespec="microseconds"),
+                    str(error)[:500],
+                    retry_at,
+                    deletion_id,
+                ),
+            )
+            self._conn.commit()
+        return cursor.rowcount == 1
+
+    async def retry_deletions_now(self, *, limit: int = 200) -> int:
+        return await asyncio.to_thread(self._retry_deletions_now_sync, limit)
+
+    def _retry_deletions_now_sync(self, limit: int) -> int:
+        if not 1 <= limit <= 10_000:
+            raise InvalidApplicationStateError(
+                "chat projection deletion retry limit must be between 1 and 10000"
+            )
+        now = _utc_now()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT deletion_id FROM app_chat_projection_deletions "
+                "WHERE completed_at IS NULL "
+                "ORDER BY next_attempt_at, requested_at, deletion_id LIMIT ?",
+                (limit,),
+            ).fetchall()
+            if rows:
+                self._conn.executemany(
+                    "UPDATE app_chat_projection_deletions SET next_attempt_at = ? "
+                    "WHERE deletion_id = ? AND completed_at IS NULL",
+                    [(now, str(row[0])) for row in rows],
+                )
+                self._conn.commit()
+        return len(rows)
+
+    async def deletion_stats(
+        self,
+        *,
+        user_id: str | None = None,
+    ) -> dict[str, int | str]:
+        return await asyncio.to_thread(self._deletion_stats_sync, user_id)
+
+    def _deletion_stats_sync(
+        self,
+        user_id: str | None,
+    ) -> dict[str, int | str]:
+        columns = (
+            "COALESCE(SUM(CASE WHEN completed_at IS NULL THEN 1 ELSE 0 END), 0), "
+            "COALESCE(SUM(CASE WHEN completed_at IS NULL THEN attempts ELSE 0 END), 0), "
+            "COALESCE(SUM(CASE WHEN completed_at IS NULL AND length(last_error) > 0 "
+            "THEN 1 ELSE 0 END), 0), "
+            "COALESCE(SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END), 0), "
+            "COALESCE(MIN(CASE WHEN completed_at IS NULL THEN requested_at END), '') "
+        )
+        with self._lock:
+            if user_id is None:
+                row = self._conn.execute(
+                    "SELECT " + columns + "FROM app_chat_projection_deletions"
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    "SELECT " + columns + "FROM app_chat_projection_deletions "
+                    "WHERE user_id = ?",
+                    (_required(user_id, "user id"),),
+                ).fetchone()
+        return {
+            "pending": int(row[0]),
+            "attempts": int(row[1]),
+            "with_error": int(row[2]),
+            "exhausted": 0,
+            "completed": int(row[3]),
+            "oldest_created_at": str(row[4]),
+        }
+
+    async def stats(self, *, user_id: str | None = None) -> dict[str, int | str]:
+        return await asyncio.to_thread(self._stats_sync, user_id)
+
+    def _stats_sync(self, user_id: str | None) -> dict[str, int | str]:
+        columns = (
+            "COALESCE(SUM(CASE WHEN enqueued_at IS NULL THEN 1 ELSE 0 END), 0), "
+            "COALESCE(SUM(CASE WHEN enqueued_at IS NULL THEN attempts ELSE 0 END), 0), "
+            "COALESCE(SUM(CASE WHEN enqueued_at IS NULL AND length(last_error) > 0 "
+            "THEN 1 ELSE 0 END), 0), "
+            "COALESCE(SUM(CASE WHEN enqueued_at IS NOT NULL THEN 1 ELSE 0 END), 0), "
+            "COALESCE(MIN(CASE WHEN enqueued_at IS NULL THEN created_at END), '') "
+        )
+        with self._lock:
+            if user_id is None:
+                row = self._conn.execute(
+                    "SELECT " + columns + "FROM app_chat_projections"
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    "SELECT " + columns + "FROM app_chat_projections WHERE user_id = ?",
+                    (_required(user_id, "user id"),),
+                ).fetchone()
+        return {
+            "pending": int(row[0]),
+            "attempts": int(row[1]),
+            "with_error": int(row[2]),
+            "exhausted": 0,
+            "completed": int(row[3]),
+            "oldest_created_at": str(row[4]),
+        }
 
 
 def _required(value: str | None, label: str) -> str:
@@ -879,7 +1263,39 @@ def _run_from_row(row: sqlite3.Row) -> RunRecord:
     )
 
 
+def _chat_projection_from_row(row: sqlite3.Row) -> ChatProjectionRecord:
+    return ChatProjectionRecord(
+        projection_id=str(row[0]),
+        user_id=str(row[1]),
+        storage_namespace=str(row[2]),
+        conversation_id=str(row[3]),
+        user_content=str(row[4]),
+        assistant_content=str(row[5]),
+        partial=bool(row[6]),
+        virtual_model=str(row[7]),
+        concrete_model=str(row[8]),
+        prompt_tokens=int(row[9]),
+        completion_tokens=int(row[10]),
+        created_at=str(row[11]),
+        attempts=int(row[12]),
+    )
+
+
+def _chat_projection_deletion_from_row(
+    row: sqlite3.Row,
+) -> ChatProjectionDeletionRecord:
+    return ChatProjectionDeletionRecord(
+        deletion_id=str(row[0]),
+        user_id=str(row[1]),
+        storage_namespace=str(row[2]),
+        conversation_id=str(row[3]),
+        requested_at=str(row[4]),
+        attempts=int(row[5]),
+    )
+
+
 __all__ = [
+    "ChatProjectionsRepository",
     "ConversationArchivedError",
     "ConversationHasActiveRunError",
     "ConversationsRepository",

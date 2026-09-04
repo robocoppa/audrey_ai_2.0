@@ -216,6 +216,8 @@ async def test_research_stream_emits_typed_lifecycle_and_writer_usage():
         "v": "looks fine",
         "w": "Research answer.",
     })
+    archive = _ResearchArchive()
+    app.state.archive_client = archive
 
     await _collect(app, events=events)
 
@@ -238,6 +240,7 @@ async def test_research_stream_emits_typed_lifecycle_and_writer_usage():
     assert (usage.prompt_tokens, usage.completion_tokens) == (1, 1)
     assert events[-1].type == "run.finished"
     assert events[-1].status == "succeeded"
+    assert archive.calls == []
 
 
 async def test_research_stream_projects_researcher_tool_and_source_events(

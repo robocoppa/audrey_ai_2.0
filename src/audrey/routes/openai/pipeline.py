@@ -156,7 +156,11 @@ async def _generate_via_pipeline(
 
     # Commit the compact local outbox row after generation. Remote HTTP,
     # embedding, and Qdrant indexing belong to the lifecycle-owned worker.
-    archive_client: ChatArchiveQueue | None = getattr(app.state, "archive_client", None)
+    archive_client: ChatArchiveQueue | None = getattr(
+        app.state,
+        "archive_client",
+        None,
+    )
     if archive_client is not None and not is_owui_task_request(messages):
         await archive_client.archive_turn(
             registry=app.state.tools,
@@ -246,12 +250,12 @@ async def _stream_via_pipeline(
     tool-capable, the request goes through the graph for a ReAct loop and
     is emitted as one chunk on completion.
 
-    Capture: every emitted SSE frame is passed through `StreamCollector`
-    so assistant-content deltas accumulate for the post-completion
-    archive write. `_stream_deep_with_banners` does its own narrower
-    capture (only synth deltas) so progress banners stay out of the
-    archive — its return value is ignored here and the archive write
-    happens inside that helper instead.
+    Compatibility capture: every emitted SSE frame is passed through
+    `StreamCollector` so assistant-content deltas accumulate for the
+    post-completion archive write. `_stream_deep_with_banners` does its own
+    narrower capture (only synth deltas) so progress banners stay out. Native
+    runs bypass both hooks because their terminal database transaction creates
+    the durable canonical projection receipt.
     """
     cfg = app.state.cfg
     ollama: OllamaClient = app.state.ollama
@@ -260,7 +264,13 @@ async def _stream_via_pipeline(
     inflight = app.state.inflight
     router_cfg = cfg.router
 
-    archive_client: ChatArchiveQueue | None = getattr(app.state, "archive_client", None)
+    # Native runs persist one canonical projection receipt with terminal state.
+    # Reusing the compatibility hook here would index the same turn twice.
+    archive_client: ChatArchiveQueue | None = (
+        None
+        if event_context is not None
+        else getattr(app.state, "archive_client", None)
+    )
     collector = StreamCollector()
     chosen_concrete: str = "?"
     is_deep_branch = False  # deep handles its own archive write to skip banners
@@ -693,7 +703,11 @@ async def _stream_deep_with_banners(
         mode="deep",
         task_type=task,
         archive=StreamArchiveTarget(
-            client=getattr(app.state, "archive_client", None),
+            client=(
+                None
+                if event_context is not None
+                else getattr(app.state, "archive_client", None)
+            ),
             registry=tools,
             user_id=user_id,
             conversation_id=conversation_id,
@@ -1063,7 +1077,11 @@ async def _stream_research_with_banners(
         mode="deep",
         task_type=task,
         archive=StreamArchiveTarget(
-            client=getattr(app.state, "archive_client", None),
+            client=(
+                None
+                if event_context is not None
+                else getattr(app.state, "archive_client", None)
+            ),
             registry=tools,
             user_id=user_id,
             conversation_id=conversation_id,

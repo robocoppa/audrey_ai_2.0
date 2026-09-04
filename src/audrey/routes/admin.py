@@ -17,6 +17,9 @@ Endpoints:
   GET  /v1/admin/readiness           — components, queues, workers, pressure.
   POST /v1/admin/repair              — wake local repair owners and run one
                                        bounded sidecar repair pass.
+  POST /v1/admin/chat_archive/rebuild-canonical
+                                     — replay canonical turns through the
+                                       rebuildable search projection.
   POST /v1/admin/chat_archive/prune  — apply the chat archive's retention
                                        policy on demand (SQLite rows + Qdrant
                                        points older than the cutoff).
@@ -53,6 +56,7 @@ from audrey.auth import (
     clear_auth_cache_for_email,
     require_admin,
 )
+from audrey.chat_projection import combine_repair_stats
 from audrey.kb.reconcile import reconcile_once
 from audrey.readiness import ReadinessStatus
 from audrey.routes.user_data import RepairQueueStatus, UserDataRepairStatus
@@ -89,6 +93,13 @@ class AdminRepairTriggerResponse(BaseModel):
     chat_delivery: RepairTriggerComponent
     chat_archive: RepairTriggerComponent
     account_purges: RepairTriggerComponent
+
+
+class ChatProjectionRebuildResponse(BaseModel):
+    schema_version: int = 1
+    status: Literal["accepted"] = "accepted"
+    projections_reset: int
+    pending: int
 
 
 def _repair_queue(
@@ -192,9 +203,16 @@ async def repair_status(
 
     archive_queue = getattr(request.app.state, "archive_client", None)
     delivery_stats = getattr(archive_queue, "repair_stats", None)
+    projector = getattr(request.app.state, "archive_projector", None)
+    projection_stats = getattr(projector, "repair_stats", None)
+    local_delivery_stats = []
+    if callable(projection_stats):
+        local_delivery_stats.append(await projection_stats())
+    if callable(delivery_stats):
+        local_delivery_stats.append(await delivery_stats())
     chat_delivery = (
-        _repair_queue(await delivery_stats())
-        if callable(delivery_stats)
+        _repair_queue(combine_repair_stats(*local_delivery_stats))
+        if local_delivery_stats
         else _repair_queue(available=False)
     )
 
@@ -258,9 +276,16 @@ async def repair(
 
     archive_queue = getattr(request.app.state, "archive_client", None)
     retry_delivery = getattr(archive_queue, "retry_now", None)
+    projector = getattr(request.app.state, "archive_projector", None)
+    retry_projection = getattr(projector, "retry_now", None)
+    projection_accepted = True
+    if callable(retry_projection):
+        await retry_projection()
+    elif projector is not None:
+        projection_accepted = False
     delivery_component = RepairTriggerComponent(
-        available=callable(retry_delivery),
-        accepted=callable(retry_delivery),
+        available=callable(retry_delivery) and projection_accepted,
+        accepted=callable(retry_delivery) and projection_accepted,
     )
     if callable(retry_delivery):
         await retry_delivery()
@@ -317,6 +342,36 @@ async def repair(
         chat_delivery=delivery_component,
         chat_archive=remote_component,
         account_purges=purge_component,
+    )
+
+
+@router.post(
+    "/chat_archive/rebuild-canonical",
+    response_model=ChatProjectionRebuildResponse,
+    status_code=202,
+)
+async def rebuild_canonical_chat_projection(
+    request: Request,
+    me: AuthedUser = Depends(require_admin),
+) -> ChatProjectionRebuildResponse:
+    """Replay canonical turns through the durable chat-search projection."""
+
+    projector = getattr(request.app.state, "archive_projector", None)
+    rebuild = getattr(projector, "rebuild", None)
+    stats = getattr(projector, "repair_stats", None)
+    if not callable(rebuild) or not callable(stats):
+        raise HTTPException(status_code=503, detail="chat_projection_unavailable")
+    reset = await rebuild()
+    current = await stats()
+    log.warning(
+        "admin: canonical chat projection rebuild by %s reset=%d pending=%d",
+        me.email,
+        reset,
+        int(current.get("pending", 0)),
+    )
+    return ChatProjectionRebuildResponse(
+        projections_reset=reset,
+        pending=int(current.get("pending", 0)),
     )
 
 

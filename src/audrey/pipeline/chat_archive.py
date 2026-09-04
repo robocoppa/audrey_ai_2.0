@@ -1,6 +1,6 @@
 """Chat-archive capture (Audrey side).
 
-Three responsibilities:
+Four responsibilities:
 
   ChatArchiveClient
     Performs one best-effort delivery to custom-tools' internal route.
@@ -8,7 +8,8 @@ Three responsibilities:
   ChatArchiveQueue
     Commits response-time source rows to local SQLite, wakes one bounded
     lifecycle-owned delivery worker, and retries after failure/restart.
-    Queue saturation is visible but cannot discard the durable row.
+    Queue saturation is visible but cannot discard the durable row. It also
+    orders native conversation deletion after in-flight projection writes.
 
   StreamCollector
     Wraps an SSE async-generator and accumulates only the assistant
@@ -57,6 +58,7 @@ log = logging.getLogger(__name__)
 # live on the same server but aren't in the OpenAPI tool surface.
 _ARCHIVE_HOST_TOOL = "chat_history_search"
 _ARCHIVE_WRITE_PATH = "/chat_history/archive"
+_CONVERSATION_DELETE_PATH = "/user_data/chat_history/delete"
 _USER_PURGE_PATH = "/user_data/purge"
 _REPAIR_STATUS_PATH = "/user_data/repair/status"
 _REPAIR_RUN_PATH = "/user_data/repair/run"
@@ -390,6 +392,47 @@ class ChatArchiveClient:
             raise RuntimeError("sidecar purge returned an invalid response")
         return value
 
+    async def request_conversation_deletion(
+        self,
+        *,
+        registry: ToolRegistry | None,
+        user: str,
+        conversation_id: str,
+    ) -> bool:
+        """Hand one owner-scoped deletion to the sidecar's durable outbox."""
+        host = self.host_url(registry)
+        if host is None:
+            raise RuntimeError("chat_history_search is not registered")
+        kwargs: dict[str, Any] = {
+            "json": {
+                "user": user,
+                "conversation_id": conversation_id,
+            },
+            "timeout": self._timeout_s,
+        }
+        if self._service_headers:
+            kwargs["headers"] = self._service_headers
+        response = await self._http.post(
+            f"{host}{_CONVERSATION_DELETE_PATH}",
+            **kwargs,
+        )
+        if response.status_code == 404:
+            return True
+        if response.status_code >= 400:
+            raise RuntimeError(
+                "sidecar conversation deletion returned "
+                f"HTTP {response.status_code}"
+            )
+        value = response.json()
+        if (
+            not isinstance(value, dict)
+            or value.get("conversation_id") != conversation_id
+        ):
+            raise RuntimeError(
+                "sidecar conversation deletion returned an invalid response"
+            )
+        return True
+
     async def _request_repair_control(
         self,
         *,
@@ -481,6 +524,7 @@ CREATE TABLE IF NOT EXISTS archive_write_outbox (
     archive_id       TEXT PRIMARY KEY,
     payload_json     TEXT NOT NULL,
     user_id          TEXT NOT NULL DEFAULT '',
+    conversation_id  TEXT NOT NULL DEFAULT '',
     created_at       TEXT NOT NULL,
     attempts         INTEGER NOT NULL DEFAULT 0,
     last_attempt_at  TEXT,
@@ -528,6 +572,7 @@ class ChatArchiveQueue:
         self._signals: asyncio.Queue[str] = asyncio.Queue(maxsize=maxsize)
         self._db: aiosqlite.Connection | None = None
         self._db_lock = asyncio.Lock()
+        self._operation_lock = asyncio.Lock()
         self._worker: asyncio.Task[None] | None = None
         self._accepting = False
 
@@ -582,25 +627,40 @@ class ChatArchiveQueue:
                 "ALTER TABLE archive_write_outbox "
                 "ADD COLUMN user_id TEXT NOT NULL DEFAULT ''"
             )
+        if "conversation_id" not in columns:
+            await self._db.execute(
+                "ALTER TABLE archive_write_outbox "
+                "ADD COLUMN conversation_id TEXT NOT NULL DEFAULT ''"
+            )
         cursor = await self._db.execute(
-            "SELECT archive_id, payload_json FROM archive_write_outbox "
-            "WHERE user_id = ''"
+            "SELECT archive_id, payload_json, user_id, conversation_id "
+            "FROM archive_write_outbox "
+            "WHERE user_id = '' OR conversation_id = ''"
         )
         rows = await cursor.fetchall()
         await cursor.close()
-        for archive_id, payload_json in rows:
+        for archive_id, payload_json, stored_user, stored_conversation in rows:
             try:
-                user_id = str(json.loads(str(payload_json)).get("user_id") or "")
+                payload = json.loads(str(payload_json))
             except (TypeError, ValueError, json.JSONDecodeError):
-                user_id = ""
-            if user_id:
+                payload = {}
+            user_id = str(stored_user or payload.get("user_id") or "")
+            conversation_id = str(
+                stored_conversation or payload.get("conversation_id") or ""
+            )
+            if user_id or conversation_id:
                 await self._db.execute(
-                    "UPDATE archive_write_outbox SET user_id = ? WHERE archive_id = ?",
-                    (user_id, archive_id),
+                    "UPDATE archive_write_outbox "
+                    "SET user_id = ?, conversation_id = ? WHERE archive_id = ?",
+                    (user_id, conversation_id, archive_id),
                 )
         await self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_archive_write_user "
             "ON archive_write_outbox(user_id, created_at)"
+        )
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_archive_write_conversation "
+            "ON archive_write_outbox(user_id, conversation_id, created_at)"
         )
         await self._db.commit()
 
@@ -635,16 +695,16 @@ class ChatArchiveQueue:
         completion_tokens: int = 0,
         archive_id: str = "",
         created_at: str = "",
-    ) -> None:
-        """Commit one retryable source row, then wake the delivery worker."""
+    ) -> bool:
+        """Commit one retryable source row and report durable acceptance."""
         del registry  # the queue owns the live, in-place ToolRegistry
         if not user_id or (not user_content and not assistant_content):
             chat_archive_writes_total.labels(result="skipped").inc()
-            return
+            return False
         if not self._accepting or self._db is None:
             chat_archive_queue_events_total.labels(result="enqueue_fail").inc()
             log.error("chat_archive: enqueue rejected while queue is stopped")
-            return
+            return False
 
         job = ArchiveJob.create(
             user_id=user_id,
@@ -671,17 +731,19 @@ class ChatArchiveQueue:
                 await cursor.close()
                 if purge is not None and job.created_at <= str(purge[0]):
                     chat_archive_queue_events_total.labels(result="purged").inc()
-                    return
+                    return True
                 cursor = await self._db.execute(
                     """
                     INSERT OR IGNORE INTO archive_write_outbox
-                    (archive_id, payload_json, user_id, created_at, next_attempt_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    (archive_id, payload_json, user_id, conversation_id,
+                     created_at, next_attempt_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     (
                         job.archive_id,
                         encoded,
                         job.user_id,
+                        job.conversation_id,
                         job.created_at,
                         job.created_at,
                     ),
@@ -701,7 +763,7 @@ class ChatArchiveQueue:
                 type(exc).__name__,
                 exc,
             )
-            return
+            return False
         chat_archive_enqueue_seconds.observe(time.perf_counter() - started)
         if inserted:
             chat_archive_queue_depth.inc()
@@ -714,6 +776,46 @@ class ChatArchiveQueue:
                 "chat_archive: wake queue full; durable source retained archive_id=%s",
                 job.archive_id,
             )
+        return True
+
+    async def request_conversation_deletion(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+    ) -> bool:
+        """Order one delete after in-flight writes and discard queued writes."""
+        if not user_id or not conversation_id:
+            raise ValueError("conversation deletion requires user and conversation id")
+        if not self._accepting or self._db is None:
+            return False
+        async with self._operation_lock:
+            async with self._db_lock:
+                cursor = await self._db.execute(
+                    "DELETE FROM archive_write_outbox "
+                    "WHERE user_id = ? AND conversation_id = ?",
+                    (user_id, conversation_id),
+                )
+                discarded = max(0, cursor.rowcount)
+                await cursor.close()
+                await self._db.commit()
+            if discarded:
+                chat_archive_queue_depth.dec(discarded)
+            try:
+                return await self._client.request_conversation_deletion(
+                    registry=self._registry,
+                    user=user_id,
+                    conversation_id=conversation_id,
+                )
+            except Exception as exc:  # noqa: BLE001 — durable caller retries
+                log.warning(
+                    "chat_archive: conversation deletion handoff failed "
+                    "conversation=%s error=%s: %s",
+                    conversation_id,
+                    type(exc).__name__,
+                    exc,
+                )
+                return False
 
     async def purge_user_before(
         self,
@@ -975,28 +1077,29 @@ class ChatArchiveQueue:
         return row is not None
 
     async def _deliver_one(self) -> None:
-        job = await self._next_due()
-        if job is None:
-            return
-        try:
-            outcome, error = await self._client.deliver_job(
-                registry=self._registry,
-                job=job,
-            )
-        except Exception as exc:  # noqa: BLE001 — worker must survive one job
-            outcome = ArchiveDelivery.RETRY
-            error = f"{type(exc).__name__}: {exc}"[:500]
-        if outcome is ArchiveDelivery.DELIVERED:
-            await self._finalize(job.archive_id)
-            chat_archive_queue_events_total.labels(result="delivered").inc()
-        else:
-            await self._defer(job.archive_id, error)
-            chat_archive_queue_events_total.labels(result="retry").inc()
-            log.warning(
-                "chat_archive: durable delivery deferred archive_id=%s error=%s",
-                job.archive_id,
-                error,
-            )
+        async with self._operation_lock:
+            job = await self._next_due()
+            if job is None:
+                return
+            try:
+                outcome, error = await self._client.deliver_job(
+                    registry=self._registry,
+                    job=job,
+                )
+            except Exception as exc:  # noqa: BLE001 — worker must survive one job
+                outcome = ArchiveDelivery.RETRY
+                error = f"{type(exc).__name__}: {exc}"[:500]
+            if outcome is ArchiveDelivery.DELIVERED:
+                await self._finalize(job.archive_id)
+                chat_archive_queue_events_total.labels(result="delivered").inc()
+            else:
+                await self._defer(job.archive_id, error)
+                chat_archive_queue_events_total.labels(result="retry").inc()
+                log.warning(
+                    "chat_archive: durable delivery deferred archive_id=%s error=%s",
+                    job.archive_id,
+                    error,
+                )
 
     async def _run(self) -> None:
         while True:

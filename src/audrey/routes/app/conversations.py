@@ -255,6 +255,10 @@ async def delete_conversation(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="Conversation not found.")
+    projector = getattr(request.app.state, "archive_projector", None)
+    wake = getattr(projector, "wake", None)
+    if callable(wake):
+        wake()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

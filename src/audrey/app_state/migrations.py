@@ -152,6 +152,73 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           ON app_messages(run_id) WHERE role = 'assistant';
         """,
     ),
+    (
+        4,
+        """
+        CREATE TABLE IF NOT EXISTS app_chat_projections (
+          projection_id       TEXT PRIMARY KEY,
+          user_id             TEXT NOT NULL,
+          conversation_id     TEXT NOT NULL,
+          user_message_id     TEXT,
+          assistant_message_id TEXT,
+          partial             INTEGER NOT NULL DEFAULT 0
+                              CHECK (partial IN (0, 1)),
+          virtual_model       TEXT NOT NULL DEFAULT '',
+          concrete_model      TEXT NOT NULL DEFAULT '',
+          prompt_tokens       INTEGER NOT NULL DEFAULT 0
+                              CHECK (prompt_tokens >= 0),
+          completion_tokens   INTEGER NOT NULL DEFAULT 0
+                              CHECK (completion_tokens >= 0),
+          created_at          TEXT NOT NULL,
+          enqueued_at         TEXT,
+          attempts            INTEGER NOT NULL DEFAULT 0
+                              CHECK (attempts >= 0),
+          last_attempt_at     TEXT,
+          last_error          TEXT NOT NULL DEFAULT '',
+          next_attempt_at     TEXT NOT NULL,
+          CHECK (user_message_id IS NOT NULL OR assistant_message_id IS NOT NULL),
+          UNIQUE (user_message_id, assistant_message_id),
+          FOREIGN KEY (conversation_id, user_id)
+            REFERENCES app_conversations(conversation_id, user_id) ON DELETE CASCADE,
+          FOREIGN KEY (user_message_id)
+            REFERENCES app_messages(message_id) ON DELETE CASCADE,
+          FOREIGN KEY (assistant_message_id)
+            REFERENCES app_messages(message_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_app_chat_projections_due
+          ON app_chat_projections(enqueued_at, next_attempt_at, created_at);
+
+        CREATE INDEX IF NOT EXISTS idx_app_chat_projections_user
+          ON app_chat_projections(user_id, enqueued_at, next_attempt_at);
+
+        CREATE TABLE IF NOT EXISTS app_chat_projection_deletions (
+          deletion_id       TEXT PRIMARY KEY,
+          user_id           TEXT NOT NULL,
+          conversation_id   TEXT NOT NULL,
+          requested_at      TEXT NOT NULL,
+          completed_at      TEXT,
+          attempts          INTEGER NOT NULL DEFAULT 0
+                            CHECK (attempts >= 0),
+          last_attempt_at   TEXT,
+          last_error        TEXT NOT NULL DEFAULT '',
+          next_attempt_at   TEXT NOT NULL,
+          UNIQUE (user_id, conversation_id),
+          FOREIGN KEY (user_id) REFERENCES app_users(user_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_app_chat_projection_deletions_due
+          ON app_chat_projection_deletions(
+            completed_at, next_attempt_at, requested_at
+          );
+
+        CREATE INDEX IF NOT EXISTS idx_app_chat_projection_deletions_user
+          ON app_chat_projection_deletions(
+            user_id, completed_at, next_attempt_at
+          );
+
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS"]

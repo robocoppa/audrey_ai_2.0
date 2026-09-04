@@ -159,6 +159,8 @@ async def _collect(app, events: list[RunEvent] | None = None):
 async def test_deep_stream_emits_typed_lifecycle_and_answer_only_deltas():
     events: list[RunEvent] = []
     app = _fake_app({"w1": "draft one", "w2": "draft two", "s": "Deep answer."})
+    archive = _RecordingArchive()
+    app.state.archive_client = archive
 
     await _collect(app, events)
 
@@ -180,6 +182,7 @@ async def test_deep_stream_emits_typed_lifecycle_and_answer_only_deltas():
     assert events[-2].type == "message.finished"
     assert events[-1].type == "run.finished"
     assert events[-1].status == "succeeded"
+    assert archive.calls == []
 
 
 async def test_deep_stream_projects_real_tool_activity_and_deduped_sources(

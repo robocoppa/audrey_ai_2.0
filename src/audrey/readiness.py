@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from audrey.chat_projection import combine_repair_stats
 from audrey.metrics import publish_readiness
 from audrey.tools.discovery import TOOL_DECLARATIONS
 
@@ -407,16 +408,33 @@ class ReadinessCollector:
 
     async def _archive_delivery_stats(self, state: Any) -> dict[str, Any] | None:
         queue = getattr(state, "archive_queue", None)
-        if queue is None:
+        projector = getattr(state, "archive_projector", None)
+        if queue is None and projector is None:
             return None
         try:
-            operational, repair = await asyncio.gather(
-                queue.stats(),
-                queue.repair_stats(),
+            queue_values = (
+                await asyncio.gather(queue.stats(), queue.repair_stats())
+                if queue is not None
+                else None
+            )
+            projection = (
+                await projector.repair_stats()
+                if projector is not None
+                else None
             )
         except Exception:  # noqa: BLE001 — backend failures become state
             return None
-        return {**operational, **repair}
+        if queue_values is None:
+            return combine_repair_stats(projection)
+        operational, repair = queue_values
+        queue_repair = {
+            **repair,
+            "oldest_created_at": operational.get("oldest_created_at", ""),
+        }
+        return {
+            **operational,
+            **combine_repair_stats(queue_repair, projection),
+        }
 
     async def _work_queue_stats(self, state: Any) -> dict[str, Any] | None:
         method = getattr(state.uploads_db, "work_queue_stats", None)

@@ -60,7 +60,7 @@ async def test_v2_upgrade_backfills_preferences_without_changing_identity_or_tok
     try:
         after = await _resolve(upgraded)
         preferences = await upgraded.preferences.get(user_id=owner.user_id)
-        assert upgraded.schema_version == 3
+        assert upgraded.schema_version == 4
         assert after.user_id == owner.user_id
         assert preferences is not None
         assert preferences.timezone == "UTC"
@@ -193,6 +193,167 @@ async def test_conversation_and_run_ids_are_server_owned_and_transactional(tmp_p
         )).status == "succeeded"
     finally:
         reopened.close()
+
+
+async def test_terminal_run_commits_search_projection_receipt_with_canonical_state(
+    tmp_path,
+):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    owner = await _resolve(store)
+    try:
+        conversation = await store.conversations.create(user_id=owner.user_id)
+        started = await store.conversations.begin_run(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="Project this question.",
+        )
+        assert started is not None
+        await store.conversations.finish_run(
+            user_id=owner.user_id,
+            run_id=started.run.run_id,
+            outcome="succeeded",
+            assistant_content="Project this answer.",
+            finish_reason="stop",
+            virtual_model="audrey_fast",
+            concrete_model="qwen-test",
+            prompt_tokens=11,
+            completion_tokens=7,
+        )
+
+        pending = await store.chat_projections.due()
+        assert len(pending) == 1
+        projection = pending[0]
+        assert projection.projection_id == f"native:{started.run.run_id}"
+        assert projection.user_id == owner.user_id
+        assert projection.storage_namespace == "alice@example.com"
+        assert projection.conversation_id == conversation.conversation_id
+        assert projection.user_content == "Project this question."
+        assert projection.assistant_content == "Project this answer."
+        assert projection.partial is False
+        assert projection.virtual_model == "audrey_fast"
+        assert projection.concrete_model == "qwen-test"
+        assert (projection.prompt_tokens, projection.completion_tokens) == (11, 7)
+
+        assert await store.chat_projections.mark_failed(
+            projection_id=projection.projection_id,
+            error="private transport detail",
+            retry_interval_s=60,
+        )
+        assert await store.chat_projections.due() == ()
+        stats = await store.chat_projections.stats(user_id=owner.user_id)
+        assert stats["pending"] == 1
+        assert stats["attempts"] == 1
+        assert stats["with_error"] == 1
+
+        assert await store.chat_projections.retry_now() == 1
+        assert len(await store.chat_projections.due()) == 1
+        assert await store.chat_projections.mark_enqueued(
+            projection_id=projection.projection_id
+        )
+        stats = await store.chat_projections.stats(user_id=owner.user_id)
+        assert stats["pending"] == 0
+        assert stats["completed"] == 1
+        assert await store.chat_projections.reset_all() == 1
+        assert len(await store.chat_projections.due()) == 1
+    finally:
+        store.close()
+
+
+async def test_projection_receipt_failure_rolls_back_terminal_transition(tmp_path):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
+    owner = await _resolve(store)
+    try:
+        conversation = await store.conversations.create(user_id=owner.user_id)
+        started = await store.conversations.begin_run(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="Keep the terminal write atomic.",
+        )
+        assert started is not None
+        with sqlite3.connect(path) as connection:
+            connection.executescript(
+                """
+                CREATE TRIGGER fail_chat_projection_insert
+                BEFORE INSERT ON app_chat_projections
+                BEGIN
+                  SELECT RAISE(ABORT, 'projection receipt blocked');
+                END;
+                """
+            )
+
+        with pytest.raises(sqlite3.IntegrityError, match="projection receipt blocked"):
+            await store.conversations.finish_run(
+                user_id=owner.user_id,
+                run_id=started.run.run_id,
+                outcome="succeeded",
+                assistant_content="This must roll back too.",
+            )
+
+        run = await store.conversations.get_run(
+            user_id=owner.user_id,
+            run_id=started.run.run_id,
+        )
+        messages = await store.conversations.list_messages(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+        )
+        assert run is not None and run.status == "running"
+        assert messages is not None
+        assert messages[-1].status == "in_progress"
+        assert messages[-1].content == ""
+
+        with sqlite3.connect(path) as connection:
+            connection.execute("DROP TRIGGER fail_chat_projection_insert")
+        assert await store.conversations.finish_run(
+            user_id=owner.user_id,
+            run_id=started.run.run_id,
+            outcome="succeeded",
+            assistant_content="Atomic after repair.",
+        )
+        assert len(await store.chat_projections.due()) == 1
+    finally:
+        store.close()
+
+
+async def test_schema_v3_upgrade_does_not_duplicate_legacy_archive_writes(tmp_path):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
+    owner = await _resolve(store)
+    conversation = await store.conversations.create(user_id=owner.user_id)
+    started = await store.conversations.begin_run(
+        user_id=owner.user_id,
+        conversation_id=conversation.conversation_id,
+        user_content="Existing canonical question.",
+    )
+    assert started is not None
+    await store.conversations.finish_run(
+        user_id=owner.user_id,
+        run_id=started.run.run_id,
+        outcome="failed",
+        assistant_content="Existing partial answer.",
+        finish_reason="error",
+        error_code="provider_error",
+    )
+    store.close()
+
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP TABLE app_chat_projections")
+        connection.execute("DELETE FROM app_schema_migrations WHERE version = 4")
+        connection.commit()
+
+    upgraded = ApplicationStore(path)
+    try:
+        assert upgraded.schema_version == 4
+        assert await upgraded.chat_projections.due() == ()
+        existing = await upgraded.conversations.get_run(
+            user_id=owner.user_id,
+            run_id=started.run.run_id,
+        )
+        assert existing is not None
+        assert existing.status == "failed"
+    finally:
+        upgraded.close()
 
 
 @pytest.mark.parametrize("outcome", ["cancelled", "failed"])
@@ -355,6 +516,13 @@ async def test_restart_recovery_terminalizes_interrupted_runs_once(tmp_path):
         )
         assert alice_messages is not None
         assert alice_messages[-1].content == "partial response"
+        projections = await store.chat_projections.due()
+        assert len(projections) == 2
+        by_user = {projection.user_id: projection for projection in projections}
+        assert by_user[alice.user_id].assistant_content == "partial response"
+        assert by_user[alice.user_id].partial is True
+        assert by_user[bob.user_id].assistant_content == ""
+        assert by_user[bob.user_id].partial is True
     finally:
         store.close()
 
@@ -504,6 +672,44 @@ async def test_conversation_metadata_archive_and_delete_are_owner_bound(tmp_path
             user_id=alice.user_id,
             conversation_id=conversation.conversation_id,
         ) is None
+        deletions = await store.chat_projections.due_deletions()
+        assert len(deletions) == 1
+        assert deletions[0].deletion_id == (
+            f"conversation:{conversation.conversation_id}"
+        )
+        assert deletions[0].user_id == alice.user_id
+        assert deletions[0].storage_namespace == "alice@example.com"
+    finally:
+        store.close()
+
+
+async def test_projection_tombstone_failure_rolls_back_conversation_delete(tmp_path):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
+    owner = await _resolve(store)
+    try:
+        conversation = await store.conversations.create(user_id=owner.user_id)
+        with sqlite3.connect(path) as connection:
+            connection.executescript(
+                """
+                CREATE TRIGGER fail_projection_deletion_insert
+                BEFORE INSERT ON app_chat_projection_deletions
+                BEGIN
+                  SELECT RAISE(ABORT, 'projection deletion blocked');
+                END;
+                """
+            )
+
+        with pytest.raises(sqlite3.IntegrityError, match="projection deletion blocked"):
+            await store.conversations.delete(
+                user_id=owner.user_id,
+                conversation_id=conversation.conversation_id,
+            )
+        assert await store.conversations.get(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+        ) is not None
+        assert await store.chat_projections.due_deletions() == ()
     finally:
         store.close()
 
@@ -546,6 +752,8 @@ async def test_active_run_blocks_archive_and_delete_until_terminal(tmp_path):
             user_id=owner.user_id,
             run_id=started.run.run_id,
         ) is None
+        assert await store.chat_projections.due() == ()
+        assert len(await store.chat_projections.due_deletions()) == 1
     finally:
         store.close()
 
@@ -687,6 +895,16 @@ async def test_local_purge_is_atomic_owner_bound_and_idempotent(tmp_path):
             persona="Private persona",
             response_preferences={"detail": 9},
         )
+        deleted_conversation = await store.conversations.create(
+            user_id=alice.user_id
+        )
+        assert await store.conversations.delete(
+            user_id=alice.user_id,
+            conversation_id=deleted_conversation.conversation_id,
+        )
+        assert (
+            await store.chat_projections.deletion_stats(user_id=alice.user_id)
+        )["pending"] == 1
         alice_conversation = await store.conversations.create(user_id=alice.user_id)
         alice_run = await store.conversations.begin_run(
             user_id=alice.user_id,
@@ -719,6 +937,16 @@ async def test_local_purge_is_atomic_owner_bound_and_idempotent(tmp_path):
             user_id=alice.user_id,
             conversation_id=alice_conversation.conversation_id,
         ) is None
+        assert await store.chat_projections.deletion_stats(
+            user_id=alice.user_id
+        ) == {
+            "pending": 0,
+            "attempts": 0,
+            "with_error": 0,
+            "exhausted": 0,
+            "completed": 0,
+            "oldest_created_at": "",
+        }
         preferences = await store.preferences.get(user_id=alice.user_id)
         assert preferences is not None
         assert (preferences.timezone, preferences.persona, preferences.response_preferences) == (

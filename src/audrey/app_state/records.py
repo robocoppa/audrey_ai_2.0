@@ -85,6 +85,37 @@ class FinishedRun:
 
 
 @dataclass(frozen=True, slots=True)
+class ChatProjectionRecord:
+    """One canonical turn awaiting promotion to the search delivery queue."""
+
+    projection_id: str
+    user_id: str
+    storage_namespace: str
+    conversation_id: str
+    user_content: str
+    assistant_content: str
+    partial: bool
+    virtual_model: str
+    concrete_model: str
+    prompt_tokens: int
+    completion_tokens: int
+    created_at: str
+    attempts: int
+
+
+@dataclass(frozen=True, slots=True)
+class ChatProjectionDeletionRecord:
+    """One canonical conversation deletion awaiting search cleanup handoff."""
+
+    deletion_id: str
+    user_id: str
+    storage_namespace: str
+    conversation_id: str
+    requested_at: str
+    attempts: int
+
+
+@dataclass(frozen=True, slots=True)
 class LocalUserDataPurge:
     """Authoritative local rows erased or reset before remote purge delivery."""
 
@@ -96,6 +127,8 @@ class LocalUserDataPurge:
 
 
 __all__ = [
+    "ChatProjectionDeletionRecord",
+    "ChatProjectionRecord",
     "ConversationRecord",
     "FinishedRun",
     "LocalUserDataPurge",

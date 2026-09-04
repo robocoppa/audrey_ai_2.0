@@ -61,6 +61,7 @@ _MODELS: dict[str, str] = {
     "cloud": "audrey_cloud",
 }
 _StreamFactory = Callable[..., AsyncIterator[str]]
+_ArchiveWake = Callable[[], None]
 
 
 class NativeRunUnavailableError(RuntimeError):
@@ -147,6 +148,7 @@ class NativeRunManager:
         app: Any,
         store: ApplicationStore,
         stream_factory: _StreamFactory = _stream_via_pipeline,
+        archive_wake: _ArchiveWake | None = None,
         max_events_per_run: int = 20_000,
         max_completed_runs: int = 128,
     ) -> None:
@@ -157,6 +159,7 @@ class NativeRunManager:
         self._app = app
         self._store = store
         self._stream_factory = stream_factory
+        self._archive_wake = archive_wake
         self._max_events_per_run = max_events_per_run
         self._max_completed_runs = max_completed_runs
         self._runs: dict[str, _LiveRun] = {}
@@ -265,7 +268,7 @@ class NativeRunManager:
         assistant_content = "".join(live.answer_parts)
         usage = live.latest_usage
         try:
-            await self._store.conversations.finish_run(
+            finished = await self._store.conversations.finish_run(
                 user_id=live.owner_user_id,
                 run_id=live.started.run.run_id,
                 outcome=terminal.status,
@@ -277,6 +280,8 @@ class NativeRunManager:
                 prompt_tokens=usage.prompt_tokens if usage is not None else 0,
                 completion_tokens=usage.completion_tokens if usage is not None else 0,
             )
+            if finished is not None and self._archive_wake is not None:
+                self._archive_wake()
         except RunAlreadyTerminalError:
             log.warning(
                 "native run terminal row was already finalized run_id=%s",

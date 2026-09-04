@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime as dt
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -239,6 +240,10 @@ def _conversation_app(tmp_path):
 
 def test_conversation_routes_create_update_archive_list_and_delete(tmp_path):
     app, store, _ = _conversation_app(tmp_path)
+    archive_wakes: list[bool] = []
+    app.state.archive_projector = SimpleNamespace(
+        wake=lambda: archive_wakes.append(True)
+    )
     try:
         with TestClient(app) as client:
             created = client.post(
@@ -277,6 +282,7 @@ def test_conversation_routes_create_update_archive_list_and_delete(tmp_path):
             deleted = client.delete(f"/api/conversations/{conversation_id}")
             assert deleted.status_code == 204
             assert client.get(f"/api/conversations/{conversation_id}").status_code == 404
+            assert archive_wakes == [True]
     finally:
         store.close()
 

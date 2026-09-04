@@ -171,6 +171,40 @@ async def test_ready_snapshot_covers_tools_queues_workers_and_pressure():
 
 
 @pytest.mark.asyncio
+async def test_archive_readiness_combines_projection_and_delivery_oldest_age():
+    app = _app()
+    app.state.archive_queue.repair_stats.return_value = {
+        "pending": 2,
+        "attempts": 3,
+        "with_error": 0,
+        "exhausted": 0,
+        "completed": 0,
+    }
+    app.state.archive_projector = SimpleNamespace(
+        repair_stats=AsyncMock(
+            return_value={
+                "pending": 1,
+                "attempts": 2,
+                "with_error": 1,
+                "exhausted": 0,
+                "completed": 3,
+                "oldest_created_at": (
+                    dt.datetime.now(dt.UTC) - dt.timedelta(seconds=40)
+                ).isoformat(),
+            }
+        )
+    )
+
+    result = await ReadinessCollector(app, cache_ttl_s=0).collect(force=True)
+
+    archive = result.queues["archive_delivery"]
+    assert archive.depth == 3
+    assert archive.attempts == 5
+    assert archive.with_error == 1
+    assert archive.oldest_age_seconds >= 39
+
+
+@pytest.mark.asyncio
 async def test_optional_qdrant_failure_degrades_but_does_not_make_unready():
     collector = ReadinessCollector(
         _app(

@@ -335,6 +335,37 @@ async def test_admin_repair_status_is_global_sanitized_and_ready():
 
 
 @pytest.mark.asyncio
+async def test_admin_repair_status_combines_canonical_and_delivery_handoffs():
+    from audrey.routes import admin as admin_module
+
+    request, *_ = _repair_request()
+    request.app.state.archive_client.repair_stats.return_value = _repair_counts(
+        pending=2,
+        attempts=3,
+        completed=4,
+    )
+    request.app.state.archive_projector = SimpleNamespace(
+        repair_stats=AsyncMock(
+            return_value=_repair_counts(
+                pending=1,
+                attempts=2,
+                with_error=1,
+                completed=5,
+            )
+        ),
+        retry_now=AsyncMock(return_value=1),
+    )
+
+    result = await admin_module.repair_status(request, _fake_admin())
+
+    assert result.status == "repairing"
+    assert result.chat_delivery.pending == 3
+    assert result.chat_delivery.attempts == 5
+    assert result.chat_delivery.with_error == 1
+    assert result.chat_delivery.completed == 9
+
+
+@pytest.mark.asyncio
 async def test_admin_repair_status_degrades_only_remote_components():
     from audrey.routes import admin as admin_module
 
@@ -370,6 +401,66 @@ async def test_admin_repair_wakes_all_owners_and_runs_bounded_sidecar_pass():
 
 
 @pytest.mark.asyncio
+async def test_admin_repair_retries_canonical_projection_before_delivery_queue():
+    from audrey.routes import admin as admin_module
+
+    request, *_ = _repair_request()
+    order: list[str] = []
+    request.app.state.archive_projector = SimpleNamespace(
+        retry_now=AsyncMock(side_effect=lambda: order.append("projection")),
+    )
+    request.app.state.archive_client.retry_now = AsyncMock(
+        side_effect=lambda: order.append("delivery")
+    )
+
+    result = await admin_module.repair(request, _fake_admin())
+
+    assert result.chat_delivery.accepted is True
+    assert order == ["projection", "delivery"]
+
+
+@pytest.mark.asyncio
+async def test_admin_can_rebuild_canonical_chat_projection():
+    from audrey.routes import admin as admin_module
+
+    projector = SimpleNamespace(
+        rebuild=AsyncMock(return_value=7),
+        repair_stats=AsyncMock(return_value=_repair_counts(pending=2)),
+    )
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(archive_projector=projector))
+    )
+
+    result = await admin_module.rebuild_canonical_chat_projection(
+        request,
+        _fake_admin(),
+    )
+
+    assert result.status == "accepted"
+    assert result.projections_reset == 7
+    assert result.pending == 2
+    projector.rebuild.assert_awaited_once_with()
+    projector.repair_stats.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_canonical_chat_projection_rebuild_is_503_when_unavailable():
+    from audrey.routes import admin as admin_module
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(archive_projector=None))
+    )
+    with pytest.raises(HTTPException) as exc:
+        await admin_module.rebuild_canonical_chat_projection(
+            request,
+            _fake_admin(),
+        )
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "chat_projection_unavailable"
+
+
+@pytest.mark.asyncio
 async def test_admin_repair_is_partial_but_local_work_still_wakes_on_sidecar_outage():
     from audrey.routes import admin as admin_module
 
@@ -391,7 +482,11 @@ def test_admin_repair_routes_require_admin_and_accept_no_user_selector():
     from audrey.routes import admin as admin_module
 
     paths = {route.path: route for route in admin_module.router.routes}
-    for path in ("/v1/admin/repair-status", "/v1/admin/repair"):
+    for path in (
+        "/v1/admin/repair-status",
+        "/v1/admin/repair",
+        "/v1/admin/chat_archive/rebuild-canonical",
+    ):
         route = paths[path]
         assert require_admin in {item.call for item in route.dependant.dependencies}
         assert all(parameter.name != "user" for parameter in route.dependant.query_params)
