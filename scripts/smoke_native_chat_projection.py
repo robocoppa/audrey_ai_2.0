@@ -16,7 +16,6 @@ BASE_URL = os.getenv("AUDREY_SMOKE_BASE_URL", "http://127.0.0.1:8000").rstrip("/
 USER_TOKEN = os.getenv("TEST_OWUI_TOKEN", "")
 ADMIN_TOKEN = os.getenv("ADMIN_OWUI_TOKEN", "")
 PROMPT = "Reply exactly: 2B5-PROJECTION-READY"
-ANSWER = "2B5-PROJECTION-READY"
 
 
 class SmokeError(RuntimeError):
@@ -117,6 +116,29 @@ def _export_conversation(conversation_id: str) -> list[dict[str, Any]]:
     raise SmokeError("archive export exceeded 100 pages")
 
 
+def _canonical_turn(conversation_id: str) -> dict[str, str]:
+    _, page = _json_request(
+        f"/api/conversations/{conversation_id}/messages?limit=100",
+        token=USER_TOKEN,
+    )
+    items = page.get("items", [])
+    if page.get("next_cursor") is not None or len(items) != 2:
+        raise SmokeError(f"canonical conversation was not exactly one turn: {items}")
+    by_role = {str(item.get("role")): item for item in items}
+    if set(by_role) != {"user", "assistant"}:
+        raise SmokeError(f"canonical conversation roles were invalid: {items}")
+    user_content = str(by_role["user"].get("content") or "")
+    assistant_content = str(by_role["assistant"].get("content") or "")
+    if user_content != PROMPT:
+        raise SmokeError("canonical user content did not match the submitted prompt")
+    if not assistant_content.strip():
+        raise SmokeError("canonical assistant content was empty")
+    return {
+        "user": user_content,
+        "assistant": assistant_content,
+    }
+
+
 def _wait_for_projection(
     conversation_id: str,
     *,
@@ -153,13 +175,16 @@ def _repair_until_ready() -> dict[str, Any]:
     raise SmokeError(f"repair queues did not become ready: {last}")
 
 
-def _assert_one_turn(items: list[dict[str, Any]]) -> None:
+def _assert_one_turn(
+    items: list[dict[str, Any]],
+    canonical: dict[str, str],
+) -> None:
     by_role = {str(item.get("role")): item for item in items}
     if len(items) != 2 or set(by_role) != {"user", "assistant"}:
         raise SmokeError(f"projection was not exactly one turn: {items}")
-    if by_role["user"].get("content") != PROMPT:
+    if by_role["user"].get("content") != canonical["user"]:
         raise SmokeError("projected user content did not match canonical content")
-    if by_role["assistant"].get("content") != ANSWER:
+    if by_role["assistant"].get("content") != canonical["assistant"]:
         raise SmokeError("projected assistant content did not match canonical content")
 
 
@@ -228,9 +253,11 @@ def main() -> int:
         ):
             raise SmokeError(f"native run did not succeed: {terminal}")
 
+        canonical = _canonical_turn(conversation_id)
         first = _wait_for_projection(conversation_id, present=True)
-        _assert_one_turn(first)
+        _assert_one_turn(first, canonical)
         result["initial_projection_messages"] = len(first)
+        result["assistant_chars"] = len(canonical["assistant"])
 
         _, rebuild = _json_request(
             "/v1/admin/chat_archive/rebuild-canonical",
@@ -240,7 +267,7 @@ def main() -> int:
         )
         _repair_until_ready()
         rebuilt = _wait_for_projection(conversation_id, present=True)
-        _assert_one_turn(rebuilt)
+        _assert_one_turn(rebuilt, canonical)
         result["rebuild"] = {
             "projections_reset": rebuild.get("projections_reset"),
             "projection_messages": len(rebuilt),
