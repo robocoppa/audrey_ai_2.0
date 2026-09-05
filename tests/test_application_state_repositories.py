@@ -16,6 +16,7 @@ from audrey.app_state import (
     PersonalTokenAuthenticationError,
     RunAlreadyTerminalError,
 )
+from audrey.app_state.migrations import MIGRATIONS
 
 
 async def _resolve(
@@ -35,6 +36,113 @@ async def _resolve(
     )
 
 
+def _create_v4_database(path) -> None:
+    stamp = "2026-09-05T00:00:00+00:00"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE app_schema_migrations ("
+            "version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+        )
+        for version, sql in MIGRATIONS:
+            if version > 4:
+                break
+            connection.executescript(
+                "BEGIN IMMEDIATE;\n"
+                f"{sql}\n"
+                "INSERT INTO app_schema_migrations(version, applied_at) "
+                f"VALUES ({version}, '{stamp}');\n"
+                "COMMIT;"
+            )
+
+
+async def test_v4_upgrade_adds_video_mode_without_losing_canonical_state(tmp_path):
+    path = tmp_path / "app.sqlite"
+    _create_v4_database(path)
+    stamp = "2026-09-05T00:00:00+00:00"
+    with sqlite3.connect(path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute(
+            "INSERT INTO app_users "
+            "(user_id, storage_namespace, current_email, display_name, role, status, "
+            "created_at, updated_at) VALUES (?, ?, ?, ?, 'user', 'active', ?, ?)",
+            ("usr_existing", "alice@example.com", "alice@example.com", "Alice", stamp, stamp),
+        )
+        connection.execute(
+            "INSERT INTO app_conversations "
+            "(conversation_id, user_id, title, default_mode, created_at, updated_at, "
+            "last_message_at) VALUES (?, ?, ?, 'fast', ?, ?, ?)",
+            ("con_existing", "usr_existing", "Existing", stamp, stamp, stamp),
+        )
+        connection.execute(
+            "INSERT INTO app_runs "
+            "(run_id, conversation_id, user_id, mode, status, started_at, completed_at, "
+            "finish_reason, virtual_model, concrete_model, prompt_tokens, "
+            "completion_tokens) VALUES (?, ?, ?, 'fast', 'succeeded', ?, ?, 'stop', "
+            "'audrey_fast', 'qwen-test', 4, 2)",
+            ("run_existing", "con_existing", "usr_existing", stamp, stamp),
+        )
+        connection.executemany(
+            "INSERT INTO app_messages "
+            "(message_id, conversation_id, user_id, run_id, sequence_no, role, status, "
+            "content, created_at, updated_at) VALUES (?, 'con_existing', "
+            "'usr_existing', 'run_existing', ?, ?, 'completed', ?, ?, ?)",
+            [
+                ("msg_user", 1, "user", "Existing prompt", stamp, stamp),
+                ("msg_assistant", 2, "assistant", "Existing answer", stamp, stamp),
+            ],
+        )
+        connection.execute(
+            "INSERT INTO app_chat_projections "
+            "(projection_id, user_id, conversation_id, user_message_id, "
+            "assistant_message_id, created_at, next_attempt_at) "
+            "VALUES ('prj_existing', 'usr_existing', 'con_existing', 'msg_user', "
+            "'msg_assistant', ?, ?)",
+            (stamp, stamp),
+        )
+        connection.commit()
+
+    store = ApplicationStore(path)
+    try:
+        assert store.schema_version == 5
+        existing = await store.conversations.get(
+            user_id="usr_existing",
+            conversation_id="con_existing",
+        )
+        assert existing is not None and existing.default_mode == "fast"
+        messages = await store.conversations.list_messages(
+            user_id="usr_existing",
+            conversation_id="con_existing",
+        )
+        assert messages is not None
+        assert [message.content for message in messages] == [
+            "Existing prompt",
+            "Existing answer",
+        ]
+        assert len(await store.chat_projections.due()) == 1
+
+        video = await store.conversations.create(
+            user_id="usr_existing",
+            title="Video specialist",
+            default_mode="video",
+        )
+        started = await store.conversations.begin_run(
+            user_id="usr_existing",
+            conversation_id=video.conversation_id,
+            user_content="Summarize my video.",
+        )
+        assert started is not None and started.run.mode == "video"
+
+        with sqlite3.connect(path) as connection:
+            assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+            trigger = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'trigger' "
+                "AND name = 'trg_app_runs_terminal_immutable'"
+            ).fetchone()
+            assert trigger is not None
+    finally:
+        store.close()
+
+
 async def test_v2_upgrade_backfills_preferences_without_changing_identity_or_token(tmp_path):
     path = tmp_path / "app.sqlite"
     current = ApplicationStore(path)
@@ -49,18 +157,20 @@ async def test_v2_upgrade_backfills_preferences_without_changing_identity_or_tok
 
     with sqlite3.connect(path) as conn:
         conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("DROP TABLE app_chat_projections")
+        conn.execute("DROP TABLE app_chat_projection_deletions")
         conn.execute("DROP TABLE app_messages")
         conn.execute("DROP TABLE app_runs")
         conn.execute("DROP TABLE app_conversations")
         conn.execute("DROP TABLE user_preferences")
-        conn.execute("DELETE FROM app_schema_migrations WHERE version = 3")
+        conn.execute("DELETE FROM app_schema_migrations WHERE version >= 3")
         conn.commit()
 
     upgraded = ApplicationStore(path)
     try:
         after = await _resolve(upgraded)
         preferences = await upgraded.preferences.get(user_id=owner.user_id)
-        assert upgraded.schema_version == 4
+        assert upgraded.schema_version == 5
         assert after.user_id == owner.user_id
         assert preferences is not None
         assert preferences.timezone == "UTC"
@@ -339,12 +449,12 @@ async def test_schema_v3_upgrade_does_not_duplicate_legacy_archive_writes(tmp_pa
 
     with sqlite3.connect(path) as connection:
         connection.execute("DROP TABLE app_chat_projections")
-        connection.execute("DELETE FROM app_schema_migrations WHERE version = 4")
+        connection.execute("DELETE FROM app_schema_migrations WHERE version >= 4")
         connection.commit()
 
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 4
+        assert upgraded.schema_version == 5
         assert await upgraded.chat_projections.due() == ()
         existing = await upgraded.conversations.get_run(
             user_id=owner.user_id,
@@ -1010,7 +1120,10 @@ async def test_repository_rejects_invalid_modes_and_terminal_metadata(tmp_path):
     owner = await _resolve(store)
     try:
         with pytest.raises(InvalidApplicationStateError, match="mode"):
-            await store.conversations.create(user_id=owner.user_id, default_mode="video")
+            await store.conversations.create(
+                user_id=owner.user_id,
+                default_mode="passthrough",
+            )
         conversation = await store.conversations.create(user_id=owner.user_id)
         started = await store.conversations.begin_run(
             user_id=owner.user_id,

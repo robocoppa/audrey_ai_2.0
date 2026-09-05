@@ -69,6 +69,7 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await page.goto("./");
   await expect(page.getByRole("heading", { name: "Browser smoke" })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Mode" })).toHaveValue("fast");
+  await expect(page.getByRole("option", { name: "Video" })).toHaveCount(1);
 
   const composer = page.getByRole("textbox", { name: "Message Audrey" });
   await composer.fill("Exercise the native browser path");

@@ -219,6 +219,94 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
 
         """,
     ),
+    (
+        5,
+        """
+        PRAGMA legacy_alter_table = ON;
+
+        ALTER TABLE app_runs RENAME TO app_runs_before_video_mode;
+
+        CREATE TABLE app_runs (
+          run_id            TEXT PRIMARY KEY,
+          conversation_id   TEXT NOT NULL,
+          user_id           TEXT NOT NULL,
+          mode              TEXT NOT NULL CHECK (mode IN
+                              ('auto', 'fast', 'deep', 'research', 'local', 'cloud',
+                               'video')),
+          status            TEXT NOT NULL CHECK (status IN
+                              ('running', 'succeeded', 'cancelled', 'failed')),
+          started_at        TEXT NOT NULL,
+          completed_at      TEXT,
+          finish_reason     TEXT NOT NULL DEFAULT '',
+          error_code        TEXT NOT NULL DEFAULT '',
+          virtual_model     TEXT NOT NULL DEFAULT '',
+          concrete_model    TEXT NOT NULL DEFAULT '',
+          prompt_tokens     INTEGER NOT NULL DEFAULT 0 CHECK (prompt_tokens >= 0),
+          completion_tokens INTEGER NOT NULL DEFAULT 0 CHECK (completion_tokens >= 0),
+          UNIQUE (run_id, conversation_id, user_id),
+          CHECK (
+            (status = 'running' AND completed_at IS NULL)
+            OR (status != 'running' AND completed_at IS NOT NULL)
+          ),
+          FOREIGN KEY (conversation_id, user_id)
+            REFERENCES app_conversations(conversation_id, user_id) ON DELETE CASCADE
+        );
+
+        INSERT INTO app_runs
+          (run_id, conversation_id, user_id, mode, status, started_at,
+           completed_at, finish_reason, error_code, virtual_model, concrete_model,
+           prompt_tokens, completion_tokens)
+        SELECT run_id, conversation_id, user_id, mode, status, started_at,
+               completed_at, finish_reason, error_code, virtual_model, concrete_model,
+               prompt_tokens, completion_tokens
+        FROM app_runs_before_video_mode;
+
+        DROP TABLE app_runs_before_video_mode;
+
+        CREATE INDEX idx_app_runs_conversation_started
+          ON app_runs(user_id, conversation_id, started_at, run_id);
+
+        CREATE TRIGGER trg_app_runs_terminal_immutable
+        BEFORE UPDATE OF status ON app_runs
+        WHEN OLD.status != 'running'
+        BEGIN
+          SELECT RAISE(ABORT, 'terminal run outcome is immutable');
+        END;
+
+        ALTER TABLE app_conversations
+          RENAME TO app_conversations_before_video_mode;
+
+        CREATE TABLE app_conversations (
+          conversation_id TEXT PRIMARY KEY,
+          user_id          TEXT NOT NULL,
+          title            TEXT NOT NULL DEFAULT '',
+          default_mode     TEXT NOT NULL DEFAULT 'auto'
+                           CHECK (default_mode IN
+                             ('auto', 'fast', 'deep', 'research', 'local', 'cloud',
+                              'video')),
+          created_at       TEXT NOT NULL,
+          updated_at       TEXT NOT NULL,
+          last_message_at  TEXT,
+          archived_at      TEXT,
+          UNIQUE (conversation_id, user_id),
+          FOREIGN KEY (user_id) REFERENCES app_users(user_id) ON DELETE CASCADE
+        );
+
+        INSERT INTO app_conversations
+          (conversation_id, user_id, title, default_mode, created_at, updated_at,
+           last_message_at, archived_at)
+        SELECT conversation_id, user_id, title, default_mode, created_at, updated_at,
+               last_message_at, archived_at
+        FROM app_conversations_before_video_mode;
+
+        DROP TABLE app_conversations_before_video_mode;
+
+        CREATE INDEX idx_app_conversations_user_activity
+          ON app_conversations(user_id, last_message_at DESC, created_at DESC);
+
+        PRAGMA legacy_alter_table = OFF;
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS"]

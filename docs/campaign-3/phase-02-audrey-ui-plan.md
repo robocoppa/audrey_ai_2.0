@@ -673,7 +673,7 @@ deleted both canonical and archive state and returned repair to `ready`.
 Milestone 2C remains open for the public Cloudflare Access browser path,
 remaining native capabilities, and every-mode exercise.
 
-Slice 2C.2 is laptop-complete. `/api/conversations` now provides owner-scoped,
+Slice 2C.2 is complete and Unraid-verified. `/api/conversations` now provides owner-scoped,
 case-insensitive literal title search and binds each pagination cursor to its
 archive and search view. The browser adds debounced server search, active and
 archived views, older-page loading, rename, archive, read-only archived
@@ -687,9 +687,33 @@ and six Chromium paths covering the original run/auth behavior plus complete
 conversation lifecycle, pagination, and durable mode switching. Typecheck,
 lint, scoped ruff, compilation, production build, wheel contents, lockfile, and
 diff checks are clean; the lesson scan has zero broken links. The extended
-`scripts/smoke_native_ui.py` is the pending 2C.2 Unraid gate and now verifies
-real rename, literal title search, archive, and restore before its existing
-deletion and repair cleanup.
+`scripts/smoke_native_ui.py` also passed on Unraid: the deployed native asset
+and CSP checks were clean, two identities remained isolated, a real Fast run
+persisted its canonical messages, rename and literal `%_` title search worked,
+archive/restore completed, and deletion cleanup returned repair to `ready`.
+
+Slice 2C.3 is laptop-complete. It closes a parity gap found while preparing the
+every-mode gate: `/v1/models` published `audrey_video`, but canonical native
+state, native routes, and the browser accepted only six modes. Schema v5 widens
+the two mode constraints with a transactional table rebuild. The migration
+preserves existing conversations, runs, messages, and projection receipts,
+checks the rebuilt foreign-key graph before commit, restores foreign-key
+enforcement, and recreates the immutable-terminal trigger. Native Video now
+launches `audrey_video`, and the browser lists it alongside the other modes.
+
+A permanent invariant requires the native mode map to cover every published
+virtual model. `scripts/smoke_native_modes.py` is the pending Unraid gate: it
+creates one disposable conversation per mode, runs all seven through the same
+native AG-UI boundary used by the browser, verifies durable mode/model/message
+state, then deletes canonical and archive records and drains repair once. The
+local gate passes all 2,749 backend tests, three Vitest contracts, six Chromium
+workflows, typecheck, lint, scoped ruff, compilation, production build, wheel
+contents, lockfile, and diff checks. The remaining Milestone 2C evidence is the
+deployed seven-mode result and the interactive Cloudflare Access browser path.
+Take an online backup of `audrey_app.sqlite` before the first schema-v5 startup.
+A pre-v5 image does not understand persisted `video` rows, so after real native
+Video use the rollback choices are to roll forward or restore that snapshot;
+the latter discards canonical changes made after the backup.
 
 ### Milestone 2D — files, preferences, and ownership operations
 

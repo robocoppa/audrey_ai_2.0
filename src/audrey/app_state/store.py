@@ -39,6 +39,7 @@ from audrey.identity import (
 _ALLOWED_ROLES = frozenset({"user", "admin"})
 _TOKEN_RE = re.compile(r"\Aaud_(pat_[0-9a-f]{32})\.([A-Za-z0-9_-]{32,})\Z")
 _LAST_USED_WRITE_INTERVAL = dt.timedelta(minutes=5)
+_FOREIGN_KEYS_OFF_MIGRATIONS = frozenset({5})
 
 class InvalidIdentityError(ValueError):
     """Authentication evidence is incomplete or outside Audrey policy."""
@@ -83,6 +84,9 @@ class ApplicationStore:
             if version in applied:
                 continue
             stamp = _utc_now()
+            if version in _FOREIGN_KEYS_OFF_MIGRATIONS:
+                self._apply_table_rebuild_migration_locked(version, sql, stamp)
+                continue
             try:
                 self._conn.executescript(
                     "BEGIN IMMEDIATE;\n"
@@ -95,6 +99,35 @@ class ApplicationStore:
                 if self._conn.in_transaction:
                     self._conn.rollback()
                 raise
+
+    def _apply_table_rebuild_migration_locked(
+        self,
+        version: int,
+        sql: str,
+        stamp: str,
+    ) -> None:
+        """Apply a table rebuild without cascading through canonical children."""
+
+        self._conn.execute("PRAGMA foreign_keys = OFF")
+        try:
+            self._conn.executescript(f"BEGIN IMMEDIATE;\n{sql}\n")
+            violations = self._conn.execute("PRAGMA foreign_key_check").fetchall()
+            if violations:
+                raise sqlite3.IntegrityError(
+                    f"migration {version} produced foreign-key violations"
+                )
+            self._conn.execute(
+                "INSERT INTO app_schema_migrations(version, applied_at) VALUES (?, ?)",
+                (version, stamp),
+            )
+            self._conn.commit()
+        except BaseException:
+            if self._conn.in_transaction:
+                self._conn.rollback()
+            raise
+        finally:
+            self._conn.execute("PRAGMA legacy_alter_table = OFF")
+            self._conn.execute("PRAGMA foreign_keys = ON")
 
     @property
     def schema_version(self) -> int:

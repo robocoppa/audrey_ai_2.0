@@ -263,11 +263,11 @@ def test_conversation_routes_create_update_archive_list_and_delete(tmp_path):
 
             changed = client.patch(
                 f"/api/conversations/{conversation_id}",
-                json={"title": "Renamed", "default_mode": "research"},
+                json={"title": "Renamed", "default_mode": "video"},
             )
             assert changed.status_code == 200
             assert changed.json()["title"] == "Renamed"
-            assert changed.json()["default_mode"] == "research"
+            assert changed.json()["default_mode"] == "video"
 
             archived = client.patch(
                 f"/api/conversations/{conversation_id}",

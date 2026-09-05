@@ -7,7 +7,14 @@ export interface CurrentUser {
   auth_provider: string;
 }
 
-export type AudreyMode = "auto" | "fast" | "deep" | "research" | "local" | "cloud";
+export type AudreyMode =
+  | "auto"
+  | "fast"
+  | "deep"
+  | "research"
+  | "local"
+  | "cloud"
+  | "video";
 
 export interface Conversation {
   id: string;

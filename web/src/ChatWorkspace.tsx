@@ -30,6 +30,7 @@ const MODES: ReadonlyArray<{ value: AudreyMode; label: string }> = [
   { value: "research", label: "Research" },
   { value: "local", label: "Local only" },
   { value: "cloud", label: "Cloud" },
+  { value: "video", label: "Video" },
 ];
 
 type ThreadState =

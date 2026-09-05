@@ -22,7 +22,9 @@ from audrey.app_state.records import (
     UserPreferences,
 )
 
-_ALLOWED_MODES = frozenset({"auto", "fast", "deep", "research", "local", "cloud"})
+_ALLOWED_MODES = frozenset(
+    {"auto", "fast", "deep", "research", "local", "cloud", "video"}
+)
 _TERMINAL_RUN_STATUSES = frozenset({"succeeded", "cancelled", "failed"})
 
 

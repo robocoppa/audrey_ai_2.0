@@ -51,7 +51,7 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["runs"])
 _run_access = require_scope("compat:full")
-_Mode = Literal["auto", "fast", "deep", "research", "local", "cloud"]
+_Mode = Literal["auto", "fast", "deep", "research", "local", "cloud", "video"]
 _MODELS: dict[str, str] = {
     "auto": "audrey_auto",
     "fast": "audrey_fast",
@@ -59,6 +59,7 @@ _MODELS: dict[str, str] = {
     "research": "audrey_research",
     "local": "audrey_local",
     "cloud": "audrey_cloud",
+    "video": "audrey_video",
 }
 _StreamFactory = Callable[..., AsyncIterator[str]]
 _ArchiveWake = Callable[[], None]

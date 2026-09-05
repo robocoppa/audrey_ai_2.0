@@ -22,7 +22,7 @@ from audrey.identity import Principal
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 _conversation_access = require_scope("compat:full")
-_Mode = Literal["auto", "fast", "deep", "research", "local", "cloud"]
+_Mode = Literal["auto", "fast", "deep", "research", "local", "cloud", "video"]
 
 
 class ConversationCreateRequest(BaseModel):

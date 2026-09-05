@@ -10,9 +10,10 @@ native conversation/run resources, typed and AG-UI events, real pipeline
 observations, and the rebuildable canonical archive projection have all passed
 their live gates. Milestone 2C is in progress: Its first native web-client
 slice is complete and Unraid-verified; the interactive Cloudflare Access
-browser path and remaining native capabilities are next.
-Slice 2C.2 conversation management is laptop-complete and awaiting its Unraid
-gate.
+browser path is still pending.
+Slice 2C.2 conversation management is complete and Unraid-verified.
+Slice 2C.3 Video parity and its seven-mode smoke are laptop-complete and await
+their Unraid gate.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,
@@ -24,7 +25,7 @@ and finally adds the first general skills layer on that owned surface.
 | Phase | Plan | Outcome | Entry gate | Status |
 |---|---|---|---|---|
 | 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | Complete |
-| 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (Milestones 2A–2B and 2C.1 complete; 2C.2 laptop-complete) |
+| 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (Milestones 2A–2B and slices 2C.1–2C.2 complete; 2C.3 laptop-complete) |
 | 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | Planned |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1,

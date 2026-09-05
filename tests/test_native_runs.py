@@ -17,9 +17,11 @@ from audrey.identity import Principal
 from audrey.pipeline.run_events import RunEventContext, RunFinishedEvent
 from audrey.routes.app import router
 from audrey.routes.app.runs import (
+    _MODELS,
     NativeRunCursorExpiredError,
     NativeRunManager,
 )
+from audrey.routes.openai import VIRTUAL_MODELS
 from audrey.routes.openai.schemas import ChatCompletionRequest
 
 
@@ -120,6 +122,10 @@ def _agui_sse_events(body: str) -> list[tuple[str, dict[str, Any]]]:
         data = json.loads(next(line[6:] for line in lines if line.startswith("data: ")))
         events.append((cursor, data))
     return events
+
+
+def test_native_modes_cover_every_published_virtual_model():
+    assert set(_MODELS.values()) == set(VIRTUAL_MODELS)
 
 
 def test_native_run_create_stream_persist_and_resume_are_canonical(tmp_path):
@@ -293,6 +299,50 @@ def test_http_agent_endpoint_uses_only_latest_user_action_and_server_history(tmp
             ]
             run = client.get(f"/api/runs/{response.headers['x-audrey-run-id']}").json()
             assert run["mode"] == "research"
+    finally:
+        store.close()
+
+
+def test_http_agent_video_mode_launches_the_published_video_model(tmp_path):
+    launched_models: list[str] = []
+
+    async def capture_model(*args, **kwargs):
+        payload = args[1]
+        launched_models.append(payload.model)
+        async for chunk in _successful_stream(*args, **kwargs):
+            yield chunk
+
+    app, store, owner, _manager = _native_app(
+        tmp_path,
+        stream_factory=capture_model,
+    )
+    conversation = asyncio.run(
+        store.conversations.create(
+            user_id=owner.user_id,
+            title="Video specialist",
+            default_mode="video",
+        )
+    )
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/agent?mode=video",
+                json={
+                    "threadId": conversation.conversation_id,
+                    "runId": "client-video-run",
+                    "messages": [
+                        {
+                            "id": "video-message",
+                            "role": "user",
+                            "content": "Summarize my video.",
+                        }
+                    ],
+                },
+            )
+            assert response.status_code == 200
+            run = client.get(f"/api/runs/{response.headers['x-audrey-run-id']}").json()
+            assert run["mode"] == "video"
+            assert launched_models == ["audrey_video"]
     finally:
         store.close()
 
