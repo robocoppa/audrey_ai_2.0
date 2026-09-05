@@ -76,6 +76,13 @@ class EnvOverrides(BaseSettings):
         alias="CLOUDFLARE_ACCESS_AUDIENCE",
     )
 
+    # The native browser client remains a separate, opt-in surface throughout
+    # migration. Serving its static shell does not change API authentication.
+    native_ui_enabled: bool = Field(
+        default=False,
+        alias="AUDREY_NATIVE_UI_ENABLED",
+    )
+
     kb_service_token: str = Field(default="", alias="KB_SERVICE_TOKEN")
 
     # Search

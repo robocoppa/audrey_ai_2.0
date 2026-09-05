@@ -88,6 +88,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/audrey"]
+# Vite writes this gitignored tree before the production wheel is built.
+# Hatch artifacts deliberately include generated/VCS-ignored files when they
+# exist, while ordinary source installs can still omit the default-off UI.
+artifacts = ["src/audrey/static/app/**"]
 
 [tool.uv]
 package = true

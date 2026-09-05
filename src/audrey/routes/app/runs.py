@@ -82,6 +82,39 @@ class RunCreateRequest(BaseModel):
     max_tokens: int | None = Field(default=None, ge=1)
 
 
+class AgUiClientMessage(BaseModel):
+    """The small part of an AG-UI message Audrey needs at this boundary."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(min_length=1, max_length=200)
+    role: Literal[
+        "developer",
+        "system",
+        "assistant",
+        "user",
+        "tool",
+        "activity",
+        "reasoning",
+    ]
+    content: Any = ""
+
+
+class AgUiRunRequest(BaseModel):
+    """Compatible input envelope for ``@ag-ui/client``'s HTTP agent.
+
+    Audrey intentionally ignores the submitted history, tools, and identity
+    fields. Canonical history and server-authorized tools are loaded after the
+    authenticated conversation owner is resolved.
+    """
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    thread_id: str = Field(alias="threadId", min_length=1, max_length=200)
+    run_id: str = Field(alias="runId", min_length=1, max_length=200)
+    messages: list[AgUiClientMessage] = Field(min_length=1, max_length=1_000)
+
+
 class RunResponse(BaseModel):
     id: str
     conversation_id: str
@@ -429,6 +462,31 @@ def _history_messages(
     return messages
 
 
+def _agui_user_content(payload: AgUiRunRequest) -> str:
+    """Extract only the newest text action from an AG-UI request."""
+
+    message = payload.messages[-1]
+    if message.role != "user":
+        raise HTTPException(status_code=422, detail="The final AG-UI message must be user text.")
+    if isinstance(message.content, str):
+        content = message.content.strip()
+    elif isinstance(message.content, list):
+        content = "".join(
+            part.get("text", "")
+            for part in message.content
+            if isinstance(part, dict)
+            and part.get("type") == "text"
+            and isinstance(part.get("text"), str)
+        ).strip()
+    else:
+        content = ""
+    if not content:
+        raise HTTPException(status_code=422, detail="AG-UI user text is required.")
+    if len(content) > 1_000_000:
+        raise HTTPException(status_code=422, detail="AG-UI user text is too large.")
+    return content
+
+
 @router.post(
     "/conversations/{conversation_id}/runs",
     response_model=RunCreateResponse,
@@ -487,6 +545,37 @@ async def create_run(
         agui_events_url=f"/api/runs/{started.run.run_id}/ag-ui-events",
         cancel_url=f"/api/runs/{started.run.run_id}/cancel",
     )
+
+
+@router.post("/agent")
+async def run_agui_agent(
+    payload: AgUiRunRequest,
+    request: Request,
+    mode: Annotated[_Mode | None, Query()] = None,
+    principal: Principal = Depends(_run_access),
+) -> StreamingResponse:
+    """Start and stream one standard AG-UI turn for the native browser.
+
+    The browser's ``threadId`` selects an Audrey-issued conversation but its
+    transcript is never authoritative. ``create_run`` reloads canonical
+    history after owner scoping and accepts only the newest user action.
+    """
+
+    created = await create_run(
+        conversation_id=payload.thread_id,
+        payload=RunCreateRequest(content=_agui_user_content(payload), mode=mode),
+        request=request,
+        principal=principal,
+    )
+    response = await _agui_stream_response(
+        run_id=created.id,
+        request=request,
+        principal=principal,
+        cursor=AgUiCursor(source_sequence=0, part=None),
+        cancel_on_disconnect=True,
+    )
+    response.headers["X-Audrey-Run-ID"] = created.id
+    return response
 
 
 @router.get("/runs/{run_id}", response_model=RunResponse)
@@ -612,6 +701,23 @@ async def stream_run_agui_events(
     """Adapt one owner-bound live run to the current AG-UI SSE vocabulary."""
 
     cursor = _resolve_agui_cursor(after=after, last_event_id=last_event_id)
+    return await _agui_stream_response(
+        run_id=run_id,
+        request=request,
+        principal=principal,
+        cursor=cursor,
+        cancel_on_disconnect=False,
+    )
+
+
+async def _agui_stream_response(
+    *,
+    run_id: str,
+    request: Request,
+    principal: Principal,
+    cursor: AgUiCursor,
+    cancel_on_disconnect: bool,
+) -> StreamingResponse:
     manager = _manager(request)
     try:
         live = await manager.open_events(
@@ -638,26 +744,31 @@ async def stream_run_agui_events(
     _validate_agui_fanout_cursor(live=live, cursor=cursor, adapter=adapter)
 
     async def _events() -> AsyncIterator[str]:
-        async for event in manager.iter_events(
-            live,
-            after_sequence=cursor.native_after_sequence,
-        ):
-            if event is None:
-                yield ": keep-alive\n\n"
-                continue
-            for part, agui_event in enumerate(adapter.adapt(event), start=1):
-                if cursor.consumed(source_sequence=event.sequence, part=part):
+        try:
+            async for event in manager.iter_events(
+                live,
+                after_sequence=cursor.native_after_sequence,
+            ):
+                if event is None:
+                    yield ": keep-alive\n\n"
                     continue
-                event_cursor = format_agui_cursor(
-                    source_sequence=event.sequence,
-                    part=part,
-                )
-                data = json.dumps(
-                    dump_agui_event(agui_event),
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                )
-                yield f"id: {event_cursor}\ndata: {data}\n\n"
+                for part, agui_event in enumerate(adapter.adapt(event), start=1):
+                    if cursor.consumed(source_sequence=event.sequence, part=part):
+                        continue
+                    event_cursor = format_agui_cursor(
+                        source_sequence=event.sequence,
+                        part=part,
+                    )
+                    data = json.dumps(
+                        dump_agui_event(agui_event),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    yield f"id: {event_cursor}\ndata: {data}\n\n"
+        except asyncio.CancelledError:
+            if cancel_on_disconnect:
+                await manager.cancel(user_id=principal.user_id, run_id=run_id)
+            raise
 
     return StreamingResponse(
         _events(),

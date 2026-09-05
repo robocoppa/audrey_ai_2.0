@@ -4,13 +4,12 @@
 progress; identity slices 2A.1 and 2A.2, including the account-purge lifecycle
 corrective, and slice 2A.3 canonical application state are complete and
 Unraid-verified. Slice 2A.4's optional Cloudflare Access boundary has also
-passed its default-disabled Unraid smoke. Milestone 2A is complete. Milestone
-2B is in progress: Its first owner-bound conversation/history API slice is
-complete and Unraid-verified, as is its universal run-event/native-run slice.
-The AG-UI boundary adapter and real pipeline tool/source observation wiring
-are also complete and Unraid-verified. Canonical archive dual-write and its
-rebuildable chat-search projection are laptop-complete; the 2B.5 Unraid gate
-is next.
+passed its default-disabled Unraid smoke. Milestones 2A and 2B are complete
+and Unraid-verified: Provider-neutral identity, canonical application state,
+native conversation/run resources, typed and AG-UI events, real pipeline
+observations, and the rebuildable canonical archive projection have all passed
+their live gates. Milestone 2C is in progress: Its first native web-client
+slice is laptop-complete and awaiting the Unraid/browser gate.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,
@@ -22,7 +21,7 @@ and finally adds the first general skills layer on that owned surface.
 | Phase | Plan | Outcome | Entry gate | Status |
 |---|---|---|---|---|
 | 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | Complete |
-| 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (2B.5 laptop-complete; Unraid gate pending) |
+| 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (Milestones 2A–2B complete; 2C.1 laptop-complete) |
 | 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | Planned |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1,

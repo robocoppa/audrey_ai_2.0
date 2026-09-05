@@ -74,6 +74,7 @@ services:
       OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
       QDRANT_HOST: ${QDRANT_HOST:-qdrant}
       QDRANT_PORT: ${QDRANT_PORT:-6333}
+      AUDREY_NATIVE_UI_ENABLED: ${AUDREY_NATIVE_UI_ENABLED:-0}
       # TOOL_SERVERS and KB_DATASET_PATHS deliberately omitted — the
       # YAML (`config.yaml`'s `tools.servers` and `kb.dataset_paths`) is
       # the source of truth. Set those env vars in `.env` only if you

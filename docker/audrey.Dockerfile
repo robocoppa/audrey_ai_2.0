@@ -9,6 +9,17 @@
 #     -v $PWD/config.yaml:/app/config.yaml:ro \
 #     audrey-ai:latest
 
+# The browser client is compiled once during the image build; production runs
+# only FastAPI. The Node image is pinned to the multi-architecture digest for
+# reproducible amd64/arm64 builds.
+FROM node:24.20.0-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS web-build
+
+WORKDIR /workspace
+COPY web/package.json web/package-lock.json /workspace/web/
+RUN npm ci --prefix /workspace/web
+COPY web /workspace/web
+RUN npm run build --prefix /workspace/web
+
 # Phase 31: pinned to digest for reproducibility. Tag (`python:3.12-slim`)
 # is what this digest pointed to on 2026-05-02. To bump:
 #   docker pull python:3.12-slim
@@ -52,7 +63,9 @@ RUN uv sync --locked --no-dev --package audrey \
 # ── Layer 2: audrey package only ────────────────────────────
 COPY README.md  /app/README.md
 COPY src/audrey /app/src/audrey
+COPY --from=web-build /workspace/src/audrey/static/app /app/src/audrey/static/app
 RUN uv sync --locked --no-dev --package audrey --no-editable --no-cache
+RUN python -c "from importlib.resources import files; assert files('audrey').joinpath('static/app/index.html').is_file()"
 
 COPY config.yaml /app/config.yaml
 

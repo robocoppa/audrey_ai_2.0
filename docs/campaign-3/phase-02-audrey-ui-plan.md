@@ -1,13 +1,11 @@
 # Campaign 3 Phase 2 — Audrey application and web UI
 
-**Status:** In progress. Milestone 2A is complete and Unraid-verified, including
-the optional, default-disabled Cloudflare Access identity adapter. Milestone 2B
-is underway; its first owner-bound conversation/history API slice is
-complete and Unraid-verified. The universal run-event/native-run slice is also
-complete and Unraid-verified. The AG-UI boundary adapter is also complete and
-Unraid-verified. Pipeline tool/source observation wiring is also complete and
-Unraid-verified. Archive import/dual-write and rebuildable chat-search
-projection are next.
+**Status:** In progress. Milestones 2A and 2B are complete and
+Unraid-verified, including provider-neutral identity, canonical application
+state, native conversation/run resources, typed and AG-UI events, real
+pipeline observations, and rebuildable canonical archive projection.
+Milestone 2C is in progress; its first native web-client slice is
+laptop-complete and awaiting the Unraid/browser gate.
 
 ## Goal
 
@@ -296,8 +294,8 @@ archive state, and waits for the repair queues to return to `ready`.
 
 ### 2B.5 — canonical archive projection and repair
 
-Laptop implementation and verification are complete; the Unraid gate is
-pending. Schema v4 adds durable projection receipts owned by the canonical
+Implementation and verification are complete and Unraid-verified. Schema v4
+adds durable projection receipts owned by the canonical
 application database. A native run's terminal transaction now commits its run,
 assistant message, and search-projection receipt atomically. A lifecycle-owned
 promoter hands that receipt to the existing local archive outbox with a stable
@@ -327,6 +325,13 @@ one disposable test-owned native turn, verifies the two projected messages,
 replays all canonical receipts without duplication, deletes only that native
 conversation, verifies its projection disappears, and waits for repair to
 return to `ready`.
+
+On Unraid, schema v4 started with zero pending canonical projections and the
+worker enabled. The packaged gate projected exactly one canonical user and
+assistant pair, reset one receipt and replayed it without duplication, then
+deleted the canonical conversation with `204`; its read became `404`, its
+projected message count became zero, and global repair returned to `ready`.
+Slice 2B.5 and Milestone 2B are complete and Unraid-verified.
 
 
 ## Decision
@@ -618,11 +623,14 @@ Implementation status: Complete and Unraid-verified.
 - Implement native conversation/message/run resources and server-loaded history.
 - Add the AG-UI adapter and cancellation endpoint.
 - Persist success, cancellation, disconnect, and failure terminal state.
-- Add archive import/dual-write and rebuildable chat-search projection.
+- Add canonical archive dual-write and rebuildable chat-search projection;
+  leave the explicit pre-native history import to Milestone 2E.
 - Keep existing OpenAI behavior unchanged.
 
 Gate: fragmentation, ownership, cancellation, failure-injection, archive repair,
 and compatibility regression tests pass.
+
+Implementation status: Complete and Unraid-verified.
 
 ### Milestone 2C — native vertical slice
 
@@ -636,6 +644,32 @@ and compatibility regression tests pass.
 Gate: no browser-stored API secret; two-user browser isolation; tools need no
 client continuation; accessibility checks; Playwright happy, failure, and
 cancellation paths; user-confirmed Unraid smoke.
+
+Implementation status: The first 2C slice is laptop-complete. A pinned
+React/TypeScript/Vite workspace builds in a Node stage and ships only static
+assets in the Audrey image. `/app/` is disabled by default, applies restrictive
+browser headers when enabled, and leaves OWUI untouched. The native shell lists
+and creates owner-bound conversations, renders canonical history, selects and
+persists a mode, and sends runs through the standard `/api/agent` AG-UI
+endpoint. The browser transport removes prior history, state, identity, and
+client tool declarations before sending the newest user action; Audrey reloads
+canonical history and authorizes tools server-side.
+
+Typed stages, progress, tools, sources, success, cancellation, and failures are
+rendered without parsing compatibility banners. The login shell lazy-loads the
+chat runtime and the production build splits its large libraries into bounded,
+cacheable chunks. Three Vitest contracts and three Chromium Playwright paths
+cover same-origin identity, no browser-stored bearer, latest-action transport,
+keyboard submission, typed activity, accessibility, cancellation, and session
+expiry. All 2,745 hermetic backend tests pass; scoped ruff and compilation are
+clean. Generated assets are explicit Hatch wheel artifacts despite their
+gitignored build directory, production source maps are disabled, and the image
+build asserts that the installed package contains the native shell.
+`scripts/smoke_native_ui.py` packages the pending two-user Unraid gate,
+including static assets/CSP, cross-owner read and run denial, one real AG-UI
+turn, canonical persistence, and cleanup/repair. Milestone 2C remains open for
+the deployed gate, public Cloudflare Access browser path, and every-mode
+exercise.
 
 ### Milestone 2D — files, preferences, and ownership operations
 

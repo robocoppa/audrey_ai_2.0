@@ -56,6 +56,14 @@ htmlcov/
 dist/
 build/
 
+# Native web client (generated from web/ into the Python package at build time)
+node_modules/
+web/dist/
+src/audrey/static/app/
+*.tsbuildinfo
+web/playwright-report/
+web/test-results/
+
 # uv
 .uv/
 
