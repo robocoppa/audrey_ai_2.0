@@ -683,6 +683,35 @@ async def test_conversation_metadata_archive_and_delete_are_owner_bound(tmp_path
         store.close()
 
 
+async def test_conversation_title_search_is_literal_and_owner_scoped(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    alice = await _resolve(store)
+    bob = await _resolve(store, subject="owui-bob", email="bob@example.com")
+    try:
+        matching = await store.conversations.create(
+            user_id=alice.user_id,
+            title="Release 100%_Ready",
+        )
+        await store.conversations.create(user_id=alice.user_id, title="Other notes")
+        await store.conversations.create(
+            user_id=bob.user_id,
+            title="Release 100%_Ready for Bob",
+        )
+
+        result = await store.conversations.list_page(
+            user_id=alice.user_id,
+            archived=False,
+            limit=10,
+            search="  100%_ready  ",
+        )
+
+        assert [record.conversation_id for record in result] == [
+            matching.conversation_id
+        ]
+    finally:
+        store.close()
+
+
 async def test_projection_tombstone_failure_rolls_back_conversation_delete(tmp_path):
     path = tmp_path / "app.sqlite"
     store = ApplicationStore(path)

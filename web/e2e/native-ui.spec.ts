@@ -91,6 +91,174 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   expect(accessibility.violations.map(({ id }) => id)).toEqual([]);
 });
 
+test("searches, renames, archives, restores, and deletes a conversation", async ({ page }) => {
+  let deleted = false;
+  let conversation = browserConversation("Lifecycle conversation");
+  const searchQueries: string[] = [];
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me") {
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      const archived = url.searchParams.get("archived") === "true";
+      const search = url.searchParams.get("q") ?? "";
+      searchQueries.push(search);
+      const matches = !deleted
+        && Boolean(conversation.archived_at) === archived
+        && conversation.title.toLocaleLowerCase().includes(search.toLocaleLowerCase());
+      await json(route, { items: matches ? [conversation] : [], next_cursor: null });
+      return;
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}` && request.method() === "PATCH") {
+      const patch = request.postDataJSON() as { title?: string; archived?: boolean };
+      conversation = {
+        ...conversation,
+        ...(patch.title === undefined ? {} : { title: patch.title }),
+        ...(patch.archived === undefined
+          ? {}
+          : { archived_at: patch.archived ? "2026-09-05T00:00:00Z" : null }),
+      };
+      await json(route, conversation);
+      return;
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}` && request.method() === "DELETE") {
+      deleted = true;
+      await route.fulfill({ status: 204, body: "" });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await expect(page.getByRole("heading", { name: "Lifecycle conversation" })).toBeVisible();
+
+  await page.getByRole("searchbox", { name: "Search titles" }).fill("life");
+  await expect.poll(() => searchQueries.at(-1)).toBe("life");
+
+  await page.getByRole("button", { name: "Rename conversation" }).click();
+  await page.getByRole("textbox", { name: "Conversation title" }).fill("Lifecycle renamed");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByRole("heading", { name: "Lifecycle renamed" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  await expect(page.getByText("No matching conversation titles.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Archived" }).click();
+  await expect(page.getByRole("heading", { name: "Lifecycle renamed" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Message Audrey" })).toHaveCount(0);
+  await expect(page.getByText("This conversation is archived. Restore it to continue.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Restore" }).click();
+  await expect(page.getByText("No matching conversation titles.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Active" }).click();
+  await expect(page.getByRole("heading", { name: "Lifecycle renamed" })).toBeVisible();
+  await page.getByRole("button", { name: "Delete" }).click();
+  await expect(page.getByRole("group", { name: "Confirm deletion" })).toBeVisible();
+  await page.getByRole("button", { name: "Yes, delete" }).click();
+  await expect(page.getByText("No matching conversation titles.")).toBeVisible();
+});
+
+test("loads older conversation pages without replacing the current page", async ({ page }) => {
+  const older = { ...browserConversation("Older conversation"), id: "con_older" };
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me") {
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      const cursor = url.searchParams.get("cursor");
+      await json(route, cursor
+        ? { items: [older], next_cursor: null }
+        : {
+            items: [browserConversation("Newest conversation")],
+            next_cursor: "older-page",
+          });
+      return;
+    }
+    if (url.pathname.endsWith("/messages")) {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  const history = page.getByRole("navigation", { name: "Conversation history" });
+  await expect(history.getByText("Newest conversation", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Load older" }).click();
+  await expect(history.getByText("Older conversation", { exact: true })).toBeVisible();
+  await expect(history.getByText("Newest conversation", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Load older" })).toHaveCount(0);
+});
+
+test("keeps canonical messages when changing mode", async ({ page }) => {
+  let completed = false;
+  let conversation = browserConversation("Mode persistence");
+  const agentModes: string[] = [];
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me") {
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      await json(route, { items: [conversation], next_cursor: null });
+      return;
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
+      await json(route, {
+        items: completed ? canonicalBrowserTurn() : [],
+        next_cursor: null,
+      });
+      return;
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}` && request.method() === "PATCH") {
+      const patch = request.postDataJSON() as { default_mode?: "fast" | "deep" };
+      conversation = {
+        ...conversation,
+        default_mode: patch.default_mode ?? conversation.default_mode,
+      };
+      await json(route, conversation);
+      return;
+    }
+    if (url.pathname === "/api/agent") {
+      completed = true;
+      agentModes.push(url.searchParams.get("mode") ?? "");
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: aguiStream(canonicalBrowserEvents()),
+      });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  const composer = page.getByRole("textbox", { name: "Message Audrey" });
+  await composer.fill("First mode turn");
+  await composer.press("Enter");
+  await expect(page.getByText("Canonical mode answer.")).toBeVisible();
+
+  await page.getByRole("combobox", { name: "Mode" }).selectOption("deep");
+  await expect(page.getByRole("combobox", { name: "Mode" })).toHaveValue("deep");
+  await expect(page.getByText("Canonical mode answer.")).toBeVisible();
+  expect(agentModes).toEqual(["fast"]);
+});
+
 test("cancels an active browser run without leaving an error state", async ({ page }) => {
   await installHangingAgent(page);
   await mockAudreyApi(page);
@@ -176,6 +344,75 @@ async function json(route: Route, payload: unknown) {
     contentType: "application/json",
     body: JSON.stringify(payload),
   });
+}
+
+function browserUser() {
+  return {
+    id: "usr_browser_test",
+    email: "alice@example.com",
+    display_name: "Alice",
+    role: "user",
+    status: "active",
+    auth_provider: "cloudflare_access",
+  };
+}
+
+function browserConversation(title: string) {
+  return {
+    id: CONVERSATION_ID,
+    title,
+    default_mode: "fast" as const,
+    created_at: "2026-09-04T00:00:00Z",
+    updated_at: "2026-09-04T00:00:00Z",
+    last_message_at: null,
+    archived_at: null as string | null,
+  };
+}
+
+function canonicalBrowserTurn() {
+  return [
+    {
+      id: "msg_mode_user",
+      run_id: "run_mode",
+      sequence: 1,
+      role: "user",
+      status: "completed",
+      content: "First mode turn",
+      created_at: "2026-09-05T00:00:00Z",
+      updated_at: "2026-09-05T00:00:00Z",
+    },
+    {
+      id: "msg_mode_assistant",
+      run_id: "run_mode",
+      sequence: 2,
+      role: "assistant",
+      status: "completed",
+      content: "Canonical mode answer.",
+      created_at: "2026-09-05T00:00:01Z",
+      updated_at: "2026-09-05T00:00:01Z",
+    },
+  ];
+}
+
+function canonicalBrowserEvents(): ReadonlyArray<Record<string, unknown>> {
+  return [
+    { type: "RUN_STARTED", timestamp: 1, threadId: CONVERSATION_ID, runId: "run_mode" },
+    { type: "TEXT_MESSAGE_START", timestamp: 2, messageId: "msg_mode_assistant" },
+    {
+      type: "TEXT_MESSAGE_CONTENT",
+      timestamp: 3,
+      messageId: "msg_mode_assistant",
+      delta: "Canonical mode answer.",
+    },
+    { type: "TEXT_MESSAGE_END", timestamp: 4, messageId: "msg_mode_assistant" },
+    {
+      type: "RUN_FINISHED",
+      timestamp: 5,
+      threadId: CONVERSATION_ID,
+      runId: "run_mode",
+      outcome: { type: "success" },
+    },
+  ];
 }
 
 function aguiStream(events: ReadonlyArray<Record<string, unknown>>): string {

@@ -330,6 +330,31 @@ def test_conversation_and_message_routes_paginate_without_overlap(tmp_path):
             assert len(listed_ids) == len(set(listed_ids)) == 3
             assert set(listed_ids) == set(conversation_ids)
 
+            searched = client.get(
+                "/api/conversations",
+                params={"limit": 1, "q": "chat"},
+            )
+            assert searched.status_code == 200
+            searched_body = searched.json()
+            assert len(searched_body["items"]) == 1
+            assert searched_body["next_cursor"]
+            assert client.get(
+                "/api/conversations",
+                params={
+                    "limit": 1,
+                    "q": "different search",
+                    "cursor": searched_body["next_cursor"],
+                },
+            ).status_code == 422
+
+            exact_search = client.get(
+                "/api/conversations",
+                params={"q": "Chat 0"},
+            )
+            assert [item["id"] for item in exact_search.json()["items"]] == [
+                target_id
+            ]
+
             messages = client.get(f"/api/conversations/{target_id}/messages?limit=3")
             assert messages.status_code == 200
             first_messages = messages.json()

@@ -645,7 +645,7 @@ Gate: no browser-stored API secret; two-user browser isolation; tools need no
 client continuation; accessibility checks; Playwright happy, failure, and
 cancellation paths; user-confirmed Unraid smoke.
 
-Implementation status: The first 2C slice is laptop-complete. A pinned
+Implementation status: The first 2C slice is complete and Unraid-verified. A pinned
 React/TypeScript/Vite workspace builds in a Node stage and ships only static
 assets in the Audrey image. `/app/` is disabled by default, applies restrictive
 browser headers when enabled, and leaves OWUI untouched. The native shell lists
@@ -665,11 +665,31 @@ expiry. All 2,745 hermetic backend tests pass; scoped ruff and compilation are
 clean. Generated assets are explicit Hatch wheel artifacts despite their
 gitignored build directory, production source maps are disabled, and the image
 build asserts that the installed package contains the native shell.
-`scripts/smoke_native_ui.py` packages the pending two-user Unraid gate,
-including static assets/CSP, cross-owner read and run denial, one real AG-UI
-turn, canonical persistence, and cleanup/repair. Milestone 2C remains open for
-the deployed gate, public Cloudflare Access browser path, and every-mode
-exercise.
+`scripts/smoke_native_ui.py` packages the two-user Unraid gate. The deployed
+gate served the 449-byte shell and hashed entry asset with CSP, resolved two
+different Audrey users, returned `404` for both cross-owner read and run,
+completed one real Fast AG-UI turn with two matching canonical messages, then
+deleted both canonical and archive state and returned repair to `ready`.
+Milestone 2C remains open for the public Cloudflare Access browser path,
+remaining native capabilities, and every-mode exercise.
+
+Slice 2C.2 is laptop-complete. `/api/conversations` now provides owner-scoped,
+case-insensitive literal title search and binds each pagination cursor to its
+archive and search view. The browser adds debounced server search, active and
+archived views, older-page loading, rename, archive, read-only archived
+history, restore, and confirmed deletion. Destructive controls and mode changes
+are unavailable during an active run. A mode change reloads canonical messages
+before replacing its AG-UI agent, fixing the stale-initial-history path that
+could hide a just-finished response until reload.
+
+The expanded local gate passes all 2,746 backend tests, three Vitest contracts,
+and six Chromium paths covering the original run/auth behavior plus complete
+conversation lifecycle, pagination, and durable mode switching. Typecheck,
+lint, scoped ruff, compilation, production build, wheel contents, lockfile, and
+diff checks are clean; the lesson scan has zero broken links. The extended
+`scripts/smoke_native_ui.py` is the pending 2C.2 Unraid gate and now verifies
+real rename, literal title search, archive, and restore before its existing
+deletion and repair cleanup.
 
 ### Milestone 2D — files, preferences, and ownership operations
 

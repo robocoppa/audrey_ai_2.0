@@ -18,6 +18,7 @@ from collections import Counter
 from email.message import Message
 from typing import Any
 from urllib.error import HTTPError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 BASE_URL = os.getenv("AUDREY_SMOKE_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
@@ -143,6 +144,21 @@ def _repair_until_ready() -> dict[str, Any]:
     raise SmokeError(f"repair queues did not become ready: {last}")
 
 
+def _listed_conversation_ids(*, archived: bool, search: str) -> list[str]:
+    query = urlencode(
+        {
+            "archived": str(archived).lower(),
+            "limit": 100,
+            "q": search,
+        }
+    )
+    _, page = _json_request(
+        f"/api/conversations?{query}",
+        token=USER_TOKEN,
+    )
+    return [str(item.get("id") or "") for item in page.get("items", [])]
+
+
 def _cleanup(conversation_id: str, run_id: str) -> dict[str, Any]:
     if run_id:
         _request(
@@ -262,6 +278,53 @@ def main() -> int:
         if messages[0].get("content") != PROMPT or messages[1].get("content") != answer:
             raise SmokeError("canonical messages did not match the native AG-UI turn")
 
+        managed_title = f"C3 2C2 100%_{conversation_id[-8:]}"
+        _, renamed = _json_request(
+            f"/api/conversations/{conversation_id}",
+            token=USER_TOKEN,
+            method="PATCH",
+            payload={"title": managed_title},
+        )
+        if renamed.get("title") != managed_title:
+            raise SmokeError("conversation rename did not persist")
+        active_ids = _listed_conversation_ids(
+            archived=False,
+            search=managed_title,
+        )
+        if active_ids != [conversation_id]:
+            raise SmokeError(f"literal active-title search was invalid: {active_ids}")
+
+        _, archived = _json_request(
+            f"/api/conversations/{conversation_id}",
+            token=USER_TOKEN,
+            method="PATCH",
+            payload={"archived": True},
+        )
+        if not archived.get("archived_at"):
+            raise SmokeError("conversation archive did not persist")
+        active_after_archive = _listed_conversation_ids(
+            archived=False,
+            search=managed_title,
+        )
+        archived_ids = _listed_conversation_ids(
+            archived=True,
+            search=managed_title,
+        )
+        if active_after_archive or archived_ids != [conversation_id]:
+            raise SmokeError(
+                "archived conversation appeared in the wrong native list: "
+                f"active={active_after_archive} archived={archived_ids}"
+            )
+
+        _, restored = _json_request(
+            f"/api/conversations/{conversation_id}",
+            token=USER_TOKEN,
+            method="PATCH",
+            payload={"archived": False},
+        )
+        if restored.get("archived_at") is not None:
+            raise SmokeError("conversation restore did not persist")
+
         result["identity"] = {
             "user_id": user["id"],
             "admin_id": admin["id"],
@@ -273,6 +336,12 @@ def main() -> int:
             "event_counts": dict(counts),
             "answer_chars": len(answer),
             "canonical_messages": len(messages),
+        }
+        result["management"] = {
+            "renamed": True,
+            "literal_search": True,
+            "archived": True,
+            "restored": True,
         }
     except Exception as exc:  # noqa: BLE001 - retain error across cleanup
         primary_error = exc

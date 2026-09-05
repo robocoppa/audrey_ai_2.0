@@ -7,12 +7,14 @@ import {
   type ToolCallMessagePartProps,
 } from "@assistant-ui/react";
 import { useAgUiRuntime } from "@assistant-ui/react-ag-ui";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   createConversation,
+  deleteConversation,
   listConversations,
   listMessages,
+  updateConversation,
   updateConversationMode,
   type AudreyMode,
   type Conversation,
@@ -44,6 +46,8 @@ type RunActivity = {
   latestSource: string;
 };
 
+type ConversationView = "active" | "archived";
+
 const IDLE_ACTIVITY: RunActivity = {
   status: "idle",
   label: "Ready",
@@ -57,15 +61,40 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [view, setView] = useState<ConversationView>("active");
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState("");
+  const listKeyRef = useRef("");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const nextSearch = searchInput.trim();
+      if (nextSearch === searchQuery) return;
+      setLoading(true);
+      setConversations([]);
+      setSelectedId(null);
+      setNextCursor(null);
+      setError("");
+      setSearchQuery(nextSearch);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [searchInput, searchQuery]);
 
   useEffect(() => {
     let active = true;
-    listConversations()
-      .then(({ items }) => {
+    const requestKey = `${view}\n${searchQuery}`;
+    listKeyRef.current = requestKey;
+    listConversations({ archived: view === "archived", search: searchQuery })
+      .then(({ items, next_cursor }) => {
         if (!active) return;
         setConversations(items);
-        setSelectedId((current) => current ?? items[0]?.id ?? null);
+        setNextCursor(next_cursor);
+        setSelectedId((current) =>
+          items.some(({ id }) => id === current) ? current : items[0]?.id ?? null,
+        );
       })
       .catch((reason: unknown) => {
         if (active) setError(messageOf(reason));
@@ -76,16 +105,34 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [searchQuery, view]);
 
   const selected = conversations.find(({ id }) => id === selectedId) ?? null;
+
+  function changeView(nextView: ConversationView) {
+    if (nextView === view) return;
+    setLoading(true);
+    setConversations([]);
+    setSelectedId(null);
+    setNextCursor(null);
+    setError("");
+    setView(nextView);
+  }
 
   async function startConversation() {
     setCreating(true);
     setError("");
     try {
       const conversation = await createConversation("auto");
-      setConversations((current) => [conversation, ...current]);
+      const visibleImmediately = view === "active" && !searchQuery;
+      if (visibleImmediately) {
+        setConversations((current) => [conversation, ...current]);
+      } else {
+        setLoading(true);
+        setSearchInput("");
+        setSearchQuery("");
+        setView("active");
+      }
       setSelectedId(conversation.id);
     } catch (reason) {
       setError(messageOf(reason));
@@ -95,11 +142,49 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
   }
 
   function replaceConversation(updated: Conversation) {
+    if (
+      searchQuery
+      && !updated.title.toLocaleLowerCase().includes(searchQuery.toLocaleLowerCase())
+    ) {
+      removeFromCurrentView(updated.id);
+      return;
+    }
     setConversations((current) =>
       current.map((conversation) =>
         conversation.id === updated.id ? updated : conversation,
       ),
     );
+  }
+
+  function removeFromCurrentView(conversationId: string) {
+    const remaining = conversations.filter(({ id }) => id !== conversationId);
+    setConversations(remaining);
+    if (selectedId === conversationId) {
+      setSelectedId(remaining[0]?.id ?? null);
+    }
+  }
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    setError("");
+    const expectedKey = listKeyRef.current;
+    try {
+      const page = await listConversations({
+        archived: view === "archived",
+        cursor: nextCursor,
+        search: searchQuery,
+      });
+      if (listKeyRef.current !== expectedKey) return;
+      setConversations((current) => [...current, ...page.items]);
+      setNextCursor(page.next_cursor);
+    } catch (reason) {
+      if (listKeyRef.current === expectedKey) {
+        setError(messageOf(reason));
+      }
+    } finally {
+      setLoadingMore(false);
+    }
   }
 
   return (
@@ -120,9 +205,42 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
           </button>
         </div>
 
+        <label className="conversation-search">
+          <span>Search titles</span>
+          <input
+            type="search"
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            placeholder="Search conversations"
+            maxLength={200}
+          />
+        </label>
+        <div className="conversation-views" aria-label="Conversation view">
+          <button
+            type="button"
+            aria-pressed={view === "active"}
+            onClick={() => changeView("active")}
+          >
+            Active
+          </button>
+          <button
+            type="button"
+            aria-pressed={view === "archived"}
+            onClick={() => changeView("archived")}
+          >
+            Archived
+          </button>
+        </div>
+
         {loading ? <p className="sidebar-status">Loading conversations…</p> : null}
         {!loading && conversations.length === 0 ? (
-          <p className="sidebar-status">No conversations yet.</p>
+          <p className="sidebar-status">
+            {searchQuery
+              ? "No matching conversation titles."
+              : view === "archived"
+                ? "No archived conversations."
+                : "No conversations yet."}
+          </p>
         ) : null}
         <nav className="conversation-list" aria-label="Conversation history">
           {conversations.map((conversation) => (
@@ -138,6 +256,16 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
             </button>
           ))}
         </nav>
+        {nextCursor ? (
+          <button
+            className="load-conversations"
+            type="button"
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
+          >
+            {loadingMore ? "Loading…" : "Load older"}
+          </button>
+        ) : null}
         {error ? <p className="sidebar-error" role="alert">{error}</p> : null}
       </aside>
 
@@ -147,6 +275,7 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
             key={selected.id}
             conversation={selected}
             onConversationChange={replaceConversation}
+            onRemoveFromView={removeFromCurrentView}
           />
         ) : (
           <div className="empty-workspace">
@@ -166,12 +295,21 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
 function ConversationThread({
   conversation,
   onConversationChange,
+  onRemoveFromView,
 }: {
   conversation: Conversation;
   onConversationChange: (conversation: Conversation) => void;
+  onRemoveFromView: (conversationId: string) => void;
 }) {
   const [thread, setThread] = useState<ThreadState>({ status: "idle" });
   const [mode, setMode] = useState<AudreyMode>(conversation.default_mode);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(conversation.title);
+  const [mutation, setMutation] = useState<"mode" | "rename" | "archive" | "delete" | null>(null);
+  const [mutationError, setMutationError] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [runActive, setRunActive] = useState(false);
+  const archived = conversation.archived_at !== null;
 
   useEffect(() => {
     let active = true;
@@ -188,31 +326,158 @@ function ConversationThread({
   }, [conversation.id]);
 
   async function changeMode(next: AudreyMode) {
-    const previous = mode;
-    setMode(next);
+    if (next === mode || runActive) return;
+    setMutation("mode");
+    setMutationError("");
     try {
-      onConversationChange(await updateConversationMode(conversation.id, next));
-    } catch {
-      setMode(previous);
+      const updated = await updateConversationMode(conversation.id, next);
+      const messages = await listMessages(conversation.id);
+      setThread({ status: "ready", messages: messages.items });
+      setMode(next);
+      onConversationChange(updated);
+    } catch (reason) {
+      setMutationError(messageOf(reason));
+    } finally {
+      setMutation(null);
+    }
+  }
+
+  async function renameConversation(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const title = titleDraft.trim();
+    if (!title || title === conversation.title) {
+      setTitleDraft(conversation.title);
+      setEditingTitle(false);
+      return;
+    }
+    setMutation("rename");
+    setMutationError("");
+    try {
+      onConversationChange(await updateConversation(conversation.id, { title }));
+      setEditingTitle(false);
+    } catch (reason) {
+      setMutationError(messageOf(reason));
+    } finally {
+      setMutation(null);
+    }
+  }
+
+  async function toggleArchived() {
+    setMutation("archive");
+    setMutationError("");
+    try {
+      await updateConversation(conversation.id, { archived: !archived });
+      onRemoveFromView(conversation.id);
+    } catch (reason) {
+      setMutationError(messageOf(reason));
+    } finally {
+      setMutation(null);
+    }
+  }
+
+  async function removeConversation() {
+    setMutation("delete");
+    setMutationError("");
+    try {
+      await deleteConversation(conversation.id);
+      onRemoveFromView(conversation.id);
+    } catch (reason) {
+      setMutationError(messageOf(reason));
+      setConfirmingDelete(false);
+    } finally {
+      setMutation(null);
     }
   }
 
   return (
     <>
-      <header className="thread-header">
-        <div>
-          <span>Conversation</span>
-          <h1>{conversation.title || "Untitled conversation"}</h1>
-        </div>
-        <label className="mode-picker">
-          <span>Mode</span>
-          <select value={mode} onChange={(event) => void changeMode(event.target.value as AudreyMode)}>
-            {MODES.map((item) => (
-              <option key={item.value} value={item.value}>{item.label}</option>
-            ))}
-          </select>
-        </label>
-      </header>
+      <div className="thread-header-shell">
+        <header className="thread-header">
+          <div className="thread-title">
+            <span>Conversation</span>
+            {editingTitle ? (
+              <form className="rename-conversation" onSubmit={(event) => void renameConversation(event)}>
+                <input
+                  aria-label="Conversation title"
+                  value={titleDraft}
+                  onChange={(event) => setTitleDraft(event.target.value)}
+                  maxLength={200}
+                  autoFocus
+                />
+                <button type="submit" disabled={mutation !== null}>Save</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTitleDraft(conversation.title);
+                    setEditingTitle(false);
+                  }}
+                >
+                  Cancel
+                </button>
+              </form>
+            ) : (
+              <div className="conversation-title-display">
+                <h1>{conversation.title || "Untitled conversation"}</h1>
+                <button
+                  className="conversation-title-button"
+                  type="button"
+                  onClick={() => setEditingTitle(true)}
+                  aria-label="Rename conversation"
+                >
+                  Edit
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="thread-controls">
+            <label className="mode-picker">
+              <span>Mode</span>
+              <select
+                value={mode}
+                disabled={archived || runActive || mutation !== null}
+                onChange={(event) => void changeMode(event.target.value as AudreyMode)}
+              >
+                {MODES.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+            </label>
+            <div className="conversation-actions">
+              <button
+                type="button"
+                onClick={() => void toggleArchived()}
+                disabled={runActive || mutation !== null}
+              >
+                {archived ? "Restore" : "Archive"}
+              </button>
+              {!confirmingDelete ? (
+                <button
+                  className="danger-button"
+                  type="button"
+                  onClick={() => setConfirmingDelete(true)}
+                  disabled={runActive || mutation !== null}
+                >
+                  Delete
+                </button>
+              ) : (
+                <div className="delete-confirmation" role="group" aria-label="Confirm deletion">
+                  <span>Delete permanently?</span>
+                  <button
+                    className="danger-button"
+                    type="button"
+                    onClick={() => void removeConversation()}
+                    disabled={mutation !== null}
+                  >
+                    Yes, delete
+                  </button>
+                  <button type="button" onClick={() => setConfirmingDelete(false)}>Keep</button>
+                </div>
+              )}
+            </div>
+          </div>
+        </header>
+        {mutationError ? <p className="conversation-mutation-error" role="alert">{mutationError}</p> : null}
+      </div>
 
       {thread.status === "loading" || thread.status === "idle" ? (
         <div className="thread-loading" role="status">Loading thread…</div>
@@ -225,6 +490,8 @@ function ConversationThread({
           conversationId={conversation.id}
           mode={mode}
           initialMessages={thread.messages}
+          readOnly={archived}
+          onRunActiveChange={setRunActive}
         />
       ) : null}
     </>
@@ -235,10 +502,14 @@ function AudreyThread({
   conversationId,
   mode,
   initialMessages,
+  readOnly,
+  onRunActiveChange,
 }: {
   conversationId: string;
   mode: AudreyMode;
   initialMessages: ConversationMessage[];
+  readOnly: boolean;
+  onRunActiveChange: (active: boolean) => void;
 }) {
   const [runError, setRunError] = useState("");
   const [activity, setActivity] = useState<RunActivity>(IDLE_ACTIVITY);
@@ -255,6 +526,7 @@ function AudreyThread({
   useEffect(() => {
     const subscriber: AgentSubscriber = {
       onRunInitialized: () => {
+        onRunActiveChange(true);
         setRunError("");
         setActivity({
           status: "running",
@@ -302,6 +574,7 @@ function AudreyThread({
         }
       },
       onRunFinishedEvent: () => {
+        onRunActiveChange(false);
         setActivity((current) => ({
           ...current,
           status: "complete",
@@ -310,6 +583,7 @@ function AudreyThread({
         }));
       },
       onRunErrorEvent: ({ event }) => {
+        onRunActiveChange(false);
         const cancelled = event.code === "cancelled_by_user" || isAbortMessage(event.message);
         setActivity((current) => ({
           ...current,
@@ -319,6 +593,7 @@ function AudreyThread({
         }));
       },
       onRunFailed: ({ error }) => {
+        onRunActiveChange(false);
         const cancelled = isAbortError(error);
         setActivity((current) => ({
           ...current,
@@ -330,12 +605,16 @@ function AudreyThread({
     };
     const subscription = agent.subscribe(subscriber);
     return () => subscription.unsubscribe();
-  }, [agent]);
+  }, [agent, onRunActiveChange]);
   const runtime = useAgUiRuntime({
     agent,
     showThinking: false,
-    onError: (reason) => setRunError(reason.message),
+    onError: (reason) => {
+      onRunActiveChange(false);
+      setRunError(reason.message);
+    },
     onCancel: () => {
+      onRunActiveChange(false);
       setRunError("");
       setActivity((current) => ({
         ...current,
@@ -367,21 +646,29 @@ function AudreyThread({
             ↓
           </ThreadPrimitive.ScrollToBottom>
           <ThreadPrimitive.ViewportFooter className="composer-dock">
-            {runError ? <p className="run-error" role="alert">{runError}</p> : null}
-            <RunActivityStatus activity={activity} />
-            <ComposerPrimitive.Root className="composer">
-              <ComposerPrimitive.Input
-                className="composer-input"
-                aria-label="Message Audrey"
-                placeholder="Message Audrey…"
-                rows={1}
-              />
-              <div className="composer-actions">
-                <ComposerPrimitive.Cancel className="cancel-button">Stop</ComposerPrimitive.Cancel>
-                <ComposerPrimitive.Send className="send-button" aria-label="Send message">↑</ComposerPrimitive.Send>
-              </div>
-            </ComposerPrimitive.Root>
-            <p className="composer-hint">Enter to send · Shift+Enter for a new line</p>
+            {readOnly ? (
+              <p className="archived-notice" role="status">
+                This conversation is archived. Restore it to continue.
+              </p>
+            ) : (
+              <>
+                {runError ? <p className="run-error" role="alert">{runError}</p> : null}
+                <RunActivityStatus activity={activity} />
+                <ComposerPrimitive.Root className="composer">
+                  <ComposerPrimitive.Input
+                    className="composer-input"
+                    aria-label="Message Audrey"
+                    placeholder="Message Audrey…"
+                    rows={1}
+                  />
+                  <div className="composer-actions">
+                    <ComposerPrimitive.Cancel className="cancel-button">Stop</ComposerPrimitive.Cancel>
+                    <ComposerPrimitive.Send className="send-button" aria-label="Send message">↑</ComposerPrimitive.Send>
+                  </div>
+                </ComposerPrimitive.Root>
+                <p className="composer-hint">Enter to send · Shift+Enter for a new line</p>
+              </>
+            )}
           </ThreadPrimitive.ViewportFooter>
         </ThreadPrimitive.Viewport>
       </ThreadPrimitive.Root>

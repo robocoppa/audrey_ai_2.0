@@ -155,9 +155,11 @@ async def list_conversations(
     request: Request,
     principal: Principal = Depends(_conversation_access),
     archived: bool = False,
+    q: Annotated[str, Query(max_length=200)] = "",
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     cursor: Annotated[str | None, Query(max_length=1000)] = None,
 ) -> ConversationListResponse:
+    search = q.strip()
     before_activity_at: str | None = None
     before_conversation_id: str | None = None
     if cursor is not None:
@@ -169,6 +171,7 @@ async def list_conversations(
             or not isinstance(before_conversation_id, str)
             or not isinstance(decoded.get("archived"), bool)
             or decoded["archived"] != archived
+            or decoded.get("search", "") != search
         ):
             raise HTTPException(status_code=422, detail="Cursor is invalid for this view.")
     try:
@@ -176,6 +179,7 @@ async def list_conversations(
             user_id=principal.user_id,
             archived=archived,
             limit=limit + 1,
+            search=search,
             before_activity_at=before_activity_at,
             before_conversation_id=before_conversation_id,
         )
@@ -191,6 +195,7 @@ async def list_conversations(
                 "activity": last.last_message_at or last.created_at,
                 "conversation_id": last.conversation_id,
                 "archived": archived,
+                "search": search,
             }
         )
     return ConversationListResponse(

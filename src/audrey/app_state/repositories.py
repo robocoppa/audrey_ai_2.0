@@ -207,16 +207,18 @@ class ConversationsRepository:
         user_id: str,
         archived: bool,
         limit: int,
+        search: str = "",
         before_activity_at: str | None = None,
         before_conversation_id: str | None = None,
     ) -> tuple[ConversationRecord, ...]:
-        """List one stable keyset page for an active or archived view."""
+        """List one stable keyset page for an owner-scoped title search."""
 
         return await asyncio.to_thread(
             self._list_page_sync,
             user_id,
             archived,
             limit,
+            search,
             before_activity_at,
             before_conversation_id,
         )
@@ -226,12 +228,18 @@ class ConversationsRepository:
         user_id: str,
         archived: bool,
         limit: int,
+        search: str,
         before_activity_at: str | None,
         before_conversation_id: str | None,
     ) -> tuple[ConversationRecord, ...]:
         user_id = _required(user_id, "user id")
         if not 1 <= limit <= 200:
             raise InvalidApplicationStateError("conversation limit must be between 1 and 200")
+        search = str(search).strip()
+        if len(search) > 200:
+            raise InvalidApplicationStateError(
+                "conversation search must be at most 200 characters"
+            )
         if (before_activity_at is None) != (before_conversation_id is None):
             raise InvalidApplicationStateError("conversation cursor is incomplete")
 
@@ -249,6 +257,7 @@ class ConversationsRepository:
                 "WHERE user_id = ? "
                 "AND ((? = 1 AND archived_at IS NOT NULL) "
                 "OR (? = 0 AND archived_at IS NULL)) "
+                "AND (? = '' OR instr(lower(title), lower(?)) > 0) "
                 "AND (? IS NULL OR COALESCE(last_message_at, created_at) < ? "
                 "OR (COALESCE(last_message_at, created_at) = ? "
                 "AND conversation_id < ?)) "
@@ -258,6 +267,8 @@ class ConversationsRepository:
                     user_id,
                     int(archived),
                     int(archived),
+                    search,
+                    search,
                     before_activity_at,
                     before_activity_at,
                     before_activity_at,

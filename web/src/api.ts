@@ -30,9 +30,21 @@ export interface ConversationMessage {
   updated_at: string;
 }
 
-interface ListResponse<T> {
+export interface ListResponse<T> {
   items: T[];
   next_cursor: string | null;
+}
+
+export interface ConversationListOptions {
+  archived?: boolean;
+  cursor?: string | null;
+  search?: string;
+}
+
+export interface ConversationPatch {
+  title?: string;
+  default_mode?: AudreyMode;
+  archived?: boolean;
 }
 
 export class ApiError extends Error {
@@ -46,6 +58,11 @@ export class ApiError extends Error {
 }
 
 export async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await apiResponse(path, init);
+  return (await response.json()) as T;
+}
+
+async function apiResponse(path: string, init?: RequestInit): Promise<Response> {
   const { headers, ...options } = init ?? {};
   const response = await fetch(path, {
     ...options,
@@ -68,16 +85,24 @@ export async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(response.status, detail);
   }
-
-  return (await response.json()) as T;
+  return response;
 }
 
 export function getCurrentUser(): Promise<CurrentUser> {
   return apiJson<CurrentUser>("/api/me");
 }
 
-export function listConversations(): Promise<ListResponse<Conversation>> {
-  return apiJson<ListResponse<Conversation>>("/api/conversations?limit=100");
+export function listConversations(
+  options: ConversationListOptions = {},
+): Promise<ListResponse<Conversation>> {
+  const params = new URLSearchParams({
+    archived: String(Boolean(options.archived)),
+    limit: "100",
+  });
+  const search = options.search?.trim();
+  if (search) params.set("q", search);
+  if (options.cursor) params.set("cursor", options.cursor);
+  return apiJson<ListResponse<Conversation>>(`/api/conversations?${params}`);
 }
 
 export function createConversation(mode: AudreyMode): Promise<Conversation> {
@@ -100,12 +125,25 @@ export function updateConversationMode(
   conversationId: string,
   mode: AudreyMode,
 ): Promise<Conversation> {
+  return updateConversation(conversationId, { default_mode: mode });
+}
+
+export function updateConversation(
+  conversationId: string,
+  patch: ConversationPatch,
+): Promise<Conversation> {
   return apiJson<Conversation>(
     `/api/conversations/${encodeURIComponent(conversationId)}`,
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ default_mode: mode }),
+      body: JSON.stringify(patch),
     },
   );
+}
+
+export async function deleteConversation(conversationId: string): Promise<void> {
+  await apiResponse(`/api/conversations/${encodeURIComponent(conversationId)}`, {
+    method: "DELETE",
+  });
 }
