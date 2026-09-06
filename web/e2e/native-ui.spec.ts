@@ -92,6 +92,73 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   expect(accessibility.violations.map(({ id }) => id)).toEqual([]);
 });
 
+test("keeps history and an active run alive while switching conversations", async ({ page }) => {
+  const secondConversationId = "con_browser_second";
+  const firstConversation = browserConversation("Running conversation");
+  const secondConversation = {
+    ...browserConversation("Second conversation"),
+    id: secondConversationId,
+  };
+  await installNavigableAgent(page);
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me") {
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      await json(route, {
+        items: [firstConversation, secondConversation],
+        next_cursor: null,
+      });
+      return;
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
+      await json(route, { items: canonicalBrowserTurn(), next_cursor: null });
+      return;
+    }
+    if (url.pathname === `/api/conversations/${secondConversationId}/messages`) {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await expect(page.getByText("Canonical mode answer.")).toBeVisible();
+
+  const composer = page.getByRole("textbox", { name: "Message Audrey" });
+  await composer.fill("Keep this prompt while I visit another chat");
+  await composer.press("Enter");
+  await expect(page.getByText("Planning", { exact: true })).toBeVisible();
+  await expect(page.getByText("Preparing the background answer")).toBeVisible();
+
+  await page.getByRole("button", { name: /Second conversation/ }).click();
+  await expect(page.getByRole("heading", { name: "Second conversation" })).toBeVisible();
+  await expect(page.getByText("Canonical mode answer.")).toBeHidden();
+  expect(await page.evaluate(() =>
+    Boolean((window as Window & { __navigationRunAborted?: boolean }).__navigationRunAborted),
+  )).toBe(false);
+
+  await page.getByRole("button", { name: /Running conversation/ }).click();
+  await expect(page.getByText("Canonical mode answer.")).toBeVisible();
+  await expect(page.getByText("Keep this prompt while I visit another chat")).toBeVisible();
+  await expect(page.getByText("Preparing the background answer")).toBeVisible();
+
+  await page.evaluate(() => {
+    (window as Window & { __finishNavigationRun?: () => void }).__finishNavigationRun?.();
+  });
+  await expect(page.getByText("Background response survived navigation.")).toBeVisible();
+  await expect(page.getByText("Complete", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: /Second conversation/ }).click();
+  await page.getByRole("button", { name: /Running conversation/ }).click();
+  await expect(page.getByText("Canonical mode answer.")).toBeVisible();
+  await expect(page.getByText("Keep this prompt while I visit another chat")).toBeVisible();
+  await expect(page.getByText("Background response survived navigation.")).toBeVisible();
+});
+
 test("searches, renames, archives, restores, and deletes a conversation", async ({ page }) => {
   let deleted = false;
   let conversation = browserConversation("Lifecycle conversation");
@@ -446,6 +513,88 @@ async function installHangingAgent(page: Page) {
         (window as Window & { __cancelObserved?: boolean }).__cancelObserved = true;
         streamController.error(new DOMException("Fetch is aborted", "AbortError"));
       }, { once: true });
+      return Promise.resolve(new Response(stream, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }));
+    };
+  });
+}
+
+async function installNavigableAgent(page: Page) {
+  await page.addInitScript(() => {
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      const url = new URL(
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url,
+        location.href,
+      );
+      if (url.pathname !== "/api/agent") return originalFetch(input, init);
+
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const emit = (event: Record<string, unknown>) => {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+          };
+          emit({
+            type: "RUN_STARTED",
+            timestamp: 1,
+            threadId: "con_browser_test",
+            runId: "run_navigation",
+          });
+          emit({
+            type: "TEXT_MESSAGE_START",
+            timestamp: 2,
+            messageId: "msg_navigation_assistant",
+          });
+          emit({ type: "STEP_STARTED", timestamp: 3, stepName: "planning" });
+          emit({
+            type: "CUSTOM",
+            timestamp: 4,
+            name: "audrey.stage.progress",
+            value: {
+              stage: "planning",
+              delta: "Preparing the background answer",
+            },
+          });
+          const controls = window as Window & {
+            __finishNavigationRun?: () => void;
+            __navigationRunAborted?: boolean;
+          };
+          controls.__navigationRunAborted = false;
+          controls.__finishNavigationRun = () => {
+            emit({ type: "STEP_FINISHED", timestamp: 5, stepName: "planning" });
+            emit({
+              type: "TEXT_MESSAGE_CONTENT",
+              timestamp: 6,
+              messageId: "msg_navigation_assistant",
+              delta: "Background response survived navigation.",
+            });
+            emit({
+              type: "TEXT_MESSAGE_END",
+              timestamp: 7,
+              messageId: "msg_navigation_assistant",
+            });
+            emit({
+              type: "RUN_FINISHED",
+              timestamp: 8,
+              threadId: "con_browser_test",
+              runId: "run_navigation",
+              outcome: { type: "success" },
+            });
+            controller.close();
+          };
+          init?.signal?.addEventListener("abort", () => {
+            controls.__navigationRunAborted = true;
+            controller.error(new DOMException("Fetch is aborted", "AbortError"));
+          }, { once: true });
+        },
+      });
       return Promise.resolve(new Response(stream, {
         status: 200,
         headers: { "Content-Type": "text/event-stream" },

@@ -1,9 +1,12 @@
-import { HttpAgent, type AgentSubscriber, type Message } from "@ag-ui/client";
+import { HttpAgent, type AgentSubscriber } from "@ag-ui/client";
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
+  ExportedMessageRepository,
   MessagePrimitive,
   ThreadPrimitive,
+  type ThreadHistoryAdapter,
+  type ThreadMessageLike,
   type ToolCallMessagePartProps,
 } from "@assistant-ui/react";
 import { useAgUiRuntime } from "@assistant-ui/react-ag-ui";
@@ -59,6 +62,7 @@ const IDLE_ACTIVITY: RunActivity = {
 
 export function ChatWorkspace({ user }: { user: CurrentUser }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [openedConversations, setOpenedConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -69,6 +73,15 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState("");
   const listKeyRef = useRef("");
+  const selectedIdRef = useRef<string | null>(null);
+
+  function selectConversation(conversation: Conversation | null) {
+    if (conversation) {
+      setOpenedConversations((current) => upsertConversation(current, conversation));
+    }
+    selectedIdRef.current = conversation?.id ?? null;
+    setSelectedId(selectedIdRef.current);
+  }
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -76,7 +89,7 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
       if (nextSearch === searchQuery) return;
       setLoading(true);
       setConversations([]);
-      setSelectedId(null);
+      selectConversation(null);
       setNextCursor(null);
       setError("");
       setSearchQuery(nextSearch);
@@ -93,9 +106,10 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
         if (!active) return;
         setConversations(items);
         setNextCursor(next_cursor);
-        setSelectedId((current) =>
-          items.some(({ id }) => id === current) ? current : items[0]?.id ?? null,
-        );
+        const selected = items.find(({ id }) => id === selectedIdRef.current)
+          ?? items[0]
+          ?? null;
+        selectConversation(selected);
       })
       .catch((reason: unknown) => {
         if (active) setError(messageOf(reason));
@@ -109,12 +123,16 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
   }, [searchQuery, view]);
 
   const selected = conversations.find(({ id }) => id === selectedId) ?? null;
+  const renderedConversations = selected
+    && !openedConversations.some(({ id }) => id === selected.id)
+    ? [...openedConversations, selected]
+    : openedConversations;
 
   function changeView(nextView: ConversationView) {
     if (nextView === view) return;
     setLoading(true);
     setConversations([]);
-    setSelectedId(null);
+    selectConversation(null);
     setNextCursor(null);
     setError("");
     setView(nextView);
@@ -134,7 +152,7 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
         setSearchQuery("");
         setView("active");
       }
-      setSelectedId(conversation.id);
+      selectConversation(conversation);
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
@@ -143,6 +161,7 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
   }
 
   function replaceConversation(updated: Conversation) {
+    setOpenedConversations((current) => upsertConversation(current, updated));
     if (
       searchQuery
       && !updated.title.toLocaleLowerCase().includes(searchQuery.toLocaleLowerCase())
@@ -157,11 +176,16 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
     );
   }
 
-  function removeFromCurrentView(conversationId: string) {
+  function removeFromCurrentView(conversationId: string, closeThread = false) {
     const remaining = conversations.filter(({ id }) => id !== conversationId);
     setConversations(remaining);
+    if (closeThread) {
+      setOpenedConversations((current) =>
+        current.filter(({ id }) => id !== conversationId),
+      );
+    }
     if (selectedId === conversationId) {
-      setSelectedId(remaining[0]?.id ?? null);
+      selectConversation(remaining[0] ?? null);
     }
   }
 
@@ -249,7 +273,7 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
               className={conversation.id === selectedId ? "conversation active" : "conversation"}
               type="button"
               key={conversation.id}
-              onClick={() => setSelectedId(conversation.id)}
+              onClick={() => selectConversation(conversation)}
               aria-current={conversation.id === selectedId ? "page" : undefined}
             >
               <span>{conversation.title || "Untitled conversation"}</span>
@@ -271,14 +295,20 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
       </aside>
 
       <section className="chat-column" aria-label="Audrey conversation">
-        {selected ? (
-          <ConversationThread
-            key={selected.id}
-            conversation={selected}
-            onConversationChange={replaceConversation}
-            onRemoveFromView={removeFromCurrentView}
-          />
-        ) : (
+        {renderedConversations.map((opened) => (
+          <div
+            className="conversation-thread-slot"
+            hidden={opened.id !== selectedId}
+            key={opened.id}
+          >
+            <ConversationThread
+              conversation={opened}
+              onConversationChange={replaceConversation}
+              onRemoveFromView={removeFromCurrentView}
+            />
+          </div>
+        ))}
+        {!selected ? (
           <div className="empty-workspace">
             <span>Audrey</span>
             <h1>What shall we work through?</h1>
@@ -287,7 +317,7 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
               Start a conversation
             </button>
           </div>
-        )}
+        ) : null}
       </section>
     </div>
   );
@@ -300,7 +330,7 @@ function ConversationThread({
 }: {
   conversation: Conversation;
   onConversationChange: (conversation: Conversation) => void;
-  onRemoveFromView: (conversationId: string) => void;
+  onRemoveFromView: (conversationId: string, closeThread?: boolean) => void;
 }) {
   const [thread, setThread] = useState<ThreadState>({ status: "idle" });
   const [mode, setMode] = useState<AudreyMode>(conversation.default_mode);
@@ -368,7 +398,7 @@ function ConversationThread({
     setMutationError("");
     try {
       await updateConversation(conversation.id, { archived: !archived });
-      onRemoveFromView(conversation.id);
+      onRemoveFromView(conversation.id, true);
     } catch (reason) {
       setMutationError(messageOf(reason));
     } finally {
@@ -381,7 +411,7 @@ function ConversationThread({
     setMutationError("");
     try {
       await deleteConversation(conversation.id);
-      onRemoveFromView(conversation.id);
+      onRemoveFromView(conversation.id, true);
     } catch (reason) {
       setMutationError(messageOf(reason));
       setConfirmingDelete(false);
@@ -514,15 +544,25 @@ function AudreyThread({
 }) {
   const [runError, setRunError] = useState("");
   const [activity, setActivity] = useState<RunActivity>(IDLE_ACTIVITY);
+  const history = useMemo<ThreadHistoryAdapter>(
+    () => ({
+      load: () => Promise.resolve(
+        ExportedMessageRepository.fromArray(toThreadMessages(initialMessages)),
+      ),
+      // Audrey persists both sides of a turn before and after the server run.
+      // Runtime history writes are therefore deliberately browser-local no-ops.
+      append: () => Promise.resolve(),
+    }),
+    [initialMessages],
+  );
   const agent = useMemo(
     () =>
       new HttpAgent({
         url: `/api/agent?mode=${encodeURIComponent(mode)}`,
         threadId: conversationId,
-        initialMessages: toAgUiMessages(initialMessages),
         fetch: latestActionFetch,
       }),
-    [conversationId, initialMessages, mode],
+    [conversationId, mode],
   );
   useEffect(() => {
     const subscriber: AgentSubscriber = {
@@ -609,6 +649,7 @@ function AudreyThread({
   }, [agent, onRunActiveChange]);
   const runtime = useAgUiRuntime({
     agent,
+    adapters: { history },
     showThinking: false,
     onError: (reason) => {
       onRunActiveChange(false);
@@ -725,8 +766,8 @@ function ToolActivity({ toolName, args, result, status }: ToolCallMessagePartPro
   );
 }
 
-function toAgUiMessages(messages: ConversationMessage[]): Message[] {
-  return messages.flatMap<Message>((message) => {
+function toThreadMessages(messages: ConversationMessage[]): ThreadMessageLike[] {
+  return messages.flatMap<ThreadMessageLike>((message) => {
     if (message.role === "user") {
       return [{ id: message.id, role: "user", content: message.content }];
     }
@@ -735,6 +776,18 @@ function toAgUiMessages(messages: ConversationMessage[]): Message[] {
     }
     return [];
   });
+}
+
+function upsertConversation(
+  conversations: Conversation[],
+  updated: Conversation,
+): Conversation[] {
+  const index = conversations.findIndex(({ id }) => id === updated.id);
+  if (index < 0) return [...conversations, updated];
+  if (conversations[index] === updated) return conversations;
+  return conversations.map((conversation) =>
+    conversation.id === updated.id ? updated : conversation,
+  );
 }
 
 function modeLabel(mode: AudreyMode): string {

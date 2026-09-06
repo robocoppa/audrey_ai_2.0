@@ -8,9 +8,10 @@ passed its default-disabled Unraid smoke. Milestones 2A and 2B are complete
 and Unraid-verified: Provider-neutral identity, canonical application state,
 native conversation/run resources, typed and AG-UI events, real pipeline
 observations, and the rebuildable canonical archive projection have all passed
-their live gates. Milestone 2C is in progress: Its first native web-client
-slice is complete and Unraid-verified; the interactive Cloudflare Access
-browser path is still pending.
+their live gates. Milestone 2C is in progress: Its native web-client slices are
+complete and Unraid-verified, and the first interactive Cloudflare Access user
+opened the root application and completed a Fast turn. Refresh and second-user
+isolation remain pending behind a browser navigation-history corrective.
 Slice 2C.2 conversation management is complete and Unraid-verified.
 Slice 2C.3 Video parity and its seven-mode smoke are complete and
 Unraid-verified.

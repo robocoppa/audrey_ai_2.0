@@ -751,12 +751,26 @@ The first public session validated the Access assertion and returned a new
 `cloudflare_access` Audrey principal, but exposed a production-only circular
 chunk between AG-UI and ChatWorkspace. Playwright had previously used Vite's
 development server, so the deployed chunk graph was outside the browser gate.
-The corrective removes the unsafe manual split, serves the dedicated Audrey
-hostname at clean root `/`, and makes Playwright build and preview the production
-artifact. All 2,749 backend tests, three Vitest contracts, and six production-
-preview Chromium workflows pass; the corrected wheel contains one lazy,
-self-contained chat-runtime chunk and no source maps. Rebuild and interactive
-browser verification remain.
+The first corrective removes the unsafe manual split, serves the dedicated
+Audrey hostname at clean root `/`, and makes Playwright build and preview the
+production artifact. After deployment, the allowed user opened the corrected
+root application and a Fast turn returned the exact `2C-ACCESS-READY` response.
+
+The subsequent refresh check exposed a second browser defect: Canonical
+messages were assigned to `HttpAgent`, while assistant-ui renders a separate
+runtime repository. Selecting another conversation unmounted that repository,
+aborted its active stream, and recreated an empty rendered thread even though
+Audrey still owned the canonical rows. The corrective now loads canonical rows
+through assistant-ui's supported history adapter and keeps each visited thread
+mounted for the browser session, hidden when inactive. Conversation selection
+therefore neither destroys visible history nor cancels background work; server
+canonical state remains authoritative and browser history writes remain no-ops.
+
+All 2,749 backend tests, three Vitest contracts, and seven production-preview
+Chromium workflows pass. The added workflow loads canonical history, switches
+away during an active run, returns to the same progress state, receives the
+background answer, and repeats the switch after completion. Rebuild, public
+refresh/navigation verification, and second-user isolation remain.
 
 Rollback removes or disables the public tunnel route first, then disables the
 Audrey Access flag and recreates `audrey-ai`. Disabling the Access application
