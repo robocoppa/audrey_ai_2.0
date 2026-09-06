@@ -60,21 +60,43 @@ def _index(root: Path) -> FileResponse:
     return _response(index, html=True)
 
 
+@router.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+async def native_ui_root(request: Request) -> FileResponse:
+    if not _enabled(request):
+        raise HTTPException(status_code=404, detail="Not found.")
+    return _index(_STATIC_ROOT.resolve())
+
+
+@router.api_route(
+    "/assets/{asset_path:path}",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+async def native_ui_root_asset(asset_path: str, request: Request) -> FileResponse:
+    if not _enabled(request):
+        raise HTTPException(status_code=404, detail="Not found.")
+
+    asset = _resolve_asset(_STATIC_ROOT, f"assets/{asset_path}")
+    if asset is None or not asset.is_file():
+        raise HTTPException(status_code=404, detail="Asset not found.")
+    return _response(asset, html=False)
+
+
 @router.api_route("/app", methods=["GET", "HEAD"], include_in_schema=False)
 async def native_ui_redirect(request: Request) -> Response:
     if not _enabled(request):
         raise HTTPException(status_code=404, detail="Not found.")
-    return RedirectResponse(url="/app/", status_code=307, headers=_SECURITY_HEADERS)
+    return RedirectResponse(url="/", status_code=307, headers=_SECURITY_HEADERS)
 
 
 @router.api_route("/app/{asset_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
-async def native_ui(asset_path: str, request: Request) -> FileResponse:
+async def native_ui(asset_path: str, request: Request) -> Response:
     if not _enabled(request):
         raise HTTPException(status_code=404, detail="Not found.")
 
     root = _STATIC_ROOT.resolve()
     if not asset_path:
-        return _index(root)
+        return RedirectResponse(url="/", status_code=307, headers=_SECURITY_HEADERS)
 
     asset = _resolve_asset(root, asset_path)
     if asset is None:

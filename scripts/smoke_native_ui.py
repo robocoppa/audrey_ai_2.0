@@ -25,7 +25,7 @@ BASE_URL = os.getenv("AUDREY_SMOKE_BASE_URL", "http://127.0.0.1:8000").rstrip("/
 USER_TOKEN = os.getenv("TEST_OWUI_TOKEN", "")
 ADMIN_TOKEN = os.getenv("ADMIN_OWUI_TOKEN", "")
 PROMPT = "Reply exactly: 2C1-NATIVE-UI-READY"
-_SCRIPT_SOURCE = re.compile(rb'<script[^>]+src="(/app/assets/[^"?]+\.js)"')
+_SCRIPT_SOURCE = re.compile(rb'<script[^>]+src="(/assets/[^"?]+\.js)"')
 
 
 class SmokeError(RuntimeError):
@@ -202,12 +202,12 @@ def main() -> int:
         if not user.get("id") or user.get("id") == admin.get("id"):
             raise SmokeError("smoke tokens must resolve to two different Audrey users")
 
-        _, html, headers = _request("/app/")
+        _, html, headers = _request("/")
         script_match = _SCRIPT_SOURCE.search(html)
         if b'id="root"' not in html or script_match is None:
-            raise SmokeError("/app/ did not return the built Audrey application shell")
+            raise SmokeError("/ did not return the built Audrey application shell")
         if "default-src 'self'" not in str(headers.get("Content-Security-Policy") or ""):
-            raise SmokeError("/app/ omitted the native UI content security policy")
+            raise SmokeError("/ omitted the native UI content security policy")
         script_path = script_match.group(1).decode()
         _, script, script_headers = _request(script_path)
         if not script or "javascript" not in str(script_headers.get_content_type()):

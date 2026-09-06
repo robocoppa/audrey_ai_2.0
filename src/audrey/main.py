@@ -91,7 +91,7 @@ async def lifespan(app: FastAPI):
     else:
         log.info("auth: Cloudflare Access disabled")
     log.info(
-        "native_ui: %s route=/app/",
+        "native_ui: %s route=/",
         "enabled" if cfg.env.native_ui_enabled else "disabled",
     )
 

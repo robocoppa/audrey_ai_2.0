@@ -7,7 +7,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: "html",
   use: {
-    baseURL: "http://127.0.0.1:4173/app/",
+    baseURL: "http://127.0.0.1:4173/",
     trace: "on-first-retry",
   },
   projects: [
@@ -17,8 +17,8 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run dev -- --host 127.0.0.1 --port 4173",
-    url: "http://127.0.0.1:4173/app/",
-    reuseExistingServer: !process.env.CI,
+    command: "vite preview --host 127.0.0.1 --port 4173",
+    url: "http://127.0.0.1:4173/",
+    reuseExistingServer: false,
   },
 });

@@ -29,6 +29,8 @@ def _client(tmp_path, monkeypatch, *, enabled: bool = True) -> TestClient:
 
 def test_native_ui_is_hidden_when_feature_flag_is_disabled(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch, enabled=False) as client:
+        assert client.get("/", follow_redirects=False).status_code == 404
+        assert client.get("/assets/index-deadbeef.js").status_code == 404
         assert client.get("/app/", follow_redirects=False).status_code == 404
         assert client.get("/app/assets/index-deadbeef.js").status_code == 404
 
@@ -37,9 +39,13 @@ def test_native_ui_redirect_and_html_policy(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
         redirect = client.get("/app", follow_redirects=False)
         assert redirect.status_code == 307
-        assert redirect.headers["location"] == "/app/"
+        assert redirect.headers["location"] == "/"
 
-        response = client.get("/app/")
+        compatibility = client.get("/app/", follow_redirects=False)
+        assert compatibility.status_code == 307
+        assert compatibility.headers["location"] == "/"
+
+        response = client.get("/")
         assert response.status_code == 200
         assert response.text == "<html><body>Audrey native</body></html>"
         assert response.headers["cache-control"] == "no-store"
@@ -54,11 +60,14 @@ def test_native_ui_redirect_and_html_policy(tmp_path, monkeypatch):
 
 def test_native_ui_serves_hashed_assets_and_spa_routes(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
-        asset = client.get("/app/assets/index-deadbeef.js")
+        asset = client.get("/assets/index-deadbeef.js")
         assert asset.status_code == 200
         assert asset.text == "console.log('audrey')"
         assert asset.headers["content-type"].startswith("text/javascript")
         assert asset.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+        compatibility_asset = client.get("/app/assets/index-deadbeef.js")
+        assert compatibility_asset.status_code == 200
 
         route = client.get("/app/conversations/con_example")
         assert route.status_code == 200
@@ -70,7 +79,7 @@ def test_native_ui_serves_hashed_assets_and_spa_routes(tmp_path, monkeypatch):
 
 def test_native_ui_head_and_missing_build(tmp_path, monkeypatch):
     with _client(tmp_path, monkeypatch) as client:
-        response = client.head("/app/")
+        response = client.head("/")
         assert response.status_code == 200
         assert response.content == b""
 
@@ -81,7 +90,7 @@ def test_native_ui_head_and_missing_build(tmp_path, monkeypatch):
     app.state.cfg = SimpleNamespace(env=SimpleNamespace(native_ui_enabled=True))
     app.include_router(native_ui.router)
     with TestClient(app) as client:
-        response = client.get("/app/")
+        response = client.get("/")
     assert response.status_code == 503
     assert response.json() == {"detail": "Native Audrey UI is not built."}
 

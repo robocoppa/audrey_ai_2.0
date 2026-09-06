@@ -647,7 +647,7 @@ cancellation paths; user-confirmed Unraid smoke.
 
 Implementation status: The first 2C slice is complete and Unraid-verified. A pinned
 React/TypeScript/Vite workspace builds in a Node stage and ships only static
-assets in the Audrey image. `/app/` is disabled by default, applies restrictive
+assets in the Audrey image. `/` is disabled by default, applies restrictive
 browser headers when enabled, and leaves OWUI untouched. The native shell lists
 and creates owner-bound conversations, renders canonical history, selects and
 persists a mode, and sends runs through the standard `/api/agent` AG-UI
@@ -657,8 +657,8 @@ canonical history and authorizes tools server-side.
 
 Typed stages, progress, tools, sources, success, cancellation, and failures are
 rendered without parsing compatibility banners. The login shell lazy-loads the
-chat runtime and the production build splits its large libraries into bounded,
-cacheable chunks. Three Vitest contracts and three Chromium Playwright paths
+chat runtime as one self-contained production chunk. Three Vitest contracts and
+three Chromium Playwright paths
 cover same-origin identity, no browser-stored bearer, latest-action transport,
 keyboard submission, typed activity, accessibility, cancellation, and session
 expiry. All 2,745 hermetic backend tests pass; scoped ruff and compilation are
@@ -670,8 +670,7 @@ gate served the 449-byte shell and hashed entry asset with CSP, resolved two
 different Audrey users, returned `404` for both cross-owner read and run,
 completed one real Fast AG-UI turn with two matching canonical messages, then
 deleted both canonical and archive state and returned repair to `ready`.
-Milestone 2C remains open for the public Cloudflare Access browser path,
-remaining native capabilities, and every-mode exercise.
+Milestone 2C remains open for the public Cloudflare Access browser path.
 
 Slice 2C.2 is complete and Unraid-verified. `/api/conversations` now provides owner-scoped,
 case-insensitive literal title search and binds each pagination cursor to its
@@ -692,28 +691,76 @@ and CSP checks were clean, two identities remained isolated, a real Fast run
 persisted its canonical messages, rename and literal `%_` title search worked,
 archive/restore completed, and deletion cleanup returned repair to `ready`.
 
-Slice 2C.3 is laptop-complete. It closes a parity gap found while preparing the
-every-mode gate: `/v1/models` published `audrey_video`, but canonical native
-state, native routes, and the browser accepted only six modes. Schema v5 widens
-the two mode constraints with a transactional table rebuild. The migration
+Slice 2C.3 is complete and Unraid-verified. It closes a parity gap found while
+preparing the every-mode gate: `/v1/models` published `audrey_video`, but
+canonical native state, native routes, and the browser accepted only six modes.
+Schema v5 widens the two mode constraints with a transactional table rebuild.
+The migration
 preserves existing conversations, runs, messages, and projection receipts,
 checks the rebuilt foreign-key graph before commit, restores foreign-key
 enforcement, and recreates the immutable-terminal trigger. Native Video now
 launches `audrey_video`, and the browser lists it alongside the other modes.
 
 A permanent invariant requires the native mode map to cover every published
-virtual model. `scripts/smoke_native_modes.py` is the pending Unraid gate: it
+virtual model. `scripts/smoke_native_modes.py` is the repeatable Unraid gate: it
 creates one disposable conversation per mode, runs all seven through the same
 native AG-UI boundary used by the browser, verifies durable mode/model/message
 state, then deletes canonical and archive records and drains repair once. The
 local gate passes all 2,749 backend tests, three Vitest contracts, six Chromium
 workflows, typecheck, lint, scoped ruff, compilation, production build, wheel
-contents, lockfile, and diff checks. The remaining Milestone 2C evidence is the
-deployed seven-mode result and the interactive Cloudflare Access browser path.
+contents, lockfile, and diff checks. On Unraid, all seven modes completed with
+the expected virtual model and successful AG-UI terminal event; all seven
+canonical/archive cleanup operations returned `204`/`202`, and repair drained
+to `ready`. The remaining Milestone 2C evidence is the interactive Cloudflare
+Access browser path.
 Take an online backup of `audrey_app.sqlite` before the first schema-v5 startup.
 A pre-v5 image does not understand persisted `video` rows, so after real native
 Video use the rollback choices are to roll forward or restore that snapshot;
 the latter discards canonical changes made after the backup.
+
+#### Public Cloudflare Access completion gate
+
+The remaining 2C gate is deployment configuration and an interactive browser
+check; it does not require another identity implementation. Create the Access
+application before publishing the tunnel route so an ordering mistake never
+leaves an unprotected Audrey hostname. In Cloudflare Zero Trust, create a
+self-hosted public-hostname application for the whole Audrey hostname, with no
+path restriction, and attach an Allow policy for the intended human identities.
+Email one-time PIN is sufficient for this gate. Then add a published application
+route for the same hostname. Use `http://audrey-ai:8000` when `cloudflared`
+shares `ollama-net`; use `http://127.0.0.1:8000` when its container uses host
+networking. Cloudflare documents both the
+[self-hosted application flow](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)
+and the [tunnel route](https://developers.cloudflare.com/tunnel/setup/).
+
+Copy the application's Audience (AUD) tag and the account team domain into
+`CLOUDFLARE_ACCESS_AUDIENCE` and `CLOUDFLARE_ACCESS_TEAM_DOMAIN`, enable
+`CLOUDFLARE_ACCESS_ENABLED`, and recreate `audrey-ai`. Do not store an Access
+JWT in `.env`. Audrey validates the `Cf-Access-Jwt-Assertion` header Cloudflare
+adds at the origin, following Cloudflare's
+[JWT validation contract](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/).
+
+The browser gate passes when an allowed user can open `/`, `/api/me`
+reports `auth_provider: cloudflare_access`, a native Fast turn survives refresh,
+and a second allowed identity cannot see the first identity's conversation.
+No Access cookie or assertion should be copied into a terminal or test artifact.
+A Cloudflare identity intentionally does not merge with an OWUI identity that
+has the same email, and it starts as a normal Audrey user rather than an admin.
+
+The first public session validated the Access assertion and returned a new
+`cloudflare_access` Audrey principal, but exposed a production-only circular
+chunk between AG-UI and ChatWorkspace. Playwright had previously used Vite's
+development server, so the deployed chunk graph was outside the browser gate.
+The corrective removes the unsafe manual split, serves the dedicated Audrey
+hostname at clean root `/`, and makes Playwright build and preview the production
+artifact. All 2,749 backend tests, three Vitest contracts, and six production-
+preview Chromium workflows pass; the corrected wheel contains one lazy,
+self-contained chat-runtime chunk and no source maps. Rebuild and interactive
+browser verification remain.
+
+Rollback removes or disables the public tunnel route first, then disables the
+Audrey Access flag and recreates `audrey-ai`. Disabling the Access application
+while leaving its tunnel route public is not a safe rollback.
 
 ### Milestone 2D — files, preferences, and ownership operations
 

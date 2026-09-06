@@ -42,7 +42,7 @@ export function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <a className="brand" href="/app/" aria-label="Audrey home">
+        <a className="brand" href="/" aria-label="Audrey home">
           Audrey
         </a>
         <SessionBadge session={session} />
