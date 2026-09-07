@@ -25,6 +25,7 @@ from audrey.app_state import (
     StartedRun,
 )
 from audrey.auth import require_scope
+from audrey.conversation_titles import ConversationTitleGenerator
 from audrey.identity import Principal
 from audrey.pipeline.agui import (
     AgUiCursor,
@@ -430,6 +431,10 @@ def _manager(request: Request) -> NativeRunManager:
     return manager
 
 
+def _title_generator(request: Request) -> ConversationTitleGenerator | None:
+    return getattr(request.app.state, "conversation_titles", None)
+
+
 def _run_response(record: RunRecord) -> RunResponse:
     return RunResponse(
         id=record.run_id,
@@ -501,12 +506,31 @@ async def create_run(
 ) -> RunCreateResponse:
     manager = _manager(request)
     store = _store(request)
+    automatic_title: str | None = None
+    title_generator = _title_generator(request)
+    if title_generator is not None:
+        conversation = await store.conversations.get(
+            user_id=principal.user_id,
+            conversation_id=conversation_id,
+        )
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="Conversation not found.")
+        if (
+            not conversation.title.strip()
+            and conversation.last_message_at is None
+            and conversation.archived_at is None
+        ):
+            automatic_title = await title_generator.generate(
+                user_id=principal.storage_namespace,
+                user_content=payload.content,
+            )
     try:
         started = await store.conversations.begin_run(
             user_id=principal.user_id,
             conversation_id=conversation_id,
             user_content=payload.content,
             mode=payload.mode,
+            automatic_title=automatic_title,
         )
     except (ConversationArchivedError, ConversationHasActiveRunError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

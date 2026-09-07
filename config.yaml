@@ -1652,3 +1652,15 @@ classification:
   review_override:
     enabled: true                        # "review this code" → reasoning, not code
   web_search_regex_set: "default"        # matches time-sensitive / factual / current-info
+
+# ─── Native conversation titles ───────────────────────────────────────
+title_generation:
+  # A title is a label, not a second answer. Keep this on the small router
+  # model, disable thinking when supported, and fail back to a cleaned prompt
+  # rather than making conversation creation depend on an auxiliary call.
+  enabled: true
+  model: "qwen3.5:4b"
+  timeout_s: 10
+  max_prompt_chars: 6000
+  max_tokens: 32
+  no_thinking: true

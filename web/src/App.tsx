@@ -46,7 +46,17 @@ export function App() {
   }, []);
 
   return (
-    <div className="app-shell">
+    <div
+      className={session.status === "ready" ? "app-shell app-shell-ready" : "app-shell"}
+    >
+      <svg className="brand-filter" aria-hidden="true">
+        <filter id="remove-wordmark-white" colorInterpolationFilters="sRGB">
+          <feColorMatrix
+            type="matrix"
+            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  -1.5 -1.5 -1.5 0 4.45"
+          />
+        </filter>
+      </svg>
       <header className="topbar">
         <a className="brand" href="/" aria-label="Audrey home">
           <span className="brand-wordmark" aria-hidden="true">

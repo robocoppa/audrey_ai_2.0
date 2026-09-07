@@ -78,11 +78,13 @@ def _native_app(
     *,
     stream_factory=_successful_stream,
     archive_wake=None,
+    title_generator=None,
 ) -> tuple[FastAPI, ApplicationStore, Principal, NativeRunManager]:
     store = ApplicationStore(tmp_path / "app.sqlite")
     owner = _principal_sync(store)
     app = FastAPI()
     app.state.application_store = store
+    app.state.conversation_titles = title_generator
     manager = NativeRunManager(
         app=app,
         store=store,
@@ -93,6 +95,16 @@ def _native_app(
     app.include_router(router)
     app.dependency_overrides[require_principal] = lambda: owner
     return app, store, owner, manager
+
+
+class _StaticTitleGenerator:
+    def __init__(self, title: str) -> None:
+        self.title = title
+        self.calls: list[tuple[str, str]] = []
+
+    async def generate(self, *, user_id: str, user_content: str) -> str:
+        self.calls.append((user_id, user_content))
+        return self.title
 
 
 def _sse_events(body: str) -> list[dict[str, Any]]:
@@ -130,9 +142,11 @@ def test_native_modes_cover_every_published_virtual_model():
 
 def test_native_run_create_stream_persist_and_resume_are_canonical(tmp_path):
     archive_wakes: list[bool] = []
+    title_generator = _StaticTitleGenerator("Native Answer Request")
     app, store, owner, _manager = _native_app(
         tmp_path,
         archive_wake=lambda: archive_wakes.append(True),
+        title_generator=title_generator,
     )
     conversation = asyncio.run(
         store.conversations.create(
@@ -156,7 +170,10 @@ def test_native_run_create_stream_persist_and_resume_are_canonical(tmp_path):
                 f"/api/conversations/{conversation.conversation_id}"
             )
             assert titled.status_code == 200
-            assert titled.json()["title"] == "Answer natively."
+            assert titled.json()["title"] == "Native Answer Request"
+            assert title_generator.calls == [
+                (owner.storage_namespace, "Answer natively.")
+            ]
 
             streamed = client.get(run["events_url"])
             assert streamed.status_code == 200

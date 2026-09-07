@@ -783,13 +783,32 @@ the selected mode's purpose appears directly beneath it, followed by the model
 selector and input. User and assistant text render safe CommonMark plus GitHub-
 flavored Markdown, with raw HTML ignored.
 
-New native conversations are created without a canonical title. The first run
-assigns one atomically from the first persisted user prompt: whitespace and a
-leading Markdown marker are normalized, the title is capped at 72 characters
-on a word boundary, and later prompts cannot replace it. A title explicitly
-supplied or edited by the user is never auto-renamed. The browser refreshes the
-canonical conversation when the server confirms `RUN_STARTED`, so the new title
-appears in the header and sidebar without waiting for a reload or the answer.
+The empty thread now collapses its introductory space so the complete composer
+fits in the initial 720px browser viewport. Its center copy is only `Ask Audrey`,
+the input uses the same wording, the mode description and selector are larger,
+and the send control uses an unambiguous arrow icon. A render-time transparency
+filter removes the white plate baked into the supplied Builtryte wordmark while
+preserving the original artwork and dark header.
+
+The authenticated shell now owns one viewport-height layout: conversation
+messages are the scrolling region while the complete composer dock remains at
+the bottom of the screen. Scrolling meaningfully above the newest message
+reveals an accessible down-arrow immediately above the dock; activating it
+returns the thread to the latest message, where the control disappears. This
+uses assistant-ui's thread scroll state rather than a second competing browser
+scroll listener.
+
+New native conversations are created without a canonical title. Before the
+first run is committed, the small configured title model labels the prompt with
+a 3–7 word noun phrase describing its central topic or task. The full auxiliary
+operation, including capability detection and both scheduler queues, is bounded
+to ten seconds; any failure uses the previous deterministic cleaned-prompt
+title, so a title outage cannot prevent the chat from starting. The final choice is capped
+at 72 characters and committed atomically with the first messages. Later
+prompts cannot replace it, and a title explicitly supplied or edited by the user
+is never auto-renamed. The browser refreshes the canonical conversation when
+the server confirms `RUN_STARTED`, so the summary appears in the header and
+sidebar without waiting for a reload or the answer.
 
 The header shows the stored profile's first name when one exists, falls back to
 the account handle, and provides Cloudflare Access's same-origin logout link.
@@ -798,9 +817,9 @@ authenticated `PATCH /api/me` changes only the current Audrey user's display
 name, trims and bounds the value, rejects personal access tokens, evicts stale
 authentication cache entries, and prevents later OWUI or Cloudflare logins from
 overwriting the Audrey-owned value. Clean `npm ci`, typecheck, lint, five Vitest
-contracts, nine production-preview Chromium workflows, the production build,
-34 affected canonical-run contracts, 66 focused identity/authentication
-contracts, and all 2,756 backend tests pass.
+contracts, ten production-preview Chromium workflows, the production build,
+37 focused title/canonical-run contracts, 66 focused identity/authentication
+contracts, and all 2,759 backend tests pass.
 The required lesson-link scan reports zero broken links; its existing stale-line
 backlog remains deferred by user direction. This refinement still needs its
 Unraid browser smoke.

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import json
-import re
 import sqlite3
 import threading
 import uuid
@@ -22,12 +21,12 @@ from audrey.app_state.records import (
     StartedRun,
     UserPreferences,
 )
+from audrey.app_state.titles import fallback_conversation_title
 
 _ALLOWED_MODES = frozenset(
     {"auto", "fast", "deep", "research", "local", "cloud", "video"}
 )
 _TERMINAL_RUN_STATUSES = frozenset({"succeeded", "cancelled", "failed"})
-_AUTOMATIC_TITLE_MAX_CHARS = 72
 
 
 class InvalidApplicationStateError(ValueError):
@@ -497,6 +496,7 @@ class ConversationsRepository:
         conversation_id: str,
         user_content: str,
         mode: str | None = None,
+        automatic_title: str | None = None,
     ) -> StartedRun | None:
         """Create run plus user/assistant messages in one write transaction."""
 
@@ -506,6 +506,7 @@ class ConversationsRepository:
             conversation_id,
             user_content,
             mode,
+            automatic_title,
         )
 
     def _begin_run_sync(
@@ -514,6 +515,7 @@ class ConversationsRepository:
         conversation_id: str,
         user_content: str,
         mode: str | None,
+        automatic_title: str | None,
     ) -> StartedRun | None:
         user_id = _required(user_id, "user id")
         conversation_id = _required(conversation_id, "conversation id")
@@ -552,7 +554,9 @@ class ConversationsRepository:
                         "UPDATE app_conversations SET title = ?, updated_at = ? "
                         "WHERE user_id = ? AND conversation_id = ?",
                         (
-                            _automatic_title(user_content),
+                            fallback_conversation_title(
+                                automatic_title or user_content
+                            ),
                             now,
                             user_id,
                             conversation_id,
@@ -1184,22 +1188,6 @@ def _normalize_title(value: str) -> str:
     if len(title) > 200:
         raise InvalidApplicationStateError("conversation title must be at most 200 characters")
     return title
-
-
-def _automatic_title(user_content: str) -> str:
-    """Build a stable first-prompt title without another model request."""
-
-    title = " ".join(str(user_content).split())
-    title = re.sub(r"^(?:#{1,6}\s+|>\s+|[-+*]\s+)", "", title).strip()
-    title = title.strip("`*_\"'") or "New conversation"
-    if len(title) <= _AUTOMATIC_TITLE_MAX_CHARS:
-        return title
-
-    prefix = title[: _AUTOMATIC_TITLE_MAX_CHARS - 1]
-    word_boundary = prefix.rsplit(" ", 1)[0].rstrip(" ,.;:-")
-    if len(word_boundary) >= _AUTOMATIC_TITLE_MAX_CHARS // 2:
-        prefix = word_boundary
-    return f"{prefix.rstrip()}…"
 
 
 def _normalize_mode(value: str) -> str:

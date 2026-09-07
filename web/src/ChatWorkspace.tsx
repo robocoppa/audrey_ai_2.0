@@ -740,9 +740,7 @@ function AudreyThread({
         <ThreadPrimitive.Viewport className="thread-viewport">
           <ThreadPrimitive.Empty>
             <div className="thread-empty">
-              <span>Ready</span>
-              <h2>Ask Audrey anything.</h2>
-              <p>The server will load this conversation's canonical history.</p>
+              <h2>Ask Audrey</h2>
             </div>
           </ThreadPrimitive.Empty>
           <ThreadPrimitive.Messages
@@ -751,10 +749,15 @@ function AudreyThread({
               AssistantMessage,
             }}
           />
-          <ThreadPrimitive.ScrollToBottom className="scroll-bottom" aria-label="Scroll to latest message">
-            ↓
-          </ThreadPrimitive.ScrollToBottom>
           <ThreadPrimitive.ViewportFooter className="composer-dock">
+            <ThreadPrimitive.ScrollToBottom
+              className="scroll-bottom"
+              aria-label="Scroll to latest message"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 5v14m5.5-5.5L12 19l-5.5-5.5" />
+              </svg>
+            </ThreadPrimitive.ScrollToBottom>
             {readOnly ? (
               <p className="archived-notice" role="status">
                 This conversation is archived. Restore it to continue.
@@ -771,16 +774,19 @@ function AudreyThread({
                 <ComposerPrimitive.Root className="composer">
                   <ComposerPrimitive.Input
                     className="composer-input"
-                    aria-label="Message Audrey"
-                    placeholder="Message Audrey…"
+                    aria-label="Ask Audrey"
+                    placeholder="Ask Audrey…"
                     rows={1}
                   />
                   <div className="composer-actions">
                     <ComposerPrimitive.Cancel className="cancel-button">Stop</ComposerPrimitive.Cancel>
-                    <ComposerPrimitive.Send className="send-button" aria-label="Send message">↑</ComposerPrimitive.Send>
+                    <ComposerPrimitive.Send className="send-button" aria-label="Send message">
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 19V5M6.5 10.5 12 5l5.5 5.5" />
+                      </svg>
+                    </ComposerPrimitive.Send>
                   </div>
                 </ComposerPrimitive.Root>
-                <p className="composer-hint">Enter to send · Shift+Enter for a new line</p>
               </>
             )}
           </ThreadPrimitive.ViewportFooter>

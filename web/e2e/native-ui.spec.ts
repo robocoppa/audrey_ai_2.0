@@ -95,16 +95,29 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect(portrait).toBeVisible();
   await expect.poll(() => portrait.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   await expect(page.getByText("Quick, direct answers for everyday questions and tasks.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Ask Audrey", exact: true })).toBeVisible();
+  await expect(page.getByText("The server will load this conversation's canonical history.")).toHaveCount(0);
   const portraitBox = await portrait.boundingBox();
   const composerBox = await page.locator(".composer").boundingBox();
+  const viewport = page.viewportSize();
   expect(portraitBox).not.toBeNull();
   expect(composerBox).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect((composerBox?.y ?? 0) + (composerBox?.height ?? 0)).toBeLessThanOrEqual(viewport?.height ?? 0);
   expect(Math.abs(
     (portraitBox?.x ?? 0) + (portraitBox?.width ?? 0) / 2
       - ((composerBox?.x ?? 0) + (composerBox?.width ?? 0) / 2),
   )).toBeLessThan(2);
 
-  const composer = page.getByRole("textbox", { name: "Message Audrey" });
+  await expect.poll(
+    () => page.locator(".model-description").evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
+  ).toBeGreaterThanOrEqual(14);
+  await expect.poll(
+    () => page.getByRole("combobox", { name: "Audrey model" }).evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
+  ).toBeGreaterThanOrEqual(14);
+  await expect(page.getByRole("button", { name: "Send message" }).locator("svg")).toBeVisible();
+
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
   await composer.focus();
   await expect.poll(() => composer.evaluate((input) => getComputedStyle(input).outlineStyle)).toBe("none");
   await expect.poll(() => page.locator(".composer").evaluate((root) => getComputedStyle(root).boxShadow)).not.toBe("none");
@@ -132,7 +145,7 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   expect(accessibility.violations).toEqual([]);
 });
 
-test("titles a new conversation from its first prompt", async ({ page }) => {
+test("summarizes a new conversation from its first prompt", async ({ page }) => {
   let created = false;
   let createBody: unknown = null;
   let conversation = {
@@ -171,7 +184,7 @@ test("titles a new conversation from its first prompt", async ({ page }) => {
     if (url.pathname === "/api/agent") {
       conversation = {
         ...conversation,
-        title: "Plan a weekend hiking trip with a packing list",
+        title: "Weekend Hiking Trip Planning",
       };
       await route.fulfill({
         status: 200,
@@ -210,14 +223,54 @@ test("titles a new conversation from its first prompt", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "New conversation" })).toBeVisible();
 
   const prompt = "Plan a weekend hiking trip with a packing list";
-  await page.getByRole("textbox", { name: "Message Audrey" }).fill(prompt);
-  await page.getByRole("textbox", { name: "Message Audrey" }).press("Enter");
+  await page.getByRole("textbox", { name: "Ask Audrey" }).fill(prompt);
+  await page.getByRole("textbox", { name: "Ask Audrey" }).press("Enter");
 
-  await expect(page.getByRole("heading", { name: prompt })).toBeVisible();
+  const summaryTitle = "Weekend Hiking Trip Planning";
+  await expect(page.getByRole("heading", { name: summaryTitle })).toBeVisible();
   await expect(
-    page.getByRole("navigation", { name: "Conversation history" }).getByText(prompt),
+    page.getByRole("navigation", { name: "Conversation history" }).getByText(summaryTitle),
   ).toBeVisible();
   expect(createBody).toEqual({ default_mode: "auto" });
+});
+
+test("keeps the composer docked and returns to the latest message", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await mockAudreyApi(page, undefined, scrollingBrowserHistory());
+  await page.goto("./");
+
+  const viewport = page.locator(".thread-viewport");
+  const dock = page.locator(".composer-dock");
+  const jump = page.getByRole("button", { name: "Scroll to latest message" });
+
+  await expect.poll(() => viewport.evaluate(
+    (element) => element.scrollHeight > element.clientHeight + 100,
+  )).toBe(true);
+  await expect(jump).toBeHidden();
+
+  const dockAtLatest = await dock.boundingBox();
+  const viewportBox = await viewport.boundingBox();
+  expect(dockAtLatest).not.toBeNull();
+  expect(viewportBox).not.toBeNull();
+
+  await viewport.evaluate((element) => element.scrollTo({ top: 0 }));
+  await expect(jump).toBeVisible();
+  await expect(jump.locator("svg")).toBeVisible();
+
+  const dockWhileReading = await dock.boundingBox();
+  expect(dockWhileReading).not.toBeNull();
+  expect(Math.abs((dockWhileReading?.y ?? 0) - (dockAtLatest?.y ?? 0))).toBeLessThan(2);
+  expect(
+    (dockWhileReading?.y ?? 0) + (dockWhileReading?.height ?? 0),
+  ).toBeLessThanOrEqual(
+    (viewportBox?.y ?? 0) + (viewportBox?.height ?? 0) + 1,
+  );
+
+  await jump.click();
+  await expect.poll(() => viewport.evaluate((element) => (
+    element.scrollTop + element.clientHeight >= element.scrollHeight - 2
+  ))).toBe(true);
+  await expect(jump).toBeHidden();
 });
 
 test("keeps history and an active run alive while switching conversations", async ({ page }) => {
@@ -256,7 +309,7 @@ test("keeps history and an active run alive while switching conversations", asyn
   await page.goto("./");
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
 
-  const composer = page.getByRole("textbox", { name: "Message Audrey" });
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
   await composer.fill("Keep this prompt while I visit another chat");
   await composer.press("Enter");
   await expect(page.getByText("Planning", { exact: true })).toBeVisible();
@@ -349,7 +402,7 @@ test("searches, renames, archives, restores, and deletes a conversation", async 
 
   await page.getByRole("button", { name: "Archived" }).click();
   await expect(page.getByRole("heading", { name: "Lifecycle renamed" })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Message Audrey" })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toHaveCount(0);
   await expect(page.getByText("This conversation is archived. Restore it to continue.")).toBeVisible();
 
   await page.getByRole("button", { name: "Restore" }).click();
@@ -444,7 +497,7 @@ test("keeps canonical messages when changing mode", async ({ page }) => {
   });
 
   await page.goto("./");
-  const composer = page.getByRole("textbox", { name: "Message Audrey" });
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
   await composer.fill("First mode turn");
   await composer.press("Enter");
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
@@ -505,7 +558,7 @@ test("cancels an active browser run without leaving an error state", async ({ pa
   await mockAudreyApi(page);
   await page.goto("./");
 
-  const composer = page.getByRole("textbox", { name: "Message Audrey" });
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
   await composer.fill("Keep this run open");
   await composer.press("Enter");
   await page.getByRole("button", { name: "Stop" }).click();
@@ -527,7 +580,7 @@ test("surfaces an expired session during a run", async ({ page }) => {
   );
   await page.goto("./");
 
-  const composer = page.getByRole("textbox", { name: "Message Audrey" });
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
   await composer.fill("Attempt after expiry");
   await composer.press("Enter");
 
@@ -538,6 +591,7 @@ test("surfaces an expired session during a run", async ({ page }) => {
 async function mockAudreyApi(
   page: Page,
   agentHandler?: (route: Route) => Promise<void> | void,
+  messages: ReadonlyArray<Record<string, unknown>> = [],
 ) {
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -568,7 +622,7 @@ async function mockAudreyApi(
       return;
     }
     if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
-      await json(route, { items: [], next_cursor: null });
+      await json(route, { items: messages, next_cursor: null });
       return;
     }
     if (url.pathname === "/api/agent" && agentHandler) {
@@ -633,6 +687,21 @@ function canonicalBrowserTurn() {
       updated_at: "2026-09-05T00:00:01Z",
     },
   ];
+}
+
+function scrollingBrowserHistory() {
+  return Array.from({ length: 18 }, (_, index) => ({
+    id: `msg_scroll_${index + 1}`,
+    run_id: `run_scroll_${Math.floor(index / 2) + 1}`,
+    sequence: index + 1,
+    role: index % 2 === 0 ? "user" : "assistant",
+    status: "completed",
+    content: `${index % 2 === 0 ? "Question" : "Answer"} ${index + 1}: ${
+      "A deliberately long conversation entry that makes the message viewport overflow. ".repeat(3)
+    }`,
+    created_at: "2026-09-05T00:00:00Z",
+    updated_at: "2026-09-05T00:00:00Z",
+  }));
 }
 
 function canonicalBrowserEvents(): ReadonlyArray<Record<string, unknown>> {

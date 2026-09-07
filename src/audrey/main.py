@@ -22,6 +22,7 @@ from audrey.app_state import ApplicationStore
 from audrey.auth import AuthedUser, require_admin
 from audrey.chat_projection import ChatProjectionPromoter
 from audrey.config import get_config
+from audrey.conversation_titles import ConversationTitleGenerator
 from audrey.identity import build_cloudflare_access_verifier
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
 from audrey.kb.file_deletion import FileDeletionWorker, FileOperationLocks
@@ -323,6 +324,22 @@ async def lifespan(app: FastAPI):
     )
     await user_data_purges.start()
     app.state.user_data_purges = user_data_purges
+
+    title_cfg = cfg.raw.get("title_generation", {}) or {}
+    conversation_titles = None
+    if title_cfg.get("enabled", True):
+        conversation_titles = ConversationTitleGenerator(
+            ollama=ollama,
+            registry=registry,
+            gate=gate,
+            inflight=inflight,
+            model=str(title_cfg.get("model") or cfg.raw["router"]["model"]),
+            timeout_s=float(title_cfg.get("timeout_s", 10.0)),
+            max_prompt_chars=int(title_cfg.get("max_prompt_chars", 6_000)),
+            max_tokens=int(title_cfg.get("max_tokens", 32)),
+            no_thinking=bool(title_cfg.get("no_thinking", True)),
+        )
+    app.state.conversation_titles = conversation_titles
 
     native_runs = NativeRunManager(
         app=app,

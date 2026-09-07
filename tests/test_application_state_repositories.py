@@ -315,11 +315,10 @@ async def test_first_prompt_titles_only_an_untitled_conversation(tmp_path):
             user_id=owner.user_id,
             conversation_id=conversation.conversation_id,
             user_content="  # Plan a weekend hiking trip\nwith a packing list  ",
+            automatic_title="Weekend Hiking Trip Planning",
         )
         assert started is not None
-        assert started.conversation.title == (
-            "Plan a weekend hiking trip with a packing list"
-        )
+        assert started.conversation.title == "Weekend Hiking Trip Planning"
 
         await store.conversations.finish_run(
             user_id=owner.user_id,
@@ -333,9 +332,7 @@ async def test_first_prompt_titles_only_an_untitled_conversation(tmp_path):
             user_content="Replace the title with this second prompt.",
         )
         assert second is not None
-        assert second.conversation.title == (
-            "Plan a weekend hiking trip with a packing list"
-        )
+        assert second.conversation.title == "Weekend Hiking Trip Planning"
 
         manual = await store.conversations.create(
             user_id=owner.user_id,
@@ -345,6 +342,7 @@ async def test_first_prompt_titles_only_an_untitled_conversation(tmp_path):
             user_id=owner.user_id,
             conversation_id=manual.conversation_id,
             user_content="This must not replace a manual title.",
+            automatic_title="Attempted Automatic Replacement",
         )
         assert manual_run is not None
         assert manual_run.conversation.title == "My saved title"
