@@ -68,6 +68,12 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
 
   await page.goto("./");
   await expect(page).toHaveTitle("Audrey by Builtryte");
+  await expect.poll(
+    () => page.evaluate(() => getComputedStyle(document.documentElement).colorScheme),
+  ).toBe("dark");
+  await expect.poll(
+    () => page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor),
+  ).toBe("rgb(7, 16, 31)");
   const wordmark = page.locator(".brand-wordmark img");
   await expect(wordmark).toBeVisible();
   await expect.poll(
@@ -88,6 +94,15 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   const portrait = page.locator(".composer-model-picker img");
   await expect(portrait).toBeVisible();
   await expect.poll(() => portrait.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  await expect(page.getByText("Quick, direct answers for everyday questions and tasks.")).toBeVisible();
+  const portraitBox = await portrait.boundingBox();
+  const composerBox = await page.locator(".composer").boundingBox();
+  expect(portraitBox).not.toBeNull();
+  expect(composerBox).not.toBeNull();
+  expect(Math.abs(
+    (portraitBox?.x ?? 0) + (portraitBox?.width ?? 0) / 2
+      - ((composerBox?.x ?? 0) + (composerBox?.width ?? 0) / 2),
+  )).toBeLessThan(2);
 
   const composer = page.getByRole("textbox", { name: "Message Audrey" });
   await composer.focus();
@@ -115,6 +130,94 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
 
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations).toEqual([]);
+});
+
+test("titles a new conversation from its first prompt", async ({ page }) => {
+  let created = false;
+  let createBody: unknown = null;
+  let conversation = {
+    ...browserConversation(""),
+    default_mode: "auto" as const,
+  };
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me") {
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      await json(route, { items: created ? [conversation] : [], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/conversations" && request.method() === "POST") {
+      createBody = request.postDataJSON();
+      created = true;
+      await json(route, conversation);
+      return;
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    if (
+      url.pathname === `/api/conversations/${CONVERSATION_ID}`
+      && request.method() === "GET"
+    ) {
+      await json(route, conversation);
+      return;
+    }
+    if (url.pathname === "/api/agent") {
+      conversation = {
+        ...conversation,
+        title: "Plan a weekend hiking trip with a packing list",
+      };
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: aguiStream([
+          {
+            type: "RUN_STARTED",
+            timestamp: 1,
+            threadId: CONVERSATION_ID,
+            runId: "run_automatic_title",
+          },
+          { type: "TEXT_MESSAGE_START", timestamp: 2, messageId: "msg_title" },
+          {
+            type: "TEXT_MESSAGE_CONTENT",
+            timestamp: 3,
+            messageId: "msg_title",
+            delta: "Here is the hiking plan.",
+          },
+          { type: "TEXT_MESSAGE_END", timestamp: 4, messageId: "msg_title" },
+          {
+            type: "RUN_FINISHED",
+            timestamp: 5,
+            threadId: CONVERSATION_ID,
+            runId: "run_automatic_title",
+            outcome: { type: "success" },
+          },
+        ]),
+      });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await page.getByRole("button", { name: "Start a conversation" }).click();
+  await expect(page.getByRole("heading", { name: "New conversation" })).toBeVisible();
+
+  const prompt = "Plan a weekend hiking trip with a packing list";
+  await page.getByRole("textbox", { name: "Message Audrey" }).fill(prompt);
+  await page.getByRole("textbox", { name: "Message Audrey" }).press("Enter");
+
+  await expect(page.getByRole("heading", { name: prompt })).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Conversation history" }).getByText(prompt),
+  ).toBeVisible();
+  expect(createBody).toEqual({ default_mode: "auto" });
 });
 
 test("keeps history and an active run alive while switching conversations", async ({ page }) => {
@@ -350,6 +453,7 @@ test("keeps canonical messages when changing mode", async ({ page }) => {
   await page.getByRole("combobox", { name: "Audrey model" }).selectOption("deep");
   await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue("deep");
   await expect(page.locator(".composer-model-picker img")).not.toHaveAttribute("src", portraitBefore ?? "");
+  await expect(page.getByText("A reasoning panel for complex problems and careful analysis.")).toBeVisible();
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
   expect(agentModes).toEqual(["fast"]);
 });

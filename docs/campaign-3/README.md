@@ -13,8 +13,9 @@ complete and Unraid-verified, and the first interactive Cloudflare Access user
 opened the root application and completed a Fast turn. The deployed
 navigation-history corrective is user-confirmed; hard-refresh persistence and
 second-user isolation remain pending.
-The Builtryte branding and self-service profile-name refinement is
-laptop-complete and awaits its live browser gate.
+The dark Builtryte branding, centered portrait-backed mode descriptions,
+automatic first-prompt titles, and self-service profile-name refinement are
+laptop-complete and await their live browser gate.
 Slice 2C.2 conversation management is complete and Unraid-verified.
 Slice 2C.3 Video parity and its seven-mode smoke are complete and
 Unraid-verified.

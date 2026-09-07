@@ -137,7 +137,6 @@ def test_native_run_create_stream_persist_and_resume_are_canonical(tmp_path):
     conversation = asyncio.run(
         store.conversations.create(
             user_id=owner.user_id,
-            title="Native run",
             default_mode="fast",
         )
     )
@@ -153,6 +152,11 @@ def test_native_run_create_stream_persist_and_resume_are_canonical(tmp_path):
             assert run["events_url"] == f"/api/runs/{run['id']}/events"
             assert run["agui_events_url"] == f"/api/runs/{run['id']}/ag-ui-events"
             assert "user_id" not in created.text
+            titled = client.get(
+                f"/api/conversations/{conversation.conversation_id}"
+            )
+            assert titled.status_code == 200
+            assert titled.json()["title"] == "Answer natively."
 
             streamed = client.get(run["events_url"])
             assert streamed.status_code == 200

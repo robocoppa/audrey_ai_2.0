@@ -255,6 +255,7 @@ async def test_conversation_and_run_ids_are_server_owned_and_transactional(tmp_p
         assert started.run.run_id.startswith("run_")
         assert started.run.mode == "deep"
         assert started.run.status == "running"
+        assert started.conversation.title == "Canonical chat"
         assert started.user_message.message_id.startswith("msg_")
         assert started.assistant_message.message_id.startswith("msg_")
         assert (started.user_message.sequence_no, started.assistant_message.sequence_no) == (1, 2)
@@ -303,6 +304,63 @@ async def test_conversation_and_run_ids_are_server_owned_and_transactional(tmp_p
         )).status == "succeeded"
     finally:
         reopened.close()
+
+
+async def test_first_prompt_titles_only_an_untitled_conversation(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    owner = await _resolve(store)
+    try:
+        conversation = await store.conversations.create(user_id=owner.user_id)
+        started = await store.conversations.begin_run(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="  # Plan a weekend hiking trip\nwith a packing list  ",
+        )
+        assert started is not None
+        assert started.conversation.title == (
+            "Plan a weekend hiking trip with a packing list"
+        )
+
+        await store.conversations.finish_run(
+            user_id=owner.user_id,
+            run_id=started.run.run_id,
+            outcome="succeeded",
+            assistant_content="A plan.",
+        )
+        second = await store.conversations.begin_run(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="Replace the title with this second prompt.",
+        )
+        assert second is not None
+        assert second.conversation.title == (
+            "Plan a weekend hiking trip with a packing list"
+        )
+
+        manual = await store.conversations.create(
+            user_id=owner.user_id,
+            title="My saved title",
+        )
+        manual_run = await store.conversations.begin_run(
+            user_id=owner.user_id,
+            conversation_id=manual.conversation_id,
+            user_content="This must not replace a manual title.",
+        )
+        assert manual_run is not None
+        assert manual_run.conversation.title == "My saved title"
+
+        long_conversation = await store.conversations.create(user_id=owner.user_id)
+        long_run = await store.conversations.begin_run(
+            user_id=owner.user_id,
+            conversation_id=long_conversation.conversation_id,
+            user_content="Explain how a durable automatic conversation title should be "
+            "generated from a very long first prompt without cutting the final word badly.",
+        )
+        assert long_run is not None
+        assert len(long_run.conversation.title) <= 72
+        assert long_run.conversation.title.endswith("…")
+    finally:
+        store.close()
 
 
 async def test_terminal_run_commits_search_projection_receipt_with_canonical_state(

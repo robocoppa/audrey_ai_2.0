@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import json
+import re
 import sqlite3
 import threading
 import uuid
@@ -26,6 +27,7 @@ _ALLOWED_MODES = frozenset(
     {"auto", "fast", "deep", "research", "local", "cloud", "video"}
 )
 _TERMINAL_RUN_STATUSES = frozenset({"succeeded", "cancelled", "failed"})
+_AUTOMATIC_TITLE_MAX_CHARS = 72
 
 
 class InvalidApplicationStateError(ValueError):
@@ -545,6 +547,17 @@ class ConversationsRepository:
                     (user_id, conversation_id),
                 ).fetchone()
                 first_sequence = int(next_row["next_sequence"])
+                if first_sequence == 1 and not str(conversation_row["title"]).strip():
+                    self._conn.execute(
+                        "UPDATE app_conversations SET title = ?, updated_at = ? "
+                        "WHERE user_id = ? AND conversation_id = ?",
+                        (
+                            _automatic_title(user_content),
+                            now,
+                            user_id,
+                            conversation_id,
+                        ),
+                    )
                 self._conn.execute(
                     "INSERT INTO app_runs "
                     "(run_id, conversation_id, user_id, mode, status, started_at, "
@@ -1171,6 +1184,22 @@ def _normalize_title(value: str) -> str:
     if len(title) > 200:
         raise InvalidApplicationStateError("conversation title must be at most 200 characters")
     return title
+
+
+def _automatic_title(user_content: str) -> str:
+    """Build a stable first-prompt title without another model request."""
+
+    title = " ".join(str(user_content).split())
+    title = re.sub(r"^(?:#{1,6}\s+|>\s+|[-+*]\s+)", "", title).strip()
+    title = title.strip("`*_\"'") or "New conversation"
+    if len(title) <= _AUTOMATIC_TITLE_MAX_CHARS:
+        return title
+
+    prefix = title[: _AUTOMATIC_TITLE_MAX_CHARS - 1]
+    word_boundary = prefix.rsplit(" ", 1)[0].rstrip(" ,.;:-")
+    if len(word_boundary) >= _AUTOMATIC_TITLE_MAX_CHARS // 2:
+        prefix = word_boundary
+    return f"{prefix.rstrip()}…"
 
 
 def _normalize_mode(value: str) -> str:

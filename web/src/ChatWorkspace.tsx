@@ -26,6 +26,7 @@ import localPortrait from "../../images/localModel.png";
 import {
   createConversation,
   deleteConversation,
+  getConversation,
   listConversations,
   listMessages,
   updateConversation,
@@ -41,14 +42,50 @@ const MODES: ReadonlyArray<{
   value: AudreyMode;
   label: string;
   portrait: string;
+  description: string;
 }> = [
-  { value: "auto", label: "Auto", portrait: autoPortrait },
-  { value: "fast", label: "Fast", portrait: fastPortrait },
-  { value: "deep", label: "Deep", portrait: deepPortrait },
-  { value: "research", label: "Research", portrait: researchPortrait },
-  { value: "local", label: "Local only", portrait: localPortrait },
-  { value: "cloud", label: "Cloud", portrait: cloudPortrait },
-  { value: "video", label: "Video", portrait: videoPortrait },
+  {
+    value: "auto",
+    label: "Auto",
+    portrait: autoPortrait,
+    description: "Chooses the best Audrey workflow for each request.",
+  },
+  {
+    value: "fast",
+    label: "Fast",
+    portrait: fastPortrait,
+    description: "Quick, direct answers for everyday questions and tasks.",
+  },
+  {
+    value: "deep",
+    label: "Deep",
+    portrait: deepPortrait,
+    description: "A reasoning panel for complex problems and careful analysis.",
+  },
+  {
+    value: "research",
+    label: "Research",
+    portrait: researchPortrait,
+    description: "Grounded web research with verification and cited sources.",
+  },
+  {
+    value: "local",
+    label: "Local only",
+    portrait: localPortrait,
+    description: "Keeps model generation local while using Audrey's tools.",
+  },
+  {
+    value: "cloud",
+    label: "Cloud",
+    portrait: cloudPortrait,
+    description: "Uses cloud models for stronger general-purpose reasoning.",
+  },
+  {
+    value: "video",
+    label: "Video",
+    portrait: videoPortrait,
+    description: "Analyzes video content, scenes, transcripts, and questions.",
+  },
 ];
 
 type ThreadState =
@@ -291,7 +328,7 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
               onClick={() => selectConversation(conversation)}
               aria-current={conversation.id === selectedId ? "page" : undefined}
             >
-              <span>{conversation.title || "Untitled conversation"}</span>
+              <span>{conversation.title || "New conversation"}</span>
               <small>{modeLabel(conversation.default_mode)}</small>
             </button>
           ))}
@@ -388,6 +425,17 @@ function ConversationThread({
     }
   }
 
+  async function refreshAutomaticTitle() {
+    if (conversation.title.trim()) return;
+    try {
+      const updated = await getConversation(conversation.id);
+      setTitleDraft(updated.title);
+      onConversationChange(updated);
+    } catch {
+      // Canonical state remains correct; a later list or refresh will reconcile it.
+    }
+  }
+
   async function renameConversation(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const title = titleDraft.trim();
@@ -463,7 +511,7 @@ function ConversationThread({
               </form>
             ) : (
               <div className="conversation-title-display">
-                <h1>{conversation.title || "Untitled conversation"}</h1>
+                <h1>{conversation.title || "New conversation"}</h1>
                 <button
                   className="conversation-title-button"
                   type="button"
@@ -528,6 +576,7 @@ function ConversationThread({
           modeDisabled={runActive || mutation !== null}
           onModeChange={changeMode}
           onRunActiveChange={setRunActive}
+          onRunStarted={() => void refreshAutomaticTitle()}
         />
       ) : null}
     </>
@@ -542,6 +591,7 @@ function AudreyThread({
   modeDisabled,
   onModeChange,
   onRunActiveChange,
+  onRunStarted,
 }: {
   conversationId: string;
   mode: AudreyMode;
@@ -550,6 +600,7 @@ function AudreyThread({
   modeDisabled: boolean;
   onModeChange: (mode: AudreyMode) => Promise<void>;
   onRunActiveChange: (active: boolean) => void;
+  onRunStarted: () => void;
 }) {
   const [runError, setRunError] = useState("");
   const [activity, setActivity] = useState<RunActivity>(IDLE_ACTIVITY);
@@ -573,6 +624,10 @@ function AudreyThread({
       }),
     [conversationId, mode],
   );
+  const onRunStartedRef = useRef(onRunStarted);
+  useEffect(() => {
+    onRunStartedRef.current = onRunStarted;
+  }, [onRunStarted]);
   useEffect(() => {
     const subscriber: AgentSubscriber = {
       onRunInitialized: () => {
@@ -585,6 +640,9 @@ function AudreyThread({
           sourceCount: 0,
           latestSource: "",
         });
+      },
+      onRunStartedEvent: () => {
+        onRunStartedRef.current();
       },
       onStepStartedEvent: ({ event }) => {
         setActivity((current) => ({
@@ -780,14 +838,17 @@ function ComposerModelPicker({
 }) {
   const selected = modeDetails(mode);
   return (
-    <label className="composer-model-picker">
+    <div className="composer-model-picker">
       <img src={selected.portrait} alt="" aria-hidden="true" />
       <span className="model-picker-copy">
         <span>Audrey</span>
         <strong>{selected.label}</strong>
+        <span className="model-description" aria-live="polite">
+          {selected.description}
+        </span>
       </span>
-      <span className="model-picker-control">
-        <span>Model</span>
+      <label className="model-picker-control">
+        <span>Choose a model</span>
         <select
           aria-label="Audrey model"
           value={mode}
@@ -798,8 +859,8 @@ function ComposerModelPicker({
             <option key={item.value} value={item.value}>{item.label}</option>
           ))}
         </select>
-      </span>
-    </label>
+      </label>
+    </div>
   );
 }
 

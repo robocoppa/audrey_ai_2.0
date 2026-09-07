@@ -126,8 +126,14 @@ export function createConversation(mode: AudreyMode): Promise<Conversation> {
   return apiJson<Conversation>("/api/conversations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title: "New conversation", default_mode: mode }),
+    body: JSON.stringify({ default_mode: mode }),
   });
+}
+
+export function getConversation(conversationId: string): Promise<Conversation> {
+  return apiJson<Conversation>(
+    `/api/conversations/${encodeURIComponent(conversationId)}`,
+  );
 }
 
 export function listMessages(

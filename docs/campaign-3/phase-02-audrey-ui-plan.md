@@ -776,11 +776,20 @@ persistence and second-user isolation remain.
 
 The next native-client refinement is laptop-complete: The supplied Builtryte
 wordmark and standalone mark now brand the header and favicon. The application
-uses the kit's light canvas, navy text, accessible blue/violet accents,
-restrained gradient, and soft illuminated focus states instead of hard outline
-boxes. The model picker sits above the composer with a distinct existing Audrey
-portrait for each mode. User and assistant text render safe CommonMark plus
-GitHub-flavored Markdown, with raw HTML ignored.
+uses a dark navy interpretation of the kit with accessible blue/violet accents,
+restrained gradients, and soft illuminated focus states instead of hard outline
+boxes. A larger portrait is centered above the composer for every Audrey mode;
+the selected mode's purpose appears directly beneath it, followed by the model
+selector and input. User and assistant text render safe CommonMark plus GitHub-
+flavored Markdown, with raw HTML ignored.
+
+New native conversations are created without a canonical title. The first run
+assigns one atomically from the first persisted user prompt: whitespace and a
+leading Markdown marker are normalized, the title is capped at 72 characters
+on a word boundary, and later prompts cannot replace it. A title explicitly
+supplied or edited by the user is never auto-renamed. The browser refreshes the
+canonical conversation when the server confirms `RUN_STARTED`, so the new title
+appears in the header and sidebar without waiting for a reload or the answer.
 
 The header shows the stored profile's first name when one exists, falls back to
 the account handle, and provides Cloudflare Access's same-origin logout link.
@@ -789,8 +798,9 @@ authenticated `PATCH /api/me` changes only the current Audrey user's display
 name, trims and bounds the value, rejects personal access tokens, evicts stale
 authentication cache entries, and prevents later OWUI or Cloudflare logins from
 overwriting the Audrey-owned value. Clean `npm ci`, typecheck, lint, five Vitest
-contracts, eight production-preview Chromium workflows, the production build,
-66 focused identity/authentication contracts, and all 2,755 backend tests pass.
+contracts, nine production-preview Chromium workflows, the production build,
+34 affected canonical-run contracts, 66 focused identity/authentication
+contracts, and all 2,756 backend tests pass.
 The required lesson-link scan reports zero broken links; its existing stale-line
 backlog remains deferred by user direction. This refinement still needs its
 Unraid browser smoke.
