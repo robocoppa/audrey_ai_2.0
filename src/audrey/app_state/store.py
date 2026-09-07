@@ -278,6 +278,44 @@ class ApplicationStore:
             (provider, subject),
         ).fetchone()
 
+    async def update_display_name(
+        self,
+        *,
+        user_id: str,
+        display_name: str,
+    ) -> str:
+        """Persist one account-owned profile name without touching auth evidence."""
+
+        return await asyncio.to_thread(
+            self._update_display_name_sync,
+            user_id,
+            display_name,
+        )
+
+    def _update_display_name_sync(
+        self,
+        user_id: str,
+        display_name: str,
+    ) -> str:
+        user_id = _required(user_id, "user id")
+        display_name = _required(display_name, "display name")
+        if len(display_name) > 100:
+            raise InvalidIdentityError(
+                "display name must be at most 100 characters"
+            )
+
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE app_users SET display_name = ?, updated_at = ? "
+                "WHERE user_id = ? AND status = 'active'",
+                (display_name, _utc_now(), user_id),
+            )
+            if cursor.rowcount != 1:
+                self._conn.rollback()
+                raise InvalidIdentityError("profile owner does not exist")
+            self._conn.commit()
+        return display_name
+
     async def create_personal_token(
         self,
         *,

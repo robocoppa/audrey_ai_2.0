@@ -9,7 +9,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from audrey.app_state import ApplicationStore, InvalidIdentityError
-from audrey.auth import require_provider_principal, require_scope
+from audrey.auth import (
+    clear_auth_cache_for_email,
+    require_provider_principal,
+    require_scope,
+)
 from audrey.identity import PersonalTokenSummary, Principal
 
 router = APIRouter(tags=["application"])
@@ -81,6 +85,10 @@ class MeResponse(BaseModel):
     auth_provider: str
 
 
+class MeUpdateRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=100)
+
+
 @router.get("/me", response_model=MeResponse)
 async def get_me(
     principal: Principal = Depends(_account_read),
@@ -95,6 +103,32 @@ async def get_me(
         id=principal.user_id,
         email=principal.email,
         display_name=principal.display_name,
+        role=principal.role,
+        status=principal.status,
+        auth_provider=principal.provider,
+    )
+
+
+@router.patch("/me", response_model=MeResponse)
+async def update_me(
+    payload: MeUpdateRequest,
+    request: Request,
+    principal: Principal = Depends(require_provider_principal),
+) -> MeResponse:
+    """Update the current Audrey account's profile name only."""
+
+    try:
+        display_name = await _store(request).update_display_name(
+            user_id=principal.user_id,
+            display_name=payload.display_name,
+        )
+    except InvalidIdentityError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    clear_auth_cache_for_email(principal.email)
+    return MeResponse(
+        id=principal.user_id,
+        email=principal.email,
+        display_name=display_name,
         role=principal.role,
         status=principal.status,
         auth_provider=principal.provider,

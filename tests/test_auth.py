@@ -347,6 +347,49 @@ async def test_require_user_binds_stable_audrey_principal(monkeypatch, tmp_path)
     assert me.principal.provider_subject == "owui-stable-subject"
 
 
+async def test_owui_login_does_not_overwrite_audrey_profile_name(
+    monkeypatch,
+    tmp_path,
+):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    owner = await store.resolve_external_identity(
+        provider="owui",
+        subject="owui-profile-subject",
+        email="alice@example.com",
+        display_name="Provider Name",
+        role="user",
+        auth_method="owui_bearer",
+        legacy_storage_namespace="alice@example.com",
+    )
+    await store.update_display_name(
+        user_id=owner.user_id,
+        display_name="Audrey Profile",
+    )
+    _patch_async_client(
+        monkeypatch,
+        _FakeResponse(
+            200,
+            body={
+                "id": "owui-profile-subject",
+                "email": "alice@example.com",
+                "name": "Changed Provider Name",
+                "role": "user",
+            },
+        ),
+    )
+
+    try:
+        me = await require_user(
+            _fake_request(application_store=store),
+            authorization="Bearer profile-name-token",
+        )
+    finally:
+        store.close()
+
+    assert me.principal is not None
+    assert me.principal.display_name == "Audrey Profile"
+
+
 async def test_require_user_rejects_missing_stable_subject_when_store_is_active(
     monkeypatch,
     tmp_path,

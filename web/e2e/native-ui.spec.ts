@@ -52,7 +52,7 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
           type: "TEXT_MESSAGE_CONTENT",
           timestamp: 11,
           messageId: "msg_browser",
-          delta: "Browser-native answer.",
+          delta: "Browser-native **answer** with `code`.\n\n- First\n- Second",
         },
         { type: "TEXT_MESSAGE_END", timestamp: 12, messageId: "msg_browser" },
         {
@@ -67,15 +67,40 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   });
 
   await page.goto("./");
+  await expect(page).toHaveTitle("Audrey by Builtryte");
+  const wordmark = page.locator(".brand-wordmark img");
+  await expect(wordmark).toBeVisible();
+  await expect.poll(
+    () => wordmark.evaluate((image) => (image as HTMLImageElement).naturalWidth),
+  ).toBeGreaterThan(0);
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute(
+    "href",
+    /builtryte-mark/,
+  );
   await expect(page.getByRole("heading", { name: "Browser smoke" })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Mode" })).toHaveValue("fast");
+  await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue("fast");
   await expect(page.getByRole("option", { name: "Video" })).toHaveCount(1);
+  await expect(page.getByLabel("Signed in user")).toContainText("Alice");
+  await expect(page.getByRole("link", { name: "Log out" })).toHaveAttribute(
+    "href",
+    "/cdn-cgi/access/logout",
+  );
+  const portrait = page.locator(".composer-model-picker img");
+  await expect(portrait).toBeVisible();
+  await expect.poll(() => portrait.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
 
   const composer = page.getByRole("textbox", { name: "Message Audrey" });
+  await composer.focus();
+  await expect.poll(() => composer.evaluate((input) => getComputedStyle(input).outlineStyle)).toBe("none");
+  await expect.poll(() => page.locator(".composer").evaluate((root) => getComputedStyle(root).boxShadow)).not.toBe("none");
   await composer.fill("Exercise the native browser path");
   await composer.press("Enter");
 
-  await expect(page.getByText("Browser-native answer.")).toBeVisible();
+  const assistantMessage = page.locator(".message-assistant");
+  await expect(assistantMessage.getByText("answer", { exact: true })).toHaveJSProperty("tagName", "STRONG");
+  await expect(assistantMessage.getByText("code", { exact: true })).toHaveJSProperty("tagName", "CODE");
+  await expect(assistantMessage.getByRole("listitem")).toHaveCount(2);
+  await expect(assistantMessage).not.toContainText("**answer**");
   await expect(page.getByText("web_search · complete")).toBeVisible();
   await expect(page.getByText("1 source · Official source")).toBeVisible();
   await expect(page.getByText("Complete", { exact: true })).toBeVisible();
@@ -89,7 +114,7 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   expect(secrets).toEqual({ local: [], session: [] });
 
   const accessibility = await new AxeBuilder({ page }).analyze();
-  expect(accessibility.violations.map(({ id }) => id)).toEqual([]);
+  expect(accessibility.violations).toEqual([]);
 });
 
 test("keeps history and an active run alive while switching conversations", async ({ page }) => {
@@ -321,10 +346,54 @@ test("keeps canonical messages when changing mode", async ({ page }) => {
   await composer.press("Enter");
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
 
-  await page.getByRole("combobox", { name: "Mode" }).selectOption("deep");
-  await expect(page.getByRole("combobox", { name: "Mode" })).toHaveValue("deep");
+  const portraitBefore = await page.locator(".composer-model-picker img").getAttribute("src");
+  await page.getByRole("combobox", { name: "Audrey model" }).selectOption("deep");
+  await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue("deep");
+  await expect(page.locator(".composer-model-picker img")).not.toHaveAttribute("src", portraitBefore ?? "");
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
   expect(agentModes).toEqual(["fast"]);
+});
+
+test("sets and retains the current user's profile name", async ({ page }) => {
+  let profile = { ...browserUser(), display_name: "" };
+  const profilePatches: unknown[] = [];
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me" && request.method() === "PATCH") {
+      const payload = request.postDataJSON() as { display_name: string };
+      profilePatches.push(payload);
+      profile = { ...profile, display_name: payload.display_name.trim() };
+      await json(route, profile);
+      return;
+    }
+    if (url.pathname === "/api/me") {
+      await json(route, profile);
+      return;
+    }
+    if (url.pathname === "/api/conversations") {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  const profileButton = page.getByRole("button", { name: "Edit profile name" });
+  await expect(profileButton).toHaveText("alice");
+  await profileButton.click();
+  await page.getByRole("textbox", { name: "Profile name" }).fill("Alice Builder");
+  await page.getByRole("button", { name: "Save" }).click();
+
+  await expect(profileButton).toHaveText("Alice");
+  await expect(page.locator(".sidebar-heading strong")).toHaveText("Alice Builder");
+  expect(profilePatches).toEqual([{ display_name: "Alice Builder" }]);
+
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Edit profile name" })).toHaveText("Alice");
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
 });
 
 test("cancels an active browser run without leaving an error state", async ({ page }) => {

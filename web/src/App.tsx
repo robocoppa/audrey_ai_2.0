@@ -1,6 +1,12 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
 
-import { ApiError, getCurrentUser, type CurrentUser } from "./api";
+import builtryteWordmark from "./assets/brand/builtryte-wordmark.png";
+import {
+  ApiError,
+  getCurrentUser,
+  updateCurrentUserDisplayName,
+  type CurrentUser,
+} from "./api";
 
 const ChatWorkspace = lazy(() =>
   import("./ChatWorkspace").then((module) => ({ default: module.ChatWorkspace })),
@@ -43,9 +49,15 @@ export function App() {
     <div className="app-shell">
       <header className="topbar">
         <a className="brand" href="/" aria-label="Audrey home">
-          Audrey
+          <span className="brand-wordmark" aria-hidden="true">
+            <img src={builtryteWordmark} alt="" />
+          </span>
+          <span className="brand-product">Audrey</span>
         </a>
-        <SessionBadge session={session} />
+        <SessionControls
+          session={session}
+          onUserChange={(user) => setSession({ status: "ready", user })}
+        />
       </header>
 
       {session.status === "ready" ? (
@@ -83,12 +95,99 @@ export function App() {
   );
 }
 
-function SessionBadge({ session }: { session: SessionState }) {
+function SessionControls({
+  session,
+  onUserChange,
+}: {
+  session: SessionState;
+  onUserChange: (user: CurrentUser) => void;
+}) {
   if (session.status === "loading") {
     return <span className="session-badge">Checking session…</span>;
   }
   if (session.status === "ready") {
-    return <span className="session-badge session-badge-ready">Authenticated</span>;
+    return <ReadySessionControls user={session.user} onUserChange={onUserChange} />;
   }
   return <span className="session-badge session-badge-offline">Not connected</span>;
+}
+
+function ReadySessionControls({
+  user,
+  onUserChange,
+}: {
+  user: CurrentUser;
+  onUserChange: (user: CurrentUser) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [displayName, setDisplayName] = useState(user.display_name);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function saveProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const updated = await updateCurrentUserDisplayName(displayName);
+      onUserChange(updated);
+      setDisplayName(updated.display_name);
+      setEditing(false);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Profile name could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function cancelEditing() {
+    setDisplayName(user.display_name);
+    setError("");
+    setEditing(false);
+  }
+
+  return (
+    <div className="session-controls" aria-label="Signed in user">
+      <div className="profile-editor">
+        {editing ? (
+          <form className="profile-name-form" aria-label="Edit profile name" onSubmit={saveProfile}>
+            <input
+              aria-label="Profile name"
+              autoFocus
+              maxLength={100}
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              placeholder="Your name"
+              disabled={saving}
+            />
+            <button type="submit" disabled={saving || !displayName.trim()}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+            <button type="button" onClick={cancelEditing} disabled={saving}>
+              Cancel
+            </button>
+          </form>
+        ) : (
+          <button
+            className="session-name"
+            type="button"
+            aria-label="Edit profile name"
+            title={`${user.display_name || user.email} · Edit profile name`}
+            onClick={() => setEditing(true)}
+          >
+            {firstName(user)}
+          </button>
+        )}
+        {error ? <span className="profile-name-error" role="alert">{error}</span> : null}
+      </div>
+      {user.auth_provider === "cloudflare_access" ? (
+        <a className="logout-button" href="/cdn-cgi/access/logout">Log out</a>
+      ) : null}
+    </div>
+  );
+}
+
+function firstName(user: CurrentUser): string {
+  const displayName = user.display_name.trim();
+  if (displayName) return displayName.split(/\s+/u)[0];
+  return user.email.split("@", 1)[0] || "Account";
 }

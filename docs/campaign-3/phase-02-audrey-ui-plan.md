@@ -4,8 +4,9 @@
 Unraid-verified, including provider-neutral identity, canonical application
 state, native conversation/run resources, typed and AG-UI events, real
 pipeline observations, and rebuildable canonical archive projection.
-Milestone 2C is in progress; its first native web-client slice is
-laptop-complete and awaiting the Unraid/browser gate.
+Milestone 2C is in progress. Its native chat slices and public navigation
+corrective are Unraid-verified; the Builtryte branding and self-service profile
+refinement is laptop-complete and awaiting its live browser gate.
 
 ## Goal
 
@@ -767,10 +768,32 @@ therefore neither destroys visible history nor cancels background work; server
 canonical state remains authoritative and browser history writes remain no-ops.
 
 All 2,749 backend tests, three Vitest contracts, and seven production-preview
-Chromium workflows pass. The added workflow loads canonical history, switches
-away during an active run, returns to the same progress state, receives the
-background answer, and repeats the switch after completion. Rebuild, public
-refresh/navigation verification, and second-user isolation remain.
+Chromium workflows passed the navigation corrective. The added workflow loads
+canonical history, switches away during an active run, returns to the same
+progress state, receives the background answer, and repeats the switch after
+completion. Public navigation verification is now user-confirmed. Hard-refresh
+persistence and second-user isolation remain.
+
+The next native-client refinement is laptop-complete: The supplied Builtryte
+wordmark and standalone mark now brand the header and favicon. The application
+uses the kit's light canvas, navy text, accessible blue/violet accents,
+restrained gradient, and soft illuminated focus states instead of hard outline
+boxes. The model picker sits above the composer with a distinct existing Audrey
+portrait for each mode. User and assistant text render safe CommonMark plus
+GitHub-flavored Markdown, with raw HTML ignored.
+
+The header shows the stored profile's first name when one exists, falls back to
+the account handle, and provides Cloudflare Access's same-origin logout link.
+The account label also opens a self-service profile-name editor. Its provider-
+authenticated `PATCH /api/me` changes only the current Audrey user's display
+name, trims and bounds the value, rejects personal access tokens, evicts stale
+authentication cache entries, and prevents later OWUI or Cloudflare logins from
+overwriting the Audrey-owned value. Clean `npm ci`, typecheck, lint, five Vitest
+contracts, eight production-preview Chromium workflows, the production build,
+66 focused identity/authentication contracts, and all 2,755 backend tests pass.
+The required lesson-link scan reports zero broken links; its existing stale-line
+backlog remains deferred by user direction. This refinement still needs its
+Unraid browser smoke.
 
 Rollback removes or disables the public tunnel route first, then disables the
 Audrey Access flag and recreates `audrey-ai`. Disabling the Access application

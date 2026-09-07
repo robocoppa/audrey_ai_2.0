@@ -22,12 +22,13 @@ async def _resolve(
     subject: str = "owui-1",
     email: str = "alice@example.com",
     namespace: str | None = "alice@example.com",
+    display_name: str = "Alice",
 ):
     return await store.resolve_external_identity(
         provider="owui",
         subject=subject,
         email=email,
-        display_name="Alice",
+        display_name=display_name,
         role="user",
         auth_method="owui_bearer",
         legacy_storage_namespace=namespace,
@@ -136,6 +137,74 @@ async def test_provider_without_role_authority_cannot_demote_or_promote_existing
     assert after.role == "admin"
     assert after.email == "renamed@example.com"
     assert after.display_name == ""
+
+
+async def test_display_name_update_is_trimmed_persistent_and_owner_scoped(tmp_path):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
+    try:
+        alice = await _resolve(store, subject="owui-alice")
+        bob = await _resolve(
+            store,
+            subject="owui-bob",
+            email="bob@example.com",
+            namespace="bob@example.com",
+            display_name="Bob",
+        )
+        assert await store.update_display_name(
+            user_id=alice.user_id,
+            display_name="  Alice Builder  ",
+        ) == "Alice Builder"
+    finally:
+        store.close()
+
+    reopened = ApplicationStore(path)
+    try:
+        refreshed_alice = await reopened.resolve_external_identity(
+            provider="owui",
+            subject="owui-alice",
+            email="alice@example.com",
+            display_name="Provider Alice",
+            role="user",
+            auth_method="owui_bearer",
+            legacy_storage_namespace="alice@example.com",
+            sync_display_name=False,
+        )
+        refreshed_bob = await reopened.resolve_external_identity(
+            provider="owui",
+            subject="owui-bob",
+            email="bob@example.com",
+            display_name="Bob",
+            role="user",
+            auth_method="owui_bearer",
+            legacy_storage_namespace="bob@example.com",
+            sync_display_name=False,
+        )
+        assert refreshed_alice.display_name == "Alice Builder"
+        assert refreshed_bob.user_id == bob.user_id
+        assert refreshed_bob.display_name == "Bob"
+    finally:
+        reopened.close()
+
+
+async def test_display_name_update_rejects_invalid_or_unknown_owner(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    try:
+        owner = await _resolve(store)
+        with pytest.raises(InvalidIdentityError, match="display name is required"):
+            await store.update_display_name(user_id=owner.user_id, display_name="   ")
+        with pytest.raises(InvalidIdentityError, match="at most 100"):
+            await store.update_display_name(
+                user_id=owner.user_id,
+                display_name="x" * 101,
+            )
+        with pytest.raises(InvalidIdentityError, match="owner does not exist"):
+            await store.update_display_name(
+                user_id="usr_missing",
+                display_name="Missing",
+            )
+    finally:
+        store.close()
 
 
 async def test_concurrent_first_login_creates_one_account(tmp_path):

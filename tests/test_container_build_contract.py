@@ -39,6 +39,14 @@ def test_python_services_install_from_the_workspace_lock():
         assert "uv pip compile" not in text
 
 
+def test_native_ui_build_includes_repository_portraits():
+    text = _text(AUDREY_DOCKERFILE)
+    assert "COPY images /workspace/images" in text
+    assert text.index("COPY images /workspace/images") < text.index(
+        "RUN npm run build --prefix /workspace/web"
+    )
+
+
 def test_every_shared_writer_uses_unraids_numeric_identity():
     texts = [
         _text(path)

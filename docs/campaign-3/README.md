@@ -10,8 +10,11 @@ native conversation/run resources, typed and AG-UI events, real pipeline
 observations, and the rebuildable canonical archive projection have all passed
 their live gates. Milestone 2C is in progress: Its native web-client slices are
 complete and Unraid-verified, and the first interactive Cloudflare Access user
-opened the root application and completed a Fast turn. Refresh and second-user
-isolation remain pending behind a browser navigation-history corrective.
+opened the root application and completed a Fast turn. The deployed
+navigation-history corrective is user-confirmed; hard-refresh persistence and
+second-user isolation remain pending.
+The Builtryte branding and self-service profile-name refinement is
+laptop-complete and awaits its live browser gate.
 Slice 2C.2 conversation management is complete and Unraid-verified.
 Slice 2C.3 Video parity and its seven-mode smoke are complete and
 Unraid-verified.

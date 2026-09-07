@@ -99,6 +99,16 @@ export function getCurrentUser(): Promise<CurrentUser> {
   return apiJson<CurrentUser>("/api/me");
 }
 
+export function updateCurrentUserDisplayName(
+  displayName: string,
+): Promise<CurrentUser> {
+  return apiJson<CurrentUser>("/api/me", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ display_name: displayName }),
+  });
+}
+
 export function listConversations(
   options: ConversationListOptions = {},
 ): Promise<ListResponse<Conversation>> {

@@ -73,6 +73,81 @@ def test_get_me_requires_authentication():
     assert response.status_code == 401
 
 
+def test_patch_me_updates_only_the_provider_authenticated_profile(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    app = FastAPI()
+    app.state.application_store = store
+    app.include_router(router)
+    owner = _persist_principal(store, _principal())
+    app.dependency_overrides[require_provider_principal] = lambda: owner
+
+    try:
+        response = TestClient(app).patch(
+            "/api/me",
+            json={"display_name": "  Alice Builder  "},
+        )
+        refreshed = asyncio.run(
+            store.resolve_external_identity(
+                provider=owner.provider,
+                subject=owner.provider_subject,
+                email=owner.email,
+                display_name="Provider Name",
+                role=owner.role,
+                auth_method=owner.auth_method,
+                legacy_storage_namespace=owner.storage_namespace,
+                sync_display_name=False,
+            )
+        )
+    finally:
+        store.close()
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "id": owner.user_id,
+        "email": "alice@example.com",
+        "display_name": "Alice Builder",
+        "role": "user",
+        "status": "active",
+        "auth_provider": "owui",
+    }
+    assert refreshed.display_name == "Alice Builder"
+
+
+def test_patch_me_rejects_personal_tokens_and_blank_names(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    owner = _persist_principal(store, _principal())
+    issued = asyncio.run(
+        store.create_personal_token(
+            user_id=owner.user_id,
+            name="Native account",
+            scopes=["account:read"],
+            expires_at=(dt.datetime.now(dt.UTC) + dt.timedelta(days=30)).isoformat(),
+        )
+    )
+    app = FastAPI()
+    app.state.application_store = store
+    app.include_router(router)
+    app.dependency_overrides[require_provider_principal] = lambda: owner
+
+    try:
+        blank = TestClient(app).patch("/api/me", json={"display_name": "   "})
+        app.dependency_overrides.clear()
+        personal = TestClient(app).patch(
+            "/api/me",
+            headers={"Authorization": f"Bearer {issued.token}"},
+            json={"display_name": "Token Rename"},
+        )
+    finally:
+        store.close()
+
+    assert blank.status_code == 422
+    assert blank.json()["detail"] == "display name is required"
+    assert personal.status_code == 403
+    assert personal.json()["detail"] == (
+        "External provider authentication is required for this operation."
+    )
+
+
 def test_token_lifecycle_returns_secret_only_on_create(tmp_path):
     store = ApplicationStore(tmp_path / "app.sqlite")
     app = FastAPI()

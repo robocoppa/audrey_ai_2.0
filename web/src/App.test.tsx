@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -16,7 +16,7 @@ describe("App", () => {
         ? {
             id: "usr_example",
             email: "alice@example.com",
-            display_name: "Alice",
+            display_name: "Alice Example",
             role: "user",
             status: "active",
             auth_provider: "cloudflare_access",
@@ -33,8 +33,21 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Alice")).toBeInTheDocument();
-    expect(screen.getByText("Authenticated")).toBeInTheDocument();
+    const identity = await screen.findByLabelText("Signed in user");
+    expect(screen.getByRole("link", { name: "Audrey home" })).toContainElement(
+      document.querySelector(".brand-wordmark img"),
+    );
+    expect(document.querySelector(".brand-wordmark img")).toHaveAttribute(
+      "src",
+      expect.stringContaining("builtryte-wordmark.png"),
+    );
+    expect(identity).toHaveTextContent("Alice");
+    expect(identity).not.toHaveTextContent("Example");
+    expect(screen.queryByText("Authenticated")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Log out" })).toHaveAttribute(
+      "href",
+      "/cdn-cgi/access/logout",
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/me",
       expect.objectContaining({ credentials: "same-origin" }),
@@ -59,6 +72,85 @@ describe("App", () => {
     );
     expect(window.localStorage).toHaveLength(0);
     expect(window.sessionStorage).toHaveLength(0);
+  });
+
+  it("uses the account handle when the provider has no display name", async () => {
+    const fetchMock = vi.fn().mockImplementation((path: string) => {
+      const payload = path === "/api/me"
+        ? {
+            id: "usr_example",
+            email: "alice@example.com",
+            display_name: "",
+            role: "user",
+            status: "active",
+            auth_provider: "cloudflare_access",
+          }
+        : { items: [], next_cursor: null };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByLabelText("Signed in user")).toHaveTextContent("alice");
+  });
+
+  it("updates the current user's profile name and refreshes the header", async () => {
+    let currentName = "";
+    const fetchMock = vi.fn().mockImplementation(
+      (path: string, request?: RequestInit) => {
+        if (path === "/api/me" && request?.method === "PATCH") {
+          currentName = "Alice Example";
+          return Promise.resolve(new Response(JSON.stringify({
+            id: "usr_example",
+            email: "alice@example.com",
+            display_name: currentName,
+            role: "user",
+            status: "active",
+            auth_provider: "cloudflare_access",
+          }), { status: 200, headers: { "Content-Type": "application/json" } }));
+        }
+        const payload = path === "/api/me"
+          ? {
+              id: "usr_example",
+              email: "alice@example.com",
+              display_name: currentName,
+              role: "user",
+              status: "active",
+              auth_provider: "cloudflare_access",
+            }
+          : { items: [], next_cursor: null };
+        return Promise.resolve(new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit profile name" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Profile name" }), {
+      target: { value: "Alice Example" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Signed in user")).toHaveTextContent("Alice");
+    });
+    const patch = fetchMock.mock.calls.find(
+      ([path, request]) => path === "/api/me" && request?.method === "PATCH",
+    ) as [string, RequestInit] | undefined;
+    expect(patch).toBeDefined();
+    expect(JSON.parse(String(patch?.[1].body))).toEqual({
+      display_name: "Alice Example",
+    });
   });
 
   it("sends only the latest user action through the same-origin transport", async () => {

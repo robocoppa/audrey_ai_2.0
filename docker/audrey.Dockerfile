@@ -18,6 +18,7 @@ WORKDIR /workspace
 COPY web/package.json web/package-lock.json /workspace/web/
 RUN npm ci --prefix /workspace/web
 COPY web /workspace/web
+COPY images /workspace/images
 RUN npm run build --prefix /workspace/web
 
 # Phase 31: pinned to digest for reproducibility. Tag (`python:3.12-slim`)

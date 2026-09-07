@@ -216,6 +216,7 @@ async def _bind_audrey_principal(
             role=user.role,
             auth_method="owui_bearer",
             legacy_storage_namespace=user.email,
+            sync_display_name=False,
         )
     except InvalidIdentityError as exc:
         log.error("auth: invalid identity evidence from OWUI: %s", exc)

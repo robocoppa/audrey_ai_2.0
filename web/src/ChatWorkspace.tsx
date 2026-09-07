@@ -7,10 +7,21 @@ import {
   ThreadPrimitive,
   type ThreadHistoryAdapter,
   type ThreadMessageLike,
+  type TextMessagePartProps,
   type ToolCallMessagePartProps,
 } from "@assistant-ui/react";
 import { useAgUiRuntime } from "@assistant-ui/react-ag-ui";
 import { useEffect, useMemo, useRef, useState } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+import autoPortrait from "../../images/audrey2.png";
+import deepPortrait from "../../images/audrey7.png";
+import fastPortrait from "../../images/audrey3.png";
+import researchPortrait from "../../images/search.png";
+import videoPortrait from "../../images/audrey8.png";
+import cloudPortrait from "../../images/cloudModel.png";
+import localPortrait from "../../images/localModel.png";
 
 import {
   createConversation,
@@ -26,14 +37,18 @@ import {
 } from "./api";
 import { latestActionFetch } from "./agentTransport";
 
-const MODES: ReadonlyArray<{ value: AudreyMode; label: string }> = [
-  { value: "auto", label: "Auto" },
-  { value: "fast", label: "Fast" },
-  { value: "deep", label: "Deep" },
-  { value: "research", label: "Research" },
-  { value: "local", label: "Local only" },
-  { value: "cloud", label: "Cloud" },
-  { value: "video", label: "Video" },
+const MODES: ReadonlyArray<{
+  value: AudreyMode;
+  label: string;
+  portrait: string;
+}> = [
+  { value: "auto", label: "Auto", portrait: autoPortrait },
+  { value: "fast", label: "Fast", portrait: fastPortrait },
+  { value: "deep", label: "Deep", portrait: deepPortrait },
+  { value: "research", label: "Research", portrait: researchPortrait },
+  { value: "local", label: "Local only", portrait: localPortrait },
+  { value: "cloud", label: "Cloud", portrait: cloudPortrait },
+  { value: "video", label: "Video", portrait: videoPortrait },
 ];
 
 type ThreadState =
@@ -461,18 +476,6 @@ function ConversationThread({
             )}
           </div>
           <div className="thread-controls">
-            <label className="mode-picker">
-              <span>Mode</span>
-              <select
-                value={mode}
-                disabled={archived || runActive || mutation !== null}
-                onChange={(event) => void changeMode(event.target.value as AudreyMode)}
-              >
-                {MODES.map((item) => (
-                  <option key={item.value} value={item.value}>{item.label}</option>
-                ))}
-              </select>
-            </label>
             <div className="conversation-actions">
               <button
                 type="button"
@@ -522,6 +525,8 @@ function ConversationThread({
           mode={mode}
           initialMessages={thread.messages}
           readOnly={archived}
+          modeDisabled={runActive || mutation !== null}
+          onModeChange={changeMode}
           onRunActiveChange={setRunActive}
         />
       ) : null}
@@ -534,12 +539,16 @@ function AudreyThread({
   mode,
   initialMessages,
   readOnly,
+  modeDisabled,
+  onModeChange,
   onRunActiveChange,
 }: {
   conversationId: string;
   mode: AudreyMode;
   initialMessages: ConversationMessage[];
   readOnly: boolean;
+  modeDisabled: boolean;
+  onModeChange: (mode: AudreyMode) => Promise<void>;
   onRunActiveChange: (active: boolean) => void;
 }) {
   const [runError, setRunError] = useState("");
@@ -696,6 +705,11 @@ function AudreyThread({
               <>
                 {runError ? <p className="run-error" role="alert">{runError}</p> : null}
                 <RunActivityStatus activity={activity} />
+                <ComposerModelPicker
+                  mode={mode}
+                  disabled={modeDisabled}
+                  onChange={onModeChange}
+                />
                 <ComposerPrimitive.Root className="composer">
                   <ComposerPrimitive.Input
                     className="composer-input"
@@ -739,7 +753,7 @@ function UserMessage() {
   return (
     <MessagePrimitive.Root className="message message-user">
       <div className="message-label">You</div>
-      <MessagePrimitive.Parts />
+      <MessagePrimitive.Parts components={{ Text: MarkdownText }} />
     </MessagePrimitive.Root>
   );
 }
@@ -748,8 +762,64 @@ function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="message message-assistant">
       <div className="message-label">Audrey</div>
-      <MessagePrimitive.Parts components={{ tools: { Fallback: ToolActivity } }} />
+      <MessagePrimitive.Parts
+        components={{ Text: MarkdownText, tools: { Fallback: ToolActivity } }}
+      />
     </MessagePrimitive.Root>
+  );
+}
+
+function ComposerModelPicker({
+  mode,
+  disabled,
+  onChange,
+}: {
+  mode: AudreyMode;
+  disabled: boolean;
+  onChange: (mode: AudreyMode) => Promise<void>;
+}) {
+  const selected = modeDetails(mode);
+  return (
+    <label className="composer-model-picker">
+      <img src={selected.portrait} alt="" aria-hidden="true" />
+      <span className="model-picker-copy">
+        <span>Audrey</span>
+        <strong>{selected.label}</strong>
+      </span>
+      <span className="model-picker-control">
+        <span>Model</span>
+        <select
+          aria-label="Audrey model"
+          value={mode}
+          disabled={disabled}
+          onChange={(event) => void onChange(event.target.value as AudreyMode)}
+        >
+          {MODES.map((item) => (
+            <option key={item.value} value={item.value}>{item.label}</option>
+          ))}
+        </select>
+      </span>
+    </label>
+  );
+}
+
+function MarkdownText({ text }: TextMessagePartProps) {
+  return (
+    <div className="markdown-content">
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        skipHtml
+        components={{
+          a: ({ href, title, children }) => (
+            <a href={href} title={title} target="_blank" rel="noreferrer noopener">
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {text}
+      </Markdown>
+    </div>
   );
 }
 
@@ -791,7 +861,11 @@ function upsertConversation(
 }
 
 function modeLabel(mode: AudreyMode): string {
-  return MODES.find((item) => item.value === mode)?.label ?? mode;
+  return modeDetails(mode).label;
+}
+
+function modeDetails(mode: AudreyMode) {
+  return MODES.find((item) => item.value === mode) ?? MODES[0];
 }
 
 function messageOf(reason: unknown): string {
