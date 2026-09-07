@@ -708,56 +708,14 @@ a:focus-visible {
     0 0.75rem 2.1rem rgb(52 153 250 / 24%);
 }
 
-.model-picker-copy,
-.model-picker-copy > span,
-.model-picker-copy strong,
-.model-picker-control,
-.model-picker-control > span {
-  display: block;
-}
-
-.model-picker-copy {
-  display: grid;
-  min-width: 0;
-  justify-items: center;
-  gap: 0.16rem;
-}
-
-.model-picker-copy > span,
-.model-picker-control > span {
-  color: var(--muted);
-  font-size: 0.61rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.model-picker-copy strong {
-  margin-top: 0.08rem;
-  color: var(--text);
-  font-size: 1rem;
-}
-
-.model-picker-copy .model-description {
-  max-width: 34rem;
-  min-height: 2.8em;
-  margin-top: 0.28rem;
-  color: var(--muted);
-  font-size: 0.92rem;
-  font-weight: 450;
-  letter-spacing: 0;
-  line-height: 1.4;
-  text-transform: none;
-}
-
 .model-picker-control {
-  margin-top: 0.12rem;
+  display: block;
+  margin-top: 0;
 }
 
 .model-picker-control select {
   min-width: 10rem;
-  margin-top: 0.16rem;
-  padding: 0.32rem 1.8rem 0.32rem 0.48rem;
+  padding: 0.42rem 1.8rem 0.42rem 0.6rem;
   border: 1px solid transparent;
   border-radius: 0.45rem;
   outline: none;
@@ -766,10 +724,20 @@ a:focus-visible {
   font-size: 0.9rem;
 }
 
-.model-picker-control select:focus-visible {
+.model-picker-control select:focus-visible,
+.compact-model-picker select:focus-visible {
   border-color: var(--border-strong);
   background: var(--surface-active);
   box-shadow: var(--focus-glow);
+}
+
+.model-description {
+  max-width: 34rem;
+  min-height: 2.8em;
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-weight: 450;
+  line-height: 1.4;
 }
 
 .run-activity {
@@ -831,6 +799,28 @@ a:focus-visible {
   border-radius: 1rem;
   background: var(--surface);
   box-shadow: 0 1.2rem 4rem rgb(0 0 0 / 30%);
+}
+
+.compact-model-picker {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  flex: 0 0 auto;
+  padding-right: 0.65rem;
+  border-right: 1px solid var(--border);
+}
+
+.compact-model-picker select {
+  width: 7.75rem;
+  max-width: 22vw;
+  padding: 0.48rem 1.45rem 0.48rem 0.52rem;
+  border: 1px solid transparent;
+  border-radius: 0.48rem;
+  outline: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 
 .composer:focus-within {
@@ -1311,6 +1301,17 @@ a:focus-visible {
 
   .model-picker-control select {
     min-width: 7.25rem;
+  }
+
+  .compact-model-picker {
+    padding-right: 0.4rem;
+  }
+
+  .compact-model-picker select {
+    width: 6.5rem;
+    max-width: 28vw;
+    padding-inline: 0.35rem 1.15rem;
+    font-size: 0.74rem;
   }
 }
 

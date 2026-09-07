@@ -778,10 +778,13 @@ The next native-client refinement is laptop-complete: The supplied Builtryte
 wordmark and standalone mark now brand the header and favicon. The application
 uses a dark navy interpretation of the kit with accessible blue/violet accents,
 restrained gradients, and soft illuminated focus states instead of hard outline
-boxes. A larger portrait is centered above the composer for every Audrey mode;
-the selected mode's purpose appears directly beneath it, followed by the model
-selector and input. User and assistant text render safe CommonMark plus GitHub-
-flavored Markdown, with raw HTML ignored.
+boxes. A larger portrait introduces every Audrey mode before the first prompt,
+with one selector immediately beneath it and the selected mode's purpose below.
+Once the conversation begins, the portrait and description disappear and that
+same selector moves inside the composer beside the input. This removes the
+redundant Audrey/mode label and preserves message space throughout the thread.
+User and assistant text render safe CommonMark plus GitHub-flavored Markdown,
+with raw HTML ignored.
 
 The empty thread now collapses its introductory space so the complete composer
 fits in the initial 720px browser viewport. Its center copy is only `Ask Audrey`,

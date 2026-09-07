@@ -13,8 +13,8 @@ complete and Unraid-verified, and the first interactive Cloudflare Access user
 opened the root application and completed a Fast turn. The deployed
 navigation-history corrective is user-confirmed; hard-refresh persistence and
 second-user isolation remain pending.
-The dark Builtryte branding, compact docked `Ask Audrey` composer, contextual
-jump-to-latest control, centered portrait-backed mode descriptions, semantic
+The dark Builtryte branding, adaptive docked `Ask Audrey` composer, contextual
+jump-to-latest control, introductory portrait-backed mode descriptions, semantic
 first-prompt titles, and self-service profile-name refinement are laptop-
 complete and await their live browser gate.
 Slice 2C.2 conversation management is complete and Unraid-verified.

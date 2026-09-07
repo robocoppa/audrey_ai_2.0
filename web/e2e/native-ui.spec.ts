@@ -95,6 +95,7 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect(portrait).toBeVisible();
   await expect.poll(() => portrait.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   await expect(page.getByText("Quick, direct answers for everyday questions and tasks.")).toBeVisible();
+  await expect(page.locator(".model-picker-copy")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Ask Audrey", exact: true })).toBeVisible();
   await expect(page.getByText("The server will load this conversation's canonical history.")).toHaveCount(0);
   const portraitBox = await portrait.boundingBox();
@@ -132,6 +133,9 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect(page.getByText("web_search · complete")).toBeVisible();
   await expect(page.getByText("1 source · Official source")).toBeVisible();
   await expect(page.getByText("Complete", { exact: true })).toBeVisible();
+  await expect(page.locator(".composer-model-picker")).toHaveCount(0);
+  await expect(page.locator(".composer .compact-model-picker")).toBeVisible();
+  await expect(page.locator(".model-description")).toHaveCount(0);
   expect(requestBody).toMatchObject({ threadId: CONVERSATION_ID });
   expect(requestBody?.messages).toHaveLength(1);
 
@@ -498,15 +502,16 @@ test("keeps canonical messages when changing mode", async ({ page }) => {
 
   await page.goto("./");
   const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+  await expect(page.locator(".composer-model-picker img")).toBeVisible();
   await composer.fill("First mode turn");
   await composer.press("Enter");
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
 
-  const portraitBefore = await page.locator(".composer-model-picker img").getAttribute("src");
+  await expect(page.locator(".composer-model-picker")).toHaveCount(0);
+  await expect(page.locator(".composer .compact-model-picker")).toBeVisible();
   await page.getByRole("combobox", { name: "Audrey model" }).selectOption("deep");
   await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue("deep");
-  await expect(page.locator(".composer-model-picker img")).not.toHaveAttribute("src", portraitBefore ?? "");
-  await expect(page.getByText("A reasoning panel for complex problems and careful analysis.")).toBeVisible();
+  await expect(page.getByText("A reasoning panel for complex problems and careful analysis.")).toHaveCount(0);
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
   expect(agentModes).toEqual(["fast"]);
 });

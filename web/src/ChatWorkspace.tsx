@@ -766,12 +766,22 @@ function AudreyThread({
               <>
                 {runError ? <p className="run-error" role="alert">{runError}</p> : null}
                 <RunActivityStatus activity={activity} />
-                <ComposerModelPicker
-                  mode={mode}
-                  disabled={modeDisabled}
-                  onChange={onModeChange}
-                />
+                <ThreadPrimitive.Empty>
+                  <ComposerModelPicker
+                    mode={mode}
+                    disabled={modeDisabled}
+                    onChange={onModeChange}
+                  />
+                </ThreadPrimitive.Empty>
                 <ComposerPrimitive.Root className="composer">
+                  <ThreadPrimitive.If empty={false}>
+                    <ComposerModelPicker
+                      compact
+                      mode={mode}
+                      disabled={modeDisabled}
+                      onChange={onModeChange}
+                    />
+                  </ThreadPrimitive.If>
                   <ComposerPrimitive.Input
                     className="composer-input"
                     aria-label="Ask Audrey"
@@ -834,38 +844,42 @@ function AssistantMessage() {
 }
 
 function ComposerModelPicker({
+  compact = false,
   mode,
   disabled,
   onChange,
 }: {
+  compact?: boolean;
   mode: AudreyMode;
   disabled: boolean;
   onChange: (mode: AudreyMode) => Promise<void>;
 }) {
   const selected = modeDetails(mode);
+  const select = (
+    <select
+      aria-label="Audrey model"
+      title={`${selected.label}: ${selected.description}`}
+      value={mode}
+      disabled={disabled}
+      onChange={(event) => void onChange(event.target.value as AudreyMode)}
+    >
+      {MODES.map((item) => (
+        <option key={item.value} value={item.value}>{item.label}</option>
+      ))}
+    </select>
+  );
+  if (compact) {
+    return <label className="compact-model-picker">{select}</label>;
+  }
   return (
     <div className="composer-model-picker">
       <img src={selected.portrait} alt="" aria-hidden="true" />
-      <span className="model-picker-copy">
-        <span>Audrey</span>
-        <strong>{selected.label}</strong>
-        <span className="model-description" aria-live="polite">
-          {selected.description}
-        </span>
-      </span>
       <label className="model-picker-control">
-        <span>Choose a model</span>
-        <select
-          aria-label="Audrey model"
-          value={mode}
-          disabled={disabled}
-          onChange={(event) => void onChange(event.target.value as AudreyMode)}
-        >
-          {MODES.map((item) => (
-            <option key={item.value} value={item.value}>{item.label}</option>
-          ))}
-        </select>
+        {select}
       </label>
+      <span className="model-description" aria-live="polite">
+        {selected.description}
+      </span>
     </div>
   );
 }
