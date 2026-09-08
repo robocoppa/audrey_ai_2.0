@@ -237,6 +237,7 @@ async def _stream_via_pipeline(
     app, payload: ChatCompletionRequest, messages, options,
     *, user_id: str, conversation_id: str, user_turn_text: str,
     event_context: RunEventContext | None = None,
+    routing_messages: list[dict[str, Any]] | None = None,
 ):
     """Streaming path.
 
@@ -274,11 +275,12 @@ async def _stream_via_pipeline(
     collector = StreamCollector()
     chosen_concrete: str = "?"
     is_deep_branch = False  # deep handles its own archive write to skip banners
-    owui_task = is_owui_task_request(messages)
+    decision_messages = messages if routing_messages is None else routing_messages
+    owui_task = is_owui_task_request(decision_messages)
 
     try:
         async with inflight.slot(user_id):
-            user_text = last_user_text(messages)
+            user_text = last_user_text(decision_messages)
             # The deep-vs-fast decision uses only cheap local signals — it
             # does NOT need the classifier LLM. (`task` selects the model;
             # the route mode doesn't.) Deciding mode first lets the fast
@@ -290,13 +292,13 @@ async def _stream_via_pipeline(
             # role was injected at the route, upstream of here. Mirrors
             # `node_complexity`; see `without_task_role` for what this cost.
             gate_messages = without_task_role(
-                messages, task_role_for(payload.model, cfg)
+                decision_messages, task_role_for(payload.model, cfg)
             )
             complex_, n = is_complex(gate_messages, threshold=int(complexity_cfg.get("token_threshold", 500)))
-            deep_intent = has_deep_intent(messages, complexity_cfg.get("deep_intent_phrases") or [])
+            deep_intent = has_deep_intent(decision_messages, complexity_cfg.get("deep_intent_phrases") or [])
             forced_deep = payload.model in ("audrey_deep", "audrey_cloud", "audrey_local", "audrey_research")
             forced_fast = payload.model == "audrey_fast"
-            image_turn = has_image_part(messages)
+            image_turn = has_image_part(decision_messages)
             if image_turn and not (forced_deep and describe_enabled(cfg)):
                 # An attached image must reach a vision model — force fast.
                 # (See the classify branch below: `task` is pinned to "vl".)
@@ -337,7 +339,7 @@ async def _stream_via_pipeline(
                 # pools are task-keyed). Deep emits its own banner stream, so
                 # classify here and hand the task type down.
                 task, reason, conf = await classify_with_registry(
-                    ollama, user_text=user_text, messages=messages, router_cfg=router_cfg,
+                    ollama, user_text=user_text, messages=decision_messages, router_cfg=router_cfg,
                     cfg=cfg, registry=app.state.tools,
                 )
                 log.info(
@@ -347,8 +349,8 @@ async def _stream_via_pipeline(
                     " deep_intent=1" if (deep_intent and not complex_) else "",
                 )
                 if complexity_cfg.get("log_breakdown", False):
-                    by_role = count_tokens_by_role(messages)
-                    last_user = count_last_user_tokens(messages)
+                    by_role = count_tokens_by_role(decision_messages)
+                    last_user = count_last_user_tokens(decision_messages)
                     parts = " ".join(f"{r}={by_role[r]}" for r in sorted(by_role))
                     log.info("complexity.breakdown: %s last_user=%d", parts, last_user)
                 is_deep_branch = True
@@ -357,6 +359,7 @@ async def _stream_via_pipeline(
                         app, payload, messages, options, task=task, conf=conf, user_id=user_id,
                         conversation_id=conversation_id, user_turn_text=user_turn_text,
                         event_context=event_context,
+                        routing_messages=decision_messages,
                     ):
                         yield frame
                     return
@@ -364,6 +367,7 @@ async def _stream_via_pipeline(
                     app, payload, messages, options, task=task, conf=conf, user_id=user_id,
                     conversation_id=conversation_id, user_turn_text=user_turn_text,
                     event_context=event_context,
+                    routing_messages=decision_messages,
                 ):
                     yield frame
                 return
@@ -396,7 +400,7 @@ async def _stream_via_pipeline(
                 task, reason, conf = "vl", "image_turn", 1.0
             else:
                 task, reason, conf = await classify_with_registry(
-                    ollama, user_text=user_text, messages=messages, router_cfg=router_cfg,
+                    ollama, user_text=user_text, messages=decision_messages, router_cfg=router_cfg,
                     cfg=cfg, registry=app.state.tools,
                 )
             log.info(
@@ -406,8 +410,8 @@ async def _stream_via_pipeline(
                 " image=1" if image_turn else "",
             )
             if complexity_cfg.get("log_breakdown", False):
-                by_role = count_tokens_by_role(messages)
-                last_user = count_last_user_tokens(messages)
+                by_role = count_tokens_by_role(decision_messages)
+                last_user = count_last_user_tokens(decision_messages)
                 parts = " ".join(f"{r}={by_role[r]}" for r in sorted(by_role))
                 log.info("complexity.breakdown: %s last_user=%d", parts, last_user)
 
@@ -432,6 +436,7 @@ async def _stream_via_pipeline(
                 state = {
                     "virtual_model": payload.model,
                     "messages": messages,
+                    "routing_messages": decision_messages,
                     "temperature": payload.temperature,
                     "top_p": payload.top_p,
                     "max_tokens": payload.max_tokens,
@@ -672,6 +677,7 @@ async def _stream_deep_with_banners(
     conversation_id: str = "",
     user_turn_text: str = "",
     event_context: RunEventContext | None = None,
+    routing_messages: list[dict[str, Any]] | None = None,
 ):
     """Streaming deep path with progress banners.
 
@@ -754,7 +760,8 @@ async def _stream_deep_with_banners(
         planning_min_tokens = int(planning_cfg.get("min_prompt_tokens", 40))
         planning_max_subtasks = int(planning_cfg.get("max_subtasks", 3))
         complexity_threshold = int(cfg.raw.get("complexity", {}).get("token_threshold", 500))
-        _, prompt_tokens = is_complex(messages, threshold=complexity_threshold)
+        prompt_messages = messages if routing_messages is None else routing_messages
+        _, prompt_tokens = is_complex(prompt_messages, threshold=complexity_threshold)
 
         async with PhaseTicker(BANNER_PLANNING, emit):
             think_task = runner.own(
@@ -1053,6 +1060,7 @@ async def _stream_research_with_banners(
     conversation_id: str = "",
     user_turn_text: str = "",
     event_context: RunEventContext | None = None,
+    routing_messages: list[dict[str, Any]] | None = None,
 ):
     """Streaming `audrey_research` path: Planning → Researching → Verifying → Writing.
 
@@ -1119,7 +1127,8 @@ async def _stream_research_with_banners(
         memory_enabled = bool(memory_cfg.get("enabled", True))
         planning_cfg = agentic.get("planning", {}) or {}
         complexity_threshold = int(cfg.raw.get("complexity", {}).get("token_threshold", 500))
-        _, prompt_tokens = is_complex(messages, threshold=complexity_threshold)
+        prompt_messages = messages if routing_messages is None else routing_messages
+        _, prompt_tokens = is_complex(prompt_messages, threshold=complexity_threshold)
 
         async with PhaseTicker(BANNER_PLANNING, emit):
             think_task = runner.own(

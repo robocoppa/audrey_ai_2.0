@@ -23,6 +23,7 @@ import videoPortrait from "../../images/audrey8.png";
 import cloudPortrait from "../../images/cloudModel.png";
 import localPortrait from "../../images/localModel.png";
 
+import { AudreyLoader } from "./AudreyLoader";
 import {
   createConversation,
   deleteConversation,
@@ -37,6 +38,7 @@ import {
   type Conversation,
   type ConversationMessage,
   type CurrentUser,
+  type UserPreferences,
 } from "./api";
 import { latestActionFetch } from "./agentTransport";
 import { FileManager } from "./FileManager";
@@ -115,7 +117,13 @@ const IDLE_ACTIVITY: RunActivity = {
   latestSource: "",
 };
 
-export function ChatWorkspace({ user }: { user: CurrentUser }) {
+export function ChatWorkspace({
+  user,
+  preferences,
+}: {
+  user: CurrentUser;
+  preferences: UserPreferences;
+}) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [openedConversations, setOpenedConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -368,6 +376,7 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
           >
             <ConversationThread
               conversation={opened}
+              showProgress={preferences.show_progress}
               onConversationChange={replaceConversation}
               onRemoveFromView={removeFromCurrentView}
             />
@@ -391,10 +400,12 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
 
 function ConversationThread({
   conversation,
+  showProgress,
   onConversationChange,
   onRemoveFromView,
 }: {
   conversation: Conversation;
+  showProgress: boolean;
   onConversationChange: (conversation: Conversation) => void;
   onRemoveFromView: (conversationId: string, closeThread?: boolean) => void;
 }) {
@@ -576,7 +587,7 @@ function ConversationThread({
       </div>
 
       {thread.status === "loading" || thread.status === "idle" ? (
-        <div className="thread-loading" role="status">Loading thread…</div>
+        <AudreyLoader label="Loading conversation" />
       ) : null}
       {thread.status === "error" ? (
         <div className="thread-loading thread-error" role="alert">{thread.message}</div>
@@ -585,6 +596,7 @@ function ConversationThread({
         <AudreyThread
           conversationId={conversation.id}
           mode={mode}
+          showProgress={showProgress}
           initialMessages={thread.messages}
           readOnly={archived}
           modeDisabled={runActive || mutation !== null}
@@ -600,6 +612,7 @@ function ConversationThread({
 function AudreyThread({
   conversationId,
   mode,
+  showProgress,
   initialMessages,
   readOnly,
   modeDisabled,
@@ -609,6 +622,7 @@ function AudreyThread({
 }: {
   conversationId: string;
   mode: AudreyMode;
+  showProgress: boolean;
   initialMessages: ConversationMessage[];
   readOnly: boolean;
   modeDisabled: boolean;
@@ -819,7 +833,7 @@ function AudreyThread({
             ) : (
               <>
                 {runError ? <p className="run-error" role="alert">{runError}</p> : null}
-                <RunActivityStatus activity={activity} />
+                {showProgress ? <RunActivityStatus activity={activity} /> : null}
                 <ThreadPrimitive.Empty>
                   <ComposerModelPicker
                     mode={mode}

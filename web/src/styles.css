@@ -1109,6 +1109,91 @@ a:focus-visible {
   color: var(--muted);
 }
 
+.audrey-loader {
+  display: grid;
+  width: 100%;
+  min-height: 100%;
+  place-items: center;
+}
+
+.audrey-loader-fullscreen {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  min-height: 100dvh;
+  background:
+    radial-gradient(circle at 50% 50%, rgb(52 153 250 / 10%), transparent 23rem),
+    var(--surface-deep);
+}
+
+.audrey-loading-portrait {
+  position: relative;
+  isolation: isolate;
+  width: clamp(8rem, 18vw, 13rem);
+  aspect-ratio: 1;
+  border-radius: 50%;
+}
+
+.audrey-loading-portrait::before {
+  position: absolute;
+  z-index: 0;
+  inset: -0.55rem;
+  border: 1px solid rgb(99 181 255 / 18%);
+  border-radius: inherit;
+  box-shadow:
+    0 0 2.5rem rgb(52 153 250 / 18%),
+    inset 0 0 1.6rem rgb(52 153 250 / 8%);
+  content: "";
+}
+
+.audrey-loading-portrait img {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border: 1px solid rgb(99 181 255 / 28%);
+  border-radius: inherit;
+  box-shadow: 0 1.2rem 3.5rem rgb(0 0 0 / 48%);
+}
+
+.audrey-loading-orbit {
+  position: absolute;
+  z-index: 2;
+  inset: -0.55rem;
+  border-radius: 50%;
+  animation: audrey-loading-orbit 2.4s linear infinite;
+}
+
+.audrey-loading-orbit::after {
+  position: absolute;
+  top: -0.24rem;
+  left: 50%;
+  width: 0.7rem;
+  height: 0.7rem;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: #b9ddff;
+  box-shadow:
+    0 0 0.55rem rgb(185 221 255 / 90%),
+    0 0 1.3rem rgb(52 153 250 / 76%),
+    0 0 2.4rem rgb(70 118 242 / 42%);
+  content: "";
+}
+
+@keyframes audrey-loading-orbit {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .audrey-loading-orbit {
+    animation: none;
+  }
+}
+
 .thread-error {
   color: var(--danger);
 }
@@ -1152,7 +1237,7 @@ a:focus-visible {
   left: -2.5rem;
   width: 17.5rem;
   max-width: none;
-  filter: url("#remove-wordmark-white");
+  filter: url("#light-wordmark-on-dark");
 }
 
 .brand-product {
@@ -1203,61 +1288,218 @@ a:focus-visible {
   color: var(--accent);
 }
 
-.profile-editor {
-  position: relative;
+.session-name:focus-visible {
+  outline: none;
+  background: var(--surface-active);
+  color: var(--text);
+  box-shadow: var(--focus-glow);
 }
 
-.profile-name-form {
+.account-settings-backdrop {
+  position: fixed;
+  z-index: 40;
+  inset: 0;
+  display: grid;
+  overflow-y: auto;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgb(2 7 16 / 82%);
+  backdrop-filter: blur(0.5rem);
+}
+
+.account-settings {
+  width: min(45rem, 100%);
+  max-height: min(52rem, calc(100dvh - 2.5rem));
+  overflow-y: auto;
+  border: 1px solid rgb(99 181 255 / 28%);
+  border-radius: 1.15rem;
+  background:
+    radial-gradient(circle at 88% 0%, rgb(52 153 250 / 14%), transparent 24rem),
+    var(--surface);
+  box-shadow: 0 2rem 6rem rgb(0 0 0 / 62%);
+}
+
+.account-settings-header {
+  position: sticky;
+  z-index: 1;
+  top: 0;
   display: flex;
-  align-items: center;
-  gap: 0.35rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.3rem 1.4rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: rgb(15 28 49 / 96%);
+  backdrop-filter: blur(0.75rem);
 }
 
-.profile-name-form input {
-  width: min(12rem, 26vw);
-  padding: 0.42rem 0.55rem;
+.account-settings-header span {
+  color: var(--accent);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.account-settings-header h2 {
+  margin: 0.25rem 0 0;
+  font-size: 1.45rem;
+  letter-spacing: -0.03em;
+}
+
+.account-settings-header button {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--input-surface);
+  color: var(--muted);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.account-settings-header button:hover,
+.account-settings-header button:focus-visible {
+  outline: none;
+  border-color: var(--border-strong);
+  background: var(--surface-active);
+  color: var(--text);
+  box-shadow: var(--focus-glow);
+}
+
+.settings-section {
+  display: grid;
+  gap: 0.95rem;
+  padding: 1.25rem 1.4rem 1.4rem;
+}
+
+.settings-section + .settings-section {
+  border-top: 1px solid var(--border);
+}
+
+.settings-section-heading h3,
+.settings-section-heading p {
+  margin: 0;
+}
+
+.settings-section-heading h3 {
+  font-size: 1rem;
+}
+
+.settings-section-heading p {
+  margin-top: 0.3rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.settings-section label {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.settings-section label > small {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 450;
+}
+
+.settings-section input,
+.settings-section textarea,
+.settings-section select {
+  width: 100%;
   border: 1px solid var(--border);
   border-radius: 0.7rem;
   outline: none;
   background: var(--input-surface);
   color: var(--text);
-  font-size: 0.78rem;
 }
 
-.profile-name-form input:focus-visible {
+.settings-section input,
+.settings-section select {
+  min-height: 2.55rem;
+  padding: 0.55rem 0.7rem;
+}
+
+.settings-section textarea {
+  min-height: 6.5rem;
+  padding: 0.65rem 0.7rem;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.settings-section input:focus-visible,
+.settings-section textarea:focus-visible,
+.settings-section select:focus-visible {
+  border-color: var(--border-strong);
+  background: var(--surface-raised);
+  box-shadow: var(--focus-glow);
+}
+
+.settings-section > button,
+.timezone-control button {
+  justify-self: start;
+  padding: 0.58rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.settings-section > button[type="submit"] {
+  border-color: transparent;
+  background: var(--brand-gradient);
+  color: #fff;
+}
+
+.settings-section > button:focus-visible,
+.timezone-control button:focus-visible {
+  outline: none;
   border-color: var(--border-strong);
   box-shadow: var(--focus-glow);
 }
 
-.profile-name-form button {
-  padding: 0.42rem 0.55rem;
+.timezone-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem;
+}
+
+.settings-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.settings-section .settings-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.7rem;
   border: 1px solid var(--border);
-  border-radius: 0.65rem;
-  background: var(--surface-raised);
-  color: var(--text-soft);
-  font-size: 0.7rem;
+  border-radius: 0.75rem;
+  background: rgb(7 16 31 / 46%);
 }
 
-.profile-name-form button[type="submit"] {
-  border-color: transparent;
-  background: var(--brand-gradient);
-  color: #fff;
-  font-weight: 700;
+.settings-checkbox input {
+  width: 1rem;
+  min-height: 1rem;
+  margin: 0;
+  accent-color: var(--accent-soft);
 }
 
-.profile-name-error {
-  position: absolute;
-  top: calc(100% + 0.35rem);
-  right: 0;
-  width: max-content;
-  max-width: 20rem;
-  padding: 0.4rem 0.55rem;
-  border: 1px solid rgb(255 145 164 / 34%);
-  border-radius: 0.55rem;
-  background: #321927;
+.settings-error {
+  margin: 0;
   color: var(--danger);
-  font-size: 0.68rem;
-  box-shadow: var(--shadow-sm);
+  font-size: 0.75rem;
 }
 
 .logout-button {
@@ -1636,6 +1878,27 @@ a:focus-visible {
 }
 
 @media (max-width: 560px) {
+  .account-settings-backdrop {
+    padding: 0;
+  }
+
+  .account-settings {
+    width: 100%;
+    max-height: 100dvh;
+    min-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .settings-pair,
+  .timezone-control {
+    grid-template-columns: 1fr;
+  }
+
+  .timezone-control button {
+    justify-self: stretch;
+  }
+
   .file-manager-backdrop {
     padding: 0;
   }
@@ -1694,15 +1957,6 @@ a:focus-visible {
   .session-name,
   .logout-button {
     font-size: 0.64rem;
-  }
-
-  .profile-name-form input {
-    width: 7.5rem;
-  }
-
-  .profile-name-form button {
-    padding-inline: 0.4rem;
-    font-size: 0.62rem;
   }
 
   .workspace {

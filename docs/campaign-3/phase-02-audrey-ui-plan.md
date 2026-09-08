@@ -4,9 +4,9 @@
 Unraid-verified, including provider-neutral identity, canonical application
 state, native conversation/run resources, typed and AG-UI events, real
 pipeline observations, and rebuildable canonical archive projection.
-Milestone 2C is in progress. Its native chat slices and public navigation
-corrective are Unraid-verified; the Builtryte branding and self-service profile
-refinement is laptop-complete and awaiting its live browser gate.
+Milestone 2C's native chat and public navigation are Unraid-verified; its final
+branding/profile browser check remains. Milestone 2D's file/attachment slice is
+Unraid-verified, and its preference slice is laptop-complete.
 
 ## Goal
 
@@ -838,7 +838,7 @@ while leaving its tunnel route public is not a safe rollback.
 - Add search, export, deletion, token management, and capability health.
 - Expose the Phase 3 skills placeholder.
 
-The first 2D slice is laptop-complete. Owner-bound `/api/files` resources now
+The first 2D slice is complete and Unraid-verified. Owner-bound `/api/files` resources now
 reuse the existing hardened upload lifecycle for listing, single-request and
 chunked uploads, inspection, quota accounting, and durable deletion. The
 browser adds a same-origin file manager with upload progress and confirmed
@@ -865,7 +865,36 @@ deferred by user direction. `scripts/smoke_native_files.py` packages the live
 gate with disposable randomized data: It proves two-owner isolation, upload and
 safe listing, a tool-grounded attached turn, exact canonical text and metadata,
 snapshot survival after source deletion, and repair cleanup. Deployment and
-that live lifecycle gate remain open, so Milestone 2D is not yet complete.
+the live lifecycle gate passed: a ready 61-byte owner file produced one durable
+attachment, the Fast run made one complete tool call and recovered its private
+marker, and the second owner received identical `404`s for the file and
+conversation. Source deletion returned `200` without erasing the message
+snapshot; canonical/archive cleanup returned `204`/`202`, and repair returned
+to `ready`.
+
+The 2D.2 slice moves account preferences behind owner-bound
+`GET/PUT /api/me/preferences`. Timezone is validated as an IANA name; persona,
+response detail, tone, and live-progress visibility have bounded typed
+contracts. Preference replacement requires provider authentication, while a
+scoped personal token may read but cannot mutate this account-level state. The
+dark native settings surface edits profile and Audrey preferences without
+storing a browser bearer token, and the saved progress choice is applied to the
+chat workspace immediately.
+
+Every native run now receives a server-built preference context containing its
+server-computed local time and response guidance. It is never accepted as a
+browser-authored system message or persisted as conversation content. A
+separate routing transcript keeps even a long persona out of classification,
+the Auto complexity gate, and Deep/Research planning thresholds while still
+letting the selected model see it. All 2,773 backend tests, nine Vitest
+contracts, and fourteen production-preview Chromium workflows pass; scoped
+ruff, compilation, typecheck, lint, and production build are clean. The lesson
+scan has zero broken links; its deferred 99 hard and 162 advisory drifts remain
+out of scope by user direction. `scripts/smoke_native_preferences.py` packages
+the two-owner live gate, including invalid-timezone atomicity, model-context
+retrieval, canonical persistence, owner isolation, exact preference restoration,
+and repair cleanup. Milestone 2D remains open for this slice's live gate and the
+remaining ownership and capability operations.
 
 Gate: disposable-user upload/search/export/delete evidence covers transactional
 and derived stores, including interrupted cleanup and restart.

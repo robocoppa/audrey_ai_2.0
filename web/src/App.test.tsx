@@ -4,10 +4,37 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { latestActionFetch } from "./agentTransport";
 
+const DEFAULT_PREFERENCES = {
+  timezone: "UTC",
+  persona: "",
+  detail: "balanced",
+  tone: "natural",
+  show_progress: true,
+  created_at: "2026-09-01T00:00:00+00:00",
+  updated_at: "2026-09-01T00:00:00+00:00",
+} as const;
+
 describe("App", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+  });
+
+  it("shows a centered, text-free Audrey Auto loader while the session resolves", () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
+
+    render(<App />);
+
+    const loader = screen.getByRole("status", { name: "Loading Audrey" });
+    expect(loader).toHaveClass("audrey-loader-fullscreen");
+    expect(loader).toHaveTextContent("");
+    expect(loader.querySelector(".audrey-loading-orbit")).toBeInTheDocument();
+    expect(loader.querySelector("img")).toHaveAttribute(
+      "src",
+      expect.stringContaining("audrey2.png"),
+    );
+    expect(screen.queryByText("Checking session…")).not.toBeInTheDocument();
+    expect(screen.queryByText("A quieter place to think.")).not.toBeInTheDocument();
   });
 
   it("loads the current same-origin Audrey identity", async () => {
@@ -21,7 +48,9 @@ describe("App", () => {
             status: "active",
             auth_provider: "cloudflare_access",
           }
-        : { items: [], next_cursor: null };
+        : path === "/api/me/preferences"
+          ? DEFAULT_PREFERENCES
+          : { items: [], next_cursor: null };
       return Promise.resolve(
         new Response(JSON.stringify(payload), {
           status: 200,
@@ -40,6 +69,10 @@ describe("App", () => {
     expect(document.querySelector(".brand-wordmark img")).toHaveAttribute(
       "src",
       expect.stringContaining("builtryte-wordmark.png"),
+    );
+    expect(document.querySelector("#light-wordmark-on-dark feColorMatrix")).toHaveAttribute(
+      "values",
+      expect.stringContaining("0.843"),
     );
     expect(identity).toHaveTextContent("Alice");
     expect(identity).not.toHaveTextContent("Example");
@@ -85,7 +118,9 @@ describe("App", () => {
             status: "active",
             auth_provider: "cloudflare_access",
           }
-        : { items: [], next_cursor: null };
+        : path === "/api/me/preferences"
+          ? DEFAULT_PREFERENCES
+          : { items: [], next_cursor: null };
       return Promise.resolve(
         new Response(JSON.stringify(payload), {
           status: 200,
@@ -124,7 +159,9 @@ describe("App", () => {
               status: "active",
               auth_provider: "cloudflare_access",
             }
-          : { items: [], next_cursor: null };
+          : path === "/api/me/preferences"
+            ? DEFAULT_PREFERENCES
+            : { items: [], next_cursor: null };
         return Promise.resolve(new Response(JSON.stringify(payload), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -135,11 +172,11 @@ describe("App", () => {
 
     render(<App />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Edit profile name" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open account settings" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Profile name" }), {
       target: { value: "Alice Example" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save profile" }));
 
     await waitFor(() => {
       expect(screen.getByLabelText("Signed in user")).toHaveTextContent("Alice");
@@ -150,6 +187,79 @@ describe("App", () => {
     expect(patch).toBeDefined();
     expect(JSON.parse(String(patch?.[1].body))).toEqual({
       display_name: "Alice Example",
+    });
+  });
+
+  it("updates validated Audrey preferences from account settings", async () => {
+    const savedPreferences = {
+      ...DEFAULT_PREFERENCES,
+      timezone: "America/Denver",
+      persona: "Be direct and practical.",
+      detail: "concise" as const,
+      tone: "professional" as const,
+      show_progress: false,
+    };
+    const fetchMock = vi.fn().mockImplementation(
+      (path: string, request?: RequestInit) => {
+        if (path === "/api/me/preferences" && request?.method === "PUT") {
+          return Promise.resolve(new Response(JSON.stringify(savedPreferences), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
+        const payload = path === "/api/me"
+          ? {
+              id: "usr_example",
+              email: "alice@example.com",
+              display_name: "Alice Example",
+              role: "user",
+              status: "active",
+              auth_provider: "cloudflare_access",
+            }
+          : path === "/api/me/preferences"
+            ? DEFAULT_PREFERENCES
+            : { items: [], next_cursor: null };
+        return Promise.resolve(new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open account settings" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Timezone" }), {
+      target: { value: "America/Denver" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Persona and style" }), {
+      target: { value: "Be direct and practical." },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "Response detail" }), {
+      target: { value: "concise" },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "Tone" }), {
+      target: { value: "professional" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", {
+      name: "Show the live stage and source summary above the composer",
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Save preferences" })).not.toBeDisabled();
+    });
+    const update = fetchMock.mock.calls.find(
+      ([path, request]) => path === "/api/me/preferences" && request?.method === "PUT",
+    ) as [string, RequestInit] | undefined;
+    expect(update).toBeDefined();
+    expect(JSON.parse(String(update?.[1].body))).toEqual({
+      timezone: "America/Denver",
+      persona: "Be direct and practical.",
+      detail: "concise",
+      tone: "professional",
+      show_progress: false,
     });
   });
 

@@ -6,15 +6,21 @@ import datetime as dt
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from audrey.app_state import ApplicationStore, InvalidIdentityError
+from audrey.app_state import (
+    ApplicationStore,
+    InvalidApplicationStateError,
+    InvalidIdentityError,
+    UserPreferences,
+)
 from audrey.auth import (
     clear_auth_cache_for_email,
     require_provider_principal,
     require_scope,
 )
 from audrey.identity import PersonalTokenSummary, Principal
+from audrey.pipeline.context import normalize_response_preferences
 
 router = APIRouter(tags=["application"])
 
@@ -89,6 +95,39 @@ class MeUpdateRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=100)
 
 
+class PreferencesResponse(BaseModel):
+    timezone: str
+    persona: str
+    detail: Literal["concise", "balanced", "detailed"]
+    tone: Literal["natural", "professional", "casual"]
+    show_progress: bool
+    created_at: str
+    updated_at: str
+
+
+class PreferencesUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    timezone: str = Field(min_length=1, max_length=100)
+    persona: str = Field(max_length=4_000)
+    detail: Literal["concise", "balanced", "detailed"]
+    tone: Literal["natural", "professional", "casual"]
+    show_progress: bool
+
+
+def _preferences_response(record: UserPreferences) -> PreferencesResponse:
+    response = normalize_response_preferences(record.response_preferences)
+    return PreferencesResponse(
+        timezone=record.timezone,
+        persona=record.persona,
+        detail=response["detail"],
+        tone=response["tone"],
+        show_progress=response["show_progress"],
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
 @router.get("/me", response_model=MeResponse)
 async def get_me(
     principal: Principal = Depends(_account_read),
@@ -133,6 +172,47 @@ async def update_me(
         status=principal.status,
         auth_provider=principal.provider,
     )
+
+
+@router.get("/me/preferences", response_model=PreferencesResponse)
+async def get_preferences(
+    request: Request,
+    principal: Principal = Depends(_account_read),
+) -> PreferencesResponse:
+    preferences = await _store(request).preferences.get(user_id=principal.user_id)
+    if preferences is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Audrey account preferences are not initialized.",
+        )
+    return _preferences_response(preferences)
+
+
+@router.put("/me/preferences", response_model=PreferencesResponse)
+async def update_preferences(
+    payload: PreferencesUpdateRequest,
+    request: Request,
+    principal: Principal = Depends(require_provider_principal),
+) -> PreferencesResponse:
+    try:
+        preferences = await _store(request).preferences.replace(
+            user_id=principal.user_id,
+            timezone=payload.timezone,
+            persona=payload.persona,
+            response_preferences={
+                "detail": payload.detail,
+                "tone": payload.tone,
+                "show_progress": payload.show_progress,
+            },
+        )
+    except InvalidApplicationStateError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if preferences is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Audrey account preferences are not initialized.",
+        )
+    return _preferences_response(preferences)
 
 
 @router.post(

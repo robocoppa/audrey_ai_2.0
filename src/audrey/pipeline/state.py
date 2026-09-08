@@ -46,6 +46,7 @@ class PipelineState(TypedDict, total=False):
     # Input — set at request time
     virtual_model: str               # audrey_deep | audrey_cloud | audrey_local | audrey_auto | audrey_fast
     messages: list[dict]             # OpenAI-shaped chat messages
+    routing_messages: list[dict]     # optional native transcript without server-owned preference context
     temperature: float | None
     top_p: float | None
     max_tokens: int | None

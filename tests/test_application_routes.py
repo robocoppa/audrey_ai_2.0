@@ -148,6 +148,125 @@ def test_patch_me_rejects_personal_tokens_and_blank_names(tmp_path):
     )
 
 
+def test_native_preferences_are_validated_persisted_and_owner_bound(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    app = FastAPI()
+    app.state.application_store = store
+    app.include_router(router)
+    alice = _persist_principal(store, _principal())
+    bob = _persist_principal(
+        store,
+        Principal(
+            user_id="ignored",
+            storage_namespace="bob@example.com",
+            provider="owui",
+            provider_subject="owui-bob-preferences",
+            email="bob@example.com",
+            display_name="Bob",
+            role="user",
+            status="active",
+            auth_method="owui_bearer",
+        ),
+    )
+    app.dependency_overrides[require_principal] = lambda: alice
+    app.dependency_overrides[require_provider_principal] = lambda: alice
+
+    try:
+        with TestClient(app) as client:
+            defaults = client.get("/api/me/preferences")
+            assert defaults.status_code == 200
+            assert defaults.json() | {
+                "created_at": "ignored",
+                "updated_at": "ignored",
+            } == {
+                "timezone": "UTC",
+                "persona": "",
+                "detail": "balanced",
+                "tone": "natural",
+                "show_progress": True,
+                "created_at": "ignored",
+                "updated_at": "ignored",
+            }
+
+            updated = client.put(
+                "/api/me/preferences",
+                json={
+                    "timezone": "America/Denver",
+                    "persona": "Use clear, practical language.",
+                    "detail": "concise",
+                    "tone": "professional",
+                    "show_progress": False,
+                },
+            )
+            assert updated.status_code == 200
+            assert updated.json()["timezone"] == "America/Denver"
+            assert updated.json()["persona"] == "Use clear, practical language."
+            assert updated.json()["detail"] == "concise"
+            assert updated.json()["tone"] == "professional"
+            assert updated.json()["show_progress"] is False
+
+            invalid = client.put(
+                "/api/me/preferences",
+                json={
+                    "timezone": "Mountain Time",
+                    "persona": "",
+                    "detail": "balanced",
+                    "tone": "natural",
+                    "show_progress": True,
+                },
+            )
+            assert invalid.status_code == 422
+            assert invalid.json()["detail"] == "timezone must be a valid IANA name"
+
+            app.dependency_overrides[require_principal] = lambda: bob
+            app.dependency_overrides[require_provider_principal] = lambda: bob
+            bob_defaults = client.get("/api/me/preferences")
+            assert bob_defaults.status_code == 200
+            assert bob_defaults.json()["timezone"] == "UTC"
+            assert bob_defaults.json()["persona"] == ""
+    finally:
+        store.close()
+
+
+def test_personal_token_can_read_but_cannot_replace_preferences(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    owner = _persist_principal(store, _principal())
+    issued = asyncio.run(
+        store.create_personal_token(
+            user_id=owner.user_id,
+            name="Read preferences",
+            scopes=["account:read"],
+            expires_at=(dt.datetime.now(dt.UTC) + dt.timedelta(days=30)).isoformat(),
+        )
+    )
+    app = FastAPI()
+    app.state.application_store = store
+    app.include_router(router)
+    headers = {"Authorization": f"Bearer {issued.token}"}
+
+    try:
+        with TestClient(app) as client:
+            assert client.get("/api/me/preferences", headers=headers).status_code == 200
+            denied = client.put(
+                "/api/me/preferences",
+                headers=headers,
+                json={
+                    "timezone": "UTC",
+                    "persona": "Token supplied",
+                    "detail": "balanced",
+                    "tone": "natural",
+                    "show_progress": True,
+                },
+            )
+    finally:
+        store.close()
+
+    assert denied.status_code == 403
+    assert denied.json()["detail"] == (
+        "External provider authentication is required for this operation."
+    )
+
+
 def test_token_lifecycle_returns_secret_only_on_create(tmp_path):
     store = ApplicationStore(tmp_path / "app.sqlite")
     app = FastAPI()

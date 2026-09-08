@@ -400,6 +400,61 @@ def test_http_agent_persists_owner_verified_attachments_without_mutating_user_te
         assert '<audrey_attached_files>\n[{"filename":"field-notes.txt"' in model_content
         assert "Do not infer file contents from filenames" in model_content
         assert "file_notes" not in model_content
+        assert captured_pipeline_messages[0][0]["name"] == "audrey_user_preferences"
+    finally:
+        store.close()
+
+
+def test_native_run_keeps_saved_persona_out_of_the_routing_transcript(tmp_path):
+    captured: dict[str, Any] = {}
+
+    async def capture_stream(app, payload, messages, options, **kwargs):
+        captured["messages"] = messages
+        captured["routing_messages"] = kwargs["routing_messages"]
+        async for chunk in _successful_stream(
+            app,
+            payload,
+            messages,
+            options,
+            **kwargs,
+        ):
+            yield chunk
+
+    app, store, owner, _manager = _native_app(
+        tmp_path,
+        stream_factory=capture_stream,
+    )
+    asyncio.run(
+        store.preferences.replace(
+            user_id=owner.user_id,
+            timezone="America/Denver",
+            persona="Detailed persona " * 150,
+            response_preferences={
+                "detail": "detailed",
+                "tone": "casual",
+                "show_progress": True,
+            },
+        )
+    )
+    conversation = asyncio.run(
+        store.conversations.create(user_id=owner.user_id, default_mode="auto")
+    )
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/api/conversations/{conversation.conversation_id}/runs",
+                json={"content": "A short request."},
+            )
+            assert response.status_code == 202
+            run_id = response.json()["id"]
+            client.get(f"/api/runs/{run_id}/events")
+
+        model_messages = captured["messages"]
+        routing_messages = captured["routing_messages"]
+        assert model_messages[0]["name"] == "audrey_user_preferences"
+        assert "Detailed persona" in model_messages[0]["content"]
+        assert routing_messages == [{"role": "user", "content": "A short request."}]
+        assert all(message.get("role") != "system" for message in routing_messages)
     finally:
         store.close()
 

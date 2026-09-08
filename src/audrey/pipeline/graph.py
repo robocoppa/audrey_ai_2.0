@@ -315,10 +315,11 @@ def build_graph(
         # …") route through the tool-capable fast path instead of getting
         # trapped by `vl_strong`/code keywords. Same call shape as the
         # streaming path in routes/openai.py.
+        routing_messages = state.get("routing_messages") or state["messages"]
         task, reason, conf = await classify_with_registry(
             ollama,
-            user_text=last_user_text(state["messages"]),
-            messages=state["messages"],
+            user_text=last_user_text(routing_messages),
+            messages=routing_messages,
             router_cfg=router_cfg,
             cfg=cfg,
             registry=tools,
@@ -328,20 +329,21 @@ def build_graph(
 
     async def node_complexity(state: PipelineState) -> dict[str, Any]:
         vm = state.get("virtual_model")
+        routing_messages = state.get("routing_messages") or state["messages"]
         # Gate on the request, not on Audrey's own scaffolding. The task role is
         # injected at the route, so without this a specialist's prompt counts
         # toward the threshold that decides whether the request is big enough to
         # deserve the panel — see `without_task_role`. Mirrored in the streaming
         # gate; `tests/test_virtual_model_routing.py` pins the two together.
         gate_messages = without_task_role(
-            state["messages"], task_role_for(str(vm or ""), cfg)
+            routing_messages, task_role_for(str(vm or ""), cfg)
         )
         complex_, n = is_complex(gate_messages, threshold=complexity_threshold)
-        deep_intent = has_deep_intent(state["messages"], deep_intent_phrases)
+        deep_intent = has_deep_intent(routing_messages, deep_intent_phrases)
         forced_deep = vm in ("audrey_deep", "audrey_cloud", "audrey_local", "audrey_research")
         forced_fast = vm == "audrey_fast"
-        owui_task = is_owui_task_request(state["messages"])
-        image_turn = has_image_part(state["messages"])
+        owui_task = is_owui_task_request(routing_messages)
+        image_turn = has_image_part(routing_messages)
         task_override: str | None = None
         describe_first = image_turn and forced_deep and describe_enabled(cfg)
         if image_turn and not describe_first:
@@ -376,8 +378,8 @@ def build_graph(
             reason = f"tokens<{complexity_threshold}"
         log.info("complexity: %d tokens -> %s (%s)", n, mode, reason)
         if complexity_log_breakdown:
-            by_role = count_tokens_by_role(state["messages"])
-            last_user = count_last_user_tokens(state["messages"])
+            by_role = count_tokens_by_role(routing_messages)
+            last_user = count_last_user_tokens(routing_messages)
             parts = " ".join(f"{r}={by_role[r]}" for r in sorted(by_role))
             log.info("complexity.breakdown: %s last_user=%d", parts, last_user)
         # `owui_task` is carried in state, not just used here, because the
@@ -399,7 +401,7 @@ def build_graph(
                 state["messages"],
                 ollama=ollama, registry=registry, health=health, gate=gate,
                 cfg=cfg, target_model="",
-                user_question=last_user_text(state["messages"]),
+                user_question=last_user_text(routing_messages),
                 user_id=state.get("user_id") or None,
             )
             out["messages"] = described

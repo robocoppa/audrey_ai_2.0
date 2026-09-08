@@ -7,6 +7,21 @@ export interface CurrentUser {
   auth_provider: string;
 }
 
+export interface UserPreferences {
+  timezone: string;
+  persona: string;
+  detail: "concise" | "balanced" | "detailed";
+  tone: "natural" | "professional" | "casual";
+  show_progress: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type UserPreferencesUpdate = Pick<
+  UserPreferences,
+  "timezone" | "persona" | "detail" | "tone" | "show_progress"
+>;
+
 export type AudreyMode =
   | "auto"
   | "fast"
@@ -160,6 +175,20 @@ export function updateCurrentUserDisplayName(
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ display_name: displayName }),
+  });
+}
+
+export function getCurrentUserPreferences(): Promise<UserPreferences> {
+  return apiJson<UserPreferences>("/api/me/preferences");
+}
+
+export function updateCurrentUserPreferences(
+  preferences: UserPreferencesUpdate,
+): Promise<UserPreferences> {
+  return apiJson<UserPreferences>("/api/me/preferences", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(preferences),
   });
 }
 

@@ -3,6 +3,60 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 const CONVERSATION_ID = "con_browser_test";
 
+test("centers Audrey Auto with a text-free orbit while the session loads", async ({ page }) => {
+  let releaseSession: () => void = () => undefined;
+  const sessionGate = new Promise<void>((resolve) => {
+    releaseSession = resolve;
+  });
+  await page.route("**/api/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/me/preferences") {
+      await sessionGate;
+      await json(route, browserPreferences());
+      return;
+    }
+    if (url.pathname === "/api/me") {
+      await sessionGate;
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/conversations") {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./", { waitUntil: "domcontentloaded" });
+
+  const loader = page.getByRole("status", { name: "Loading Audrey" });
+  const portrait = loader.locator("img");
+  const orbit = loader.locator(".audrey-loading-orbit");
+  await expect(loader).toBeVisible();
+  await expect(loader).toHaveText("");
+  await expect(portrait).toBeVisible();
+  await expect.poll(
+    () => portrait.evaluate((image) => (image as HTMLImageElement).naturalWidth),
+  ).toBeGreaterThan(0);
+  await expect.poll(
+    () => orbit.evaluate((element) => getComputedStyle(element).animationName),
+  ).toBe("audrey-loading-orbit");
+
+  const loaderBox = await loader.boundingBox();
+  const portraitBox = await portrait.boundingBox();
+  const viewport = page.viewportSize();
+  expect(loaderBox).not.toBeNull();
+  expect(portraitBox).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(Math.abs((portraitBox?.x ?? 0) + (portraitBox?.width ?? 0) / 2 - (viewport?.width ?? 0) / 2))
+    .toBeLessThan(2);
+  expect(Math.abs((portraitBox?.y ?? 0) + (portraitBox?.height ?? 0) / 2 - (viewport?.height ?? 0) / 2))
+    .toBeLessThan(2);
+
+  releaseSession();
+  await expect(page.getByRole("link", { name: "Audrey home" })).toBeVisible();
+});
+
 test("runs a native turn with typed stage, tool, and source activity", async ({ page }) => {
   let requestBody: Record<string, unknown> | null = null;
   await mockAudreyApi(page, async (route) => {
@@ -76,6 +130,10 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   ).toBe("rgb(7, 16, 31)");
   const wordmark = page.locator(".brand-wordmark img");
   await expect(wordmark).toBeVisible();
+  await expect(page.locator("#light-wordmark-on-dark feColorMatrix")).toHaveAttribute(
+    "values",
+    /0\.843.*0\.886.*0\.945/u,
+  );
   await expect.poll(
     () => wordmark.evaluate((image) => (image as HTMLImageElement).naturalWidth),
   ).toBeGreaterThan(0);
@@ -150,6 +208,55 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   expect(accessibility.violations).toEqual([]);
 });
 
+test("hides the run summary when the saved presentation preference is off", async ({ page }) => {
+  await mockAudreyApi(
+    page,
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: aguiStream([
+          { type: "RUN_STARTED", timestamp: 1, threadId: CONVERSATION_ID, runId: "run_quiet" },
+          { type: "TEXT_MESSAGE_START", timestamp: 2, messageId: "msg_quiet" },
+          { type: "STEP_STARTED", timestamp: 3, stepName: "thinking" },
+          {
+            type: "CUSTOM",
+            timestamp: 4,
+            name: "audrey.stage.progress",
+            value: { stage: "thinking", delta: "Working quietly" },
+          },
+          { type: "STEP_FINISHED", timestamp: 5, stepName: "thinking" },
+          {
+            type: "TEXT_MESSAGE_CONTENT",
+            timestamp: 6,
+            messageId: "msg_quiet",
+            delta: "Quiet preference answer.",
+          },
+          { type: "TEXT_MESSAGE_END", timestamp: 7, messageId: "msg_quiet" },
+          {
+            type: "RUN_FINISHED",
+            timestamp: 8,
+            threadId: CONVERSATION_ID,
+            runId: "run_quiet",
+            outcome: { type: "success" },
+          },
+        ]),
+      });
+    },
+    [],
+    browserPreferences({ show_progress: false }),
+  );
+
+  await page.goto("./");
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+  await composer.fill("Use quiet progress");
+  await composer.press("Enter");
+
+  await expect(page.getByText("Quiet preference answer.")).toBeVisible();
+  await expect(page.locator(".run-activity")).toHaveCount(0);
+  await expect(page.getByText("Working quietly")).toHaveCount(0);
+});
+
 test("summarizes a new conversation from its first prompt", async ({ page }) => {
   let created = false;
   let createBody: unknown = null;
@@ -161,6 +268,10 @@ test("summarizes a new conversation from its first prompt", async ({ page }) => 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
     if (url.pathname === "/api/me") {
       await json(route, browserUser());
       return;
@@ -289,6 +400,10 @@ test("keeps history and an active run alive while switching conversations", asyn
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
     if (url.pathname === "/api/me") {
       await json(route, browserUser());
       return;
@@ -353,6 +468,10 @@ test("searches, renames, archives, restores, and deletes a conversation", async 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
     if (url.pathname === "/api/me") {
       await json(route, browserUser());
       return;
@@ -426,6 +545,10 @@ test("loads older conversation pages without replacing the current page", async 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
     if (url.pathname === "/api/me") {
       await json(route, browserUser());
       return;
@@ -464,6 +587,10 @@ test("keeps canonical messages when changing mode", async ({ page }) => {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
     if (url.pathname === "/api/me") {
       await json(route, browserUser());
       return;
@@ -531,6 +658,10 @@ test("sets and retains the current user's profile name", async ({ page }) => {
       await json(route, profile);
       return;
     }
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
     if (url.pathname === "/api/me") {
       await json(route, profile);
       return;
@@ -543,20 +674,93 @@ test("sets and retains the current user's profile name", async ({ page }) => {
   });
 
   await page.goto("./");
-  const profileButton = page.getByRole("button", { name: "Edit profile name" });
+  const profileButton = page.getByRole("button", { name: "Open account settings" });
   await expect(profileButton).toHaveText("alice");
   await profileButton.click();
   await page.getByRole("textbox", { name: "Profile name" }).fill("Alice Builder");
-  await page.getByRole("button", { name: "Save" }).click();
+  await page.getByRole("button", { name: "Save profile" }).click();
 
   await expect(profileButton).toHaveText("Alice");
   await expect(page.locator(".sidebar-heading strong")).toHaveText("Alice Builder");
   expect(profilePatches).toEqual([{ display_name: "Alice Builder" }]);
 
   await page.reload();
-  await expect(page.getByRole("button", { name: "Edit profile name" })).toHaveText("Alice");
+  await expect(page.getByRole("button", { name: "Open account settings" })).toHaveText("Alice");
+  await expect(page.getByRole("heading", { name: "What shall we work through?" })).toBeVisible();
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations).toEqual([]);
+});
+
+test("saves and reloads native Audrey preferences", async ({ page }) => {
+  let preferences = browserPreferences();
+  const updates: unknown[] = [];
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me/preferences" && request.method() === "PUT") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      updates.push(payload);
+      preferences = browserPreferences(payload);
+      await json(route, preferences);
+      return;
+    }
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, preferences);
+      return;
+    }
+    if (url.pathname === "/api/me") {
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/conversations") {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await page.getByRole("button", { name: "Open account settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await dialog.getByRole("textbox", { name: "Timezone" }).fill("America/Denver");
+  await dialog.getByRole("textbox", { name: "Persona and style" }).fill(
+    "Be direct and explain uncommon terms.",
+  );
+  await dialog.getByRole("combobox", { name: "Response detail" }).selectOption("detailed");
+  await dialog.getByRole("combobox", { name: "Tone" }).selectOption("professional");
+  await dialog.getByRole("checkbox", {
+    name: "Show the live stage and source summary above the composer",
+  }).uncheck();
+  await dialog.getByRole("button", { name: "Save preferences" }).click();
+
+  await expect.poll(() => updates.length).toBe(1);
+  expect(updates[0]).toEqual({
+    timezone: "America/Denver",
+    persona: "Be direct and explain uncommon terms.",
+    detail: "detailed",
+    tone: "professional",
+    show_progress: false,
+  });
+
+  await page.reload();
+  await page.getByRole("button", { name: "Open account settings" }).click();
+  const reloaded = page.getByRole("dialog", { name: "Settings" });
+  await expect(reloaded.getByRole("textbox", { name: "Timezone" })).toHaveValue(
+    "America/Denver",
+  );
+  await expect(reloaded.getByRole("textbox", { name: "Persona and style" })).toHaveValue(
+    "Be direct and explain uncommon terms.",
+  );
+  await expect(reloaded.getByRole("combobox", { name: "Response detail" })).toHaveValue(
+    "detailed",
+  );
+  await expect(reloaded.getByRole("combobox", { name: "Tone" })).toHaveValue(
+    "professional",
+  );
+  await expect(reloaded.getByRole("checkbox", {
+    name: "Show the live stage and source summary above the composer",
+  })).not.toBeChecked();
 });
 
 test("cancels an active browser run without leaving an error state", async ({ page }) => {
@@ -611,6 +815,10 @@ test("attaches an owner file through the minimized AG-UI request", async ({ page
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
     if (url.pathname === "/api/me") {
       await json(route, browserUser());
       return;
@@ -666,6 +874,10 @@ test("manages owner-bound files without a browser bearer token", async ({ page }
     const request = route.request();
     const url = new URL(request.url());
     authorizationHeaders.push(request.headers().authorization);
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
     if (url.pathname === "/api/me") {
       await json(route, browserUser());
       return;
@@ -746,9 +958,14 @@ async function mockAudreyApi(
   page: Page,
   agentHandler?: (route: Route) => Promise<void> | void,
   messages: ReadonlyArray<Record<string, unknown>> = [],
+  preferences = browserPreferences(),
 ) {
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, preferences);
+      return;
+    }
     if (url.pathname === "/api/me") {
       await json(route, {
         id: "usr_browser_test",
@@ -803,6 +1020,19 @@ function browserUser() {
     role: "user",
     status: "active",
     auth_provider: "cloudflare_access",
+  };
+}
+
+function browserPreferences(overrides: Record<string, unknown> = {}) {
+  return {
+    timezone: "UTC",
+    persona: "",
+    detail: "balanced",
+    tone: "natural",
+    show_progress: true,
+    created_at: "2026-09-04T00:00:00Z",
+    updated_at: "2026-09-04T00:00:00Z",
+    ...overrides,
   };
 }
 

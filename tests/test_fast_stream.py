@@ -617,6 +617,78 @@ async def test_route_uses_one_id_one_role_and_the_configured_thinking_policy(
     assert (usage.prompt_tokens, usage.completion_tokens) == (0, 0)
 
 
+async def test_native_preference_context_reaches_model_but_not_auto_routing(
+    monkeypatch,
+):
+    cfg = _Cfg(("a", 100, "local"))
+    ollama = _ScriptedOllama({
+        "a": [{
+            "message": {"content": "short answer"},
+            "done": True,
+        }],
+    })
+    routing_messages = [{"role": "user", "content": "A short request."}]
+    model_messages = [
+        {
+            "role": "system",
+            "name": "audrey_user_preferences",
+            "content": "Very long persona guidance. " * 600,
+        },
+        *routing_messages,
+    ]
+    gate_calls: list[list[dict[str, Any]]] = []
+    classify_calls: list[list[dict[str, Any]]] = []
+
+    def capture_complexity(messages, *, threshold):
+        assert threshold == 500
+        gate_calls.append(messages)
+        return False, 4
+
+    async def classify(*args, **kwargs):
+        classify_calls.append(kwargs["messages"])
+        return "general", "test", 1.0
+
+    monkeypatch.setattr(route_pipeline, "is_complex", capture_complexity)
+    monkeypatch.setattr(route_pipeline, "classify_with_registry", classify)
+    app = _route_app(cfg, ollama, _RecordingArchive())
+    payload = ChatCompletionRequest(
+        model="audrey_auto",
+        messages=model_messages,
+        stream=True,
+    )
+
+    frames = [
+        frame async for frame in _stream_via_pipeline(
+            app,
+            payload,
+            model_messages,
+            {},
+            user_id="alice@example.com",
+            conversation_id="conversation-preferences",
+            user_turn_text="A short request.",
+            routing_messages=routing_messages,
+        )
+    ]
+
+    assert gate_calls == [routing_messages]
+    assert classify_calls == [routing_messages]
+    assert any(
+        message.get("name") == "audrey_user_preferences"
+        for message in ollama.calls[0]["messages"]
+    )
+    chunks = [
+        json.loads(frame[6:].strip())
+        for frame in frames
+        if frame.startswith("data: ") and frame.strip() != "data: [DONE]"
+    ]
+    answer = "".join(
+        chunk["choices"][0]["delta"].get("content", "")
+        for chunk in chunks
+    )
+    assert "short answer" in answer
+    assert frames[-1] == "data: [DONE]\n\n"
+
+
 async def test_fast_tool_route_emits_native_observations_without_leaking_to_v1(
     monkeypatch,
 ):

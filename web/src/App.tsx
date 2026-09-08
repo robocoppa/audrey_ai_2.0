@@ -1,11 +1,14 @@
-import { lazy, Suspense, useEffect, useState, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
+import { AudreyLoader } from "./AudreyLoader";
 import builtryteWordmark from "./assets/brand/builtryte-wordmark.png";
+import { AccountSettings } from "./AccountSettings";
 import {
   ApiError,
   getCurrentUser,
-  updateCurrentUserDisplayName,
+  getCurrentUserPreferences,
   type CurrentUser,
+  type UserPreferences,
 } from "./api";
 
 const ChatWorkspace = lazy(() =>
@@ -14,7 +17,7 @@ const ChatWorkspace = lazy(() =>
 
 type SessionState =
   | { status: "loading" }
-  | { status: "ready"; user: CurrentUser }
+  | { status: "ready"; user: CurrentUser; preferences: UserPreferences }
   | { status: "unauthenticated" }
   | { status: "error"; message: string };
 
@@ -24,9 +27,9 @@ export function App() {
   useEffect(() => {
     let active = true;
 
-    getCurrentUser()
-      .then((user) => {
-        if (active) setSession({ status: "ready", user });
+    Promise.all([getCurrentUser(), getCurrentUserPreferences()])
+      .then(([user, preferences]) => {
+        if (active) setSession({ status: "ready", user, preferences });
       })
       .catch((error: unknown) => {
         if (!active) return;
@@ -45,15 +48,19 @@ export function App() {
     };
   }, []);
 
+  if (session.status === "loading") {
+    return <AudreyLoader fullscreen />;
+  }
+
   return (
     <div
       className={session.status === "ready" ? "app-shell app-shell-ready" : "app-shell"}
     >
       <svg className="brand-filter" aria-hidden="true">
-        <filter id="remove-wordmark-white" colorInterpolationFilters="sRGB">
+        <filter id="light-wordmark-on-dark" colorInterpolationFilters="sRGB">
           <feColorMatrix
             type="matrix"
-            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  -1.5 -1.5 -1.5 0 4.45"
+            values="0 0 0 0 0.843  0 0 0 0 0.886  0 0 0 0 0.945  -1.5 -1.5 -1.5 0 4.45"
           />
         </filter>
       </svg>
@@ -66,14 +73,23 @@ export function App() {
         </a>
         <SessionControls
           session={session}
-          onUserChange={(user) => setSession({ status: "ready", user })}
+          onUserChange={(user) => {
+            setSession((current) =>
+              current.status === "ready" ? { ...current, user } : current,
+            );
+          }}
+          onPreferencesChange={(preferences) => {
+            setSession((current) =>
+              current.status === "ready" ? { ...current, preferences } : current,
+            );
+          }}
         />
       </header>
 
       {session.status === "ready" ? (
         <main className="native-main">
-          <Suspense fallback={<div className="thread-loading" role="status">Loading workspace…</div>}>
-            <ChatWorkspace user={session.user} />
+          <Suspense fallback={<AudreyLoader fullscreen label="Loading Audrey workspace" />}>
+            <ChatWorkspace user={session.user} preferences={session.preferences} />
           </Suspense>
         </main>
       ) : (
@@ -108,89 +124,63 @@ export function App() {
 function SessionControls({
   session,
   onUserChange,
+  onPreferencesChange,
 }: {
   session: SessionState;
   onUserChange: (user: CurrentUser) => void;
+  onPreferencesChange: (preferences: UserPreferences) => void;
 }) {
   if (session.status === "loading") {
-    return <span className="session-badge">Checking session…</span>;
+    return null;
   }
   if (session.status === "ready") {
-    return <ReadySessionControls user={session.user} onUserChange={onUserChange} />;
+    return (
+      <ReadySessionControls
+        user={session.user}
+        preferences={session.preferences}
+        onUserChange={onUserChange}
+        onPreferencesChange={onPreferencesChange}
+      />
+    );
   }
   return <span className="session-badge session-badge-offline">Not connected</span>;
 }
 
 function ReadySessionControls({
   user,
+  preferences,
   onUserChange,
+  onPreferencesChange,
 }: {
   user: CurrentUser;
+  preferences: UserPreferences;
   onUserChange: (user: CurrentUser) => void;
+  onPreferencesChange: (preferences: UserPreferences) => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [displayName, setDisplayName] = useState(user.display_name);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  async function saveProfile(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSaving(true);
-    setError("");
-    try {
-      const updated = await updateCurrentUserDisplayName(displayName);
-      onUserChange(updated);
-      setDisplayName(updated.display_name);
-      setEditing(false);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Profile name could not be saved.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function cancelEditing() {
-    setDisplayName(user.display_name);
-    setError("");
-    setEditing(false);
-  }
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
     <div className="session-controls" aria-label="Signed in user">
-      <div className="profile-editor">
-        {editing ? (
-          <form className="profile-name-form" aria-label="Edit profile name" onSubmit={saveProfile}>
-            <input
-              aria-label="Profile name"
-              autoFocus
-              maxLength={100}
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-              placeholder="Your name"
-              disabled={saving}
-            />
-            <button type="submit" disabled={saving || !displayName.trim()}>
-              {saving ? "Saving…" : "Save"}
-            </button>
-            <button type="button" onClick={cancelEditing} disabled={saving}>
-              Cancel
-            </button>
-          </form>
-        ) : (
-          <button
-            className="session-name"
-            type="button"
-            aria-label="Edit profile name"
-            title={`${user.display_name || user.email} · Edit profile name`}
-            onClick={() => setEditing(true)}
-          >
-            {firstName(user)}
-          </button>
-        )}
-        {error ? <span className="profile-name-error" role="alert">{error}</span> : null}
-      </div>
+      <button
+        className="session-name"
+        type="button"
+        aria-label="Open account settings"
+        title={`${user.display_name || user.email} · Account settings`}
+        onClick={() => setSettingsOpen(true)}
+      >
+        {firstName(user)}
+      </button>
       {user.auth_provider === "cloudflare_access" ? (
         <a className="logout-button" href="/cdn-cgi/access/logout">Log out</a>
+      ) : null}
+      {settingsOpen ? (
+        <AccountSettings
+          user={user}
+          preferences={preferences}
+          onUserChange={onUserChange}
+          onPreferencesChange={onPreferencesChange}
+          onClose={() => setSettingsOpen(false)}
+        />
       ) : null}
     </div>
   );

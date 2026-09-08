@@ -35,6 +35,7 @@ from audrey.pipeline.agui import (
     format_agui_cursor,
     parse_agui_cursor,
 )
+from audrey.pipeline.context import user_preferences_system_message
 from audrey.pipeline.run_events import (
     RunEvent,
     RunEventContext,
@@ -217,6 +218,7 @@ class NativeRunManager:
         payload: ChatCompletionRequest,
         messages: list[dict[str, Any]],
         options: dict[str, Any],
+        routing_messages: list[dict[str, Any]] | None = None,
     ) -> None:
         live: _LiveRun
         live = _LiveRun(
@@ -240,7 +242,13 @@ class NativeRunManager:
                 raise RuntimeError("native run is already registered")
             self._runs[started.run.run_id] = live
             live.task = asyncio.create_task(
-                self._execute(live, payload, messages, options),
+                self._execute(
+                    live,
+                    payload,
+                    messages,
+                    options,
+                    messages if routing_messages is None else routing_messages,
+                ),
                 name=f"audrey.native_run.{started.run.run_id}",
             )
 
@@ -250,6 +258,7 @@ class NativeRunManager:
         payload: ChatCompletionRequest,
         messages: list[dict[str, Any]],
         options: dict[str, Any],
+        routing_messages: list[dict[str, Any]],
     ) -> None:
         context = RunEventContext(
             run_id=live.started.run.run_id,
@@ -269,6 +278,7 @@ class NativeRunManager:
                 conversation_id=live.started.conversation.conversation_id,
                 user_turn_text=live.started.user_message.content,
                 event_context=context,
+                routing_messages=routing_messages,
             ):
                 pass
         except asyncio.CancelledError:
@@ -538,6 +548,12 @@ async def create_run(
 ) -> RunCreateResponse:
     manager = _manager(request)
     store = _store(request)
+    preferences = await store.preferences.get(user_id=principal.user_id)
+    if preferences is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Audrey account preferences are not initialized.",
+        )
     attachments = await resolve_owned_attachments(
         request,
         principal,
@@ -582,7 +598,11 @@ async def create_run(
         conversation_id=conversation_id,
     )
     assert records is not None
-    messages = _history_messages(started, records)
+    routing_messages = _history_messages(started, records)
+    messages = [
+        user_preferences_system_message(preferences),
+        *routing_messages,
+    ]
     virtual_model = _MODELS[started.run.mode]
     pipeline_payload = ChatCompletionRequest(
         model=virtual_model,
@@ -598,6 +618,7 @@ async def create_run(
         payload=pipeline_payload,
         messages=messages,
         options=_options_from_request(pipeline_payload),
+        routing_messages=routing_messages,
     )
     base = _run_response(started.run).model_dump()
     return RunCreateResponse(
