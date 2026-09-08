@@ -230,7 +230,7 @@ async def test_binding_persists_across_reopen(tmp_path):
     try:
         after = await _resolve(reopened)
         assert after.user_id == before.user_id
-        assert reopened.schema_version == 5
+        assert reopened.schema_version == 6
         with sqlite3.connect(path) as conn:
             assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     finally:
@@ -448,6 +448,7 @@ async def test_v1_database_migrates_additively_without_changing_user_id(tmp_path
     first.close()
 
     with sqlite3.connect(path) as conn:
+        conn.execute("DROP TABLE app_message_attachments")
         conn.execute("DROP TABLE app_messages")
         conn.execute("DROP TABLE app_runs")
         conn.execute("DROP TABLE app_conversations")
@@ -459,7 +460,7 @@ async def test_v1_database_migrates_additively_without_changing_user_id(tmp_path
     upgraded = ApplicationStore(path)
     try:
         after = await _resolve(upgraded)
-        assert upgraded.schema_version == 5
+        assert upgraded.schema_version == 6
         assert after.user_id == before.user_id
         assert await upgraded.list_personal_tokens(user_id=after.user_id) == ()
         assert (await upgraded.preferences.get(user_id=after.user_id)).timezone == "UTC"

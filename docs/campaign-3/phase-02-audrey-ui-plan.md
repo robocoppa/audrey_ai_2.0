@@ -838,6 +838,35 @@ while leaving its tunnel route public is not a safe rollback.
 - Add search, export, deletion, token management, and capability health.
 - Expose the Phase 3 skills placeholder.
 
+The first 2D slice is laptop-complete. Owner-bound `/api/files` resources now
+reuse the existing hardened upload lifecycle for listing, single-request and
+chunked uploads, inspection, quota accounting, and durable deletion. The
+browser adds a same-origin file manager with upload progress and confirmed
+removal; it never stores or supplies a bearer token.
+
+Schema v6 adds attachment snapshots keyed through the canonical message owner.
+Native and AG-UI runs accept at most ten opaque file ids, resolve them against
+the authenticated owner's ready-file listing, and commit their safe metadata in
+the same transaction as the user message. Canonical text remains exactly what
+the user typed. Audrey alone creates the model-facing manifest, which names the
+attached files, requires authorized file/knowledge tools for their contents,
+and treats filenames and retrieved content as data rather than instructions.
+Message history renders the durable snapshots even if the source file is later
+removed, while access to its contents correctly follows the live file state.
+
+The native composer now selects ready owner files, sends only their ids through
+the minimized AG-UI envelope, and renders saved attachment names on history
+reload. The mode portrait is also twice its prior display size without pushing
+the composer outside the initial browser viewport. All 2,767 backend tests,
+eight Vitest contracts, and twelve production-preview Chromium workflows pass;
+typecheck, lint, scoped ruff, compilation, production build, and diff checks are
+clean. The lesson scan has zero broken links; its existing drift backlog remains
+deferred by user direction. `scripts/smoke_native_files.py` packages the live
+gate with disposable randomized data: It proves two-owner isolation, upload and
+safe listing, a tool-grounded attached turn, exact canonical text and metadata,
+snapshot survival after source deletion, and repair cleanup. Deployment and
+that live lifecycle gate remain open, so Milestone 2D is not yet complete.
+
 Gate: disposable-user upload/search/export/delete evidence covers transactional
 and derived stores, including interrupted cleanup and restart.
 

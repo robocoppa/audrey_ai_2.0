@@ -1,6 +1,7 @@
 export function latestActionFetch(
   url: string,
   init: RequestInit,
+  attachmentIds: readonly string[] = [],
 ): Promise<Response> {
   if (typeof init.body !== "string") {
     throw new Error("Audrey's agent request body was not JSON text.");
@@ -17,6 +18,7 @@ export function latestActionFetch(
     threadId: envelope.threadId,
     runId: envelope.runId,
     messages: [latestMessage],
+    ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
   });
   return fetch(url, {
     ...init,

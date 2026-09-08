@@ -63,6 +63,14 @@ class ConversationListResponse(BaseModel):
     next_cursor: str | None
 
 
+class MessageAttachmentResponse(BaseModel):
+    id: str
+    filename: str
+    mime: str
+    kind: Literal["text", "image", "video"]
+    bytes: int
+
+
 class MessageResponse(BaseModel):
     id: str
     run_id: str | None
@@ -72,6 +80,7 @@ class MessageResponse(BaseModel):
     content: str
     created_at: str
     updated_at: str
+    attachments: list[MessageAttachmentResponse]
 
 
 class MessageListResponse(BaseModel):
@@ -111,6 +120,16 @@ def _message_response(record: MessageRecord) -> MessageResponse:
         content=record.content,
         created_at=record.created_at,
         updated_at=record.updated_at,
+        attachments=[
+            MessageAttachmentResponse(
+                id=attachment.file_id,
+                filename=attachment.filename,
+                mime=attachment.mime,
+                kind=attachment.kind,
+                bytes=attachment.bytes,
+            )
+            for attachment in record.attachments
+        ],
     )
 
 

@@ -28,15 +28,18 @@ import {
   deleteConversation,
   getConversation,
   listConversations,
+  listFiles,
   listMessages,
   updateConversation,
   updateConversationMode,
   type AudreyMode,
+  type AudreyFile,
   type Conversation,
   type ConversationMessage,
   type CurrentUser,
 } from "./api";
 import { latestActionFetch } from "./agentTransport";
+import { FileManager } from "./FileManager";
 
 const MODES: ReadonlyArray<{
   value: AudreyMode;
@@ -124,6 +127,7 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState("");
+  const [managingFiles, setManagingFiles] = useState(false);
   const listKeyRef = useRef("");
   const selectedIdRef = useRef<string | null>(null);
 
@@ -272,14 +276,23 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
             <span>Workspace</span>
             <strong>{user.display_name || user.email}</strong>
           </div>
-          <button
-            className="new-conversation"
-            type="button"
-            onClick={startConversation}
-            disabled={creating}
-          >
-            {creating ? "Creating…" : "+ New"}
-          </button>
+          <div className="sidebar-heading-actions">
+            <button
+              className="manage-files"
+              type="button"
+              onClick={() => setManagingFiles(true)}
+            >
+              Files
+            </button>
+            <button
+              className="new-conversation"
+              type="button"
+              onClick={startConversation}
+              disabled={creating}
+            >
+              {creating ? "Creating…" : "+ New"}
+            </button>
+          </div>
         </div>
 
         <label className="conversation-search">
@@ -371,6 +384,7 @@ export function ChatWorkspace({ user }: { user: CurrentUser }) {
           </div>
         ) : null}
       </section>
+      {managingFiles ? <FileManager onClose={() => setManagingFiles(false)} /> : null}
     </div>
   );
 }
@@ -604,6 +618,15 @@ function AudreyThread({
 }) {
   const [runError, setRunError] = useState("");
   const [activity, setActivity] = useState<RunActivity>(IDLE_ACTIVITY);
+  const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
+  const [attachmentFiles, setAttachmentFiles] = useState<AudreyFile[]>([]);
+  const [attachmentsLoading, setAttachmentsLoading] = useState(false);
+  const [attachmentError, setAttachmentError] = useState("");
+  const [selectedAttachments, setSelectedAttachments] = useState<AudreyFile[]>([]);
+  const attachmentIds = useMemo(
+    () => selectedAttachments.map(({ id }) => id),
+    [selectedAttachments],
+  );
   const history = useMemo<ThreadHistoryAdapter>(
     () => ({
       load: () => Promise.resolve(
@@ -620,9 +643,9 @@ function AudreyThread({
       new HttpAgent({
         url: `/api/agent?mode=${encodeURIComponent(mode)}`,
         threadId: conversationId,
-        fetch: latestActionFetch,
+        fetch: (url, init) => latestActionFetch(url, init, attachmentIds),
       }),
-    [conversationId, mode],
+    [attachmentIds, conversationId, mode],
   );
   const onRunStartedRef = useRef(onRunStarted);
   useEffect(() => {
@@ -642,6 +665,7 @@ function AudreyThread({
         });
       },
       onRunStartedEvent: () => {
+        setAttachmentPickerOpen(false);
         onRunStartedRef.current();
       },
       onStepStartedEvent: ({ event }) => {
@@ -683,6 +707,7 @@ function AudreyThread({
       },
       onRunFinishedEvent: () => {
         onRunActiveChange(false);
+        setSelectedAttachments([]);
         setActivity((current) => ({
           ...current,
           status: "complete",
@@ -692,6 +717,7 @@ function AudreyThread({
       },
       onRunErrorEvent: ({ event }) => {
         onRunActiveChange(false);
+        setSelectedAttachments([]);
         const cancelled = event.code === "cancelled_by_user" || isAbortMessage(event.message);
         setActivity((current) => ({
           ...current,
@@ -724,6 +750,7 @@ function AudreyThread({
     },
     onCancel: () => {
       onRunActiveChange(false);
+      setSelectedAttachments([]);
       setRunError("");
       setActivity((current) => ({
         ...current,
@@ -733,6 +760,33 @@ function AudreyThread({
       }));
     },
   });
+
+  async function toggleAttachmentPicker() {
+    if (attachmentPickerOpen) {
+      setAttachmentPickerOpen(false);
+      return;
+    }
+    setAttachmentPickerOpen(true);
+    setAttachmentsLoading(true);
+    setAttachmentError("");
+    try {
+      const listing = await listFiles();
+      setAttachmentFiles(listing.items.filter(({ status }) => status === "ready"));
+    } catch (reason) {
+      setAttachmentError(messageOf(reason));
+    } finally {
+      setAttachmentsLoading(false);
+    }
+  }
+
+  function toggleAttachment(file: AudreyFile) {
+    setSelectedAttachments((current) => {
+      if (current.some(({ id }) => id === file.id)) {
+        return current.filter(({ id }) => id !== file.id);
+      }
+      return current.length < 10 ? [...current, file] : current;
+    });
+  }
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -773,6 +827,55 @@ function AudreyThread({
                     onChange={onModeChange}
                   />
                 </ThreadPrimitive.Empty>
+                {selectedAttachments.length > 0 ? (
+                  <div className="selected-attachments" aria-label="Selected attachments">
+                    {selectedAttachments.map((file) => (
+                      <button
+                        type="button"
+                        key={file.id}
+                        onClick={() => toggleAttachment(file)}
+                        disabled={modeDisabled}
+                        aria-label={`Remove attachment ${file.filename}`}
+                      >
+                        <span aria-hidden="true">×</span>
+                        {file.filename}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {attachmentPickerOpen ? (
+                  <section className="attachment-picker" aria-label="Choose attachments">
+                    <header>
+                      <strong>Attach your files</strong>
+                      <span>{selectedAttachments.length}/10 selected</span>
+                    </header>
+                    {attachmentsLoading ? <p role="status">Loading files…</p> : null}
+                    {attachmentError ? <p className="attachment-error" role="alert">{attachmentError}</p> : null}
+                    {!attachmentsLoading && !attachmentError && attachmentFiles.length === 0 ? (
+                      <p>No ready files. Use Files to upload one first.</p>
+                    ) : null}
+                    {attachmentFiles.length > 0 ? (
+                      <div className="attachment-options">
+                        {attachmentFiles.map((file) => {
+                          const selected = selectedAttachments.some(({ id }) => id === file.id);
+                          return (
+                            <button
+                              type="button"
+                              key={file.id}
+                              aria-pressed={selected}
+                              onClick={() => toggleAttachment(file)}
+                              disabled={!selected && selectedAttachments.length >= 10}
+                            >
+                              <span aria-hidden="true">{selected ? "✓" : "+"}</span>
+                              <span>{file.filename}</span>
+                              <small>{file.kind} · {formatBytes(file.bytes)}</small>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
                 <ComposerPrimitive.Root className="composer">
                   <ThreadPrimitive.If empty={false}>
                     <ComposerModelPicker
@@ -782,6 +885,18 @@ function AudreyThread({
                       onChange={onModeChange}
                     />
                   </ThreadPrimitive.If>
+                  <button
+                    className="attach-button"
+                    type="button"
+                    onClick={() => void toggleAttachmentPicker()}
+                    disabled={modeDisabled}
+                    aria-label={attachmentPickerOpen ? "Close attachment picker" : "Attach files"}
+                    aria-expanded={attachmentPickerOpen}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m9.5 12.5 5.4-5.4a3 3 0 0 1 4.2 4.2l-7.5 7.5a5 5 0 0 1-7.1-7.1l7.2-7.2" />
+                    </svg>
+                  </button>
                   <ComposerPrimitive.Input
                     className="composer-input"
                     aria-label="Ask Audrey"
@@ -919,14 +1034,43 @@ function ToolActivity({ toolName, args, result, status }: ToolCallMessagePartPro
 
 function toThreadMessages(messages: ConversationMessage[]): ThreadMessageLike[] {
   return messages.flatMap<ThreadMessageLike>((message) => {
+    const content = messageWithAttachments(message);
     if (message.role === "user") {
-      return [{ id: message.id, role: "user", content: message.content }];
+      return [{ id: message.id, role: "user", content }];
     }
     if (message.role === "assistant") {
       return [{ id: message.id, role: "assistant", content: message.content }];
     }
     return [];
   });
+}
+
+function messageWithAttachments(message: ConversationMessage): string {
+  if (message.role !== "user" || !message.attachments?.length) return message.content;
+  const files = message.attachments
+    .map(({ filename }) => `📎 ${escapeMarkdown(filename)}`)
+    .join("\n");
+  return `${message.content}\n\n${files}`;
+}
+
+function escapeMarkdown(value: string): string {
+  return value
+    .replaceAll("\r", " ")
+    .replaceAll("\n", " ")
+    .replace(/([\\`*_{}[\]()<>#+\-.!|])/g, "\\$1");
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unit = units[0];
+  for (const next of units.slice(1)) {
+    if (value < 1024) break;
+    value /= 1024;
+    unit = next;
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${unit}`;
 }
 
 function upsertConversation(

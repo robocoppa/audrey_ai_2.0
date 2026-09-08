@@ -1,6 +1,7 @@
 """Audrey-owned transactional application state."""
 
 from audrey.app_state.records import (
+    AttachmentSnapshot,
     ChatProjectionDeletionRecord,
     ChatProjectionRecord,
     ConversationRecord,
@@ -29,6 +30,7 @@ from audrey.app_state.store import (
 
 __all__ = [
     "ApplicationStore",
+    "AttachmentSnapshot",
     "ChatProjectionDeletionRecord",
     "ChatProjectionRecord",
     "ChatProjectionsRepository",

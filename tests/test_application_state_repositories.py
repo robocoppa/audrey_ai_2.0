@@ -10,6 +10,7 @@ import pytest
 
 from audrey.app_state import (
     ApplicationStore,
+    AttachmentSnapshot,
     ConversationArchivedError,
     ConversationHasActiveRunError,
     InvalidApplicationStateError,
@@ -103,7 +104,7 @@ async def test_v4_upgrade_adds_video_mode_without_losing_canonical_state(tmp_pat
 
     store = ApplicationStore(path)
     try:
-        assert store.schema_version == 5
+        assert store.schema_version == 6
         existing = await store.conversations.get(
             user_id="usr_existing",
             conversation_id="con_existing",
@@ -159,6 +160,7 @@ async def test_v2_upgrade_backfills_preferences_without_changing_identity_or_tok
         conn.execute("PRAGMA foreign_keys = OFF")
         conn.execute("DROP TABLE app_chat_projections")
         conn.execute("DROP TABLE app_chat_projection_deletions")
+        conn.execute("DROP TABLE app_message_attachments")
         conn.execute("DROP TABLE app_messages")
         conn.execute("DROP TABLE app_runs")
         conn.execute("DROP TABLE app_conversations")
@@ -170,7 +172,7 @@ async def test_v2_upgrade_backfills_preferences_without_changing_identity_or_tok
     try:
         after = await _resolve(upgraded)
         preferences = await upgraded.preferences.get(user_id=owner.user_id)
-        assert upgraded.schema_version == 5
+        assert upgraded.schema_version == 6
         assert after.user_id == owner.user_id
         assert preferences is not None
         assert preferences.timezone == "UTC"
@@ -302,6 +304,73 @@ async def test_conversation_and_run_ids_are_server_owned_and_transactional(tmp_p
             user_id=owner.user_id,
             run_id=started.run.run_id,
         )).status == "succeeded"
+    finally:
+        reopened.close()
+
+
+async def test_message_attachments_are_atomic_ordered_persistent_and_cascaded(tmp_path):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
+    owner = await _resolve(store)
+    conversation = await store.conversations.create(user_id=owner.user_id)
+    attachments = (
+        AttachmentSnapshot(
+            file_id="file_notes",
+            filename="field-notes.txt",
+            mime="text/plain",
+            kind="text",
+            bytes=42,
+        ),
+        AttachmentSnapshot(
+            file_id="file_map",
+            filename="route-map.png",
+            mime="image/png",
+            kind="image",
+            bytes=84,
+        ),
+    )
+    try:
+        started = await store.conversations.begin_run(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="Compare these files.",
+            attachments=attachments,
+        )
+        assert started is not None
+        assert started.user_message.attachments == attachments
+        assert started.assistant_message.attachments == ()
+        with pytest.raises(InvalidApplicationStateError, match="unique"):
+            await store.conversations.begin_run(
+                user_id=owner.user_id,
+                conversation_id=conversation.conversation_id,
+                user_content="Duplicate attachment.",
+                attachments=(attachments[0], attachments[0]),
+            )
+        await store.conversations.finish_run(
+            user_id=owner.user_id,
+            run_id=started.run.run_id,
+            outcome="succeeded",
+            assistant_content="Compared.",
+        )
+    finally:
+        store.close()
+
+    reopened = ApplicationStore(path)
+    try:
+        messages = await reopened.conversations.list_messages(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+        )
+        assert messages is not None
+        assert messages[0].attachments == attachments
+        assert await reopened.conversations.delete(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+        )
+        with sqlite3.connect(path) as connection:
+            assert connection.execute(
+                "SELECT COUNT(*) FROM app_message_attachments"
+            ).fetchone()[0] == 0
     finally:
         reopened.close()
 
@@ -510,7 +579,7 @@ async def test_schema_v3_upgrade_does_not_duplicate_legacy_archive_writes(tmp_pa
 
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 5
+        assert upgraded.schema_version == 6
         assert await upgraded.chat_projections.due() == ()
         existing = await upgraded.conversations.get_run(
             user_id=owner.user_id,

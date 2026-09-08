@@ -104,6 +104,7 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   expect(portraitBox).not.toBeNull();
   expect(composerBox).not.toBeNull();
   expect(viewport).not.toBeNull();
+  expect(portraitBox?.width ?? 0).toBeGreaterThanOrEqual(160);
   expect((composerBox?.y ?? 0) + (composerBox?.height ?? 0)).toBeLessThanOrEqual(viewport?.height ?? 0);
   expect(Math.abs(
     (portraitBox?.x ?? 0) + (portraitBox?.width ?? 0) / 2
@@ -575,6 +576,154 @@ test("cancels an active browser run without leaving an error state", async ({ pa
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
+test("attaches an owner file through the minimized AG-UI request", async ({ page }) => {
+  let requestBody: Record<string, unknown> | null = null;
+  const existingMessages = [
+    {
+      id: "msg_attached_user",
+      run_id: "run_attached",
+      sequence: 1,
+      role: "user",
+      status: "completed",
+      content: "Review my notes.",
+      created_at: "2026-09-07T00:00:00Z",
+      updated_at: "2026-09-07T00:00:00Z",
+      attachments: [{
+        id: "file_existing",
+        filename: "field-notes.txt",
+        mime: "text/plain",
+        kind: "text",
+        bytes: 42,
+      }],
+    },
+    {
+      id: "msg_attached_assistant",
+      run_id: "run_attached",
+      sequence: 2,
+      role: "assistant",
+      status: "completed",
+      content: "I reviewed them.",
+      created_at: "2026-09-07T00:00:01Z",
+      updated_at: "2026-09-07T00:00:01Z",
+      attachments: [],
+    },
+  ];
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me") {
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      await json(route, { items: [browserConversation("Attached notes")], next_cursor: null });
+      return;
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
+      await json(route, { items: existingMessages, next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/files" && request.method() === "GET") {
+      await json(route, browserFileListing([browserFile("file_existing", "field-notes.txt", 42)]));
+      return;
+    }
+    if (url.pathname === "/api/agent") {
+      requestBody = request.postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        status: 200,
+        contentType: "text/event-stream",
+        body: aguiStream(canonicalBrowserEvents()),
+      });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await expect(page.locator(".message-user").first()).toContainText("📎 field-notes.txt");
+  await page.getByRole("button", { name: "Attach files" }).click();
+  const picker = page.getByRole("region", { name: "Choose attachments" });
+  await picker.getByRole("button", { name: /field-notes\.txt/ }).click();
+  await expect(page.getByRole("button", { name: "Remove attachment field-notes.txt" })).toBeVisible();
+
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+  await composer.fill("Use the attached notes again.");
+  await composer.press("Enter");
+
+  await expect(page.getByText("Complete", { exact: true })).toBeVisible();
+  expect(requestBody).toMatchObject({
+    threadId: CONVERSATION_ID,
+    attachmentIds: ["file_existing"],
+  });
+  expect(requestBody?.messages).toHaveLength(1);
+  await expect(page.getByRole("button", { name: "Remove attachment field-notes.txt" })).toHaveCount(0);
+});
+
+test("manages owner-bound files without a browser bearer token", async ({ page }) => {
+  let files = [browserFile("file_existing", "field-notes.txt", 42)];
+  const authorizationHeaders: Array<string | undefined> = [];
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    authorizationHeaders.push(request.headers().authorization);
+    if (url.pathname === "/api/me") {
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      await json(route, { items: [browserConversation("Browser smoke")], next_cursor: null });
+      return;
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/files" && request.method() === "GET") {
+      await json(route, browserFileListing(files));
+      return;
+    }
+    if (url.pathname === "/api/files" && request.method() === "POST") {
+      files = [...files, browserFile("file_uploaded", "new-notes.txt", 12)];
+      await json(route, {
+        id: "file_uploaded",
+        filename: "new-notes.txt",
+        mime: "text/plain",
+        bytes: 12,
+        kind: "text",
+        chunks: 1,
+        status: "ready",
+      });
+      return;
+    }
+    if (url.pathname === "/api/files/file_uploaded" && request.method() === "DELETE") {
+      files = files.filter(({ id }) => id !== "file_uploaded");
+      await json(route, { id: "file_uploaded", deleted: true, pending_cleanup: false });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Your files" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("field-notes.txt")).toBeVisible();
+  await dialog.getByLabel("Choose a file").setInputFiles({
+    name: "new-notes.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("native bytes"),
+  });
+  await dialog.getByRole("button", { name: "Upload", exact: true }).click();
+  await expect(dialog.getByText("new-notes.txt")).toBeVisible();
+
+  await dialog.getByRole("button", { name: "Delete new-notes.txt" }).click();
+  const confirmation = dialog.getByRole("group", { name: "Delete new-notes.txt" });
+  await confirmation.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(dialog.getByText("new-notes.txt")).toHaveCount(0);
+  expect(authorizationHeaders.every((value) => value === undefined)).toBe(true);
+});
+
 test("surfaces an expired session during a run", async ({ page }) => {
   await mockAudreyApi(page, (route) =>
     route.fulfill({
@@ -666,6 +815,43 @@ function browserConversation(title: string) {
     updated_at: "2026-09-04T00:00:00Z",
     last_message_at: null,
     archived_at: null as string | null,
+  };
+}
+
+function browserFile(id: string, filename: string, bytes: number) {
+  return {
+    id,
+    filename,
+    mime: "text/plain",
+    bytes,
+    uploaded_at: "2026-09-07T00:00:00Z",
+    kind: "text" as const,
+    chunks: 1,
+    status: "ready",
+    failure_reason: "",
+    duration_s: 0,
+    summary: "",
+    source_freed_at: "",
+    leased_at: "",
+    source_url: "",
+    transcript_source: "",
+    fetch_downloaded_bytes: 0,
+    fetch_total_bytes: 0,
+  };
+}
+
+function browserFileListing(files: ReturnType<typeof browserFile>[]) {
+  return {
+    items: files,
+    total_bytes: files.reduce((total, file) => total + file.bytes, 0),
+    server_time: "2026-09-07T00:00:00Z",
+    limits: {
+      max_upload_bytes: 50 * 1024 * 1024,
+      max_user_bytes: 1024 * 1024 * 1024,
+      allowed_extensions: [".txt"],
+      chunked_max_bytes: 2 * 1024 * 1024 * 1024,
+      part_size: 8 * 1024 * 1024,
+    },
   };
 }
 

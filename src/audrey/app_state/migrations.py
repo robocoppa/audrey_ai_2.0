@@ -307,6 +307,33 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         PRAGMA legacy_alter_table = OFF;
         """,
     ),
+    (
+        6,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_app_messages_owner_id
+          ON app_messages(message_id, conversation_id, user_id);
+
+        CREATE TABLE IF NOT EXISTS app_message_attachments (
+          message_id      TEXT NOT NULL,
+          conversation_id TEXT NOT NULL,
+          user_id         TEXT NOT NULL,
+          position        INTEGER NOT NULL CHECK (position >= 0),
+          file_id         TEXT NOT NULL,
+          filename        TEXT NOT NULL,
+          mime            TEXT NOT NULL,
+          kind            TEXT NOT NULL CHECK (kind IN ('text', 'image', 'video')),
+          bytes           INTEGER NOT NULL CHECK (bytes >= 0),
+          PRIMARY KEY (message_id, position),
+          UNIQUE (message_id, file_id),
+          FOREIGN KEY (message_id, conversation_id, user_id)
+            REFERENCES app_messages(message_id, conversation_id, user_id)
+            ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_app_message_attachments_owner
+          ON app_message_attachments(user_id, conversation_id, message_id, position);
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS"]

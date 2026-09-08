@@ -6,6 +6,17 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
+class AttachmentSnapshot:
+    """Safe file metadata captured when an owner attaches a file to a message."""
+
+    file_id: str
+    filename: str
+    mime: str
+    kind: str
+    bytes: int
+
+
+@dataclass(frozen=True, slots=True)
 class UserPreferences:
     """Durable, server-owned preferences for one Audrey user."""
 
@@ -45,6 +56,7 @@ class MessageRecord:
     content: str
     created_at: str
     updated_at: str
+    attachments: tuple[AttachmentSnapshot, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +139,7 @@ class LocalUserDataPurge:
 
 
 __all__ = [
+    "AttachmentSnapshot",
     "ChatProjectionDeletionRecord",
     "ChatProjectionRecord",
     "ConversationRecord",

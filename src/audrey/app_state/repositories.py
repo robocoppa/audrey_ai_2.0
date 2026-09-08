@@ -8,10 +8,11 @@ import json
 import sqlite3
 import threading
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from audrey.app_state.records import (
+    AttachmentSnapshot,
     ChatProjectionDeletionRecord,
     ChatProjectionRecord,
     ConversationRecord,
@@ -434,7 +435,7 @@ class ConversationsRepository:
                 "WHERE user_id = ? AND conversation_id = ? ORDER BY sequence_no",
                 (user_id, conversation_id),
             ).fetchall()
-        return tuple(_message_from_row(row) for row in rows)
+            return self._messages_from_rows_locked(rows)
 
     async def list_message_page(
         self,
@@ -477,7 +478,7 @@ class ConversationsRepository:
                 "ORDER BY sequence_no LIMIT ?",
                 (user_id, conversation_id, after_sequence, limit),
             ).fetchall()
-        return tuple(_message_from_row(row) for row in rows)
+            return self._messages_from_rows_locked(rows)
 
     async def get_run(self, *, user_id: str, run_id: str) -> RunRecord | None:
         return await asyncio.to_thread(self._get_run_sync, user_id, run_id)
@@ -497,6 +498,7 @@ class ConversationsRepository:
         user_content: str,
         mode: str | None = None,
         automatic_title: str | None = None,
+        attachments: Sequence[AttachmentSnapshot] = (),
     ) -> StartedRun | None:
         """Create run plus user/assistant messages in one write transaction."""
 
@@ -507,6 +509,7 @@ class ConversationsRepository:
             user_content,
             mode,
             automatic_title,
+            attachments,
         )
 
     def _begin_run_sync(
@@ -516,12 +519,14 @@ class ConversationsRepository:
         user_content: str,
         mode: str | None,
         automatic_title: str | None,
+        attachments: Sequence[AttachmentSnapshot],
     ) -> StartedRun | None:
         user_id = _required(user_id, "user id")
         conversation_id = _required(conversation_id, "conversation id")
         user_content = _required(user_content, "user content")
         if len(user_content) > 1_000_000:
             raise InvalidApplicationStateError("user content is too large")
+        attachments = _normalize_attachments(attachments)
         now = _utc_now()
         run_id = _new_id("run")
         user_message_id = _new_id("msg")
@@ -586,6 +591,25 @@ class ConversationsRepository:
                         now,
                     ),
                 )
+                self._conn.executemany(
+                    "INSERT INTO app_message_attachments "
+                    "(message_id, conversation_id, user_id, position, file_id, "
+                    "filename, mime, kind, bytes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        (
+                            user_message_id,
+                            conversation_id,
+                            user_id,
+                            position,
+                            attachment.file_id,
+                            attachment.filename,
+                            attachment.mime,
+                            attachment.kind,
+                            attachment.bytes,
+                        )
+                        for position, attachment in enumerate(attachments)
+                    ],
+                )
                 self._conn.execute(
                     "INSERT INTO app_messages "
                     "(message_id, conversation_id, user_id, run_id, sequence_no, "
@@ -622,11 +646,40 @@ class ConversationsRepository:
                     self._conn.rollback()
                 raise
 
+        with self._lock:
+            messages = self._messages_from_rows_locked(message_rows)
         return StartedRun(
             conversation=_conversation_from_row(conversation_row),
             run=_run_from_row(run_row),
-            user_message=_message_from_row(message_rows[0]),
-            assistant_message=_message_from_row(message_rows[1]),
+            user_message=messages[0],
+            assistant_message=messages[1],
+        )
+
+    def _messages_from_rows_locked(
+        self,
+        rows: Sequence[sqlite3.Row],
+    ) -> tuple[MessageRecord, ...]:
+        if not rows:
+            return ()
+        message_ids = [str(row["message_id"]) for row in rows]
+        attachment_rows = self._conn.execute(
+            "SELECT message_id, file_id, filename, mime, kind, bytes "
+            "FROM app_message_attachments "
+            "WHERE message_id IN (SELECT value FROM json_each(?)) "
+            "ORDER BY message_id, position",
+            (json.dumps(message_ids),),
+        ).fetchall()
+        by_message: dict[str, list[AttachmentSnapshot]] = {}
+        for row in attachment_rows:
+            by_message.setdefault(str(row["message_id"]), []).append(
+                _attachment_from_row(row)
+            )
+        return tuple(
+            _message_from_row(
+                row,
+                attachments=tuple(by_message.get(str(row["message_id"]), ())),
+            )
+            for row in rows
         )
 
     async def finish_run(
@@ -1225,6 +1278,43 @@ def _bounded_metadata(value: str, label: str) -> str:
     return clean
 
 
+def _normalize_attachments(
+    values: Sequence[AttachmentSnapshot],
+) -> tuple[AttachmentSnapshot, ...]:
+    if len(values) > 10:
+        raise InvalidApplicationStateError("a message can attach at most 10 files")
+    normalized: list[AttachmentSnapshot] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, AttachmentSnapshot):
+            raise InvalidApplicationStateError("attachments must be file snapshots")
+        file_id = _bounded_metadata(_required(value.file_id, "attachment file id"), "file id")
+        if file_id in seen:
+            raise InvalidApplicationStateError("attachment file ids must be unique")
+        filename = _required(value.filename, "attachment filename")
+        if len(filename) > 500:
+            raise InvalidApplicationStateError(
+                "attachment filename must be at most 500 characters"
+            )
+        mime = _bounded_metadata(_required(value.mime, "attachment MIME"), "attachment MIME")
+        kind = _required(value.kind, "attachment kind").lower()
+        if kind not in {"text", "image", "video"}:
+            raise InvalidApplicationStateError("attachment kind is unsupported")
+        if isinstance(value.bytes, bool) or value.bytes < 0:
+            raise InvalidApplicationStateError("attachment bytes cannot be negative")
+        normalized.append(
+            AttachmentSnapshot(
+                file_id=file_id,
+                filename=filename,
+                mime=mime,
+                kind=kind,
+                bytes=int(value.bytes),
+            )
+        )
+        seen.add(file_id)
+    return tuple(normalized)
+
+
 def _utc_now() -> str:
     return dt.datetime.now(dt.UTC).isoformat(timespec="microseconds")
 
@@ -1260,7 +1350,21 @@ def _conversation_from_row(row: sqlite3.Row) -> ConversationRecord:
     )
 
 
-def _message_from_row(row: sqlite3.Row) -> MessageRecord:
+def _attachment_from_row(row: sqlite3.Row) -> AttachmentSnapshot:
+    return AttachmentSnapshot(
+        file_id=str(row["file_id"]),
+        filename=str(row["filename"]),
+        mime=str(row["mime"]),
+        kind=str(row["kind"]),
+        bytes=int(row["bytes"]),
+    )
+
+
+def _message_from_row(
+    row: sqlite3.Row,
+    *,
+    attachments: tuple[AttachmentSnapshot, ...] = (),
+) -> MessageRecord:
     return MessageRecord(
         message_id=str(row["message_id"]),
         conversation_id=str(row["conversation_id"]),
@@ -1272,6 +1376,7 @@ def _message_from_row(row: sqlite3.Row) -> MessageRecord:
         content=str(row["content"]),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
+        attachments=attachments,
     )
 
 

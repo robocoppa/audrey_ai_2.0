@@ -11,7 +11,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from audrey.app_state import ApplicationStore
+import audrey.routes.app.runs as app_runs
+from audrey.app_state import ApplicationStore, AttachmentSnapshot
 from audrey.auth import require_principal
 from audrey.identity import Principal
 from audrey.pipeline.run_events import RunEventContext, RunFinishedEvent
@@ -320,6 +321,85 @@ def test_http_agent_endpoint_uses_only_latest_user_action_and_server_history(tmp
             ]
             run = client.get(f"/api/runs/{response.headers['x-audrey-run-id']}").json()
             assert run["mode"] == "research"
+    finally:
+        store.close()
+
+
+def test_http_agent_persists_owner_verified_attachments_without_mutating_user_text(
+    tmp_path,
+    monkeypatch,
+):
+    captured_pipeline_messages: list[list[dict[str, Any]]] = []
+    resolver_calls: list[tuple[str, list[str]]] = []
+
+    async def resolve_attachments(request, principal, file_ids):
+        resolver_calls.append((principal.storage_namespace, list(file_ids)))
+        return (
+            AttachmentSnapshot(
+                file_id="file_notes",
+                filename="field-notes.txt",
+                mime="text/plain",
+                kind="text",
+                bytes=42,
+            ),
+        )
+
+    async def capture_stream(app, payload, messages, options, **kwargs):
+        captured_pipeline_messages.append(messages)
+        async for chunk in _successful_stream(
+            app,
+            payload,
+            messages,
+            options,
+            **kwargs,
+        ):
+            yield chunk
+
+    monkeypatch.setattr(app_runs, "resolve_owned_attachments", resolve_attachments)
+    app, store, owner, _manager = _native_app(
+        tmp_path,
+        stream_factory=capture_stream,
+    )
+    conversation = asyncio.run(
+        store.conversations.create(user_id=owner.user_id, default_mode="fast")
+    )
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/agent",
+                json={
+                    "threadId": conversation.conversation_id,
+                    "runId": "browser-run-id-is-not-authoritative",
+                    "attachmentIds": ["file_notes"],
+                    "messages": [
+                        {
+                            "id": "browser-message",
+                            "role": "user",
+                            "content": "Summarize the attachment.",
+                        }
+                    ],
+                },
+            )
+            assert response.status_code == 200
+            persisted = client.get(
+                f"/api/conversations/{conversation.conversation_id}/messages"
+            ).json()["items"]
+        assert resolver_calls == [(owner.storage_namespace, ["file_notes"])]
+        assert persisted[0]["content"] == "Summarize the attachment."
+        assert persisted[0]["attachments"] == [
+            {
+                "id": "file_notes",
+                "filename": "field-notes.txt",
+                "mime": "text/plain",
+                "kind": "text",
+                "bytes": 42,
+            }
+        ]
+        model_content = captured_pipeline_messages[0][-1]["content"]
+        assert model_content.startswith("Summarize the attachment.\n\n")
+        assert '<audrey_attached_files>\n[{"filename":"field-notes.txt"' in model_content
+        assert "Do not infer file contents from filenames" in model_content
+        assert "file_notes" not in model_content
     finally:
         store.close()
 

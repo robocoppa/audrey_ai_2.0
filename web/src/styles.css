@@ -129,6 +129,13 @@ a {
   white-space: nowrap;
 }
 
+.sidebar-heading .sidebar-heading-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.35rem;
+}
+
 button,
 select,
 input,
@@ -161,6 +168,22 @@ button:disabled {
   font-size: 0.78rem;
   font-weight: 700;
   box-shadow: var(--shadow-sm);
+}
+
+.manage-files {
+  padding: 0.46rem 0.62rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: var(--input-surface);
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.manage-files:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-active);
+  box-shadow: var(--focus-glow);
 }
 
 .new-conversation:hover,
@@ -698,8 +721,8 @@ a:focus-visible {
 }
 
 .composer-model-picker img {
-  width: 5.25rem;
-  height: 5.25rem;
+  width: 10.5rem;
+  height: 10.5rem;
   border: 2px solid rgb(99 181 255 / 36%);
   border-radius: 999px;
   object-fit: cover;
@@ -801,6 +824,115 @@ a:focus-visible {
   box-shadow: 0 1.2rem 4rem rgb(0 0 0 / 30%);
 }
 
+.selected-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0 0 0.45rem 0.65rem;
+}
+
+.selected-attachments button {
+  display: inline-flex;
+  max-width: 14rem;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.32rem 0.58rem;
+  overflow: hidden;
+  border: 1px solid rgb(99 181 255 / 28%);
+  border-radius: 999px;
+  background: rgb(52 153 250 / 11%);
+  color: var(--text-soft);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-attachments button:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-active);
+}
+
+.selected-attachments button span {
+  color: var(--accent);
+  font-size: 1rem;
+  line-height: 0.7;
+}
+
+.attachment-picker {
+  max-height: min(16rem, 35vh);
+  margin: 0 0 0.55rem;
+  padding: 0.7rem;
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.8rem;
+  background: rgb(10 24 45 / 98%);
+  box-shadow: var(--shadow-md);
+}
+
+.attachment-picker > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.55rem;
+  color: var(--text-soft);
+  font-size: 0.76rem;
+}
+
+.attachment-picker > header span,
+.attachment-picker > p {
+  color: var(--muted);
+}
+
+.attachment-picker > p {
+  margin: 0.45rem 0;
+  font-size: 0.74rem;
+}
+
+.attachment-picker .attachment-error {
+  color: var(--danger);
+}
+
+.attachment-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.4rem;
+}
+
+.attachment-options button {
+  display: grid;
+  grid-template-columns: 1.25rem minmax(0, 1fr);
+  gap: 0.12rem 0.35rem;
+  padding: 0.48rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  text-align: left;
+}
+
+.attachment-options button[aria-pressed="true"] {
+  border-color: var(--border-strong);
+  background: var(--surface-active);
+  box-shadow: inset 0 0 0 1px rgb(99 181 255 / 12%);
+}
+
+.attachment-options button > span:first-child {
+  grid-row: 1 / span 2;
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.attachment-options button > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-options small {
+  color: var(--muted-deep);
+  font-size: 0.64rem;
+}
+
 .compact-model-picker {
   display: flex;
   align-items: center;
@@ -850,6 +982,34 @@ a:focus-visible {
   display: flex;
   align-items: center;
   gap: 0.4rem;
+}
+
+.attach-button {
+  display: grid;
+  width: 2.35rem;
+  height: 2.35rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.attach-button:hover,
+.attach-button[aria-expanded="true"] {
+  background: var(--surface-active);
+  color: var(--accent);
+}
+
+.attach-button svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.9;
 }
 
 .send-button,
@@ -1119,6 +1279,273 @@ a:focus-visible {
   color: var(--warning);
 }
 
+.file-manager-backdrop {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgb(2 7 16 / 78%);
+  backdrop-filter: blur(0.45rem);
+}
+
+.file-manager {
+  display: flex;
+  width: min(46rem, 100%);
+  max-height: min(46rem, calc(100dvh - 2.5rem));
+  overflow: hidden;
+  flex-direction: column;
+  border: 1px solid rgb(99 181 255 / 28%);
+  border-radius: 1.15rem;
+  background:
+    radial-gradient(circle at 90% 0%, rgb(52 153 250 / 13%), transparent 22rem),
+    var(--surface);
+  box-shadow: 0 2rem 6rem rgb(0 0 0 / 58%);
+}
+
+.file-manager-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.3rem 1.4rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-manager-header span {
+  color: var(--accent);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.file-manager-header h2 {
+  margin: 0.25rem 0 0;
+  font-size: 1.45rem;
+  letter-spacing: -0.03em;
+}
+
+.file-manager-close {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--input-surface);
+  color: var(--muted);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.file-manager-close:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-active);
+  color: var(--text);
+}
+
+.file-quota {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.9rem 1.4rem 0;
+}
+
+.file-quota > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.file-quota-track {
+  height: 0.35rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(4 11 22 / 68%);
+}
+
+.file-quota-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand-gradient);
+  box-shadow: 0 0 1rem rgb(52 153 250 / 34%);
+}
+
+.file-upload {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.6rem;
+  padding: 1rem 1.4rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-upload label {
+  display: grid;
+  min-width: 0;
+  gap: 0.35rem;
+}
+
+.file-upload label > span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.file-upload input[type="file"] {
+  min-width: 0;
+  padding: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  outline: none;
+  background: var(--input-surface);
+  color: var(--text-soft);
+  font-size: 0.76rem;
+}
+
+.file-upload input[type="file"]:focus-visible {
+  border-color: var(--border-strong);
+  background: var(--surface-raised);
+  box-shadow: var(--focus-glow);
+}
+
+.file-upload button {
+  align-self: end;
+  padding: 0.57rem 0.9rem;
+  border: 0;
+  border-radius: 0.65rem;
+  background: var(--brand-gradient);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.file-upload progress,
+.file-upload small {
+  grid-column: 1 / -1;
+}
+
+.file-upload progress {
+  width: 100%;
+  accent-color: var(--accent-soft);
+}
+
+.file-upload small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-manager-status,
+.file-manager-empty,
+.file-manager-error {
+  margin: 1.2rem 1.4rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.file-manager-error {
+  color: var(--danger);
+}
+
+.file-list {
+  display: grid;
+  min-height: 0;
+  overflow-y: auto;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.8rem 1.1rem 1.2rem;
+  list-style: none;
+}
+
+.file-list li {
+  display: grid;
+  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.8rem;
+  padding: 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.8rem;
+  background: rgb(7 16 31 / 56%);
+}
+
+.file-list li:hover {
+  border-color: var(--border);
+  background: var(--input-surface);
+}
+
+.file-kind {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border: 1px solid rgb(99 181 255 / 24%);
+  border-radius: 0.65rem;
+  background: rgb(52 153 250 / 10%);
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.file-details {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
+.file-details strong,
+.file-details span,
+.file-details small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-details strong {
+  font-size: 0.84rem;
+}
+
+.file-details span,
+.file-details small {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.file-details small {
+  color: var(--warning);
+}
+
+.file-remove,
+.file-delete-confirm button {
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.file-remove:hover {
+  border-color: rgb(255 145 164 / 45%);
+  color: var(--danger);
+}
+
+.file-delete-confirm {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.file-delete-confirm .danger-button {
+  border-color: rgb(255 145 164 / 36%);
+  color: var(--danger);
+}
+
 .welcome {
   width: min(760px, calc(100% - 2.5rem));
   margin: auto;
@@ -1209,6 +1636,36 @@ a:focus-visible {
 }
 
 @media (max-width: 560px) {
+  .file-manager-backdrop {
+    padding: 0;
+  }
+
+  .file-manager {
+    width: 100%;
+    max-height: 100dvh;
+    min-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .file-upload {
+    grid-template-columns: 1fr;
+  }
+
+  .file-upload button {
+    width: 100%;
+  }
+
+  .file-list li {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .file-remove,
+  .file-delete-confirm {
+    grid-column: 2;
+    justify-self: start;
+  }
+
   .topbar {
     padding-block: 1rem;
   }
@@ -1295,8 +1752,8 @@ a:focus-visible {
   }
 
   .composer-model-picker img {
-    width: 4.5rem;
-    height: 4.5rem;
+    width: 9rem;
+    height: 9rem;
   }
 
   .model-picker-control select {

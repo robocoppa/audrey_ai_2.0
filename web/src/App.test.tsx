@@ -157,20 +157,24 @@ describe("App", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await latestActionFetch("/api/agent?mode=fast", {
-      method: "POST",
-      body: JSON.stringify({
-        threadId: "con_example",
-        runId: "run_example",
-        messages: [
-          { id: "prior-user", role: "user", content: "Prior question" },
-          { id: "prior-assistant", role: "assistant", content: "Prior answer" },
-          { id: "latest-user", role: "user", content: "Hello natively" },
-        ],
-        state: { browserOwned: false },
-        tools: [{ name: "browser_tool" }],
-      }),
-    });
+    await latestActionFetch(
+      "/api/agent?mode=fast",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          threadId: "con_example",
+          runId: "run_example",
+          messages: [
+            { id: "prior-user", role: "user", content: "Prior question" },
+            { id: "prior-assistant", role: "assistant", content: "Prior answer" },
+            { id: "latest-user", role: "user", content: "Hello natively" },
+          ],
+          state: { browserOwned: false },
+          tools: [{ name: "browser_tool" }],
+        }),
+      },
+      ["file_notes"],
+    );
 
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -179,12 +183,14 @@ describe("App", () => {
     const body = JSON.parse(String(request.body)) as {
       threadId: string;
       messages: Array<{ role: string; content: string }>;
+      attachmentIds: string[];
     };
     expect(body.threadId).toBe("con_example");
     expect(body.messages).toHaveLength(1);
     expect(body.messages[0]).toEqual(
       expect.objectContaining({ role: "user", content: "Hello natively" }),
     );
+    expect(body.attachmentIds).toEqual(["file_notes"]);
     expect(body).not.toHaveProperty("state");
     expect(body).not.toHaveProperty("tools");
   });
