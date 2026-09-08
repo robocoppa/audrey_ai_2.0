@@ -9,6 +9,9 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 AUDREY_DOCKERFILE = ROOT / "docker" / "audrey.Dockerfile"
+UI_DOCKERFILE = ROOT / "web" / "Dockerfile"
+UI_NGINX_TEMPLATE = ROOT / "web" / "docker" / "default.conf.template"
+UI_VITE_CONFIG = ROOT / "web" / "vite.config.ts"
 TOOLS_DOCKERFILE = ROOT / "docker" / "custom-tools.Dockerfile"
 FETCHER_DOCKERFILE = ROOT / "docker" / "media-fetcher.Dockerfile"
 COMPOSE = ROOT / "compose.yaml"
@@ -39,12 +42,67 @@ def test_python_services_install_from_the_workspace_lock():
         assert "uv pip compile" not in text
 
 
-def test_native_ui_build_includes_repository_portraits():
-    text = _text(AUDREY_DOCKERFILE)
-    assert "COPY images /workspace/images" in text
-    assert text.index("COPY images /workspace/images") < text.index(
-        "RUN npm run build --prefix /workspace/web"
+def test_native_ui_build_is_self_contained_and_has_a_transitional_fallback():
+    audrey = _text(AUDREY_DOCKERFILE)
+    ui = _text(UI_DOCKERFILE)
+    vite = _text(UI_VITE_CONFIG)
+    compose = yaml.safe_load(COMPOSE.read_text())
+
+    assert "COPY images /workspace/images" not in audrey
+    assert "COPY --from=web-build /workspace/web/dist" in audrey
+    assert "COPY --from=build --chown=101:101 /workspace/dist" in ui
+    assert (
+        "nginxinc/nginx-unprivileged:1.30.4-alpine3.24@"
+        "sha256:442753882674b49ae2c1de83ed67896131c0777f56df5005e356e62bc3f7e7ce"
+        in ui
     )
+    assert "USER 101" in ui
+    assert 'outDir: "dist"' in vite
+    assert "../src/audrey/static/app" not in vite
+    for asset in (
+        "audrey2.png",
+        "audrey3.png",
+        "audrey7.png",
+        "audrey8.png",
+        "cloudModel.png",
+        "localModel.png",
+        "search.png",
+    ):
+        assert (ROOT / "web" / "src" / "assets" / "models" / asset).is_file()
+
+    service = compose["services"]["audrey-ui"]
+    assert service["build"] == {"context": "./web", "dockerfile": "Dockerfile"}
+    assert service["depends_on"]["audrey-ai"]["condition"] == "service_healthy"
+    assert service["networks"] == ["ollama-net"]
+    assert service["ports"] == ["127.0.0.1:${AUDREY_UI_PORT:-8088}:8080"]
+    assert service["environment"]["AUDREY_UPSTREAM"] == (
+        "${AUDREY_UI_UPSTREAM:-http://audrey-ai:8000}"
+    )
+    assert service["cap_drop"] == ["ALL"]
+    assert service["security_opt"] == ["no-new-privileges:true"]
+    assert compose["services"]["audrey-ai"]["labels"] == {
+        "net.unraid.docker.icon": (
+            "${AUDREY_REPO_DIR:-/mnt/user/appdata/audrey_ai_2.0}/"
+            "web/src/assets/models/audrey2.png"
+        )
+    }
+
+
+def test_native_ui_proxy_preserves_auth_streams_uploads_and_static_boundaries():
+    template = _text(UI_NGINX_TEMPLATE)
+
+    assert "location ~ ^/(api|v1)(/|$)" in template
+    assert "proxy_set_header Cf-Access-Jwt-Assertion" in template
+    assert "proxy_buffering off;" in template
+    assert "proxy_request_buffering off;" in template
+    assert "proxy_read_timeout 3600s;" in template
+    assert "proxy_pass ${AUDREY_UPSTREAM};" in template
+    assert "resolver 127.0.0.11" not in template
+    assert "client_max_body_size ${AUDREY_UI_MAX_BODY_SIZE};" in template
+    assert "location ^~ /assets/" in template
+    assert "try_files $uri =404;" in template
+    assert "try_files $uri $uri/ /index.html;" in template
+    assert "default-src 'self'" in template
 
 
 def test_every_shared_writer_uses_unraids_numeric_identity():

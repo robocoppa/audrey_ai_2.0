@@ -6,7 +6,9 @@ state, native conversation/run resources, typed and AG-UI events, real
 pipeline observations, and rebuildable canonical archive projection.
 Milestone 2C's native chat and public navigation are Unraid-verified; its final
 branding/profile browser check remains. Milestone 2D's file/attachment slice is
-Unraid-verified, and its preference slice is laptop-complete.
+Unraid-verified, and its preference slice is laptop-complete. The native client
+is now self-contained and has a standalone-container laptop gate; its Unraid
+traffic switch remains pending.
 
 ## Goal
 
@@ -342,7 +344,8 @@ Build a first-party Audrey web application with these boundaries:
 - Audrey owns authenticated principals, authorization, conversations, messages,
   runs, tool activity, attachments, preferences, and audit metadata.
 - A React and TypeScript single-page application is compiled to static assets
-  and served from the Audrey origin. Production does not require a Node server.
+  and served by a dedicated non-root web container on the Audrey browser
+  origin. Production does not require a Node server.
 - The browser uses a native Audrey API and AG-UI event stream. It does not use
   Chat Completions as its application protocol.
 - Audrey emits one typed, client-neutral run-event stream. Native AG-UI and
@@ -368,8 +371,12 @@ browser
   |
   | Cloudflare Access identity
   v
-Audrey origin
-  +-- static web application
+Audrey browser origin
+  +-- audrey-ui static application
+  +-- same-origin /api/* and /v1/* streaming proxy
+        |
+        v
+      audrey-ai
   +-- /api/* native resources
   +-- /api/agent AG-UI event stream
   +-- /v1/* OpenAI compatibility adapters
@@ -787,11 +794,13 @@ User and assistant text render safe CommonMark plus GitHub-flavored Markdown,
 with raw HTML ignored.
 
 The empty thread now collapses its introductory space so the complete composer
-fits in the initial 720px browser viewport. Its center copy is only `Ask Audrey`,
-the input uses the same wording, the mode description and selector are larger,
-and the send control uses an unambiguous arrow icon. A render-time transparency
-filter removes the white plate baked into the supplied Builtryte wordmark while
-preserving the original artwork and dark header.
+fits in the initial 720px browser viewport. The header reads `Ask Audrey`, the
+redundant center heading is gone, the input uses the same wording, the mode
+description and selector are larger, and the send control uses an unambiguous
+arrow icon. The introductory portrait is 20 percent larger and rendered at 80
+percent opacity with a short gap above the selector. The supplied Builtryte
+header uses only the small Builtryte mark, recolored blue with its baked white
+plate made transparent; the product name remains separate.
 
 The authenticated shell now owns one viewport-height layout: conversation
 messages are the scrolling region while the complete composer dock remains at
@@ -826,6 +835,17 @@ contracts, and all 2,759 backend tests pass.
 The required lesson-link scan reports zero broken links; its existing stale-line
 backlog remains deferred by user direction. This refinement still needs its
 Unraid browser smoke.
+
+The frontend deployment boundary is now laptop-complete. `web/` owns its model
+artwork, production output, Dockerfile, and proxy template without reading or
+writing outside that directory. A pinned, non-root NGINX runtime serves the SPA
+and forwards `/api/*` and `/v1/*` to `audrey-ai` on `ollama-net`, including the
+Cloudflare Access assertion, unbuffered SSE, and streamed upload bodies. Compose
+publishes the UI only on loopback port 8088 for the host-network tunnel. The
+backend image keeps an embedded copy for one transition release; after the live
+soak, the frontend can move intact to its own GitHub repository before that
+fallback is removed. See the
+[standalone UI deployment runbook](phase-02-standalone-ui-deploy.md).
 
 Rollback removes or disables the public tunnel route first, then disables the
 Audrey Access flag and recreates `audrey-ai`. Disabling the Access application
@@ -945,9 +965,10 @@ Back up the application database and attachment metadata with a restore test.
 Qdrant projections must be rebuildable. Schema migration is an explicit
 deployment step with a recorded prior version and rollback limit.
 
-Production adds static assets but no always-on frontend service. During
-migration, OWUI remains separately routable so rollback changes traffic rather
-than rewriting data.
+Production runs a dedicated static frontend service and keeps application state
+in Audrey. During the transition, the backend retains the embedded shell and
+OWUI remains separately routable, so rollback changes traffic rather than
+rewriting data.
 
 ## Decision gates before implementation
 
@@ -970,7 +991,8 @@ than rewriting data.
 - src/audrey/app_state/ for migrations and repositories;
 - src/audrey/events/ for typed events and protocol adapters;
 - src/audrey/routes/app/ for native resources;
-- web/ for the React and TypeScript client;
+- self-contained web/ for the React and TypeScript client, production proxy,
+  and container, prepared for extraction after its live gate;
 - focused backend and Playwright tests.
 
 Existing orchestration, OpenAI routes, storage, archive, uploads, configuration,

@@ -1223,23 +1223,20 @@ a:focus-visible {
   text-decoration: none;
 }
 
-.brand-wordmark {
-  position: relative;
+.brand-mark {
   display: block;
-  width: 12.5rem;
+  width: 3.25rem;
   height: 3.25rem;
-  overflow: hidden;
   flex: 0 0 auto;
   background: transparent;
 }
 
-.brand-wordmark img {
-  position: absolute;
-  top: -1.25rem;
-  left: -2.5rem;
-  width: 17.5rem;
-  max-width: none;
-  filter: url("#light-wordmark-on-dark");
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: url("#blue-mark-on-dark");
 }
 
 .brand-product {
@@ -1939,15 +1936,9 @@ a:focus-visible {
     gap: 0.35rem;
   }
 
-  .brand-wordmark {
-    width: 8.4rem;
+  .brand-mark {
+    width: 2.5rem;
     height: 2.5rem;
-  }
-
-  .brand-wordmark img {
-    top: -0.82rem;
-    left: -1.7rem;
-    width: 11.8rem;
   }
 
   .brand-product {

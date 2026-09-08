@@ -17,6 +17,11 @@ The dark Builtryte branding, adaptive docked `Ask Audrey` composer, contextual
 jump-to-latest control, introductory portrait-backed mode descriptions, semantic
 first-prompt titles, and self-service profile-name refinement are laptop-
 complete and await their live browser gate.
+The native client is also packaged as a self-contained, non-root `audrey-ui`
+container with a same-origin streaming proxy. Its laptop contract is complete;
+the loopback deployment and Cloudflare Tunnel switch remain a user-run Unraid
+gate. Audrey retains the embedded shell for one transition release so rollback
+is a tunnel-origin change rather than a data migration.
 Slice 2C.2 conversation management is complete and Unraid-verified.
 Slice 2C.3 Video parity and its seven-mode smoke are complete and
 Unraid-verified.

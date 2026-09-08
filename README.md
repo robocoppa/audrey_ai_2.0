@@ -45,30 +45,27 @@ classify → route → tool-call → reflect pipeline.
 ## High-level architecture
 
 ```
-Open WebUI ──[Cloudflare Tunnel]──> audrey-ai ─────> Ollama (local + cloud)
-                                       │             │
-                                       │             └─ both 3090 Ti GPUs
-                                       │
-                                       ├─> custom-tools (OpenAPI-discovered model tools;
-                                       │     live inventory at GET /v1/tools)
-                                       │
-                                       ├─> Qdrant (text vectors + CLIP images,
-                                       │   per-user collections + global KB
-                                       │   + per-user chat archive)
-                                       │
-                                       └─> KB watcher (event-driven re-ingest)
-                                           + reconcile (periodic orphan sweep,
-                                             startup + 30 min cadence)
+Browser ──[Cloudflare Access + Tunnel]──> audrey-ui ──> audrey-ai ──> Ollama
+                                                  │          │       local + cloud
+                                                  │          ├─> custom-tools
+                                                  │          ├─> Qdrant
+                                                  │          └─> KB workers
+                                                  │
+                                                  └─ same-origin /api and /v1 proxy
 
-                                  + Prometheus + Grafana (metrics + alerts,
-                                    dashboards provisioned from monitoring/)
-                                  + OWUI-backed auth on all routes
+Open WebUI / API clients ────────────────────────────────────> audrey-ai /v1
+
+                         + Prometheus + Grafana (metrics + alerts,
+                           dashboards provisioned from monitoring/)
 ```
 
-All containers sit on Docker network `ollama-net`. Open WebUI is the only
-internet-facing service. Audrey is also published on LAN port 8000 for
-authenticated API clients such as Hermes; custom-tools and the remaining
-backends stay internal.
+The native `audrey-ui` container is the intended browser surface. It serves the
+compiled React application and proxies Audrey's `/api/*` and `/v1/*` routes on
+the same origin, including streaming responses and Cloudflare Access identity.
+Its host port is loopback-only for the host-network Cloudflare Tunnel. Audrey
+remains published on LAN port 8000 for authenticated API clients and Open WebUI
+compatibility; custom-tools and the remaining backends stay internal. The UI
+and backend share the external Docker network `ollama-net`.
 
 ## Virtual models
 

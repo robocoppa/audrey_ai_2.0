@@ -1,4 +1,4 @@
-import autoPortrait from "../../images/audrey2.png";
+import autoPortrait from "./assets/models/audrey2.png";
 
 export function AudreyLoader({
   fullscreen = false,

@@ -15,13 +15,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import autoPortrait from "../../images/audrey2.png";
-import deepPortrait from "../../images/audrey7.png";
-import fastPortrait from "../../images/audrey3.png";
-import researchPortrait from "../../images/search.png";
-import videoPortrait from "../../images/audrey8.png";
-import cloudPortrait from "../../images/cloudModel.png";
-import localPortrait from "../../images/localModel.png";
+import autoPortrait from "./assets/models/audrey2.png";
+import deepPortrait from "./assets/models/audrey7.png";
+import fastPortrait from "./assets/models/audrey3.png";
+import researchPortrait from "./assets/models/search.png";
+import videoPortrait from "./assets/models/audrey8.png";
+import cloudPortrait from "./assets/models/cloudModel.png";
+import localPortrait from "./assets/models/localModel.png";
 
 import { AudreyLoader } from "./AudreyLoader";
 import {

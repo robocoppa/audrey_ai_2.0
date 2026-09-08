@@ -9,7 +9,7 @@ export default defineConfig({
   build: {
     emptyOutDir: true,
     manifest: true,
-    outDir: "../src/audrey/static/app",
+    outDir: "dist",
     sourcemap: false,
   },
   server: {

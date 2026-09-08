@@ -56,7 +56,8 @@ htmlcov/
 dist/
 build/
 
-# Native web client (generated from web/ into the Python package at build time)
+# Native web client output. The standalone image consumes web/dist; the Audrey
+# image temporarily copies it into the Python package as a rollback shell.
 node_modules/
 web/dist/
 src/audrey/static/app/

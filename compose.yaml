@@ -1,13 +1,14 @@
-# Audrey 2.0 — compose for the two services we rebuild often.
+# Audrey 2.0 — compose for the three services we rebuild often.
 #
-# Scope: only `audrey-ai` and `custom-tools`. `ollama`, `qdrant`, and
+# Scope: `audrey-ai`, `audrey-ui`, and `custom-tools`. `ollama`, `qdrant`, and
 # `open-webui` stay under the Unraid UI so the GPU passthrough +
 # persistence config stays where you've been managing it.
 #
 # Usage (on Unraid, from /mnt/user/appdata/audrey_ai_2.0):
 #   docker compose up -d --build audrey-ai      # rebuild + restart audrey
+#   docker compose up -d --build audrey-ui      # rebuild + restart the browser UI
 #   docker compose up -d --build custom-tools   # rebuild + restart tools
-#   docker compose up -d --build                # both (audrey-eval excluded)
+#   docker compose up -d --build                # all services (audrey-eval excluded)
 #   docker compose logs -f audrey-ai            # tail logs
 #   docker compose down audrey-ai               # stop + remove
 #
@@ -36,7 +37,7 @@ services:
     image: audrey-ai:latest
     container_name: audrey-ai
     labels:
-      net.unraid.docker.icon: "${AUDREY_REPO_DIR:-/mnt/user/appdata/audrey_ai_2.0}/images/audrey2.png"
+      net.unraid.docker.icon: "${AUDREY_REPO_DIR:-/mnt/user/appdata/audrey_ai_2.0}/web/src/assets/models/audrey2.png"
     restart: unless-stopped
     # Audrey discovers tools at startup from custom-tools /openapi.json.
     # Process health is deliberately shallow: optional backend failures leave
@@ -94,6 +95,38 @@ services:
       interval: 30s
       timeout: 5s
       start_period: 10s
+      retries: 3
+
+  audrey-ui:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: audrey-ui:latest
+    container_name: audrey-ui
+    labels:
+      net.unraid.docker.icon: "${AUDREY_REPO_DIR:-/mnt/user/appdata/audrey_ai_2.0}/web/src/assets/models/audrey2.png"
+    restart: unless-stopped
+    depends_on:
+      audrey-ai:
+        condition: service_healthy
+    networks:
+      - ollama-net
+    # Host-network cloudflared reaches this loopback-only port. If cloudflared
+    # later joins ollama-net, target http://audrey-ui:8080 instead.
+    ports:
+      - "127.0.0.1:${AUDREY_UI_PORT:-8088}:8080"
+    environment:
+      AUDREY_UPSTREAM: ${AUDREY_UI_UPSTREAM:-http://audrey-ai:8000}
+      AUDREY_UI_MAX_BODY_SIZE: ${AUDREY_UI_MAX_BODY_SIZE:-110m}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
       retries: 3
 
   custom-tools:

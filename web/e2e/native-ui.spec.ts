@@ -128,15 +128,16 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect.poll(
     () => page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor),
   ).toBe("rgb(7, 16, 31)");
-  const wordmark = page.locator(".brand-wordmark img");
-  await expect(wordmark).toBeVisible();
-  await expect(page.locator("#light-wordmark-on-dark feColorMatrix")).toHaveAttribute(
+  const brandMark = page.locator(".brand-mark img");
+  await expect(brandMark).toBeVisible();
+  await expect(page.locator("#blue-mark-on-dark feColorMatrix")).toHaveAttribute(
     "values",
-    /0\.843.*0\.886.*0\.945/u,
+    /0\.204.*0\.6.*0\.98/u,
   );
   await expect.poll(
-    () => wordmark.evaluate((image) => (image as HTMLImageElement).naturalWidth),
+    () => brandMark.evaluate((image) => (image as HTMLImageElement).naturalWidth),
   ).toBeGreaterThan(0);
+  await expect(brandMark).toHaveAttribute("src", /builtryte-mark/u);
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute(
     "href",
     /builtryte-mark/,
