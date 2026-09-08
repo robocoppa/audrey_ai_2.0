@@ -11,25 +11,36 @@ embedded shell is the rollback target until the standalone container has passed
 the smoke, browser checks, and a normal-use soak. Do not remove Open WebUI or
 change the Access application during this gate.
 
-The host-network `cloudflared` instance currently reaches the new UI through
-`http://127.0.0.1:8088`. The UI reaches Audrey through the explicit
-`AUDREY_UI_UPSTREAM` setting, which defaults to `http://audrey-ai:8000` on
+The host-network `cloudflared` instance reaches the new UI through
+`http://127.0.0.1:8090`; host port 8088 remains assigned to SearXNG. The UI
+reaches Audrey through the explicit
+`AUDREY_UI_UPSTREAM` setting, which defaults to `http://audrey:8000` on
 external network `ollama-net`. No Access JWT or API key belongs in the UI
 container environment.
 
-## Build and check the private origin
+## Rename the backend and build the private origin
 
 From the Unraid Audrey checkout:
 
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
-docker compose up -d --build audrey-ai audrey-ui
-docker compose ps audrey-ai audrey-ui
-curl --fail-with-body -sS http://127.0.0.1:8088/healthz
+docker compose build audrey audrey-ui
+docker stop audrey-ai
+docker rename audrey-ai audrey-ai-retired
+docker compose up -d audrey audrey-ui
+docker compose ps audrey audrey-ui
+curl --fail-with-body -sS http://127.0.0.1:8090/healthz
 ```
 
 Both services should become healthy and the final command should print `ok`.
-The UI port is bound to loopback, not the LAN.
+The UI port is bound to loopback, not the LAN. Keep the stopped
+`audrey-ai-retired` container through the initial soak; Compose may identify
+it as an orphan, which is expected. Do not use `--remove-orphans` during this
+migration.
+
+The new `audrey` service retains `audrey-ai` as a temporary network alias.
+Existing OWUI and monitoring configuration can therefore continue to resolve
+the former hostname while their settings move to `http://audrey:8000`.
 
 Run the existing full native-client smoke through the standalone proxy:
 
@@ -38,7 +49,7 @@ cd /mnt/user/appdata/audrey_ai_2.0
 set -a
 source .env.smoke.local
 set +a
-AUDREY_SMOKE_BASE_URL=http://127.0.0.1:8088 .venv/bin/python scripts/smoke_native_ui.py
+AUDREY_SMOKE_BASE_URL=http://127.0.0.1:8090 .venv/bin/python scripts/smoke_native_ui.py
 ```
 
 The result must end with `"status": "passed"`, cross-owner reads must remain
@@ -53,7 +64,7 @@ In the existing Cloudflare Tunnel published-application route for
 
 ```text
 from: http://127.0.0.1:8000
-to:   http://127.0.0.1:8088
+to:   http://127.0.0.1:8090
 ```
 
 Leave the hostname, Access application, policies, audience tag, and Audrey team
@@ -73,6 +84,20 @@ origin back to `http://127.0.0.1:8000`. No database rollback or data migration
 is involved because the browser client never owns canonical state. Keep the
 standalone container available for diagnosis and leave the Access application
 protecting the hostname.
+
+If the renamed backend itself fails before the gate, restore the retained
+container without deleting either image:
+
+```bash
+docker compose stop audrey
+docker rename audrey audrey-failed
+docker rename audrey-ai-retired audrey-ai
+docker start audrey-ai
+```
+
+The old Compose service remains outside the new graph, so do not run
+`docker compose up` against it. Diagnose or remove `audrey-failed` only
+after normal service has been restored.
 
 ## Extraction gate
 

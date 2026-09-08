@@ -1,16 +1,16 @@
 # Audrey 2.0 — compose for the three services we rebuild often.
 #
-# Scope: `audrey-ai`, `audrey-ui`, and `custom-tools`. `ollama`, `qdrant`, and
+# Scope: `audrey`, `audrey-ui`, and `custom-tools`. `ollama`, `qdrant`, and
 # `open-webui` stay under the Unraid UI so the GPU passthrough +
 # persistence config stays where you've been managing it.
 #
 # Usage (on Unraid, from /mnt/user/appdata/audrey_ai_2.0):
-#   docker compose up -d --build audrey-ai      # rebuild + restart audrey
+#   docker compose up -d --build audrey         # rebuild + restart audrey
 #   docker compose up -d --build audrey-ui      # rebuild + restart the browser UI
 #   docker compose up -d --build custom-tools   # rebuild + restart tools
 #   docker compose up -d --build                # all services (audrey-eval excluded)
-#   docker compose logs -f audrey-ai            # tail logs
-#   docker compose down audrey-ai               # stop + remove
+#   docker compose logs -f audrey               # tail logs
+#   docker compose stop audrey                  # stop without removing
 #
 # The `audrey-eval` service below is BUILD-ONLY (profile `eval`), so a bare
 # `up`/`up --build` never starts it — it's a throwaway container run on demand
@@ -30,12 +30,12 @@
 # compose try to recreate it.
 
 services:
-  audrey-ai:
+  audrey:
     build:
       context: .
       dockerfile: docker/audrey.Dockerfile
-    image: audrey-ai:latest
-    container_name: audrey-ai
+    image: audrey:latest
+    container_name: audrey
     labels:
       net.unraid.docker.icon: "${AUDREY_REPO_DIR:-/mnt/user/appdata/audrey_ai_2.0}/web/src/assets/models/audrey2.png"
     restart: unless-stopped
@@ -47,22 +47,30 @@ services:
       custom-tools:
         condition: service_healthy
     networks:
-      - ollama-net
-      # Phase 34: media-worker reaches audrey-ai here and ONLY here. It is not
+      ollama-net:
+        # Transitional compatibility for OWUI, Prometheus, and any existing
+        # client still configured with the former backend hostname.
+        aliases:
+          - audrey-ai
+      # Phase 34: media-worker reaches audrey here and ONLY here. It is not
       # on ollama-net, so it cannot resolve or route to `ollama` even if some
       # future edit hands it an address. See the media-worker stanza below.
-      - media-net
+      media-net:
+        aliases:
+          - audrey-ai
       # Phase 41: same job for media-fetcher. A separate network from media-net
       # because that one is `internal: true` and the fetcher's entire purpose
       # requires egress — putting it there would be the one thing it cannot do.
-      - fetch-net
+      fetch-net:
+        aliases:
+          - audrey-ai
     # Published to the host LAN. Safe since Phase 31 (2026-07-27): the KB query
     # routes (`/v1/kb/query`, `/v1/kb/query/image`) are gated by
     # `resolve_kb_caller` — custom-tools' `X-Audrey-Service-Token` may act-as
     # `req.user`; a direct user bearer is pinned to its own email; anything else
     # 401s. LAN exposure no longer leaks other users' uploads. Consumers:
-    #   - OWUI → Audrey  (http://audrey-ai:8000/v1, container DNS)
-    #   - Prometheus     (scrape target audrey-ai:8000, monitoring/ compose)
+    #   - OWUI → Audrey  (http://audrey:8000/v1, container DNS)
+    #   - Prometheus     (scrape target audrey:8000, monitoring/ compose)
     #   - Hermes LAN passthrough, e.g. Claudette (audrey_passthrough/* →
     #     192.168.1.11:8000/v1) — REQUIRES this publish; the 2026-07-18 review
     #     omitted this consumer and unpublishing broke it.
@@ -107,16 +115,16 @@ services:
       net.unraid.docker.icon: "${AUDREY_REPO_DIR:-/mnt/user/appdata/audrey_ai_2.0}/web/src/assets/models/audrey2.png"
     restart: unless-stopped
     depends_on:
-      audrey-ai:
+      audrey:
         condition: service_healthy
     networks:
       - ollama-net
     # Host-network cloudflared reaches this loopback-only port. If cloudflared
     # later joins ollama-net, target http://audrey-ui:8080 instead.
     ports:
-      - "127.0.0.1:${AUDREY_UI_PORT:-8088}:8080"
+      - "127.0.0.1:${AUDREY_UI_PORT:-8090}:8080"
     environment:
-      AUDREY_UPSTREAM: ${AUDREY_UI_UPSTREAM:-http://audrey-ai:8000}
+      AUDREY_UPSTREAM: ${AUDREY_UI_UPSTREAM:-http://audrey:8000}
       AUDREY_UI_MAX_BODY_SIZE: ${AUDREY_UI_MAX_BODY_SIZE:-110m}
     security_opt:
       - no-new-privileges:true
@@ -148,12 +156,12 @@ services:
     # The only legitimate caller is Audrey, over ollama-net DNS:
     #   Audrey → custom-tools  (config.yaml tools.servers = http://custom-tools:8001)
     # The in-container healthcheck hits 127.0.0.1:8001 and is unaffected.
-    # Debug access from the laptop, if ever needed: tunnel it like audrey-ai above.
+    # Debug access from the laptop, if ever needed: tunnel it like audrey above.
     env_file:
       - .env
     environment:
       TZ: America/Denver
-      AUDREY_URL: ${AUDREY_URL:-http://audrey-ai:8000}
+      AUDREY_URL: ${AUDREY_URL:-http://audrey:8000}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
       MEMORY_COLLECTION: ${MEMORY_COLLECTION:-kb_memory}
@@ -161,7 +169,7 @@ services:
       MEMORY_SIMILARITY_THRESHOLD: ${MEMORY_SIMILARITY_THRESHOLD:-0.5}
     volumes:
       - /mnt/user/appdata/custom-tools:/app/data
-    # Healthcheck so audrey-ai's depends_on(condition=service_healthy)
+    # Healthcheck so audrey's depends_on(condition=service_healthy)
     # actually has something to wait on. The image has no `curl` binary,
     # so use python (which is the entrypoint and guaranteed present).
     healthcheck:
@@ -171,7 +179,7 @@ services:
       start_period: 10s
       retries: 3
 
-  # Phase 34: the ffmpeg sidecar. Claims video jobs from audrey-ai over HTTP,
+  # Phase 34: the ffmpeg sidecar. Claims video jobs from audrey over HTTP,
   # demuxes audio, posts the result back. No ports, no model access, no
   # database — it is an HTTP client that happens to run ffmpeg.
   media-worker:
@@ -189,12 +197,12 @@ services:
     # wait out `lease_minutes` before anything retried it.
     stop_grace_period: 180s
     depends_on:
-      audrey-ai:
+      audrey:
         condition: service_healthy
     # ONLY media-net, and media-net is `internal: true`. This is the fairness
     # invariant from Phase 34 expressed as topology rather than as a promise:
     # CPU work is isolated in this container, but GPU work must keep going
-    # through audrey-ai's passthrough so `FairLocalGate` and
+    # through audrey's passthrough so `FairLocalGate` and
     # `UserInflightRegistry` still apply. A worker that reaches Ollama directly
     # bypasses both — silently, and only under load.
     #
@@ -212,7 +220,7 @@ services:
     # from the same place, without the rest riding along.
     environment:
       TZ: America/Denver
-      AUDREY_ENDPOINT: http://audrey-ai:8000
+      AUDREY_ENDPOINT: http://audrey:8000
       POLL_SECONDS: ${MEDIA_POLL_SECONDS:-10}
       KB_SERVICE_TOKEN: ${KB_SERVICE_TOKEN:?media-worker needs KB_SERVICE_TOKEN in .env}
       # Phase 35. WHISPER_MODEL can only name a model baked into the image at
@@ -235,7 +243,7 @@ services:
       # effect on the next job instead of needing a container recreate.
       FRAME_BUDGET_S: ${FRAME_BUDGET_S:-900}
     volumes:
-      # Read-only, and the same path audrey-ai uses, so the `path` returned by
+      # Read-only, and the same path audrey uses, so the `path` returned by
       # /v1/files/jobs/claim resolves unchanged inside this container. If these
       # ever diverge the worker gets a valid-looking path it cannot open.
       #
@@ -244,11 +252,11 @@ services:
       # claim untrue for the upload bytes themselves.
       - /mnt/user/appdata/runtime:/data:ro
     # ffmpeg on a large file is CPU-hungry and this box also serves chat.
-    # Cap it so a 300 MB video can't starve audrey-ai of cores. Raise it if
+    # Cap it so a 300 MB video can't starve audrey of cores. Raise it if
     # Phase 35's whisper turns out to be the bottleneck it probably is.
     cpus: 2.0
 
-  # Phase 41: the yt-dlp sidecar. Claims download jobs from audrey-ai over HTTP,
+  # Phase 41: the yt-dlp sidecar. Claims download jobs from audrey over HTTP,
   # fetches the video into a staging directory, posts the result back. No ports,
   # no model access, no database — and, unlike the other two, internet egress.
   media-fetcher:
@@ -265,11 +273,11 @@ services:
     # staging sweep deletes the partial file. Costly, not broken.
     stop_grace_period: 300s
     depends_on:
-      audrey-ai:
+      audrey:
         condition: service_healthy
     # fetch-net is an ordinary bridge, NOT `internal: true`, because a
     # downloader without egress is a contradiction. It exists so this container
-    # can reach audrey-ai by DNS instead of by the host's published port.
+    # can reach audrey by DNS instead of by the host's published port.
     #
     # **Be honest about what this does and does not isolate.** It keeps the
     # fetcher off ollama-net, so `ollama` does not resolve and no config here
@@ -287,7 +295,7 @@ services:
     # actually has a route to it.
     environment:
       TZ: America/Denver
-      AUDREY_ENDPOINT: http://audrey-ai:8000
+      AUDREY_ENDPOINT: http://audrey:8000
       POLL_SECONDS: ${FETCH_POLL_SECONDS:-10}
       KB_SERVICE_TOKEN: ${KB_SERVICE_TOKEN:?media-fetcher needs KB_SERVICE_TOKEN in .env}
       # The metadata pass only. The download's budget is the lease, and arrives
@@ -296,11 +304,11 @@ services:
       PROBE_TIMEOUT_S: ${FETCH_PROBE_TIMEOUT_S:-120}
     volumes:
       # ONE directory, read-write, and that is the point. The fetcher writes
-      # downloads here and audrey-ai moves them into the user's directory after
+      # downloads here and audrey moves them into the user's directory after
       # checking them, so this container never has write access to stored files
       # — see `_fetch_stage_dir` in routes/files.py.
       #
-      # The path inside the container must equal the `stage_dir` audrey-ai
+      # The path inside the container must equal the `stage_dir` audrey
       # reports on the claim, which is `<kb.upload_root>/.staging`.
       #
       # Audrey and the fetcher both run as Unraid 99:100. Create/chown this
@@ -309,7 +317,7 @@ services:
       - /mnt/user/appdata/runtime/uploads/.staging:/data/uploads/.staging
     # yt-dlp is network-bound; the CPU here is ffmpeg remuxing the merged
     # streams into mp4, which is a stream copy rather than a re-encode. Capped
-    # anyway so a pathological file cannot starve audrey-ai of cores.
+    # anyway so a pathological file cannot starve audrey of cores.
     cpus: 2.0
 
   # Build-only: the live-eval harness image (see Dockerfile.eval + Phase 27).
@@ -332,7 +340,7 @@ networks:
   ollama-net:
     external: true
   # Phase 34: compose-managed, unlike ollama-net. It exists only to join
-  # media-worker to audrey-ai, so nothing outside this file needs to know
+  # media-worker to audrey, so nothing outside this file needs to know
   # about it and compose may create and destroy it freely.
   #
   # `internal: true` removes the default route, not just the DNS entry. The
@@ -342,9 +350,9 @@ networks:
   # different docker network only isolates you from other containers' names,
   # never from the host's own published ports.
   #
-  # audrey-ai is on this network too and keeps its egress from ollama-net,
+  # audrey is on this network too and keeps its egress from ollama-net,
   # which has the only gateway of the two. Verify after any change here:
-  #   docker exec audrey-ai python3 -c "import socket;print(socket.gethostbyname('ollama'))"
+  #   docker exec audrey python3 -c "import socket;print(socket.gethostbyname('ollama'))"
   #
   # Consequence for Phase 35: whisper weights must be baked into the image at
   # build time. The worker cannot download anything at runtime, on purpose.
@@ -352,7 +360,7 @@ networks:
     driver: bridge
     internal: true
 
-  # Phase 41: joins media-fetcher to audrey-ai. An ordinary bridge — see the
+  # Phase 41: joins media-fetcher to audrey. An ordinary bridge — see the
   # media-fetcher stanza for why `internal: true` is not available here and
   # what is lost by that.
   fetch-net:

@@ -28,7 +28,7 @@ sh: 1: curl: not found
 ```
 The deploy docs (`docs/campaign-2/phase-01-chat-archive-deploy.md`) *do* use `curl` — so it
 exists in **some** context (the host, or a container that bundles it), but **not
-inside the Python app containers** (`audrey-ai`, `custom-tools`, `SearXNG`
+inside the Python app containers** (`audrey`, `custom-tools`, `SearXNG`
 clients). The trap is `exec`ing into a container and assuming its shell has curl.
 
 **Use Python for HTTP probes inside app containers** — they're Python services,
@@ -59,7 +59,7 @@ Full listing verified against the Unraid docker view **2026-07-30**.
 
 | Container | host → internal port | ollama-net IP (volatile) | Role |
 |---|---|---|---|
-| **audrey-ai** | 8000 → 8000 | 172.18.0.16 | FastAPI app (THIS repo) |
+| **audrey** | 8000 → 8000 | 172.18.0.16 | FastAPI app (THIS repo) |
 | **custom-tools** | **none → 8001 (INTERNAL ONLY)** | 172.18.0.5 | Tools server — serves `web_search` (Brave↔SearXNG logic lives here). Built from **`tools-server/` IN THIS REPO**, not a separate project |
 | **SearXNG** | **8088 → 8080** | 172.18.0.12 | Search engine behind `web_search` |
 | **open-webui** | **8080 → 8080** | 172.18.0.14 | OWUI frontend / public surface |
@@ -114,14 +114,14 @@ own copy. When a port changes on either side, it changes here.
 ## 4. Request path (who calls whom)
 
 ```
-OWUI  ──►  audrey-ai:8000  ──►  custom-tools:8001  ──►  SearXNG:8080  ──► (web)
+OWUI  ──►  audrey:8000  ──►  custom-tools:8001  ──►  SearXNG:8080  ──► (web)
 (public)   (FastAPI app)        (tools/web_search)      (search engine)
                 │
                 ├──►  ollama:11434        (models)
                 └──►  qdrant:6333         (KB vectors)
 ```
 
-- **`web_search` is served by `custom-tools`, not `audrey-ai`.** audrey-ai
+- **`web_search` is served by `custom-tools`, not `audrey`.** audrey
   *discovers* it via OpenAPI from `http://custom-tools:8001` (see `tools:` in
   `config.yaml`) and calls it as a remote tool. The Brave/SearXNG provider logic
   lives in the **custom-tools repo** — a different codebase from this one.
@@ -135,20 +135,21 @@ OWUI  ──►  audrey-ai:8000  ──►  custom-tools:8001  ──►  SearXN
 From `/mnt/user/appdata/audrey_ai_2.0`:
 ```bash
 # Code change (rebuild image):
-docker compose up -d --build audrey-ai
+docker compose up -d --build audrey
 docker compose up -d --build custom-tools
 
 # Config-only change (no rebuild — config.yaml is bind-mounted):
-docker compose up -d --force-recreate audrey-ai
+docker compose up -d --force-recreate audrey
 
 # Logs:
-docker compose logs -f audrey-ai
+docker compose logs -f audrey
 
 # Monitoring stack:
 cd monitoring && docker compose up -d
 ```
-Compose layout (AGENTS.md): root `compose.yaml` has only `audrey-ai` +
-`custom-tools`; `monitoring/compose.yaml` has Prometheus+Grafana; Ollama, Qdrant,
+Compose layout (AGENTS.md): root `compose.yaml` has `audrey`, `audrey-ui`,
+`custom-tools`, and the two media workers; `monitoring/compose.yaml` has
+Prometheus+Grafana; Ollama, Qdrant,
 Open WebUI, cloudflared are managed **outside** root compose.
 
 **Which verb?**
@@ -191,7 +192,7 @@ nohup env MODEL=audrey_research CASES=<file>.json LABEL=<label> \
 - **HTTP probe between services** (internal network): use the Python one-liner in
   §2. `curl` is not in the app containers.
 - **App logs for the failure window:**
-  `docker compose logs --since 30m audrey-ai` (or `docker logs <id>`), grep for
+  `docker compose logs --since 30m audrey` (or `docker logs <id>`), grep for
   the subsystem (`web_search`, `brave`, `searxng`, `429`, `quota`).
 - **A `200` HTTP code is not "healthy"** for search: a throttled SearXNG returns
   `200` with an **empty `results` array** ("SearXNG empties" — a known recurring
@@ -205,7 +206,7 @@ nohup env MODEL=audrey_research CASES=<file>.json LABEL=<label> \
   is designed to **degrade gracefully** — researchers fall back to prior knowledge
   and answers can still be correct, just unsourced (which then makes `hedge_policy`
   hedge more, since unsourced claims hedge by default). Empty search ≠ broken
-  pipeline. Fix is at the provider/tools-server layer, not audrey-ai.
+  pipeline. Fix is at the provider/tools-server layer, not audrey.
 - **`kb_search` fails intermittently (`✅0 ❌1`) with no error body.** Diagnosed
   2026-07-22. NOT a tool, dispatch, or corpus bug: `OLLAMA_MAX_LOADED_MODELS=1`
   could not hold the 323 MB `nomic-embed-text` embedder alongside a ~24 GB panel

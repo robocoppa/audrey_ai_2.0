@@ -4,7 +4,7 @@ The smallest stage of the video work and the one that makes the rest legible.
 A file list reading `jasonRetirement.mp4 · 288 MB · ready` tells you nothing
 you did not already know.
 
-## Why this runs in `audrey-ai` and not in the worker
+## Why this runs in `audrey` and not in the worker
 
 The phase plan put it in `media/summarise.py`, calling passthrough "acting-as
 the uploader as in phase 36". Phase 36 discovered there is no act-as on

@@ -494,7 +494,7 @@ async def metrics(request: Request) -> Response:
 
     Unauthenticated by design — Prometheus convention, and we don't
     publish the route via cloudflared, so it's effectively LAN-only
-    (Unraid scrapes from the same docker network as audrey-ai).
+    (Unraid scrapes from the same docker network as audrey).
     """
     readiness = getattr(request.app.state, "readiness", None)
     if readiness is not None:

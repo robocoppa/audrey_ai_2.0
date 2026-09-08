@@ -193,7 +193,7 @@ class TestLeaseAwareBudget:
         assert self._budget(lease_s=1800, elapsed=2000, configured=900) == 0.0
 
     def test_a_claim_without_a_lease_falls_back_to_the_configured_budget(self):
-        """An audrey-ai that predates this field still hands out jobs."""
+        """An audrey that predates this field still hands out jobs."""
         import audrey.media.worker as worker
         assert worker._frame_budget({}, worker.time.monotonic(), 900) == 900
 
@@ -430,7 +430,7 @@ class TestTheHintReachesTheRoute:
 
         described, planned = describe_frames(
             frames, user="a@b.c", post=_post,
-            endpoint="http://audrey-ai:8000", token=TOKEN, segments=segments,
+            endpoint="http://audrey:8000", token=TOKEN, segments=segments,
         )
 
         assert planned == 1
@@ -450,7 +450,7 @@ class TestTheHintReachesTheRoute:
 
         describe_frames(
             frames, user="a@b.c", post=_post,
-            endpoint="http://audrey-ai:8000", token=TOKEN, segments=None,
+            endpoint="http://audrey:8000", token=TOKEN, segments=None,
         )
 
         assert posted[0]["hint"] == ""

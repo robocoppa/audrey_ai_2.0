@@ -41,7 +41,7 @@ A one-off `export AUDREY_EVAL_*` or a `--flag` still overrides the file.
 the repeatable one and needs nothing else. Hitting Audrey directly is no longer
 possible over the LAN — as of the 2026-07-18 security review Audrey's `:8000`
 is not published to the host (ollama-net only). To debug against Audrey
-directly, tunnel it first — `ssh -N -L 8000:audrey-ai:8000 <unraid>` — then
+directly, tunnel it first — `ssh -N -L 8000:audrey:8000 <unraid>` — then
 `--base-url http://localhost:8000/v1` with a valid (short-lived) OWUI JWT.)
 
 WHAT IT CHECKS (structural / heuristic — no exact-match, models vary)
@@ -328,14 +328,15 @@ def _is_direct_audrey(base_url: str) -> bool:
 
     Audrey's `:8000` is not published to the host (2026-07-18 security review),
     so the LAN path is OWUI — but the eval CONTAINER runs on `ollama-net`
-    alongside `audrey-ai`, which is why direct is reachable at all from a box
+    alongside `audrey`, which is why direct is reachable at all from a box
     run. Matched on host/port rather than on a flag so a stale `eval.env`
     cannot claim direct while pointing somewhere else.
     """
     from urllib.parse import urlparse
     host = (urlparse(base_url).hostname or "").lower()
     port = urlparse(base_url).port
-    return host in {"audrey-ai", "audrey"} or (
+    # Keep the former hostname during the compatibility-alias migration.
+    return host in {"audrey", "audrey-ai"} or (
         host in {"localhost", "127.0.0.1"} and port == 8000)
 
 
@@ -2192,7 +2193,7 @@ def main() -> int:
         print(f"error: --think {args.think} needs a DIRECT Audrey base-url "
               f"(got {args.base_url!r}). Open WebUI drops unknown body fields, "
               f"so the arm would be recorded wrong. From the box, the eval "
-              f"container is on ollama-net: --base-url http://audrey-ai:8000/v1",
+              f"container is on ollama-net: --base-url http://audrey:8000/v1",
               file=sys.stderr)
         return 2
 

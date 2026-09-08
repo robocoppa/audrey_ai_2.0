@@ -242,7 +242,7 @@ class TestBackfillPreservesJobState:
 
     All seven of `_UPLOADS_ADDED_COLUMNS` were unnamed. The visible cost was
     phase 37's summary: a video completed with a 1,257-character summary showed
-    it in `GET /v1/files` until `audrey-ai` restarted, and then showed nothing,
+    it in `GET /v1/files` until `audrey` restarted, and then showed nothing,
     with no error and no log line. `duration_s` went the same way.
 
     The rule being pinned: **a Qdrant payload is authoritative about content,

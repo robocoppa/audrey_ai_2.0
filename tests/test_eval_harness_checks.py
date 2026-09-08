@@ -2033,7 +2033,8 @@ def test_request_body_omits_think_unless_asked():
 
 
 @pytest.mark.parametrize(("url", "direct"), [
-    ("http://audrey-ai:8000/v1", True),
+    ("http://audrey:8000/v1", True),
+    ("http://audrey-ai:8000/v1", True),  # transitional Docker alias
     ("http://localhost:8000/v1", True),
     ("http://localhost:8080/api", False),      # Open WebUI — drops the field
     ("http://192.168.1.11:8080/v1", False),

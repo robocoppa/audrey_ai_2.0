@@ -11,7 +11,7 @@ ollama/qdrant). No API key, no per-query cost.
 |-------|-------|
 | **Name** | `searxng` |
 | **Repository** | `searxng/searxng:latest` |
-| **Network** | `ollama-net` — the SAME network custom-tools/audrey-ai/qdrant/ollama use. This box addresses every service by container name over this network, so SearXNG must join it for `custom-tools` to reach it as `http://searxng:8080`. |
+| **Network** | `ollama-net` — the SAME network custom-tools/audrey/qdrant/ollama use. This box addresses every service by container name over this network, so SearXNG must join it for `custom-tools` to reach it as `http://searxng:8080`. |
 | **Port** | host `8088` → container `8080` (host port only needed for the LAN `curl` check below; the container-name path uses 8080 directly) |
 | **Path / volume** | host `/mnt/user/appdata/searxng` → container `/etc/searxng` (holds `settings.yml`) |
 
@@ -23,7 +23,7 @@ Env vars:
 | `SEARXNG_SECRET` | any long random string (or set `secret_key` in settings.yml) |
 
 > **Network note:** this box reaches every internal service by container name over
-> `ollama-net` (`AUDREY_URL=http://audrey-ai:8000`, `QDRANT_URL=http://qdrant:6333`,
+> `ollama-net` (`AUDREY_URL=http://audrey:8000`, `QDRANT_URL=http://qdrant:6333`,
 > etc.) — no host-IP URLs. SearXNG follows the same pattern, hence
 > `SEARXNG_URL=http://searxng:8080` in step 3. `ollama-net` is `external: true` in
 > compose (created outside it), so just attach the searxng container to it.
@@ -58,7 +58,7 @@ SEARXNG_URL=http://searxng:8080
 ```
 
 (Container name + internal port 8080, over `ollama-net` — matches how
-custom-tools reaches audrey-ai/qdrant/ollama. Use the host-IP form
+custom-tools reaches audrey/qdrant/ollama. Use the host-IP form
 `http://192.168.1.11:8088` only if you chose NOT to put searxng on `ollama-net`.)
 
 Rebuild/restart custom-tools. The startup log should now read
@@ -238,7 +238,7 @@ old running config and seeing no change).
 
 - **No Dockerfile / `docker build`** — SearXNG is third-party, pulled prebuilt.
   It lives on the Unraid UI like ollama/qdrant, NOT in `compose.yaml` (which
-  scopes to audrey-ai + custom-tools only).
+  scopes to audrey + custom-tools only).
 - SearXNG's `settings.yml` is **not tracked in this repo** — it lives only on the
   box at `/mnt/user/appdata/searxng/`. This guide is the tracked record of what it
   should contain; keep it in sync when you change the box's engine set.

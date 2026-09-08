@@ -21,7 +21,7 @@ no model selection.
 ## What it preserves
 
 The reason the plan wanted passthrough was fairness, and that survives intact.
-`FairLocalGate` is in-process to `audrey-ai` and keys on `user_id`, so passing
+`FairLocalGate` is in-process to `audrey` and keys on `user_id`, so passing
 the *uploader's* email puts the ingest in that user's round-robin slice: a
 giant video slows its own owner's chat and leaves everyone else's alone. A
 worker calling Ollama directly would share no gate at all and would starve the

@@ -9,9 +9,9 @@ scrape_configs:
   - job_name: audrey
     metrics_path: /metrics
     static_configs:
-      - targets: ['audrey-ai:8000']
+      - targets: ['audrey:8000']
         labels:
-          service: audrey-ai
+          service: audrey
 
   # Prometheus scraping itself — useful as a "is the scraper alive" canary.
   - job_name: prometheus

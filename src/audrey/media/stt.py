@@ -7,7 +7,7 @@ one for a container that has no GPU to justify the weight.
 The `faster_whisper` import is **deliberately lazy**. This module is imported
 by the worker, and the worker's tests run on a laptop that has no whisper
 installed — a module-level import would make every one of them fail on
-something unrelated to what they test. It also keeps `audrey-ai` able to import
+something unrelated to what they test. It also keeps `audrey` able to import
 `audrey.media.*` without the package.
 
 Model weights are baked into the image at build time and loaded from disk. The

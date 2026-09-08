@@ -28,7 +28,7 @@ false by topology rather than by intent.
 Configured by environment, not `config.yaml` — the caps that matter arrive on
 the claim, so `kb.fetch.*` stays the single source of truth:
 
-    AUDREY_ENDPOINT   default http://audrey-ai:8000
+    AUDREY_ENDPOINT   default http://audrey:8000
     KB_SERVICE_TOKEN  required
     POLL_SECONDS      default 10
     ONCE              set to 1 to take a single job and exit

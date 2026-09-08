@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     file_text_page_chars: int = Field(default=4000, alias="FILE_TEXT_PAGE_CHARS")
 
     # Audrey (for kb_search / kb_image_search proxying)
-    audrey_url: str = Field(default="http://audrey-ai:8000", alias="AUDREY_URL")
+    audrey_url: str = Field(default="http://audrey:8000", alias="AUDREY_URL")
     # Middle rung of the KB timeout ladder. Must sit BELOW Audrey's tool-dispatch
     # timeout (`graph.DEFAULT_DISPATCH_TIMEOUT_S`, 30s) and ABOVE the embed budget
     # inside /v1/kb/query (`TextEmbedder.query_timeout_s`, 24s). Previously 30.0 —

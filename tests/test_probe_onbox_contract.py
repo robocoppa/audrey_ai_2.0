@@ -63,7 +63,7 @@ class TestItRunsWhereThePythonIs:
         assert "python3" in src
 
     def test_it_copies_the_probe_in(self, src):
-        # The repo is NOT bind-mounted into audrey-ai — only config.yaml,
+        # The repo is NOT bind-mounted into audrey — only config.yaml,
         # /data and /datasets — so a `git pull` on the host is invisible
         # inside the container until the copy happens.
         assert "docker cp" in src
@@ -74,7 +74,7 @@ class TestItRunsWhereThePythonIs:
         )
 
     def test_it_defaults_to_the_audrey_container(self, src):
-        assert 'CONTAINER="${CONTAINER:-audrey-ai}"' in src
+        assert 'CONTAINER="${CONTAINER:-audrey}"' in src
 
 
 class TestLogsSurviveARebuild:

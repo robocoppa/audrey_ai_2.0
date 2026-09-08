@@ -71,16 +71,34 @@ def test_native_ui_build_is_self_contained_and_has_a_transitional_fallback():
         assert (ROOT / "web" / "src" / "assets" / "models" / asset).is_file()
 
     service = compose["services"]["audrey-ui"]
+    backend = compose["services"]["audrey"]
+    assert "audrey-ai" not in compose["services"]
+    assert backend["container_name"] == "audrey"
+    assert backend["image"] == "audrey:latest"
+    assert set(backend["networks"]) == {"ollama-net", "media-net", "fetch-net"}
+    for network in backend["networks"].values():
+        assert network["aliases"] == ["audrey-ai"]
     assert service["build"] == {"context": "./web", "dockerfile": "Dockerfile"}
-    assert service["depends_on"]["audrey-ai"]["condition"] == "service_healthy"
+    assert service["depends_on"]["audrey"]["condition"] == "service_healthy"
     assert service["networks"] == ["ollama-net"]
-    assert service["ports"] == ["127.0.0.1:${AUDREY_UI_PORT:-8088}:8080"]
+    assert service["ports"] == ["127.0.0.1:${AUDREY_UI_PORT:-8090}:8080"]
     assert service["environment"]["AUDREY_UPSTREAM"] == (
-        "${AUDREY_UI_UPSTREAM:-http://audrey-ai:8000}"
+        "${AUDREY_UI_UPSTREAM:-http://audrey:8000}"
     )
     assert service["cap_drop"] == ["ALL"]
     assert service["security_opt"] == ["no-new-privileges:true"]
-    assert compose["services"]["audrey-ai"]["labels"] == {
+    assert compose["services"]["custom-tools"]["environment"]["AUDREY_URL"] == (
+        "${AUDREY_URL:-http://audrey:8000}"
+    )
+    for sidecar in ("media-worker", "media-fetcher"):
+        assert compose["services"][sidecar]["depends_on"]["audrey"] == {
+            "condition": "service_healthy"
+        }
+        assert (
+            compose["services"][sidecar]["environment"]["AUDREY_ENDPOINT"]
+            == "http://audrey:8000"
+        )
+    assert compose["services"]["audrey"]["labels"] == {
         "net.unraid.docker.icon": (
             "${AUDREY_REPO_DIR:-/mnt/user/appdata/audrey_ai_2.0}/"
             "web/src/assets/models/audrey2.png"
@@ -119,7 +137,7 @@ def test_every_shared_writer_uses_unraids_numeric_identity():
 
 def test_bind_mounts_match_the_non_root_cache_and_read_only_dataset_contract():
     compose = yaml.safe_load(COMPOSE.read_text())
-    volumes = compose["services"]["audrey-ai"]["volumes"]
+    volumes = compose["services"]["audrey"]["volumes"]
     assert "/mnt/user/appdata/clip-cache:/home/audrey/.cache/clip" in volumes
     assert "/mnt/user/knowledge:/datasets:ro" in volumes
 

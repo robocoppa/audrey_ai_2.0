@@ -333,7 +333,7 @@ fails identically:
 2. `scripts/pull-models.sh` — pinned by
    `test_every_model_the_config_names_is_pulled_by_the_script`, so a rebuilt box
    cannot come up missing a name the config mentions.
-3. **`docker restart open-webui`** after `up -d --build audrey-ai`. OWUI reads
+3. **`docker restart open-webui`** after `up -d --build audrey`. OWUI reads
    `/v1/models` once and holds it, and the harness talks to OWUI, never to
    Audrey. Skipping this fails every case with
    `HTTP 400 {"detail":"Model not found"}` — OWUI's string, absent from `src/`,
@@ -405,11 +405,11 @@ head -3 testing-out/<file>.md               # "N cases, 0 passed" = failed early
 grep -m3 "error:" testing-out/<file>.md     # WHY — this is the line that matters
 ```
 
-⚠️ **`audrey-ai` being healthy is not sufficient.** Two independent things must
+⚠️ **`audrey` being healthy is not sufficient.** Two independent things must
 be ready, and only one of them is what `docker compose ps` reports:
 
 ```bash
-docker compose ps audrey-ai                      # Audrey up
+docker compose ps audrey                      # Audrey up
 curl -s localhost:8000/v1/models | grep audrey_  # Audrey OFFERING the model
 ```
 
@@ -449,8 +449,8 @@ handle that a plain restart will not clear.
 
 ```bash
 echo 'DEBUG_RESEARCH_TRACE=1' >> .env
-docker compose up -d --force-recreate audrey-ai
-docker compose logs audrey-ai | grep "ENV OVERRIDE"     # confirm it landed
+docker compose up -d --force-recreate audrey
+docker compose logs audrey | grep "ENV OVERRIDE"     # confirm it landed
 ```
 
 | flag | what it adds | visible to |
@@ -468,7 +468,7 @@ If you must edit `config.yaml` instead, a force-recreate is mandatory:
 ```bash
 sed -i 's/^\(\s*\)debug_research_trace:.*/\1debug_research_trace: true/' config.yaml
 grep -n "debug_research_trace" config.yaml
-docker compose up -d --force-recreate audrey-ai
+docker compose up -d --force-recreate audrey
 ```
 
 ⚠️ `config.yaml` is also `COPY`d into the image, so anything the app reads at
@@ -481,22 +481,22 @@ recreate.
 
 ```bash
 # compaction: what the model was actually looking at
-docker compose logs audrey-ai | grep "context-trace:" | grep -E "ANSWERED|FINAL"
+docker compose logs audrey | grep "context-trace:" | grep -E "ANSWERED|FINAL"
 
 # a fast turn that was re-run through the deep panel (costs a 3-worker panel,
 # two of them cloud, while reporting itself as `fast`)
-docker compose logs audrey-ai | grep -c "escalate: fast→deep"
-docker compose logs audrey-ai | grep "escalate: fast→deep" | tail -20
+docker compose logs audrey | grep -c "escalate: fast→deep"
+docker compose logs audrey | grep "escalate: fast→deep" | tail -20
 
 # the catalogue guard fetching a file the model tried to describe unread
-docker compose logs audrey-ai | grep catalogue-guard
+docker compose logs audrey | grep catalogue-guard
 
 # a researcher naming an authority it never fetched ("Herodotus, Histories",
 # "Meta Llama 4 Family Announcement") — demoted so it can no longer make a
 # claim read as confident. Expect a handful per research run; ZERO means the
 # demotion is not deployed, not that the ledgers were clean.
-docker compose logs audrey-ai | grep -c "ledger: demoting url-less"
-docker compose logs audrey-ai | grep "ledger: demoting url-less" | tail -20
+docker compose logs audrey | grep -c "ledger: demoting url-less"
+docker compose logs audrey | grep "ledger: demoting url-less" | tail -20
 
 # the linkage shape of every structuring call. READ THE TRIPLE — it separates
 # two different faults that both end in unsourced claims:
@@ -513,7 +513,7 @@ docker compose logs audrey-ai | grep "ledger: demoting url-less" | tail -20
 #                                   CORRECT here; the fix is upstream.
 #   claims=N  linked=0  dangling=0  sources=0   found nothing — grounding, not
 #                                   linkage
-docker compose logs audrey-ai | grep "research: structured"
+docker compose logs audrey | grep "research: structured"
 
 # ▶▶ The same line now ends `catalogue=N dropped=D notes_only=M`. The catalogue
 # is the ONLY id authority since 2026-08-14, so these three read as:
@@ -531,24 +531,24 @@ docker compose logs audrey-ai | grep "research: structured"
 #                fetched. These are DROPPED, and M is the price of the trade.
 #                ⚠️ If M runs high the fix is a SECOND id namespace, never
 #                relaxing the single-authority rule.
-docker compose logs audrey-ai | grep -o "catalogue=[0-9]* dropped=[0-9]* notes_only=[0-9]*"
+docker compose logs audrey | grep -o "catalogue=[0-9]* dropped=[0-9]* notes_only=[0-9]*"
 
 # only the middle case above. ⚠️ Wants ZERO, and unlike the demotion grep a zero
 # here is meaningful on its own — the `research: structured` lines prove the
 # instrument is live.
-docker compose logs audrey-ai | grep -c "UNLINKED-LEDGER"
+docker compose logs audrey | grep -c "UNLINKED-LEDGER"
 
 # ⚠️ The one video shape that produces an authoritative summary built on almost
 # nothing: 0 transcript segments AND only 1-2 keyframe descriptions. Zero
 # instances so far — the case that prompted the check had 10 descriptions and was
 # fine — so this is a watch, not a known bug.
-docker compose logs audrey-ai | grep "summarise:" | grep "(0 segments"
+docker compose logs audrey | grep "summarise:" | grep "(0 segments"
 
 # which env overrides are actually live
-docker compose logs audrey-ai | grep "ENV OVERRIDE"
+docker compose logs audrey | grep "ENV OVERRIDE"
 
 # per-turn summary: task, confidence, mode, model, tool calls
-docker compose logs audrey-ai | grep "chat.completions model="
+docker compose logs audrey | grep "chat.completions model="
 ```
 
 ⚠️ The Unraid shell has **no python3** — use `jq` or plain `grep`, never pipe

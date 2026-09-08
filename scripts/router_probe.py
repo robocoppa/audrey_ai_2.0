@@ -42,17 +42,17 @@ rest.
 
 USAGE
 
-⚠️ The box has no `python3`, and the repo is not bind-mounted into `audrey-ai`
+⚠️ The box has no `python3`, and the repo is not bind-mounted into `audrey`
 — but that container has Python, the `audrey` package, and a route to Ollama:
 
-  docker cp scripts/router_probe.py audrey-ai:/tmp/rp.py
-  docker exec -e MODEL=qwen3:4b audrey-ai python3 /tmp/rp.py
+  docker cp scripts/router_probe.py audrey:/tmp/rp.py
+  docker exec -e MODEL=qwen3:4b audrey python3 /tmp/rp.py
 
   # compare candidates in one go
-  docker exec -e MODEL=qwen3:4b,some-small:3b audrey-ai python3 /tmp/rp.py
+  docker exec -e MODEL=qwen3:4b,some-small:3b audrey python3 /tmp/rp.py
 
   # the comparison that decides whether a SMALLER model is viable at all
-  docker exec -e MODEL=qwen3:4b -e BOTH=1 audrey-ai python3 /tmp/rp.py
+  docker exec -e MODEL=qwen3:4b -e BOTH=1 audrey python3 /tmp/rp.py
 
 Env:
   MODEL      comma-separated model tags to probe (required)
@@ -220,7 +220,7 @@ async def amain() -> int:
     except ImportError as e:
         return _fail(
             f"cannot import the audrey package ({e}) — run this INSIDE the "
-            "audrey-ai container, or from the repo root with the venv active"
+            "audrey container, or from the repo root with the venv active"
         )
 
     # ⚠️ `get_config()` resolves `AUDREY_CONFIG` relative to CWD and runs the

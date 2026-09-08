@@ -1155,7 +1155,7 @@ async def _drop_session(
 # segments differ, but the ordering makes that a property of the file rather
 # than a coincidence of naming.
 #
-# The download happens in NEITHER `audrey-ai` nor `media-worker`, and both
+# The download happens in NEITHER `audrey` nor `media-worker`, and both
 # exclusions are load-bearing rather than stylistic — see the phase 41 plan.
 # The short version: `media-worker` is on an `internal: true` network on
 # purpose, and giving it egress would restore its route to the host-published
@@ -1460,7 +1460,7 @@ class FetchClaim(BaseModel):
     #
     # Rides the claim for the same reason every other cap here does, and this
     # one earns it hardest: changing the list costs a `config.yaml` edit and an
-    # audrey-ai restart rather than a fetcher image rebuild per attempt.
+    # audrey restart rather than a fetcher image rebuild per attempt.
     extractor_args: list[str] = []
     # How many of them a single job may try. See `kb.fetch.max_client_attempts`
     # — 1 disables fallback entirely, which is a reasonable setting rather than

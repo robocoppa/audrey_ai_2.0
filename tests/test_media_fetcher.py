@@ -407,7 +407,7 @@ class TestLoop:
             fetcher.Stopping, "wait",
             lambda self, seconds, **_kw: (calls.append(seconds), setattr(self, "requested", True)),
         )
-        # A restart of audrey-ai is normal. The fetcher waits and polls again
+        # A restart of audrey is normal. The fetcher waits and polls again
         # rather than exiting into a restart loop.
         assert fetcher.run(endpoint="http://a", token=TOKEN, poll_seconds=7) == 0
         assert calls == [7]

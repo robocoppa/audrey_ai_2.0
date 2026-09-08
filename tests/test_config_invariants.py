@@ -376,9 +376,9 @@ class TestEvalOnboxWaitsForTheStack:
 
     def test_both_containers_the_harness_depends_on_are_gated(self):
         text = self._text()
-        # audrey-ai is what was late; open-webui is what the harness actually
+        # audrey is what was late; open-webui is what the harness actually
         # talks to, and it gets bounced whenever allowed_models changes.
-        assert "READY_CONTAINERS:-audrey-ai open-webui" in text
+        assert "READY_CONTAINERS:-audrey open-webui" in text
 
     def test_there_is_an_escape_hatch(self):
         # A gate with no bypass becomes the thing people delete.

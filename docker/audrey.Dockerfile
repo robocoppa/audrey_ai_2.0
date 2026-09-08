@@ -1,13 +1,13 @@
 # Audrey FastAPI orchestrator
 #
 # Build from the repo root:
-#   docker build -f docker/audrey.Dockerfile -t audrey-ai:latest .
+#   docker build -f docker/audrey.Dockerfile -t audrey:latest .
 #
 # Run locally:
 #   docker run --rm -p 8000:8000 \
 #     -e OLLAMA_HOST=http://host.docker.internal:11434 \
 #     -v $PWD/config.yaml:/app/config.yaml:ro \
-#     audrey-ai:latest
+#     audrey:latest
 
 # Transitional rollback: Compile the browser client into the backend image for
 # one release while production traffic moves to the standalone audrey-ui image.
@@ -66,7 +66,7 @@ COPY README.md  /app/README.md
 COPY src/audrey /app/src/audrey
 # Transitional rollback copy. The public native UI now has its own container,
 # but one release keeps the embedded shell so changing the tunnel origin back
-# to audrey-ai:8000 remains an immediate rollback.
+# to audrey:8000 remains an immediate rollback.
 COPY --from=web-build /workspace/web/dist /app/src/audrey/static/app
 RUN uv sync --locked --no-dev --package audrey --no-editable --no-cache
 RUN python -c "from importlib.resources import files; assert files('audrey').joinpath('static/app/index.html').is_file()"

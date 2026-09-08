@@ -39,7 +39,7 @@ _PAGE = {
 
 def _client(handler) -> httpx.AsyncClient:
     return httpx.AsyncClient(
-        transport=httpx.MockTransport(handler), base_url="http://audrey-ai:8000",
+        transport=httpx.MockTransport(handler), base_url="http://audrey:8000",
     )
 
 

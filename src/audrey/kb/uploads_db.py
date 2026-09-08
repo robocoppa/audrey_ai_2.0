@@ -461,7 +461,7 @@ class UploadsDB:
         # default. Every one of `_UPLOADS_ADDED_COLUMNS` is absent from this
         # statement, and `reconcile_with_qdrant` calls this for every user file
         # on every boot — which meant a processed video lost its `summary` and
-        # its `duration_s` at the next restart of `audrey-ai`, with no error
+        # its `duration_s` at the next restart of `audrey`, with no error
         # and nothing in the log. Measured, not theorised: a row completed with
         # a 1,257-character summary came back empty after one reconcile pass.
         #

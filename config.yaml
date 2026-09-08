@@ -343,7 +343,7 @@ deep_panel_cloud:
     # `MAX_DEEP_WORKERS_CLOUD` is 3, confirmed from the `ENV OVERRIDE` log line.
     # The likely cause was simply that this edit was not yet in the running
     # image. ▶ LESSON: `config.yaml` is not evidence of what is deployed; read
-    # `docker logs audrey-ai | grep "ENV OVERRIDE"` before diagnosing a missing
+    # `docker logs audrey | grep "ENV OVERRIDE"` before diagnosing a missing
     # draft, and check for a `deep_panel: DROPPING cloud worker` warning, which
     # now fires whenever the cap really is the reason.
     # ⚠️⚠️ THREE cloud workers sits EXACTLY ON the cap of 3. A fourth is dropped
@@ -1045,7 +1045,7 @@ kb:
     session_ttl_minutes: 120             # abandoned part dirs swept after this
 
   # Phase 33: the media-worker job lifecycle. A video uploads to
-  # `status='pending'` and nothing in audrey-ai will ever read it — extraction
+  # `status='pending'` and nothing in audrey will ever read it — extraction
   # is minutes of CPU and GPU and cannot live in a request. A separate worker
   # leases the row, does the work, and posts the result back over the service
   # token. Audrey stays the only writer of uploads.sqlite.
@@ -1286,7 +1286,7 @@ kb:
     # remembered YouTube client as the steady-state default; that duplicates
     # yt-dlp's maintenance policy in a file that changes much less often.
     #
-    # A changed extractor arg rides the next claim after recreating audrey-ai.
+    # A changed extractor arg rides the next claim after recreating audrey.
     # A new yt-dlp pin requires rebuilding media-fetcher.
     extractor_args:
       - ""
@@ -1527,7 +1527,7 @@ passthrough:
     # ⚠️ ADDING A NAME HERE IS A TWO-CONTAINER CHANGE. `allowed_models` feeds
     # `/v1/models`, but OWUI reads that list ONCE and holds it, and the eval
     # harness talks to OWUI, never to Audrey directly. So this needs
-    # `up -d --build audrey-ai` AND `docker restart open-webui`. Skipping the
+    # `up -d --build audrey` AND `docker restart open-webui`. Skipping the
     # second one fails every case with `HTTP 400 {"detail":"Model not found"}`
     # — OWUI's string, which appears nowhere in `src/`, and which looks exactly
     # like a bad model name (2026-08-18, the whole laguna-s run).
@@ -1635,7 +1635,7 @@ passthrough:
     # directly. Batch image work (Phase 36 media-worker keyframe description)
     # reaches the GPU through passthrough precisely so both fair-scheduling
     # layers still fire — a sidecar calling Ollama itself would contend behind
-    # FairLocalGate's back, since the gate is in-process to audrey-ai.
+    # FairLocalGate's back, since the gate is in-process to audrey.
     # These are the only entries here that receive pixels rather than prose:
     # an image turn to a vl target forwards untouched, with no transcription
     # hop (`test_image_to_vision_capable_model_is_forwarded_untouched`).

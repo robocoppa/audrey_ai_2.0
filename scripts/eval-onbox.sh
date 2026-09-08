@@ -84,7 +84,7 @@ LABEL="${LABEL:-${MODEL}}"
 # against `docker logs` meant doing the arithmetic every time. Asking the
 # container what time it is needs no hardcoded zone and cannot drift if either
 # clock is changed later. Falls back to the host clock, loudly, if it is down.
-STAMP_FROM="${STAMP_FROM:-audrey-ai}"
+STAMP_FROM="${STAMP_FROM:-audrey}"
 STAMP="$(docker exec "${STAMP_FROM}" date +%F-%H%M%S 2>/dev/null || true)"
 if [[ -z "${STAMP}" ]]; then
   STAMP="$(date +%F-%H%M%S)"
@@ -115,7 +115,7 @@ fi
 # its own upstream payload and drops unknown body fields. The harness refuses
 # (exit 2) rather than record an arm it did not actually send, so setting THINK
 # without this would simply fail. The eval container is on `ollama-net`
-# alongside `audrey-ai`, and the `sk-` OWUI key authenticates against Audrey
+# alongside `audrey`, and the `sk-` OWUI key authenticates against Audrey
 # (verified 2026-08-19: /v1/models → 200), so direct is reachable here even
 # though Audrey's :8000 is not published to the LAN.
 #
@@ -126,7 +126,7 @@ fi
 #   THINK=on CASES=eval_prompts_models_ab.json MODELS='...' scripts/eval-onbox.sh
 THINK_ARGS=()
 if [[ -n "${THINK:-}" ]]; then
-  THINK_ARGS=(--think "${THINK}" --base-url "${DIRECT_URL:-http://audrey-ai:8000/v1}")
+  THINK_ARGS=(--think "${THINK}" --base-url "${DIRECT_URL:-http://audrey:8000/v1}")
 fi
 
 # ARGS forwards extra harness flags verbatim. Added 2026-08-12: without it
@@ -170,7 +170,7 @@ mkdir -p "${OUT_DIR}"; chmod 700 "${OUT_DIR}"
 
 # ── wait for the stack to be READY, not merely started ──────────────────────
 # ⚠️ A CONTAINER THAT IS `Up` IS NOT A CONTAINER THAT IS LISTENING. On
-# 2026-08-18 a run launched seconds after `up -d --force-recreate audrey-ai`
+# 2026-08-18 a run launched seconds after `up -d --force-recreate audrey`
 # fired all twelve cases at 14:50:32 while uvicorn finished binding at
 # 14:50:33.9. Every case returned `HTTP 400 {"detail":"Open WebUI: Server
 # Connection Error"}` and the answers file led with **"12 cases, 0 passed"** —
@@ -180,12 +180,12 @@ mkdir -p "${OUT_DIR}"; chmod 700 "${OUT_DIR}"
 # ⚠️ The STAMP step above does NOT cover this. `docker exec … date` succeeds the
 # instant the container starts, which is why the run was stamped 14:50:32 and
 # still had nothing to talk to.
-# Both containers are gated, for different reasons: `audrey-ai` is what was late
+# Both containers are gated, for different reasons: `audrey` is what was late
 # here, and `open-webui` is what the harness actually talks to — an
 # `allowed_models` change requires bouncing it, so it is routinely restarted
 # moments before a run.
 READY_TIMEOUT="${READY_TIMEOUT:-180}"
-READY_CONTAINERS="${READY_CONTAINERS:-audrey-ai open-webui}"
+READY_CONTAINERS="${READY_CONTAINERS:-audrey open-webui}"
 
 wait_ready() {
   local name="$1" deadline=$(( SECONDS + READY_TIMEOUT )) state health

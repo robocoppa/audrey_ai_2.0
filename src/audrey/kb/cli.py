@@ -13,7 +13,7 @@ uploaded file path would no-op on the global collections and leave the
 per-user data alone.
 
 If no paths are given, falls back to `kb.dataset_paths` from config. Run
-inside the audrey-ai container where Qdrant + Ollama are reachable.
+inside the audrey container where Qdrant + Ollama are reachable.
 """
 
 from __future__ import annotations

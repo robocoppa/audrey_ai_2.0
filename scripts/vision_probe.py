@@ -49,15 +49,15 @@ reading them is not.
 ## Running it
 
 The worker cannot reach Ollama (its compose network is `internal: true`, by
-design), so this runs inside `audrey-ai`, the only container on both networks.
+design), so this runs inside `audrey`, the only container on both networks.
 Fed over stdin so no rebuild is needed:
 
     # Unraid box
     docker exec -i -e IMAGES=/tmp/a.jpg,/tmp/b.jpg \
       -e EXPECT='a.jpg:ACOM TECHNOLOGIES;b.jpg:enertec' \
-      audrey-ai python3 - < scripts/vision_probe.py
+      audrey python3 - < scripts/vision_probe.py
 
-Extracting frames is two steps, because `audrey-ai` has no ffmpeg (the whole
+Extracting frames is two steps, because `audrey` has no ffmpeg (the whole
 reason the sidecar exists) and the worker deletes its frames when a job ends:
 
     # Unraid box
@@ -65,7 +65,7 @@ reason the sidecar exists) and the worker deletes its frames when a job ends:
       'ffmpeg -loglevel error -ss 30 -i /data/uploads/<user>/<file_id>.mp4 \
          -frames:v 1 -vf scale=1280:-2 -q:v 3 /tmp/a.jpg'
     docker cp media-worker:/tmp/a.jpg /tmp/a.jpg
-    docker cp /tmp/a.jpg audrey-ai:/tmp/a.jpg
+    docker cp /tmp/a.jpg audrey:/tmp/a.jpg
 
 **Use more than two images, and make them different in kind.** Thinking varied
 7x between a talking head and a cluttered desk, so a conclusion drawn from one
@@ -548,7 +548,7 @@ def main() -> int:
         print(
             f"WARNING: {degenerate} are IDENTICAL to `current` in this image.\n"
             "         The deployed KEYFRAME_SYSTEM is not the one these "
-            "variants were derived\n         from — rebuild audrey-ai, or "
+            "variants were derived\n         from — rebuild audrey, or "
             "these comparisons measure nothing.\n"
         )
 

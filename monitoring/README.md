@@ -10,7 +10,7 @@ deployment.
 monitoring/
 ├── compose.yaml                              # prometheus + grafana services
 ├── config/
-│   └── prometheus.yml                        # scrape config (audrey-ai + self-scrape)
+│   └── prometheus.yml                        # scrape config (audrey + self-scrape)
 ├── prometheus-rules/
 │   └── audrey.yml                            # 4 alert rules (Phase 22)
 ├── grafana/
@@ -43,7 +43,7 @@ docker compose logs -f --tail 20
 ```
 
 The containers join `ollama-net` (external network owned by the audrey
-compose) so Prometheus can resolve `audrey-ai:8000` for scrapes.
+compose) so Prometheus can resolve `audrey:8000` for scrapes.
 
 ## URLs
 
@@ -132,7 +132,7 @@ AudreyToolCallLatencyP95, AudreyCloudModelErrorRate).
 
 ## Why split from `audrey_ai_2.0/compose.yaml`?
 
-Audrey rebuilds frequently (`docker compose up -d --build audrey-ai`
+Audrey rebuilds frequently (`docker compose up -d --build audrey`
 every code change). Prometheus and Grafana are set-and-forget. Mixing
 them means a typo in audrey's image build would risk metrics/dashboard
 downtime. Two compose files, one network — clean separation.

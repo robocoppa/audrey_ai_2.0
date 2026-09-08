@@ -1,7 +1,7 @@
 """The two things every media sidecar needs (Phase 41).
 
 `media-worker` (phase 34) and `media-fetcher` (phase 41) are the same shape: a
-container with no listening socket that polls audrey-ai for a lease, does one
+container with no listening socket that polls audrey for a lease, does one
 long CPU-or-network-bound job, and posts the outcome back. They differ entirely
 in what happens in the middle.
 
@@ -34,7 +34,7 @@ from types import FrameType
 
 log = logging.getLogger("media-sidecar")
 
-DEFAULT_ENDPOINT = "http://audrey-ai:8000"
+DEFAULT_ENDPOINT = "http://audrey:8000"
 DEFAULT_POLL_SECONDS = 10
 HTTP_TIMEOUT_S = 60
 

@@ -8,9 +8,9 @@
 # Every probe in scripts/ has the same three problems on this box:
 #
 #   1. ⚠️ **Unraid has no `python3`.** A probe cannot run on the host at all.
-#      It has to run inside `audrey-ai`, which has Python, the `audrey`
+#      It has to run inside `audrey`, which has Python, the `audrey`
 #      package, and a route to Ollama over the compose network.
-#   2. ⚠️ **The repo is NOT bind-mounted into `audrey-ai`** — only
+#   2. ⚠️ **The repo is NOT bind-mounted into `audrey`** — only
 #      `config.yaml`, `/data` and `/datasets`. So the probe has to be copied in
 #      before it can run.
 #   3. ⚠️ **A probe outlives the SSH session, and used not to.** Long runs died
@@ -52,7 +52,7 @@
 set -uo pipefail
 
 APPDATA="${APPDATA:-/mnt/user/appdata/audrey_ai_2.0}"
-CONTAINER="${CONTAINER:-audrey-ai}"
+CONTAINER="${CONTAINER:-audrey}"
 OUT_DIR="${OUT_DIR:-${APPDATA}/testing-out/probes}"
 WATCHDOG_ENV="${WATCHDOG_ENV:-/mnt/user/appdata/fleet-watchdog/.env}"
 

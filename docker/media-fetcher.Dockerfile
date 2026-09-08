@@ -6,7 +6,7 @@
 # The third container, and the only one with internet egress. That is the whole
 # reason it exists: `media-worker` is on an `internal: true` network on purpose
 # (Phase 34), and giving it egress would restore its route to the ollama port
-# published on the host — undoing the fairness invariant by topology. `audrey-ai`
+# published on the host — undoing the fairness invariant by topology. `audrey`
 # could download, but a multi-minute transfer has no business occupying the API
 # container, and yt-dlp needs updating whenever YouTube changes something, which
 # would couple that cadence to rebuilding the API image.

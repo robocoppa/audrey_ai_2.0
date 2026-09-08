@@ -376,7 +376,7 @@ Audrey browser origin
   +-- same-origin /api/* and /v1/* streaming proxy
         |
         v
-      audrey-ai
+      audrey
   +-- /api/* native resources
   +-- /api/agent AG-UI event stream
   +-- /v1/* OpenAI compatibility adapters
@@ -735,7 +735,7 @@ leaves an unprotected Audrey hostname. In Cloudflare Zero Trust, create a
 self-hosted public-hostname application for the whole Audrey hostname, with no
 path restriction, and attach an Allow policy for the intended human identities.
 Email one-time PIN is sufficient for this gate. Then add a published application
-route for the same hostname. Use `http://audrey-ai:8000` when `cloudflared`
+route for the same hostname. Use `http://audrey:8000` when `cloudflared`
 shares `ollama-net`; use `http://127.0.0.1:8000` when its container uses host
 networking. Cloudflare documents both the
 [self-hosted application flow](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)
@@ -743,7 +743,7 @@ and the [tunnel route](https://developers.cloudflare.com/tunnel/setup/).
 
 Copy the application's Audience (AUD) tag and the account team domain into
 `CLOUDFLARE_ACCESS_AUDIENCE` and `CLOUDFLARE_ACCESS_TEAM_DOMAIN`, enable
-`CLOUDFLARE_ACCESS_ENABLED`, and recreate `audrey-ai`. Do not store an Access
+`CLOUDFLARE_ACCESS_ENABLED`, and recreate `audrey`. Do not store an Access
 JWT in `.env`. Audrey validates the `Cf-Access-Jwt-Assertion` header Cloudflare
 adds at the origin, following Cloudflare's
 [JWT validation contract](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/validating-json/).
@@ -839,16 +839,17 @@ Unraid browser smoke.
 The frontend deployment boundary is now laptop-complete. `web/` owns its model
 artwork, production output, Dockerfile, and proxy template without reading or
 writing outside that directory. A pinned, non-root NGINX runtime serves the SPA
-and forwards `/api/*` and `/v1/*` to `audrey-ai` on `ollama-net`, including the
+and forwards `/api/*` and `/v1/*` to `audrey` on `ollama-net`, including the
 Cloudflare Access assertion, unbuffered SSE, and streamed upload bodies. Compose
-publishes the UI only on loopback port 8088 for the host-network tunnel. The
+publishes the UI only on loopback port 8090 for the host-network tunnel; 8088
+remains assigned to SearXNG. The
 backend image keeps an embedded copy for one transition release; after the live
 soak, the frontend can move intact to its own GitHub repository before that
 fallback is removed. See the
 [standalone UI deployment runbook](phase-02-standalone-ui-deploy.md).
 
 Rollback removes or disables the public tunnel route first, then disables the
-Audrey Access flag and recreates `audrey-ai`. Disabling the Access application
+Audrey Access flag and recreates `audrey`. Disabling the Access application
 while leaving its tunnel route public is not a safe rollback.
 
 ### Milestone 2D — files, preferences, and ownership operations

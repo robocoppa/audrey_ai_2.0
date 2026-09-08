@@ -59,7 +59,7 @@ USAGE
   scripts/probe-onbox.sh draft_shape_probe.py MODEL=nemotron-3.5-lightning:latest \
       N=5 COPY=eval_prompts_code_hard.json
 
-⚠️ `COPY=` is not optional. The repo is not mounted into `audrey-ai`, so the
+⚠️ `COPY=` is not optional. The repo is not mounted into `audrey`, so the
 cases file is absent without it and the probe exits before calling anything.
 
   MODEL    required — the model to probe
@@ -99,7 +99,7 @@ OLLAMA = os.environ.get("OLLAMA_HOST", "http://ollama:11434")
 def _load_prompt() -> str:
     """Find the case prompt, or say exactly how to supply it.
 
-    ⚠️ `probe-onbox.sh` copies the PROBE into `audrey-ai` and nothing else —
+    ⚠️ `probe-onbox.sh` copies the PROBE into `audrey` and nothing else —
     the repo is not bind-mounted there, so the cases file has to arrive under
     its own power. Rather than carry a stale copy of the prompt (which would
     drift from the suite silently and make every result a lie), this looks for

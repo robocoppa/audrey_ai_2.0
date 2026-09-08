@@ -16,10 +16,10 @@ and returns per-hit scores. Run it ON THE BOX (ollama-net DNS resolves there).
 As of the 2026-07-18 security review, Audrey's `:8000` is NOT published to the
 host, so the old `http://192.168.1.11:8000` over-the-LAN form no longer works —
 run from a container on ollama-net, or tunnel `:8000` from the laptop first
-(`ssh -N -L 8000:audrey-ai:8000 <unraid>` then KB_PROBE_BASE_URL=http://localhost:8000).
+(`ssh -N -L 8000:audrey:8000 <unraid>` then KB_PROBE_BASE_URL=http://localhost:8000).
 
 USAGE (on the box, on ollama-net):
-    # default: http://audrey-ai:8000 (internal name) or set --base-url
+    # default: http://audrey:8000 (internal name) or set --base-url
     python3 scripts/kb_score_probe.py
     KB_PROBE_BASE_URL=http://localhost:8000 python3 scripts/kb_score_probe.py  # via tunnel
     python3 scripts/kb_score_probe.py --queries scripts/kb_probe_queries.json --top-k 5
@@ -45,7 +45,7 @@ except ImportError:  # pragma: no cover - runtime guard, mirrors eval_research
     raise SystemExit(2) from None
 
 DEFAULT_QUERIES = Path(__file__).with_name("kb_probe_queries.json")
-DEFAULT_BASE_URL = os.environ.get("KB_PROBE_BASE_URL", "http://audrey-ai:8000")
+DEFAULT_BASE_URL = os.environ.get("KB_PROBE_BASE_URL", "http://audrey:8000")
 
 
 def _top_score(base_url: str, query: str, top_k: int, timeout_s: float) -> tuple[float | None, str]:

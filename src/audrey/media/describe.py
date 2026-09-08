@@ -1,11 +1,11 @@
 """The worker's side of the keyframe describe call (Phase 36).
 
 Sampling and thinning happen in [`frames.py`](frames.py); this turns what
-survives into prose by asking `audrey-ai` for it, one frame at a time.
+survives into prose by asking `audrey` for it, one frame at a time.
 
 ## Why it goes through Audrey rather than straight to Ollama
 
-`FairLocalGate` is in-process to `audrey-ai`. A worker calling Ollama directly
+`FairLocalGate` is in-process to `audrey`. A worker calling Ollama directly
 would share no gate at all and would contend with live chat at the Ollama
 level with no fairness whatsoever — a long ingest would simply starve the box.
 The worker's compose network is `internal: true` precisely so this cannot be

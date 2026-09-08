@@ -19,7 +19,7 @@ Configured by environment, not `config.yaml`: a sidecar that parses the app's
 config file needs the file mounted and a YAML parser, and gains nothing — none
 of the orchestrator's settings apply to it.
 
-    AUDREY_ENDPOINT      default http://audrey-ai:8000
+    AUDREY_ENDPOINT      default http://audrey:8000
     KB_SERVICE_TOKEN     required
     POLL_SECONDS         default 10
     WORK_DIR             default /tmp/media-worker
@@ -82,7 +82,7 @@ log = logging.getLogger("media-worker")
 #: it here would make the worker fail at start over a three-word constant.
 WHISPER_SOURCE = "whisper"
 
-# A transcript for a long video is a large POST. It goes to audrey-ai directly
+# A transcript for a long video is a large POST. It goes to audrey directly
 # over the compose network, not through cloudflared, so the 100 MB edge cap
 # that shaped Phase 32 does not apply here — but a slow read on a big body
 # still shouldn't look like a hung worker.

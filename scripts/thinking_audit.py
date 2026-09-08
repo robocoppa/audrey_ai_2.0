@@ -61,10 +61,10 @@ and runs anywhere:
     uv run python scripts/thinking_audit.py
 
 The capability column needs Ollama, so the full report runs on the box.
-`audrey-ai` reaches it over `ollama-net`; fed on stdin, so no rebuild:
+`audrey` reaches it over `ollama-net`; fed on stdin, so no rebuild:
 
     # Unraid box, from /mnt/user/appdata/audrey_ai_2.0
-    docker exec -i audrey-ai python3 - < scripts/thinking_audit.py
+    docker exec -i audrey python3 - < scripts/thinking_audit.py
 
 Environment:
 
@@ -110,7 +110,7 @@ def _find_config() -> Path:
 
     ⚠️ **`__file__` alone is wrong here, and it failed on the box 2026-08-06.**
     The documented way to run this is
-    `docker exec -i audrey-ai python3 - < scripts/thinking_audit.py`, which
+    `docker exec -i audrey python3 - < scripts/thinking_audit.py`, which
     feeds the source in on stdin — so `__file__` is the literal string
     `<stdin>`, `Path("<stdin>").resolve().parent.parent` is `/`, and the script
     exits with `config not found: /config.yaml`. The invocation in its own
@@ -138,7 +138,7 @@ def _load(path: Path) -> dict:
     try:
         import yaml
     except ImportError:  # pragma: no cover - only when run outside the venv
-        sys.exit("PyYAML is not importable here; run inside audrey-ai or `uv run`.")
+        sys.exit("PyYAML is not importable here; run inside audrey or `uv run`.")
     with path.open(encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
@@ -244,7 +244,7 @@ def main() -> int:
     unreachable = sum(1 for v in caps.values() if v[0] == "?")
     if unreachable == len(caps):
         print("!! Ollama unreachable — capability column is unknown, roles below are still valid.")
-        print("!! Re-run on the box: docker exec -i audrey-ai python3 - < scripts/thinking_audit.py\n")
+        print("!! Re-run on the box: docker exec -i audrey python3 - < scripts/thinking_audit.py\n")
 
     by_stance: dict[str, dict[str, set[str]]] = {}
     for model, places in uses.items():

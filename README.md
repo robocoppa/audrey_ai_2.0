@@ -45,7 +45,7 @@ classify → route → tool-call → reflect pipeline.
 ## High-level architecture
 
 ```
-Browser ──[Cloudflare Access + Tunnel]──> audrey-ui ──> audrey-ai ──> Ollama
+Browser ──[Cloudflare Access + Tunnel]──> audrey-ui ──> audrey ──> Ollama
                                                   │          │       local + cloud
                                                   │          ├─> custom-tools
                                                   │          ├─> Qdrant
@@ -53,7 +53,7 @@ Browser ──[Cloudflare Access + Tunnel]──> audrey-ui ──> audrey-ai �
                                                   │
                                                   └─ same-origin /api and /v1 proxy
 
-Open WebUI / API clients ────────────────────────────────────> audrey-ai /v1
+Open WebUI / API clients ────────────────────────────────────> audrey /v1
 
                          + Prometheus + Grafana (metrics + alerts,
                            dashboards provisioned from monitoring/)
@@ -184,14 +184,14 @@ uv run audrey-ingest --source /path/to/docs --topic geology
 src/audrey/         # orchestrator package (FastAPI + LangGraph)
 tools-server/       # custom-tools FastAPI service (separate package)
 tests/              # pytest suite — hermetic, no Ollama/Qdrant needed
-docker/             # Dockerfiles (audrey-ai + custom-tools, base images pinned to digest)
+docker/             # Dockerfiles (audrey + custom-tools, base images pinned to digest)
 monitoring/         # prometheus + grafana compose, scrape config, alert rules, provisioned dashboards
 docs/               # campaign histories, lessons, deploy guides
 images/             # screenshots used by docs
 scripts/            # model-pull, smoke tests, lesson-cite link checker
 config.yaml         # model registry, fast_path, deep_panel*, fairness, KB, reconcile
 .env.example        # BRAVE_API_KEY, GRAFANA_ADMIN_PASSWORD, etc.
-compose.yaml        # audrey-ai + custom-tools (ollama/qdrant/owui stay on Unraid UI)
+compose.yaml        # Audrey backend, standalone UI, tools, and media sidecars
 AGENTS.md           # canonical agent guide
 ```
 

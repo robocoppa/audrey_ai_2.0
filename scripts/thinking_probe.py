@@ -50,11 +50,11 @@ in the content-length column.
 
 ## Running it
 
-Needs Ollama, so it runs on the box. `audrey-ai` reaches it over `ollama-net`;
+Needs Ollama, so it runs on the box. `audrey` reaches it over `ollama-net`;
 fed on stdin, so no rebuild is needed:
 
     # Unraid box, from /mnt/user/appdata/audrey_ai_2.0
-    docker exec -i -e MODEL=qwen3.8:latest audrey-ai python3 - < scripts/thinking_probe.py
+    docker exec -i -e MODEL=qwen3.8:latest audrey python3 - < scripts/thinking_probe.py
 
 **Run it on a prompt like the role you are deciding about.** Reasoning scales
 with how much work the question is, so a probe on "what is 2+2" says nothing

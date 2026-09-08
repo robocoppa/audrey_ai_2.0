@@ -94,7 +94,7 @@ from pathlib import Path
 # Audrey's own loader + tokenizer — same code path as ingest.
 # Resolve `audrey.*` from one of:
 #   - the repo checkout's `src/` (running on the laptop / dev box)
-#   - the container's `/app` (running inside audrey-ai via `docker exec`,
+#   - the container's `/app` (running inside audrey via `docker exec`,
 #     where the audrey package is installed system-wide and `/app` is
 #     the PYTHONPATH)
 # Falls through to a plain `import` if neither path-insert helps —

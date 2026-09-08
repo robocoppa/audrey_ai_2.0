@@ -114,7 +114,7 @@ shipped. Use the groupings below for navigation.
 - [29 web_fetch page-opener](campaign-2/phase-29-web-fetch-page-opener.md)
 - [30 web_fetch SSRF hardening](campaign-2/phase-30-web-fetch-ssrf-hardening.md)
 - [31 KB query auth](campaign-2/phase-31-kb-query-auth.md) — authentication on
-  the query routes, which is what made publishing `audrey-ai:8000` to the LAN
+  the query routes, which is what made publishing `audrey:8000` to the LAN
   safe.
 
 **Video ingest (32–38)** — one pipeline built in slices; each phase is
@@ -180,7 +180,7 @@ There is no Phase 24 in Campaign 2.
 - [phase-1-deploy.md](campaign-1/phase-1-deploy.md) — Ollama clean recreation
 - [phase-2-deploy.md](campaign-1/phase-2-deploy.md) — custom-tools + Brave API
 - [phase-3-deploy.md](campaign-1/phase-3-deploy.md) — Qdrant container
-- [phase-4-deploy.md](campaign-1/phase-4-deploy.md) — audrey-ai pass-through
+- [phase-4-deploy.md](campaign-1/phase-4-deploy.md) — audrey pass-through
 - [phase-5-deploy.md](campaign-1/phase-5-deploy.md) — model registry + health tracker
 - [phase-6-deploy.md](campaign-1/phase-6-deploy.md) — fast-path + deep-panel routing
 - [phase-7-deploy.md](campaign-1/phase-7-deploy.md) — streaming responses

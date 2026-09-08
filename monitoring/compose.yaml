@@ -11,7 +11,7 @@
 # alert rules).
 #
 # Joins the existing `ollama-net` network so prometheus can resolve
-# `audrey-ai:8000` for scrapes.
+# `audrey:8000` for scrapes.
 ###
 
 services:

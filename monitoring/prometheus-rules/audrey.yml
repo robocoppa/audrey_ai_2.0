@@ -38,7 +38,7 @@ groups:
           description: |
             {{ $value | humanizePercentage }} of audrey pipeline requests
             are erroring over the last 10 minutes. Check
-            `docker logs audrey-ai` for recent OllamaError or stream_truncated
+            `docker logs audrey` for recent OllamaError or stream_truncated
             entries.
 
       # ─── Tool call error rate (Phase 22 instrumentation) ───────────

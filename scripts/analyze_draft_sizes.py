@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Analyze production synth-draft sizes from audrey-ai logs.
+"""Analyze production synth-draft sizes from audrey logs.
 
 WHY
 
@@ -43,13 +43,13 @@ USAGE
   # the moment), then `>` moves stdout to the file — and docker writes the
   # container log to stderr. The pipe form below is fine, because the pipe
   # is already stdout by the time `2>&1` is evaluated.
-  docker logs audrey-ai > /tmp/audrey.log 2>&1
+  docker logs audrey > /tmp/audrey.log 2>&1
 
   # Then analyze:
   python3 scripts/analyze_draft_sizes.py /tmp/audrey.log
 
   # Read from stdin:
-  docker logs audrey-ai 2>&1 | python3 scripts/analyze_draft_sizes.py -
+  docker logs audrey 2>&1 | python3 scripts/analyze_draft_sizes.py -
 
   # JSON output:
   python3 scripts/analyze_draft_sizes.py /tmp/audrey.log --json
@@ -193,7 +193,7 @@ def _report_human(stats: Stats) -> None:
         print("\nNo synth_draft_sizes records found.")
         print("Check that:")
         print("  - The instrumentation patch is deployed (Phase 12).")
-        print("  - The log file actually contains audrey-ai's stdout/stderr.")
+        print("  - The log file actually contains audrey's stdout/stderr.")
         print("  - You've had at least one deep request since deploy.")
         return
     print(f"\nSynth-draft size analysis - {stats.records} synth calls")
@@ -259,11 +259,11 @@ def _report_json(stats: Stats) -> None:
 
 def main() -> int:
     p = argparse.ArgumentParser(
-        description="Analyze synth_draft_sizes log lines from audrey-ai.",
+        description="Analyze synth_draft_sizes log lines from audrey.",
     )
     p.add_argument(
         "logfile", type=str,
-        help="Path to the audrey-ai log file. Use '-' to read from stdin.",
+        help="Path to the audrey log file. Use '-' to read from stdin.",
     )
     p.add_argument(
         "--since", type=str, default=None,

@@ -27,7 +27,7 @@ proxy `/api` and `/v1` to the Audrey backend configured in `vite.config.ts`.
 
 The image accepts two runtime settings:
 
-- `AUDREY_UPSTREAM`, normally `http://audrey-ai:8000` on `ollama-net`;
+- `AUDREY_UPSTREAM`, normally `http://audrey:8000` on `ollama-net`;
 - `AUDREY_UI_MAX_BODY_SIZE`, normally `110m`, which must accommodate Audrey's
   configured upload limit.
 

@@ -35,12 +35,12 @@ roles inside it are not.
 USAGE
 
 ⚠️ The Unraid box has no `python3`, and the repo is not bind-mounted into
-`audrey-ai` — but that container has Python and can reach Ollama over the
+`audrey` — but that container has Python and can reach Ollama over the
 compose network. So:
 
-  docker cp config.yaml audrey-ai:/tmp/cfg.yaml
-  docker cp scripts/check_model_inventory.py audrey-ai:/tmp/cmi.py
-  docker exec audrey-ai python3 /tmp/cmi.py --config /tmp/cfg.yaml \\
+  docker cp config.yaml audrey:/tmp/cfg.yaml
+  docker cp scripts/check_model_inventory.py audrey:/tmp/cmi.py
+  docker exec audrey python3 /tmp/cmi.py --config /tmp/cfg.yaml \\
       --tags-url http://ollama:11434
 
 Or, with no network access at all, paste `ollama list` output in:

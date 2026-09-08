@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Count what `audrey_auto` escalation actually costs, from audrey-ai logs.
+"""Count what `audrey_auto` escalation actually costs, from audrey logs.
 
 WHY
 
@@ -68,7 +68,7 @@ this script on the box fails with `command not found`. Two ways round it.
   # writes container logs to stderr, so they land on screen instead. Put the
   # file redirect FIRST. (In the pipe form, `2>&1 |` is correct — the pipe is
   # already stdout when `2>&1` is evaluated.)
-  docker logs audrey-ai > /tmp/audrey.log 2>&1
+  docker logs audrey > /tmp/audrey.log 2>&1
   grep -c 'complexity: .* -> fast'  /tmp/audrey.log   # denominator
   grep -c 'escalate: fast'          /tmp/audrey.log   # numerator
   grep -c 'deep_panel: pool='       /tmp/audrey.log   # panels run
@@ -76,9 +76,9 @@ this script on the box fails with `command not found`. Two ways round it.
   # B) Full report — run it INSIDE the container, which has Python. The repo
   #    is not bind-mounted there (only config.yaml, /data, /datasets), so the
   #    script has to be copied in.
-  docker cp scripts/analyze_escalations.py audrey-ai:/tmp/ae.py
-  docker cp /tmp/audrey.log audrey-ai:/tmp/audrey.log
-  docker exec audrey-ai python3 /tmp/ae.py /tmp/audrey.log --config /app/config.yaml
+  docker cp scripts/analyze_escalations.py audrey:/tmp/ae.py
+  docker cp /tmp/audrey.log audrey:/tmp/audrey.log
+  docker exec audrey python3 /tmp/ae.py /tmp/audrey.log --config /app/config.yaml
 
   # On the laptop, against a log dump copied off the box:
   python3 scripts/analyze_escalations.py /tmp/audrey.log --since 2026-08-15
