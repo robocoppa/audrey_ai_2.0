@@ -142,6 +142,12 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
     /builtryte-mark/,
   );
   await expect(page.getByRole("heading", { name: "Browser smoke" })).toBeVisible();
+  await expect(page.locator(".brand-product")).toHaveText("Ask Audrey");
+  await expect.poll(
+    () => page.locator(".brand-product").evaluate(
+      (element) => Number.parseFloat(getComputedStyle(element).fontSize),
+    ),
+  ).toBeGreaterThanOrEqual(16);
   await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue("fast");
   await expect(page.getByRole("option", { name: "Video" })).toHaveCount(1);
   await expect(page.getByLabel("Signed in user")).toContainText("Alice");
@@ -154,15 +160,24 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect.poll(() => portrait.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   await expect(page.getByText("Quick, direct answers for everyday questions and tasks.")).toBeVisible();
   await expect(page.locator(".model-picker-copy")).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Ask Audrey", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Ask Audrey", exact: true })).toHaveCount(0);
   await expect(page.getByText("The server will load this conversation's canonical history.")).toHaveCount(0);
   const portraitBox = await portrait.boundingBox();
+  const pickerBox = await page.getByRole("combobox", { name: "Audrey model" }).boundingBox();
   const composerBox = await page.locator(".composer").boundingBox();
   const viewport = page.viewportSize();
   expect(portraitBox).not.toBeNull();
+  expect(pickerBox).not.toBeNull();
   expect(composerBox).not.toBeNull();
   expect(viewport).not.toBeNull();
-  expect(portraitBox?.width ?? 0).toBeGreaterThanOrEqual(160);
+  expect(portraitBox?.width ?? 0).toBeGreaterThanOrEqual(200);
+  expect((pickerBox?.y ?? 0) - ((portraitBox?.y ?? 0) + (portraitBox?.height ?? 0)))
+    .toBeGreaterThanOrEqual(18);
+  expect((pickerBox?.y ?? 0) - ((portraitBox?.y ?? 0) + (portraitBox?.height ?? 0)))
+    .toBeLessThanOrEqual(22);
+  await expect.poll(
+    () => portrait.evaluate((element) => Number.parseFloat(getComputedStyle(element).opacity)),
+  ).toBe(0.8);
   expect((composerBox?.y ?? 0) + (composerBox?.height ?? 0)).toBeLessThanOrEqual(viewport?.height ?? 0);
   expect(Math.abs(
     (portraitBox?.x ?? 0) + (portraitBox?.width ?? 0) / 2

@@ -721,10 +721,12 @@ a:focus-visible {
 }
 
 .composer-model-picker img {
-  width: 10.5rem;
-  height: 10.5rem;
+  width: 12.6rem;
+  height: 12.6rem;
+  margin-bottom: 0.65rem;
   border: 2px solid rgb(99 181 255 / 36%);
   border-radius: 999px;
+  opacity: 0.8;
   object-fit: cover;
   box-shadow:
     0 0 0 0.32rem rgb(70 118 242 / 10%),
@@ -1244,7 +1246,7 @@ a:focus-visible {
   padding-left: 0.8rem;
   border-left: 1px solid var(--border);
   color: var(--muted);
-  font-size: 0.88rem;
+  font-size: 1.05rem;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -2006,8 +2008,8 @@ a:focus-visible {
   }
 
   .composer-model-picker img {
-    width: 9rem;
-    height: 9rem;
+    width: 10.8rem;
+    height: 10.8rem;
   }
 
   .model-picker-control select {

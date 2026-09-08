@@ -806,11 +806,6 @@ function AudreyThread({
     <AssistantRuntimeProvider runtime={runtime}>
       <ThreadPrimitive.Root className="thread-root">
         <ThreadPrimitive.Viewport className="thread-viewport">
-          <ThreadPrimitive.Empty>
-            <div className="thread-empty">
-              <h2>Ask Audrey</h2>
-            </div>
-          </ThreadPrimitive.Empty>
           <ThreadPrimitive.Messages
             components={{
               UserMessage,
