@@ -914,8 +914,37 @@ scan has zero broken links; its deferred 99 hard and 162 advisory drifts remain
 out of scope by user direction. `scripts/smoke_native_preferences.py` packages
 the two-owner live gate, including invalid-timezone atomicity, model-context
 retrieval, canonical persistence, owner isolation, exact preference restoration,
-and repair cleanup. Milestone 2D remains open for this slice's live gate and the
-remaining ownership and capability operations.
+and repair cleanup.
+
+The Unraid gate passed through the standalone UI proxy. Invalid IANA input was
+atomic; a 3,003-character persona and saved timezone reached the Fast model in
+a successful 12-event native run; the second owner remained unchanged; and the
+test owner's exact preferences were restored. Canonical/archive cleanup returned
+`204`/`202`, and repair returned to `ready`. Slice 2D.2 is complete and
+Unraid-verified. Milestone 2D remains open for the remaining ownership and
+capability operations.
+
+Slice 2D.3 brings the existing owner-bound personal-token lifecycle into native
+Settings. The browser lazily lists active secret-free metadata, creates tokens
+with explicit `account:read` and/or `compat:full` scopes and mandatory
+1–365-day expiry, displays a new secret only until the user dismisses it, and
+requires confirmation before revocation. No token is written to local or session
+storage, and provider authentication remains mandatory for every management
+operation.
+
+The browser contract covers the real create/list/revoke shapes, one-time secret
+handling, and storage isolation. Its production-preview workflow also caught and
+removed a duplicate banner landmark from the Settings dialog. All 2,776 backend
+tests, five native-UI packaging contracts, 11 Vitest contracts, and 16
+production-preview Chromium workflows pass; typecheck, lint, production build,
+and diff checks are clean. The lesson scan has zero broken links; its deferred
+99 hard and 162 advisory drifts remain out of scope.
+
+The live gate rebuilds only `audrey-ui`: Through the public native Settings
+surface, list current token metadata, create a short-lived disposable token,
+copy and authenticate with it once, dismiss the one-time secret, reopen Settings
+to prove the secret is absent, and revoke it. Slice 2D.3 remains laptop-complete
+until that browser gate passes.
 
 Gate: disposable-user upload/search/export/delete evidence covers transactional
 and derived stores, including interrupted cleanup and restart.

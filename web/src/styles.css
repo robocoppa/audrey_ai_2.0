@@ -1509,6 +1509,193 @@ a:focus-visible {
   color: var(--danger);
   font-size: 0.75rem;
 }
+.token-manager,
+.token-create-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.token-create-form {
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  background: rgb(7 16 31 / 38%);
+}
+
+.token-scope-fieldset {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.token-scope-fieldset legend {
+  margin-bottom: 0.45rem;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.token-create-form > button,
+.token-actions button,
+.token-revoke-button {
+  justify-self: start;
+  padding: 0.58rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.token-create-form > button {
+  border-color: transparent;
+  background: var(--brand-gradient);
+  color: #fff;
+}
+
+.token-create-form > button:hover,
+.token-actions button:hover,
+.token-revoke-button:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.token-create-form > button:focus-visible,
+.token-actions button:focus-visible,
+.token-revoke-button:focus-visible {
+  outline: none;
+  border-color: var(--border-strong);
+  box-shadow: var(--focus-glow);
+}
+
+.token-create-form > button:disabled,
+.token-actions button:disabled,
+.token-revoke-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.token-secret {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid rgb(104 211 145 / 42%);
+  border-radius: 0.85rem;
+  background: rgb(104 211 145 / 8%);
+}
+
+.token-secret strong {
+  color: var(--success);
+  font-size: 0.82rem;
+}
+
+.token-secret textarea {
+  min-height: 4.2rem;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+.token-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.token-actions .danger-button,
+.token-revoke-button {
+  border-color: rgb(255 145 164 / 34%);
+  color: var(--danger);
+}
+
+.token-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.token-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.token-list > li {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background: rgb(7 16 31 / 38%);
+}
+
+.token-record-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.token-record-heading strong {
+  overflow-wrap: anywhere;
+  font-size: 0.88rem;
+}
+
+.token-status {
+  flex: none;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid rgb(104 211 145 / 34%);
+  border-radius: 999px;
+  color: var(--success);
+  font-size: 0.62rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.token-status.expired {
+  border-color: rgb(239 192 113 / 34%);
+  color: var(--warning);
+}
+
+.token-list dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.token-list dl > div {
+  min-width: 0;
+}
+
+.token-list dt,
+.token-list dd {
+  margin: 0;
+}
+
+.token-list dt {
+  color: var(--muted-deep);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.token-list dd {
+  margin-top: 0.2rem;
+  overflow-wrap: anywhere;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+
 
 .logout-button {
   padding: 0.42rem 0.72rem;
@@ -1899,6 +2086,7 @@ a:focus-visible {
   }
 
   .settings-pair,
+  .token-list dl,
   .timezone-control {
     grid-template-columns: 1fr;
   }

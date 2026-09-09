@@ -262,6 +262,113 @@ describe("App", () => {
       show_progress: false,
     });
   });
+  it("creates, reveals once, and revokes personal tokens without browser storage", async () => {
+    const existingToken = {
+      id: "pat_existing",
+      name: "Laptop token",
+      scopes: ["compat:full"],
+      created_at: "2026-09-01T00:00:00+00:00",
+      expires_at: "2099-10-01T00:00:00+00:00",
+      last_used_at: null,
+      revoked_at: null,
+    };
+    const createdToken = {
+      ...existingToken,
+      id: "pat_created",
+      name: "CLI token",
+      scopes: ["account:read", "compat:full"],
+      token: "aud_pat_created.one-time-secret",
+    };
+    const fetchMock = vi.fn().mockImplementation(
+      (path: string, request?: RequestInit) => {
+        if (path === "/api/tokens" && request?.method === "POST") {
+          return Promise.resolve(new Response(JSON.stringify(createdToken), {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
+        if (path === "/api/tokens") {
+          return Promise.resolve(new Response(JSON.stringify({ items: [existingToken] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
+        if (path === "/api/tokens/pat_existing" && request?.method === "DELETE") {
+          return Promise.resolve(new Response(JSON.stringify({
+            id: "pat_existing",
+            revoked: true,
+          }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
+        const payload = path === "/api/me"
+          ? {
+              id: "usr_example",
+              email: "alice@example.com",
+              display_name: "Alice Example",
+              role: "user",
+              status: "active",
+              auth_provider: "cloudflare_access",
+            }
+          : path === "/api/me/preferences"
+            ? DEFAULT_PREFERENCES
+            : { items: [], next_cursor: null };
+        return Promise.resolve(new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open account settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage personal tokens" }));
+    expect(await screen.findByText("Laptop token")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Token name" }), {
+      target: { value: "CLI token" },
+    });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Token lifetime in days" }), {
+      target: { value: "30" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", {
+      name: "Read Audrey account details and preferences",
+    }));
+    fireEvent.click(screen.getByRole("button", { name: "Create token" }));
+
+    const secret = await screen.findByRole("textbox", { name: "New personal token" });
+    expect(secret).toHaveValue("aud_pat_created.one-time-secret");
+    expect(screen.getByRole("button", { name: "Close settings" })).toBeDisabled();
+    const create = fetchMock.mock.calls.find(
+      ([path, request]) => path === "/api/tokens" && request?.method === "POST",
+    ) as [string, RequestInit] | undefined;
+    expect(JSON.parse(String(create?.[1].body))).toEqual({
+      name: "CLI token",
+      scopes: ["compat:full", "account:read"],
+      expires_in_days: 30,
+    });
+    expect(window.localStorage).toHaveLength(0);
+    expect(window.sessionStorage).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "I saved it" }));
+    expect(screen.getByRole("button", { name: "Close settings" })).not.toBeDisabled();
+    expect(screen.queryByRole("textbox", { name: "New personal token" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Revoke Laptop token" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm revoke" }));
+    await waitFor(() => {
+      expect(screen.queryByText("Laptop token")).not.toBeInTheDocument();
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/tokens/pat_existing",
+      expect.objectContaining({ method: "DELETE", credentials: "same-origin" }),
+    );
+  });
+
+
 
   it("sends only the latest user action through the same-origin transport", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));

@@ -22,6 +22,28 @@ export type UserPreferencesUpdate = Pick<
   "timezone" | "persona" | "detail" | "tone" | "show_progress"
 >;
 
+export type PersonalTokenScope = "account:read" | "compat:full";
+
+export interface PersonalTokenRecord {
+  id: string;
+  name: string;
+  scopes: PersonalTokenScope[];
+  created_at: string;
+  expires_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface PersonalTokenCreated extends PersonalTokenRecord {
+  token: string;
+}
+
+export interface PersonalTokenCreate {
+  name: string;
+  scopes: PersonalTokenScope[];
+  expires_in_days: number;
+}
+
 export type AudreyMode =
   | "auto"
   | "fast"
@@ -189,6 +211,29 @@ export function updateCurrentUserPreferences(
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(preferences),
+  });
+}
+
+export function listPersonalTokens(): Promise<{ items: PersonalTokenRecord[] }> {
+  return apiJson<{ items: PersonalTokenRecord[] }>("/api/tokens");
+}
+
+export function createPersonalToken(
+  token: PersonalTokenCreate,
+): Promise<PersonalTokenCreated> {
+  return apiJson<PersonalTokenCreated>("/api/tokens", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(token),
+  });
+}
+
+export function revokePersonalToken(tokenId: string): Promise<{
+  id: string;
+  revoked: boolean;
+}> {
+  return apiJson(`/api/tokens/${encodeURIComponent(tokenId)}`, {
+    method: "DELETE",
   });
 }
 

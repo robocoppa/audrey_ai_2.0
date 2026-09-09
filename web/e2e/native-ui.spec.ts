@@ -785,6 +785,108 @@ test("saves and reloads native Audrey preferences", async ({ page }) => {
     name: "Show the live stage and source summary above the composer",
   })).not.toBeChecked();
 });
+test("manages personal tokens through the production browser bundle", async ({ page }) => {
+  const requests: unknown[] = [];
+  let tokens = [{
+    id: "pat_browser_existing",
+    name: "Existing client",
+    scopes: ["account:read"],
+    created_at: "2026-09-08T00:00:00Z",
+    expires_at: "2099-10-08T00:00:00Z",
+    last_used_at: null,
+    revoked_at: null,
+  }];
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/tokens" && request.method() === "POST") {
+      const payload = request.postDataJSON() as {
+        name: string;
+        scopes: string[];
+        expires_in_days: number;
+      };
+      requests.push(payload);
+      const created = {
+        id: "pat_browser_created",
+        name: payload.name,
+        scopes: payload.scopes,
+        created_at: "2026-09-08T00:00:00Z",
+        expires_at: "2099-10-08T00:00:00Z",
+        last_used_at: null,
+        revoked_at: null,
+      };
+      tokens = [created, ...tokens];
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...created,
+          token: "aud_pat_browser_created.one-time-secret",
+        }),
+      });
+      return;
+    }
+    if (url.pathname === "/api/tokens" && request.method() === "GET") {
+      await json(route, { items: tokens });
+      return;
+    }
+    if (url.pathname === "/api/tokens/pat_browser_created" && request.method() === "DELETE") {
+      tokens = tokens.filter(({ id }) => id !== "pat_browser_created");
+      await json(route, { id: "pat_browser_created", revoked: true });
+      return;
+    }
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
+    if (url.pathname === "/api/me") {
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/conversations") {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await page.getByRole("button", { name: "Open account settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await dialog.getByRole("button", { name: "Manage personal tokens" }).click();
+  await expect(dialog.getByText("Existing client")).toBeVisible();
+
+  await dialog.getByRole("textbox", { name: "Token name" }).fill("Browser CLI");
+  await dialog.getByRole("spinbutton", { name: "Token lifetime in days" }).fill("30");
+  await dialog.getByRole("button", { name: "Create token" }).click();
+
+  await expect(dialog.getByRole("textbox", { name: "New personal token" })).toHaveValue(
+    "aud_pat_browser_created.one-time-secret",
+  );
+  await expect(dialog.getByRole("button", { name: "Close settings" })).toBeDisabled();
+  expect(requests).toEqual([{
+    name: "Browser CLI",
+    scopes: ["compat:full"],
+    expires_in_days: 30,
+  }]);
+  expect(await page.evaluate(() => ({
+    local: localStorage.length,
+    session: sessionStorage.length,
+  }))).toEqual({ local: 0, session: 0 });
+
+  await dialog.getByRole("button", { name: "I saved it" }).click();
+  await expect(dialog.getByRole("button", { name: "Close settings" })).toBeEnabled();
+  await dialog.getByRole("button", { name: "Revoke Browser CLI" }).click();
+  await dialog.getByRole("button", { name: "Confirm revoke" }).click();
+  await expect(dialog.getByText("Browser CLI")).toHaveCount(0);
+  await expect(dialog.getByText("Existing client")).toBeVisible();
+
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
+});
+
+
 
 test("cancels an active browser run without leaving an error state", async ({ page }) => {
   await installHangingAgent(page);

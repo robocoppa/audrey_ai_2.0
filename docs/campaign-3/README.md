@@ -8,23 +8,28 @@ passed its default-disabled Unraid smoke. Milestones 2A and 2B are complete
 and Unraid-verified: Provider-neutral identity, canonical application state,
 native conversation/run resources, typed and AG-UI events, real pipeline
 observations, and the rebuildable canonical archive projection have all passed
-their live gates. Milestone 2C is in progress: Its native web-client slices are
-complete and Unraid-verified, and the first interactive Cloudflare Access user
-opened the root application and completed a Fast turn. The deployed
-navigation-history corrective is user-confirmed; hard-refresh persistence and
-second-user isolation remain pending.
+their live gates. Milestone 2C's native web-client slices are complete and
+Unraid-verified, and the first interactive Cloudflare Access user opened the
+root application and completed a Fast turn. The deployed navigation-history
+corrective is user-confirmed; hard-refresh persistence and second-user isolation
+remain pending.
 The dark Builtryte branding, adaptive docked `Ask Audrey` composer, contextual
 jump-to-latest control, introductory portrait-backed mode descriptions, semantic
 first-prompt titles, and self-service profile-name refinement are laptop-
 complete and await their live browser gate.
 The native client is also packaged as a self-contained, non-root `audrey-ui`
-container with a same-origin streaming proxy. Its laptop contract is complete;
-the loopback deployment and Cloudflare Tunnel switch remain a user-run Unraid
-gate. Audrey retains the embedded shell for one transition release so rollback
-is a tunnel-origin change rather than a data migration.
+container with a same-origin streaming proxy. Its loopback deployment and public
+Cloudflare route are live; the preference gate passes through the proxy, while
+the full UI smoke, browser checks, and normal-use soak remain. Audrey retains the
+embedded shell for one transition release so rollback is a tunnel-origin change
+rather than a data migration.
 Slice 2C.2 conversation management is complete and Unraid-verified.
 Slice 2C.3 Video parity and its seven-mode smoke are complete and
 Unraid-verified.
+Milestone 2D slices 2D.1 files/attachments and 2D.2 native preferences are
+complete and Unraid-verified.
+Slice 2D.3 native personal-token management is laptop-complete and awaits its
+public browser create/use/revoke gate.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,
