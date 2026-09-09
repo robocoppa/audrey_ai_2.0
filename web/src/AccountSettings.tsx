@@ -2,10 +2,14 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import {
   createPersonalToken,
+  exportChatHistory,
+  getAccountDataPurge,
   listPersonalTokens,
+  requestAccountDataPurge,
   revokePersonalToken,
   updateCurrentUserDisplayName,
   updateCurrentUserPreferences,
+  type AccountPurgeStatus,
   type CurrentUser,
   type PersonalTokenRecord,
   type PersonalTokenScope,
@@ -18,12 +22,14 @@ export function AccountSettings({
   preferences,
   onUserChange,
   onPreferencesChange,
+  onDataPurgeAttempted,
   onClose,
 }: {
   user: CurrentUser;
   preferences: UserPreferences;
   onUserChange: (user: CurrentUser) => void;
   onPreferencesChange: (preferences: UserPreferences) => void;
+  onDataPurgeAttempted: () => void;
   onClose: () => void;
 }) {
   const [displayName, setDisplayName] = useState(user.display_name);
@@ -52,8 +58,18 @@ export function AccountSettings({
   const [issuedToken, setIssuedToken] = useState("");
   const [tokenCopied, setTokenCopied] = useState(false);
   const [tokenError, setTokenError] = useState("");
+  const [dataExporting, setDataExporting] = useState(false);
+  const [dataMessage, setDataMessage] = useState("");
+  const [dataError, setDataError] = useState("");
+  const [purgeConfirmOpen, setPurgeConfirmOpen] = useState(false);
+  const [purgeConfirmation, setPurgeConfirmation] = useState("");
+  const [purgeRequesting, setPurgeRequesting] = useState(false);
+  const [purgePolling, setPurgePolling] = useState(false);
+  const [purgeIdempotencyKey, setPurgeIdempotencyKey] = useState("");
+  const [purgeStatus, setPurgeStatus] = useState<AccountPurgeStatus | null>(null);
   const tokenBusy = tokensLoading || tokenCreating || Boolean(revokingTokenId);
-  const busy = profileSaving || preferencesSaving || tokenBusy
+  const dataBusy = dataExporting || purgeRequesting;
+  const busy = profileSaving || preferencesSaving || tokenBusy || dataBusy
     || Boolean(issuedToken);
 
   useEffect(() => {
@@ -63,6 +79,39 @@ export function AccountSettings({
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [busy, onClose]);
+
+  useEffect(() => {
+    if (!purgeStatus || purgeStatus.status !== "pending") return undefined;
+    let active = true;
+    let checking = false;
+    const timer = window.setInterval(() => {
+      if (checking) return;
+      checking = true;
+      setPurgePolling(true);
+      void getAccountDataPurge(purgeStatus.purge_id)
+        .then((updated) => {
+          if (!active) return;
+          setPurgeStatus(updated);
+          setDataError("");
+        })
+        .catch((reason: unknown) => {
+          if (active) {
+            setDataError(messageOf(
+              reason,
+              "Deletion status could not be refreshed. Audrey will keep retrying cleanup.",
+            ));
+          }
+        })
+        .finally(() => {
+          checking = false;
+          if (active) setPurgePolling(false);
+        });
+    }, 1500);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [purgeStatus]);
 
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -176,6 +225,52 @@ export function AccountSettings({
     }
   }
 
+  async function downloadChatExport() {
+    setDataExporting(true);
+    setDataError("");
+    setDataMessage("");
+    try {
+      const archive = await exportChatHistory();
+      const exportedAt = new Date().toISOString();
+      downloadJson(
+        { ...archive, exported_at: exportedAt },
+        `audrey-chat-history-${exportedAt.slice(0, 10)}.json`,
+      );
+      const noun = archive.items.length === 1 ? "message" : "messages";
+      setDataMessage(`Downloaded ${archive.items.length} archived ${noun}.`);
+    } catch (reason) {
+      setDataError(messageOf(reason, "Chat history could not be exported."));
+    } finally {
+      setDataExporting(false);
+    }
+  }
+
+  async function requestDataPurge(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (purgeConfirmation !== ACCOUNT_PURGE_CONFIRMATION) return;
+    const idempotencyKey = purgeIdempotencyKey || newPurgeIdempotencyKey();
+    if (!purgeIdempotencyKey) setPurgeIdempotencyKey(idempotencyKey);
+    setPurgeRequesting(true);
+    setDataError("");
+    setDataMessage("");
+    try {
+      const status = await requestAccountDataPurge(
+        purgeConfirmation,
+        idempotencyKey,
+      );
+      setPurgeStatus(status);
+      setTokens([]);
+      setIssuedToken("");
+      setTokenCopied(false);
+      onDataPurgeAttempted();
+    } catch (reason) {
+      setDataError(messageOf(reason, "Audrey data deletion could not be started."));
+      onDataPurgeAttempted();
+    } finally {
+      setPurgeRequesting(false);
+    }
+  }
+
 
   function useDeviceTimezone() {
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -204,6 +299,31 @@ export function AccountSettings({
           <button type="button" onClick={onClose} disabled={busy} aria-label="Close settings">×</button>
         </div>
 
+        {purgeStatus ? (
+          <section className="settings-section purge-receipt" aria-labelledby="purge-status-title">
+            <div className="settings-section-heading">
+              <h3 id="purge-status-title">{purgeStatusTitle(purgeStatus.status)}</h3>
+              <p>{purgeStatusDescription(purgeStatus.status)}</p>
+            </div>
+            <dl className="purge-progress">
+              <div>
+                <dt>Files remaining</dt>
+                <dd>{purgeStatus.files.pending}</dd>
+              </div>
+              <div>
+                <dt>Disk items remaining</dt>
+                <dd>{purgeStatus.paths.pending}</dd>
+              </div>
+              <div>
+                <dt>Archive cleanup</dt>
+                <dd>{purgeStatus.sidecar.completed ? "Complete" : "Pending"}</dd>
+              </div>
+            </dl>
+            {purgePolling ? <p className="data-message" role="status">Checking cleanup…</p> : null}
+            {dataError ? <p className="settings-error" role="alert">{dataError}</p> : null}
+          </section>
+        ) : (
+          <>
         <form className="settings-section" onSubmit={(event) => void saveProfile(event)}>
           <div className="settings-section-heading">
             <h3>Profile</h3>
@@ -495,10 +615,97 @@ export function AccountSettings({
           )}
         </section>
 
+        <section className="settings-section" aria-labelledby="account-data-title">
+          <div className="settings-section-heading">
+            <h3 id="account-data-title">Your Audrey data</h3>
+            <p>
+              Download the current chat-search archive or permanently remove
+              Audrey-owned personal data from every managed store.
+            </p>
+          </div>
+          <div className="data-export-control">
+            <div>
+              <strong>Export chat history</strong>
+              <p>
+                Downloads all currently archived messages as JSON. Uploaded
+                file contents, memories, and conversations still awaiting
+                archive delivery are not included.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void downloadChatExport()}
+              disabled={dataBusy}
+            >
+              {dataExporting ? "Preparing export…" : "Download chat history"}
+            </button>
+          </div>
+          {dataMessage ? <p className="data-message" role="status">{dataMessage}</p> : null}
+          {dataError ? <p className="settings-error" role="alert">{dataError}</p> : null}
+
+          <div className="data-danger-zone">
+            <div>
+              <strong>Delete all Audrey data</strong>
+              <p>
+                Permanently deletes conversations, runs, personal tokens,
+                uploads, memories, and search history, and resets Audrey
+                preferences. Your sign-in identity and profile remain.
+              </p>
+            </div>
+            {!purgeConfirmOpen ? (
+              <button
+                className="danger-button"
+                type="button"
+                onClick={() => setPurgeConfirmOpen(true)}
+                disabled={dataBusy || Boolean(issuedToken)}
+              >
+                Delete Audrey data
+              </button>
+            ) : (
+              <form className="purge-confirmation" onSubmit={(event) => void requestDataPurge(event)}>
+                <label>
+                  <span>Type <code>{ACCOUNT_PURGE_CONFIRMATION}</code> to continue</span>
+                  <input
+                    aria-label="Deletion confirmation"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={purgeConfirmation}
+                    onChange={(event) => setPurgeConfirmation(event.target.value)}
+                    disabled={purgeRequesting}
+                  />
+                </label>
+                <div className="token-actions">
+                  <button
+                    className="danger-button"
+                    type="submit"
+                    disabled={purgeRequesting || purgeConfirmation !== ACCOUNT_PURGE_CONFIRMATION}
+                  >
+                    {purgeRequesting ? "Starting deletion…" : "Delete all Audrey data"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPurgeConfirmOpen(false);
+                      setPurgeConfirmation("");
+                    }}
+                    disabled={purgeRequesting}
+                  >
+                    Keep my data
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </section>
+          </>
+        )}
+
       </section>
     </div>
   );
 }
+
+const ACCOUNT_PURGE_CONFIRMATION = "DELETE ALL MY AUDREY DATA";
 
 function validTokenExpiry(value: string): boolean {
   const days = Number(value);
@@ -520,6 +727,46 @@ function formatTokenTime(value: string): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(parsed);
+}
+
+function downloadJson(value: unknown, filename: string) {
+  const blob = new Blob([`${JSON.stringify(value, null, 2)}\n`], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.hidden = true;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function newPurgeIdempotencyKey(): string {
+  if (typeof globalThis.crypto.randomUUID === "function") {
+    return `native-ui-${globalThis.crypto.randomUUID()}`;
+  }
+  const values = new Uint32Array(4);
+  globalThis.crypto.getRandomValues(values);
+  return `native-ui-${Array.from(values, (value) => value.toString(16)).join("-")}`;
+}
+
+function purgeStatusTitle(status: string): string {
+  if (status === "completed") return "Deletion complete";
+  if (status === "attention_required") return "Deletion needs attention";
+  return "Deletion is in progress";
+}
+
+function purgeStatusDescription(status: string): string {
+  if (status === "completed") {
+    return "Audrey removed the requested data. Your sign-in identity remains available for a fresh start.";
+  }
+  if (status === "attention_required") {
+    return "The data remains hidden, but one or more cleanup operations need an administrator repair.";
+  }
+  return "Audrey has hidden the pre-deletion data and will keep retrying durable cleanup in the background.";
 }
 
 

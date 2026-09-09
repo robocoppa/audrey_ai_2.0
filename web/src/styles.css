@@ -711,6 +711,7 @@ a:focus-visible {
 
 .composer-model-picker {
   display: grid;
+  isolation: isolate;
   justify-items: center;
   gap: 0.6rem;
   width: min(100%, 36rem);
@@ -739,6 +740,8 @@ a:focus-visible {
 }
 
 .model-picker-control {
+  position: relative;
+  z-index: 1;
   display: block;
   margin-top: 0;
 }
@@ -1695,6 +1698,125 @@ a:focus-visible {
   line-height: 1.45;
 }
 
+.data-export-control,
+.data-danger-zone,
+.purge-confirmation,
+.purge-receipt {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.data-export-control,
+.data-danger-zone {
+  padding: 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  background: rgb(7 16 31 / 38%);
+}
+
+.data-danger-zone {
+  border-color: rgb(255 145 164 / 28%);
+  background: rgb(255 95 126 / 5%);
+}
+
+.data-export-control strong,
+.data-danger-zone strong {
+  color: var(--text-soft);
+  font-size: 0.86rem;
+}
+
+.data-export-control p,
+.data-danger-zone p {
+  margin: 0.3rem 0 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.data-export-control > button,
+.data-danger-zone > button {
+  justify-self: start;
+  padding: 0.58rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.data-danger-zone > .danger-button {
+  border-color: rgb(255 145 164 / 34%);
+  color: var(--danger);
+}
+
+.data-export-control > button:hover,
+.data-danger-zone > button:hover,
+.data-export-control > button:focus-visible,
+.data-danger-zone > button:focus-visible {
+  outline: none;
+  border-color: var(--border-strong);
+  color: var(--text);
+  box-shadow: var(--focus-glow);
+}
+
+.data-export-control > button:disabled,
+.data-danger-zone > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.purge-confirmation {
+  padding-top: 0.2rem;
+}
+
+.purge-confirmation code {
+  overflow-wrap: anywhere;
+  color: var(--danger);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.72rem;
+}
+
+.data-message {
+  margin: 0;
+  color: var(--success);
+  font-size: 0.75rem;
+}
+
+.purge-progress {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin: 0;
+}
+
+.purge-progress > div {
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: rgb(7 16 31 / 38%);
+}
+
+.purge-progress dt,
+.purge-progress dd {
+  margin: 0;
+}
+
+.purge-progress dt {
+  color: var(--muted-deep);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.purge-progress dd {
+  margin-top: 0.25rem;
+  color: var(--text-soft);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
 
 
 .logout-button {
@@ -2087,6 +2209,7 @@ a:focus-visible {
 
   .settings-pair,
   .token-list dl,
+  .purge-progress,
   .timezone-control {
     grid-template-columns: 1fr;
   }

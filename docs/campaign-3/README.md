@@ -28,8 +28,9 @@ Slice 2C.3 Video parity and its seven-mode smoke are complete and
 Unraid-verified.
 Milestone 2D slices 2D.1 files/attachments and 2D.2 native preferences are
 complete and Unraid-verified.
-Slice 2D.3 native personal-token management is laptop-complete and awaits its
-public browser create/use/revoke gate.
+Slice 2D.3 native personal-token management is complete and Unraid-verified.
+Slice 2D.4 native chat export and account-data deletion is laptop-complete and
+awaits its disposable-account browser gate.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,
@@ -41,7 +42,7 @@ and finally adds the first general skills layer on that owned surface.
 | Phase | Plan | Outcome | Entry gate | Status |
 |---|---|---|---|---|
 | 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | Complete |
-| 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (Milestones 2A–2B and slices 2C.1–2C.3 complete) |
+| 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (Milestones 2A–2B and slices 2C.1–2C.3 plus 2D.1–2D.3 complete) |
 | 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | Planned |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1,

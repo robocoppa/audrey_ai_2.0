@@ -368,6 +368,136 @@ describe("App", () => {
     );
   });
 
+  it("downloads every chat-export page and confirms durable account deletion", async () => {
+    const firstMessage = {
+      message_id: "msg_export_1",
+      conversation_id: "con_export",
+      conversation_title: "Exported conversation",
+      conversation_created_at: "2026-09-01T00:00:00+00:00",
+      conversation_updated_at: "2026-09-01T00:01:00+00:00",
+      role: "user",
+      content: "First export page",
+      created_at: "2026-09-01T00:00:00+00:00",
+      archived_at: "2026-09-01T00:02:00+00:00",
+      partial: false,
+      virtual_model: "audrey_fast",
+      concrete_model: "test-model",
+      prompt_tokens: 12,
+      completion_tokens: 0,
+    };
+    const completedPurge = {
+      schema_version: 1,
+      purge_id: "purge_browser",
+      cutoff_at: "2026-09-09T00:00:00+00:00",
+      requested_at: "2026-09-09T00:00:00+00:00",
+      status: "completed",
+      completed_at: "2026-09-09T00:00:01+00:00",
+      files: { pending: 0, attempts: 1, with_error: 0, completed: 1 },
+      paths: { pending: 0, attempts: 1, with_error: 0, completed: 1 },
+      local_delivery: { completed: true, attempts: 1, with_error: false },
+      sidecar: {
+        acknowledged: true,
+        completed: true,
+        status: "completed",
+        attempts: 1,
+        with_error: false,
+      },
+    };
+    const fetchMock = vi.fn().mockImplementation(
+      (path: string, request?: RequestInit) => {
+        if (path === "/v1/me/chat-history/export?limit=200") {
+          return Promise.resolve(new Response(JSON.stringify({
+            schema_version: 1,
+            items: [firstMessage],
+            next_cursor: "next page",
+          }), { status: 200, headers: { "Content-Type": "application/json" } }));
+        }
+        if (path === "/v1/me/chat-history/export?limit=200&cursor=next+page") {
+          return Promise.resolve(new Response(JSON.stringify({
+            schema_version: 1,
+            items: [{ ...firstMessage, message_id: "msg_export_2", content: "Second page" }],
+            next_cursor: null,
+          }), { status: 200, headers: { "Content-Type": "application/json" } }));
+        }
+        if (path === "/v1/me/data-purge" && request?.method === "POST") {
+          return Promise.resolve(new Response(JSON.stringify(completedPurge), {
+            status: 202,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
+        const payload = path === "/api/me"
+          ? {
+              id: "usr_example",
+              email: "alice@example.com",
+              display_name: "Alice Example",
+              role: "user",
+              status: "active",
+              auth_provider: "cloudflare_access",
+            }
+          : path === "/api/me/preferences"
+            ? DEFAULT_PREFERENCES
+            : { items: [], next_cursor: null };
+        return Promise.resolve(new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+      },
+    );
+    const createObjectURL = vi.fn().mockReturnValue("blob:audrey-export");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    let downloadedName = "";
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
+      function captureDownload(this: HTMLAnchorElement) {
+        downloadedName = this.download;
+      },
+    );
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open account settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download chat history" }));
+    expect(await screen.findByText("Downloaded 2 archived messages.")).toBeInTheDocument();
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(downloadedName).toMatch(/^audrey-chat-history-\d{4}-\d{2}-\d{2}\.json$/u);
+    const artifact = JSON.parse(
+      await (createObjectURL.mock.calls[0][0] as Blob).text(),
+    ) as { schema_version: number; items: Array<{ message_id: string }> };
+    expect(artifact.schema_version).toBe(1);
+    expect(artifact.items.map(({ message_id }) => message_id)).toEqual([
+      "msg_export_1",
+      "msg_export_2",
+    ]);
+    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:audrey-export"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Audrey data" }));
+    const destructiveButton = screen.getByRole("button", { name: "Delete all Audrey data" });
+    expect(destructiveButton).toBeDisabled();
+    fireEvent.change(screen.getByRole("textbox", { name: "Deletion confirmation" }), {
+      target: { value: "DELETE ALL MY AUDREY DATA" },
+    });
+    expect(destructiveButton).toBeEnabled();
+    fireEvent.click(destructiveButton);
+
+    expect(await screen.findByRole("heading", { name: "Deletion complete" })).toBeVisible();
+    const purgeRequest = fetchMock.mock.calls.find(
+      ([path, request]) => path === "/v1/me/data-purge" && request?.method === "POST",
+    ) as [string, RequestInit] | undefined;
+    expect(JSON.parse(String(purgeRequest?.[1].body))).toEqual({
+      confirmation: "DELETE ALL MY AUDREY DATA",
+    });
+    expect(new Headers(purgeRequest?.[1].headers).get("Idempotency-Key")).toMatch(
+      /^native-ui-/u,
+    );
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([path]) => path === "/api/me")).toHaveLength(2);
+    });
+    expect(window.localStorage).toHaveLength(0);
+    expect(window.sessionStorage).toHaveLength(0);
+    click.mockRestore();
+  });
+
 
 
   it("sends only the latest user action through the same-origin transport", async () => {

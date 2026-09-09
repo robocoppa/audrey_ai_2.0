@@ -4,11 +4,10 @@
 Unraid-verified, including provider-neutral identity, canonical application
 state, native conversation/run resources, typed and AG-UI events, real
 pipeline observations, and rebuildable canonical archive projection.
-Milestone 2C's native chat and public navigation are Unraid-verified; its final
-branding/profile browser check remains. Milestone 2D's file/attachment slice is
-Unraid-verified, and its preference slice is laptop-complete. The native client
-is now self-contained and has a standalone-container laptop gate; its Unraid
-traffic switch remains pending.
+Milestone 2C's native client and public route are live, with the broader browser
+and soak gate still open. Milestone 2D slices 2D.1–2D.3 are Unraid-verified;
+slice 2D.4 chat export and account-data deletion is laptop-complete and awaits
+its destructive live gate.
 
 ## Goal
 
@@ -940,11 +939,38 @@ production-preview Chromium workflows pass; typecheck, lint, production build,
 and diff checks are clean. The lesson scan has zero broken links; its deferred
 99 hard and 162 advisory drifts remain out of scope.
 
-The live gate rebuilds only `audrey-ui`: Through the public native Settings
-surface, list current token metadata, create a short-lived disposable token,
-copy and authenticate with it once, dismiss the one-time secret, reopen Settings
-to prove the secret is absent, and revoke it. Slice 2D.3 remains laptop-complete
-until that browser gate passes.
+The Unraid gate passed through the standalone UI proxy. A disposable one-day
+token created through native Settings authenticated its owner at `/api/me`;
+after revocation, the same request returned `401`. Slice 2D.3 is complete and
+Unraid-verified.
+
+Slice 2D.4 exposes the hardened Phase 1 current-user data controls through
+native Settings. Chat export follows every opaque pagination cursor, rejects a
+repeated cursor or mid-export schema change, and downloads one timestamped JSON
+artifact. The UI explicitly identifies the boundary: This is the current
+chat-search archive, not uploaded file contents, memories, or canonical turns
+still awaiting archive delivery.
+
+Full Audrey-data deletion remains provider-authenticated on the server. The
+browser requires the exact `DELETE ALL MY AUDREY DATA` phrase, supplies one
+stable per-attempt idempotency key, and never accepts a user selector. After
+the request settles, the native workspace remounts and refreshes account state
+because the local transactional purge intentionally runs before downstream
+durable cleanup and can therefore succeed even if the final request reports an
+error. An accepted receipt replaces the old Settings forms and polls its exact
+owner-bound status through pending, completed, or attention-required cleanup.
+The Audrey identity and profile remain and preferences reset; conversations,
+runs, tokens, uploads, memories, and derived chat history are deleted.
+
+The full hermetic backend suite passes all 2,776 tests; its focused packaging/
+user-data regression passes 32. All 12 Vitest contracts and 17 production-
+preview Chromium workflows pass, including a real Blob download, pending-to-
+complete status polling, workspace reset, no browser bearer storage/header,
+and an axe audit. Typecheck, lint, production build, and diff checks are
+clean. Slice 2D.4 remains laptop-complete until an explicitly expendable
+account exports its seeded archive, completes deletion,
+reloads as the same empty identity, and reaches `ready` repair status on
+Unraid. Do not run this destructive gate against the primary account.
 
 Gate: disposable-user upload/search/export/delete evidence covers transactional
 and derived stores, including interrupted cleanup and restart.

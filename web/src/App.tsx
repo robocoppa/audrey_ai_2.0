@@ -23,6 +23,7 @@ type SessionState =
 
 export function App() {
   const [session, setSession] = useState<SessionState>({ status: "loading" });
+  const [workspaceRevision, setWorkspaceRevision] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -83,13 +84,25 @@ export function App() {
               current.status === "ready" ? { ...current, preferences } : current,
             );
           }}
+          onDataPurgeAttempted={() => {
+            setWorkspaceRevision((current) => current + 1);
+            void Promise.all([getCurrentUser(), getCurrentUserPreferences()])
+              .then(([user, preferences]) => {
+                setSession({ status: "ready", user, preferences });
+              })
+              .catch(() => undefined);
+          }}
         />
       </header>
 
       {session.status === "ready" ? (
         <main className="native-main">
           <Suspense fallback={<AudreyLoader fullscreen label="Loading Audrey workspace" />}>
-            <ChatWorkspace user={session.user} preferences={session.preferences} />
+            <ChatWorkspace
+              key={workspaceRevision}
+              user={session.user}
+              preferences={session.preferences}
+            />
           </Suspense>
         </main>
       ) : (
@@ -125,10 +138,12 @@ function SessionControls({
   session,
   onUserChange,
   onPreferencesChange,
+  onDataPurgeAttempted,
 }: {
   session: SessionState;
   onUserChange: (user: CurrentUser) => void;
   onPreferencesChange: (preferences: UserPreferences) => void;
+  onDataPurgeAttempted: () => void;
 }) {
   if (session.status === "loading") {
     return null;
@@ -140,6 +155,7 @@ function SessionControls({
         preferences={session.preferences}
         onUserChange={onUserChange}
         onPreferencesChange={onPreferencesChange}
+        onDataPurgeAttempted={onDataPurgeAttempted}
       />
     );
   }
@@ -151,11 +167,13 @@ function ReadySessionControls({
   preferences,
   onUserChange,
   onPreferencesChange,
+  onDataPurgeAttempted,
 }: {
   user: CurrentUser;
   preferences: UserPreferences;
   onUserChange: (user: CurrentUser) => void;
   onPreferencesChange: (preferences: UserPreferences) => void;
+  onDataPurgeAttempted: () => void;
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -179,6 +197,7 @@ function ReadySessionControls({
           preferences={preferences}
           onUserChange={onUserChange}
           onPreferencesChange={onPreferencesChange}
+          onDataPurgeAttempted={onDataPurgeAttempted}
           onClose={() => setSettingsOpen(false)}
         />
       ) : null}

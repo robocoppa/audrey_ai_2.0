@@ -186,6 +186,8 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect.poll(
     () => portrait.evaluate((element) => Number.parseFloat(getComputedStyle(element).opacity)),
   ).toBe(1);
+  await expect(page.locator(".composer-model-picker")).toHaveCSS("isolation", "isolate");
+  await expect(page.locator(".model-picker-control")).toHaveCSS("z-index", "1");
   expect((composerBox?.y ?? 0) + (composerBox?.height ?? 0)).toBeLessThanOrEqual(viewport?.height ?? 0);
   expect(Math.abs(
     (portraitBox?.x ?? 0) + (portraitBox?.width ?? 0) / 2
@@ -881,6 +883,156 @@ test("manages personal tokens through the production browser bundle", async ({ p
   await dialog.getByRole("button", { name: "Confirm revoke" }).click();
   await expect(dialog.getByText("Browser CLI")).toHaveCount(0);
   await expect(dialog.getByText("Existing client")).toBeVisible();
+
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
+});
+
+test("exports archived chat and durably deletes Audrey data", async ({ page }) => {
+  const userDataAuthorization: Array<string | undefined> = [];
+  const purgeRequests: Array<{
+    body: unknown;
+    idempotencyKey: string | undefined;
+  }> = [];
+  let purgeStatusReads = 0;
+  const exportMessage = {
+    message_id: "msg_browser_export",
+    conversation_id: "con_browser_export",
+    conversation_title: "Browser export",
+    conversation_created_at: "2026-09-09T00:00:00Z",
+    conversation_updated_at: "2026-09-09T00:01:00Z",
+    role: "assistant",
+    content: "Portable archived answer.",
+    created_at: "2026-09-09T00:01:00Z",
+    archived_at: "2026-09-09T00:02:00Z",
+    partial: false,
+    virtual_model: "audrey_fast",
+    concrete_model: "browser-model",
+    prompt_tokens: 10,
+    completion_tokens: 20,
+  };
+  const purgeReceipt = (status: "pending" | "completed") => ({
+    schema_version: 1,
+    purge_id: "purge_browser_data",
+    cutoff_at: "2026-09-09T00:03:00Z",
+    requested_at: "2026-09-09T00:03:00Z",
+    status,
+    completed_at: status === "completed" ? "2026-09-09T00:03:02Z" : "",
+    files: {
+      pending: status === "completed" ? 0 : 1,
+      attempts: 1,
+      with_error: 0,
+      completed: status === "completed" ? 1 : 0,
+    },
+    paths: {
+      pending: status === "completed" ? 0 : 1,
+      attempts: 1,
+      with_error: 0,
+      completed: status === "completed" ? 1 : 0,
+    },
+    local_delivery: { completed: true, attempts: 1, with_error: false },
+    sidecar: {
+      acknowledged: true,
+      completed: status === "completed",
+      status,
+      attempts: 1,
+      with_error: false,
+    },
+  });
+
+  await page.route("**/v1/me/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    userDataAuthorization.push(request.headers().authorization);
+    if (url.pathname === "/v1/me/chat-history/export") {
+      await json(route, {
+        schema_version: 1,
+        items: [exportMessage],
+        next_cursor: null,
+      });
+      return;
+    }
+    if (url.pathname === "/v1/me/data-purge" && request.method() === "POST") {
+      purgeRequests.push({
+        body: request.postDataJSON(),
+        idempotencyKey: request.headers()["idempotency-key"],
+      });
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify(purgeReceipt("pending")),
+      });
+      return;
+    }
+    if (url.pathname === "/v1/me/data-purge/purge_browser_data") {
+      purgeStatusReads += 1;
+      await json(route, purgeReceipt("completed"));
+      return;
+    }
+    await route.abort("failed");
+  });
+  await page.route("**/api/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
+    if (url.pathname === "/api/me") {
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/conversations") {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await page.getByRole("button", { name: "Open account settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  const downloadPromise = page.waitForEvent("download");
+  await dialog.getByRole("button", { name: "Download chat history" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(
+    /^audrey-chat-history-\d{4}-\d{2}-\d{2}\.json$/u,
+  );
+  const stream = await download.createReadStream();
+  if (!stream) throw new Error("Chat export download stream was unavailable.");
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  const artifact = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+    schema_version: number;
+    items: Array<{ message_id: string; content: string }>;
+  };
+  expect(artifact.schema_version).toBe(1);
+  expect(artifact.items).toEqual([expect.objectContaining({
+    message_id: "msg_browser_export",
+    content: "Portable archived answer.",
+  })]);
+  await expect(dialog.getByText("Downloaded 1 archived message.")).toBeVisible();
+
+  await dialog.getByRole("button", { name: "Delete Audrey data" }).click();
+  const deleteButton = dialog.getByRole("button", { name: "Delete all Audrey data" });
+  await expect(deleteButton).toBeDisabled();
+  await dialog.getByRole("textbox", { name: "Deletion confirmation" }).fill(
+    "DELETE ALL MY AUDREY DATA",
+  );
+  await expect(deleteButton).toBeEnabled();
+  await deleteButton.click();
+
+  await expect(dialog.getByRole("heading", { name: "Deletion is in progress" })).toBeVisible();
+  await expect(dialog.getByRole("heading", { name: "Deletion complete" })).toBeVisible();
+  expect(purgeStatusReads).toBeGreaterThanOrEqual(1);
+  expect(purgeRequests).toEqual([{
+    body: { confirmation: "DELETE ALL MY AUDREY DATA" },
+    idempotencyKey: expect.stringMatching(/^native-ui-/u),
+  }]);
+  expect(userDataAuthorization.every((value) => value === undefined)).toBe(true);
+  expect(await page.evaluate(() => ({
+    local: localStorage.length,
+    session: sessionStorage.length,
+  }))).toEqual({ local: 0, session: 0 });
 
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations).toEqual([]);

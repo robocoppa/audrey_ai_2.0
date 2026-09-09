@@ -44,6 +44,59 @@ export interface PersonalTokenCreate {
   expires_in_days: number;
 }
 
+export interface ChatExportMessage {
+  message_id: string;
+  conversation_id: string;
+  conversation_title: string;
+  conversation_created_at: string;
+  conversation_updated_at: string;
+  role: string;
+  content: string;
+  created_at: string;
+  archived_at: string;
+  partial: boolean;
+  virtual_model: string;
+  concrete_model: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+}
+
+export interface ChatHistoryExport {
+  schema_version: number;
+  items: ChatExportMessage[];
+}
+
+export interface PurgeQueueStatus {
+  pending: number;
+  attempts: number;
+  with_error: number;
+  completed: number;
+}
+
+export interface PurgeComponentStatus {
+  completed: boolean;
+  attempts: number;
+  with_error: boolean;
+}
+
+export interface PurgeSidecarStatus extends PurgeComponentStatus {
+  acknowledged: boolean;
+  status: string;
+}
+
+export interface AccountPurgeStatus {
+  schema_version: number;
+  purge_id: string;
+  cutoff_at: string;
+  requested_at: string;
+  status: string;
+  completed_at: string;
+  files: PurgeQueueStatus;
+  paths: PurgeQueueStatus;
+  local_delivery: PurgeComponentStatus;
+  sidecar: PurgeSidecarStatus;
+}
+
 export type AudreyMode =
   | "auto"
   | "fast"
@@ -235,6 +288,57 @@ export function revokePersonalToken(tokenId: string): Promise<{
   return apiJson(`/api/tokens/${encodeURIComponent(tokenId)}`, {
     method: "DELETE",
   });
+}
+
+export async function exportChatHistory(): Promise<ChatHistoryExport> {
+  const items: ChatExportMessage[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | null = null;
+  let schemaVersion: number | null = null;
+
+  do {
+    if (cursor) {
+      if (seenCursors.has(cursor)) {
+        throw new Error("Chat export returned a repeated pagination cursor.");
+      }
+      seenCursors.add(cursor);
+    }
+    const params = new URLSearchParams({ limit: "200" });
+    if (cursor) params.set("cursor", cursor);
+    const page = await apiJson<{
+      schema_version: number;
+      items: ChatExportMessage[];
+      next_cursor: string | null;
+    }>(`/v1/me/chat-history/export?${params}`);
+    if (schemaVersion !== null && page.schema_version !== schemaVersion) {
+      throw new Error("Chat export schema changed between pages.");
+    }
+    schemaVersion = page.schema_version;
+    items.push(...page.items);
+    cursor = page.next_cursor;
+  } while (cursor);
+
+  return { schema_version: schemaVersion ?? 1, items };
+}
+
+export function requestAccountDataPurge(
+  confirmation: string,
+  idempotencyKey: string,
+): Promise<AccountPurgeStatus> {
+  return apiJson<AccountPurgeStatus>("/v1/me/data-purge", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotencyKey,
+    },
+    body: JSON.stringify({ confirmation }),
+  });
+}
+
+export function getAccountDataPurge(purgeId: string): Promise<AccountPurgeStatus> {
+  return apiJson<AccountPurgeStatus>(
+    `/v1/me/data-purge/${encodeURIComponent(purgeId)}`,
+  );
 }
 
 export function listConversations(
