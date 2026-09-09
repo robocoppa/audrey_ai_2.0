@@ -182,6 +182,10 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect.poll(
     () => portrait.evaluate((element) => Number.parseFloat(getComputedStyle(element).opacity)),
   ).toBe(0.8);
+  await portrait.hover();
+  await expect.poll(
+    () => portrait.evaluate((element) => Number.parseFloat(getComputedStyle(element).opacity)),
+  ).toBe(1);
   expect((composerBox?.y ?? 0) + (composerBox?.height ?? 0)).toBeLessThanOrEqual(viewport?.height ?? 0);
   expect(Math.abs(
     (portraitBox?.x ?? 0) + (portraitBox?.width ?? 0) / 2

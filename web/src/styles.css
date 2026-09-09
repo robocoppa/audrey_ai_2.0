@@ -731,6 +731,11 @@ a:focus-visible {
   box-shadow:
     0 0 0 0.32rem rgb(70 118 242 / 10%),
     0 0.75rem 2.1rem rgb(52 153 250 / 24%);
+  transition: opacity 160ms ease;
+}
+
+.composer-model-picker img:hover {
+  opacity: 1;
 }
 
 .model-picker-control {
