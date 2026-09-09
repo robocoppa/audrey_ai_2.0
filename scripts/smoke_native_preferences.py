@@ -254,7 +254,7 @@ def main() -> int:
         persona = (
             f"The saved verification marker is {marker}. "
             + "Prefer direct, practical explanations with explicit assumptions. " * 45
-        )
+        ).strip()
         desired = {
             "timezone": "America/Denver",
             "persona": persona,
