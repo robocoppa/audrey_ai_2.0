@@ -24,30 +24,51 @@ type SessionState =
 export function App() {
   const [session, setSession] = useState<SessionState>({ status: "loading" });
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
+  const [sessionRevision, setSessionRevision] = useState(0);
 
   useEffect(() => {
     let active = true;
 
-    Promise.all([getCurrentUser(), getCurrentUserPreferences()])
-      .then(([user, preferences]) => {
-        if (active) setSession({ status: "ready", user, preferences });
-      })
-      .catch((error: unknown) => {
-        if (!active) return;
-        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-          setSession({ status: "unauthenticated" });
-          return;
+    async function initializeSession() {
+      let lastError: unknown;
+      for (const delayMs of [0, 250, 750]) {
+        if (delayMs) {
+          await new Promise((resolve) => window.setTimeout(resolve, delayMs));
         }
-        setSession({
-          status: "error",
-          message: error instanceof Error ? error.message : "Audrey is unavailable.",
-        });
+        if (!active) return;
+        try {
+          const user = await getCurrentUser();
+          const preferences = await getCurrentUserPreferences();
+          if (active) setSession({ status: "ready", user, preferences });
+          return;
+        } catch (error) {
+          lastError = error;
+          const retryable = error instanceof ApiError
+            && (error.status === 401 || error.status === 403);
+          if (!retryable) break;
+        }
+      }
+
+      if (!active) return;
+      if (lastError instanceof ApiError
+        && (lastError.status === 401 || lastError.status === 403)) {
+        setSession({ status: "unauthenticated" });
+        return;
+      }
+      setSession({
+        status: "error",
+        message: lastError instanceof Error
+          ? lastError.message
+          : "Audrey is unavailable.",
       });
+    }
+
+    void initializeSession();
 
     return () => {
       active = false;
     };
-  }, []);
+  }, [sessionRevision]);
 
   if (session.status === "loading") {
     return <AudreyLoader fullscreen />;
@@ -73,6 +94,10 @@ export function App() {
           <span className="brand-product">Ask Audrey</span>
         </a>
         <SessionControls
+          onRetry={() => {
+            setSession({ status: "loading" });
+            setSessionRevision((current) => current + 1);
+          }}
           session={session}
           onUserChange={(user) => {
             setSession((current) =>
@@ -116,7 +141,7 @@ export function App() {
           </p>
           {session.status === "unauthenticated" ? (
             <p className="notice" role="alert">
-              Sign in through the Audrey access page, then reload this tab.
+              Audrey could not establish this Access session. Retry it or log out and sign in again.
             </p>
           ) : null}
           {session.status === "error" ? (
@@ -136,11 +161,13 @@ export function App() {
 
 function SessionControls({
   session,
+  onRetry,
   onUserChange,
   onPreferencesChange,
   onDataPurgeAttempted,
 }: {
   session: SessionState;
+  onRetry: () => void;
   onUserChange: (user: CurrentUser) => void;
   onPreferencesChange: (preferences: UserPreferences) => void;
   onDataPurgeAttempted: () => void;
@@ -159,7 +186,17 @@ function SessionControls({
       />
     );
   }
-  return <span className="session-badge session-badge-offline">Not connected</span>;
+  return (
+    <div className="session-controls session-controls-offline">
+      <span className="session-badge session-badge-offline">Not connected</span>
+      <button className="session-retry-button" type="button" onClick={onRetry}>
+        Retry session
+      </button>
+      <a className="logout-button" href="/cdn-cgi/access/logout">
+        Log out
+      </a>
+    </div>
+  );
 }
 
 function ReadySessionControls({

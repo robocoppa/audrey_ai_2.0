@@ -18,8 +18,8 @@ import remarkGfm from "remark-gfm";
 import autoPortrait from "./assets/models/audrey2.png";
 import deepPortrait from "./assets/models/audrey7.png";
 import fastPortrait from "./assets/models/audrey3.png";
-import researchPortrait from "./assets/models/search.png";
-import videoPortrait from "./assets/models/audrey8.png";
+import researchPortrait from "./assets/models/audrey8.png";
+import videoPortrait from "./assets/models/audrey9.png";
 import cloudPortrait from "./assets/models/cloudModel.png";
 import localPortrait from "./assets/models/localModel.png";
 
@@ -395,7 +395,7 @@ export function ChatWorkspace({
           </div>
         ))}
         {!selected && (loading || creating) ? (
-          <AudreyLoader label="Opening conversation" />
+          <AudreyLoader label="Opening conversation" showPortrait={false} />
         ) : null}
       </section>
       {managingFiles ? <FileManager onClose={() => setManagingFiles(false)} /> : null}
@@ -592,7 +592,7 @@ function ConversationThread({
       </div>
 
       {thread.status === "loading" || thread.status === "idle" ? (
-        <AudreyLoader label="Loading conversation" />
+        <AudreyLoader label="Loading conversation" showPortrait={false} />
       ) : null}
       {thread.status === "error" ? (
         <div className="thread-loading thread-error" role="alert">{thread.message}</div>

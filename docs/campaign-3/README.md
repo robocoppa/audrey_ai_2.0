@@ -11,9 +11,13 @@ observations, and the rebuildable canonical archive projection have all passed
 their live gates. Milestone 2C's native web-client slices are complete and
 Unraid-verified, and the first interactive Cloudflare Access user opened the
 root application and completed a Fast turn. The deployed navigation-history
-corrective is user-confirmed. The no-landing startup and hard-refresh corrective
-is laptop-complete and awaits redeployment; second-user isolation remains
-pending.
+and no-landing startup/hard-refresh correctives are user-confirmed; second-user
+isolation remains pending.
+The loader-to-composer portrait transition and Research/Video artwork correction
+are laptop-complete and await redeployment.
+A second Cloudflare identity is valid and distinct, while a resilient sequential
+session bootstrap plus disconnected Retry/Log out controls are laptop-complete
+and await redeployment before the final isolation check.
 The dark Builtryte branding, adaptive docked `Ask Audrey` composer, contextual
 jump-to-latest control, introductory portrait-backed mode descriptions, semantic
 first-prompt titles, and self-service profile-name refinement are laptop-

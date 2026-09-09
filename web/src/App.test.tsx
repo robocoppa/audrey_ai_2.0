@@ -87,24 +87,111 @@ describe("App", () => {
     );
   });
 
-  it("shows a sign-in message without storing a browser token", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ detail: "Not authenticated." }), {
-          status: 401,
+  it("recovers from a transient Access rejection during session bootstrap", async () => {
+    let identityReads = 0;
+    const fetchMock = vi.fn().mockImplementation((path: string) => {
+      if (path === "/api/me") {
+        identityReads += 1;
+        if (identityReads === 1) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ detail: "Missing bearer token." }), {
+              status: 401,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        }
+        return Promise.resolve(
+          new Response(JSON.stringify({
+            id: "usr_example",
+            email: "alice@example.com",
+            display_name: "Alice Example",
+            role: "user",
+            status: "active",
+            auth_provider: "cloudflare_access",
+          }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      if (path === "/api/me/preferences") {
+        return Promise.resolve(
+          new Response(JSON.stringify(DEFAULT_PREFERENCES), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ items: [], next_cursor: null }), {
+          status: 200,
           headers: { "Content-Type": "application/json" },
         }),
-      ),
-    );
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Sign in through the Audrey",
+    const identity = await screen.findByLabelText(
+      "Signed in user",
+      undefined,
+      { timeout: 3000 },
+    );
+    expect(identity).toHaveTextContent("Alice");
+    expect(identityReads).toBe(2);
+    expect(screen.queryByText("A quieter place to think.")).not.toBeInTheDocument();
+  });
+
+  it("offers retry and logout after Access authentication remains unavailable", async () => {
+    let sessionReady = false;
+    const fetchMock = vi.fn().mockImplementation((path: string) => {
+      if (!sessionReady) {
+        return Promise.resolve(new Response(JSON.stringify({ detail: "Not authenticated." }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }));
+      }
+      const payload = path === "/api/me"
+        ? {
+            id: "usr_example",
+            email: "alice@example.com",
+            display_name: "Alice Example",
+            role: "user",
+            status: "active",
+            auth_provider: "cloudflare_access",
+          }
+        : path === "/api/me/preferences"
+          ? DEFAULT_PREFERENCES
+          : { items: [], next_cursor: null };
+      return Promise.resolve(
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole("alert", undefined, { timeout: 3000 })).toHaveTextContent(
+      "could not establish this Access session",
+    );
+    expect(screen.getByRole("button", { name: "Retry session" })).toBeEnabled();
+    expect(screen.getByRole("link", { name: "Log out" })).toHaveAttribute(
+      "href",
+      "/cdn-cgi/access/logout",
     );
     expect(window.localStorage).toHaveLength(0);
     expect(window.sessionStorage).toHaveLength(0);
+
+    sessionReady = true;
+    fireEvent.click(screen.getByRole("button", { name: "Retry session" }));
+    expect(await screen.findByLabelText("Signed in user")).toHaveTextContent(
+      "Alice",
+    );
+    expect(fetchMock).toHaveBeenCalled();
   });
 
   it("uses the account handle when the provider has no display name", async () => {

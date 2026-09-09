@@ -7,7 +7,10 @@ pipeline observations, and rebuildable canonical archive projection.
 Milestone 2C's native client and public route are live, with the broader browser
 and soak gate still open. Milestone 2D slices 2D.1–2D.3 are Unraid-verified;
 slice 2D.4 chat export and account-data deletion is deployed and awaits its
-destructive live gate plus the current no-landing corrective redeploy.
+destructive live gate. The no-landing startup corrective is user-verified; its
+loader-transition and Research/Video artwork follow-up awaits redeployment.
+The second-user Access bootstrap recovery and disconnected session controls also
+await redeployment.
 
 ## Goal
 
@@ -763,6 +766,17 @@ Audrey hostname at clean root `/`, and makes Playwright build and preview the
 production artifact. After deployment, the allowed user opened the corrected
 root application and a Fast turn returned the exact `2C-ACCESS-READY` response.
 
+The second allowed Access identity subsequently produced a distinct active
+Audrey principal and default preference row; direct identity and preference
+reads both succeeded. Its first post-code redirect nevertheless hit a transient
+authentication rejection, and the client's one-shot concurrent bootstrap
+latched that response into the disconnected view. The client now resolves
+identity before preferences, retries `401`/`403` twice over one second while
+retaining the loader, and exposes Retry and Access logout controls after a
+persistent failure. Thirteen Vitest contracts and all 19 production-preview
+Chromium workflows pass. Redeployment and conversation-isolation verification
+remain.
+
 The subsequent refresh check exposed a second browser defect: Canonical
 messages were assigned to `HttpAgent`, while assistant-ui renders a separate
 runtime repository. Selecting another conversation unmounted that repository,
@@ -974,7 +988,12 @@ through?” landing state. A first startup with no active conversations creates
 and opens a blank Auto thread, while a hard refresh remains on the Audrey loader
 until the saved canonical thread and messages return. Production-preview browser
 coverage deliberately delays that reload response and proves the landing state
-never appears. This corrective awaits redeployment. Slice 2D.4 remains open
+never appears. The deployed behavior is user-confirmed.
+
+The next corrective keeps the centered full-screen loader but renders no portrait
+during workspace and canonical-message loading, so Audrey appears again only in
+her final composer position. Research uses `audrey8`; Video uses `audrey9`. All
+19 production-preview Chromium workflows pass. Slice 2D.4 remains open
 until an explicitly expendable account exports its seeded archive, completes
 deletion, reloads as the same identity, and reaches `ready` repair status on
 Unraid. Do not run this destructive gate against the primary account.

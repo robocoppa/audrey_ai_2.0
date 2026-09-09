@@ -3,9 +3,11 @@ import autoPortrait from "./assets/models/audrey2.png";
 export function AudreyLoader({
   fullscreen = false,
   label = "Loading Audrey",
+  showPortrait = true,
 }: {
   fullscreen?: boolean;
   label?: string;
+  showPortrait?: boolean;
 }) {
   return (
     <div
@@ -13,10 +15,12 @@ export function AudreyLoader({
       role="status"
       aria-label={label}
     >
-      <div className="audrey-loading-portrait" aria-hidden="true">
-        <span className="audrey-loading-orbit" />
-        <img src={autoPortrait} alt="" />
-      </div>
+      {showPortrait ? (
+        <div className="audrey-loading-portrait" aria-hidden="true">
+          <span className="audrey-loading-orbit" />
+          <img src={autoPortrait} alt="" />
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -64,11 +64,68 @@ test("centers Audrey Auto with a text-free orbit while the session loads", async
   await expect(page.getByRole("link", { name: "Audrey home" })).toBeVisible();
 });
 
+test("recovers a transient Access bootstrap rejection", async ({ page }) => {
+  const sessionRequests: string[] = [];
+  let identityReads = 0;
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me") {
+      identityReads += 1;
+      sessionRequests.push(url.pathname);
+      if (identityReads === 1) {
+        await route.fulfill({
+          status: 401,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "Missing bearer token." }),
+        });
+        return;
+      }
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/me/preferences") {
+      sessionRequests.push(url.pathname);
+      await json(route, browserPreferences());
+      return;
+    }
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      await json(route, {
+        items: [browserConversation("Recovered Access session")],
+        next_cursor: null,
+      });
+      return;
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+
+  await expect(page.getByRole("heading", { name: "Recovered Access session" })).toBeVisible();
+  expect(sessionRequests).toEqual([
+    "/api/me",
+    "/api/me",
+    "/api/me/preferences",
+  ]);
+  await expect(page.getByText("A quieter place to think.")).toHaveCount(0);
+  await expect(page.getByText("Not connected")).toHaveCount(0);
+});
+
 test("restores a saved conversation on hard refresh without showing a landing page", async ({ page }) => {
   let conversationListReads = 0;
+  let messageReads = 0;
   let releaseReloadList: () => void = () => undefined;
+  let releaseReloadMessages: () => void = () => undefined;
   const reloadListGate = new Promise<void>((resolve) => {
     releaseReloadList = resolve;
+  });
+  const reloadMessagesGate = new Promise<void>((resolve) => {
+    releaseReloadMessages = resolve;
   });
 
   await page.route("**/api/**", async (route) => {
@@ -92,6 +149,8 @@ test("restores a saved conversation on hard refresh without showing a landing pa
       return;
     }
     if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
+      messageReads += 1;
+      if (messageReads === 2) await reloadMessagesGate;
       await json(route, { items: canonicalBrowserTurn(), next_cursor: null });
       return;
     }
@@ -104,10 +163,17 @@ test("restores a saved conversation on hard refresh without showing a landing pa
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect.poll(() => conversationListReads).toBe(2);
-  await expect(page.getByRole("status", { name: "Opening conversation" })).toBeVisible();
+  const opening = page.getByRole("status", { name: "Opening conversation" });
+  await expect(opening).toBeAttached();
+  await expect(opening.locator("img, .audrey-loading-orbit")).toHaveCount(0);
   await expect(page.getByText("What shall we work through?")).toHaveCount(0);
 
   releaseReloadList();
+  const loading = page.getByRole("status", { name: "Loading conversation" });
+  await expect(loading).toBeAttached();
+  await expect(loading.locator("img, .audrey-loading-orbit")).toHaveCount(0);
+
+  releaseReloadMessages();
   await expect(page.getByRole("heading", { name: "Hard refresh history" })).toBeVisible();
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
 });
@@ -213,6 +279,14 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   );
   const portrait = page.locator(".composer-model-picker img");
   await expect(portrait).toBeVisible();
+  const modelPicker = page.getByRole("combobox", { name: "Audrey model" });
+  await modelPicker.selectOption("research");
+  await expect(portrait).toHaveAttribute("src", /audrey8/u);
+  await modelPicker.selectOption("video");
+  await expect(portrait).toHaveAttribute("src", /audrey9/u);
+  await expect.poll(() => portrait.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  await modelPicker.selectOption("fast");
+  await expect(portrait).toHaveAttribute("src", /audrey3/u);
   await expect.poll(() => portrait.evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
   await expect(page.getByText("Quick, direct answers for everyday questions and tasks.")).toBeVisible();
   await expect(page.locator(".model-picker-copy")).toHaveCount(0);
@@ -1307,8 +1381,10 @@ async function mockAudreyApi(
   messages: ReadonlyArray<Record<string, unknown>> = [],
   preferences = browserPreferences(),
 ) {
+  let conversation: Record<string, unknown> = browserConversation("Browser smoke");
   await page.route("**/api/**", async (route) => {
-    const url = new URL(route.request().url());
+    const request = route.request();
+    const url = new URL(request.url());
     if (url.pathname === "/api/me/preferences") {
       await json(route, preferences);
       return;
@@ -1324,17 +1400,9 @@ async function mockAudreyApi(
       });
       return;
     }
-    if (url.pathname === "/api/conversations" && route.request().method() === "GET") {
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
       await json(route, {
-        items: [{
-          id: CONVERSATION_ID,
-          title: "Browser smoke",
-          default_mode: "fast",
-          created_at: "2026-09-04T00:00:00Z",
-          updated_at: "2026-09-04T00:00:00Z",
-          last_message_at: null,
-          archived_at: null,
-        }],
+        items: [conversation],
         next_cursor: null,
       });
       return;
@@ -1343,6 +1411,15 @@ async function mockAudreyApi(
       await json(route, { items: messages, next_cursor: null });
       return;
     }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}` && request.method() === "PATCH") {
+      conversation = {
+        ...conversation,
+        ...(request.postDataJSON() as Record<string, unknown>),
+      };
+      await json(route, conversation);
+      return;
+    }
+
     if (url.pathname === "/api/agent" && agentHandler) {
       await agentHandler(route);
       return;
