@@ -64,15 +64,15 @@ describe("App", () => {
 
     const identity = await screen.findByLabelText("Signed in user");
     expect(screen.getByRole("link", { name: "Audrey home" })).toContainElement(
-      document.querySelector(".brand-mark img"),
+      document.querySelector(".brand-wordmark img"),
     );
-    expect(document.querySelector(".brand-mark img")).toHaveAttribute(
+    expect(document.querySelector(".brand-wordmark img")).toHaveAttribute(
       "src",
-      expect.stringContaining("builtryte-mark.png"),
+      expect.stringContaining("builtryte-wordmark.png"),
     );
-    expect(document.querySelector("#blue-mark-on-dark feColorMatrix")).toHaveAttribute(
+    expect(document.querySelector("#light-wordmark-on-dark feColorMatrix")).toHaveAttribute(
       "values",
-      expect.stringContaining("0.204"),
+      expect.stringContaining("0.843"),
     );
     expect(identity).toHaveTextContent("Alice");
     expect(identity).not.toHaveTextContent("Example");

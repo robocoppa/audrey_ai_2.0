@@ -6,12 +6,15 @@ import re
 from pathlib import Path
 
 import yaml
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
 AUDREY_DOCKERFILE = ROOT / "docker" / "audrey.Dockerfile"
 UI_DOCKERFILE = ROOT / "web" / "Dockerfile"
 UI_NGINX_TEMPLATE = ROOT / "web" / "docker" / "default.conf.template"
 UI_VITE_CONFIG = ROOT / "web" / "vite.config.ts"
+UI_INDEX = ROOT / "web" / "index.html"
+UI_FAVICON = ROOT / "web" / "src" / "assets" / "brand" / "builtryte-favicon.png"
 TOOLS_DOCKERFILE = ROOT / "docker" / "custom-tools.Dockerfile"
 FETCHER_DOCKERFILE = ROOT / "docker" / "media-fetcher.Dockerfile"
 COMPOSE = ROOT / "compose.yaml"
@@ -121,6 +124,16 @@ def test_native_ui_proxy_preserves_auth_streams_uploads_and_static_boundaries():
     assert "try_files $uri =404;" in template
     assert "try_files $uri $uri/ /index.html;" in template
     assert "default-src 'self'" in template
+
+
+def test_native_ui_uses_a_small_transparent_branded_favicon():
+    assert 'href="/src/assets/brand/builtryte-favicon.png"' in _text(UI_INDEX)
+    assert UI_FAVICON.stat().st_size < 100_000
+    with Image.open(UI_FAVICON) as favicon:
+        assert favicon.size == (256, 256)
+        assert favicon.mode == "RGBA"
+        assert favicon.getpixel((0, 0))[3] == 0
+        assert favicon.getchannel("A").getbbox() is not None
 
 
 def test_every_shared_writer_uses_unraids_numeric_identity():

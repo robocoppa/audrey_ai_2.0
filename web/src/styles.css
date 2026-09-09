@@ -1157,6 +1157,7 @@ a:focus-visible {
   object-fit: cover;
   border: 1px solid rgb(99 181 255 / 28%);
   border-radius: inherit;
+  opacity: 0.8;
   box-shadow: 0 1.2rem 3.5rem rgb(0 0 0 / 48%);
 }
 
@@ -1223,20 +1224,23 @@ a:focus-visible {
   text-decoration: none;
 }
 
-.brand-mark {
+.brand-wordmark {
+  position: relative;
   display: block;
-  width: 3.25rem;
+  width: 12.5rem;
   height: 3.25rem;
+  overflow: hidden;
   flex: 0 0 auto;
   background: transparent;
 }
 
-.brand-mark img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  filter: url("#blue-mark-on-dark");
+.brand-wordmark img {
+  position: absolute;
+  top: -1.25rem;
+  left: -2.5rem;
+  width: 17.5rem;
+  max-width: none;
+  filter: url("#light-wordmark-on-dark");
 }
 
 .brand-product {
@@ -1936,9 +1940,15 @@ a:focus-visible {
     gap: 0.35rem;
   }
 
-  .brand-mark {
-    width: 2.5rem;
+  .brand-wordmark {
+    width: 8.4rem;
     height: 2.5rem;
+  }
+
+  .brand-wordmark img {
+    top: -0.82rem;
+    left: -1.7rem;
+    width: 11.8rem;
   }
 
   .brand-product {

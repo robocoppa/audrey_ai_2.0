@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 
 import { AudreyLoader } from "./AudreyLoader";
-import builtryteMark from "./assets/brand/builtryte-mark.png";
+import builtryteWordmark from "./assets/brand/builtryte-wordmark.png";
 import { AccountSettings } from "./AccountSettings";
 import {
   ApiError,
@@ -57,17 +57,17 @@ export function App() {
       className={session.status === "ready" ? "app-shell app-shell-ready" : "app-shell"}
     >
       <svg className="brand-filter" aria-hidden="true">
-        <filter id="blue-mark-on-dark" colorInterpolationFilters="sRGB">
+        <filter id="light-wordmark-on-dark" colorInterpolationFilters="sRGB">
           <feColorMatrix
             type="matrix"
-            values="0 0 0 0 0.204  0 0 0 0 0.6  0 0 0 0 0.98  -1.5 -1.5 -1.5 0 4.45"
+            values="0 0 0 0 0.843  0 0 0 0 0.886  0 0 0 0 0.945  -1.5 -1.5 -1.5 0 4.45"
           />
         </filter>
       </svg>
       <header className="topbar">
         <a className="brand" href="/" aria-label="Audrey home">
-          <span className="brand-mark" aria-hidden="true">
-            <img src={builtryteMark} alt="" />
+          <span className="brand-wordmark" aria-hidden="true">
+            <img src={builtryteWordmark} alt="" />
           </span>
           <span className="brand-product">Ask Audrey</span>
         </a>

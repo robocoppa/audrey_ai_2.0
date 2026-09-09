@@ -41,6 +41,9 @@ test("centers Audrey Auto with a text-free orbit while the session loads", async
   await expect.poll(
     () => orbit.evaluate((element) => getComputedStyle(element).animationName),
   ).toBe("audrey-loading-orbit");
+  await expect.poll(
+    () => portrait.evaluate((image) => getComputedStyle(image).opacity),
+  ).toBe("0.8");
 
   const loaderBox = await loader.boundingBox();
   const portraitBox = await portrait.boundingBox();
@@ -128,19 +131,19 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect.poll(
     () => page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor),
   ).toBe("rgb(7, 16, 31)");
-  const brandMark = page.locator(".brand-mark img");
-  await expect(brandMark).toBeVisible();
-  await expect(page.locator("#blue-mark-on-dark feColorMatrix")).toHaveAttribute(
+  const brandWordmark = page.locator(".brand-wordmark img");
+  await expect(brandWordmark).toBeVisible();
+  await expect(page.locator("#light-wordmark-on-dark feColorMatrix")).toHaveAttribute(
     "values",
-    /0\.204.*0\.6.*0\.98/u,
+    /0\.843.*0\.886.*0\.945/u,
   );
   await expect.poll(
-    () => brandMark.evaluate((image) => (image as HTMLImageElement).naturalWidth),
+    () => brandWordmark.evaluate((image) => (image as HTMLImageElement).naturalWidth),
   ).toBeGreaterThan(0);
-  await expect(brandMark).toHaveAttribute("src", /builtryte-mark/u);
+  await expect(brandWordmark).toHaveAttribute("src", /builtryte-wordmark/u);
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute(
     "href",
-    /builtryte-mark/,
+    /builtryte-favicon/u,
   );
   await expect(page.getByRole("heading", { name: "Browser smoke" })).toBeVisible();
   await expect(page.locator(".brand-product")).toHaveText("Ask Audrey");
