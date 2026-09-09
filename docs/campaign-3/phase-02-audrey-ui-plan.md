@@ -6,8 +6,8 @@ state, native conversation/run resources, typed and AG-UI events, real
 pipeline observations, and rebuildable canonical archive projection.
 Milestone 2C's native client and public route are live, with the broader browser
 and soak gate still open. Milestone 2D slices 2D.1–2D.3 are Unraid-verified;
-slice 2D.4 chat export and account-data deletion is laptop-complete and awaits
-its destructive live gate.
+slice 2D.4 chat export and account-data deletion is deployed and awaits its
+destructive live gate plus the current no-landing corrective redeploy.
 
 ## Goal
 
@@ -963,13 +963,20 @@ The Audrey identity and profile remain and preferences reset; conversations,
 runs, tokens, uploads, memories, and derived chat history are deleted.
 
 The full hermetic backend suite passes all 2,776 tests; its focused packaging/
-user-data regression passes 32. All 12 Vitest contracts and 17 production-
+user-data regression passes 32. All 12 Vitest contracts and 18 production-
 preview Chromium workflows pass, including a real Blob download, pending-to-
 complete status polling, workspace reset, no browser bearer storage/header,
 and an axe audit. Typecheck, lint, production build, and diff checks are
-clean. Slice 2D.4 remains laptop-complete until an explicitly expendable
-account exports its seeded archive, completes deletion,
-reloads as the same empty identity, and reaches `ready` repair status on
+clean.
+
+The native conversation surface no longer contains the “What shall we work
+through?” landing state. A first startup with no active conversations creates
+and opens a blank Auto thread, while a hard refresh remains on the Audrey loader
+until the saved canonical thread and messages return. Production-preview browser
+coverage deliberately delays that reload response and proves the landing state
+never appears. This corrective awaits redeployment. Slice 2D.4 remains open
+until an explicitly expendable account exports its seeded archive, completes
+deletion, reloads as the same identity, and reaches `ready` repair status on
 Unraid. Do not run this destructive gate against the primary account.
 
 Gate: disposable-user upload/search/export/delete evidence covers transactional

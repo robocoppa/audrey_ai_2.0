@@ -20,7 +20,11 @@ test("centers Audrey Auto with a text-free orbit while the session loads", async
       await json(route, browserUser());
       return;
     }
-    if (url.pathname === "/api/conversations") {
+    if (url.pathname === "/api/conversations" && route.request().method() === "GET") {
+      await json(route, { items: [browserConversation("Loading workspace")], next_cursor: null });
+      return;
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
       await json(route, { items: [], next_cursor: null });
       return;
     }
@@ -58,6 +62,54 @@ test("centers Audrey Auto with a text-free orbit while the session loads", async
 
   releaseSession();
   await expect(page.getByRole("link", { name: "Audrey home" })).toBeVisible();
+});
+
+test("restores a saved conversation on hard refresh without showing a landing page", async ({ page }) => {
+  let conversationListReads = 0;
+  let releaseReloadList: () => void = () => undefined;
+  const reloadListGate = new Promise<void>((resolve) => {
+    releaseReloadList = resolve;
+  });
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
+    if (url.pathname === "/api/me") {
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      conversationListReads += 1;
+      if (conversationListReads === 2) await reloadListGate;
+      await json(route, {
+        items: [browserConversation("Hard refresh history")],
+        next_cursor: null,
+      });
+      return;
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
+      await json(route, { items: canonicalBrowserTurn(), next_cursor: null });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await expect(page.getByRole("heading", { name: "Hard refresh history" })).toBeVisible();
+  await expect(page.getByText("Canonical mode answer.")).toBeVisible();
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect.poll(() => conversationListReads).toBe(2);
+  await expect(page.getByRole("status", { name: "Opening conversation" })).toBeVisible();
+  await expect(page.getByText("What shall we work through?")).toHaveCount(0);
+
+  releaseReloadList();
+  await expect(page.getByRole("heading", { name: "Hard refresh history" })).toBeVisible();
+  await expect(page.getByText("Canonical mode answer.")).toBeVisible();
 });
 
 test("runs a native turn with typed stage, tool, and source activity", async ({ page }) => {
@@ -360,8 +412,10 @@ test("summarizes a new conversation from its first prompt", async ({ page }) => 
   });
 
   await page.goto("./");
-  await page.getByRole("button", { name: "Start a conversation" }).click();
   await expect(page.getByRole("heading", { name: "New conversation" })).toBeVisible();
+  await expect(page.locator(".composer-model-picker img")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Ask Audrey" })).toBeVisible();
+  await expect(page.getByText("What shall we work through?")).toHaveCount(0);
 
   const prompt = "Plan a weekend hiking trip with a packing list";
   await page.getByRole("textbox", { name: "Ask Audrey" }).fill(prompt);
@@ -691,7 +745,11 @@ test("sets and retains the current user's profile name", async ({ page }) => {
       await json(route, profile);
       return;
     }
-    if (url.pathname === "/api/conversations") {
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      await json(route, { items: [browserConversation("Profile conversation")], next_cursor: null });
+      return;
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
       await json(route, { items: [], next_cursor: null });
       return;
     }
@@ -711,7 +769,7 @@ test("sets and retains the current user's profile name", async ({ page }) => {
 
   await page.reload();
   await expect(page.getByRole("button", { name: "Open account settings" })).toHaveText("Alice");
-  await expect(page.getByRole("heading", { name: "What shall we work through?" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Profile conversation" })).toBeVisible();
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations).toEqual([]);
 });
@@ -738,7 +796,11 @@ test("saves and reloads native Audrey preferences", async ({ page }) => {
       await json(route, browserUser());
       return;
     }
-    if (url.pathname === "/api/conversations") {
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      await json(route, { items: [browserConversation("Preferences conversation")], next_cursor: null });
+      return;
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
       await json(route, { items: [], next_cursor: null });
       return;
     }
@@ -846,7 +908,11 @@ test("manages personal tokens through the production browser bundle", async ({ p
       await json(route, browserUser());
       return;
     }
-    if (url.pathname === "/api/conversations") {
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      await json(route, { items: [browserConversation("Token conversation")], next_cursor: null });
+      return;
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
       await json(route, { items: [], next_cursor: null });
       return;
     }
@@ -981,7 +1047,11 @@ test("exports archived chat and durably deletes Audrey data", async ({ page }) =
       await json(route, browserUser());
       return;
     }
-    if (url.pathname === "/api/conversations") {
+    if (url.pathname === "/api/conversations" && route.request().method() === "GET") {
+      await json(route, { items: [browserConversation("Data controls conversation")], next_cursor: null });
+      return;
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
       await json(route, { items: [], next_cursor: null });
       return;
     }

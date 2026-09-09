@@ -11,8 +11,9 @@ observations, and the rebuildable canonical archive projection have all passed
 their live gates. Milestone 2C's native web-client slices are complete and
 Unraid-verified, and the first interactive Cloudflare Access user opened the
 root application and completed a Fast turn. The deployed navigation-history
-corrective is user-confirmed; hard-refresh persistence and second-user isolation
-remain pending.
+corrective is user-confirmed. The no-landing startup and hard-refresh corrective
+is laptop-complete and awaits redeployment; second-user isolation remains
+pending.
 The dark Builtryte branding, adaptive docked `Ask Audrey` composer, contextual
 jump-to-latest control, introductory portrait-backed mode descriptions, semantic
 first-prompt titles, and self-service profile-name refinement are laptop-
@@ -29,8 +30,8 @@ Unraid-verified.
 Milestone 2D slices 2D.1 files/attachments and 2D.2 native preferences are
 complete and Unraid-verified.
 Slice 2D.3 native personal-token management is complete and Unraid-verified.
-Slice 2D.4 native chat export and account-data deletion is laptop-complete and
-awaits its disposable-account browser gate.
+Slice 2D.4 native chat export and account-data deletion is deployed and awaits
+its destructive disposable-account browser gate.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,

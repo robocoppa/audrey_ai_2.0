@@ -112,8 +112,7 @@ a {
 
 .sidebar-heading span,
 .thread-header > div > span,
-.thread-empty > span,
-.empty-workspace > span {
+.thread-empty > span {
   color: var(--muted);
   font-size: 0.66rem;
   font-weight: 700;
@@ -158,8 +157,7 @@ button:disabled {
   opacity: 0.48;
 }
 
-.new-conversation,
-.empty-workspace button {
+.new-conversation {
   padding: 0.5rem 0.7rem;
   border: 0;
   border-radius: 0.75rem;
@@ -186,8 +184,7 @@ button:disabled {
   box-shadow: var(--focus-glow);
 }
 
-.new-conversation:hover,
-.empty-workspace button:hover {
+.new-conversation:hover {
   filter: brightness(1.12);
   box-shadow: 0 7px 22px rgb(52 153 250 / 24%);
 }
@@ -463,8 +460,7 @@ a:focus-visible {
   scrollbar-gutter: stable;
 }
 
-.thread-empty,
-.empty-workspace {
+.thread-empty {
   display: grid;
   place-items: center;
   align-content: center;
@@ -477,12 +473,7 @@ a:focus-visible {
   padding-block: 1rem;
 }
 
-.empty-workspace {
-  min-height: 55vh;
-}
-
-.thread-empty h2,
-.empty-workspace h1 {
+.thread-empty h2 {
   max-width: 15ch;
   margin: 0;
   font-family: inherit;
@@ -492,8 +483,7 @@ a:focus-visible {
   line-height: 1;
 }
 
-.thread-empty p,
-.empty-workspace p {
+.thread-empty p {
   max-width: 40ch;
   margin: 1rem 0 1.5rem;
   color: var(--muted);

@@ -166,7 +166,16 @@ export function ChatWorkspace({
     const requestKey = `${view}\n${searchQuery}`;
     listKeyRef.current = requestKey;
     listConversations({ archived: view === "archived", search: searchQuery })
-      .then(({ items, next_cursor }) => {
+      .then(async ({ items, next_cursor }) => {
+        if (!active) return;
+        if (view === "active" && !searchQuery && items.length === 0) {
+          const conversation = await createConversation("auto");
+          if (!active) return;
+          setConversations([conversation]);
+          setNextCursor(null);
+          selectConversation(conversation);
+          return;
+        }
         if (!active) return;
         setConversations(items);
         setNextCursor(next_cursor);
@@ -250,6 +259,9 @@ export function ChatWorkspace({
     }
     if (selectedId === conversationId) {
       selectConversation(remaining[0] ?? null);
+      if (remaining.length === 0 && view === "active" && !searchQuery) {
+        void startConversation();
+      }
     }
   }
 
@@ -296,7 +308,7 @@ export function ChatWorkspace({
               className="new-conversation"
               type="button"
               onClick={startConversation}
-              disabled={creating}
+              disabled={creating || loading}
             >
               {creating ? "Creating…" : "+ New"}
             </button>
@@ -382,15 +394,8 @@ export function ChatWorkspace({
             />
           </div>
         ))}
-        {!selected ? (
-          <div className="empty-workspace">
-            <span>Audrey</span>
-            <h1>What shall we work through?</h1>
-            <p>Start a conversation to use Audrey's native run pipeline.</p>
-            <button type="button" onClick={startConversation} disabled={creating}>
-              Start a conversation
-            </button>
-          </div>
+        {!selected && (loading || creating) ? (
+          <AudreyLoader label="Opening conversation" />
         ) : null}
       </section>
       {managingFiles ? <FileManager onClose={() => setManagingFiles(false)} /> : null}
