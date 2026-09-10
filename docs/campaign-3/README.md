@@ -15,9 +15,11 @@ and no-landing startup/hard-refresh correctives are user-confirmed; second-user
 isolation remains pending.
 The loader-to-composer portrait transition and Research/Video artwork correction
 are laptop-complete and await redeployment.
-A second Cloudflare identity is valid and distinct, while a resilient sequential
-session bootstrap plus disconnected Retry/Log out controls are laptop-complete
-and await redeployment before the final isolation check.
+A second Cloudflare identity is valid and distinct. A dedicated Access handoff
+now retries for about 30 seconds without application chrome before an isolated
+Retry/Log out timeout; callback cleanup, a Cloudflare-ready vector favicon, and
+desktop wordmark alignment over the conversation rail are laptop-complete and
+await redeployment before the final isolation check.
 The dark Builtryte branding, adaptive docked `Ask Audrey` composer, contextual
 jump-to-latest control, introductory portrait-backed mode descriptions, semantic
 first-prompt titles, and self-service profile-name refinement are laptop-
@@ -34,8 +36,8 @@ Unraid-verified.
 Milestone 2D slices 2D.1 files/attachments and 2D.2 native preferences are
 complete and Unraid-verified.
 Slice 2D.3 native personal-token management is complete and Unraid-verified.
-Slice 2D.4 native chat export and account-data deletion is deployed and awaits
-its destructive disposable-account browser gate.
+Slice 2D.4 native chat export and account-data deletion is complete and
+Unraid-verified.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,
@@ -47,7 +49,7 @@ and finally adds the first general skills layer on that owned surface.
 | Phase | Plan | Outcome | Entry gate | Status |
 |---|---|---|---|---|
 | 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | Complete |
-| 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (Milestones 2A–2B and slices 2C.1–2C.3 plus 2D.1–2D.3 complete) |
+| 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (Milestones 2A–2B and slices 2C.1–2C.3 plus 2D.1–2D.4 complete) |
 | 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | Planned |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1,

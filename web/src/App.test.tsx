@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -17,7 +17,9 @@ const DEFAULT_PREFERENCES = {
 describe("App", () => {
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
+    window.history.replaceState({}, "", "/");
   });
 
   it("shows a centered, text-free Audrey Auto loader while the session resolves", () => {
@@ -87,12 +89,13 @@ describe("App", () => {
     );
   });
 
-  it("recovers from a transient Access rejection during session bootstrap", async () => {
+  it("holds through multiple transient Access bootstrap rejections", async () => {
     let identityReads = 0;
+    window.history.replaceState({}, "", "/?__cf_access_message=logged_out&kept=yes#chat");
     const fetchMock = vi.fn().mockImplementation((path: string) => {
       if (path === "/api/me") {
         identityReads += 1;
-        if (identityReads === 1) {
+        if (identityReads <= 3) {
           return Promise.resolve(
             new Response(JSON.stringify({ detail: "Missing bearer token." }), {
               status: 401,
@@ -133,17 +136,27 @@ describe("App", () => {
 
     render(<App />);
 
+    expect(screen.getByRole("status", { name: "Finishing secure sign-in" })).toHaveTextContent(
+      "Finishing your secure sign-in",
+    );
+    expect(screen.getByText(/Cloudflare Access is confirming this browser\./u)).toBeInTheDocument();
+    expect(screen.queryByRole("banner")).not.toBeInTheDocument();
+
     const identity = await screen.findByLabelText(
       "Signed in user",
       undefined,
-      { timeout: 3000 },
+      { timeout: 7000 },
     );
     expect(identity).toHaveTextContent("Alice");
-    expect(identityReads).toBe(2);
+    expect(identityReads).toBe(4);
     expect(screen.queryByText("A quieter place to think.")).not.toBeInTheDocument();
+    expect(window.location.search).toBe("?kept=yes");
+    expect(window.location.hash).toBe("#chat");
+    expect(window.location.href).not.toContain("__cf_access_message");
   });
 
   it("offers retry and logout after Access authentication remains unavailable", async () => {
+    vi.useFakeTimers();
     let sessionReady = false;
     const fetchMock = vi.fn().mockImplementation((path: string) => {
       if (!sessionReady) {
@@ -175,9 +188,17 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("alert", undefined, { timeout: 3000 })).toHaveTextContent(
-      "could not establish this Access session",
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "did not establish this browser session within 30 seconds",
     );
+    expect(screen.getByRole("heading", {
+      name: "Sign-in is taking longer than expected",
+    })).toBeInTheDocument();
+    expect(screen.queryByRole("banner")).not.toBeInTheDocument();
+    expect(screen.queryByText("A quieter place to think.")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry session" })).toBeEnabled();
     expect(screen.getByRole("link", { name: "Log out" })).toHaveAttribute(
       "href",
@@ -186,6 +207,7 @@ describe("App", () => {
     expect(window.localStorage).toHaveLength(0);
     expect(window.sessionStorage).toHaveLength(0);
 
+    vi.useRealTimers();
     sessionReady = true;
     fireEvent.click(screen.getByRole("button", { name: "Retry session" }));
     expect(await screen.findByLabelText("Signed in user")).toHaveTextContent(

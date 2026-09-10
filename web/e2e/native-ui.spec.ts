@@ -64,7 +64,7 @@ test("centers Audrey Auto with a text-free orbit while the session loads", async
   await expect(page.getByRole("link", { name: "Audrey home" })).toBeVisible();
 });
 
-test("recovers a transient Access bootstrap rejection", async ({ page }) => {
+test("holds through multiple transient Access bootstrap rejections", async ({ page }) => {
   const sessionRequests: string[] = [];
   let identityReads = 0;
 
@@ -74,7 +74,7 @@ test("recovers a transient Access bootstrap rejection", async ({ page }) => {
     if (url.pathname === "/api/me") {
       identityReads += 1;
       sessionRequests.push(url.pathname);
-      if (identityReads === 1) {
+      if (identityReads <= 3) {
         await route.fulfill({
           status: 401,
           contentType: "application/json",
@@ -104,16 +104,28 @@ test("recovers a transient Access bootstrap rejection", async ({ page }) => {
     await route.abort("failed");
   });
 
-  await page.goto("./");
+  await page.goto("./?__cf_access_message=logged_out&kept=yes#chat");
+
+  const handoff = page.getByRole("status", { name: "Finishing secure sign-in" });
+  await expect(handoff).toContainText("Finishing your secure sign-in");
+  await expect(handoff).toContainText("Cloudflare Access is confirming this browser.");
+  await expect(page.locator(".topbar")).toHaveCount(0);
+  await expect(page.getByText("A quieter place to think.")).toHaveCount(0);
 
   await expect(page.getByRole("heading", { name: "Recovered Access session" })).toBeVisible();
   expect(sessionRequests).toEqual([
+    "/api/me",
+    "/api/me",
     "/api/me",
     "/api/me",
     "/api/me/preferences",
   ]);
   await expect(page.getByText("A quieter place to think.")).toHaveCount(0);
   await expect(page.getByText("Not connected")).toHaveCount(0);
+  const recoveredUrl = new URL(page.url());
+  expect(recoveredUrl.searchParams.get("kept")).toBe("yes");
+  expect(recoveredUrl.searchParams.has("__cf_access_message")).toBe(false);
+  expect(recoveredUrl.hash).toBe("#chat");
 });
 
 test("restores a saved conversation on hard refresh without showing a landing page", async ({ page }) => {
@@ -259,6 +271,14 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
     () => brandWordmark.evaluate((image) => (image as HTMLImageElement).naturalWidth),
   ).toBeGreaterThan(0);
   await expect(brandWordmark).toHaveAttribute("src", /builtryte-wordmark/u);
+  const brandBox = await page.locator(".brand-wordmark").boundingBox();
+  const sidebarBox = await page.locator(".sidebar").boundingBox();
+  expect(brandBox).not.toBeNull();
+  expect(sidebarBox).not.toBeNull();
+  expect(Math.abs(
+    (brandBox?.x ?? 0) + (brandBox?.width ?? 0) / 2
+      - ((sidebarBox?.x ?? 0) + (sidebarBox?.width ?? 0) / 2),
+  )).toBeLessThan(2);
   await expect(page.locator('link[rel="icon"]')).toHaveAttribute(
     "href",
     /builtryte-favicon/u,

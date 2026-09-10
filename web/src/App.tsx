@@ -21,17 +21,36 @@ type SessionState =
   | { status: "unauthenticated" }
   | { status: "error"; message: string };
 
+const ACCESS_BOOTSTRAP_DELAYS_MS = [0, 500, 1_000, 2_000, 4_000, 7_500, 15_000];
+
+function hasCloudflareAccessMessage() {
+  return new URLSearchParams(window.location.search).has("__cf_access_message");
+}
+
+function clearCloudflareAccessMessage() {
+  const search = new URLSearchParams(window.location.search);
+  if (!search.has("__cf_access_message")) return;
+  search.delete("__cf_access_message");
+  const query = search.toString();
+  window.history.replaceState(
+    window.history.state,
+    "",
+    `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
+  );
+}
+
 export function App() {
   const [session, setSession] = useState<SessionState>({ status: "loading" });
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [sessionRevision, setSessionRevision] = useState(0);
+  const [showAccessHandoff, setShowAccessHandoff] = useState(hasCloudflareAccessMessage);
 
   useEffect(() => {
     let active = true;
 
     async function initializeSession() {
       let lastError: unknown;
-      for (const delayMs of [0, 250, 750]) {
+      for (const delayMs of ACCESS_BOOTSTRAP_DELAYS_MS) {
         if (delayMs) {
           await new Promise((resolve) => window.setTimeout(resolve, delayMs));
         }
@@ -39,7 +58,10 @@ export function App() {
         try {
           const user = await getCurrentUser();
           const preferences = await getCurrentUserPreferences();
-          if (active) setSession({ status: "ready", user, preferences });
+          if (active) {
+            clearCloudflareAccessMessage();
+            setSession({ status: "ready", user, preferences });
+          }
           return;
         } catch (error) {
           lastError = error;
@@ -70,14 +92,32 @@ export function App() {
     };
   }, [sessionRevision]);
 
+  const retrySession = () => {
+    setShowAccessHandoff(true);
+    setSession({ status: "loading" });
+    setSessionRevision((current) => current + 1);
+  };
+
   if (session.status === "loading") {
+    if (showAccessHandoff) {
+      return (
+        <AudreyLoader
+          fullscreen
+          label="Finishing secure sign-in"
+          message="Finishing your secure sign-in"
+          detail="Cloudflare Access is confirming this browser. Audrey will open automatically."
+        />
+      );
+    }
     return <AudreyLoader fullscreen />;
   }
 
+  if (session.status !== "ready") {
+    return <SessionTimeout session={session} onRetry={retrySession} />;
+  }
+
   return (
-    <div
-      className={session.status === "ready" ? "app-shell app-shell-ready" : "app-shell"}
-    >
+    <div className="app-shell app-shell-ready">
       <svg className="brand-filter" aria-hidden="true">
         <filter id="light-wordmark-on-dark" colorInterpolationFilters="sRGB">
           <feColorMatrix
@@ -93,12 +133,9 @@ export function App() {
           </span>
           <span className="brand-product">Ask Audrey</span>
         </a>
-        <SessionControls
-          onRetry={() => {
-            setSession({ status: "loading" });
-            setSessionRevision((current) => current + 1);
-          }}
-          session={session}
+        <ReadySessionControls
+          user={session.user}
+          preferences={session.preferences}
           onUserChange={(user) => {
             setSession((current) =>
               current.status === "ready" ? { ...current, user } : current,
@@ -120,82 +157,61 @@ export function App() {
         />
       </header>
 
-      {session.status === "ready" ? (
-        <main className="native-main">
-          <Suspense fallback={<AudreyLoader fullscreen label="Loading Audrey workspace" />}>
-            <ChatWorkspace
-              key={workspaceRevision}
-              user={session.user}
-              preferences={session.preferences}
-            />
-          </Suspense>
-        </main>
-      ) : (
-        <main className="welcome" aria-labelledby="welcome-title">
-          <div className="eyebrow">Private intelligence, on your terms</div>
-          <h1 id="welcome-title">A quieter place to think.</h1>
-          <p>
-            This is Audrey's first native application surface. Conversations,
-            runs, tools, and files will live here without making another chat UI
-            the system of record.
-          </p>
-          {session.status === "unauthenticated" ? (
-            <p className="notice" role="alert">
-              Audrey could not establish this Access session. Retry it or log out and sign in again.
-            </p>
-          ) : null}
-          {session.status === "error" ? (
-            <p className="notice notice-error" role="alert">
-              Audrey could not load your session. {session.message}
-            </p>
-          ) : null}
-        </main>
-      )}
-
-      {session.status !== "ready" ? (
-        <footer className="footer">Native preview · Open WebUI remains available</footer>
-      ) : null}
+      <main className="native-main">
+        <Suspense fallback={<AudreyLoader fullscreen label="Loading Audrey workspace" />}>
+          <ChatWorkspace
+            key={workspaceRevision}
+            user={session.user}
+            preferences={session.preferences}
+          />
+        </Suspense>
+      </main>
     </div>
   );
 }
 
-function SessionControls({
+function SessionTimeout({
   session,
   onRetry,
-  onUserChange,
-  onPreferencesChange,
-  onDataPurgeAttempted,
 }: {
-  session: SessionState;
+  session:
+    | { status: "unauthenticated" }
+    | { status: "error"; message: string };
   onRetry: () => void;
-  onUserChange: (user: CurrentUser) => void;
-  onPreferencesChange: (preferences: UserPreferences) => void;
-  onDataPurgeAttempted: () => void;
 }) {
-  if (session.status === "loading") {
-    return null;
-  }
-  if (session.status === "ready") {
-    return (
-      <ReadySessionControls
-        user={session.user}
-        preferences={session.preferences}
-        onUserChange={onUserChange}
-        onPreferencesChange={onPreferencesChange}
-        onDataPurgeAttempted={onDataPurgeAttempted}
-      />
-    );
-  }
+  const timedOut = session.status === "unauthenticated";
+  const title = timedOut
+    ? "Sign-in is taking longer than expected"
+    : "Audrey could not finish opening";
+  const detail = timedOut
+    ? "Cloudflare Access did not establish this browser session within 30 seconds."
+    : `The session check ended early. ${session.message}`;
+
   return (
-    <div className="session-controls session-controls-offline">
-      <span className="session-badge session-badge-offline">Not connected</span>
-      <button className="session-retry-button" type="button" onClick={onRetry}>
-        Retry session
-      </button>
-      <a className="logout-button" href="/cdn-cgi/access/logout">
-        Log out
-      </a>
-    </div>
+    <main className="session-timeout" aria-labelledby="session-timeout-title">
+      <div className="session-timeout-body">
+        <span className="session-timeout-mark" aria-hidden="true">
+          <span />
+        </span>
+        <p className="session-timeout-kicker">Secure connection</p>
+        <h1 id="session-timeout-title">{title}</h1>
+        <p className="session-timeout-detail" role="alert">
+          {detail}
+        </p>
+        <div className="session-timeout-actions">
+          <button
+            className="session-retry-button"
+            type="button"
+            onClick={onRetry}
+          >
+            Retry session
+          </button>
+          <a className="logout-button" href="/cdn-cgi/access/logout">
+            Log out
+          </a>
+        </div>
+      </div>
+    </main>
   );
 }
 

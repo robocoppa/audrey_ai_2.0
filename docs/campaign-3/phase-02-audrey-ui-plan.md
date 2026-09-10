@@ -5,12 +5,11 @@ Unraid-verified, including provider-neutral identity, canonical application
 state, native conversation/run resources, typed and AG-UI events, real
 pipeline observations, and rebuildable canonical archive projection.
 Milestone 2C's native client and public route are live, with the broader browser
-and soak gate still open. Milestone 2D slices 2D.1–2D.3 are Unraid-verified;
-slice 2D.4 chat export and account-data deletion is deployed and awaits its
-destructive live gate. The no-landing startup corrective is user-verified; its
+and soak gate still open. Milestone 2D slices 2D.1–2D.4 are Unraid-verified.
+The no-landing startup corrective is user-verified; its
 loader-transition and Research/Video artwork follow-up awaits redeployment.
-The second-user Access bootstrap recovery and disconnected session controls also
-await redeployment.
+The second-user Access handoff and isolated timeout controls also await
+redeployment.
 
 ## Goal
 
@@ -768,14 +767,15 @@ root application and a Fast turn returned the exact `2C-ACCESS-READY` response.
 
 The second allowed Access identity subsequently produced a distinct active
 Audrey principal and default preference row; direct identity and preference
-reads both succeeded. Its first post-code redirect nevertheless hit a transient
-authentication rejection, and the client's one-shot concurrent bootstrap
-latched that response into the disconnected view. The client now resolves
-identity before preferences, retries `401`/`403` twice over one second while
-retaining the loader, and exposes Retry and Access logout controls after a
-persistent failure. Thirteen Vitest contracts and all 19 production-preview
-Chromium workflows pass. Redeployment and conversation-isolation verification
-remain.
+reads both succeeded. Its first redirects nevertheless hit transient
+authentication rejections while the Access session propagated. The client now
+resolves identity before preferences and retries `401`/`403` seven times over
+about 30 seconds. Callback URLs use a dedicated full-screen portrait handoff
+with simple status text and no application chrome; success removes only
+Cloudflare's stale message parameter while preserving the rest of the URL.
+Only a persistent failure reaches the isolated Retry and Access-logout timeout
+screen. Thirteen Vitest contracts and all 19 production-preview Chromium
+workflows pass. Redeployment and conversation-isolation verification remain.
 
 The subsequent refresh check exposed a second browser defect: Canonical
 messages were assigned to `HttpAgent`, while assistant-ui renders a separate
@@ -811,9 +811,12 @@ fits in the initial 720px browser viewport. The header reads `Ask Audrey`, the
 redundant center heading is gone, the input uses the same wording, the mode
 description and selector are larger, and the send control uses an unambiguous
 arrow icon. The introductory portrait is 20 percent larger and rendered at 80
-percent opacity with a short gap above the selector. The supplied Builtryte
-header uses only the small Builtryte mark, recolored blue with its baked white
-plate made transparent; the product name remains separate.
+percent opacity with a short gap above the selector. The restored full
+Builtryte wordmark is centered over the desktop conversation rail's exact
+17rem column while `Ask Audrey` remains separately positioned in the main
+header; the compact mobile header keeps its flex layout. A transparent
+true-vector favicon in source blue `#3499fa` is available for the Cloudflare
+page, whose matching Audrey background color is `#07101f`.
 
 The authenticated shell now owns one viewport-height layout: conversation
 messages are the scrolling region while the complete composer dock remains at
@@ -993,10 +996,15 @@ never appears. The deployed behavior is user-confirmed.
 The next corrective keeps the centered full-screen loader but renders no portrait
 during workspace and canonical-message loading, so Audrey appears again only in
 her final composer position. Research uses `audrey8`; Video uses `audrey9`. All
-19 production-preview Chromium workflows pass. Slice 2D.4 remains open
-until an explicitly expendable account exports its seeded archive, completes
-deletion, reloads as the same identity, and reaches `ready` repair status on
-Unraid. Do not run this destructive gate against the primary account.
+19 production-preview Chromium workflows pass.
+
+The disposable-account Unraid gate exported its seeded archive as a schema-v1
+artifact containing one complete user/assistant turn with consistent model and
+usage metadata and no partial rows. The exact-owner deletion flow passed its
+remaining checks. Repair status briefly showed one pending chat deletion and
+one pending account purge with four aggregate attempts but zero errors or
+exhaustion, then reached `ready` on refresh as the asynchronous workers drained.
+Slice 2D.4 is complete and Unraid-verified.
 
 Gate: disposable-user upload/search/export/delete evidence covers transactional
 and derived stores, including interrupted cleanup and restart.
