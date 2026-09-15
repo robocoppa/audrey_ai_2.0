@@ -32,9 +32,9 @@ import {
   listFiles,
   listMessages,
   updateConversation,
-  updateConversationMode,
-  type AudreyMode,
+  updateConversationModel,
   type AudreyFile,
+  type AudreyModel,
   type Conversation,
   type ConversationMessage,
   type CurrentUser,
@@ -43,55 +43,15 @@ import {
 import { latestActionFetch } from "./agentTransport";
 import { FileManager } from "./FileManager";
 
-const MODES: ReadonlyArray<{
-  value: AudreyMode;
-  label: string;
-  portrait: string;
-  description: string;
-}> = [
-  {
-    value: "auto",
-    label: "Auto",
-    portrait: autoPortrait,
-    description: "Chooses the best Audrey workflow for each request.",
-  },
-  {
-    value: "fast",
-    label: "Fast",
-    portrait: fastPortrait,
-    description: "Quick, direct answers for everyday questions and tasks.",
-  },
-  {
-    value: "deep",
-    label: "Deep",
-    portrait: deepPortrait,
-    description: "A reasoning panel for complex problems and careful analysis.",
-  },
-  {
-    value: "research",
-    label: "Research",
-    portrait: researchPortrait,
-    description: "Grounded web research with verification and cited sources.",
-  },
-  {
-    value: "local",
-    label: "Local only",
-    portrait: localPortrait,
-    description: "Keeps model generation local while using Audrey's tools.",
-  },
-  {
-    value: "cloud",
-    label: "Cloud",
-    portrait: cloudPortrait,
-    description: "Uses cloud models for stronger general-purpose reasoning.",
-  },
-  {
-    value: "video",
-    label: "Video",
-    portrait: videoPortrait,
-    description: "Analyzes video content, scenes, transcripts, and questions.",
-  },
-];
+const MODEL_PORTRAITS: Readonly<Record<string, string>> = {
+  auto: autoPortrait,
+  fast: fastPortrait,
+  deep: deepPortrait,
+  research: researchPortrait,
+  video: videoPortrait,
+  cloud: cloudPortrait,
+  local: localPortrait,
+};
 
 type ThreadState =
   | { status: "idle" }
@@ -120,9 +80,11 @@ const IDLE_ACTIVITY: RunActivity = {
 export function ChatWorkspace({
   user,
   preferences,
+  models,
 }: {
   user: CurrentUser;
   preferences: UserPreferences;
+  models: AudreyModel[];
 }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [openedConversations, setOpenedConversations] = useState<Conversation[]>([]);
@@ -138,6 +100,8 @@ export function ChatWorkspace({
   const [managingFiles, setManagingFiles] = useState(false);
   const listKeyRef = useRef("");
   const selectedIdRef = useRef<string | null>(null);
+  const defaultModelId = models[0]?.id ?? null;
+  const catalogUnavailable = defaultModelId === null;
 
   function selectConversation(conversation: Conversation | null) {
     if (conversation) {
@@ -162,6 +126,7 @@ export function ChatWorkspace({
   }, [searchInput, searchQuery]);
 
   useEffect(() => {
+    if (!defaultModelId) return;
     let active = true;
     const requestKey = `${view}\n${searchQuery}`;
     listKeyRef.current = requestKey;
@@ -169,7 +134,7 @@ export function ChatWorkspace({
       .then(async ({ items, next_cursor }) => {
         if (!active) return;
         if (view === "active" && !searchQuery && items.length === 0) {
-          const conversation = await createConversation("auto");
+          const conversation = await createConversation(defaultModelId);
           if (!active) return;
           setConversations([conversation]);
           setNextCursor(null);
@@ -193,7 +158,7 @@ export function ChatWorkspace({
     return () => {
       active = false;
     };
-  }, [searchQuery, view]);
+  }, [defaultModelId, searchQuery, view]);
 
   const selected = conversations.find(({ id }) => id === selectedId) ?? null;
   const renderedConversations = selected
@@ -212,10 +177,11 @@ export function ChatWorkspace({
   }
 
   async function startConversation() {
+    if (!defaultModelId) return;
     setCreating(true);
     setError("");
     try {
-      const conversation = await createConversation("auto");
+      const conversation = await createConversation(defaultModelId);
       const visibleImmediately = view === "active" && !searchQuery;
       if (visibleImmediately) {
         setConversations((current) => [conversation, ...current]);
@@ -308,7 +274,7 @@ export function ChatWorkspace({
               className="new-conversation"
               type="button"
               onClick={startConversation}
-              disabled={creating || loading}
+              disabled={creating || loading || catalogUnavailable}
             >
               {creating ? "Creating…" : "+ New"}
             </button>
@@ -342,8 +308,13 @@ export function ChatWorkspace({
           </button>
         </div>
 
-        {loading ? <p className="sidebar-status">Loading conversations…</p> : null}
-        {!loading && conversations.length === 0 ? (
+        {!catalogUnavailable && loading ? (
+          <p className="sidebar-status">Loading conversations…</p>
+        ) : null}
+        {catalogUnavailable ? (
+          <p className="sidebar-error" role="alert">No models are enabled for this account.</p>
+        ) : null}
+        {!catalogUnavailable && !loading && conversations.length === 0 ? (
           <p className="sidebar-status">
             {searchQuery
               ? "No matching conversation titles."
@@ -362,7 +333,7 @@ export function ChatWorkspace({
               aria-current={conversation.id === selectedId ? "page" : undefined}
             >
               <span>{conversation.title || "New conversation"}</span>
-              <small>{modeLabel(conversation.default_mode)}</small>
+              <small>{modelLabel(models, conversation)}</small>
             </button>
           ))}
         </nav>
@@ -380,7 +351,12 @@ export function ChatWorkspace({
       </aside>
 
       <section className="chat-column" aria-label="Audrey conversation">
-        {renderedConversations.map((opened) => (
+        {catalogUnavailable ? (
+          <div className="catalog-unavailable">
+            <h2>No models available</h2>
+            <p>An Audrey administrator can enable a model from the Admin panel.</p>
+          </div>
+        ) : renderedConversations.map((opened) => (
           <div
             className="conversation-thread-slot"
             hidden={opened.id !== selectedId}
@@ -388,13 +364,14 @@ export function ChatWorkspace({
           >
             <ConversationThread
               conversation={opened}
+              models={models}
               showProgress={preferences.show_progress}
               onConversationChange={replaceConversation}
               onRemoveFromView={removeFromCurrentView}
             />
           </div>
         ))}
-        {!selected && (loading || creating) ? (
+        {!catalogUnavailable && !selected && (loading || creating) ? (
           <AudreyLoader label="Opening conversation" showPortrait={false} />
         ) : null}
       </section>
@@ -405,24 +382,33 @@ export function ChatWorkspace({
 
 function ConversationThread({
   conversation,
+  models,
   showProgress,
   onConversationChange,
   onRemoveFromView,
 }: {
   conversation: Conversation;
+  models: AudreyModel[];
   showProgress: boolean;
   onConversationChange: (conversation: Conversation) => void;
   onRemoveFromView: (conversationId: string, closeThread?: boolean) => void;
 }) {
   const [thread, setThread] = useState<ThreadState>({ status: "idle" });
-  const [mode, setMode] = useState<AudreyMode>(conversation.default_mode);
+  const [modelId, setModelId] = useState(
+    models.some(({ id }) => id === conversation.default_model_id)
+      ? conversation.default_model_id
+      : models[0].id,
+  );
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(conversation.title);
-  const [mutation, setMutation] = useState<"mode" | "rename" | "archive" | "delete" | null>(null);
+  const [mutation, setMutation] = useState<"model" | "rename" | "archive" | "delete" | null>(null);
   const [mutationError, setMutationError] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [runActive, setRunActive] = useState(false);
   const archived = conversation.archived_at !== null;
+  const selectedModelId = models.some(({ id }) => id === modelId)
+    ? modelId
+    : models[0].id;
 
   useEffect(() => {
     let active = true;
@@ -438,15 +424,15 @@ function ConversationThread({
     };
   }, [conversation.id]);
 
-  async function changeMode(next: AudreyMode) {
-    if (next === mode || runActive) return;
-    setMutation("mode");
+  async function changeModel(next: string) {
+    if (next === modelId || runActive) return;
+    setMutation("model");
     setMutationError("");
     try {
-      const updated = await updateConversationMode(conversation.id, next);
+      const updated = await updateConversationModel(conversation.id, next);
       const messages = await listMessages(conversation.id);
       setThread({ status: "ready", messages: messages.items });
-      setMode(next);
+      setModelId(updated.default_model_id);
       onConversationChange(updated);
     } catch (reason) {
       setMutationError(messageOf(reason));
@@ -600,12 +586,13 @@ function ConversationThread({
       {thread.status === "ready" ? (
         <AudreyThread
           conversationId={conversation.id}
-          mode={mode}
+          models={models}
+          modelId={selectedModelId}
           showProgress={showProgress}
           initialMessages={thread.messages}
           readOnly={archived}
           modeDisabled={runActive || mutation !== null}
-          onModeChange={changeMode}
+          onModelChange={changeModel}
           onRunActiveChange={setRunActive}
           onRunStarted={() => void refreshAutomaticTitle()}
         />
@@ -616,22 +603,24 @@ function ConversationThread({
 
 function AudreyThread({
   conversationId,
-  mode,
+  models,
+  modelId,
   showProgress,
   initialMessages,
   readOnly,
   modeDisabled,
-  onModeChange,
+  onModelChange,
   onRunActiveChange,
   onRunStarted,
 }: {
   conversationId: string;
-  mode: AudreyMode;
+  models: AudreyModel[];
+  modelId: string;
   showProgress: boolean;
   initialMessages: ConversationMessage[];
   readOnly: boolean;
   modeDisabled: boolean;
-  onModeChange: (mode: AudreyMode) => Promise<void>;
+  onModelChange: (modelId: string) => Promise<void>;
   onRunActiveChange: (active: boolean) => void;
   onRunStarted: () => void;
 }) {
@@ -642,6 +631,8 @@ function AudreyThread({
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentError, setAttachmentError] = useState("");
   const [selectedAttachments, setSelectedAttachments] = useState<AudreyFile[]>([]);
+  const selectedModel = modelDetails(models, modelId);
+  const supportsFiles = selectedModel.capabilities.includes("files");
   const attachmentIds = useMemo(
     () => selectedAttachments.map(({ id }) => id),
     [selectedAttachments],
@@ -660,12 +651,20 @@ function AudreyThread({
   const agent = useMemo(
     () =>
       new HttpAgent({
-        url: `/api/agent?mode=${encodeURIComponent(mode)}`,
+        url: `/api/agent?model=${encodeURIComponent(modelId)}`,
         threadId: conversationId,
         fetch: (url, init) => latestActionFetch(url, init, attachmentIds),
       }),
-    [attachmentIds, conversationId, mode],
+    [attachmentIds, conversationId, modelId],
   );
+  async function changeModel(nextModelId: string) {
+    await onModelChange(nextModelId);
+    const nextModel = modelDetails(models, nextModelId);
+    if (!nextModel.capabilities.includes("files")) {
+      setAttachmentPickerOpen(false);
+      setSelectedAttachments([]);
+    }
+  }
   const onRunStartedRef = useRef(onRunStarted);
   useEffect(() => {
     onRunStartedRef.current = onRunStarted;
@@ -836,9 +835,10 @@ function AudreyThread({
                 {showProgress ? <RunActivityStatus activity={activity} /> : null}
                 <ThreadPrimitive.Empty>
                   <ComposerModelPicker
-                    mode={mode}
+                    models={models}
+                    modelId={modelId}
                     disabled={modeDisabled}
-                    onChange={onModeChange}
+                    onChange={changeModel}
                   />
                 </ThreadPrimitive.Empty>
                 {selectedAttachments.length > 0 ? (
@@ -894,16 +894,18 @@ function AudreyThread({
                   <ThreadPrimitive.If empty={false}>
                     <ComposerModelPicker
                       compact
-                      mode={mode}
+                      models={models}
+                      modelId={modelId}
                       disabled={modeDisabled}
-                      onChange={onModeChange}
+                      onChange={changeModel}
                     />
                   </ThreadPrimitive.If>
                   <button
                     className="attach-button"
                     type="button"
                     onClick={() => void toggleAttachmentPicker()}
-                    disabled={modeDisabled}
+                    disabled={modeDisabled || !supportsFiles}
+                    title={supportsFiles ? "Attach files" : `${selectedModel.label} accepts text only`}
                     aria-label={attachmentPickerOpen ? "Close attachment picker" : "Attach files"}
                     aria-expanded={attachmentPickerOpen}
                   >
@@ -974,26 +976,28 @@ function AssistantMessage() {
 
 function ComposerModelPicker({
   compact = false,
-  mode,
+  models,
+  modelId,
   disabled,
   onChange,
 }: {
   compact?: boolean;
-  mode: AudreyMode;
+  models: AudreyModel[];
+  modelId: string;
   disabled: boolean;
-  onChange: (mode: AudreyMode) => Promise<void>;
+  onChange: (modelId: string) => Promise<void>;
 }) {
-  const selected = modeDetails(mode);
+  const selected = modelDetails(models, modelId);
   const select = (
     <select
       aria-label="Audrey model"
       title={`${selected.label}: ${selected.description}`}
-      value={mode}
+      value={modelId}
       disabled={disabled}
-      onChange={(event) => void onChange(event.target.value as AudreyMode)}
+      onChange={(event) => void onChange(event.target.value)}
     >
-      {MODES.map((item) => (
-        <option key={item.value} value={item.value}>{item.label}</option>
+      {models.map((item) => (
+        <option key={item.id} value={item.id}>{item.label}</option>
       ))}
     </select>
   );
@@ -1099,12 +1103,18 @@ function upsertConversation(
   );
 }
 
-function modeLabel(mode: AudreyMode): string {
-  return modeDetails(mode).label;
+function modelLabel(models: AudreyModel[], conversation: Conversation): string {
+  return models.find(({ id }) => id === conversation.default_model_id)?.label
+    ?? models[0]?.label
+    ?? conversation.default_mode;
 }
 
-function modeDetails(mode: AudreyMode) {
-  return MODES.find((item) => item.value === mode) ?? MODES[0];
+function modelDetails(models: AudreyModel[], modelId: string) {
+  const model = models.find(({ id }) => id === modelId) ?? models[0];
+  return {
+    ...model,
+    portrait: MODEL_PORTRAITS[model.presentation] ?? autoPortrait,
+  };
 }
 
 function messageOf(reason: unknown): string {

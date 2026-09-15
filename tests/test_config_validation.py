@@ -27,6 +27,7 @@ from audrey.config import (
     _validate_chat_archive,
     _validate_deep_panel_pools,
     _validate_file_deletion,
+    _validate_native_models,
     _validate_upload_limits,
 )
 from audrey.pipeline.deep_panel import pick_panel_timeout, pool_key_for
@@ -737,6 +738,81 @@ def test_invalid_application_settings_fail_at_boot(application):
 
 def test_committed_application_settings_are_valid():
     _validate_application(_load_yaml(_REPO_ROOT / "config.yaml"))
+
+
+# ─── _validate_native_models ─────────────────────────────────────────
+
+def test_native_model_catalog_accepts_the_committed_config():
+    _validate_native_models(_load_yaml(_REPO_ROOT / "config.yaml"))
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"audience": "everyone"},
+        {"enabled": "yes"},
+        {"num_ctx": 0},
+        {"max_tokens": True},
+        {"presentation": "secret"},
+        {"capabilities": "text"},
+        {"capabilities": []},
+        {"capabilities": ["thinking"]},
+        {"capabilities": ["text", "files"]},
+        {"capabilities": ["text", "text"]},
+        {"label": ""},
+        {"audence": "testers"},
+    ],
+)
+def test_invalid_native_model_entries_fail_at_boot(entry):
+    with pytest.raises(ValueError, match="native_models"):
+        _validate_native_models(
+            {
+                "passthrough": {"allowed_models": ["qwen-test:latest"]},
+                "native_models": {
+                    "entries": {"qwen-test:latest": entry},
+                },
+            }
+        )
+
+
+def test_native_model_entries_must_be_in_the_passthrough_allowlist():
+    with pytest.raises(ValueError, match=r"absent from passthrough\.allowed_models"):
+        _validate_native_models(
+            {
+                "passthrough": {"allowed_models": ["allowed:latest"]},
+                "native_models": {
+                    "entries": {"not-allowed:latest": {"audience": "testers"}},
+                },
+            }
+        )
+
+
+def test_native_model_ids_must_fit_the_native_request_contract():
+    oversized = "x" * 194
+    with pytest.raises(ValueError, match="too long"):
+        _validate_native_models(
+            {
+                "passthrough": {"allowed_models": [oversized]},
+                "native_models": {"entries": {}},
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "allowed_models",
+    [
+        ["qwen-test:latest", "qwen-test:latest"],
+        [" qwen-test:latest"],
+    ],
+)
+def test_passthrough_model_ids_are_unambiguous_for_the_native_catalog(allowed_models):
+    with pytest.raises(ValueError, match="native_models"):
+        _validate_native_models(
+            {
+                "passthrough": {"allowed_models": allowed_models},
+                "native_models": {"entries": {}},
+            }
+        )
 
 
 # ─── _validate_chat_archive ──────────────────────────────────────────

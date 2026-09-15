@@ -36,6 +36,7 @@ class ConversationRecord:
     user_id: str
     title: str
     default_mode: str
+    default_model_id: str
     created_at: str
     updated_at: str
     last_message_at: str | None
@@ -67,6 +68,7 @@ class RunRecord:
     conversation_id: str
     user_id: str
     mode: str
+    requested_model_id: str
     status: str
     started_at: str
     completed_at: str | None
@@ -138,7 +140,34 @@ class LocalUserDataPurge:
     preferences_reset: bool
 
 
+@dataclass(frozen=True, slots=True)
+class AdminUserRecord:
+    """Safe account and authorization fields shown in the admin application."""
+
+    user_id: str
+    email: str
+    display_name: str
+    role: str
+    status: str
+    groups: tuple[str, ...]
+    auth_provider: str
+    created_at: str
+    updated_at: str
+    last_seen_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class ModelAccessPolicy:
+    """Mutable audience overlay for one deployment-defined model."""
+
+    model_id: str
+    enabled: bool
+    audience: str
+    updated_at: str
+
+
 __all__ = [
+    "AdminUserRecord",
     "AttachmentSnapshot",
     "ChatProjectionDeletionRecord",
     "ChatProjectionRecord",
@@ -146,6 +175,7 @@ __all__ = [
     "FinishedRun",
     "LocalUserDataPurge",
     "MessageRecord",
+    "ModelAccessPolicy",
     "RunRecord",
     "StartedRun",
     "UserPreferences",

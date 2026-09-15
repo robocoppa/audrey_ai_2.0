@@ -5,7 +5,9 @@ Unraid-verified, including provider-neutral identity, canonical application
 state, native conversation/run resources, typed and AG-UI events, real
 pipeline observations, and rebuildable canonical archive projection.
 Milestone 2C's native client and public route are live, with the broader browser
-and soak gate still open. Milestone 2D slices 2D.1–2D.4 are Unraid-verified.
+and soak gate still open. Milestone 2D slices 2D.1–2D.4 are Unraid-verified;
+slice 2D.5 account administration and model publication is laptop-complete and
+awaits its Unraid gate.
 The no-landing startup corrective is user-verified; its
 loader-transition and Research/Video artwork follow-up awaits redeployment.
 The second-user Access handoff and isolated timeout controls also await
@@ -873,6 +875,7 @@ while leaving its tunnel route public is not a safe rollback.
 - Add native upload and attachment lifecycle.
 - Move timezone, persona, and presentation preferences into Audrey.
 - Add search, export, deletion, token management, and capability health.
+- Add Audrey-owned account approval, access groups, and model publication.
 - Expose the Phase 3 skills placeholder.
 
 The first 2D slice is complete and Unraid-verified. Owner-bound `/api/files` resources now
@@ -1005,6 +1008,48 @@ remaining checks. Repair status briefly showed one pending chat deletion and
 one pending account purge with four aggregate attempts but zero errors or
 exhaustion, then reached `ready` on refresh as the asynchronous workers drained.
 Slice 2D.4 is complete and Unraid-verified.
+
+Slice 2D.5 makes Audrey—not Cloudflare—the application authorization authority.
+Schema v7 adds `pending`, `active`, and `disabled` account states, built-in
+`users`, `testers`, and `admins` groups, atomic membership changes, model access
+policies, and durable before/after admin audit events. A first Cloudflare Access
+sign-in now creates only a pending Audrey account. Pending users can read their
+safe `/api/me` projection and see the approval boundary, but every workspace,
+model, file, conversation, and run route remains behind active-account checks.
+The local `audrey-admin grant-admin <usr_...>` entry point is the explicit
+first-admin recovery path; normal admin routes require provider authentication
+and reject personal tokens even when their owner is an administrator.
+
+Schema v8 gives conversations and runs stable server-owned model ids alongside
+their execution modes. `/api/models` combines the fixed Audrey workflows with
+deployment-approved passthrough models, applies SQLite enabled/audience policy,
+and reveals only entries the current groups may invoke. Direct selections use
+the existing Ollama fairness and in-flight gates without Audrey routing or
+tools; their context/output budgets are deployment-defined, and the current
+native contract deliberately accepts text only. Config validation rejects
+duplicate or ambiguous ids, unknown fields, and capability claims the direct
+path cannot honor.
+
+The native client now renders that catalog rather than a hard-coded mode list,
+persists exact model ids on conversations, and submits the selected id through
+AG-UI. Administrators can approve or deny accounts, disable/reactivate users,
+manage tester/admin membership, and change model enabled/audience policy from a
+same-origin dialog. Self-demotion, self-disable, and removal of the last active
+administrator are refused transactionally. An empty personal catalog is a
+recoverable workspace state, so an administrator can re-enable a model instead
+of being locked out by the policy they just set.
+
+The laptop gate passes all 2,804 backend tests, 212 focused identity/state/
+route tests, 18 Vitest contracts, and 21 production-preview Chromium workflows.
+Scoped ruff, Python compilation, TypeScript, ESLint, the production build, and
+diff checks are clean. The lesson scan has zero broken links; its deferred 99
+hard and 162 advisory line drifts remain outside this slice. Deployment must
+take an online application-SQLite backup before the schema-v7/v8 startup. The
+Unraid gate must prove a new Access identity starts pending, bootstrap one exact
+Audrey user id, exercise provider-only approval and group/policy changes, run a
+tester-visible direct model through native AG-UI, verify ordinary-user hiding,
+restore the prior policies/groups, and confirm restart persistence. Slice 2D.5
+is laptop-complete, not yet Unraid-verified.
 
 Gate: disposable-user upload/search/export/delete evidence covers transactional
 and derived stores, including interrupted cleanup and restart.

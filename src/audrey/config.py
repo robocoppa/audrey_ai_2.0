@@ -393,6 +393,151 @@ def _validate_application(merged: dict[str, Any]) -> None:
         raise ValueError("Invalid application.sqlite_path: expected a path")
 
 
+def _validate_native_models(merged: dict[str, Any]) -> None:
+    """Keep the native catalog aligned with the passthrough allowlist."""
+
+    native = merged.get("native_models")
+    if native is None:
+        return
+    if not isinstance(native, dict):
+        raise ValueError("Invalid native_models configuration: expected an object")
+    defaults = native.get("direct_defaults", {}) or {}
+    entries = native.get("entries", {}) or {}
+    if not isinstance(defaults, dict) or not isinstance(entries, dict):
+        raise ValueError(
+            "Invalid native_models configuration: defaults and entries must be objects"
+        )
+
+    allowed_audiences = {"users", "testers", "admins"}
+    allowed_direct_capabilities = {"text", "thinking"}
+    allowed_presentations = {
+        "auto",
+        "fast",
+        "deep",
+        "research",
+        "local",
+        "cloud",
+        "video",
+    }
+    errors: list[str] = []
+    unknown_native_keys = sorted(set(native) - {"direct_defaults", "entries"})
+    if unknown_native_keys:
+        errors.append("unsupported fields: " + ", ".join(unknown_native_keys))
+    passthrough = merged.get("passthrough") or {}
+    if not isinstance(passthrough, dict):
+        errors.append("passthrough: expected an object")
+        allowed_model_values: object = ()
+    else:
+        allowed_model_values = passthrough.get("allowed_models") or ()
+    if isinstance(allowed_model_values, (str, bytes)) or not isinstance(
+        allowed_model_values,
+        (list, tuple),
+    ):
+        errors.append("passthrough.allowed_models: expected a list")
+        allowed_model_values = ()
+    allowed_models: set[str] = set()
+    for value in allowed_model_values:
+        if not isinstance(value, str) or not value.strip():
+            errors.append("passthrough.allowed_models: model ids must be non-empty strings")
+            continue
+        if value != value.strip():
+            errors.append(
+                f"passthrough.allowed_models: model id {value!r} has surrounding whitespace"
+            )
+            continue
+        if len(value) > 193:
+            errors.append(
+                f"passthrough.allowed_models: model id {value!r} is too long"
+            )
+            continue
+        if value in allowed_models:
+            errors.append(f"passthrough.allowed_models: duplicate model id {value!r}")
+            continue
+        allowed_models.add(value)
+
+    valid_entries: set[str] = set()
+    bodies: list[tuple[str, object]] = [("direct_defaults", defaults)]
+    for model_id, body in entries.items():
+        if not isinstance(model_id, str) or not model_id.strip():
+            errors.append("entries: model ids must be non-empty strings")
+            continue
+        if model_id != model_id.strip():
+            errors.append(f"entries: model id {model_id!r} has surrounding whitespace")
+            continue
+        if len(model_id) > 193:
+            errors.append(f"entries: model id {model_id!r} is too long")
+            continue
+        valid_entries.add(model_id)
+        bodies.append((model_id, body))
+
+    for label, body in bodies:
+        if not isinstance(body, dict):
+            errors.append(f"{label}: expected an object")
+            continue
+        allowed_fields = {"enabled", "audience", "num_ctx", "max_tokens"}
+        if label != "direct_defaults":
+            allowed_fields |= {"label", "description", "presentation", "capabilities"}
+        unknown_fields = sorted(set(body) - allowed_fields)
+        if unknown_fields:
+            errors.append(f"{label}: unsupported fields: " + ", ".join(unknown_fields))
+        audience = body.get("audience")
+        if audience is not None and audience not in allowed_audiences:
+            errors.append(f"{label}: unsupported audience {audience!r}")
+        enabled = body.get("enabled")
+        if enabled is not None and not isinstance(enabled, bool):
+            errors.append(f"{label}: enabled must be true or false")
+        for key in ("num_ctx", "max_tokens"):
+            value = body.get(key)
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 1
+            ):
+                errors.append(f"{label}: {key} must be a positive integer")
+        if label == "direct_defaults":
+            continue
+        for key in ("label", "description"):
+            value = body.get(key)
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                errors.append(f"{label}: {key} must be a non-empty string")
+        presentation = body.get("presentation")
+        if presentation is not None and presentation not in allowed_presentations:
+            errors.append(f"{label}: unsupported presentation {presentation!r}")
+        capabilities = body.get("capabilities")
+        if capabilities is not None:
+            if isinstance(capabilities, (str, bytes)) or not isinstance(
+                capabilities,
+                (list, tuple),
+            ):
+                errors.append(f"{label}: capabilities must be a list")
+            elif not capabilities or any(
+                not isinstance(capability, str) or not capability.strip()
+                for capability in capabilities
+            ):
+                errors.append(
+                    f"{label}: capabilities must contain non-empty strings"
+                )
+            else:
+                normalized = [str(capability).strip() for capability in capabilities]
+                unsupported = sorted(set(normalized) - allowed_direct_capabilities)
+                if unsupported:
+                    errors.append(
+                        f"{label}: unsupported direct capabilities: "
+                        + ", ".join(unsupported)
+                    )
+                if "text" not in normalized:
+                    errors.append(f"{label}: direct capabilities must include text")
+                if len(set(normalized)) != len(normalized):
+                    errors.append(f"{label}: capabilities must not contain duplicates")
+
+    unknown = sorted(valid_entries - allowed_models)
+    if unknown:
+        errors.append(
+            "entries absent from passthrough.allowed_models: " + ", ".join(unknown)
+        )
+    if errors:
+        bullets = "\n  - " + "\n  - ".join(errors)
+        raise ValueError(f"Invalid native_models configuration:{bullets}")
+
+
 def _validate_upload_limits(merged: dict[str, Any]) -> None:
     """Reject a per-user quota smaller than the largest permitted single upload.
 
@@ -534,6 +679,7 @@ def get_config() -> Config:
     cfg = Config(yaml_cfg, env)
     _validate_deep_panel_pools(cfg.raw)
     _validate_application(cfg.raw)
+    _validate_native_models(cfg.raw)
     _validate_upload_limits(cfg.raw)
     _validate_chat_archive(cfg.raw)
     _validate_file_deletion(cfg.raw)
@@ -551,6 +697,7 @@ __all__ = [
     "Config",
     "EnvOverrides",
     "_validate_application",
+    "_validate_native_models",
     "_validate_readiness",
     "get_config",
     "reload_config",

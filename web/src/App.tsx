@@ -1,12 +1,15 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 
 import { AudreyLoader } from "./AudreyLoader";
+import { AdminPanel } from "./AdminPanel";
 import builtryteWordmark from "./assets/brand/builtryte-wordmark.png";
 import { AccountSettings } from "./AccountSettings";
 import {
   ApiError,
   getCurrentUser,
   getCurrentUserPreferences,
+  listModels,
+  type AudreyModel,
   type CurrentUser,
   type UserPreferences,
 } from "./api";
@@ -17,7 +20,13 @@ const ChatWorkspace = lazy(() =>
 
 type SessionState =
   | { status: "loading" }
-  | { status: "ready"; user: CurrentUser; preferences: UserPreferences }
+  | {
+      status: "ready";
+      user: CurrentUser;
+      preferences: UserPreferences;
+      models: AudreyModel[];
+    }
+  | { status: "restricted"; user: CurrentUser }
   | { status: "unauthenticated" }
   | { status: "error"; message: string };
 
@@ -57,10 +66,19 @@ export function App() {
         if (!active) return;
         try {
           const user = await getCurrentUser();
-          const preferences = await getCurrentUserPreferences();
+          if (!active) return;
+          clearCloudflareAccessMessage();
+          setShowAccessHandoff(false);
+          if (user.status !== "active") {
+            if (active) setSession({ status: "restricted", user });
+            return;
+          }
+          const [preferences, catalog] = await Promise.all([
+            getCurrentUserPreferences(),
+            listModels(),
+          ]);
           if (active) {
-            clearCloudflareAccessMessage();
-            setSession({ status: "ready", user, preferences });
+            setSession({ status: "ready", user, preferences, models: catalog.items });
           }
           return;
         } catch (error) {
@@ -112,6 +130,10 @@ export function App() {
     return <AudreyLoader fullscreen />;
   }
 
+  if (session.status === "restricted") {
+    return <AccountAccessState user={session.user} onRetry={retrySession} />;
+  }
+
   if (session.status !== "ready") {
     return <SessionTimeout session={session} onRetry={retrySession} />;
   }
@@ -148,11 +170,18 @@ export function App() {
           }}
           onDataPurgeAttempted={() => {
             setWorkspaceRevision((current) => current + 1);
-            void Promise.all([getCurrentUser(), getCurrentUserPreferences()])
-              .then(([user, preferences]) => {
-                setSession({ status: "ready", user, preferences });
+            void Promise.all([getCurrentUser(), getCurrentUserPreferences(), listModels()])
+              .then(([user, preferences, catalog]) => {
+                setSession({ status: "ready", user, preferences, models: catalog.items });
               })
               .catch(() => undefined);
+          }}
+          onAdministrationChanged={() => {
+            void listModels().then(({ items }) => {
+              setSession((current) =>
+                current.status === "ready" ? { ...current, models: items } : current,
+              );
+            });
           }}
         />
       </header>
@@ -163,10 +192,44 @@ export function App() {
             key={workspaceRevision}
             user={session.user}
             preferences={session.preferences}
+            models={session.models}
           />
         </Suspense>
       </main>
     </div>
+  );
+}
+
+function AccountAccessState({
+  user,
+  onRetry,
+}: {
+  user: CurrentUser;
+  onRetry: () => void;
+}) {
+  const pending = user.status === "pending";
+  return (
+    <main className="session-timeout" aria-labelledby="account-access-title">
+      <div className="session-timeout-body">
+        <span className="session-timeout-mark" aria-hidden="true"><span /></span>
+        <p className="session-timeout-kicker">Audrey account</p>
+        <h1 id="account-access-title">
+          {pending ? "Approval is pending" : "This account is disabled"}
+        </h1>
+        <p className="session-timeout-detail" role="status">
+          {pending
+            ? "Your secure sign-in is complete. An Audrey administrator must approve this account before the workspace opens."
+            : "Your secure sign-in is valid, but this Audrey account no longer has application access."}
+        </p>
+        <p className="account-access-email">{user.email}</p>
+        <div className="session-timeout-actions">
+          <button className="session-retry-button" type="button" onClick={onRetry}>
+            Check again
+          </button>
+          <a className="logout-button" href="/cdn-cgi/access/logout">Log out</a>
+        </div>
+      </div>
+    </main>
   );
 }
 
@@ -221,14 +284,17 @@ function ReadySessionControls({
   onUserChange,
   onPreferencesChange,
   onDataPurgeAttempted,
+  onAdministrationChanged,
 }: {
   user: CurrentUser;
   preferences: UserPreferences;
   onUserChange: (user: CurrentUser) => void;
   onPreferencesChange: (preferences: UserPreferences) => void;
   onDataPurgeAttempted: () => void;
+  onAdministrationChanged: () => void;
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
 
   return (
     <div className="session-controls" aria-label="Signed in user">
@@ -241,6 +307,15 @@ function ReadySessionControls({
       >
         {firstName(user)}
       </button>
+      {user.groups.includes("admins") ? (
+        <button
+          className="admin-button"
+          type="button"
+          onClick={() => setAdminOpen(true)}
+        >
+          Admin
+        </button>
+      ) : null}
       {user.auth_provider === "cloudflare_access" ? (
         <a className="logout-button" href="/cdn-cgi/access/logout">Log out</a>
       ) : null}
@@ -252,6 +327,13 @@ function ReadySessionControls({
           onPreferencesChange={onPreferencesChange}
           onDataPurgeAttempted={onDataPurgeAttempted}
           onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
+      {adminOpen ? (
+        <AdminPanel
+          currentUserId={user.id}
+          onChanged={onAdministrationChanged}
+          onClose={() => setAdminOpen(false)}
         />
       ) : null}
     </div>

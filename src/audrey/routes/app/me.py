@@ -16,6 +16,7 @@ from audrey.app_state import (
 )
 from audrey.auth import (
     clear_auth_cache_for_email,
+    require_account_principal,
     require_provider_principal,
     require_scope,
 )
@@ -88,6 +89,7 @@ class MeResponse(BaseModel):
     display_name: str
     role: str
     status: str
+    groups: list[str]
     auth_provider: str
 
 
@@ -130,7 +132,7 @@ def _preferences_response(record: UserPreferences) -> PreferencesResponse:
 
 @router.get("/me", response_model=MeResponse)
 async def get_me(
-    principal: Principal = Depends(_account_read),
+    principal: Principal = Depends(require_account_principal),
 ) -> MeResponse:
     """Return the Audrey-owned account behind current auth evidence.
 
@@ -144,6 +146,7 @@ async def get_me(
         display_name=principal.display_name,
         role=principal.role,
         status=principal.status,
+        groups=sorted(principal.groups),
         auth_provider=principal.provider,
     )
 
@@ -170,6 +173,7 @@ async def update_me(
         display_name=display_name,
         role=principal.role,
         status=principal.status,
+        groups=sorted(principal.groups),
         auth_provider=principal.provider,
     )
 

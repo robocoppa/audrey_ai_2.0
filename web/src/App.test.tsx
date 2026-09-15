@@ -14,6 +14,26 @@ const DEFAULT_PREFERENCES = {
   updated_at: "2026-09-01T00:00:00+00:00",
 } as const;
 
+const DEFAULT_MODELS = [
+  {
+    id: "auto",
+    label: "Auto",
+    description: "Let Audrey choose the response path.",
+    kind: "workflow",
+    mode: "auto",
+    presentation: "auto",
+    capabilities: ["text", "files", "tools"],
+    enabled: true,
+    audience: "users",
+  },
+] as const;
+
+function collectionPayload(path: string) {
+  return path === "/api/models"
+    ? { items: DEFAULT_MODELS }
+    : { items: [], next_cursor: null };
+}
+
 describe("App", () => {
   afterEach(() => {
     cleanup();
@@ -39,6 +59,62 @@ describe("App", () => {
     expect(screen.queryByText("A quieter place to think.")).not.toBeInTheDocument();
   });
 
+  it("holds a newly authenticated account at the approval boundary", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: "usr_pending",
+      email: "alice@example.com",
+      display_name: "Alice Example",
+      role: "user",
+      status: "pending",
+      groups: [],
+      auth_provider: "cloudflare_access",
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Approval is pending" })).toBeVisible();
+    expect(screen.getByText("alice@example.com")).toBeVisible();
+    expect(screen.queryByRole("banner")).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/me",
+      expect.objectContaining({ credentials: "same-origin" }),
+    );
+  });
+
+  it("keeps administration reachable when every model is disabled", async () => {
+    const fetchMock = vi.fn().mockImplementation((path: string) => {
+      const payload = path === "/api/me"
+        ? {
+            id: "usr_admin",
+            email: "admin@example.com",
+            display_name: "Admin User",
+            role: "admin",
+            status: "active",
+            groups: ["admins", "users"],
+            auth_provider: "cloudflare_access",
+          }
+        : path === "/api/me/preferences"
+          ? DEFAULT_PREFERENCES
+          : { items: [] };
+      return Promise.resolve(new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "No models available" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Admin" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "+ New" })).toBeDisabled();
+  });
+
   it("loads the current same-origin Audrey identity", async () => {
     const fetchMock = vi.fn().mockImplementation((path: string) => {
       const payload = path === "/api/me"
@@ -48,11 +124,12 @@ describe("App", () => {
             display_name: "Alice Example",
             role: "user",
             status: "active",
+            groups: ["users"],
             auth_provider: "cloudflare_access",
           }
         : path === "/api/me/preferences"
           ? DEFAULT_PREFERENCES
-          : { items: [], next_cursor: null };
+          : collectionPayload(path);
       return Promise.resolve(
         new Response(JSON.stringify(payload), {
           status: 200,
@@ -110,6 +187,7 @@ describe("App", () => {
             display_name: "Alice Example",
             role: "user",
             status: "active",
+            groups: ["users"],
             auth_provider: "cloudflare_access",
           }), {
             status: 200,
@@ -126,7 +204,7 @@ describe("App", () => {
         );
       }
       return Promise.resolve(
-        new Response(JSON.stringify({ items: [], next_cursor: null }), {
+        new Response(JSON.stringify(collectionPayload(path)), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
@@ -172,11 +250,12 @@ describe("App", () => {
             display_name: "Alice Example",
             role: "user",
             status: "active",
+            groups: ["users"],
             auth_provider: "cloudflare_access",
           }
         : path === "/api/me/preferences"
           ? DEFAULT_PREFERENCES
-          : { items: [], next_cursor: null };
+          : collectionPayload(path);
       return Promise.resolve(
         new Response(JSON.stringify(payload), {
           status: 200,
@@ -225,11 +304,12 @@ describe("App", () => {
             display_name: "",
             role: "user",
             status: "active",
+            groups: ["users"],
             auth_provider: "cloudflare_access",
           }
         : path === "/api/me/preferences"
           ? DEFAULT_PREFERENCES
-          : { items: [], next_cursor: null };
+          : collectionPayload(path);
       return Promise.resolve(
         new Response(JSON.stringify(payload), {
           status: 200,
@@ -256,6 +336,7 @@ describe("App", () => {
             display_name: currentName,
             role: "user",
             status: "active",
+            groups: ["users"],
             auth_provider: "cloudflare_access",
           }), { status: 200, headers: { "Content-Type": "application/json" } }));
         }
@@ -266,11 +347,12 @@ describe("App", () => {
               display_name: currentName,
               role: "user",
               status: "active",
+              groups: ["users"],
               auth_provider: "cloudflare_access",
             }
           : path === "/api/me/preferences"
             ? DEFAULT_PREFERENCES
-            : { items: [], next_cursor: null };
+            : collectionPayload(path);
         return Promise.resolve(new Response(JSON.stringify(payload), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -323,11 +405,12 @@ describe("App", () => {
               display_name: "Alice Example",
               role: "user",
               status: "active",
+              groups: ["users"],
               auth_provider: "cloudflare_access",
             }
           : path === "/api/me/preferences"
             ? DEFAULT_PREFERENCES
-            : { items: [], next_cursor: null };
+            : collectionPayload(path);
         return Promise.resolve(new Response(JSON.stringify(payload), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -418,11 +501,12 @@ describe("App", () => {
               display_name: "Alice Example",
               role: "user",
               status: "active",
+              groups: ["users"],
               auth_provider: "cloudflare_access",
             }
           : path === "/api/me/preferences"
             ? DEFAULT_PREFERENCES
-            : { items: [], next_cursor: null };
+            : collectionPayload(path);
         return Promise.resolve(new Response(JSON.stringify(payload), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -541,11 +625,12 @@ describe("App", () => {
               display_name: "Alice Example",
               role: "user",
               status: "active",
+              groups: ["users"],
               auth_provider: "cloudflare_access",
             }
           : path === "/api/me/preferences"
             ? DEFAULT_PREFERENCES
-            : { items: [], next_cursor: null };
+            : collectionPayload(path);
         return Promise.resolve(new Response(JSON.stringify(payload), {
           status: 200,
           headers: { "Content-Type": "application/json" },

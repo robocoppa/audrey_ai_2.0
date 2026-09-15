@@ -30,6 +30,7 @@ from audrey.auth import (
     _probe_owui,
     clear_auth_cache,
     clear_auth_cache_for_email,
+    require_account_user,
     require_admin,
     require_provider_principal,
     require_user,
@@ -334,7 +335,7 @@ async def test_require_user_binds_stable_audrey_principal(monkeypatch, tmp_path)
         ),
     )
     try:
-        me = await require_user(
+        me = await require_account_user(
             _fake_request(application_store=store),
             authorization="Bearer identity-token",
         )
@@ -484,7 +485,7 @@ async def test_cloudflare_header_creates_provider_neutral_principal_without_owui
 
     monkeypatch.setattr(auth_module.httpx, "AsyncClient", _unexpected_owui)
     try:
-        me = await require_user(
+        me = await require_account_user(
             _fake_request(
                 application_store=store,
                 cloudflare_access_verifier=verifier,
@@ -501,6 +502,8 @@ async def test_cloudflare_header_creates_provider_neutral_principal_without_owui
     assert me.principal.provider_subject == "cf-subject"
     assert me.principal.auth_method == "cloudflare_access"
     assert me.principal.role == "user"
+    assert me.principal.status == "pending"
+    assert me.principal.groups == frozenset()
     assert me.email.startswith("ns_")
     assert me.email != "alice@example.com"
 
@@ -515,7 +518,7 @@ def test_fastapi_reads_cloudflare_access_assertion_header(tmp_path):
     app.state.cloudflare_access_verifier = verifier
 
     @app.get("/probe")
-    async def probe(me: AuthedUser = Depends(require_user)):
+    async def probe(me: AuthedUser = Depends(require_account_user)):
         return {"user_id": me.principal.user_id}
 
     try:
@@ -547,7 +550,7 @@ async def test_cloudflare_email_match_does_not_implicitly_merge_owui_account(tmp
         CloudflareAccessClaims(subject="cf-subject", email="alice@example.com")
     )
     try:
-        me = await require_user(
+        me = await require_account_user(
             _fake_request(
                 application_store=store,
                 cloudflare_access_verifier=verifier,
@@ -561,6 +564,7 @@ async def test_cloudflare_email_match_does_not_implicitly_merge_owui_account(tmp
     assert me.principal is not None
     assert me.principal.user_id != owui.user_id
     assert me.principal.storage_namespace != owui.storage_namespace
+    assert me.principal.status == "pending"
 
 
 async def test_invalid_cloudflare_header_never_falls_back_to_valid_owui_bearer(

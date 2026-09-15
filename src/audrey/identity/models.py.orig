@@ -26,17 +26,12 @@ class Principal:
     role: str
     status: str
     auth_method: str
-    groups: frozenset[str] = frozenset()
     token_id: str | None = None
     scopes: frozenset[str] = frozenset()
 
     @property
     def is_admin(self) -> bool:
-        return self.role == "admin" or "admins" in self.groups
-
-    @property
-    def is_tester(self) -> bool:
-        return "testers" in self.groups
+        return self.role == "admin"
 
 
 @dataclass(frozen=True, slots=True)

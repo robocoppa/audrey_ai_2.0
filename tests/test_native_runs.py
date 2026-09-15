@@ -7,6 +7,7 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -15,13 +16,18 @@ import audrey.routes.app.runs as app_runs
 from audrey.app_state import ApplicationStore, AttachmentSnapshot
 from audrey.auth import require_principal
 from audrey.identity import Principal
-from audrey.pipeline.run_events import RunEventContext, RunFinishedEvent
+from audrey.models.ollama import OllamaClient
+from audrey.models.registry import ModelRegistry
+from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.pipeline.run_events import RunEventContext, RunEventEmitter, RunFinishedEvent
 from audrey.routes.app import router
 from audrey.routes.app.runs import (
     _MODELS,
     NativeRunCursorExpiredError,
     NativeRunManager,
+    _stream_via_selected_model,
 )
+from audrey.routes.inflight import UserInflightRegistry
 from audrey.routes.openai import VIRTUAL_MODELS
 from audrey.routes.openai.schemas import ChatCompletionRequest
 
@@ -80,11 +86,13 @@ def _native_app(
     stream_factory=_successful_stream,
     archive_wake=None,
     title_generator=None,
+    cfg=None,
 ) -> tuple[FastAPI, ApplicationStore, Principal, NativeRunManager]:
     store = ApplicationStore(tmp_path / "app.sqlite")
     owner = _principal_sync(store)
     app = FastAPI()
     app.state.application_store = store
+    app.state.cfg = cfg or SimpleNamespace(raw={"passthrough": {"enabled": False}})
     app.state.conversation_titles = title_generator
     manager = NativeRunManager(
         app=app,
@@ -139,6 +147,203 @@ def _agui_sse_events(body: str) -> list[tuple[str, dict[str, Any]]]:
 
 def test_native_modes_cover_every_published_virtual_model():
     assert set(_MODELS.values()) == set(VIRTUAL_MODELS)
+
+
+def _direct_cfg():
+    model = "qwen-test:latest"
+    return SimpleNamespace(
+        raw={
+            "passthrough": {
+                "enabled": True,
+                "allowed_models": [model],
+                "think": None,
+            },
+            "native_models": {
+                "direct_defaults": {
+                    "audience": "testers",
+                    "num_ctx": 8192,
+                    "max_tokens": 512,
+                }
+            },
+        },
+        model_registry={
+            "general": [
+                {"name": model, "priority": 100, "location": "local"}
+            ]
+        },
+        timeouts={"medium": 30},
+    )
+
+
+def test_native_route_resolves_direct_model_and_persists_stable_selection(tmp_path):
+    captured_models: list[str] = []
+
+    async def capture_stream(app, payload, messages, options, **kwargs):
+        captured_models.append(payload.model)
+        async for chunk in _successful_stream(
+            app,
+            payload,
+            messages,
+            options,
+            **kwargs,
+        ):
+            yield chunk
+
+    app, store, owner, _manager = _native_app(
+        tmp_path,
+        stream_factory=capture_stream,
+        cfg=_direct_cfg(),
+    )
+    admin = asyncio.run(
+        store.resolve_external_identity(
+            provider="owui",
+            subject="owui-admin",
+            email="admin@example.com",
+            display_name="Admin",
+            role="admin",
+            auth_method="owui_bearer",
+            legacy_storage_namespace="admin@example.com",
+        )
+    )
+    asyncio.run(
+        store.admin_update_user(
+            actor_user_id=admin.user_id,
+            target_user_id=owner.user_id,
+            groups=["users", "testers"],
+        )
+    )
+    tester = _principal_sync(store)
+    app.dependency_overrides[require_principal] = lambda: tester
+    model_id = "direct/qwen-test:latest"
+    try:
+        with TestClient(app) as client:
+            created_conversation = client.post(
+                "/api/conversations",
+                json={"model_id": model_id},
+            )
+            assert created_conversation.status_code == 201
+            conversation = created_conversation.json()
+            assert conversation["default_mode"] == "direct"
+            assert conversation["default_model_id"] == model_id
+
+            rejected_attachment = client.post(
+                f"/api/conversations/{conversation['id']}/runs",
+                json={"content": "Read this.", "attachment_ids": ["file_1"]},
+            )
+            assert rejected_attachment.status_code == 422
+            assert "text only" in rejected_attachment.json()["detail"]
+
+            created_run = client.post(
+                f"/api/conversations/{conversation['id']}/runs",
+                json={"content": "Answer directly."},
+            )
+            assert created_run.status_code == 202
+            run = created_run.json()
+            assert run["mode"] == "direct"
+            assert run["requested_model_id"] == model_id
+            events = _sse_events(client.get(run["events_url"]).text)
+            assert events[-1]["status"] == "succeeded"
+
+        assert captured_models == ["audrey_passthrough/qwen-test:latest"]
+    finally:
+        store.close()
+
+
+async def test_selected_direct_model_streams_through_real_ollama_client_contract():
+    captured: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        captured.append(payload)
+        chunks = (
+            {"message": {"role": "assistant", "content": "direct "}, "done": False},
+            {
+                "message": {"role": "assistant", "content": "answer"},
+                "done": True,
+                "done_reason": "stop",
+                "prompt_eval_count": 11,
+                "eval_count": 2,
+            },
+        )
+        return httpx.Response(
+            200,
+            content="".join(json.dumps(chunk) + "\n" for chunk in chunks).encode(),
+        )
+
+    cfg = _direct_cfg()
+    ollama = OllamaClient(
+        "http://ollama:11434",
+        transport=httpx.MockTransport(handler),
+    )
+    registry = ModelRegistry(cfg)
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            cfg=cfg,
+            ollama=ollama,
+            registry=registry,
+            gate=FairLocalGate(concurrency=1),
+            inflight=UserInflightRegistry(max_inflight_per_user=2),
+        )
+    )
+    events = []
+    emitter = RunEventEmitter(
+        run_id="run_direct",
+        conversation_id="con_direct",
+        assistant_message_id="msg_assistant",
+        mode="direct",
+        virtual_model="audrey_passthrough/qwen-test:latest",
+        sink=events.append,
+    )
+    context = RunEventContext(
+        run_id="run_direct",
+        conversation_id="con_direct",
+        assistant_message_id="msg_assistant",
+        mode="direct",
+        emitter=emitter,
+    )
+    payload = ChatCompletionRequest(
+        model="audrey_passthrough/qwen-test:latest",
+        messages=[{"role": "user", "content": "Hello"}],
+        stream=True,
+        temperature=0.25,
+        max_tokens=1024,
+    )
+
+    frames = [
+        frame
+        async for frame in _stream_via_selected_model(
+            app,
+            payload,
+            [{"role": "user", "content": "Hello"}],
+            {"temperature": 0.25, "num_predict": 1024},
+            user_id="alice@example.com",
+            conversation_id="con_direct",
+            user_turn_text="Hello",
+            event_context=context,
+        )
+    ]
+
+    assert frames[-1] == "data: [DONE]\n\n"
+    assert [event.type for event in events] == [
+        "run.started",
+        "message.started",
+        "stage.started",
+        "text.delta",
+        "text.delta",
+        "usage.reported",
+        "stage.finished",
+        "message.finished",
+        "run.finished",
+    ]
+    assert isinstance(events[-1], RunFinishedEvent)
+    assert events[-1].status == "succeeded"
+    assert events[-1].concrete_model == "qwen-test:latest"
+    assert captured[0]["model"] == "qwen-test:latest"
+    assert captured[0]["options"] == {
+        "temperature": 0.25,
+        "num_ctx": 8192,
+        "num_predict": 512,
+    }
 
 
 def test_native_run_create_stream_persist_and_resume_are_canonical(tmp_path):

@@ -1416,6 +1416,31 @@ a:focus-visible {
   box-shadow: var(--focus-glow);
 }
 
+.admin-button {
+  padding: 0.42rem 0.72rem;
+  border: 1px solid rgb(99 181 255 / 35%);
+  border-radius: 999px;
+  background: rgb(52 153 250 / 10%);
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.admin-button:hover,
+.admin-button:focus-visible {
+  outline: none;
+  border-color: var(--border-strong);
+  background: var(--surface-active);
+  color: var(--text);
+  box-shadow: var(--focus-glow);
+}
+
+.account-access-email {
+  margin: -0.35rem 0 0;
+  color: var(--accent);
+  font-size: 0.82rem;
+}
+
 .account-settings-backdrop {
   position: fixed;
   z-index: 40;
@@ -1489,6 +1514,152 @@ a:focus-visible {
   background: var(--surface-active);
   color: var(--text);
   box-shadow: var(--focus-glow);
+}
+
+.admin-panel {
+  width: min(64rem, 100%);
+}
+
+.admin-loading,
+.admin-error {
+  margin: 1.25rem 1.4rem;
+}
+
+.admin-record-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.admin-record {
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background: rgb(7 16 31 / 46%);
+}
+
+.admin-record-heading,
+.admin-record-actions,
+.admin-account-controls,
+.admin-model-audience {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.admin-record-heading {
+  justify-content: space-between;
+}
+
+.admin-record-heading > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
+.admin-record-heading strong,
+.admin-record-heading span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.admin-record-heading span,
+.admin-record-meta,
+.admin-model-record p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.account-status {
+  flex: 0 0 auto;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.account-status.active {
+  border-color: rgb(104 211 145 / 35%);
+  color: var(--success);
+}
+
+.account-status.pending {
+  border-color: rgb(239 192 113 / 35%);
+  color: var(--warning);
+}
+
+.account-status.disabled {
+  color: var(--muted-deep);
+}
+
+.admin-record-actions,
+.admin-account-controls {
+  flex-wrap: wrap;
+}
+
+.admin-record-actions button,
+.admin-account-controls button,
+.admin-record-heading > button {
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.admin-record-actions button:hover,
+.admin-account-controls button:hover,
+.admin-record-heading > button:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.admin-record-actions .danger-button,
+.admin-account-controls .danger-button {
+  border-color: rgb(255 145 164 / 30%);
+  color: var(--danger);
+}
+
+.admin-account-controls .settings-checkbox {
+  flex: 1 1 9rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.settings-section .admin-model-audience {
+  grid-template-columns: auto minmax(8rem, 1fr);
+}
+
+.admin-model-audience select {
+  min-width: 0;
+}
+
+.catalog-unavailable {
+  align-self: center;
+  justify-self: center;
+  max-width: 28rem;
+  padding: 2rem;
+  text-align: center;
+}
+
+.catalog-unavailable h2,
+.catalog-unavailable p {
+  margin: 0;
+}
+
+.catalog-unavailable p {
+  margin-top: 0.55rem;
+  color: var(--muted);
+  line-height: 1.55;
 }
 
 .settings-section {
@@ -2343,6 +2514,7 @@ a:focus-visible {
   }
 
   .settings-pair,
+  .admin-record-list,
   .token-list dl,
   .purge-progress,
   .timezone-control {
@@ -2420,6 +2592,7 @@ a:focus-visible {
   .session-badge,
   .session-retry-button,
   .session-name,
+  .admin-button,
   .logout-button {
     font-size: 0.64rem;
   }

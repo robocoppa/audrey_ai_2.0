@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { uploadFile, type AudreyFileLimits } from "./api";
+import {
+  createConversation,
+  updateAdminModel,
+  updateConversationModel,
+  uploadFile,
+  type AudreyFileLimits,
+} from "./api";
 
 const LIMITS: AudreyFileLimits = {
   max_upload_bytes: 4,
@@ -100,6 +106,55 @@ describe("native file uploads", () => {
       LIMITS,
     )).rejects.toThrow("exceeds Audrey's");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("server-owned model selections", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("sends stable model IDs when conversations are created and changed", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({})));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createConversation("direct/qwen3.8-27b");
+    await updateConversationModel("con_example", "research");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/conversations",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ model_id: "direct/qwen3.8-27b" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/conversations/con_example",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ model_id: "research" }),
+      }),
+    );
+  });
+
+  it("encodes direct-model IDs and sends the complete policy mutation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({}));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await updateAdminModel("direct/qwen3.8-27b", {
+      enabled: false,
+      audience: "testers",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/models/direct%2Fqwen3.8-27b",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ enabled: false, audience: "testers" }),
+      }),
+    );
   });
 });
 

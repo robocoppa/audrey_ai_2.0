@@ -8,7 +8,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from audrey.app_state import ApplicationStore
-from audrey.auth import require_principal, require_provider_principal
+from audrey.auth import (
+    AuthedUser,
+    require_account_principal,
+    require_account_user,
+    require_principal,
+    require_provider_principal,
+)
 from audrey.identity import Principal
 from audrey.routes.app import router
 
@@ -24,6 +30,7 @@ def _principal() -> Principal:
         role="user",
         status="active",
         auth_method="owui_bearer",
+        groups=frozenset({"users"}),
     )
 
 
@@ -47,7 +54,7 @@ def _persist_principal(
 def test_get_me_returns_audrey_id_without_internal_identity_fields():
     app = FastAPI()
     app.include_router(router)
-    app.dependency_overrides[require_principal] = _principal
+    app.dependency_overrides[require_account_principal] = _principal
 
     response = TestClient(app).get("/api/me")
 
@@ -58,6 +65,7 @@ def test_get_me_returns_audrey_id_without_internal_identity_fields():
         "display_name": "Alice",
         "role": "user",
         "status": "active",
+        "groups": ["users"],
         "auth_provider": "owui",
     }
     assert "storage_namespace" not in response.text
@@ -108,6 +116,7 @@ def test_patch_me_updates_only_the_provider_authenticated_profile(tmp_path):
         "display_name": "Alice Builder",
         "role": "user",
         "status": "active",
+        "groups": ["users"],
         "auth_provider": "owui",
     }
     assert refreshed.display_name == "Alice Builder"
@@ -386,7 +395,12 @@ def test_personal_token_needs_account_read_scope_for_me():
     )
     app = FastAPI()
     app.include_router(router)
-    app.dependency_overrides[require_principal] = lambda: principal
+    app.dependency_overrides[require_account_user] = lambda: AuthedUser(
+        email=principal.storage_namespace,
+        role="user",
+        owui_id="",
+        principal=principal,
+    )
 
     response = TestClient(app).get("/api/me")
 
@@ -407,6 +421,7 @@ def test_personal_token_authenticates_through_native_me_route(tmp_path):
     )
     app = FastAPI()
     app.state.application_store = store
+    app.state.cfg = SimpleNamespace(raw={"passthrough": {"enabled": False}})
     app.include_router(router)
 
     try:
@@ -426,6 +441,7 @@ def _conversation_app(tmp_path):
     store = ApplicationStore(tmp_path / "app.sqlite")
     app = FastAPI()
     app.state.application_store = store
+    app.state.cfg = SimpleNamespace(raw={"passthrough": {"enabled": False}})
     app.include_router(router)
     owner = _persist_principal(store, _principal())
     app.dependency_overrides[require_principal] = lambda: owner

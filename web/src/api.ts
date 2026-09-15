@@ -1,10 +1,42 @@
+export type AccessGroup = "users" | "testers" | "admins";
+
 export interface CurrentUser {
   id: string;
   email: string;
   display_name: string;
   role: "admin" | "user";
-  status: "active" | string;
+  status: "pending" | "active" | "disabled";
+  groups: AccessGroup[];
   auth_provider: string;
+}
+
+export interface AudreyModel {
+  id: string;
+  label: string;
+  description: string;
+  kind: "workflow" | "direct";
+  mode: AudreyMode;
+  presentation: string;
+  capabilities: string[];
+  enabled: boolean;
+  audience: AccessGroup;
+}
+
+export interface AdminModel extends AudreyModel {
+  concrete_model: string;
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  display_name: string;
+  role: "admin" | "user";
+  status: "pending" | "active" | "disabled";
+  groups: AccessGroup[];
+  auth_provider: string;
+  created_at: string;
+  updated_at: string;
+  last_seen_at: string;
 }
 
 export interface UserPreferences {
@@ -104,12 +136,14 @@ export type AudreyMode =
   | "research"
   | "local"
   | "cloud"
-  | "video";
+  | "video"
+  | "direct";
 
 export interface Conversation {
   id: string;
   title: string;
   default_mode: AudreyMode;
+  default_model_id: string;
   created_at: string;
   updated_at: string;
   last_message_at: string | null;
@@ -150,6 +184,7 @@ export interface ConversationListOptions {
 export interface ConversationPatch {
   title?: string;
   default_mode?: AudreyMode;
+  model_id?: string;
   archived?: boolean;
 }
 
@@ -241,6 +276,57 @@ export async function apiResponse(path: string, init?: RequestInit): Promise<Res
 
 export function getCurrentUser(): Promise<CurrentUser> {
   return apiJson<CurrentUser>("/api/me");
+}
+
+export function listModels(): Promise<{ items: AudreyModel[] }> {
+  return apiJson<{ items: AudreyModel[] }>("/api/models");
+}
+
+export function listAdminUsers(): Promise<{ items: AdminUser[] }> {
+  return apiJson<{ items: AdminUser[] }>("/api/admin/users");
+}
+
+export function approveAdminUser(
+  userId: string,
+  tester: boolean,
+): Promise<AdminUser> {
+  return apiJson<AdminUser>(`/api/admin/users/${encodeURIComponent(userId)}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tester }),
+  });
+}
+
+export function denyAdminUser(userId: string): Promise<AdminUser> {
+  return apiJson<AdminUser>(`/api/admin/users/${encodeURIComponent(userId)}/deny`, {
+    method: "POST",
+  });
+}
+
+export function updateAdminUser(
+  userId: string,
+  patch: { status?: "active" | "disabled"; groups?: AccessGroup[] },
+): Promise<AdminUser> {
+  return apiJson<AdminUser>(`/api/admin/users/${encodeURIComponent(userId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
+export function listAdminModels(): Promise<{ items: AdminModel[] }> {
+  return apiJson<{ items: AdminModel[] }>("/api/admin/models");
+}
+
+export function updateAdminModel(
+  modelId: string,
+  patch: { enabled: boolean; audience: AccessGroup },
+): Promise<AdminModel> {
+  return apiJson<AdminModel>(`/api/admin/models/${encodeURIComponent(modelId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
 }
 
 export function updateCurrentUserDisplayName(
@@ -354,11 +440,11 @@ export function listConversations(
   return apiJson<ListResponse<Conversation>>(`/api/conversations?${params}`);
 }
 
-export function createConversation(mode: AudreyMode): Promise<Conversation> {
+export function createConversation(modelId: string): Promise<Conversation> {
   return apiJson<Conversation>("/api/conversations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ default_mode: mode }),
+    body: JSON.stringify({ model_id: modelId }),
   });
 }
 
@@ -381,6 +467,13 @@ export function updateConversationMode(
   mode: AudreyMode,
 ): Promise<Conversation> {
   return updateConversation(conversationId, { default_mode: mode });
+}
+
+export function updateConversationModel(
+  conversationId: string,
+  modelId: string,
+): Promise<Conversation> {
+  return updateConversation(conversationId, { model_id: modelId });
 }
 
 export function updateConversation(

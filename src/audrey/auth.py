@@ -196,6 +196,8 @@ async def _resolve_personal_token(
 async def _bind_audrey_principal(
     request: Request,
     user: AuthedUser,
+    *,
+    allow_inactive: bool = False,
 ) -> AuthedUser:
     """Map OWUI evidence to one durable Audrey account when the store exists."""
 
@@ -230,14 +232,16 @@ async def _bind_audrey_principal(
             status_code=409,
             detail="Audrey identity binding conflict.",
         ) from exc
-    if user.principal.status != "active":
-        raise HTTPException(status_code=403, detail="Audrey account is disabled.")
+    if not allow_inactive and user.principal.status != "active":
+        raise HTTPException(status_code=403, detail=_inactive_account_detail(user.principal))
     return user
 
 
 async def _resolve_cloudflare_access(
     request: Request,
     token: str,
+    *,
+    allow_inactive: bool = False,
 ) -> AuthedUser:
     """Verify Access evidence and bind it without trusting email or role."""
 
@@ -272,6 +276,7 @@ async def _resolve_cloudflare_access(
             legacy_storage_namespace=None,
             sync_role=False,
             sync_display_name=False,
+            initial_status="pending",
         )
     except InvalidIdentityError as exc:
         log.error("auth: invalid identity evidence from Cloudflare Access: %s", exc)
@@ -286,8 +291,8 @@ async def _resolve_cloudflare_access(
             detail="Audrey identity binding conflict.",
         ) from exc
 
-    if principal.status != "active":
-        raise HTTPException(status_code=403, detail="Audrey account is disabled.")
+    if not allow_inactive and principal.status != "active":
+        raise HTTPException(status_code=403, detail=_inactive_account_detail(principal))
     return AuthedUser(
         email=principal.storage_namespace,
         role=principal.role,
@@ -344,6 +349,47 @@ async def require_user(
     return user
 
 
+async def require_account_user(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    cloudflare_access_jwt: Annotated[
+        str | None,
+        Header(alias="Cf-Access-Jwt-Assertion"),
+    ] = None,
+) -> AuthedUser:
+    """Authenticate `/api/me` while exposing pending Cloudflare account status."""
+
+    verifier = getattr(request.app.state, "cloudflare_access_verifier", None)
+    if verifier is not None and cloudflare_access_jwt:
+        return await _resolve_cloudflare_access(
+            request,
+            cloudflare_access_jwt,
+            allow_inactive=True,
+        )
+    return await require_user(request, authorization, cloudflare_access_jwt)
+
+
+async def require_account_principal(
+    me: AuthedUser = Depends(require_account_user),
+) -> Principal:
+    """Return provider-backed account state before the active-access gate."""
+
+    if me.principal is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Audrey application identity is not initialized.",
+        )
+    if (
+        me.principal.auth_method == "personal_token"
+        and "account:read" not in me.principal.scopes
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Personal access token lacks account:read scope.",
+        )
+    return me.principal
+
+
 async def require_principal(
     me: AuthedUser = Depends(require_user),
 ) -> Principal:
@@ -385,6 +431,16 @@ async def require_provider_principal(
             status_code=403,
             detail="External provider authentication is required for this operation.",
         )
+    return principal
+
+
+async def require_admin_principal(
+    principal: Principal = Depends(require_provider_principal),
+) -> Principal:
+    """Require provider auth from an active Audrey administrator."""
+
+    if not principal.is_admin:
+        raise HTTPException(status_code=403, detail="Administrator access required.")
     return principal
 
 
@@ -472,6 +528,30 @@ def clear_auth_cache_for_email(email: str) -> int:
     return len(to_evict)
 
 
+def clear_auth_cache_for_user_id(user_id: str) -> int:
+    """Evict every cached provider session for one canonical Audrey user."""
+
+    target = str(user_id).strip()
+    if not target:
+        return 0
+    to_evict = [
+        token
+        for token, (_, user) in _cache.items()
+        if user.principal is not None and user.principal.user_id == target
+    ]
+    for token in to_evict:
+        _cache.pop(token, None)
+    if to_evict:
+        _auth_cache_size_gauge.set(len(_cache))
+    return len(to_evict)
+
+
+def _inactive_account_detail(principal: Principal) -> str:
+    if principal.status == "pending":
+        return "Audrey account is awaiting administrator approval."
+    return "Audrey account is disabled."
+
+
 def cache_size() -> int:
     """Current count of cached AuthedUser entries. For admin observability."""
     return len(_cache)
@@ -480,6 +560,9 @@ def cache_size() -> int:
 __all__ = [
     "AuthedUser",
     "KBCaller",
+    "require_account_principal",
+    "require_account_user",
+    "require_admin_principal",
     "require_user",
     "require_principal",
     "require_scope",
@@ -490,5 +573,6 @@ __all__ = [
     "require_service",
     "clear_auth_cache",
     "clear_auth_cache_for_email",
+    "clear_auth_cache_for_user_id",
     "cache_size",
 ]

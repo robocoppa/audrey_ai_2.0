@@ -28,6 +28,10 @@ test("centers Audrey Auto with a text-free orbit while the session loads", async
       await json(route, { items: [], next_cursor: null });
       return;
     }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
+      return;
+    }
     await route.abort("failed");
   });
 
@@ -101,6 +105,10 @@ test("holds through multiple transient Access bootstrap rejections", async ({ pa
       await json(route, { items: [], next_cursor: null });
       return;
     }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
+      return;
+    }
     await route.abort("failed");
   });
 
@@ -126,6 +134,137 @@ test("holds through multiple transient Access bootstrap rejections", async ({ pa
   expect(recoveredUrl.searchParams.get("kept")).toBe("yes");
   expect(recoveredUrl.searchParams.has("__cf_access_message")).toBe(false);
   expect(recoveredUrl.hash).toBe("#chat");
+});
+
+test("holds a valid new Access identity for Audrey approval", async ({ page }) => {
+  const requests: string[] = [];
+  await page.route("**/api/**", async (route) => {
+    const url = new URL(route.request().url());
+    requests.push(url.pathname);
+    if (url.pathname === "/api/me") {
+      await json(route, {
+        ...browserUser(),
+        id: "usr_pending",
+        status: "pending",
+        groups: [],
+      });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+
+  await expect(page.getByRole("heading", { name: "Approval is pending" })).toBeVisible();
+  await expect(page.getByText("alice@example.com")).toBeVisible();
+  await expect(page.locator(".topbar")).toHaveCount(0);
+  expect(requests).toEqual(["/api/me"]);
+});
+
+test("approves an account and changes a model policy in the admin panel", async ({ page }) => {
+  let pending = {
+    ...browserUser(),
+    id: "usr_pending",
+    email: "pending@example.com",
+    display_name: "Pending Person",
+    status: "pending",
+    groups: [] as string[],
+    created_at: "2026-09-15T00:00:00Z",
+    updated_at: "2026-09-15T00:00:00Z",
+    last_seen_at: "2026-09-15T00:00:00Z",
+  };
+  let directModel = {
+    id: "direct/qwen3.8:latest",
+    label: "Qwen 3.8",
+    description: "Direct local Qwen.",
+    kind: "direct",
+    mode: "direct",
+    presentation: "local",
+    capabilities: ["text", "thinking"],
+    enabled: true,
+    audience: "testers",
+    concrete_model: "qwen3.8:latest",
+  };
+  const modelPatches: unknown[] = [];
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me") {
+      await json(route, {
+        ...browserUser(),
+        id: "usr_admin",
+        role: "admin",
+        groups: ["admins", "users"],
+      });
+      return;
+    }
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
+    if (url.pathname === "/api/models") {
+      await json(route, {
+        items: directModel.enabled
+          ? browserModels()
+          : browserModels().filter(({ id }) => id !== directModel.id),
+      });
+      return;
+    }
+    if (url.pathname === "/api/admin/users") {
+      await json(route, { items: [pending] });
+      return;
+    }
+    if (url.pathname === "/api/admin/users/usr_pending/approve") {
+      pending = { ...pending, status: "active", groups: ["users"] };
+      await json(route, pending);
+      return;
+    }
+    if (url.pathname === "/api/admin/models") {
+      await json(route, { items: [directModel] });
+      return;
+    }
+    if (url.pathname === "/api/admin/models/direct%2Fqwen3.8%3Alatest") {
+      const modelPatch = request.postDataJSON() as {
+        enabled: boolean;
+        audience: string;
+      };
+      modelPatches.push(modelPatch);
+      directModel = { ...directModel, ...modelPatch };
+      await json(route, directModel);
+      return;
+    }
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      await json(route, {
+        items: [{
+          ...browserConversation("Admin recovery"),
+          default_mode: "direct",
+          default_model_id: directModel.id,
+        }],
+        next_cursor: null,
+      });
+      return;
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await page.getByRole("button", { name: "Admin" }).click();
+  await expect(page.getByRole("dialog", { name: "Access control" })).toBeVisible();
+
+  const account = page.locator(".admin-record").filter({ hasText: "Pending Person" });
+  await account.getByRole("button", { name: "Approve" }).click();
+  await expect(account.getByText("active")).toBeVisible();
+
+  const model = page.locator(".admin-model-record").filter({ hasText: "Qwen 3.8" });
+  await model.getByRole("button", { name: "Enabled" }).click();
+  await expect(model.getByRole("button", { name: "Disabled" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue("auto");
+  expect(modelPatches).toEqual([{ enabled: false, audience: "testers" }]);
 });
 
 test("restores a saved conversation on hard refresh without showing a landing page", async ({ page }) => {
@@ -164,6 +303,10 @@ test("restores a saved conversation on hard refresh without showing a landing pa
       messageReads += 1;
       if (messageReads === 2) await reloadMessagesGate;
       await json(route, { items: canonicalBrowserTurn(), next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
       return;
     }
     await route.abort("failed");
@@ -434,6 +577,7 @@ test("summarizes a new conversation from its first prompt", async ({ page }) => 
   let conversation = {
     ...browserConversation(""),
     default_mode: "auto" as const,
+    default_model_id: "auto",
   };
 
   await page.route("**/api/**", async (route) => {
@@ -502,6 +646,10 @@ test("summarizes a new conversation from its first prompt", async ({ page }) => 
       });
       return;
     }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
+      return;
+    }
     await route.abort("failed");
   });
 
@@ -520,7 +668,7 @@ test("summarizes a new conversation from its first prompt", async ({ page }) => 
   await expect(
     page.getByRole("navigation", { name: "Conversation history" }).getByText(summaryTitle),
   ).toBeVisible();
-  expect(createBody).toEqual({ default_mode: "auto" });
+  expect(createBody).toEqual({ model_id: "auto" });
 });
 
 test("keeps the composer docked and returns to the latest message", async ({ page }) => {
@@ -594,6 +742,10 @@ test("keeps history and an active run alive while switching conversations", asyn
     }
     if (url.pathname === `/api/conversations/${secondConversationId}/messages`) {
       await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
       return;
     }
     await route.abort("failed");
@@ -680,6 +832,10 @@ test("searches, renames, archives, restores, and deletes a conversation", async 
       await route.fulfill({ status: 204, body: "" });
       return;
     }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
+      return;
+    }
     await route.abort("failed");
   });
 
@@ -740,6 +896,10 @@ test("loads older conversation pages without replacing the current page", async 
       await json(route, { items: [], next_cursor: null });
       return;
     }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
+      return;
+    }
     await route.abort("failed");
   });
 
@@ -752,10 +912,10 @@ test("loads older conversation pages without replacing the current page", async 
   await expect(page.getByRole("button", { name: "Load older" })).toHaveCount(0);
 });
 
-test("keeps canonical messages when changing mode", async ({ page }) => {
+test("keeps canonical messages when changing model", async ({ page }) => {
   let completed = false;
   let conversation = browserConversation("Mode persistence");
-  const agentModes: string[] = [];
+  const agentModels: string[] = [];
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -780,22 +940,29 @@ test("keeps canonical messages when changing mode", async ({ page }) => {
       return;
     }
     if (url.pathname === `/api/conversations/${CONVERSATION_ID}` && request.method() === "PATCH") {
-      const patch = request.postDataJSON() as { default_mode?: "fast" | "deep" };
+      const patch = request.postDataJSON() as { model_id?: string };
       conversation = {
         ...conversation,
-        default_mode: patch.default_mode ?? conversation.default_mode,
+        default_mode: patch.model_id
+          ? browserModelMode(patch.model_id)
+          : conversation.default_mode,
+        default_model_id: patch.model_id ?? conversation.default_model_id,
       };
       await json(route, conversation);
       return;
     }
     if (url.pathname === "/api/agent") {
       completed = true;
-      agentModes.push(url.searchParams.get("mode") ?? "");
+      agentModels.push(url.searchParams.get("model") ?? "");
       await route.fulfill({
         status: 200,
         contentType: "text/event-stream",
         body: aguiStream(canonicalBrowserEvents()),
       });
+      return;
+    }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
       return;
     }
     await route.abort("failed");
@@ -814,7 +981,13 @@ test("keeps canonical messages when changing mode", async ({ page }) => {
   await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue("deep");
   await expect(page.getByText("A reasoning panel for complex problems and careful analysis.")).toHaveCount(0);
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
-  expect(agentModes).toEqual(["fast"]);
+  await page.getByRole("combobox", { name: "Audrey model" }).selectOption(
+    "direct/qwen3.8:latest",
+  );
+  await expect(page.getByRole("button", { name: "Attach files" })).toBeDisabled();
+  await page.getByRole("textbox", { name: "Ask Audrey" }).fill("Use direct Qwen");
+  await page.getByRole("textbox", { name: "Ask Audrey" }).press("Enter");
+  await expect.poll(() => agentModels).toEqual(["fast", "direct/qwen3.8:latest"]);
 });
 
 test("sets and retains the current user's profile name", async ({ page }) => {
@@ -845,6 +1018,10 @@ test("sets and retains the current user's profile name", async ({ page }) => {
     }
     if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
       await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
       return;
     }
     await route.abort("failed");
@@ -896,6 +1073,10 @@ test("saves and reloads native Audrey preferences", async ({ page }) => {
     }
     if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
       await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
       return;
     }
     await route.abort("failed");
@@ -1008,6 +1189,10 @@ test("manages personal tokens through the production browser bundle", async ({ p
     }
     if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
       await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
       return;
     }
     await route.abort("failed");
@@ -1129,6 +1314,10 @@ test("exports archived chat and durably deletes Audrey data", async ({ page }) =
       await json(route, purgeReceipt("completed"));
       return;
     }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
+      return;
+    }
     await route.abort("failed");
   });
   await page.route("**/api/**", async (route) => {
@@ -1147,6 +1336,10 @@ test("exports archived chat and durably deletes Audrey data", async ({ page }) =
     }
     if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
       await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
       return;
     }
     await route.abort("failed");
@@ -1285,6 +1478,10 @@ test("attaches an owner file through the minimized AG-UI request", async ({ page
       });
       return;
     }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
+      return;
+    }
     await route.abort("failed");
   });
 
@@ -1353,6 +1550,10 @@ test("manages owner-bound files without a browser bearer token", async ({ page }
       await json(route, { id: "file_uploaded", deleted: true, pending_cleanup: false });
       return;
     }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
+      return;
+    }
     await route.abort("failed");
   });
 
@@ -1416,6 +1617,7 @@ async function mockAudreyApi(
         display_name: "Alice",
         role: "user",
         status: "active",
+        groups: ["users"],
         auth_provider: "cloudflare_access",
       });
       return;
@@ -1432,9 +1634,15 @@ async function mockAudreyApi(
       return;
     }
     if (url.pathname === `/api/conversations/${CONVERSATION_ID}` && request.method() === "PATCH") {
+      const patch = request.postDataJSON() as Record<string, unknown>;
+      const requestedModel = typeof patch.model_id === "string" ? patch.model_id : null;
       conversation = {
         ...conversation,
-        ...(request.postDataJSON() as Record<string, unknown>),
+        ...patch,
+        default_model_id: requestedModel ?? conversation.default_model_id,
+        default_mode: requestedModel
+          ? browserModelMode(requestedModel)
+          : conversation.default_mode,
       };
       await json(route, conversation);
       return;
@@ -1442,6 +1650,10 @@ async function mockAudreyApi(
 
     if (url.pathname === "/api/agent" && agentHandler) {
       await agentHandler(route);
+      return;
+    }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
       return;
     }
     await route.abort("failed");
@@ -1463,8 +1675,81 @@ function browserUser() {
     display_name: "Alice",
     role: "user",
     status: "active",
+    groups: ["users"],
     auth_provider: "cloudflare_access",
   };
+}
+
+function browserModels() {
+  const workflows = [
+    {
+      id: "auto",
+      label: "Auto",
+      description: "Chooses the best Audrey workflow for each request.",
+      presentation: "auto",
+    },
+    {
+      id: "fast",
+      label: "Fast",
+      description: "Quick, direct answers for everyday questions and tasks.",
+      presentation: "fast",
+    },
+    {
+      id: "deep",
+      label: "Deep",
+      description: "A reasoning panel for complex problems and careful analysis.",
+      presentation: "deep",
+    },
+    {
+      id: "research",
+      label: "Research",
+      description: "Grounded web research with verification and cited sources.",
+      presentation: "research",
+    },
+    {
+      id: "local",
+      label: "Local only",
+      description: "Keeps model generation local while using Audrey's tools.",
+      presentation: "local",
+    },
+    {
+      id: "cloud",
+      label: "Cloud",
+      description: "Uses cloud models for stronger general-purpose reasoning.",
+      presentation: "cloud",
+    },
+    {
+      id: "video",
+      label: "Video",
+      description: "Analyzes video content, scenes, transcripts, and questions.",
+      presentation: "video",
+    },
+  ].map((model) => ({
+    ...model,
+    kind: "workflow",
+    mode: model.id,
+    capabilities: ["text", "files", "tools"],
+    enabled: true,
+    audience: "users",
+  }));
+  return [
+    ...workflows,
+    {
+      id: "direct/qwen3.8:latest",
+      label: "Qwen 3.8",
+      description: "Direct local Qwen, without Audrey routing or tools.",
+      kind: "direct",
+      mode: "direct",
+      presentation: "local",
+      capabilities: ["text", "thinking"],
+      enabled: true,
+      audience: "testers",
+    },
+  ];
+}
+
+function browserModelMode(modelId: string): string {
+  return modelId.startsWith("direct/") ? "direct" : modelId;
 }
 
 function browserPreferences(overrides: Record<string, unknown> = {}) {
@@ -1485,6 +1770,7 @@ function browserConversation(title: string) {
     id: CONVERSATION_ID,
     title,
     default_mode: "fast" as const,
+    default_model_id: "fast",
     created_at: "2026-09-04T00:00:00Z",
     updated_at: "2026-09-04T00:00:00Z",
     last_message_at: null,

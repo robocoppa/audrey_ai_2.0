@@ -80,6 +80,7 @@ dev = [
 
 [project.scripts]
 audrey = "audrey.main:run"
+audrey-admin = "audrey.admin_cli:main"
 audrey-ingest = "audrey.kb.cli:main"
 
 [build-system]

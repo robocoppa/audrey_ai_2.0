@@ -1485,6 +1485,26 @@ vision:
   # descriptions get worse.
   temperature: 0.3
 
+# The native app presents Audrey workflows and selected concrete Ollama models
+# through one server-owned catalog. Definitions stay here; the admin panel
+# writes only enabled/audience overrides to the application database.
+native_models:
+  direct_defaults:
+    enabled: true
+    audience: admins
+    num_ctx: 32768
+    max_tokens: 4096
+
+  entries:
+    qwen3.8:latest:
+      label: Qwen 3.8
+      description: Direct local Qwen, without Audrey routing or tools.
+      audience: testers
+      presentation: local
+      capabilities:
+        - text
+        - thinking
+
 # ─── Passthrough virtual model ─────────────────────────────────────────
 # audrey_passthrough/<concrete_model> forwards the request directly to
 # Ollama with no classifier, no complexity gate, no banners. Both fair-
@@ -1537,10 +1557,9 @@ passthrough:
     # reports **context length 262144** natively, so a 64k variant would CAP the
     # model at a quarter of what it already does. The base tag below is the
     # long-context entry now.
-    # ⚠️ Nothing in this repo sets `num_ctx`, so Ollama's per-model default is
-    # what every call gets — which is the whole 262144 here. That is a much
-    # larger default than the 35B-class models this config was tuned around;
-    # if a long conversation starts costing latency, this is why.
+  # ⚠️ The OpenAI-compatible passthrough route does not set `num_ctx`, so
+  # Ollama's per-model default is what those calls get — the whole 262144 here.
+  # Native direct entries have their own bounded `native_models` defaults.
     # Registry text-pool models (code + reasoning + general, deduped), exposed
     # for the per-model eval sweeps (scripts/eval_research.py --models
     # 'audrey_passthrough/<name>,…'): testing panel candidates in isolation is

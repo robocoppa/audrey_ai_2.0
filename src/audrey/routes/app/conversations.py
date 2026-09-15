@@ -19,17 +19,27 @@ from audrey.app_state import (
 )
 from audrey.auth import require_scope
 from audrey.identity import Principal
+from audrey.model_catalog import ServedModel, resolve_model
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 _conversation_access = require_scope("compat:full")
-_Mode = Literal["auto", "fast", "deep", "research", "local", "cloud", "video"]
+_Mode = Literal[
+    "auto", "fast", "deep", "research", "local", "cloud", "video", "direct"
+]
 
 
 class ConversationCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str = Field(default="", max_length=200)
-    default_mode: _Mode = "auto"
+    default_mode: _Mode | None = None
+    model_id: str = Field(default="auto", min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def reject_ambiguous_model(self):
+        if "default_mode" in self.model_fields_set and "model_id" in self.model_fields_set:
+            raise ValueError("use model_id or default_mode, not both")
+        return self
 
 
 class ConversationPatchRequest(BaseModel):
@@ -37,6 +47,7 @@ class ConversationPatchRequest(BaseModel):
 
     title: str | None = Field(default=None, max_length=200)
     default_mode: _Mode | None = None
+    model_id: str | None = Field(default=None, min_length=1, max_length=200)
     archived: bool | None = None
 
     @model_validator(mode="after")
@@ -45,6 +56,8 @@ class ConversationPatchRequest(BaseModel):
             raise ValueError("at least one conversation field is required")
         if any(getattr(self, field) is None for field in self.model_fields_set):
             raise ValueError("conversation fields cannot be null")
+        if "default_mode" in self.model_fields_set and "model_id" in self.model_fields_set:
+            raise ValueError("use model_id or default_mode, not both")
         return self
 
 
@@ -52,6 +65,7 @@ class ConversationResponse(BaseModel):
     id: str
     title: str
     default_mode: _Mode
+    default_model_id: str
     created_at: str
     updated_at: str
     last_message_at: str | None
@@ -98,11 +112,28 @@ def _store(request: Request) -> ApplicationStore:
     return store
 
 
+async def _selected_model(
+    request: Request,
+    principal: Principal,
+    model_id: str,
+) -> ServedModel:
+    model = await resolve_model(
+        request.app.state.cfg,
+        _store(request),
+        principal,
+        model_id,
+    )
+    if model is None:
+        raise HTTPException(status_code=404, detail="Model is not available.")
+    return model
+
+
 def _conversation_response(record: ConversationRecord) -> ConversationResponse:
     return ConversationResponse(
         id=record.conversation_id,
         title=record.title,
         default_mode=record.default_mode,
+        default_model_id=record.default_model_id,
         created_at=record.created_at,
         updated_at=record.updated_at,
         last_message_at=record.last_message_at,
@@ -158,11 +189,18 @@ async def create_conversation(
     request: Request,
     principal: Principal = Depends(_conversation_access),
 ) -> ConversationResponse:
+    requested_model = (
+        payload.default_mode
+        if "default_mode" in payload.model_fields_set
+        else payload.model_id
+    )
+    model = await _selected_model(request, principal, requested_model or "auto")
     try:
         record = await _store(request).conversations.create(
             user_id=principal.user_id,
             title=payload.title,
-            default_mode=payload.default_mode,
+            default_mode=model.mode,
+            default_model_id=model.id,
         )
     except InvalidApplicationStateError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -245,14 +283,21 @@ async def update_conversation(
     request: Request,
     principal: Principal = Depends(_conversation_access),
 ) -> ConversationResponse:
+    selected = None
+    if "model_id" in payload.model_fields_set or "default_mode" in payload.model_fields_set:
+        requested_model = (
+            payload.model_id
+            if "model_id" in payload.model_fields_set
+            else payload.default_mode
+        )
+        selected = await _selected_model(request, principal, requested_model or "auto")
     try:
         record = await _store(request).conversations.update(
             user_id=principal.user_id,
             conversation_id=conversation_id,
             title=payload.title if "title" in payload.model_fields_set else None,
-            default_mode=(
-                payload.default_mode if "default_mode" in payload.model_fields_set else None
-            ),
+            default_mode=selected.mode if selected is not None else None,
+            default_model_id=selected.id if selected is not None else None,
             archived=payload.archived if "archived" in payload.model_fields_set else None,
         )
     except ConversationHasActiveRunError as exc:

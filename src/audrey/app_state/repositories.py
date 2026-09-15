@@ -25,7 +25,7 @@ from audrey.app_state.records import (
 from audrey.app_state.titles import fallback_conversation_title
 
 _ALLOWED_MODES = frozenset(
-    {"auto", "fast", "deep", "research", "local", "cloud", "video"}
+    {"auto", "fast", "deep", "research", "local", "cloud", "video", "direct"}
 )
 _TERMINAL_RUN_STATUSES = frozenset({"succeeded", "cancelled", "failed"})
 
@@ -139,18 +139,23 @@ class ConversationsRepository:
         user_id: str,
         title: str = "",
         default_mode: str = "auto",
+        default_model_id: str | None = None,
     ) -> ConversationRecord:
-        return await asyncio.to_thread(self._create_sync, user_id, title, default_mode)
+        return await asyncio.to_thread(
+            self._create_sync, user_id, title, default_mode, default_model_id
+        )
 
     def _create_sync(
         self,
         user_id: str,
         title: str,
         default_mode: str,
+        default_model_id: str | None,
     ) -> ConversationRecord:
         user_id = _required(user_id, "user id")
         title = _normalize_title(title)
         default_mode = _normalize_mode(default_mode)
+        default_model_id = _normalize_model_id(default_model_id or default_mode)
         conversation_id = _new_id("con")
         now = _utc_now()
 
@@ -165,10 +170,18 @@ class ConversationsRepository:
                     raise InvalidApplicationStateError("conversation owner does not exist")
                 self._conn.execute(
                     "INSERT INTO app_conversations "
-                    "(conversation_id, user_id, title, default_mode, created_at, "
-                    "updated_at, last_message_at, archived_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)",
-                    (conversation_id, user_id, title, default_mode, now, now),
+                    "(conversation_id, user_id, title, default_mode, default_model_id, "
+                    "created_at, updated_at, last_message_at, archived_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
+                    (
+                        conversation_id,
+                        user_id,
+                        title,
+                        default_mode,
+                        default_model_id,
+                        now,
+                        now,
+                    ),
                 )
                 row = self._conversation_row_locked(user_id, conversation_id)
                 assert row is not None
@@ -256,7 +269,8 @@ class ConversationsRepository:
 
         with self._lock:
             rows = self._conn.execute(
-                "SELECT conversation_id, user_id, title, default_mode, created_at, "
+                "SELECT conversation_id, user_id, title, default_mode, "
+                "default_model_id, created_at, "
                 "updated_at, last_message_at, archived_at FROM app_conversations "
                 "WHERE user_id = ? "
                 "AND ((? = 1 AND archived_at IS NOT NULL) "
@@ -289,6 +303,7 @@ class ConversationsRepository:
         conversation_id: str,
         title: str | None = None,
         default_mode: str | None = None,
+        default_model_id: str | None = None,
         archived: bool | None = None,
     ) -> ConversationRecord | None:
         return await asyncio.to_thread(
@@ -297,6 +312,7 @@ class ConversationsRepository:
             conversation_id,
             title,
             default_mode,
+            default_model_id,
             archived,
         )
 
@@ -306,15 +322,26 @@ class ConversationsRepository:
         conversation_id: str,
         title: str | None,
         default_mode: str | None,
+        default_model_id: str | None,
         archived: bool | None,
     ) -> ConversationRecord | None:
         user_id = _required(user_id, "user id")
         conversation_id = _required(conversation_id, "conversation id")
-        if title is None and default_mode is None and archived is None:
+        if (
+            title is None
+            and default_mode is None
+            and default_model_id is None
+            and archived is None
+        ):
             raise InvalidApplicationStateError("conversation update has no fields")
 
         normalized_title = _normalize_title(title) if title is not None else ""
         normalized_mode = _normalize_mode(default_mode) if default_mode is not None else "auto"
+        normalized_model_id = (
+            _normalize_model_id(default_model_id)
+            if default_model_id is not None
+            else "auto"
+        )
         now = _utc_now()
 
         with self._lock:
@@ -328,6 +355,8 @@ class ConversationsRepository:
                     "UPDATE app_conversations SET "
                     "title = CASE WHEN ? = 1 THEN ? ELSE title END, "
                     "default_mode = CASE WHEN ? = 1 THEN ? ELSE default_mode END, "
+                    "default_model_id = CASE WHEN ? = 1 THEN ? "
+                    "ELSE default_model_id END, "
                     "archived_at = CASE WHEN ? = 1 THEN ? ELSE archived_at END, "
                     "updated_at = ? "
                     "WHERE user_id = ? AND conversation_id = ?",
@@ -336,6 +365,8 @@ class ConversationsRepository:
                         normalized_title,
                         int(default_mode is not None),
                         normalized_mode,
+                        int(default_model_id is not None),
+                        normalized_model_id,
                         int(archived is not None),
                         now if archived else None,
                         now,
@@ -403,7 +434,8 @@ class ConversationsRepository:
             raise InvalidApplicationStateError("conversation limit must be between 1 and 200")
         with self._lock:
             rows = self._conn.execute(
-                "SELECT conversation_id, user_id, title, default_mode, created_at, "
+                "SELECT conversation_id, user_id, title, default_mode, "
+                "default_model_id, created_at, "
                 "updated_at, last_message_at, archived_at FROM app_conversations "
                 "WHERE user_id = ? ORDER BY COALESCE(last_message_at, created_at) DESC, "
                 "conversation_id DESC LIMIT ?",
@@ -497,6 +529,7 @@ class ConversationsRepository:
         conversation_id: str,
         user_content: str,
         mode: str | None = None,
+        model_id: str | None = None,
         automatic_title: str | None = None,
         attachments: Sequence[AttachmentSnapshot] = (),
     ) -> StartedRun | None:
@@ -508,6 +541,7 @@ class ConversationsRepository:
             conversation_id,
             user_content,
             mode,
+            model_id,
             automatic_title,
             attachments,
         )
@@ -518,6 +552,7 @@ class ConversationsRepository:
         conversation_id: str,
         user_content: str,
         mode: str | None,
+        model_id: str | None,
         automatic_title: str | None,
         attachments: Sequence[AttachmentSnapshot],
     ) -> StartedRun | None:
@@ -548,6 +583,9 @@ class ConversationsRepository:
                         "conversation already has an active run"
                     )
                 selected_mode = _normalize_mode(mode or str(conversation_row["default_mode"]))
+                selected_model_id = _normalize_model_id(
+                    model_id or str(conversation_row["default_model_id"])
+                )
                 next_row = self._conn.execute(
                     "SELECT COALESCE(MAX(sequence_no), 0) + 1 AS next_sequence "
                     "FROM app_messages WHERE user_id = ? AND conversation_id = ?",
@@ -569,11 +607,12 @@ class ConversationsRepository:
                     )
                 self._conn.execute(
                     "INSERT INTO app_runs "
-                    "(run_id, conversation_id, user_id, mode, status, started_at, "
+                    "(run_id, conversation_id, user_id, mode, requested_model_id, "
+                    "status, started_at, "
                     "completed_at, finish_reason, error_code, virtual_model, "
                     "concrete_model, prompt_tokens, completion_tokens) "
-                    "VALUES (?, ?, ?, ?, 'running', ?, NULL, '', '', '', '', 0, 0)",
-                    (run_id, conversation_id, user_id, selected_mode, now),
+                    "VALUES (?, ?, ?, ?, ?, 'running', ?, NULL, '', '', '', '', 0, 0)",
+                    (run_id, conversation_id, user_id, selected_mode, selected_model_id, now),
                 )
                 self._conn.execute(
                     "INSERT INTO app_messages "
@@ -877,7 +916,8 @@ class ConversationsRepository:
         conversation_id: str,
     ) -> sqlite3.Row | None:
         return self._conn.execute(
-            "SELECT conversation_id, user_id, title, default_mode, created_at, "
+            "SELECT conversation_id, user_id, title, default_mode, "
+            "default_model_id, created_at, "
             "updated_at, last_message_at, archived_at FROM app_conversations "
             "WHERE user_id = ? AND conversation_id = ?",
             (user_id, conversation_id),
@@ -885,7 +925,8 @@ class ConversationsRepository:
 
     def _run_row_locked(self, user_id: str, run_id: str) -> sqlite3.Row | None:
         return self._conn.execute(
-            "SELECT run_id, conversation_id, user_id, mode, status, started_at, "
+            "SELECT run_id, conversation_id, user_id, mode, requested_model_id, "
+            "status, started_at, "
             "completed_at, finish_reason, error_code, virtual_model, concrete_model, "
             "prompt_tokens, completion_tokens FROM app_runs "
             "WHERE user_id = ? AND run_id = ?",
@@ -1250,6 +1291,13 @@ def _normalize_mode(value: str) -> str:
     return mode
 
 
+def _normalize_model_id(value: str) -> str:
+    model_id = _required(value, "model id")
+    if len(model_id) > 200:
+        raise InvalidApplicationStateError("model id must be at most 200 characters")
+    return model_id
+
+
 def _normalize_timezone(value: str) -> str:
     timezone = _required(value, "timezone")
     try:
@@ -1343,6 +1391,7 @@ def _conversation_from_row(row: sqlite3.Row) -> ConversationRecord:
         user_id=str(row["user_id"]),
         title=str(row["title"]),
         default_mode=str(row["default_mode"]),
+        default_model_id=str(row["default_model_id"]),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
         last_message_at=str(row["last_message_at"]) if row["last_message_at"] else None,
@@ -1386,6 +1435,7 @@ def _run_from_row(row: sqlite3.Row) -> RunRecord:
         conversation_id=str(row["conversation_id"]),
         user_id=str(row["user_id"]),
         mode=str(row["mode"]),
+        requested_model_id=str(row["requested_model_id"]),
         status=str(row["status"]),
         started_at=str(row["started_at"]),
         completed_at=str(row["completed_at"]) if row["completed_at"] else None,

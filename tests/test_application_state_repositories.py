@@ -56,6 +56,137 @@ def _create_v4_database(path) -> None:
             )
 
 
+def _create_v6_database(path) -> None:
+    stamp = "2026-09-09T00:00:00+00:00"
+    with sqlite3.connect(path) as connection:
+        connection.execute("PRAGMA foreign_keys = OFF")
+        connection.execute(
+            "CREATE TABLE app_schema_migrations ("
+            "version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+        )
+        for version, sql in MIGRATIONS:
+            if version > 6:
+                break
+            connection.executescript(
+                f"{sql}\n"
+                "INSERT INTO app_schema_migrations(version, applied_at) "
+                f"VALUES ({version}, '{stamp}');"
+            )
+
+
+async def test_v6_upgrade_adds_access_groups_and_model_ids_without_data_loss(tmp_path):
+    path = tmp_path / "app.sqlite"
+    _create_v6_database(path)
+    stamp = "2026-09-09T00:00:00+00:00"
+    with sqlite3.connect(path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute(
+            "INSERT INTO app_users "
+            "(user_id, storage_namespace, current_email, display_name, role, status, "
+            "created_at, updated_at) VALUES "
+            "('usr_existing', 'admin@example.com', 'admin@example.com', 'Admin', "
+            "'admin', 'active', ?, ?)",
+            (stamp, stamp),
+        )
+        connection.execute(
+            "INSERT INTO external_identities "
+            "(provider, subject, user_id, email, created_at, last_seen_at) VALUES "
+            "('owui', 'owui-admin', 'usr_existing', 'admin@example.com', ?, ?)",
+            (stamp, stamp),
+        )
+        connection.execute(
+            "INSERT INTO user_preferences "
+            "(user_id, timezone, persona, response_preferences_json, created_at, "
+            "updated_at) VALUES ('usr_existing', 'UTC', '', '{}', ?, ?)",
+            (stamp, stamp),
+        )
+        connection.execute(
+            "INSERT INTO app_conversations "
+            "(conversation_id, user_id, title, default_mode, created_at, updated_at, "
+            "last_message_at) VALUES "
+            "('con_existing', 'usr_existing', 'Existing video', 'video', ?, ?, ?)",
+            (stamp, stamp, stamp),
+        )
+        connection.execute(
+            "INSERT INTO app_runs "
+            "(run_id, conversation_id, user_id, mode, status, started_at, completed_at, "
+            "finish_reason, virtual_model, concrete_model, prompt_tokens, "
+            "completion_tokens) VALUES "
+            "('run_existing', 'con_existing', 'usr_existing', 'video', 'succeeded', "
+            "?, ?, 'stop', 'audrey_video', 'qwen-test', 5, 3)",
+            (stamp, stamp),
+        )
+        connection.executemany(
+            "INSERT INTO app_messages "
+            "(message_id, conversation_id, user_id, run_id, sequence_no, role, status, "
+            "content, created_at, updated_at) VALUES "
+            "(?, 'con_existing', 'usr_existing', 'run_existing', ?, ?, 'completed', "
+            "?, ?, ?)",
+            [
+                ("msg_user", 1, "user", "Inspect the clip.", stamp, stamp),
+                ("msg_assistant", 2, "assistant", "Clip inspected.", stamp, stamp),
+            ],
+        )
+        connection.execute(
+            "INSERT INTO app_message_attachments "
+            "(message_id, conversation_id, user_id, position, file_id, filename, "
+            "mime, kind, bytes) VALUES "
+            "('msg_user', 'con_existing', 'usr_existing', 0, 'file_clip', "
+            "'clip.mp4', 'video/mp4', 'video', 1234)"
+        )
+        connection.execute(
+            "INSERT INTO app_chat_projections "
+            "(projection_id, user_id, conversation_id, user_message_id, "
+            "assistant_message_id, created_at, next_attempt_at) VALUES "
+            "('prj_existing', 'usr_existing', 'con_existing', 'msg_user', "
+            "'msg_assistant', ?, ?)",
+            (stamp, stamp),
+        )
+        connection.commit()
+
+    store = ApplicationStore(path)
+    try:
+        assert store.schema_version == 8
+        principal = await store.resolve_external_identity(
+            provider="owui",
+            subject="owui-admin",
+            email="admin@example.com",
+            display_name="Admin",
+            role="admin",
+            auth_method="owui_bearer",
+            legacy_storage_namespace="admin@example.com",
+        )
+        assert principal.user_id == "usr_existing"
+        assert principal.groups == frozenset({"users", "admins"})
+
+        conversation = await store.conversations.get(
+            user_id=principal.user_id,
+            conversation_id="con_existing",
+        )
+        assert conversation is not None
+        assert conversation.default_mode == "video"
+        assert conversation.default_model_id == "video"
+
+        run = await store.conversations.get_run(
+            user_id=principal.user_id,
+            run_id="run_existing",
+        )
+        assert run is not None
+        assert run.requested_model_id == "video"
+        messages = await store.conversations.list_messages(
+            user_id=principal.user_id,
+            conversation_id="con_existing",
+        )
+        assert messages is not None
+        assert [item.filename for item in messages[0].attachments] == ["clip.mp4"]
+        assert len(await store.chat_projections.due()) == 1
+    finally:
+        store.close()
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
 async def test_v4_upgrade_adds_video_mode_without_losing_canonical_state(tmp_path):
     path = tmp_path / "app.sqlite"
     _create_v4_database(path)
@@ -104,7 +235,7 @@ async def test_v4_upgrade_adds_video_mode_without_losing_canonical_state(tmp_pat
 
     store = ApplicationStore(path)
     try:
-        assert store.schema_version == 6
+        assert store.schema_version == 8
         existing = await store.conversations.get(
             user_id="usr_existing",
             conversation_id="con_existing",
@@ -172,7 +303,7 @@ async def test_v2_upgrade_backfills_preferences_without_changing_identity_or_tok
     try:
         after = await _resolve(upgraded)
         preferences = await upgraded.preferences.get(user_id=owner.user_id)
-        assert upgraded.schema_version == 6
+        assert upgraded.schema_version == 8
         assert after.user_id == owner.user_id
         assert preferences is not None
         assert preferences.timezone == "UTC"
@@ -579,7 +710,7 @@ async def test_schema_v3_upgrade_does_not_duplicate_legacy_archive_writes(tmp_pa
 
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 6
+        assert upgraded.schema_version == 8
         assert await upgraded.chat_projections.due() == ()
         existing = await upgraded.conversations.get_run(
             user_id=owner.user_id,

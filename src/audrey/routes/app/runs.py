@@ -12,7 +12,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from audrey.app_state import (
     ApplicationStore,
@@ -27,6 +27,7 @@ from audrey.app_state import (
 from audrey.auth import require_scope
 from audrey.conversation_titles import ConversationTitleGenerator
 from audrey.identity import Principal
+from audrey.model_catalog import configured_models, resolve_model
 from audrey.pipeline.agui import (
     AgUiCursor,
     AgUiCursorError,
@@ -36,6 +37,7 @@ from audrey.pipeline.agui import (
     parse_agui_cursor,
 )
 from audrey.pipeline.context import user_preferences_system_message
+from audrey.pipeline.passthrough import passthrough_stream
 from audrey.pipeline.run_events import (
     RunEvent,
     RunEventContext,
@@ -46,16 +48,19 @@ from audrey.pipeline.run_events import (
     dump_run_event,
 )
 from audrey.routes.app.files import resolve_owned_attachments
+from audrey.routes.openai.passthrough import _passthrough_think
 from audrey.routes.openai.pipeline import _stream_via_pipeline
 from audrey.routes.openai.responses import _options_from_request
 from audrey.routes.openai.schemas import ChatCompletionRequest
+from audrey.routes.openai.streaming import OpenAIStreamSession, StreamOutcome
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["runs"])
 _run_access = require_scope("compat:full")
-_Mode = Literal["auto", "fast", "deep", "research", "local", "cloud", "video"]
-_AttachmentId = Annotated[str, Field(min_length=1, max_length=200)]
+_Mode = Literal[
+    "auto", "fast", "deep", "research", "local", "cloud", "video", "direct"
+]
 _MODELS: dict[str, str] = {
     "auto": "audrey_auto",
     "fast": "audrey_fast",
@@ -65,6 +70,7 @@ _MODELS: dict[str, str] = {
     "cloud": "audrey_cloud",
     "video": "audrey_video",
 }
+_AttachmentId = Annotated[str, Field(min_length=1, max_length=200)]
 _StreamFactory = Callable[..., AsyncIterator[str]]
 _ArchiveWake = Callable[[], None]
 
@@ -82,10 +88,17 @@ class RunCreateRequest(BaseModel):
 
     content: str = Field(min_length=1, max_length=1_000_000)
     mode: _Mode | None = None
+    model_id: str | None = Field(default=None, min_length=1, max_length=200)
     temperature: float | None = None
     top_p: float | None = None
     max_tokens: int | None = Field(default=None, ge=1)
     attachment_ids: list[_AttachmentId] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def reject_ambiguous_model(self):
+        if self.mode is not None and self.model_id is not None:
+            raise ValueError("use model_id or mode, not both")
+        return self
 
 
 class AgUiClientMessage(BaseModel):
@@ -130,6 +143,7 @@ class RunResponse(BaseModel):
     id: str
     conversation_id: str
     mode: _Mode
+    requested_model_id: str
     status: Literal["running", "succeeded", "cancelled", "failed"]
     started_at: str
     completed_at: str | None
@@ -183,6 +197,132 @@ class _LiveRun:
         return None
 
 
+async def _stream_via_selected_model(
+    app,
+    payload: ChatCompletionRequest,
+    messages,
+    options,
+    *,
+    user_id: str,
+    conversation_id: str,
+    user_turn_text: str,
+    event_context: RunEventContext | None = None,
+    routing_messages: list[dict[str, Any]] | None = None,
+):
+    """Dispatch native workflows normally and direct entries straight to Ollama."""
+
+    if not payload.model.startswith("audrey_passthrough/"):
+        async for frame in _stream_via_pipeline(
+            app,
+            payload,
+            messages,
+            options,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_turn_text=user_turn_text,
+            event_context=event_context,
+            routing_messages=routing_messages,
+        ):
+            yield frame
+        return
+
+    selected = next(
+        (
+            model
+            for model in configured_models(app.state.cfg)
+            if model.kind == "direct" and model.protocol_model == payload.model
+        ),
+        None,
+    )
+    if selected is None:
+        raise RuntimeError("selected direct model is absent from the deployment catalog")
+
+    session_kwargs: dict[str, Any] = {}
+    if event_context is not None:
+        session_kwargs = {
+            "run_id": event_context.run_id,
+            "conversation_id": event_context.conversation_id,
+            "assistant_message_id": event_context.assistant_message_id,
+            "mode": event_context.mode,
+            "event_sink": event_context.sink,
+            "event_emitter": event_context.emitter,
+        }
+    session = OpenAIStreamSession(
+        virtual_model=payload.model,
+        fingerprint_model=selected.concrete_model,
+        **session_kwargs,
+    )
+    yield session.role_frame()
+    session.stage_started("generating", label=selected.label)
+    direct_options = dict(options)
+    if selected.num_ctx is not None:
+        direct_options.setdefault("num_ctx", selected.num_ctx)
+    if selected.max_tokens is not None:
+        requested_max = direct_options.get("num_predict")
+        direct_options["num_predict"] = (
+            min(int(requested_max), selected.max_tokens)
+            if requested_max is not None
+            else selected.max_tokens
+        )
+
+    try:
+        think = await _passthrough_think(
+            app.state.ollama,
+            app.state.cfg,
+            selected.concrete_model,
+            payload.think,
+        )
+        done = False
+        async with app.state.inflight.slot(user_id):
+            async for chunk in passthrough_stream(
+                app.state.ollama,
+                app.state.gate,
+                concrete=selected.concrete_model,
+                location=app.state.registry.location_of(selected.concrete_model),
+                messages=messages,
+                options=direct_options,
+                user_id=user_id,
+                timeout_s=float(app.state.cfg.timeouts.get("medium", 180)),
+                think=think,
+            ):
+                message = chunk.get("message") or {}
+                content = str(message.get("content") or "")
+                if content:
+                    yield session.content_frame(content)
+                if not chunk.get("done"):
+                    continue
+                done = True
+                finish_reason = str(chunk.get("done_reason") or "stop")
+                session.set_concrete_model(selected.concrete_model)
+                session.usage_reported(
+                    prompt_tokens=int(chunk.get("prompt_eval_count", 0) or 0),
+                    completion_tokens=int(chunk.get("eval_count", 0) or 0),
+                )
+                session.stage_finished("generating")
+                outcome = (
+                    StreamOutcome.TRUNCATED
+                    if finish_reason == "length"
+                    else StreamOutcome.OK
+                )
+                session.terminal.finish(outcome, finish_reason=finish_reason)
+                yield session.terminal_frame()
+                yield session.done_frame()
+                return
+        if not done:
+            session.set_concrete_model(selected.concrete_model)
+            session.terminal.finish(StreamOutcome.TRUNCATED, finish_reason="length")
+            yield session.terminal_frame()
+            yield session.done_frame()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("native direct model failed model=%s", selected.id)
+        session.set_concrete_model(selected.concrete_model)
+        session.terminal.finish(StreamOutcome.ERROR, finish_reason="error")
+        yield session.terminal_frame()
+        yield session.done_frame()
+
+
 class NativeRunManager:
     """Own live tasks and a bounded reconnect window for native run events."""
 
@@ -191,7 +331,7 @@ class NativeRunManager:
         *,
         app: Any,
         store: ApplicationStore,
-        stream_factory: _StreamFactory = _stream_via_pipeline,
+        stream_factory: _StreamFactory = _stream_via_selected_model,
         archive_wake: _ArchiveWake | None = None,
         max_events_per_run: int = 20_000,
         max_completed_runs: int = 128,
@@ -458,6 +598,7 @@ def _run_response(record: RunRecord) -> RunResponse:
         id=record.run_id,
         conversation_id=record.conversation_id,
         mode=record.mode,
+        requested_model_id=record.requested_model_id,
         status=record.status,
         started_at=record.started_at,
         completed_at=record.completed_at,
@@ -548,6 +689,26 @@ async def create_run(
 ) -> RunCreateResponse:
     manager = _manager(request)
     store = _store(request)
+    conversation = await store.conversations.get(
+        user_id=principal.user_id,
+        conversation_id=conversation_id,
+    )
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    requested_model_id = payload.model_id or payload.mode or conversation.default_model_id
+    selected_model = await resolve_model(
+        request.app.state.cfg,
+        store,
+        principal,
+        requested_model_id,
+    )
+    if selected_model is None:
+        raise HTTPException(status_code=404, detail="Model is not available.")
+    if selected_model.kind == "direct" and payload.attachment_ids:
+        raise HTTPException(
+            status_code=422,
+            detail="Direct models currently accept text only; remove attached files.",
+        )
     preferences = await store.preferences.get(user_id=principal.user_id)
     if preferences is None:
         raise HTTPException(
@@ -562,12 +723,6 @@ async def create_run(
     automatic_title: str | None = None
     title_generator = _title_generator(request)
     if title_generator is not None:
-        conversation = await store.conversations.get(
-            user_id=principal.user_id,
-            conversation_id=conversation_id,
-        )
-        if conversation is None:
-            raise HTTPException(status_code=404, detail="Conversation not found.")
         if (
             not conversation.title.strip()
             and conversation.last_message_at is None
@@ -582,7 +737,8 @@ async def create_run(
             user_id=principal.user_id,
             conversation_id=conversation_id,
             user_content=payload.content,
-            mode=payload.mode,
+            mode=selected_model.mode,
+            model_id=selected_model.id,
             automatic_title=automatic_title,
             attachments=attachments,
         )
@@ -603,9 +759,8 @@ async def create_run(
         user_preferences_system_message(preferences),
         *routing_messages,
     ]
-    virtual_model = _MODELS[started.run.mode]
     pipeline_payload = ChatCompletionRequest(
-        model=virtual_model,
+        model=selected_model.protocol_model,
         messages=messages,
         stream=True,
         temperature=payload.temperature,
@@ -636,6 +791,7 @@ async def run_agui_agent(
     payload: AgUiRunRequest,
     request: Request,
     mode: Annotated[_Mode | None, Query()] = None,
+    model: Annotated[str | None, Query(min_length=1, max_length=200)] = None,
     principal: Principal = Depends(_run_access),
 ) -> StreamingResponse:
     """Start and stream one standard AG-UI turn for the native browser.
@@ -645,11 +801,14 @@ async def run_agui_agent(
     history after owner scoping and accepts only the newest user action.
     """
 
+    if mode is not None and model is not None:
+        raise HTTPException(status_code=422, detail="Use model or mode, not both.")
     created = await create_run(
         conversation_id=payload.thread_id,
         payload=RunCreateRequest(
             content=_agui_user_content(payload),
             mode=mode,
+            model_id=model,
             attachment_ids=payload.attachment_ids,
         ),
         request=request,
