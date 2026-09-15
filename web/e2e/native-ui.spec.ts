@@ -435,6 +435,8 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   ).toBeGreaterThanOrEqual(16);
   await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue("fast");
   await expect(page.getByRole("option", { name: "Video" })).toHaveCount(1);
+  await expect(page.getByRole("option", { name: "Other models..." })).toHaveCount(1);
+  await expect(page.getByRole("option", { name: "Qwen 3.8" })).toHaveCount(0);
   await expect(page.getByLabel("Signed in user")).toContainText("Alice");
   await expect(page.getByRole("link", { name: "Log out" })).toHaveAttribute(
     "href",
@@ -443,6 +445,19 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   const portrait = page.locator(".composer-model-picker img");
   await expect(portrait).toBeVisible();
   const modelPicker = page.getByRole("combobox", { name: "Audrey model" });
+  await modelPicker.selectOption({ label: "Other models..." });
+  const directModelMenu = page.getByRole("region", { name: "Other models" });
+  await expect(directModelMenu).toBeVisible();
+  await expect(directModelMenu.getByRole("button", { name: /Qwen 3\.8/u })).toBeVisible();
+  const directModelMenuBox = await directModelMenu.boundingBox();
+  const pickerViewport = page.viewportSize();
+  expect(directModelMenuBox).not.toBeNull();
+  expect(directModelMenuBox?.x ?? -1).toBeGreaterThanOrEqual(0);
+  expect((directModelMenuBox?.x ?? 0) + (directModelMenuBox?.width ?? 0))
+    .toBeLessThanOrEqual(pickerViewport?.width ?? 0);
+  await directModelMenu.getByRole("button", { name: "Close other models" }).click();
+  await expect(directModelMenu).toHaveCount(0);
+  await expect(modelPicker).toHaveValue("fast");
   await modelPicker.selectOption("research");
   await expect(portrait).toHaveAttribute("src", /audrey8/u);
   await modelPicker.selectOption("video");
@@ -981,7 +996,13 @@ test("keeps canonical messages when changing model", async ({ page }) => {
   await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue("deep");
   await expect(page.getByText("A reasoning panel for complex problems and careful analysis.")).toHaveCount(0);
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
-  await page.getByRole("combobox", { name: "Audrey model" }).selectOption(
+  await page.getByRole("combobox", { name: "Audrey model" }).selectOption({
+    label: "Other models...",
+  });
+  const otherModels = page.getByRole("region", { name: "Other models" });
+  await expect(otherModels).toBeVisible();
+  await otherModels.getByRole("button", { name: /Qwen 3\.8/u }).click();
+  await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue(
     "direct/qwen3.8:latest",
   );
   await expect(page.getByRole("button", { name: "Attach files" })).toBeDisabled();

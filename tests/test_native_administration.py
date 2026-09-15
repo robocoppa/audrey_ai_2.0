@@ -284,7 +284,8 @@ async def test_catalog_filters_groups_and_applies_database_policy(tmp_path):
 
 
 def test_admin_routes_mutate_exact_accounts_and_model_policies(tmp_path):
-    store = ApplicationStore(tmp_path / "app.sqlite")
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
     admin = asyncio.run(
         _resolve(
             store,
@@ -328,6 +329,14 @@ def test_admin_routes_mutate_exact_accounts_and_model_policies(tmp_path):
             assert changed.status_code == 200
             assert changed.json()["id"] == model_id
             assert changed.json()["audience"] == "users"
+            assert changed.json()["policy_overridden"] is True
+
+            reset = client.delete(f"/api/admin/model-policies/{model_id}")
+            assert reset.status_code == 200
+            assert reset.json()["id"] == model_id
+            assert reset.json()["audience"] == "testers"
+            assert reset.json()["policy_overridden"] is False
+            assert asyncio.run(store.list_model_access_policies()) == ()
 
             missing = client.patch(
                 "/api/admin/users/usr_missing",
@@ -336,6 +345,16 @@ def test_admin_routes_mutate_exact_accounts_and_model_policies(tmp_path):
             assert missing.status_code == 404
     finally:
         store.close()
+
+    with sqlite3.connect(path) as connection:
+        model_actions = connection.execute(
+            "SELECT action, target_id FROM admin_audit_events "
+            "WHERE target_type = 'model' ORDER BY created_at, event_id"
+        ).fetchall()
+    assert model_actions == [
+        ("set_model_policy", model_id),
+        ("delete_model_policy", model_id),
+    ]
 
 
 def test_native_model_route_exposes_only_the_callers_catalog(tmp_path):

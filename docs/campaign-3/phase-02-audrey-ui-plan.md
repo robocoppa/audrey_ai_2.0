@@ -1051,6 +1051,26 @@ tester-visible direct model through native AG-UI, verify ordinary-user hiding,
 restore the prior policies/groups, and confirm restart persistence. Slice 2D.5
 is laptop-complete, not yet Unraid-verified.
 
+`scripts/smoke_native_access_models.py` packages the repeatable portion of that
+gate through the standalone proxy. It rejects an admin-owned personal token,
+checks self-disable/demotion safeguards, moves the disposable ordinary account
+through users-only and tester visibility, executes one direct Qwen AG-UI turn,
+proves disabled-model denial does not append messages, deletes the disposable
+conversation/projection, drains repair, and restores the original effective
+account/model state without leaving a YAML-masking database override behind.
+The initial signed Access login, exact-id bootstrap,
+selected-model browser fallback, and post-restart confirmation remain explicit
+interactive checks because an OWUI bearer-token script cannot represent them.
+
+Live feedback after the first rebuild exposed a discoverability problem in the
+flat catalog: direct models were not clearly reachable from the portrait model
+control. The corrective keeps Audrey workflows in the primary selector and
+adds `Other models...` as its final choice whenever the server-filtered catalog
+contains permitted direct entries. That opens an on-screen, keyboard-accessible
+disclosure shared by the empty-workspace and compact conversation controls.
+Vitest and all 21 production-preview Chromium workflows cover the interaction;
+deployment and the authorized-user browser check remain open.
+
 Gate: disposable-user upload/search/export/delete evidence covers transactional
 and derived stores, including interrupted cleanup and restart.
 

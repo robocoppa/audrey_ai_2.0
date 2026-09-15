@@ -57,6 +57,57 @@ The result must end with `"status": "passed"`, cross-owner reads must remain
 hashed SPA asset, security headers, identity, a real AG-UI run, canonical
 history, conversation management, and same-origin API forwarding.
 
+## Run the access and direct-model gate
+
+After deploying the schema-v7/v8 build, run the focused 2D.5 smoke through the
+same standalone proxy:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+set -a
+source .env.smoke.local
+set +a
+AUDREY_SMOKE_BASE_URL=http://127.0.0.1:8090 .venv/bin/python scripts/smoke_native_access_models.py
+```
+
+The result must end with `"status": "passed"`. It proves provider-only admin
+access, personal-token rejection at the admin boundary, self-protection,
+ordinary/tester catalog filtering, stable direct-model selection, a real Qwen
+AG-UI turn without tool events, disabled-model denial, canonical persistence,
+and cleanup. The script restores the test user's original status/groups and the
+model's original policy source and values even after a failed assertion.
+Override the target only when the deployment intentionally uses a different
+direct model:
+
+```bash
+AUDREY_DIRECT_SMOKE_MODEL_ID=direct/example-model:latest AUDREY_SMOKE_BASE_URL=http://127.0.0.1:8090 .venv/bin/python scripts/smoke_native_access_models.py
+```
+
+Four checks remain interactive because bearer-token automation cannot reproduce
+Cloudflare's signed browser assertion or the model picker's browser state:
+
+1. Sign in with the first genuinely new allowed Access identity, confirm Audrey
+   shows the pending screen and its exact `usr_...` id, then bootstrap that exact
+   id from inside the Audrey container:
+
+   ```bash
+   docker compose exec audrey audrey-admin grant-admin usr_replace_with_exact_id
+   ```
+
+   Reload and confirm that same account can open the Admin dialog.
+
+2. Sign in with a second new Access identity, confirm it remains pending, then
+   approve it from the first account and assign the intended users/testers
+   groups.
+3. With a conversation currently selecting the direct model, disable that
+   model in Admin and confirm the picker moves to the first available model;
+   restore the original policy before leaving the gate.
+4. Recreate Audrey after restoring groups and policies, then confirm both the
+   restored access state and the selected conversation model survive restart.
+
+The bootstrap command must report `"status": "ok"` with the same user id. The
+browser must never expose a concrete model that the current account cannot use.
+
 ## Switch the public hostname
 
 In the existing Cloudflare Tunnel published-application route for

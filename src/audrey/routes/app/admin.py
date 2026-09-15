@@ -52,6 +52,7 @@ class AdminUserPatchRequest(BaseModel):
 
 class AdminModelResponse(ModelResponse):
     concrete_model: str
+    policy_overridden: bool
 
 
 class AdminModelListResponse(BaseModel):
@@ -80,9 +81,13 @@ def _user_response(record: AdminUserRecord) -> AdminUserResponse:
     )
 
 
-def _admin_model_response(model) -> AdminModelResponse:
+def _admin_model_response(model, *, policy_overridden: bool) -> AdminModelResponse:
     base = model_response(model).model_dump()
-    return AdminModelResponse(**base, concrete_model=model.concrete_model)
+    return AdminModelResponse(
+        **base,
+        concrete_model=model.concrete_model,
+        policy_overridden=policy_overridden,
+    )
 
 
 def _admin_error(exc: AccountAdministrationError) -> HTTPException:
@@ -177,14 +182,24 @@ async def list_models(
     request: Request,
     principal: Principal = Depends(require_admin_principal),
 ) -> AdminModelListResponse:
+    store = application_store(request)
+    overridden = {
+        policy.model_id for policy in await store.list_model_access_policies()
+    }
     models = await catalog_for_principal(
         request.app.state.cfg,
-        application_store(request),
+        store,
         principal,
         include_hidden=True,
     )
     return AdminModelListResponse(
-        items=[_admin_model_response(model) for model in models]
+        items=[
+            _admin_model_response(
+                model,
+                policy_overridden=model.id in overridden,
+            )
+            for model in models
+        ]
     )
 
 
@@ -214,7 +229,37 @@ async def update_model(
         include_hidden=True,
     )
     updated = next(model for model in models if model.id == model_id)
-    return _admin_model_response(updated)
+    return _admin_model_response(updated, policy_overridden=True)
+
+
+@router.delete(
+    "/model-policies/{model_id:path}",
+    response_model=AdminModelResponse,
+)
+async def delete_model_policy(
+    model_id: str,
+    request: Request,
+    principal: Principal = Depends(require_admin_principal),
+) -> AdminModelResponse:
+    known = {model.id for model in configured_models(request.app.state.cfg)}
+    if model_id not in known:
+        raise HTTPException(status_code=404, detail="Model does not exist.")
+    store = application_store(request)
+    try:
+        await store.delete_model_access_policy(
+            actor_user_id=principal.user_id,
+            model_id=model_id,
+        )
+    except AccountAdministrationError as exc:
+        raise _admin_error(exc) from exc
+    models = await catalog_for_principal(
+        request.app.state.cfg,
+        store,
+        principal,
+        include_hidden=True,
+    )
+    updated = next(model for model in models if model.id == model_id)
+    return _admin_model_response(updated, policy_overridden=False)
 
 
 __all__ = ["router"]

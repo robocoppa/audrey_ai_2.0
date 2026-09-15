@@ -1015,6 +1015,63 @@ class ApplicationStore:
                 raise
         return policy
 
+    async def delete_model_access_policy(
+        self,
+        *,
+        actor_user_id: str,
+        model_id: str,
+    ) -> bool:
+        """Remove a database override so deployment configuration applies again."""
+
+        return await asyncio.to_thread(
+            self._delete_model_access_policy_sync,
+            actor_user_id,
+            model_id,
+        )
+
+    def _delete_model_access_policy_sync(
+        self,
+        actor_user_id: str,
+        model_id: str,
+    ) -> bool:
+        actor_user_id = _required(actor_user_id, "actor user id")
+        model_id = _required(model_id, "model id")
+        if len(model_id) > 200:
+            raise AccountAdministrationError("model id is too long")
+
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._assert_admin_locked(actor_user_id)
+                before_row = self._conn.execute(
+                    "SELECT model_id, enabled, audience, updated_at "
+                    "FROM model_access_policies WHERE model_id = ?",
+                    (model_id,),
+                ).fetchone()
+                if before_row is None:
+                    self._conn.commit()
+                    return False
+                now = _utc_now()
+                self._conn.execute(
+                    "DELETE FROM model_access_policies WHERE model_id = ?",
+                    (model_id,),
+                )
+                self._insert_audit_locked(
+                    actor_user_id=actor_user_id,
+                    target_type="model",
+                    target_id=model_id,
+                    action="delete_model_policy",
+                    before=_model_policy_snapshot(_model_policy_from_row(before_row)),
+                    after={},
+                    now=now,
+                )
+                self._conn.commit()
+            except BaseException:
+                if self._conn.in_transaction:
+                    self._conn.rollback()
+                raise
+        return True
+
     def _assert_admin_locked(self, user_id: str) -> None:
         row = self._conn.execute(
             "SELECT 1 FROM app_users AS u "

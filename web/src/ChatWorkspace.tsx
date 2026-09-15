@@ -53,6 +53,8 @@ const MODEL_PORTRAITS: Readonly<Record<string, string>> = {
   local: localPortrait,
 };
 
+const OTHER_MODELS_VALUE = "__audrey_other_models__";
+
 type ThreadState =
   | { status: "idle" }
   | { status: "loading" }
@@ -988,28 +990,131 @@ function ComposerModelPicker({
   onChange: (modelId: string) => Promise<void>;
 }) {
   const selected = modelDetails(models, modelId);
+  const workflowModels = models.filter(({ kind }) => kind === "workflow");
+  const directModels = models.filter(({ kind }) => kind === "direct");
+  const [otherModelsOpen, setOtherModelsOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const directModelsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!otherModelsOpen) return;
+    function closeOnOutsidePress(event: PointerEvent) {
+      if (event.target instanceof Node && !pickerRef.current?.contains(event.target)) {
+        setOtherModelsOpen(false);
+      }
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOtherModelsOpen(false);
+        pickerRef.current?.querySelector("select")?.focus();
+      }
+    }
+    document.addEventListener("pointerdown", closeOnOutsidePress);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePress);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [otherModelsOpen]);
+
+  useEffect(() => {
+    if (!otherModelsOpen) return;
+    const selectedDirect = directModelsRef.current?.querySelector<HTMLButtonElement>(
+      '[aria-pressed="true"]',
+    );
+    (selectedDirect ?? directModelsRef.current?.querySelector<HTMLButtonElement>("button"))
+      ?.focus();
+  }, [otherModelsOpen]);
+
+  function choosePrimaryModel(nextModelId: string) {
+    if (nextModelId === OTHER_MODELS_VALUE) {
+      setOtherModelsOpen(true);
+      return;
+    }
+    setOtherModelsOpen(false);
+    void onChange(nextModelId);
+  }
+
+  function chooseDirectModel(nextModelId: string) {
+    setOtherModelsOpen(false);
+    void onChange(nextModelId);
+  }
+
   const select = (
     <select
       aria-label="Audrey model"
       title={`${selected.label}: ${selected.description}`}
       value={modelId}
       disabled={disabled}
-      onChange={(event) => void onChange(event.target.value)}
+      onChange={(event) => choosePrimaryModel(event.target.value)}
     >
-      {models.map((item) => (
+      {workflowModels.map((item) => (
         <option key={item.id} value={item.id}>{item.label}</option>
       ))}
+      {selected.kind === "direct" ? (
+        <option value={selected.id}>{selected.label}</option>
+      ) : null}
+      {directModels.length > 0 ? (
+        <option value={OTHER_MODELS_VALUE}>Other models...</option>
+      ) : null}
     </select>
   );
-  if (compact) {
-    return <label className="compact-model-picker">{select}</label>;
-  }
-  return (
-    <div className="composer-model-picker">
-      <img src={selected.portrait} alt="" aria-hidden="true" />
-      <label className="model-picker-control">
+
+  const directModelMenu = otherModelsOpen && !disabled ? (
+    <section
+      className="direct-model-menu"
+      aria-label="Other models"
+      ref={directModelsRef}
+    >
+      <header>
+        <div>
+          <strong>Other models</strong>
+          <span>Direct, without Audrey routing or tools</span>
+        </div>
+        <button
+          type="button"
+          className="direct-model-menu-close"
+          aria-label="Close other models"
+          onClick={() => setOtherModelsOpen(false)}
+        >
+          ×
+        </button>
+      </header>
+      <div className="direct-model-options">
+        {directModels.map((item) => (
+          <button
+            type="button"
+            key={item.id}
+            aria-pressed={item.id === modelId}
+            onClick={() => chooseDirectModel(item.id)}
+          >
+            <strong>{item.label}</strong>
+            <span>{item.description}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  ) : null;
+
+  const control = (
+    <div className="model-picker-menu-anchor">
+      <label className={compact ? "compact-model-picker" : "model-picker-control"}>
         {select}
       </label>
+      {directModelMenu}
+    </div>
+  );
+  if (compact) {
+    return (
+      <div className="compact-model-picker-shell" ref={pickerRef}>
+        {control}
+      </div>
+    );
+  }
+  return (
+    <div className="composer-model-picker" ref={pickerRef}>
+      <img src={selected.portrait} alt="" aria-hidden="true" />
+      {control}
       <span className="model-description" aria-live="polite">
         {selected.description}
       </span>

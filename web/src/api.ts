@@ -24,6 +24,7 @@ export interface AudreyModel {
 
 export interface AdminModel extends AudreyModel {
   concrete_model: string;
+  policy_overridden: boolean;
 }
 
 export interface AdminUser {
