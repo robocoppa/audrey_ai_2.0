@@ -27,7 +27,7 @@ from audrey.app_state import (
 from audrey.auth import require_scope
 from audrey.conversation_titles import ConversationTitleGenerator
 from audrey.identity import Principal
-from audrey.model_catalog import configured_models, resolve_model
+from audrey.model_catalog import ServedModel, configured_models, resolve_model
 from audrey.pipeline.agui import (
     AgUiCursor,
     AgUiCursorError,
@@ -208,6 +208,7 @@ async def _stream_via_selected_model(
     user_turn_text: str,
     event_context: RunEventContext | None = None,
     routing_messages: list[dict[str, Any]] | None = None,
+    selected_model: ServedModel | None = None,
 ):
     """Dispatch native workflows normally and direct entries straight to Ollama."""
 
@@ -226,14 +227,18 @@ async def _stream_via_selected_model(
             yield frame
         return
 
-    selected = next(
-        (
-            model
-            for model in configured_models(app.state.cfg)
-            if model.kind == "direct" and model.protocol_model == payload.model
-        ),
-        None,
-    )
+    selected = selected_model
+    if selected is None:
+        selected = next(
+            (
+                model
+                for model in configured_models(app.state.cfg)
+                if model.kind == "direct" and model.protocol_model == payload.model
+            ),
+            None,
+        )
+    elif selected.kind != "direct" or selected.protocol_model != payload.model:
+        selected = None
     if selected is None:
         raise RuntimeError("selected direct model is absent from the deployment catalog")
 
@@ -359,6 +364,7 @@ class NativeRunManager:
         messages: list[dict[str, Any]],
         options: dict[str, Any],
         routing_messages: list[dict[str, Any]] | None = None,
+        selected_model: ServedModel | None = None,
     ) -> None:
         live: _LiveRun
         live = _LiveRun(
@@ -388,6 +394,7 @@ class NativeRunManager:
                     messages,
                     options,
                     messages if routing_messages is None else routing_messages,
+                    selected_model,
                 ),
                 name=f"audrey.native_run.{started.run.run_id}",
             )
@@ -399,6 +406,7 @@ class NativeRunManager:
         messages: list[dict[str, Any]],
         options: dict[str, Any],
         routing_messages: list[dict[str, Any]],
+        selected_model: ServedModel | None,
     ) -> None:
         context = RunEventContext(
             run_id=live.started.run.run_id,
@@ -419,6 +427,7 @@ class NativeRunManager:
                 user_turn_text=live.started.user_message.content,
                 event_context=context,
                 routing_messages=routing_messages,
+                selected_model=selected_model,
             ):
                 pass
         except asyncio.CancelledError:
@@ -701,6 +710,7 @@ async def create_run(
         store,
         principal,
         requested_model_id,
+        ollama=getattr(request.app.state, "ollama", None),
     )
     if selected_model is None:
         raise HTTPException(status_code=404, detail="Model is not available.")
@@ -774,6 +784,7 @@ async def create_run(
         messages=messages,
         options=_options_from_request(pipeline_payload),
         routing_messages=routing_messages,
+        selected_model=selected_model,
     )
     base = _run_response(started.run).model_dump()
     return RunCreateResponse(

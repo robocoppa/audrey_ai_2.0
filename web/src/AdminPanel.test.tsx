@@ -25,8 +25,9 @@ const DIRECT_MODEL = {
   presentation: "local",
   capabilities: ["text"],
   enabled: true,
-  audience: "testers",
+  audience: "admins",
   concrete_model: "qwen3.8:27b",
+  policy_overridden: false,
 } as const;
 
 describe("AdminPanel", () => {
@@ -40,7 +41,9 @@ describe("AdminPanel", () => {
     const fetchMock = vi.fn().mockImplementation(
       async (path: string, request?: RequestInit) => {
         if (path === "/api/admin/users") return jsonResponse({ items: [PENDING_USER] });
-        if (path === "/api/admin/models") return jsonResponse({ items: [DIRECT_MODEL] });
+        if (path === "/api/admin/models") {
+          return jsonResponse({ items: [DIRECT_MODEL], source: "ollama", warning: "" });
+        }
         if (path === "/api/admin/users/usr_pending/approve") {
           return jsonResponse({
             ...PENDING_USER,
@@ -48,12 +51,23 @@ describe("AdminPanel", () => {
             groups: ["users"],
           });
         }
+        if (path === "/api/admin/users/usr_pending") {
+          const patch = JSON.parse(String(request?.body)) as { groups: string[] };
+          return jsonResponse({
+            ...PENDING_USER,
+            status: "active",
+            groups: patch.groups,
+          });
+        }
         if (path === "/api/admin/models/direct%2Fqwen3.8-27b") {
           const patch = JSON.parse(String(request?.body)) as {
             enabled: boolean;
             audience: string;
           };
-          return jsonResponse({ ...DIRECT_MODEL, ...patch });
+          return jsonResponse({ ...DIRECT_MODEL, ...patch, policy_overridden: true });
+        }
+        if (path === "/api/admin/model-policies/direct%2Fqwen3.8-27b") {
+          return jsonResponse(DIRECT_MODEL);
         }
         throw new Error(`Unexpected request: ${path}`);
       },
@@ -68,7 +82,7 @@ describe("AdminPanel", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Approve as user" }));
     await waitFor(() => expect(screen.getByText("active")).toBeVisible());
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/admin/users/usr_pending/approve",
@@ -78,16 +92,34 @@ describe("AdminPanel", () => {
       }),
     );
 
+    fireEvent.change(screen.getByRole("combobox", { name: "Role for Pending Person" }), {
+      target: { value: "tester" },
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/users/usr_pending",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ groups: ["testers", "users"] }),
+      }),
+    ));
+
+    fireEvent.click(screen.getByRole("tab", { name: /Models/u }));
+    expect(screen.getByText("Live Ollama inventory")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Enabled" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Disabled" })).toBeVisible());
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/admin/models/direct%2Fqwen3.8-27b",
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({ enabled: false, audience: "testers" }),
+        body: JSON.stringify({ enabled: false, audience: "admins" }),
       }),
     );
-    expect(changed).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: "Reset default" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/model-policies/direct%2Fqwen3.8-27b",
+      expect.objectContaining({ method: "DELETE" }),
+    ));
+    expect(changed).toHaveBeenCalledTimes(4);
   });
 });
 

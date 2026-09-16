@@ -27,6 +27,12 @@ export interface AdminModel extends AudreyModel {
   policy_overridden: boolean;
 }
 
+export interface AdminModelCatalog {
+  items: AdminModel[];
+  source: "ollama" | "configuration";
+  warning: string;
+}
+
 export interface AdminUser {
   id: string;
   email: string;
@@ -315,8 +321,8 @@ export function updateAdminUser(
   });
 }
 
-export function listAdminModels(): Promise<{ items: AdminModel[] }> {
-  return apiJson<{ items: AdminModel[] }>("/api/admin/models");
+export function listAdminModels(): Promise<AdminModelCatalog> {
+  return apiJson<AdminModelCatalog>("/api/admin/models");
 }
 
 export function updateAdminModel(
@@ -328,6 +334,13 @@ export function updateAdminModel(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
+}
+
+export function resetAdminModelPolicy(modelId: string): Promise<AdminModel> {
+  return apiJson<AdminModel>(
+    `/api/admin/model-policies/${encodeURIComponent(modelId)}`,
+    { method: "DELETE" },
+  );
 }
 
 export function updateCurrentUserDisplayName(

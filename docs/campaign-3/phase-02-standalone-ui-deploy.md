@@ -94,14 +94,18 @@ Cloudflare's signed browser assertion or the model picker's browser state:
    docker compose exec audrey audrey-admin grant-admin usr_replace_with_exact_id
    ```
 
-   Reload and confirm that same account can open the Admin dialog.
+   Reload and confirm that same account can open the Admin dialog. In Accounts,
+   confirm User/Tester/Administrator role controls are present. In Models,
+   confirm the status says `Live Ollama inventory`, every installed Ollama tag
+   is listed, and direct entries default to Enabled + Admins only.
 
 2. Sign in with a second new Access identity, confirm it remains pending, then
    approve it from the first account and assign the intended users/testers
    groups.
 3. With a conversation currently selecting the direct model, disable that
-   model in Admin and confirm the picker moves to the first available model;
-   restore the original policy before leaving the gate.
+   model in Admin and confirm the picker moves to the first available model.
+   Use `Reset default` and confirm the Customized marker clears before leaving
+   the gate.
 4. Recreate Audrey after restoring groups and policies, then confirm both the
    restored access state and the selected conversation model survive restart.
 

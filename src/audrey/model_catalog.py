@@ -8,16 +8,21 @@ registry.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, replace
-from typing import Literal
+from typing import Any, Literal
 
 from audrey.app_state import ApplicationStore, ModelAccessPolicy
 from audrey.config import Config
 from audrey.identity import Principal
+from audrey.models.ollama import OllamaError
 from audrey.models.registry import ModelRegistry
 
 ModelKind = Literal["workflow", "direct"]
 ModelAudience = Literal["users", "testers", "admins"]
+InventorySource = Literal["ollama", "configuration"]
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +42,15 @@ class ServedModel:
     audience: ModelAudience
     num_ctx: int | None = None
     max_tokens: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ModelInventory:
+    """Runtime model definitions plus the source used to build them."""
+
+    models: tuple[ServedModel, ...]
+    source: InventorySource
+    warning: str = ""
 
 
 _WORKFLOWS: tuple[ServedModel, ...] = (
@@ -147,36 +161,60 @@ def configured_models(cfg: Config) -> tuple[ServedModel, ...]:
 
     registry = ModelRegistry(cfg)
     for concrete in passthrough.get("allowed_models") or ():
-        concrete = str(concrete)
-        entry = overrides.get(concrete) or {}
-        location = registry.location_of(concrete)
         models.append(
-            ServedModel(
-                id=f"direct/{concrete}",
-                label=str(entry.get("label") or _model_label(concrete)),
-                description=str(
-                    entry.get("description")
-                    or f"Talk directly to {concrete} without Audrey orchestration."
-                ),
-                kind="direct",
-                mode="direct",
-                protocol_model=f"audrey_passthrough/{concrete}",
-                concrete_model=concrete,
-                presentation=str(entry.get("presentation") or location),
-                capabilities=tuple(entry.get("capabilities") or ("text",)),
-                enabled=bool(entry.get("enabled", direct_defaults.get("enabled", True))),
-                audience=str(
-                    entry.get("audience", direct_defaults.get("audience", "admins"))
-                ),
-                num_ctx=_optional_positive_int(
-                    entry.get("num_ctx", direct_defaults.get("num_ctx"))
-                ),
-                max_tokens=_optional_positive_int(
-                    entry.get("max_tokens", direct_defaults.get("max_tokens"))
-                ),
+            _direct_model(
+                str(concrete),
+                direct_defaults=direct_defaults,
+                overrides=overrides,
+                registry=registry,
             )
         )
     return tuple(models)
+
+
+async def discover_models(cfg: Config, ollama: Any | None) -> ModelInventory:
+    """Prefer Ollama's installed tags over the compatibility allowlist.
+
+    `passthrough.allowed_models` remains the explicit contract for `/v1`
+    compatibility clients. The native application is different: it discovers
+    the models this Ollama instance can actually serve, then applies Audrey's
+    own enabled/audience policies. If discovery is unavailable, the configured
+    catalog is retained so Audrey workflows and known recovery controls remain
+    usable.
+    """
+
+    configured = configured_models(cfg)
+    passthrough = cfg.raw.get("passthrough") or {}
+    tags = getattr(ollama, "tags", None)
+    if not passthrough.get("enabled", False) or not callable(tags):
+        return ModelInventory(configured, "configuration")
+    try:
+        installed = await tags()
+    except OllamaError as exc:
+        log.warning("native model discovery failed; using configured fallback: %s", exc)
+        return ModelInventory(
+            configured,
+            "configuration",
+            "Ollama model discovery is unavailable; showing configured fallback models.",
+        )
+
+    native = cfg.raw.get("native_models") or {}
+    direct_defaults = native.get("direct_defaults") or {}
+    overrides = native.get("entries") or {}
+    registry = ModelRegistry(cfg)
+    names = _installed_model_names(installed)
+    workflows = tuple(model for model in configured if model.kind == "workflow")
+    directs = tuple(
+        _direct_model(
+            concrete,
+            direct_defaults=direct_defaults,
+            overrides=overrides,
+            registry=registry,
+        )
+        for concrete in names
+    )
+    warning = "" if names else "Ollama reported no installed models."
+    return ModelInventory(workflows + directs, "ollama", warning)
 
 
 async def catalog_for_principal(
@@ -185,6 +223,8 @@ async def catalog_for_principal(
     principal: Principal,
     *,
     include_hidden: bool = False,
+    ollama: Any | None = None,
+    inventory: tuple[ServedModel, ...] | None = None,
 ) -> tuple[ServedModel, ...]:
     """Return models this principal may invoke, with database policy overlays."""
 
@@ -193,7 +233,10 @@ async def catalog_for_principal(
         for policy in await store.list_model_access_policies()
     }
     result: list[ServedModel] = []
-    for model in configured_models(cfg):
+    available = inventory
+    if available is None:
+        available = (await discover_models(cfg, ollama)).models
+    for model in available:
         model = _apply_policy(model, policies.get(model.id))
         if include_hidden and principal.is_admin:
             result.append(model)
@@ -207,6 +250,8 @@ async def resolve_model(
     store: ApplicationStore,
     principal: Principal,
     model_id: str,
+    *,
+    ollama: Any | None = None,
 ) -> ServedModel | None:
     """Resolve an invokable model without revealing inaccessible entries."""
 
@@ -214,7 +259,12 @@ async def resolve_model(
     return next(
         (
             model
-            for model in await catalog_for_principal(cfg, store, principal)
+            for model in await catalog_for_principal(
+                cfg,
+                store,
+                principal,
+                ollama=ollama,
+            )
             if model.id == model_id
         ),
         None,
@@ -228,6 +278,53 @@ def _apply_policy(
     if policy is None:
         return model
     return replace(model, enabled=policy.enabled, audience=policy.audience)
+
+
+def _direct_model(
+    concrete: str,
+    *,
+    direct_defaults: dict[str, Any] | Any,
+    overrides: dict[str, Any] | Any,
+    registry: ModelRegistry,
+) -> ServedModel:
+    entry = overrides.get(concrete) or {}
+    location = registry.location_of(concrete)
+    return ServedModel(
+        id=f"direct/{concrete}",
+        label=str(entry.get("label") or _model_label(concrete)),
+        description=str(
+            entry.get("description")
+            or f"Talk directly to {concrete} without Audrey orchestration."
+        ),
+        kind="direct",
+        mode="direct",
+        protocol_model=f"audrey_passthrough/{concrete}",
+        concrete_model=concrete,
+        presentation=str(entry.get("presentation") or location),
+        capabilities=tuple(entry.get("capabilities") or ("text",)),
+        enabled=bool(entry.get("enabled", direct_defaults.get("enabled", True))),
+        audience=str(entry.get("audience", direct_defaults.get("audience", "admins"))),
+        num_ctx=_optional_positive_int(
+            entry.get("num_ctx", direct_defaults.get("num_ctx"))
+        ),
+        max_tokens=_optional_positive_int(
+            entry.get("max_tokens", direct_defaults.get("max_tokens"))
+        ),
+    )
+
+
+def _installed_model_names(items: list[dict[str, Any]]) -> tuple[str, ...]:
+    names: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        raw = item.get("model") or item.get("name")
+        if not isinstance(raw, str):
+            continue
+        name = raw.strip()
+        if name:
+            names.add(name)
+    return tuple(sorted(names, key=str.casefold))
 
 
 def _audience_allows(audience: str, principal: Principal) -> bool:
@@ -255,10 +352,13 @@ def _optional_positive_int(value: object) -> int | None:
 
 
 __all__ = [
+    "InventorySource",
+    "ModelInventory",
     "ModelAudience",
     "ModelKind",
     "ServedModel",
     "catalog_for_principal",
     "configured_models",
+    "discover_models",
     "resolve_model",
 ]

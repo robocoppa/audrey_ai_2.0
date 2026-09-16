@@ -15,10 +15,27 @@ from audrey import admin_cli
 from audrey.app_state import AccountAdministrationError, ApplicationStore
 from audrey.auth import require_admin_principal, require_principal
 from audrey.identity import Principal
-from audrey.model_catalog import catalog_for_principal, configured_models
+from audrey.model_catalog import catalog_for_principal, configured_models, discover_models
+from audrey.models.ollama import OllamaError
 from audrey.routes.app import router
 
 _DIRECT_MODEL = "qwen-test:latest"
+
+
+class _OllamaInventory:
+    def __init__(self, *models: str) -> None:
+        self.models = models
+
+    async def tags(self):
+        return [
+            {"name": model, "model": model}
+            for model in self.models
+        ]
+
+
+class _UnavailableOllama:
+    async def tags(self):
+        raise OllamaError("offline")
 
 
 def _cfg():
@@ -283,6 +300,74 @@ async def test_catalog_filters_groups_and_applies_database_policy(tmp_path):
         store.close()
 
 
+async def test_native_inventory_discovers_every_ollama_tag_as_admin_only():
+    inventory = await discover_models(
+        _cfg(),
+        _OllamaInventory("unlisted:latest", "cloud-model:cloud", "unlisted:latest"),
+    )
+
+    assert inventory.source == "ollama"
+    assert inventory.warning == ""
+    direct = [model for model in inventory.models if model.kind == "direct"]
+    assert [model.concrete_model for model in direct] == [
+        "cloud-model:cloud",
+        "unlisted:latest",
+    ]
+    assert all(model.enabled for model in direct)
+    assert all(model.audience == "admins" for model in direct)
+    assert [model.presentation for model in direct] == ["cloud", "local"]
+
+
+async def test_native_inventory_falls_back_to_configuration_when_ollama_is_down():
+    inventory = await discover_models(_cfg(), _UnavailableOllama())
+
+    assert inventory.source == "configuration"
+    assert "unavailable" in inventory.warning
+    assert f"direct/{_DIRECT_MODEL}" in {model.id for model in inventory.models}
+
+
+def test_admin_can_manage_a_dynamically_discovered_model(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    admin = asyncio.run(
+        _resolve(
+            store,
+            subject="owui-admin",
+            email="admin@example.com",
+            role="admin",
+        )
+    )
+    app = FastAPI()
+    app.state.application_store = store
+    app.state.cfg = _cfg()
+    app.state.ollama = _OllamaInventory("newly-pulled:latest")
+    app.include_router(router)
+    app.dependency_overrides[require_admin_principal] = lambda: admin
+    try:
+        with TestClient(app) as client:
+            listed = client.get("/api/admin/models")
+            assert listed.status_code == 200
+            body = listed.json()
+            assert body["source"] == "ollama"
+            assert body["warning"] == ""
+            dynamic = next(
+                item for item in body["items"]
+                if item["id"] == "direct/newly-pulled:latest"
+            )
+            assert dynamic["enabled"] is True
+            assert dynamic["audience"] == "admins"
+            assert dynamic["policy_overridden"] is False
+
+            changed = client.patch(
+                "/api/admin/models/direct/newly-pulled:latest",
+                json={"enabled": True, "audience": "testers"},
+            )
+            assert changed.status_code == 200
+            assert changed.json()["audience"] == "testers"
+            assert changed.json()["policy_overridden"] is True
+    finally:
+        store.close()
+
+
 def test_admin_routes_mutate_exact_accounts_and_model_policies(tmp_path):
     path = tmp_path / "app.sqlite"
     store = ApplicationStore(path)
@@ -306,6 +391,7 @@ def test_admin_routes_mutate_exact_accounts_and_model_policies(tmp_path):
     app = FastAPI()
     app.state.application_store = store
     app.state.cfg = _cfg()
+    app.state.ollama = _OllamaInventory(_DIRECT_MODEL, "admin-only:latest")
     app.include_router(router)
     app.dependency_overrides[require_admin_principal] = lambda: admin
     try:
@@ -391,6 +477,7 @@ def test_native_model_route_exposes_only_the_callers_catalog(tmp_path):
     app = FastAPI()
     app.state.application_store = store
     app.state.cfg = _cfg()
+    app.state.ollama = _OllamaInventory(_DIRECT_MODEL, "admin-only:latest")
     app.include_router(router)
     try:
         app.dependency_overrides[require_principal] = lambda: ordinary
@@ -416,6 +503,13 @@ def test_native_model_route_exposes_only_the_callers_catalog(tmp_path):
             "audience": "testers",
         }
         assert "concrete_model" not in tester_response.text
+
+        app.dependency_overrides[require_principal] = lambda: admin
+        admin_response = TestClient(app).get("/api/models")
+        assert admin_response.status_code == 200
+        admin_ids = {item["id"] for item in admin_response.json()["items"]}
+        assert f"direct/{_DIRECT_MODEL}" in admin_ids
+        assert "direct/admin-only:latest" in admin_ids
     finally:
         store.close()
 

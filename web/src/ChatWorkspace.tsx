@@ -104,6 +104,10 @@ export function ChatWorkspace({
   const selectedIdRef = useRef<string | null>(null);
   const defaultModelId = models[0]?.id ?? null;
   const catalogUnavailable = defaultModelId === null;
+  const canBrowseDirectModels = models.some(({ kind }) => kind === "direct")
+    || user.role === "admin"
+    || user.groups.includes("admins")
+    || user.groups.includes("testers");
 
   function selectConversation(conversation: Conversation | null) {
     if (conversation) {
@@ -367,6 +371,7 @@ export function ChatWorkspace({
             <ConversationThread
               conversation={opened}
               models={models}
+              canBrowseDirectModels={canBrowseDirectModels}
               showProgress={preferences.show_progress}
               onConversationChange={replaceConversation}
               onRemoveFromView={removeFromCurrentView}
@@ -385,12 +390,14 @@ export function ChatWorkspace({
 function ConversationThread({
   conversation,
   models,
+  canBrowseDirectModels,
   showProgress,
   onConversationChange,
   onRemoveFromView,
 }: {
   conversation: Conversation;
   models: AudreyModel[];
+  canBrowseDirectModels: boolean;
   showProgress: boolean;
   onConversationChange: (conversation: Conversation) => void;
   onRemoveFromView: (conversationId: string, closeThread?: boolean) => void;
@@ -589,6 +596,7 @@ function ConversationThread({
         <AudreyThread
           conversationId={conversation.id}
           models={models}
+          canBrowseDirectModels={canBrowseDirectModels}
           modelId={selectedModelId}
           showProgress={showProgress}
           initialMessages={thread.messages}
@@ -606,6 +614,7 @@ function ConversationThread({
 function AudreyThread({
   conversationId,
   models,
+  canBrowseDirectModels,
   modelId,
   showProgress,
   initialMessages,
@@ -617,6 +626,7 @@ function AudreyThread({
 }: {
   conversationId: string;
   models: AudreyModel[];
+  canBrowseDirectModels: boolean;
   modelId: string;
   showProgress: boolean;
   initialMessages: ConversationMessage[];
@@ -838,6 +848,7 @@ function AudreyThread({
                 <ThreadPrimitive.Empty>
                   <ComposerModelPicker
                     models={models}
+                    canBrowseDirectModels={canBrowseDirectModels}
                     modelId={modelId}
                     disabled={modeDisabled}
                     onChange={changeModel}
@@ -897,6 +908,7 @@ function AudreyThread({
                     <ComposerModelPicker
                       compact
                       models={models}
+                      canBrowseDirectModels={canBrowseDirectModels}
                       modelId={modelId}
                       disabled={modeDisabled}
                       onChange={changeModel}
@@ -979,12 +991,14 @@ function AssistantMessage() {
 function ComposerModelPicker({
   compact = false,
   models,
+  canBrowseDirectModels,
   modelId,
   disabled,
   onChange,
 }: {
   compact?: boolean;
   models: AudreyModel[];
+  canBrowseDirectModels: boolean;
   modelId: string;
   disabled: boolean;
   onChange: (modelId: string) => Promise<void>;
@@ -1054,13 +1068,13 @@ function ComposerModelPicker({
       {selected.kind === "direct" ? (
         <option value={selected.id}>{selected.label}</option>
       ) : null}
-      {directModels.length > 0 ? (
+      {canBrowseDirectModels ? (
         <option value={OTHER_MODELS_VALUE}>Other models...</option>
       ) : null}
     </select>
   );
 
-  const directModelMenu = otherModelsOpen && !disabled ? (
+  const directModelMenu = otherModelsOpen && canBrowseDirectModels && !disabled ? (
     <section
       className="direct-model-menu"
       aria-label="Other models"
@@ -1081,7 +1095,7 @@ function ComposerModelPicker({
         </button>
       </header>
       <div className="direct-model-options">
-        {directModels.map((item) => (
+        {directModels.length > 0 ? directModels.map((item) => (
           <button
             type="button"
             key={item.id}
@@ -1091,7 +1105,12 @@ function ComposerModelPicker({
             <strong>{item.label}</strong>
             <span>{item.description}</span>
           </button>
-        ))}
+        )) : (
+          <p className="direct-model-empty" role="status">
+            No direct models are available for this account. Model access is
+            managed by an Audrey administrator.
+          </p>
+        )}
       </div>
     </section>
   ) : null;

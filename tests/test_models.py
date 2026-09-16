@@ -227,6 +227,21 @@ async def test_ollama_tags_rejects_unexpected_response_shape():
         await client.aclose()
 
 
+async def test_ollama_tags_uses_a_short_metadata_deadline():
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["read_timeout"] = request.extensions["timeout"]["read"]
+        return httpx.Response(200, json={"models": []})
+
+    client = _ollama_client(handler)
+    try:
+        assert await client.tags() == []
+    finally:
+        await client.aclose()
+    assert seen["read_timeout"] == 5.0
+
+
 async def test_ollama_embed_rejects_vector_count_mismatch():
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"embeddings": [[1.0, 2.0]]})

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createConversation,
+  resetAdminModelPolicy,
   updateAdminModel,
   updateConversationModel,
   uploadFile,
@@ -140,13 +141,14 @@ describe("server-owned model selections", () => {
   });
 
   it("encodes direct-model IDs and sends the complete policy mutation", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({}));
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({})));
     vi.stubGlobal("fetch", fetchMock);
 
     await updateAdminModel("direct/qwen3.8-27b", {
       enabled: false,
       audience: "testers",
     });
+    await resetAdminModelPolicy("direct/qwen3.8-27b");
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/admin/models/direct%2Fqwen3.8-27b",
@@ -154,6 +156,10 @@ describe("server-owned model selections", () => {
         method: "PATCH",
         body: JSON.stringify({ enabled: false, audience: "testers" }),
       }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/model-policies/direct%2Fqwen3.8-27b",
+      expect.objectContaining({ method: "DELETE" }),
     );
   });
 });

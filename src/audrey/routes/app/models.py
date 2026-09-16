@@ -64,6 +64,7 @@ async def list_application_models(
         request.app.state.cfg,
         application_store(request),
         principal,
+        ollama=getattr(request.app.state, "ollama", None),
     )
     return ModelListResponse(items=[model_response(model) for model in models])
 

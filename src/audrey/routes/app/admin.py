@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict
 from audrey.app_state import AccountAdministrationError, AdminUserRecord
 from audrey.auth import clear_auth_cache_for_user_id, require_admin_principal
 from audrey.identity import Principal
-from audrey.model_catalog import catalog_for_principal, configured_models
+from audrey.model_catalog import catalog_for_principal, discover_models
 from audrey.routes.app.models import (
     ModelResponse,
     application_store,
@@ -57,6 +57,8 @@ class AdminModelResponse(ModelResponse):
 
 class AdminModelListResponse(BaseModel):
     items: list[AdminModelResponse]
+    source: Literal["ollama", "configuration"]
+    warning: str
 
 
 class AdminModelPatchRequest(BaseModel):
@@ -186,11 +188,16 @@ async def list_models(
     overridden = {
         policy.model_id for policy in await store.list_model_access_policies()
     }
+    inventory = await discover_models(
+        request.app.state.cfg,
+        getattr(request.app.state, "ollama", None),
+    )
     models = await catalog_for_principal(
         request.app.state.cfg,
         store,
         principal,
         include_hidden=True,
+        inventory=inventory.models,
     )
     return AdminModelListResponse(
         items=[
@@ -199,7 +206,9 @@ async def list_models(
                 policy_overridden=model.id in overridden,
             )
             for model in models
-        ]
+        ],
+        source=inventory.source,
+        warning=inventory.warning,
     )
 
 
@@ -210,7 +219,11 @@ async def update_model(
     request: Request,
     principal: Principal = Depends(require_admin_principal),
 ) -> AdminModelResponse:
-    known = {model.id for model in configured_models(request.app.state.cfg)}
+    inventory = await discover_models(
+        request.app.state.cfg,
+        getattr(request.app.state, "ollama", None),
+    )
+    known = {model.id for model in inventory.models}
     if model_id not in known:
         raise HTTPException(status_code=404, detail="Model does not exist.")
     try:
@@ -227,6 +240,7 @@ async def update_model(
         application_store(request),
         principal,
         include_hidden=True,
+        inventory=inventory.models,
     )
     updated = next(model for model in models if model.id == model_id)
     return _admin_model_response(updated, policy_overridden=True)
@@ -241,7 +255,11 @@ async def delete_model_policy(
     request: Request,
     principal: Principal = Depends(require_admin_principal),
 ) -> AdminModelResponse:
-    known = {model.id for model in configured_models(request.app.state.cfg)}
+    inventory = await discover_models(
+        request.app.state.cfg,
+        getattr(request.app.state, "ollama", None),
+    )
+    known = {model.id for model in inventory.models}
     if model_id not in known:
         raise HTTPException(status_code=404, detail="Model does not exist.")
     store = application_store(request)
@@ -257,6 +275,7 @@ async def delete_model_policy(
         store,
         principal,
         include_hidden=True,
+        inventory=inventory.models,
     )
     updated = next(model for model in models if model.id == model_id)
     return _admin_model_response(updated, policy_overridden=False)

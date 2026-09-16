@@ -177,9 +177,11 @@ def _direct_cfg():
 
 def test_native_route_resolves_direct_model_and_persists_stable_selection(tmp_path):
     captured_models: list[str] = []
+    captured_selected_ids: list[str] = []
 
     async def capture_stream(app, payload, messages, options, **kwargs):
         captured_models.append(payload.model)
+        captured_selected_ids.append(kwargs["selected_model"].id)
         async for chunk in _successful_stream(
             app,
             payload,
@@ -245,6 +247,7 @@ def test_native_route_resolves_direct_model_and_persists_stable_selection(tmp_pa
             assert events[-1]["status"] == "succeeded"
 
         assert captured_models == ["audrey_passthrough/qwen-test:latest"]
+        assert captured_selected_ids == [model_id]
     finally:
         store.close()
 

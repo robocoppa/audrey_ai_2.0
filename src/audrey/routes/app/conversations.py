@@ -122,6 +122,7 @@ async def _selected_model(
         _store(request),
         principal,
         model_id,
+        ollama=getattr(request.app.state, "ollama", None),
     )
     if model is None:
         raise HTTPException(status_code=404, detail="Model is not available.")

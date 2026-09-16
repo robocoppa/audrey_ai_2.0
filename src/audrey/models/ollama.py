@@ -29,6 +29,11 @@ log = logging.getLogger(__name__)
 #: short deadline costs nothing and a long one costs everything.
 _SHOW_TIMEOUT_S = 5.0
 
+#: `/api/tags` now feeds the signed-in native catalog, so it is also a metadata
+#: lookup in front of UI and run authorization. It must never inherit the chat
+#: generation timeout and hold the whole application shell for minutes.
+_TAGS_TIMEOUT_S = 5.0
+
 
 class OllamaError(Exception):
     """Raised for Ollama HTTP, transport, or response parsing failures."""
@@ -228,7 +233,7 @@ class OllamaClient:
     async def tags(self) -> list[dict[str, Any]]:
         """Return the list of locally-available models (from /api/tags)."""
         try:
-            r = await self._client.get("/api/tags")
+            r = await self._client.get("/api/tags", timeout=_TAGS_TIMEOUT_S)
         except httpx.HTTPError as e:
             raise OllamaError(f"GET /api/tags transport error: {type(e).__name__}: {e}") from e
         self._raise_for_status(r, "/api/tags")

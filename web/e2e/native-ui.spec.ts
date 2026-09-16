@@ -221,7 +221,7 @@ test("approves an account and changes a model policy in the admin panel", async 
       return;
     }
     if (url.pathname === "/api/admin/models") {
-      await json(route, { items: [directModel] });
+      await json(route, { items: [directModel], source: "ollama", warning: "" });
       return;
     }
     if (url.pathname === "/api/admin/models/direct%2Fqwen3.8%3Alatest") {
@@ -257,14 +257,40 @@ test("approves an account and changes a model policy in the admin panel", async 
   await expect(page.getByRole("dialog", { name: "Access control" })).toBeVisible();
 
   const account = page.locator(".admin-record").filter({ hasText: "Pending Person" });
-  await account.getByRole("button", { name: "Approve" }).click();
+  await account.getByRole("button", { name: "Approve as user" }).click();
   await expect(account.getByText("active")).toBeVisible();
 
+  await page.getByRole("tab", { name: /Models/u }).click();
+  await expect(page.getByText("Live Ollama inventory")).toBeVisible();
   const model = page.locator(".admin-model-record").filter({ hasText: "Qwen 3.8" });
   await model.getByRole("button", { name: "Enabled" }).click();
   await expect(model.getByRole("button", { name: "Disabled" })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue("auto");
   expect(modelPatches).toEqual([{ enabled: false, audience: "testers" }]);
+
+  await page.getByRole("button", { name: "Close administration" }).click();
+  const modelPicker = page.getByRole("combobox", { name: "Audrey model" });
+  await expect(modelPicker.getByRole("option", { name: "Other models..." })).toHaveCount(1);
+  await modelPicker.selectOption({ label: "Other models..." });
+  const directModelMenu = page.getByRole("region", { name: "Other models" });
+  await expect(directModelMenu.getByRole("status")).toContainText(
+    "No direct models are available for this account.",
+  );
+});
+
+test("hides the direct-model disclosure from basic users", async ({ page }) => {
+  await mockAudreyApi(
+    page,
+    undefined,
+    [],
+    browserPreferences(),
+    browserUser(),
+    browserModels().filter(({ kind }) => kind === "workflow"),
+  );
+
+  await page.goto("./");
+
+  await expect(page.getByRole("option", { name: "Other models..." })).toHaveCount(0);
 });
 
 test("restores a saved conversation on hard refresh without showing a landing page", async ({ page }) => {
@@ -940,7 +966,7 @@ test("keeps canonical messages when changing model", async ({ page }) => {
       return;
     }
     if (url.pathname === "/api/me") {
-      await json(route, browserUser());
+      await json(route, browserTester());
       return;
     }
     if (url.pathname === "/api/conversations" && request.method() === "GET") {
@@ -1622,6 +1648,8 @@ async function mockAudreyApi(
   agentHandler?: (route: Route) => Promise<void> | void,
   messages: ReadonlyArray<Record<string, unknown>> = [],
   preferences = browserPreferences(),
+  user = browserTester(),
+  models = browserModels(),
 ) {
   let conversation: Record<string, unknown> = browserConversation("Browser smoke");
   await page.route("**/api/**", async (route) => {
@@ -1632,15 +1660,7 @@ async function mockAudreyApi(
       return;
     }
     if (url.pathname === "/api/me") {
-      await json(route, {
-        id: "usr_browser_test",
-        email: "alice@example.com",
-        display_name: "Alice",
-        role: "user",
-        status: "active",
-        groups: ["users"],
-        auth_provider: "cloudflare_access",
-      });
+      await json(route, user);
       return;
     }
     if (url.pathname === "/api/conversations" && request.method() === "GET") {
@@ -1674,7 +1694,7 @@ async function mockAudreyApi(
       return;
     }
     if (url.pathname === "/api/models") {
-      await json(route, { items: browserModels() });
+      await json(route, { items: models });
       return;
     }
     await route.abort("failed");
@@ -1698,6 +1718,13 @@ function browserUser() {
     status: "active",
     groups: ["users"],
     auth_provider: "cloudflare_access",
+  };
+}
+
+function browserTester() {
+  return {
+    ...browserUser(),
+    groups: ["testers", "users"],
   };
 }
 

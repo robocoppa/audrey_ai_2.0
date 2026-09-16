@@ -1485,9 +1485,11 @@ vision:
   # descriptions get worse.
   temperature: 0.3
 
-# The native app presents Audrey workflows and selected concrete Ollama models
-# through one server-owned catalog. Definitions stay here; the admin panel
-# writes only enabled/audience overrides to the application database.
+# The native app combines Audrey workflows with every tag discovered from
+# Ollama. Defaults and optional per-tag presentation overrides stay here; the
+# admin panel writes only enabled/audience overrides to the application database.
+# `passthrough.allowed_models` below remains the separate /v1 compatibility
+# allowlist and does not limit the native inventory when Ollama is reachable.
 native_models:
   direct_defaults:
     enabled: true
@@ -1499,7 +1501,7 @@ native_models:
     qwen3.8:latest:
       label: Qwen 3.8
       description: Direct local Qwen, without Audrey routing or tools.
-      audience: testers
+      audience: admins
       presentation: local
       capabilities:
         - text

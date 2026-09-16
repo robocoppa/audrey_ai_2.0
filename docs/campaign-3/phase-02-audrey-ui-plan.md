@@ -1021,26 +1021,27 @@ first-admin recovery path; normal admin routes require provider authentication
 and reject personal tokens even when their owner is an administrator.
 
 Schema v8 gives conversations and runs stable server-owned model ids alongside
-their execution modes. `/api/models` combines the fixed Audrey workflows with
-deployment-approved passthrough models, applies SQLite enabled/audience policy,
-and reveals only entries the current groups may invoke. Direct selections use
-the existing Ollama fairness and in-flight gates without Audrey routing or
-tools; their context/output budgets are deployment-defined, and the current
-native contract deliberately accepts text only. Config validation rejects
-duplicate or ambiguous ids, unknown fields, and capability claims the direct
-path cannot honor.
+their execution modes. `/api/models` combines fixed Audrey workflows with every
+tag returned by Ollama, applies SQLite enabled/audience policy, and reveals only
+entries the current groups may invoke. Installed direct models start enabled and
+administrator-only. The live inventory has a five-second deadline and exposes a
+configured-fallback warning instead of holding the application shell when Ollama
+is unavailable. The separate `/v1` passthrough allowlist remains unchanged.
+Direct selections use the existing Ollama fairness and in-flight gates without
+Audrey routing or tools; their context/output budgets are deployment-defined,
+and the current native contract deliberately accepts text only.
 
 The native client now renders that catalog rather than a hard-coded mode list,
 persists exact model ids on conversations, and submits the selected id through
-AG-UI. Administrators can approve or deny accounts, disable/reactivate users,
-manage tester/admin membership, and change model enabled/audience policy from a
-same-origin dialog. Self-demotion, self-disable, and removal of the last active
-administrator are refused transactionally. An empty personal catalog is a
-recoverable workspace state, so an administrator can re-enable a model instead
-of being locked out by the policy they just set.
+AG-UI. Its provider-authenticated admin dialog separates searchable Accounts and
+Models workspaces. Administrators can approve as User or Tester, assign a clear
+User/Tester/Administrator role, disable/reactivate accounts, filter the live
+Ollama inventory, enable models, set the minimum audience role, and reset SQLite
+overrides to deployment defaults. Self-demotion, self-disable, and removal of the
+last active administrator remain refused transactionally.
 
-The laptop gate passes all 2,804 backend tests, 212 focused identity/state/
-route tests, 18 Vitest contracts, and 21 production-preview Chromium workflows.
+The laptop gate passes all 2,809 backend tests, 166 focused backend/config
+contracts, 18 Vitest contracts, and 22 production-preview Chromium workflows.
 Scoped ruff, Python compilation, TypeScript, ESLint, the production build, and
 diff checks are clean. The lesson scan has zero broken links; its deferred 99
 hard and 162 advisory line drifts remain outside this slice. Deployment must
@@ -1064,12 +1065,14 @@ interactive checks because an OWUI bearer-token script cannot represent them.
 
 Live feedback after the first rebuild exposed a discoverability problem in the
 flat catalog: direct models were not clearly reachable from the portrait model
-control. The corrective keeps Audrey workflows in the primary selector and
-adds `Other models...` as its final choice whenever the server-filtered catalog
-contains permitted direct entries. That opens an on-screen, keyboard-accessible
-disclosure shared by the empty-workspace and compact conversation controls.
-Vitest and all 21 production-preview Chromium workflows cover the interaction;
-deployment and the authorized-user browser check remain open.
+control. The first corrective still hid its disclosure whenever policy filtering
+returned no direct entries, leaving an authorized user with no explanation. The
+followup keeps `Other models...` available to elevated roles even when their
+filtered direct catalog is empty, while a basic user with no published direct
+entry sees no disclosure. A deliberate Users-audience policy is honored because
+the server-filtered catalog remains authoritative. The empty state explains when
+no direct model is available, and the compact control shares the same behavior.
+Deployment and the authorized-user browser check remain open.
 
 Gate: disposable-user upload/search/export/delete evidence covers transactional
 and derived stores, including interrupted cleanup and restart.

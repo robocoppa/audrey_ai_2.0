@@ -853,6 +853,17 @@ a:focus-visible {
   color: var(--accent);
 }
 
+.direct-model-empty {
+  margin: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--surface-deep);
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
 .run-activity {
   display: flex;
   align-items: center;
@@ -1629,6 +1640,126 @@ a:focus-visible {
   width: min(64rem, 100%);
 }
 
+.admin-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  padding: 1rem 1.4rem 0;
+}
+
+.admin-tabs button {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.5rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  background: var(--surface-deep);
+  color: var(--text-soft);
+  text-align: left;
+}
+
+.admin-tabs button:hover,
+.admin-tabs button:focus-visible,
+.admin-tabs button[aria-selected="true"] {
+  border-color: var(--border-strong);
+  outline: none;
+  background: var(--surface-active);
+  color: var(--text);
+  box-shadow: var(--focus-glow);
+}
+
+.admin-tabs button > span {
+  justify-self: end;
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.admin-tabs button > em {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-style: normal;
+}
+
+.admin-toolbar {
+  display: grid;
+  grid-template-columns: minmax(14rem, 1fr) repeat(2, minmax(9rem, 0.35fr));
+  gap: 0.7rem;
+}
+
+.admin-account-toolbar {
+  grid-template-columns: minmax(14rem, 1fr) minmax(10rem, 0.4fr);
+}
+
+.admin-toolbar input,
+.admin-toolbar select,
+.admin-role-control select,
+.admin-model-audience select {
+  width: 100%;
+  padding: 0.58rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  outline: none;
+  background: var(--input-surface);
+  color: var(--text);
+}
+
+.admin-toolbar input:focus-visible,
+.admin-toolbar select:focus-visible,
+.admin-role-control select:focus-visible,
+.admin-model-audience select:focus-visible {
+  border-color: var(--border-strong);
+  box-shadow: var(--focus-glow);
+}
+
+.admin-role-guide,
+.admin-inventory-status {
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: rgb(7 16 31 / 46%);
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.admin-role-guide strong {
+  color: var(--text-soft);
+}
+
+.admin-inventory-status {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.admin-inventory-status p {
+  margin: 0;
+}
+
+.admin-source,
+.admin-model-state span,
+.admin-model-state em {
+  width: fit-content;
+  padding: 0.2rem 0.42rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.admin-source.ollama {
+  border-color: rgb(104 211 145 / 35%);
+  color: var(--success);
+}
+
+.admin-inventory-warning {
+  color: var(--warning);
+}
+
 .admin-loading,
 .admin-error {
   margin: 1.25rem 1.4rem;
@@ -1653,7 +1784,8 @@ a:focus-visible {
 .admin-record-heading,
 .admin-record-actions,
 .admin-account-controls,
-.admin-model-audience {
+.admin-model-audience,
+.admin-model-controls {
   display: flex;
   align-items: center;
   gap: 0.55rem;
@@ -1716,7 +1848,8 @@ a:focus-visible {
 
 .admin-record-actions button,
 .admin-account-controls button,
-.admin-record-heading > button {
+.admin-record-heading > button,
+.admin-model-controls > button {
   padding: 0.45rem 0.65rem;
   border: 1px solid var(--border);
   border-radius: 0.65rem;
@@ -1728,7 +1861,8 @@ a:focus-visible {
 
 .admin-record-actions button:hover,
 .admin-account-controls button:hover,
-.admin-record-heading > button:hover {
+.admin-record-heading > button:hover,
+.admin-model-controls > button:hover {
   border-color: var(--border-strong);
   color: var(--text);
 }
@@ -1739,17 +1873,40 @@ a:focus-visible {
   color: var(--danger);
 }
 
-.admin-account-controls .settings-checkbox {
-  flex: 1 1 9rem;
-  padding: 0.5rem 0.6rem;
+.admin-role-control {
+  flex: 1 1 12rem;
 }
 
-.settings-section .admin-model-audience {
-  grid-template-columns: auto minmax(8rem, 1fr);
+.admin-model-state {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
 }
 
-.admin-model-audience select {
-  min-width: 0;
+.admin-model-state em {
+  color: var(--accent);
+}
+
+.admin-model-controls {
+  display: grid;
+  grid-template-columns: auto minmax(10rem, 1fr) auto;
+  align-items: end;
+}
+
+.admin-model-controls > button {
+  min-height: 2.25rem;
+}
+
+.admin-empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 1.5rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.8rem;
+  color: var(--muted);
+  text-align: center;
 }
 
 .catalog-unavailable {
@@ -2624,10 +2781,16 @@ a:focus-visible {
 
   .settings-pair,
   .admin-record-list,
+  .admin-toolbar,
+  .admin-model-controls,
   .token-list dl,
   .purge-progress,
   .timezone-control {
     grid-template-columns: 1fr;
+  }
+
+  .admin-tabs {
+    padding-inline: 1rem;
   }
 
   .timezone-control button {
