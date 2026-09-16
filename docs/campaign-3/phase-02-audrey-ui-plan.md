@@ -1040,14 +1040,15 @@ Ollama inventory, enable models, set the minimum audience role, and reset SQLite
 overrides to deployment defaults. Self-demotion, self-disable, and removal of the
 last active administrator remain refused transactionally.
 
-The laptop gate passes all 2,809 backend tests, 166 focused backend/config
+The laptop gate passes all 2,810 backend tests, 166 focused backend/config
 contracts, 18 Vitest contracts, and 22 production-preview Chromium workflows.
 Scoped ruff, Python compilation, TypeScript, ESLint, the production build, and
 diff checks are clean. The lesson scan has zero broken links; its deferred 99
 hard and 162 advisory line drifts remain outside this slice. Deployment must
 take an online application-SQLite backup before the schema-v7/v8 startup. The
 Unraid gate must prove a new Access identity starts pending, bootstrap one exact
-Audrey user id, exercise provider-only approval and group/policy changes, run a
+Audrey account by unique exact email (with canonical id as the ambiguity-safe
+fallback), exercise provider-only approval and group/policy changes, run a
 tester-visible direct model through native AG-UI, verify ordinary-user hiding,
 restore the prior policies/groups, and confirm restart persistence. Slice 2D.5
 is laptop-complete, not yet Unraid-verified.
@@ -1059,20 +1060,21 @@ through users-only and tester visibility, executes one direct Qwen AG-UI turn,
 proves disabled-model denial does not append messages, deletes the disposable
 conversation/projection, drains repair, and restores the original effective
 account/model state without leaving a YAML-masking database override behind.
-The initial signed Access login, exact-id bootstrap,
+The initial signed Access login, local operator bootstrap,
 selected-model browser fallback, and post-restart confirmation remain explicit
 interactive checks because an OWUI bearer-token script cannot represent them.
 
 Live feedback after the first rebuild exposed a discoverability problem in the
 flat catalog: direct models were not clearly reachable from the portrait model
-control. The first corrective still hid its disclosure whenever policy filtering
-returned no direct entries, leaving an authorized user with no explanation. The
-followup keeps `Other models...` available to elevated roles even when their
-filtered direct catalog is empty, while a basic user with no published direct
-entry sees no disclosure. A deliberate Users-audience policy is honored because
-the server-filtered catalog remains authoritative. The empty state explains when
-no direct model is available, and the compact control shares the same behavior.
-Deployment and the authorized-user browser check remain open.
+control. The custom `Other models...` disclosure proved needlessly fragile in
+live use. The corrective now places authorized direct entries in an
+`Other models — direct` optgroup inside the existing native select, in both its
+portrait and compact forms. The UI independently requires tester/admin status
+before rendering that group, while the server-filtered catalog and run-time
+authorization remain authoritative. Basic users therefore see only Audrey
+workflows. The same corrective adds unique exact-email first-admin bootstrap,
+a visible role in Settings, a `Loading...` portrait label, and a subtle orbit
+glow. Deployment and the authorized-user browser check remain open.
 
 Gate: disposable-user upload/search/export/delete evidence covers transactional
 and derived stores, including interrupted cleanup and restart.

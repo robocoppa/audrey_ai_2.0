@@ -18,20 +18,34 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     grant = commands.add_parser(
         "grant-admin",
-        help="Activate one exact Audrey user id and grant its admins group.",
+        help="Activate one Audrey account and grant its admins group.",
     )
-    grant.add_argument("user_id", help="Canonical usr_... id shown by /api/me")
+    target = grant.add_mutually_exclusive_group(required=True)
+    target.add_argument(
+        "user_id",
+        nargs="?",
+        help="Canonical usr_... id shown by /api/me",
+    )
+    target.add_argument(
+        "--email",
+        help="Exact account email (fails safely when more than one account matches)",
+    )
     return parser
 
 
-async def _grant_admin(user_id: str) -> int:
+async def _grant_admin(user_id: str | None = None, *, email: str | None = None) -> int:
     cfg = get_config()
     application = cfg.raw.get("application", {}) or {}
     store = ApplicationStore(
         application.get("sqlite_path", "/data/audrey_app.sqlite")
     )
     try:
-        record = await store.bootstrap_admin(user_id=user_id)
+        if email is not None:
+            record = await store.bootstrap_admin_by_email(email=email)
+        elif user_id is not None:
+            record = await store.bootstrap_admin(user_id=user_id)
+        else:  # argparse enforces one target; retain a guard for direct callers.
+            raise AccountAdministrationError("an account id or email is required")
     except AccountAdministrationError as exc:
         print(json.dumps({"status": "failed", "detail": str(exc)}))
         return 1
@@ -55,7 +69,7 @@ async def _grant_admin(user_id: str) -> int:
 def main() -> None:
     args = _parser().parse_args()
     if args.command == "grant-admin":
-        raise SystemExit(asyncio.run(_grant_admin(args.user_id)))
+        raise SystemExit(asyncio.run(_grant_admin(args.user_id, email=args.email)))
     raise SystemExit(2)
 
 

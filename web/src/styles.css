@@ -1242,6 +1242,23 @@ a:focus-visible {
   text-align: center;
 }
 
+.audrey-loader-portrait-stack {
+  position: relative;
+}
+
+.audrey-loading-label {
+  position: absolute;
+  top: calc(100% + 0.9rem);
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--text-soft);
+  font-size: 0.9rem;
+  font-weight: 550;
+  letter-spacing: 0.035em;
+  text-shadow: 0 0 1rem rgb(99 181 255 / 28%);
+  white-space: nowrap;
+}
+
 .audrey-loader-copy {
   display: grid;
   max-width: min(30rem, calc(100vw - 3rem));
@@ -1387,7 +1404,9 @@ a:focus-visible {
   position: absolute;
   z-index: 2;
   inset: -0.55rem;
+  border: 1px solid rgb(99 181 255 / 16%);
   border-radius: 50%;
+  filter: drop-shadow(0 0 0.5rem rgb(52 153 250 / 32%));
   animation: audrey-loading-orbit 2.4s linear infinite;
 }
 
@@ -1952,6 +1971,11 @@ a:focus-visible {
   color: var(--muted);
   font-size: 0.78rem;
   line-height: 1.5;
+}
+
+.settings-section-heading .settings-account-access {
+  color: var(--text-soft);
+  font-weight: 600;
 }
 
 .settings-section label {

@@ -885,11 +885,35 @@ class ApplicationStore:
 
         return await asyncio.to_thread(self._bootstrap_admin_sync, user_id)
 
-    def _bootstrap_admin_sync(self, user_id: str) -> AdminUserRecord:
-        user_id = _required(user_id, "user id")
+    async def bootstrap_admin_by_email(self, *, email: str) -> AdminUserRecord:
+        """Grant admin access to the one account with an exact email match."""
+
+        return await asyncio.to_thread(self._bootstrap_admin_sync, None, email=email)
+
+    def _bootstrap_admin_sync(
+        self, user_id: str | None, *, email: str | None = None
+    ) -> AdminUserRecord:
+        if email is None:
+            user_id = _required(user_id, "user id")
+        else:
+            email = _required(email, "email")
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
+                if email is not None:
+                    rows = self._conn.execute(
+                        "SELECT user_id FROM app_users "
+                        "WHERE lower(current_email) = lower(?) ORDER BY user_id",
+                        (email,),
+                    ).fetchall()
+                    if not rows:
+                        raise AccountAdministrationError("account does not exist")
+                    if len(rows) > 1:
+                        raise AccountAdministrationError(
+                            "multiple accounts use that email; grant by exact user id"
+                        )
+                    user_id = str(rows[0]["user_id"])
+                assert user_id is not None
                 before_row = self._admin_user_row_locked(user_id)
                 if before_row is None:
                     raise AccountAdministrationError("account does not exist")

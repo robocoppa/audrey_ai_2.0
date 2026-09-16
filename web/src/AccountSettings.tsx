@@ -328,6 +328,9 @@ export function AccountSettings({
           <div className="settings-section-heading">
             <h3>Profile</h3>
             <p>This is the name Audrey displays in the application.</p>
+            <p className="settings-account-access">
+              {user.email} · {accountRoleLabel(user)}
+            </p>
           </div>
           <label>
             <span>Profile name</span>
@@ -706,6 +709,12 @@ export function AccountSettings({
 }
 
 const ACCOUNT_PURGE_CONFIRMATION = "DELETE ALL MY AUDREY DATA";
+
+function accountRoleLabel(user: CurrentUser): string {
+  if (user.groups.includes("admins")) return "Administrator";
+  if (user.groups.includes("testers")) return "Tester";
+  return "User";
+}
 
 function validTokenExpiry(value: string): boolean {
   const days = Number(value);

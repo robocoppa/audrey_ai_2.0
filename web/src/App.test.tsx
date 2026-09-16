@@ -42,14 +42,14 @@ describe("App", () => {
     window.history.replaceState({}, "", "/");
   });
 
-  it("shows a centered, text-free Audrey Auto loader while the session resolves", () => {
+  it("shows a centered Audrey Auto loader with a loading label", () => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
 
     render(<App />);
 
     const loader = screen.getByRole("status", { name: "Loading Audrey" });
     expect(loader).toHaveClass("audrey-loader-fullscreen");
-    expect(loader).toHaveTextContent("");
+    expect(loader).toHaveTextContent("Loading...");
     expect(loader.querySelector(".audrey-loading-orbit")).toBeInTheDocument();
     expect(loader.querySelector("img")).toHaveAttribute(
       "src",
@@ -364,6 +364,7 @@ describe("App", () => {
     render(<App />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Open account settings" }));
+    expect(screen.getByText("alice@example.com · User")).toBeVisible();
     fireEvent.change(screen.getByRole("textbox", { name: "Profile name" }), {
       target: { value: "Alice Example" },
     });

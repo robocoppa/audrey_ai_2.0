@@ -21,9 +21,14 @@ export function AudreyLoader({
     >
       <div className="audrey-loader-stack">
         {showPortrait ? (
-          <div className="audrey-loading-portrait" aria-hidden="true">
-            <span className="audrey-loading-orbit" />
-            <img src={autoPortrait} alt="" />
+          <div className="audrey-loader-portrait-stack">
+            <div className="audrey-loading-portrait" aria-hidden="true">
+              <span className="audrey-loading-orbit" />
+              <img src={autoPortrait} alt="" />
+            </div>
+            {!message ? (
+              <span className="audrey-loading-label" aria-hidden="true">Loading...</span>
+            ) : null}
           </div>
         ) : null}
         {message ? (

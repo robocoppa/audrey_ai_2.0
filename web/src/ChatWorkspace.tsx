@@ -53,7 +53,6 @@ const MODEL_PORTRAITS: Readonly<Record<string, string>> = {
   local: localPortrait,
 };
 
-const OTHER_MODELS_VALUE = "__audrey_other_models__";
 
 type ThreadState =
   | { status: "idle" }
@@ -104,8 +103,7 @@ export function ChatWorkspace({
   const selectedIdRef = useRef<string | null>(null);
   const defaultModelId = models[0]?.id ?? null;
   const catalogUnavailable = defaultModelId === null;
-  const canBrowseDirectModels = models.some(({ kind }) => kind === "direct")
-    || user.role === "admin"
+  const canBrowseDirectModels = user.role === "admin"
     || user.groups.includes("admins")
     || user.groups.includes("testers");
 
@@ -625,8 +623,8 @@ function AudreyThread({
   onRunStarted,
 }: {
   conversationId: string;
-  models: AudreyModel[];
   canBrowseDirectModels: boolean;
+  models: AudreyModel[];
   modelId: string;
   showProgress: boolean;
   initialMessages: ConversationMessage[];
@@ -1005,54 +1003,9 @@ function ComposerModelPicker({
 }) {
   const selected = modelDetails(models, modelId);
   const workflowModels = models.filter(({ kind }) => kind === "workflow");
-  const directModels = models.filter(({ kind }) => kind === "direct");
-  const [otherModelsOpen, setOtherModelsOpen] = useState(false);
-  const pickerRef = useRef<HTMLDivElement>(null);
-  const directModelsRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!otherModelsOpen) return;
-    function closeOnOutsidePress(event: PointerEvent) {
-      if (event.target instanceof Node && !pickerRef.current?.contains(event.target)) {
-        setOtherModelsOpen(false);
-      }
-    }
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setOtherModelsOpen(false);
-        pickerRef.current?.querySelector("select")?.focus();
-      }
-    }
-    document.addEventListener("pointerdown", closeOnOutsidePress);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutsidePress);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [otherModelsOpen]);
-
-  useEffect(() => {
-    if (!otherModelsOpen) return;
-    const selectedDirect = directModelsRef.current?.querySelector<HTMLButtonElement>(
-      '[aria-pressed="true"]',
-    );
-    (selectedDirect ?? directModelsRef.current?.querySelector<HTMLButtonElement>("button"))
-      ?.focus();
-  }, [otherModelsOpen]);
-
-  function choosePrimaryModel(nextModelId: string) {
-    if (nextModelId === OTHER_MODELS_VALUE) {
-      setOtherModelsOpen(true);
-      return;
-    }
-    setOtherModelsOpen(false);
-    void onChange(nextModelId);
-  }
-
-  function chooseDirectModel(nextModelId: string) {
-    setOtherModelsOpen(false);
-    void onChange(nextModelId);
-  }
+  const directModels = canBrowseDirectModels
+    ? models.filter(({ kind }) => kind === "direct")
+    : [];
 
   const select = (
     <select
@@ -1060,78 +1013,39 @@ function ComposerModelPicker({
       title={`${selected.label}: ${selected.description}`}
       value={modelId}
       disabled={disabled}
-      onChange={(event) => choosePrimaryModel(event.target.value)}
+      onChange={(event) => void onChange(event.target.value)}
     >
-      {workflowModels.map((item) => (
-        <option key={item.id} value={item.id}>{item.label}</option>
-      ))}
-      {selected.kind === "direct" ? (
-        <option value={selected.id}>{selected.label}</option>
-      ) : null}
-      {canBrowseDirectModels ? (
-        <option value={OTHER_MODELS_VALUE}>Other models...</option>
+      <optgroup label="Audrey">
+        {workflowModels.map((item) => (
+          <option key={item.id} value={item.id}>{item.label}</option>
+        ))}
+      </optgroup>
+      {directModels.length > 0 ? (
+        <optgroup label="Other models — direct">
+          {directModels.map((item) => (
+            <option key={item.id} value={item.id}>{item.label}</option>
+          ))}
+        </optgroup>
       ) : null}
     </select>
   );
-
-  const directModelMenu = otherModelsOpen && canBrowseDirectModels && !disabled ? (
-    <section
-      className="direct-model-menu"
-      aria-label="Other models"
-      ref={directModelsRef}
-    >
-      <header>
-        <div>
-          <strong>Other models</strong>
-          <span>Direct, without Audrey routing or tools</span>
-        </div>
-        <button
-          type="button"
-          className="direct-model-menu-close"
-          aria-label="Close other models"
-          onClick={() => setOtherModelsOpen(false)}
-        >
-          ×
-        </button>
-      </header>
-      <div className="direct-model-options">
-        {directModels.length > 0 ? directModels.map((item) => (
-          <button
-            type="button"
-            key={item.id}
-            aria-pressed={item.id === modelId}
-            onClick={() => chooseDirectModel(item.id)}
-          >
-            <strong>{item.label}</strong>
-            <span>{item.description}</span>
-          </button>
-        )) : (
-          <p className="direct-model-empty" role="status">
-            No direct models are available for this account. Model access is
-            managed by an Audrey administrator.
-          </p>
-        )}
-      </div>
-    </section>
-  ) : null;
 
   const control = (
     <div className="model-picker-menu-anchor">
       <label className={compact ? "compact-model-picker" : "model-picker-control"}>
         {select}
       </label>
-      {directModelMenu}
     </div>
   );
   if (compact) {
     return (
-      <div className="compact-model-picker-shell" ref={pickerRef}>
+      <div className="compact-model-picker-shell">
         {control}
       </div>
     );
   }
   return (
-    <div className="composer-model-picker" ref={pickerRef}>
+    <div className="composer-model-picker">
       <img src={selected.portrait} alt="" aria-hidden="true" />
       {control}
       <span className="model-description" aria-live="polite">

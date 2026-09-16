@@ -194,7 +194,7 @@ async def test_bootstrap_admin_activates_exact_account_and_is_audited(tmp_path):
     assert event == (None, "bootstrap_admin")
 
 
-async def test_operator_cli_bootstraps_the_exact_pending_account(
+async def test_operator_cli_bootstraps_the_exact_pending_email(
     monkeypatch,
     tmp_path,
     capsys,
@@ -215,7 +215,13 @@ async def test_operator_cli_bootstraps_the_exact_pending_account(
         lambda: SimpleNamespace(raw={"application": {"sqlite_path": str(path)}}),
     )
 
-    assert await admin_cli._grant_admin(pending.user_id) == 0
+    parsed = admin_cli._parser().parse_args(
+        ["grant-admin", "--email", "cli-admin@example.com"]
+    )
+    assert parsed.user_id is None
+    assert parsed.email == "cli-admin@example.com"
+
+    assert await admin_cli._grant_admin(email="CLI-ADMIN@example.com") == 0
     output = capsys.readouterr()
     assert output.err == ""
     assert f'"user_id": "{pending.user_id}"' in output.out
@@ -228,6 +234,30 @@ async def test_operator_cli_bootstraps_the_exact_pending_account(
         assert record.groups == ("admins", "users")
     finally:
         reopened.close()
+
+
+async def test_operator_email_bootstrap_refuses_ambiguous_accounts(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    try:
+        await _resolve(
+            store,
+            subject="cf-shared-email",
+            email="shared@example.com",
+            provider="cloudflare_access",
+            initial_status="pending",
+        )
+        await _resolve(
+            store,
+            subject="owui-shared-email",
+            email="shared@example.com",
+            provider="owui",
+            initial_status="pending",
+        )
+
+        with pytest.raises(AccountAdministrationError, match="multiple accounts"):
+            await store.bootstrap_admin_by_email(email="shared@example.com")
+    finally:
+        store.close()
 
 
 async def test_catalog_filters_groups_and_applies_database_policy(tmp_path):

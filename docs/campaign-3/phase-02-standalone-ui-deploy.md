@@ -87,8 +87,16 @@ Four checks remain interactive because bearer-token automation cannot reproduce
 Cloudflare's signed browser assertion or the model picker's browser state:
 
 1. Sign in with the first genuinely new allowed Access identity, confirm Audrey
-   shows the pending screen and its exact `usr_...` id, then bootstrap that exact
-   id from inside the Audrey container:
+   shows the account boundary, then bootstrap its exact email from inside the
+   Audrey container:
+
+   ```bash
+   docker compose exec audrey audrey-admin grant-admin --email 'alice@example.com'
+   ```
+
+   Email matching is exact and case-insensitive. If more than one provider-bound
+   account uses that email, the command refuses to choose; use the canonical id
+   shown by `/api/me` instead:
 
    ```bash
    docker compose exec audrey audrey-admin grant-admin usr_replace_with_exact_id
@@ -109,8 +117,9 @@ Cloudflare's signed browser assertion or the model picker's browser state:
 4. Recreate Audrey after restoring groups and policies, then confirm both the
    restored access state and the selected conversation model survive restart.
 
-The bootstrap command must report `"status": "ok"` with the same user id. The
-browser must never expose a concrete model that the current account cannot use.
+The bootstrap command must report `"status": "ok"`, the expected email, and the
+account's canonical user id. The browser must never expose a concrete model that
+the current account cannot use.
 
 ## Switch the public hostname
 
