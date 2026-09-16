@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from audrey.app_state import ApplicationStore
 from audrey.kb.uploads_db import UploadsDB
 from audrey.kb.user_store import sanitize_user
 from audrey.user_data_purge import UserDataPurgeCoordinator
@@ -69,6 +70,7 @@ def _coordinator(
     queue: _ArchiveQueue,
     transport: _Transport,
     files: _FileWorker | None = None,
+    application_store: ApplicationStore | None = None,
 ) -> UserDataPurgeCoordinator:
     return UserDataPurgeCoordinator(
         db=db,
@@ -77,6 +79,7 @@ def _coordinator(
         archive_transport=transport,  # type: ignore[arg-type]
         registry=object(),  # type: ignore[arg-type]
         upload_root=root,
+        application_store=application_store,
         retry_interval_s=60,
     )
 
@@ -93,6 +96,58 @@ async def _record(db: UploadsDB, *, file_id: str, user: str, uploaded_at: str) -
         chunks=1,
         uploaded_at=uploaded_at,
     )
+
+
+async def test_admin_deletion_waits_for_purge_then_removes_identity_after_restart(tmp_path):
+    db_path = tmp_path / "uploads.sqlite"
+    app_path = tmp_path / "app.sqlite"
+    store = ApplicationStore(app_path)
+    admin = await store.resolve_external_identity(
+        provider="cloudflare_access", subject="admin-subject",
+        email="admin@example.com", display_name="Admin", role="admin",
+        auth_method="cloudflare_access", sync_role=False,
+        initial_status="active",
+    )
+    await store.bootstrap_admin(user_id=admin.user_id)
+    target = await store.resolve_external_identity(
+        provider="cloudflare_access", subject="target-subject",
+        email="target@example.com", display_name="Target", role="user",
+        auth_method="cloudflare_access", sync_role=False,
+        initial_status="pending",
+    )
+    purge_id, namespace = await store.begin_admin_account_deletion(
+        actor_user_id=admin.user_id, target_user_id=target.user_id,
+    )
+    assert namespace == target.storage_namespace
+    db = UploadsDB(db_path)
+    coordinator = _coordinator(
+        db, tmp_path / "uploads", queue=_ArchiveQueue(),
+        transport=_Transport([{"status": "pending"}]), application_store=store,
+    )
+    try:
+        assert await coordinator.drain_account_deletions_once() == 1
+        assert (await store.get_admin_user(user_id=target.user_id)).deletion_pending
+        assert (await coordinator.status(user=namespace, purge_id=purge_id))["status"] == "pending"
+    finally:
+        store.close()
+        db.close()
+
+    reopened_store = ApplicationStore(app_path)
+    reopened_db = UploadsDB(db_path)
+    restarted = _coordinator(
+        reopened_db, tmp_path / "uploads", queue=_ArchiveQueue(),
+        transport=_Transport([{"status": "completed"}]),
+        application_store=reopened_store,
+    )
+    try:
+        await restarted.drain_once()
+        assert await restarted.drain_account_deletions_once() == 1
+        assert await reopened_store.get_admin_user(user_id=target.user_id) is None
+        assert await reopened_store.pending_account_deletions() == ()
+        assert (await restarted.status(user=namespace, purge_id=purge_id))["status"] == "completed"
+    finally:
+        reopened_store.close()
+        reopened_db.close()
 
 
 async def test_purge_tombstones_snapshot_cleans_paths_and_preserves_new_activity(

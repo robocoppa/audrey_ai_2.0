@@ -111,7 +111,7 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "No models available" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Admin" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Admin Panel" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "+ New" })).toBeDisabled();
   });
 

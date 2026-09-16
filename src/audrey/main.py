@@ -319,6 +319,7 @@ async def lifespan(app: FastAPI):
         archive_transport=archive_transport,
         registry=tool_registry,
         upload_root=upload_root,
+        application_store=application_store,
         retry_interval_s=float(purge_cfg.get("retry_interval_s", 30.0)),
         batch_size=int(purge_cfg.get("batch_size", 50)),
     )

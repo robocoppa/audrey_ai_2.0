@@ -44,6 +44,7 @@ export interface AdminUser {
   created_at: string;
   updated_at: string;
   last_seen_at: string;
+  deletion_pending?: boolean;
 }
 
 export interface UserPreferences {
@@ -318,6 +319,16 @@ export function updateAdminUser(
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
+  });
+}
+
+export function deleteAdminUser(userId: string): Promise<{
+  id: string;
+  status: "deleting";
+  purge_id: string;
+}> {
+  return apiJson(`/api/admin/users/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
   });
 }
 

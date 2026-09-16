@@ -535,6 +535,18 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         PRAGMA legacy_alter_table = OFF;
         """,
     ),
+    (
+        9,
+        """
+        CREATE TABLE IF NOT EXISTS account_deletion_requests (
+          user_id           TEXT PRIMARY KEY,
+          purge_id          TEXT NOT NULL UNIQUE,
+          storage_namespace TEXT NOT NULL,
+          requested_at      TEXT NOT NULL,
+          FOREIGN KEY (user_id) REFERENCES app_users(user_id) ON DELETE CASCADE
+        );
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS"]

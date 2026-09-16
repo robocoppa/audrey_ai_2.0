@@ -313,7 +313,7 @@ function ReadySessionControls({
           type="button"
           onClick={() => setAdminOpen(true)}
         >
-          Admin
+          Admin Panel
         </button>
       ) : null}
       {user.auth_provider === "cloudflare_access" ? (

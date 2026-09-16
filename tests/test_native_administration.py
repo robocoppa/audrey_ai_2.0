@@ -12,7 +12,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from audrey import admin_cli
-from audrey.app_state import AccountAdministrationError, ApplicationStore
+from audrey.app_state import (
+    AccountAdministrationError,
+    ApplicationStore,
+    InvalidApplicationStateError,
+)
 from audrey.auth import require_admin_principal, require_principal
 from audrey.identity import Principal
 from audrey.model_catalog import catalog_for_principal, configured_models, discover_models
@@ -165,6 +169,76 @@ async def test_account_approval_groups_and_audit_are_atomic(tmp_path):
     assert audits[0][0:3] == ("approve_user", admin.user_id, pending.user_id)
     assert '"status":"pending"' in audits[0][3]
     assert '"groups":["testers","users"]' in audits[0][4]
+
+
+async def test_admin_account_deletion_is_durable_and_refuses_self_or_edits(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    admin = await _resolve(
+        store, subject="delete-admin", email="admin@example.com", role="admin"
+    )
+    target = await _resolve(
+        store, subject="delete-target", email="target@example.com",
+        provider="cloudflare_access", initial_status="active",
+    )
+    try:
+        conversation = await store.conversations.create(user_id=target.user_id)
+        started = await store.conversations.begin_run(
+            user_id=target.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="A running request",
+        )
+        assert started is not None
+        with pytest.raises(AccountAdministrationError, match="active run"):
+            await store.begin_admin_account_deletion(
+                actor_user_id=admin.user_id, target_user_id=target.user_id,
+            )
+        await store.conversations.finish_run(
+            user_id=target.user_id,
+            run_id=started.run.run_id,
+            outcome="cancelled",
+            assistant_content="",
+            finish_reason="cancelled",
+            error_code="cancelled_by_user",
+        )
+        with pytest.raises(AccountAdministrationError, match="own account"):
+            await store.begin_admin_account_deletion(
+                actor_user_id=admin.user_id, target_user_id=admin.user_id,
+            )
+        purge_id, namespace = await store.begin_admin_account_deletion(
+            actor_user_id=admin.user_id, target_user_id=target.user_id,
+        )
+        assert namespace == target.storage_namespace
+        assert await store.begin_admin_account_deletion(
+            actor_user_id=admin.user_id, target_user_id=target.user_id,
+        ) == (purge_id, namespace)
+        deleting = await store.get_admin_user(user_id=target.user_id)
+        assert deleting is not None
+        assert deleting.status == "disabled"
+        assert deleting.deletion_pending is True
+        assert deleting.groups == ()
+        with pytest.raises(InvalidApplicationStateError, match="account is not active"):
+            await store.conversations.begin_run(
+                user_id=target.user_id,
+                conversation_id=conversation.conversation_id,
+                user_content="Too late",
+            )
+        with pytest.raises(AccountAdministrationError, match="deletion is in progress"):
+            await store.admin_update_user(
+                actor_user_id=admin.user_id, target_user_id=target.user_id,
+                status="active", groups=["users"],
+            )
+        assert await store.finalize_account_deletion(
+            user_id=target.user_id, purge_id="wrong",
+        ) is False
+        assert await store.finalize_account_deletion(
+            user_id=target.user_id, purge_id=purge_id,
+        ) is True
+        assert await store.get_admin_user(user_id=target.user_id) is None
+        assert await store.finalize_account_deletion(
+            user_id=target.user_id, purge_id=purge_id,
+        ) is False
+    finally:
+        store.close()
 
 
 async def test_bootstrap_admin_activates_exact_account_and_is_audited(tmp_path):
@@ -471,6 +545,46 @@ def test_admin_routes_mutate_exact_accounts_and_model_policies(tmp_path):
         ("set_model_policy", model_id),
         ("delete_model_policy", model_id),
     ]
+
+
+def test_admin_delete_route_disables_account_and_queues_purge(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    admin = asyncio.run(_resolve(
+        store, subject="route-admin", email="admin@example.com", role="admin",
+    ))
+    target = asyncio.run(_resolve(
+        store, subject="route-target", email="target@example.com",
+        provider="cloudflare_access", initial_status="pending",
+    ))
+    wakes: list[bool] = []
+    app = FastAPI()
+    app.state.application_store = store
+    app.include_router(router)
+    app.dependency_overrides[require_admin_principal] = lambda: admin
+    try:
+        with TestClient(app) as client:
+            unavailable = client.delete(f"/api/admin/users/{target.user_id}")
+            assert unavailable.status_code == 503
+            assert asyncio.run(store.get_admin_user(user_id=target.user_id)).status == "pending"
+
+            app.state.user_data_purges = SimpleNamespace(wake=lambda: wakes.append(True))
+            deleted = client.delete(f"/api/admin/users/{target.user_id}")
+            assert deleted.status_code == 202
+            assert deleted.json()["status"] == "deleting"
+            assert wakes == [True]
+            listed = client.get("/api/admin/users")
+            target_row = next(
+                row for row in listed.json()["items"] if row["id"] == target.user_id
+            )
+            assert target_row["status"] == "disabled"
+            assert target_row["deletion_pending"] is True
+            assert client.patch(
+                f"/api/admin/users/{target.user_id}",
+                json={"status": "active", "groups": ["users"]},
+            ).status_code == 409
+            assert client.delete(f"/api/admin/users/{admin.user_id}").status_code == 409
+    finally:
+        store.close()
 
 
 def test_native_model_route_exposes_only_the_callers_catalog(tmp_path):

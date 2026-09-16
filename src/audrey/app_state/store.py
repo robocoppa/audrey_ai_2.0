@@ -709,6 +709,8 @@ class ApplicationStore:
                 "COALESCE((SELECT i.provider FROM external_identities AS i "
                 "WHERE i.user_id = u.user_id ORDER BY i.last_seen_at DESC LIMIT 1), '') "
                 "AS auth_provider, "
+                "EXISTS (SELECT 1 FROM account_deletion_requests AS d "
+                "WHERE d.user_id = u.user_id) AS deletion_pending, "
                 "COALESCE((SELECT max(i.last_seen_at) FROM external_identities AS i "
                 "WHERE i.user_id = u.user_id), '') AS last_seen_at "
                 "FROM app_users AS u "
@@ -751,6 +753,8 @@ class ApplicationStore:
             "COALESCE((SELECT i.provider FROM external_identities AS i "
             "WHERE i.user_id = u.user_id ORDER BY i.last_seen_at DESC LIMIT 1), '') "
             "AS auth_provider, "
+            "EXISTS (SELECT 1 FROM account_deletion_requests AS d "
+            "WHERE d.user_id = u.user_id) AS deletion_pending, "
             "COALESCE((SELECT max(i.last_seen_at) FROM external_identities AS i "
             "WHERE i.user_id = u.user_id), '') AS last_seen_at "
             "FROM app_users AS u WHERE u.user_id = ?",
@@ -801,6 +805,8 @@ class ApplicationStore:
                 if before_row is None:
                     raise AccountAdministrationError("account does not exist")
                 before = _admin_user_from_row(before_row)
+                if before.deletion_pending:
+                    raise AccountAdministrationError("account deletion is in progress")
                 next_status = requested_status or before.status
                 next_groups = (
                     set(requested_groups)
@@ -879,6 +885,152 @@ class ApplicationStore:
                     self._conn.rollback()
                 raise
         return after
+
+    async def begin_admin_account_deletion(
+        self, *, actor_user_id: str, target_user_id: str
+    ) -> tuple[str, str]:
+        """Disable a target and durably queue its cross-store data erasure."""
+
+        return await asyncio.to_thread(
+            self._begin_admin_account_deletion_sync, actor_user_id, target_user_id
+        )
+
+    def _begin_admin_account_deletion_sync(
+        self, actor_user_id: str, target_user_id: str
+    ) -> tuple[str, str]:
+        actor_user_id = _required(actor_user_id, "actor user id")
+        target_user_id = _required(target_user_id, "target user id")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._assert_admin_locked(actor_user_id)
+                if actor_user_id == target_user_id:
+                    raise AccountAdministrationError(
+                        "an administrator cannot delete their own account"
+                    )
+                row = self._admin_user_row_locked(target_user_id)
+                if row is None:
+                    raise AccountAdministrationError("account does not exist")
+                existing = self._conn.execute(
+                    "SELECT purge_id, storage_namespace FROM account_deletion_requests "
+                    "WHERE user_id = ?", (target_user_id,),
+                ).fetchone()
+                if existing is not None:
+                    self._conn.commit()
+                    return str(existing["purge_id"]), str(existing["storage_namespace"])
+                running = self._conn.execute(
+                    "SELECT 1 FROM app_runs WHERE user_id = ? AND status = 'running' LIMIT 1",
+                    (target_user_id,),
+                ).fetchone()
+                if running is not None:
+                    raise AccountAdministrationError(
+                        "account has an active run; wait for it to finish"
+                    )
+                before = _admin_user_from_row(row)
+                if before.status == "active" and "admins" in before.groups:
+                    remaining = self._conn.execute(
+                        "SELECT COUNT(*) AS total FROM user_group_memberships AS m "
+                        "JOIN app_users AS u ON u.user_id = m.user_id "
+                        "WHERE m.group_id = 'admins' AND u.status = 'active' "
+                        "AND m.user_id != ?", (target_user_id,),
+                    ).fetchone()
+                    if int(remaining["total"]) < 1:
+                        raise AccountAdministrationError(
+                            "the last active administrator cannot be removed"
+                        )
+                namespace_row = self._conn.execute(
+                    "SELECT storage_namespace FROM app_users WHERE user_id = ?",
+                    (target_user_id,),
+                ).fetchone()
+                assert namespace_row is not None
+                namespace = str(namespace_row["storage_namespace"])
+                purge_id = str(uuid.uuid4())
+                now = _utc_now()
+                self._conn.execute(
+                    "UPDATE app_users SET status = 'disabled', role = 'user', "
+                    "updated_at = ? WHERE user_id = ?", (now, target_user_id),
+                )
+                self._conn.execute(
+                    "DELETE FROM user_group_memberships WHERE user_id = ?",
+                    (target_user_id,),
+                )
+                self._conn.execute(
+                    "INSERT INTO account_deletion_requests "
+                    "(user_id, purge_id, storage_namespace, requested_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (target_user_id, purge_id, namespace, now),
+                )
+                self._insert_audit_locked(
+                    actor_user_id=actor_user_id,
+                    target_type="user",
+                    target_id=target_user_id,
+                    action="begin_account_deletion",
+                    before=_admin_user_snapshot(before),
+                    after={"status": "deleting"},
+                    now=now,
+                )
+                self._conn.commit()
+            except BaseException:
+                if self._conn.in_transaction:
+                    self._conn.rollback()
+                raise
+        return purge_id, namespace
+
+    async def pending_account_deletions(
+        self, *, limit: int = 50
+    ) -> tuple[tuple[str, str, str], ...]:
+        return await asyncio.to_thread(self._pending_account_deletions_sync, limit)
+
+    def _pending_account_deletions_sync(
+        self, limit: int
+    ) -> tuple[tuple[str, str, str], ...]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT user_id, purge_id, storage_namespace "
+                "FROM account_deletion_requests ORDER BY requested_at LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return tuple(
+            (str(row["user_id"]), str(row["purge_id"]), str(row["storage_namespace"]))
+            for row in rows
+        )
+
+    async def finalize_account_deletion(
+        self, *, user_id: str, purge_id: str
+    ) -> bool:
+        return await asyncio.to_thread(
+            self._finalize_account_deletion_sync, user_id, purge_id
+        )
+
+    def _finalize_account_deletion_sync(self, user_id: str, purge_id: str) -> bool:
+        user_id = _required(user_id, "user id")
+        purge_id = _required(purge_id, "purge id")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._conn.execute(
+                    "SELECT 1 FROM account_deletion_requests "
+                    "WHERE user_id = ? AND purge_id = ?", (user_id, purge_id),
+                ).fetchone()
+                if row is None:
+                    self._conn.commit()
+                    return False
+                self._conn.execute("DELETE FROM app_users WHERE user_id = ?", (user_id,))
+                self._insert_audit_locked(
+                    actor_user_id=None,
+                    target_type="user",
+                    target_id=user_id,
+                    action="complete_account_deletion",
+                    before={"status": "deleting"},
+                    after={"deleted": True},
+                    now=_utc_now(),
+                )
+                self._conn.commit()
+            except BaseException:
+                if self._conn.in_transaction:
+                    self._conn.rollback()
+                raise
+        return True
 
     async def bootstrap_admin(self, *, user_id: str) -> AdminUserRecord:
         """One-time operator path for granting a native identity admin access."""
@@ -1194,6 +1346,7 @@ def _admin_user_from_row(row: sqlite3.Row) -> AdminUserRecord:
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
         last_seen_at=str(row["last_seen_at"]),
+        deletion_pending=bool(row["deletion_pending"]),
     )
 
 

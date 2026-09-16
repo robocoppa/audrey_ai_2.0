@@ -121,6 +121,34 @@ describe("AdminPanel", () => {
     ));
     expect(changed).toHaveBeenCalledTimes(4);
   });
+
+  it("confirms permanent account deletion and shows durable progress", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (path: string, request?: RequestInit) => {
+      if (path === "/api/admin/users" && !request?.method) {
+        return jsonResponse({ items: [PENDING_USER] });
+      }
+      if (path === "/api/admin/models") {
+        return jsonResponse({ items: [], source: "ollama", warning: "" });
+      }
+      if (path === "/api/admin/users/usr_pending" && request?.method === "DELETE") {
+        return jsonResponse({ id: "usr_pending", status: "deleting", purge_id: "purge_test" });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AdminPanel currentUserId="usr_admin" onChanged={vi.fn()} onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete account…" }));
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/admin/users/usr_pending", expect.objectContaining({ method: "DELETE" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Yes, delete account" }));
+    await waitFor(() => expect(screen.getByText("deleting")).toBeVisible());
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/users/usr_pending", expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(screen.getByText(/Data purge in progress/u)).toBeVisible();
+  });
 });
 
 function jsonResponse(payload: unknown): Response {

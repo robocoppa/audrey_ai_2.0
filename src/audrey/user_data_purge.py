@@ -18,6 +18,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from audrey.app_state import ApplicationStore
 from audrey.kb.file_deletion import FileDeletionWorker, delete_disk_files
 from audrey.kb.uploads_db import UploadsDB
 from audrey.kb.user_store import sanitize_user
@@ -54,6 +55,7 @@ class UserDataPurgeCoordinator:
         archive_transport: ChatArchiveClient,
         registry: ToolRegistry,
         upload_root: Path,
+        application_store: ApplicationStore | None = None,
         retry_interval_s: float = 30.0,
         batch_size: int = 50,
     ) -> None:
@@ -67,6 +69,7 @@ class UserDataPurgeCoordinator:
         self._archive_transport = archive_transport
         self._registry = registry
         self._upload_root = upload_root
+        self._application_store = application_store
         self._retry_interval_s = retry_interval_s
         self._batch_size = batch_size
         self._wake = asyncio.Event()
@@ -296,11 +299,37 @@ class UserDataPurgeCoordinator:
             return delete_disk_files(self._upload_root, token, user)
         raise ValueError("unknown purge cleanup kind")
 
+    async def drain_account_deletions_once(self) -> int:
+        """Finish admin account deletion only after all purge components complete."""
+        store = self._application_store
+        if store is None:
+            return 0
+        pending = await store.pending_account_deletions(limit=self._batch_size)
+        for user_id, purge_id, namespace in pending:
+            try:
+                await store.purge_local_user_data(user_id=user_id)
+                receipt = await self._db.get_user_data_purge(purge_id)
+                if receipt is None:
+                    status = await self.request(user=namespace, purge_id=purge_id)
+                else:
+                    status = await self.status(user=namespace, purge_id=purge_id)
+                if status is not None and status.get("status") == "completed":
+                    await store.finalize_account_deletion(
+                        user_id=user_id, purge_id=purge_id
+                    )
+            except Exception as exc:
+                log.exception(
+                    "user_data_purge: account deletion retry user=%s: %s",
+                    user_id, exc,
+                )
+        return len(pending)
+
     async def _run(self) -> None:
         while True:
             try:
                 self._wake.clear()
                 attempted = await self.drain_once()
+                await self.drain_account_deletions_once()
                 if attempted >= self._batch_size:
                     continue
                 try:

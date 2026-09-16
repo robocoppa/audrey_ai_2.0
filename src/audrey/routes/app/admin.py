@@ -31,6 +31,7 @@ class AdminUserResponse(BaseModel):
     created_at: str
     updated_at: str
     last_seen_at: str
+    deletion_pending: bool = False
 
 
 class AdminUserListResponse(BaseModel):
@@ -80,6 +81,7 @@ def _user_response(record: AdminUserRecord) -> AdminUserResponse:
         created_at=record.created_at,
         updated_at=record.updated_at,
         last_seen_at=record.last_seen_at,
+        deletion_pending=record.deletion_pending,
     )
 
 
@@ -177,6 +179,27 @@ async def update_user(
         raise _admin_error(exc) from exc
     clear_auth_cache_for_user_id(user_id)
     return _user_response(record)
+
+
+@router.delete("/users/{user_id}", status_code=202)
+async def delete_user(
+    user_id: str,
+    request: Request,
+    principal: Principal = Depends(require_admin_principal),
+) -> dict[str, str]:
+    coordinator = getattr(request.app.state, "user_data_purges", None)
+    if coordinator is None:
+        raise HTTPException(status_code=503, detail="user_data_purge_unavailable")
+    try:
+        purge_id, _ = await application_store(request).begin_admin_account_deletion(
+            actor_user_id=principal.user_id,
+            target_user_id=user_id,
+        )
+    except AccountAdministrationError as exc:
+        raise _admin_error(exc) from exc
+    clear_auth_cache_for_user_id(user_id)
+    coordinator.wake()
+    return {"id": user_id, "status": "deleting", "purge_id": purge_id}
 
 
 @router.get("/models", response_model=AdminModelListResponse)

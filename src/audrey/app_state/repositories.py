@@ -574,6 +574,12 @@ class ConversationsRepository:
                 if conversation_row is None:
                     self._conn.rollback()
                     return None
+                active_owner = self._conn.execute(
+                    "SELECT 1 FROM app_users WHERE user_id = ? AND status = 'active'",
+                    (user_id,),
+                ).fetchone()
+                if active_owner is None:
+                    raise InvalidApplicationStateError("account is not active")
                 if conversation_row["archived_at"] is not None:
                     raise ConversationArchivedError(
                         "conversation must be unarchived before starting a run"

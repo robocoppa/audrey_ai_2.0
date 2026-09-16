@@ -256,8 +256,9 @@ test("approves an account and changes a model policy in the admin panel", async 
   });
 
   await page.goto("./");
-  await page.getByRole("button", { name: "Admin" }).click();
+  await page.getByRole("button", { name: "Admin Panel" }).click();
   await expect(page.getByRole("dialog", { name: "Access control" })).toBeVisible();
+  await expect(page.locator("#admin-accounts-panel .admin-record-list")).toHaveCSS("flex-direction", "column");
 
   const account = page.locator(".admin-record").filter({ hasText: "Pending Person" });
   await account.getByRole("button", { name: "Approve as user" }).click();
@@ -265,6 +266,7 @@ test("approves an account and changes a model policy in the admin panel", async 
 
   await page.getByRole("tab", { name: /Models/u }).click();
   await expect(page.getByText("Live Ollama inventory")).toBeVisible();
+  await expect(page.locator("#admin-models-panel .admin-record-list")).toHaveCSS("flex-direction", "column");
   const model = page.locator(".admin-model-record").filter({ hasText: "Qwen 3.8" });
   await model.getByRole("button", { name: "Enabled" }).click();
   await expect(model.getByRole("button", { name: "Disabled" })).toBeVisible();
@@ -290,6 +292,7 @@ test("hides direct models from basic users even if the catalog contains one", as
   await page.goto("./");
 
   await expect(page.getByRole("option", { name: "Qwen 3.8" })).toHaveCount(0);
+  await expect(page.getByRole("option", { name: "Other models..." })).toHaveCount(0);
   await expect(page.locator('optgroup[label="Other models — direct"]')).toHaveCount(0);
 });
 
@@ -461,8 +464,8 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   ).toBeGreaterThanOrEqual(16);
   await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue("fast");
   await expect(page.getByRole("option", { name: "Video" })).toHaveCount(1);
-  await expect(page.locator('optgroup[label="Other models — direct"]')).toHaveCount(1);
-  await expect(page.getByRole("option", { name: "Qwen 3.8" })).toHaveCount(1);
+  await expect(page.locator('optgroup[label="Other models — direct"]')).toHaveCount(0);
+  await expect(page.getByRole("option", { name: "Other models..." })).toHaveCount(1);
   await expect(page.getByLabel("Signed in user")).toContainText("Alice");
   await expect(page.getByRole("link", { name: "Log out" })).toHaveAttribute(
     "href",
@@ -471,8 +474,12 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   const portrait = page.locator(".composer-model-picker img");
   await expect(portrait).toBeVisible();
   const modelPicker = page.getByRole("combobox", { name: "Audrey model" });
-  await expect(modelPicker.locator('optgroup[label="Other models — direct"]')).toHaveCount(1);
+  await expect(modelPicker.locator('optgroup[label="Other models — direct"]')).toHaveCount(0);
   await expect(modelPicker).toHaveValue("fast");
+  await modelPicker.selectOption("__other_models__");
+  await expect(modelPicker).toHaveValue("fast");
+  await expect(modelPicker.locator('optgroup[label="Other models — direct"]')).toHaveCount(1);
+  await expect(modelPicker.getByRole("option", { name: "Qwen 3.8" })).toHaveCount(1);
   await modelPicker.selectOption("research");
   await expect(portrait).toHaveAttribute("src", /audrey8/u);
   await modelPicker.selectOption("video");
@@ -790,14 +797,14 @@ test("keeps history and an active run alive while switching conversations", asyn
   await expect(page.getByText("Planning", { exact: true })).toBeVisible();
   await expect(page.getByText("Preparing the background answer")).toBeVisible();
 
-  await page.getByRole("button", { name: /Second conversation/ }).click();
+  await page.getByRole("button", { name: /^Second conversation/u }).click();
   await expect(page.getByRole("heading", { name: "Second conversation" })).toBeVisible();
   await expect(page.getByText("Canonical mode answer.")).toBeHidden();
   expect(await page.evaluate(() =>
     Boolean((window as Window & { __navigationRunAborted?: boolean }).__navigationRunAborted),
   )).toBe(false);
 
-  await page.getByRole("button", { name: /Running conversation/ }).click();
+  await page.getByRole("button", { name: /^Running conversation/u }).click();
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
   await expect(page.getByText("Keep this prompt while I visit another chat")).toBeVisible();
   await expect(page.getByText("Preparing the background answer")).toBeVisible();
@@ -808,8 +815,8 @@ test("keeps history and an active run alive while switching conversations", asyn
   await expect(page.getByText("Background response survived navigation.")).toBeVisible();
   await expect(page.getByText("Complete", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: /Second conversation/ }).click();
-  await page.getByRole("button", { name: /Running conversation/ }).click();
+  await page.getByRole("button", { name: /^Second conversation/u }).click();
+  await page.getByRole("button", { name: /^Running conversation/u }).click();
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
   await expect(page.getByText("Keep this prompt while I visit another chat")).toBeVisible();
   await expect(page.getByText("Background response survived navigation.")).toBeVisible();
@@ -893,9 +900,14 @@ test("searches, renames, archives, restores, and deletes a conversation", async 
 
   await page.getByRole("button", { name: "Active" }).click();
   await expect(page.getByRole("heading", { name: "Lifecycle renamed" })).toBeVisible();
-  await page.getByRole("button", { name: "Delete" }).click();
-  await expect(page.getByRole("group", { name: "Confirm deletion" })).toBeVisible();
-  await page.getByRole("button", { name: "Yes, delete" }).click();
+  const sidebarRow = page.locator(".conversation-row").filter({ hasText: "Lifecycle renamed" });
+  const trash = sidebarRow.getByRole("button", { name: "Delete conversation Lifecycle renamed" });
+  await sidebarRow.hover();
+  await expect(trash).toHaveCSS("opacity", "1");
+  await trash.click();
+  const confirmation = sidebarRow.getByRole("group", { name: "Confirm deletion of Lifecycle renamed" });
+  await expect(confirmation).toBeVisible();
+  await confirmation.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(page.getByText("No matching conversation titles.")).toBeVisible();
 });
 
@@ -1007,10 +1019,15 @@ test("keeps canonical messages when changing model", async ({ page }) => {
 
   await expect(page.locator(".composer-model-picker")).toHaveCount(0);
   await expect(page.locator(".composer .compact-model-picker")).toBeVisible();
+  await expect.poll(() => page.locator(".compact-model-picker select").evaluate(
+    (select) => select.getBoundingClientRect().width,
+  )).toBeGreaterThan(150);
   await page.getByRole("combobox", { name: "Audrey model" }).selectOption("deep");
   await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue("deep");
   await expect(page.getByText("A reasoning panel for complex problems and careful analysis.")).toHaveCount(0);
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
+  await page.getByRole("combobox", { name: "Audrey model" }).selectOption("__other_models__");
+  await expect(page.getByRole("option", { name: "Qwen 3.8" })).toHaveCount(1);
   await page.getByRole("combobox", { name: "Audrey model" }).selectOption("direct/qwen3.8:latest");
   await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue(
     "direct/qwen3.8:latest",

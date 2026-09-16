@@ -154,6 +154,7 @@ class AdminUserRecord:
     created_at: str
     updated_at: str
     last_seen_at: str
+    deletion_pending: bool = False
 
 
 @dataclass(frozen=True, slots=True)

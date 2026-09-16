@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import {
   approveAdminUser,
+  deleteAdminUser,
   denyAdminUser,
   listAdminModels,
   listAdminUsers,
@@ -35,6 +36,7 @@ export function AdminPanel({
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState("");
   const [denyConfirmId, setDenyConfirmId] = useState("");
+  const [deleteConfirmId, setDeleteConfirmId] = useState("");
   const [error, setError] = useState("");
   const [view, setView] = useState<AdminView>("accounts");
   const [accountQuery, setAccountQuery] = useState("");
@@ -87,6 +89,16 @@ export function AdminPanel({
   }, []);
 
   useEffect(() => {
+    if (!users.some((user) => user.deletion_pending)) return;
+    const timer = window.setInterval(() => {
+      void listAdminUsers().then((response) => setUsers(response.items)).catch(() => {
+        // The worker keeps retrying; a later refresh can reconcile the list.
+      });
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [users]);
+
+  useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === "Escape" && !busy) onClose();
     }
@@ -121,6 +133,23 @@ export function AdminPanel({
       setDenyConfirmId("");
     } catch (reason) {
       setError(messageOf(reason, "The account could not be denied."));
+    } finally {
+      setBusyKey("");
+    }
+  }
+
+  async function deleteUser(user: AdminUser) {
+    setBusyKey(`user:${user.id}`);
+    setError("");
+    try {
+      await deleteAdminUser(user.id);
+      setUsers((current) => current.map((item) =>
+        item.id === user.id ? { ...item, status: "disabled", deletion_pending: true } : item,
+      ));
+      setDeleteConfirmId("");
+      onChanged();
+    } catch (reason) {
+      setError(messageOf(reason, "The account could not be deleted."));
     } finally {
       setBusyKey("");
     }
@@ -252,7 +281,7 @@ export function AdminPanel({
             >
               <div className="settings-section-heading">
                 <h3 id="admin-users-title">Accounts</h3>
-                <p>Approve sign-ins, assign one clear access role, and suspend accounts.</p>
+                <p>Approve sign-ins, assign one clear access role, suspend or permanently delete accounts.</p>
               </div>
               <div className="admin-toolbar admin-account-toolbar">
                 <label>
@@ -292,13 +321,17 @@ export function AdminPanel({
                           <strong>{user.display_name || user.email}</strong>
                           <span>{user.email}</span>
                         </div>
-                        <span className={`account-status ${user.status}`}>{user.status}</span>
+                        <span className={`account-status ${user.status}`}>
+                          {user.deletion_pending ? "deleting" : user.status}
+                        </span>
                       </div>
                       <p className="admin-record-meta">
                         {user.auth_provider || "unknown provider"}
                         {user.last_seen_at ? ` · Last seen ${formatTime(user.last_seen_at)}` : ""}
                       </p>
-                      {user.status === "pending" ? (
+                      {user.deletion_pending ? (
+                        <p className="admin-record-meta">Data purge in progress. This account will disappear when cleanup completes.</p>
+                      ) : user.status === "pending" ? (
                         <div className="admin-record-actions">
                           <button type="button" onClick={() => void approve(user, false)} disabled={rowBusy}>
                             {rowBusy ? "Updating…" : "Approve as user"}
@@ -352,6 +385,23 @@ export function AdminPanel({
                           </button>
                         </div>
                       )}
+                      {!isSelf && !user.deletion_pending ? (
+                        <div className="admin-record-delete">
+                          {deleteConfirmId === user.id ? (
+                            <div className="admin-delete-confirmation" role="group" aria-label={`Confirm deletion of ${user.email}`}>
+                              <span>Delete this account and all its Audrey data permanently? They can sign in again if their identity provider still allows access.</span>
+                              <button className="danger-button" type="button" onClick={() => void deleteUser(user)} disabled={rowBusy}>
+                                {rowBusy ? "Deleting…" : "Yes, delete account"}
+                              </button>
+                              <button type="button" onClick={() => setDeleteConfirmId("")} disabled={rowBusy}>Cancel</button>
+                            </div>
+                          ) : (
+                            <button className="danger-button" type="button" onClick={() => setDeleteConfirmId(user.id)} disabled={rowBusy}>
+                              Delete account…
+                            </button>
+                          )}
+                        </div>
+                      ) : null}
                     </article>
                   );
                 })}

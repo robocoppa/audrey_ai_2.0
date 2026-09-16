@@ -99,6 +99,8 @@ export function ChatWorkspace({
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState("");
   const [managingFiles, setManagingFiles] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const listKeyRef = useRef("");
   const selectedIdRef = useRef<string | null>(null);
   const defaultModelId = models[0]?.id ?? null;
@@ -235,6 +237,20 @@ export function ChatWorkspace({
     }
   }
 
+  async function deleteFromSidebar(conversationId: string) {
+    setDeletingId(conversationId);
+    setError("");
+    try {
+      await deleteConversation(conversationId);
+      setConfirmDeleteId(null);
+      removeFromCurrentView(conversationId, true);
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   async function loadMore() {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
@@ -329,16 +345,38 @@ export function ChatWorkspace({
         ) : null}
         <nav className="conversation-list" aria-label="Conversation history">
           {conversations.map((conversation) => (
-            <button
-              className={conversation.id === selectedId ? "conversation active" : "conversation"}
-              type="button"
-              key={conversation.id}
-              onClick={() => selectConversation(conversation)}
-              aria-current={conversation.id === selectedId ? "page" : undefined}
-            >
-              <span>{conversation.title || "New conversation"}</span>
-              <small>{modelLabel(models, conversation)}</small>
-            </button>
+            <div className="conversation-row" key={conversation.id}>
+              <button
+                className={conversation.id === selectedId ? "conversation active" : "conversation"}
+                type="button"
+                onClick={() => selectConversation(conversation)}
+                aria-current={conversation.id === selectedId ? "page" : undefined}
+              >
+                <span>{conversation.title || "New conversation"}</span>
+                <small>{modelLabel(models, conversation)}</small>
+              </button>
+              <button
+                className="conversation-delete"
+                type="button"
+                aria-label={`Delete conversation ${conversation.title || "New conversation"}`}
+                title="Delete conversation"
+                onClick={() => setConfirmDeleteId(conversation.id)}
+                disabled={deletingId === conversation.id}
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v6m4-6v6" />
+                </svg>
+              </button>
+              {confirmDeleteId === conversation.id ? (
+                <div className="sidebar-delete-confirmation" role="group" aria-label={`Confirm deletion of ${conversation.title || "New conversation"}`}>
+                  <span>Delete permanently?</span>
+                  <button className="danger-button" type="button" onClick={() => void deleteFromSidebar(conversation.id)} disabled={deletingId === conversation.id}>
+                    {deletingId === conversation.id ? "Deleting…" : "Delete"}
+                  </button>
+                  <button type="button" onClick={() => setConfirmDeleteId(null)} disabled={deletingId === conversation.id}>Cancel</button>
+                </div>
+              ) : null}
+            </div>
           ))}
         </nav>
         {nextCursor ? (
@@ -1002,10 +1040,12 @@ function ComposerModelPicker({
   onChange: (modelId: string) => Promise<void>;
 }) {
   const selected = modelDetails(models, modelId);
+  const [directExpanded, setDirectExpanded] = useState(false);
   const workflowModels = models.filter(({ kind }) => kind === "workflow");
   const directModels = canBrowseDirectModels
     ? models.filter(({ kind }) => kind === "direct")
     : [];
+  const showDirectModels = directExpanded || selected.kind === "direct";
 
   const select = (
     <select
@@ -1013,14 +1053,23 @@ function ComposerModelPicker({
       title={`${selected.label}: ${selected.description}`}
       value={modelId}
       disabled={disabled}
-      onChange={(event) => void onChange(event.target.value)}
+      onChange={(event) => {
+        if (event.target.value === "__other_models__") {
+          setDirectExpanded(true);
+          return;
+        }
+        void onChange(event.target.value);
+      }}
     >
       <optgroup label="Audrey">
         {workflowModels.map((item) => (
           <option key={item.id} value={item.id}>{item.label}</option>
         ))}
       </optgroup>
-      {directModels.length > 0 ? (
+      {directModels.length > 0 && !showDirectModels ? (
+        <option value="__other_models__">Other models...</option>
+      ) : null}
+      {directModels.length > 0 && showDirectModels ? (
         <optgroup label="Other models — direct">
           {directModels.map((item) => (
             <option key={item.id} value={item.id}>{item.label}</option>
