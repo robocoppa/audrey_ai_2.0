@@ -1040,24 +1040,52 @@ function ComposerModelPicker({
   onChange: (modelId: string) => Promise<void>;
 }) {
   const selected = modelDetails(models, modelId);
-  const [directExpanded, setDirectExpanded] = useState(false);
+  const [directMenuOpen, setDirectMenuOpen] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const selectRef = useRef<HTMLSelectElement>(null);
+  const firstDirectRef = useRef<HTMLButtonElement>(null);
   const workflowModels = models.filter(({ kind }) => kind === "workflow");
   const directModels = canBrowseDirectModels
     ? models.filter(({ kind }) => kind === "direct")
     : [];
-  const showDirectModels = directExpanded || selected.kind === "direct";
+  const directMenuVisible = directMenuOpen && !disabled && directModels.length > 0;
+
+  useEffect(() => {
+    if (!directMenuVisible) return;
+    firstDirectRef.current?.focus();
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!anchorRef.current?.contains(event.target as Node)) {
+        setDirectMenuOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      setDirectMenuOpen(false);
+      selectRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [directMenuVisible]);
 
   const select = (
     <select
+      ref={selectRef}
       aria-label="Audrey model"
+      aria-expanded={directMenuVisible}
       title={`${selected.label}: ${selected.description}`}
       value={modelId}
       disabled={disabled}
       onChange={(event) => {
         if (event.target.value === "__other_models__") {
-          setDirectExpanded(true);
+          setDirectMenuOpen(true);
           return;
         }
+        setDirectMenuOpen(false);
         void onChange(event.target.value);
       }}
     >
@@ -1066,24 +1094,60 @@ function ComposerModelPicker({
           <option key={item.id} value={item.id}>{item.label}</option>
         ))}
       </optgroup>
-      {directModels.length > 0 && !showDirectModels ? (
-        <option value="__other_models__">Other models...</option>
-      ) : null}
-      {directModels.length > 0 && showDirectModels ? (
-        <optgroup label="Other models — direct">
-          {directModels.map((item) => (
-            <option key={item.id} value={item.id}>{item.label}</option>
-          ))}
+      {selected.kind === "direct" && canBrowseDirectModels ? (
+        <optgroup label="Selected direct model">
+          <option value={selected.id}>{selected.label}</option>
         </optgroup>
+      ) : null}
+      {directModels.length > 0 ? (
+        <option value="__other_models__">Other models...</option>
       ) : null}
     </select>
   );
 
   const control = (
-    <div className="model-picker-menu-anchor">
+    <div className="model-picker-menu-anchor" ref={anchorRef}>
       <label className={compact ? "compact-model-picker" : "model-picker-control"}>
         {select}
       </label>
+      {directMenuVisible ? (
+        <div className="direct-model-menu" role="menu" aria-label="Other models">
+          <header>
+            <div>
+              <strong>Other models</strong>
+              <span>Direct Ollama models</span>
+            </div>
+            <button
+              className="direct-model-menu-close"
+              type="button"
+              aria-label="Close other models"
+              onClick={() => {
+                setDirectMenuOpen(false);
+                selectRef.current?.focus();
+              }}
+            >
+              ×
+            </button>
+          </header>
+          <div className="direct-model-options">
+            {directModels.map((item, index) => (
+              <button
+                key={item.id}
+                ref={index === 0 ? firstDirectRef : undefined}
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setDirectMenuOpen(false);
+                  void onChange(item.id);
+                }}
+              >
+                <strong>{item.label}</strong>
+                <span>{item.description}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
   if (compact) {

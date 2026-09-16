@@ -138,7 +138,7 @@ describe("AdminPanel", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<AdminPanel currentUserId="usr_admin" onChanged={vi.fn()} onClose={vi.fn()} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Delete account…" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete account Pending Person" }));
     expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/admin/users/usr_pending", expect.objectContaining({ method: "DELETE" }),
     );
@@ -147,7 +147,7 @@ describe("AdminPanel", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/admin/users/usr_pending", expect.objectContaining({ method: "DELETE" }),
     );
-    expect(screen.getByText(/Data purge in progress/u)).toBeVisible();
+    expect(screen.getByText("Purging data…")).toBeVisible();
   });
 });
 

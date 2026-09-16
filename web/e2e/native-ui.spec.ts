@@ -261,13 +261,16 @@ test("approves an account and changes a model policy in the admin panel", async 
   await expect(page.locator("#admin-accounts-panel .admin-record-list")).toHaveCSS("flex-direction", "column");
 
   const account = page.locator(".admin-record").filter({ hasText: "Pending Person" });
+  await expect.poll(() => account.evaluate((row) => row.getBoundingClientRect().height)).toBeLessThan(70);
   await account.getByRole("button", { name: "Approve as user" }).click();
   await expect(account.getByText("active")).toBeVisible();
+  await expect.poll(() => account.evaluate((row) => row.getBoundingClientRect().height)).toBeLessThan(70);
 
   await page.getByRole("tab", { name: /Models/u }).click();
   await expect(page.getByText("Live Ollama inventory")).toBeVisible();
   await expect(page.locator("#admin-models-panel .admin-record-list")).toHaveCSS("flex-direction", "column");
   const model = page.locator(".admin-model-record").filter({ hasText: "Qwen 3.8" });
+  await expect.poll(() => model.evaluate((row) => row.getBoundingClientRect().height)).toBeLessThan(70);
   await model.getByRole("button", { name: "Enabled" }).click();
   await expect(model.getByRole("button", { name: "Disabled" })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue("auto");
@@ -478,8 +481,12 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect(modelPicker).toHaveValue("fast");
   await modelPicker.selectOption("__other_models__");
   await expect(modelPicker).toHaveValue("fast");
-  await expect(modelPicker.locator('optgroup[label="Other models — direct"]')).toHaveCount(1);
-  await expect(modelPicker.getByRole("option", { name: "Qwen 3.8" })).toHaveCount(1);
+  const directMenu = page.getByRole("menu", { name: "Other models" });
+  await expect(directMenu).toBeVisible();
+  const firstDirectModel = directMenu.getByRole("menuitem", { name: /Qwen 3.8/u });
+  await expect(firstDirectModel).toBeFocused();
+  await firstDirectModel.press("Escape");
+  await expect(directMenu).toHaveCount(0);
   await modelPicker.selectOption("research");
   await expect(portrait).toHaveAttribute("src", /audrey8/u);
   await modelPicker.selectOption("video");
@@ -1027,8 +1034,9 @@ test("keeps canonical messages when changing model", async ({ page }) => {
   await expect(page.getByText("A reasoning panel for complex problems and careful analysis.")).toHaveCount(0);
   await expect(page.getByText("Canonical mode answer.")).toBeVisible();
   await page.getByRole("combobox", { name: "Audrey model" }).selectOption("__other_models__");
-  await expect(page.getByRole("option", { name: "Qwen 3.8" })).toHaveCount(1);
-  await page.getByRole("combobox", { name: "Audrey model" }).selectOption("direct/qwen3.8:latest");
+  const directMenu = page.getByRole("menu", { name: "Other models" });
+  await expect(directMenu).toBeVisible();
+  await directMenu.getByRole("menuitem", { name: /Qwen 3.8/u }).click();
   await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue(
     "direct/qwen3.8:latest",
   );

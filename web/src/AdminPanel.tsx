@@ -315,8 +315,11 @@ export function AdminPanel({
                   const rowBusy = busyKey === `user:${user.id}`;
                   const isSelf = user.id === currentUserId;
                   return (
-                    <article className="admin-record" key={user.id}>
-                      <div className="admin-record-heading">
+                    <article className="admin-record admin-user-record" key={user.id}>
+                      <div
+                        className="admin-record-heading"
+                        title={`${user.auth_provider || "unknown provider"}${user.last_seen_at ? ` · Last seen ${formatTime(user.last_seen_at)}` : ""}`}
+                      >
                         <div>
                           <strong>{user.display_name || user.email}</strong>
                           <span>{user.email}</span>
@@ -325,12 +328,12 @@ export function AdminPanel({
                           {user.deletion_pending ? "deleting" : user.status}
                         </span>
                       </div>
-                      <p className="admin-record-meta">
+                      <p className="admin-record-meta admin-visually-hidden">
                         {user.auth_provider || "unknown provider"}
                         {user.last_seen_at ? ` · Last seen ${formatTime(user.last_seen_at)}` : ""}
                       </p>
                       {user.deletion_pending ? (
-                        <p className="admin-record-meta">Data purge in progress. This account will disappear when cleanup completes.</p>
+                        <p className="admin-deletion-progress" title="This account will disappear when data cleanup completes.">Purging data…</p>
                       ) : user.status === "pending" ? (
                         <div className="admin-record-actions">
                           <button type="button" onClick={() => void approve(user, false)} disabled={rowBusy}>
@@ -386,7 +389,20 @@ export function AdminPanel({
                         </div>
                       )}
                       {!isSelf && !user.deletion_pending ? (
-                        <div className="admin-record-delete">
+                        <>
+                          <button
+                            className="admin-delete-trigger danger-button"
+                            type="button"
+                            aria-label={`Delete account ${user.display_name || user.email}`}
+                            title="Delete account"
+                            aria-expanded={deleteConfirmId === user.id}
+                            onClick={() => setDeleteConfirmId(user.id)}
+                            disabled={rowBusy}
+                          >
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v6m4-6v6" />
+                            </svg>
+                          </button>
                           {deleteConfirmId === user.id ? (
                             <div className="admin-delete-confirmation" role="group" aria-label={`Confirm deletion of ${user.email}`}>
                               <span>Delete this account and all its Audrey data permanently? They can sign in again if their identity provider still allows access.</span>
@@ -395,12 +411,8 @@ export function AdminPanel({
                               </button>
                               <button type="button" onClick={() => setDeleteConfirmId("")} disabled={rowBusy}>Cancel</button>
                             </div>
-                          ) : (
-                            <button className="danger-button" type="button" onClick={() => setDeleteConfirmId(user.id)} disabled={rowBusy}>
-                              Delete account…
-                            </button>
-                          )}
-                        </div>
+                          ) : null}
+                        </>
                       ) : null}
                     </article>
                   );
@@ -471,7 +483,7 @@ export function AdminPanel({
                   const rowBusy = busyKey === `model:${model.id}`;
                   return (
                     <article className="admin-record admin-model-record" key={model.id}>
-                      <div className="admin-record-heading">
+                      <div className="admin-record-heading" title={model.description}>
                         <div>
                           <strong>{model.label}</strong>
                           <span>{model.kind === "direct" ? model.concrete_model : model.id}</span>
@@ -481,7 +493,7 @@ export function AdminPanel({
                           {model.policy_overridden ? <em>Customized</em> : <em>Default</em>}
                         </div>
                       </div>
-                      <p>{model.description}</p>
+                      <p className="admin-visually-hidden">{model.description}</p>
                       <div className="admin-model-controls">
                         <button
                           type="button"
