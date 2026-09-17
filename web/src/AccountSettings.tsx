@@ -233,7 +233,12 @@ export function AccountSettings({
       const archive = await exportChatHistory();
       const exportedAt = new Date().toISOString();
       downloadJson(
-        { ...archive, exported_at: exportedAt },
+        {
+          ...archive,
+          exported_at: exportedAt,
+          audrey_user_id: user.id,
+          account_email: user.email,
+        },
         `audrey-chat-history-${exportedAt.slice(0, 10)}.json`,
       );
       const noun = archive.items.length === 1 ? "message" : "messages";

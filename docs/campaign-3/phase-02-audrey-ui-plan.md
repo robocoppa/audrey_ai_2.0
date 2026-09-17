@@ -1088,6 +1088,14 @@ and derived stores, including interrupted cleanup and restart.
 - Compare answer, tool, source, image, history, and mode behavior.
 - Publish deployment, backup, rollback, and recovery instructions.
 
+The first 2E laptop slice adds a preview-first importer for Audrey's existing
+Settings chat-history JSON export. Schema v12 keeps owner-scoped provenance for
+idempotent reruns and deletion tombstones; applying requires an exact account
+id/email and a new integrity-checked SQLite online backup. Imported history
+starts Archived. This is not an OWUI database integration and has not been
+run against live data. The procedure and disposable-account smoke are in
+`phase-02-history-import.md`.
+
 Gate: the user's normal workflow completes in the native UI for a defined soak
 period without returning to OWUI for a missing core capability.
 

@@ -5,11 +5,23 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
+import sqlite3
+import threading
+from contextlib import closing
+from dataclasses import asdict
 from getpass import getpass
+from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 
 from audrey.app_state import AccountAdministrationError, ApplicationStore
+from audrey.app_state.history_import import (
+    HistoryImportError,
+    HistoryImportRepository,
+    load_archive_export,
+)
 from audrey.config import get_config
 
 
@@ -41,6 +53,28 @@ def _parser() -> argparse.ArgumentParser:
         "--apply",
         action="store_true",
         help="Create pending accounts after reviewing the default preview.",
+    )
+    history = commands.add_parser(
+        "import-chat-export",
+        help="Preview or import one Audrey chat-export JSON file into native history.",
+    )
+    history.add_argument("--file", type=Path, required=True)
+    history.add_argument("--user-id", required=True, help="Exact target usr_... id")
+    history.add_argument("--email", required=True, help="Target account email safety check")
+    history.add_argument(
+        "--apply",
+        action="store_true",
+        help="Import after an application-database backup and preview.",
+    )
+    history.add_argument(
+        "--allow-unbound",
+        action="store_true",
+        help="Permit an older export without Audrey owner metadata.",
+    )
+    history.add_argument(
+        "--backup-to",
+        type=Path,
+        help="New online SQLite backup path, required with --apply.",
     )
     return parser
 
@@ -145,12 +179,107 @@ async def _import_owui_users(*, apply: bool = False) -> int:
     return 1 if counts["ambiguous"] or counts["conflict"] else 0
 
 
+def _online_application_backup(source: Path, destination: Path) -> None:
+    """Create a non-overwriting, mode-600 SQLite online backup."""
+    if destination.resolve() == source.resolve():
+        raise HistoryImportError("backup path must differ from the application database")
+    if not destination.parent.is_dir():
+        raise HistoryImportError("backup parent directory does not exist")
+    created = False
+    try:
+        try:
+            descriptor = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+        except FileExistsError as exc:
+            raise HistoryImportError("backup destination already exists") from exc
+        os.close(descriptor)
+        created = True
+        uri = f"file:{quote(str(source.resolve()), safe='/')}?mode=ro"
+        with (
+            closing(sqlite3.connect(uri, uri=True)) as source_db,
+            closing(sqlite3.connect(destination)) as backup_db,
+        ):
+            source_db.backup(backup_db)
+            integrity = backup_db.execute("PRAGMA integrity_check").fetchone()
+            if integrity is None or integrity[0] != "ok":
+                raise HistoryImportError("online SQLite backup failed integrity_check")
+    except BaseException:
+        if created:
+            destination.unlink(missing_ok=True)
+        raise
+
+def _import_chat_export(
+    *,
+    file: Path,
+    user_id: str,
+    email: str,
+    apply: bool = False,
+    allow_unbound: bool = False,
+    backup_to: Path | None = None,
+) -> int:
+    """Preview without database writes; apply after an online backup."""
+    try:
+        if not user_id.startswith("usr_") or not email or "@" not in email:
+            raise HistoryImportError("exact Audrey user id and account email are required")
+        export = load_archive_export(file)
+        bound = bool(export.audrey_user_id and export.account_email)
+        if bool(export.audrey_user_id) != bool(export.account_email):
+            raise HistoryImportError("export owner metadata is incomplete")
+        if apply and not bound and not allow_unbound:
+            raise HistoryImportError(
+                "older export has no owner metadata; preview it first, then use "
+                "--allow-unbound only if its owner was independently verified"
+            )
+        cfg = get_config()
+        application = cfg.raw.get("application", {}) or {}
+        path = Path(application.get("sqlite_path", "/data/audrey_app.sqlite"))
+        if not path.is_file():
+            raise HistoryImportError("Audrey application database does not exist")
+        uri = f"file:{quote(str(path.resolve()), safe='/')}?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True)) as connection:
+            connection.row_factory = sqlite3.Row
+            summary = HistoryImportRepository(
+                connection, threading.RLock()
+            ).preview(user_id=user_id, email=email, export=export)
+        if apply:
+            if backup_to is None:
+                raise HistoryImportError("--backup-to is required with --apply")
+            _online_application_backup(path, backup_to)
+            store = ApplicationStore(path)
+            try:
+                summary = store.history_imports.apply(
+                    user_id=user_id, email=email, export=export
+                )
+            finally:
+                store.close()
+    except (HistoryImportError, OSError, sqlite3.Error) as exc:
+        print(json.dumps({"status": "failed", "detail": str(exc)}, sort_keys=True))
+        return 1
+
+    print(json.dumps({
+        "status": "applied" if apply else "preview",
+        "user_id": user_id,
+        "owner_bound": bound,
+        "backup_path": str(backup_to) if apply else None,
+        **asdict(summary),
+    }, sort_keys=True))
+    return 0
+
+
 def main() -> None:
     args = _parser().parse_args()
     if args.command == "grant-admin":
         raise SystemExit(asyncio.run(_grant_admin(args.user_id, email=args.email)))
     if args.command == "import-owui-users":
         raise SystemExit(asyncio.run(_import_owui_users(apply=args.apply)))
+    if args.command == "import-chat-export":
+        raise SystemExit(_import_chat_export(
+            file=args.file,
+            user_id=args.user_id,
+            email=args.email,
+            apply=args.apply,
+            allow_unbound=args.allow_unbound,
+            backup_to=args.backup_to,
+        ))
     raise SystemExit(2)
 
 

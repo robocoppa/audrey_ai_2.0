@@ -579,6 +579,53 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           ON model_display_order(kind, position, model_id);
         """,
     ),
+    (
+        12,
+        """
+        CREATE TABLE IF NOT EXISTS app_history_import_conversations (
+          user_id                TEXT NOT NULL,
+          source                 TEXT NOT NULL,
+          source_conversation_id TEXT NOT NULL,
+          conversation_id        TEXT NOT NULL UNIQUE,
+          imported_at           TEXT NOT NULL,
+          PRIMARY KEY (user_id, source, source_conversation_id),
+          FOREIGN KEY (user_id) REFERENCES app_users(user_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS app_history_import_messages (
+          user_id                TEXT NOT NULL,
+          source                 TEXT NOT NULL,
+          source_message_id      TEXT NOT NULL,
+          source_conversation_id TEXT NOT NULL,
+          message_id             TEXT NOT NULL UNIQUE,
+          content_sha256         TEXT NOT NULL,
+          role                   TEXT NOT NULL,
+          source_created_at      TEXT NOT NULL,
+          partial                INTEGER NOT NULL,
+          virtual_model          TEXT NOT NULL DEFAULT '',
+          concrete_model         TEXT NOT NULL DEFAULT '',
+          prompt_tokens          INTEGER NOT NULL DEFAULT 0,
+          completion_tokens      INTEGER NOT NULL DEFAULT 0,
+          imported_at            TEXT NOT NULL,
+          PRIMARY KEY (user_id, source, source_message_id),
+          FOREIGN KEY (user_id, source, source_conversation_id)
+            REFERENCES app_history_import_conversations
+              (user_id, source, source_conversation_id) ON DELETE CASCADE
+        );
+
+        CREATE TRIGGER IF NOT EXISTS trg_app_history_import_conversation_deleted
+        AFTER DELETE ON app_conversations
+        BEGIN
+          DELETE FROM app_history_import_messages
+          WHERE user_id = OLD.user_id
+            AND source_conversation_id IN (
+              SELECT source_conversation_id
+              FROM app_history_import_conversations
+              WHERE user_id = OLD.user_id AND conversation_id = OLD.conversation_id
+            );
+        END;
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS"]

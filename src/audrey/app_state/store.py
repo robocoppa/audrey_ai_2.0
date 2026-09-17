@@ -22,6 +22,7 @@ import uuid
 from collections.abc import Iterable
 from pathlib import Path
 
+from audrey.app_state.history_import import HistoryImportRepository
 from audrey.app_state.migrations import MIGRATIONS
 from audrey.app_state.records import (
     AccessRoleRecord,
@@ -82,6 +83,7 @@ class ApplicationStore:
         self.preferences = PreferencesRepository(self._conn, self._lock)
         self.conversations = ConversationsRepository(self._conn, self._lock)
         self.chat_projections = ChatProjectionsRepository(self._conn, self._lock)
+        self.history_imports = HistoryImportRepository(self._conn, self._lock)
 
     def _migrate_locked(self) -> None:
         self._conn.execute(
@@ -766,6 +768,10 @@ class ApplicationStore:
                 )
                 self._conn.execute(
                     "DELETE FROM app_chat_projection_deletions WHERE user_id = ?",
+                    (user_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM app_history_import_conversations WHERE user_id = ?",
                     (user_id,),
                 )
                 self._conn.execute(

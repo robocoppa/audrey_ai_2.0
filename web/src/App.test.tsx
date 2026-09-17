@@ -700,8 +700,15 @@ describe("App", () => {
     expect(downloadedName).toMatch(/^audrey-chat-history-\d{4}-\d{2}-\d{2}\.json$/u);
     const artifact = JSON.parse(
       await (createObjectURL.mock.calls[0][0] as Blob).text(),
-    ) as { schema_version: number; items: Array<{ message_id: string }> };
+    ) as {
+      schema_version: number;
+      audrey_user_id: string;
+      account_email: string;
+      items: Array<{ message_id: string }>;
+    };
     expect(artifact.schema_version).toBe(1);
+    expect(artifact.audrey_user_id).toBe("usr_example");
+    expect(artifact.account_email).toBe("alice@example.com");
     expect(artifact.items.map(({ message_id }) => message_id)).toEqual([
       "msg_export_1",
       "msg_export_2",
