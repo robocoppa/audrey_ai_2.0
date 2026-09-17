@@ -12,9 +12,21 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+if __package__:
+    from .smoke_native_auth import MISSING_CREDENTIALS, SmokeCredentials
+else:
+    from smoke_native_auth import MISSING_CREDENTIALS, SmokeCredentials
+
 BASE_URL = os.getenv("AUDREY_SMOKE_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
-USER_TOKEN = os.getenv("TEST_OWUI_TOKEN", "")
-ADMIN_TOKEN = os.getenv("ADMIN_OWUI_TOKEN", "")
+_CREDENTIALS = SmokeCredentials.from_env()
+USER_TOKEN = _CREDENTIALS.user
+ADMIN_TOKEN = _CREDENTIALS.admin
+
+
+def _auth_headers(token: str) -> dict[str, str]:
+    return _CREDENTIALS.headers_for(token, user_token=USER_TOKEN, admin_token=ADMIN_TOKEN)
+
+
 PROMPT = "Reply exactly: 2B5-PROJECTION-READY"
 
 
@@ -34,7 +46,7 @@ def _request(
     headers = {"Accept": "application/json"}
     body = None
     if token:
-        headers["Authorization"] = f"Bearer {token}"
+        headers.update(_auth_headers(token))
     if payload is not None:
         headers["Content-Type"] = "application/json"
         body = json.dumps(payload).encode()
@@ -82,7 +94,7 @@ def _stream_events(path: str) -> list[dict[str, Any]]:
         f"{BASE_URL}{path}",
         headers={
             "Accept": "text/event-stream",
-            "Authorization": f"Bearer {USER_TOKEN}",
+            **_auth_headers(USER_TOKEN),
         },
     )
     events: list[dict[str, Any]] = []
@@ -106,9 +118,7 @@ def _export_conversation(conversation_id: str) -> list[dict[str, Any]]:
             token=USER_TOKEN,
         )
         matches.extend(
-            item
-            for item in page.get("items", [])
-            if item.get("conversation_id") == conversation_id
+            item for item in page.get("items", []) if item.get("conversation_id") == conversation_id
         )
         cursor = str(page.get("next_cursor") or "")
         if not cursor:
@@ -214,7 +224,7 @@ def _best_effort_cleanup(conversation_id: str, cancel_url: str) -> None:
 def main() -> int:
     if not USER_TOKEN or not ADMIN_TOKEN:
         print(
-            "TEST_OWUI_TOKEN and ADMIN_OWUI_TOKEN must be set.",
+            MISSING_CREDENTIALS,
             file=sys.stderr,
         )
         return 2
@@ -247,10 +257,7 @@ def main() -> int:
         cancel_url = str(run["cancel_url"])
         events = _stream_events(str(run["events_url"]))
         terminal = events[-1] if events else {}
-        if not (
-            terminal.get("type") == "run.finished"
-            and terminal.get("status") == "succeeded"
-        ):
+        if not (terminal.get("type") == "run.finished" and terminal.get("status") == "succeeded"):
             raise SmokeError(f"native run did not succeed: {terminal}")
 
         canonical = _canonical_turn(conversation_id)

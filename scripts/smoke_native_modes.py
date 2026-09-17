@@ -20,9 +20,21 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+if __package__:
+    from .smoke_native_auth import MISSING_CREDENTIALS, SmokeCredentials
+else:
+    from smoke_native_auth import MISSING_CREDENTIALS, SmokeCredentials
+
 BASE_URL = os.getenv("AUDREY_SMOKE_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
-USER_TOKEN = os.getenv("TEST_OWUI_TOKEN", "")
-ADMIN_TOKEN = os.getenv("ADMIN_OWUI_TOKEN", "")
+_CREDENTIALS = SmokeCredentials.from_env()
+USER_TOKEN = _CREDENTIALS.user
+ADMIN_TOKEN = _CREDENTIALS.admin
+
+
+def _auth_headers(token: str) -> dict[str, str]:
+    return _CREDENTIALS.headers_for(token, user_token=USER_TOKEN, admin_token=ADMIN_TOKEN)
+
+
 MODE_TIMEOUT_SECONDS = float(os.getenv("AUDREY_MODE_SMOKE_TIMEOUT_SECONDS", "900"))
 MODES = ("auto", "fast", "deep", "cloud", "local", "video", "research")
 EXPECTED_MODELS = {mode: f"audrey_{mode}" for mode in MODES}
@@ -43,7 +55,7 @@ def _request(
 ) -> tuple[int, bytes, Message]:
     headers = {"Accept": "application/json"}
     if token:
-        headers["Authorization"] = f"Bearer {token}"
+        headers.update(_auth_headers(token))
     body = None
     if payload is not None:
         headers["Content-Type"] = "application/json"
@@ -119,7 +131,7 @@ def _agent_turn(
         data=body,
         headers={
             "Accept": "text/event-stream",
-            "Authorization": f"Bearer {USER_TOKEN}",
+            **_auth_headers(USER_TOKEN),
             "Content-Type": "application/json",
         },
         method="POST",
@@ -140,9 +152,7 @@ def _agent_turn(
                     events.append(json.loads(line[6:]))
     except HTTPError as exc:
         excerpt = exc.read().decode(errors="replace")[:500]
-        raise SmokeError(
-            f"POST /api/agent?mode={mode}: HTTP {exc.code}: {excerpt}"
-        ) from exc
+        raise SmokeError(f"POST /api/agent?mode={mode}: HTTP {exc.code}: {excerpt}") from exc
 
     counts = Counter(str(event.get("type")) for event in events)
     terminal = events[-1] if events else {}
@@ -248,7 +258,7 @@ def _cleanup(conversation_ids: list[str], run_ids: list[str]) -> dict[str, Any]:
 
 def main() -> int:
     if not USER_TOKEN or not ADMIN_TOKEN:
-        print("TEST_OWUI_TOKEN and ADMIN_OWUI_TOKEN must be set.", file=sys.stderr)
+        print(MISSING_CREDENTIALS, file=sys.stderr)
         return 2
     if MODE_TIMEOUT_SECONDS <= 0:
         print("AUDREY_MODE_SMOKE_TIMEOUT_SECONDS must be positive.", file=sys.stderr)

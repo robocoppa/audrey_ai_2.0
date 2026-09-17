@@ -1081,20 +1081,24 @@ and derived stores, including interrupted cleanup and restart.
 
 ### Milestone 2E — parallel migration and parity
 
-- Run native Audrey UI and OWUI side by side.
-- Import current archive records with stable provenance and idempotent reruns.
-- Use a supported explicit OWUI export importer only if needed; do not depend on
-  undocumented direct reads from its database.
+- Run the native Audrey UI alongside the old client during the soak, without
+  adding another OWUI runtime integration.
+- Treat historical chat import as optional. The user has removed it from the
+  required cutover path; do not run the importer unless explicitly asked.
 - Compare answer, tool, source, image, history, and mode behavior.
 - Publish deployment, backup, rollback, and recovery instructions.
 
-The first 2E laptop slice adds a preview-first importer for Audrey's existing
-Settings chat-history JSON export. Schema v12 keeps owner-scoped provenance for
-idempotent reruns and deletion tombstones; applying requires an exact account
-id/email and a new integrity-checked SQLite online backup. Imported history
-starts Archived. This is not an OWUI database integration and has not been
-run against live data. The procedure and disposable-account smoke are in
+The preview-first Audrey Settings export importer remains available but dormant;
+it is not a deployment or parity gate. Its optional operator procedure is in
 `phase-02-history-import.md`.
+
+This laptop slice lets all seven native smoke scripts use two distinct
+Cloudflare Access application assertions instead of OWUI bearer tokens. Legacy
+bearers remain a transition fallback. Run against the standalone proxy's
+loopback address so Audrey verifies the supplied assertions; the public
+Cloudflare edge may replace the assertion header. This proves the origin auth
+and native API paths, while browser login remains a separate live gate. The
+credential procedure is in `phase-02-native-smoke-auth.md`.
 
 Gate: the user's normal workflow completes in the native UI for a defined soak
 period without returning to OWUI for a missing core capability.

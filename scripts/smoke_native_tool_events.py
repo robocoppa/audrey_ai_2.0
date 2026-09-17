@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Exercise native tool events, cancellation, `/v1`, and safe cleanup.
 
-Run this against the deployed Audrey container. The script creates exactly one
-disposable conversation owned by TEST_OWUI_TOKEN and removes both its archive
+Run this against the deployed standalone UI proxy. The script creates exactly one
+disposable conversation owned by the selected user credential and removes its archive
 projection and canonical row before returning.
 """
 
@@ -19,9 +19,21 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+if __package__:
+    from .smoke_native_auth import MISSING_CREDENTIALS, SmokeCredentials
+else:
+    from smoke_native_auth import MISSING_CREDENTIALS, SmokeCredentials
+
 BASE_URL = os.getenv("AUDREY_SMOKE_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
-USER_TOKEN = os.getenv("TEST_OWUI_TOKEN", "")
-ADMIN_TOKEN = os.getenv("ADMIN_OWUI_TOKEN", "")
+_CREDENTIALS = SmokeCredentials.from_env()
+USER_TOKEN = _CREDENTIALS.user
+ADMIN_TOKEN = _CREDENTIALS.admin
+
+
+def _auth_headers(token: str) -> dict[str, str]:
+    return _CREDENTIALS.headers_for(token, user_token=USER_TOKEN, admin_token=ADMIN_TOKEN)
+
+
 _WEB_SEARCH_METRIC = re.compile(
     r'^audrey_tool_calls_total\{[^}]*tool="web_search"[^}]*\}\s+([0-9.eE+-]+)$'
 )
@@ -42,7 +54,7 @@ def _request(
 ) -> tuple[int, bytes]:
     headers = {"Accept": "application/json"}
     if token:
-        headers["Authorization"] = f"Bearer {token}"
+        headers.update(_auth_headers(token))
     body = None
     if payload is not None:
         headers["Content-Type"] = "application/json"
@@ -97,7 +109,7 @@ def _stream_events(
         f"{BASE_URL}{path}",
         headers={
             "Accept": "text/event-stream",
-            "Authorization": f"Bearer {token}",
+            **_auth_headers(token),
         },
     )
     events: list[dict[str, Any]] = []
@@ -168,9 +180,7 @@ def _run_cancellation(conversation_id: str) -> dict[str, Any]:
                     str(run["events_url"]),
                     token=USER_TOKEN,
                     on_event=lambda event: (
-                        tool_started.set()
-                        if event.get("type") == "tool.started"
-                        else None
+                        tool_started.set() if event.get("type") == "tool.started" else None
                     ),
                 )
             )
@@ -193,17 +203,11 @@ def _run_cancellation(conversation_id: str) -> dict[str, Any]:
         raise SmokeError(f"native event stream failed: {stream_errors}")
 
     counts = Counter(str(event.get("type")) for event in native_events)
-    finishes = [
-        event for event in native_events if event.get("type") == "tool.finished"
-    ]
+    finishes = [event for event in native_events if event.get("type") == "tool.finished"]
     terminal = native_events[-1] if native_events else {}
     if not saw_active_tool:
         raise SmokeError("the run ended without observing an active tool")
-    if not (
-        counts["tool.started"]
-        == counts["tool.arguments"]
-        == counts["tool.finished"]
-    ):
+    if not (counts["tool.started"] == counts["tool.arguments"] == counts["tool.finished"]):
         raise SmokeError(f"unbalanced native tool lifecycle: {dict(counts)}")
     if not any(event.get("error") == "cancelled" for event in finishes):
         raise SmokeError(f"no interrupted tool was closed as cancelled: {finishes}")
@@ -226,12 +230,9 @@ def _run_cancellation(conversation_id: str) -> dict[str, Any]:
         "run_id": run["id"],
         "saw_active_tool": saw_active_tool,
         "native_tool_counts": {
-            name: counts[name]
-            for name in ("tool.started", "tool.arguments", "tool.finished")
+            name: counts[name] for name in ("tool.started", "tool.arguments", "tool.finished")
         },
-        "cancelled_tool_count": sum(
-            event.get("error") == "cancelled" for event in finishes
-        ),
+        "cancelled_tool_count": sum(event.get("error") == "cancelled" for event in finishes),
         "native_terminal": {
             "type": terminal.get("type"),
             "status": terminal.get("status"),
@@ -318,7 +319,7 @@ def _cleanup(conversation_id: str) -> dict[str, Any]:
 def main() -> int:
     if not USER_TOKEN or not ADMIN_TOKEN:
         print(
-            "TEST_OWUI_TOKEN and ADMIN_OWUI_TOKEN must be set.",
+            MISSING_CREDENTIALS,
             file=sys.stderr,
         )
         return 2

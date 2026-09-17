@@ -6,8 +6,8 @@ token and a different provider-authenticated administrator token. The script
 temporarily makes the ordinary account a tester, runs one direct model turn,
 then restores the account state plus the model policy's source and values.
 
-The first Cloudflare Access login remains a browser gate: an OWUI bearer token
-cannot create or validate a genuine Access assertion.
+A replayed Access assertion verifies origin auth, but the first browser login
+and Cloudflare handoff remain a separate live gate.
 """
 
 from __future__ import annotations
@@ -25,9 +25,21 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+if __package__:
+    from .smoke_native_auth import MISSING_CREDENTIALS, SmokeCredentials
+else:
+    from smoke_native_auth import MISSING_CREDENTIALS, SmokeCredentials
+
 BASE_URL = os.getenv("AUDREY_SMOKE_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
-USER_TOKEN = os.getenv("TEST_OWUI_TOKEN", "")
-ADMIN_TOKEN = os.getenv("ADMIN_OWUI_TOKEN", "")
+_CREDENTIALS = SmokeCredentials.from_env()
+USER_TOKEN = _CREDENTIALS.user
+ADMIN_TOKEN = _CREDENTIALS.admin
+
+
+def _auth_headers(token: str) -> dict[str, str]:
+    return _CREDENTIALS.headers_for(token, user_token=USER_TOKEN, admin_token=ADMIN_TOKEN)
+
+
 DIRECT_MODEL_ID = os.getenv(
     "AUDREY_DIRECT_SMOKE_MODEL_ID",
     "direct/qwen3.8:latest",
@@ -50,7 +62,7 @@ def _request(
 ) -> tuple[int, bytes, Message]:
     headers = {"Accept": "application/json"}
     if token:
-        headers["Authorization"] = f"Bearer {token}"
+        headers.update(_auth_headers(token))
     body = None
     if payload is not None:
         headers["Content-Type"] = "application/json"
@@ -115,13 +127,9 @@ def _admin_model(model_id: str) -> dict[str, Any]:
     )
     if model is None:
         direct_ids = sorted(
-            str(item.get("id"))
-            for item in page.get("items", [])
-            if item.get("kind") == "direct"
+            str(item.get("id")) for item in page.get("items", []) if item.get("kind") == "direct"
         )
-        raise SmokeError(
-            f"admin catalog omitted {model_id}; deployed direct models: {direct_ids}"
-        )
+        raise SmokeError(f"admin catalog omitted {model_id}; deployed direct models: {direct_ids}")
     return model
 
 
@@ -257,7 +265,7 @@ def _direct_agent_turn(
         data=body,
         headers={
             "Accept": "text/event-stream",
-            "Authorization": f"Bearer {USER_TOKEN}",
+            **_auth_headers(USER_TOKEN),
             "Content-Type": "application/json",
         },
         method="POST",
@@ -334,7 +342,7 @@ def _cleanup_step(
 
 def main() -> int:
     if not USER_TOKEN or not ADMIN_TOKEN:
-        print("TEST_OWUI_TOKEN and ADMIN_OWUI_TOKEN must be set.", file=sys.stderr)
+        print(MISSING_CREDENTIALS, file=sys.stderr)
         return 2
     if not DIRECT_MODEL_ID:
         print("AUDREY_DIRECT_SMOKE_MODEL_ID must not be empty.", file=sys.stderr)
@@ -517,9 +525,7 @@ def main() -> int:
                     "concrete_model": concrete_model,
                     "elapsed_seconds": round(time.monotonic() - started_at, 3),
                     "answer_chars": len(answer),
-                    "event_counts": dict(
-                        Counter(str(event.get("type") or "") for event in events)
-                    ),
+                    "event_counts": dict(Counter(str(event.get("type") or "") for event in events)),
                     "tool_events": 0,
                     "canonical_messages": len(messages),
                 },
@@ -573,6 +579,7 @@ def main() -> int:
                 _repair_until_ready,
             )
         if model_restore_needed and original_model is not None:
+
             def restore_model() -> bool:
                 if original_model.get("policy_overridden"):
                     restored = _patch_model(
@@ -585,8 +592,7 @@ def main() -> int:
                 return (
                     restored.get("enabled") == original_model.get("enabled")
                     and restored.get("audience") == original_model.get("audience")
-                    and restored.get("policy_overridden")
-                    == original_model.get("policy_overridden")
+                    and restored.get("policy_overridden") == original_model.get("policy_overridden")
                 )
 
             _cleanup_step(
@@ -598,16 +604,16 @@ def main() -> int:
             if cleanup.get("model_policy_restored") is False:
                 cleanup_errors.append("model_policy_restored: effective policy differs")
         if user_restore_needed and original_user is not None:
+
             def restore_user() -> bool:
                 restored = _patch_user(
                     str(original_user["id"]),
                     status=str(original_user["status"]),
                     groups=[str(group) for group in original_user.get("groups", [])],
                 )
-                return (
-                    restored.get("status") == original_user.get("status")
-                    and restored.get("groups") == original_user.get("groups")
-                )
+                return restored.get("status") == original_user.get("status") and restored.get(
+                    "groups"
+                ) == original_user.get("groups")
 
             _cleanup_step(
                 cleanup,
