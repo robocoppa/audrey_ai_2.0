@@ -26,6 +26,7 @@ router = APIRouter(prefix="/v1/me", tags=["user-data"])
 _MEMORY_HOST_TOOL = "memory_search"
 _CHAT_HOST_TOOL = "chat_history_search"
 _MEMORY_LIST_PATH = "/user_data/memories/list"
+_MEMORY_CREATE_PATH = "/user_data/memories/create"
 _MEMORY_UPDATE_PATH = "/user_data/memories/update"
 _MEMORY_DELETE_PATH = "/user_data/memories/delete"
 _CHAT_EXPORT_PATH = "/user_data/chat_history/export"
@@ -44,6 +45,12 @@ class MemoryItem(BaseModel):
 class MemoryPage(BaseModel):
     items: list[MemoryItem]
     next_cursor: str | None = None
+
+
+class MemoryCreation(BaseModel):
+    key: Annotated[str, Field(min_length=1, max_length=200)]
+    value: Annotated[str, Field(min_length=1, max_length=20_000)]
+    tags: Annotated[str, Field(max_length=500)] = ""
 
 
 class MemoryCorrection(BaseModel):
@@ -187,6 +194,7 @@ async def _request_backend(
     body: dict[str, Any],
     unprocessable_detail: str,
     not_found_detail: str | None = None,
+    conflict_detail: str | None = None,
 ) -> dict[str, Any]:
     client: httpx.AsyncClient | None = getattr(
         request.app.state, "archive_http", None,
@@ -223,6 +231,8 @@ async def _request_backend(
             )
         if response.status_code == 404 and not_found_detail is not None:
             raise HTTPException(status_code=404, detail=not_found_detail)
+        if response.status_code == 409 and conflict_detail is not None:
+            raise HTTPException(status_code=409, detail=conflict_detail)
         status_code = (
             503
             if response.status_code >= 500 or response.status_code == 401
@@ -292,6 +302,35 @@ async def list_memories(
     )
     try:
         return MemoryPage.model_validate(value)
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=502,
+            detail="user_data_backend_invalid_response",
+        ) from e
+
+
+@router.post("/memories", response_model=MemoryItem, status_code=201)
+async def create_memory(
+    request: Request,
+    creation: MemoryCreation,
+    me: AuthedUser = Depends(require_user),
+) -> MemoryItem:
+    """Add a new memory under the authenticated account, without overwriting."""
+    value = await _request_backend(
+        request,
+        tool_name=_MEMORY_HOST_TOOL,
+        path=_MEMORY_CREATE_PATH,
+        body={
+            "user": me.email,
+            "key": creation.key,
+            "value": creation.value,
+            "tags": creation.tags,
+        },
+        unprocessable_detail="invalid_memory_creation",
+        conflict_detail="memory_already_exists",
+    )
+    try:
+        return MemoryItem.model_validate(value)
     except ValidationError as e:
         raise HTTPException(
             status_code=502,

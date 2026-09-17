@@ -416,6 +416,57 @@ class MemoryStore:
             ))
         return entries, str(next_offset) if next_offset is not None else None
 
+    async def create_user(
+        self,
+        *,
+        user: str,
+        key: str,
+        value: str,
+        tags: str = "",
+    ) -> MemoryEntry | None:
+        """Create an owner-scoped memory, refusing an existing exact key."""
+        user = user.strip()
+        key = key.strip()
+        value = value.strip()
+        if not user or not key or not value:
+            raise ValueError("user, key, and value are required")
+
+        point_id = _point_id(user, key)
+        existing = await self._qdrant.retrieve(
+            collection_name=self._collection,
+            ids=[point_id],
+            with_payload=True,
+        )
+        if existing:
+            return None
+
+        public_tags = _public_tags(tags)
+        stored_tags = _scoped_tags(user, public_tags)
+        now = _dt.datetime.now(_dt.UTC).isoformat(timespec="microseconds")
+        vector = await self._embed(_embedding_text(key, value, stored_tags))
+        await self._qdrant.upsert(
+            collection_name=self._collection,
+            points=[
+                qm.PointStruct(
+                    id=point_id,
+                    vector=vector,
+                    payload={
+                        "key": key,
+                        "value": value,
+                        "tags": stored_tags,
+                        "user": user,
+                        "created_at": now,
+                        "updated_at": now,
+                    },
+                )
+            ],
+            wait=True,
+        )
+        return MemoryEntry(
+            key=key, value=value, tags=public_tags,
+            created_at=now, updated_at=now,
+        )
+
     async def update_user(
         self,
         *,

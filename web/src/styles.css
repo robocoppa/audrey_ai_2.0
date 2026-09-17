@@ -2641,6 +2641,13 @@ a:focus-visible {
   gap: 0.8rem;
 }
 
+.memory-create-form {
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background: var(--surface-raised);
+}
+
 .memory-list {
   display: grid;
   margin: 0;

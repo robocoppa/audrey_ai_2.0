@@ -531,6 +531,18 @@ export function listSavedMemories(cursor?: string): Promise<ListResponse<SavedMe
   return apiJson<ListResponse<SavedMemory>>(`/v1/me/memories?${params}`);
 }
 
+export function createSavedMemory(
+  key: string,
+  value: string,
+  tags: string,
+): Promise<SavedMemory> {
+  return apiJson<SavedMemory>("/v1/me/memories", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key, value, tags }),
+  });
+}
+
 export function correctSavedMemory(
   key: string,
   value: string,

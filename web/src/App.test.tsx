@@ -693,6 +693,19 @@ describe("App", () => {
           next_cursor: null,
         }), { status: 200, headers: { "Content-Type": "application/json" } }));
       }
+      if (path === "/v1/me/memories" && request?.method === "POST") {
+        const body = JSON.parse(String(request.body)) as {
+          key: string; value: string; tags: string;
+        };
+        return Promise.resolve(new Response(JSON.stringify(
+          body.key === "preferred_name"
+            ? { detail: "memory_already_exists" }
+            : { ...body, created_at: "created", updated_at: "updated" },
+        ), {
+          status: body.key === "preferred_name" ? 409 : 201,
+          headers: { "Content-Type": "application/json" },
+        }));
+      }
       if (path === memoryPath && request?.method === "PUT") {
         return Promise.resolve(new Response(JSON.stringify({
           ...firstMemory,
@@ -735,6 +748,40 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Load more memories" }));
     expect(await screen.findByText(secondMemory.value)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add memory" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "New memory key" }), {
+      target: { value: "preferred_name" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "New memory text" }), {
+      target: { value: "The user prefers concise answers." },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "New memory tags" }), {
+      target: { value: "profile" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save memory" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "A memory with that key already exists. Edit it instead.",
+    );
+    expect(screen.getByText(secondMemory.value)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "New memory key" }), {
+      target: { value: "response_style" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save memory" }));
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "New memory key" })).not.toBeInTheDocument());
+    expect(screen.getByText("The user prefers concise answers.")).toBeInTheDocument();
+    const create = fetchMock.mock.calls.find(
+      ([path, request]) => path === "/v1/me/memories"
+        && request?.method === "POST"
+        && JSON.parse(String(request.body)).key === "response_style",
+    ) as [string, RequestInit] | undefined;
+    expect(JSON.parse(String(create?.[1].body))).toEqual({
+      key: "response_style",
+      value: "The user prefers concise answers.",
+      tags: "profile",
+    });
+    expect(create?.[1]).toEqual(expect.objectContaining({ credentials: "same-origin" }));
 
     fireEvent.click(screen.getByRole("button", { name: `Edit memory ${firstMemory.key}` }));
     fireEvent.change(screen.getByRole("textbox", { name: "Memory text" }), {

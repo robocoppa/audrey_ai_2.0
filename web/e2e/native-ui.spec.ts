@@ -1206,12 +1206,25 @@ test("manages saved memories through the production browser bundle", async ({ pa
   };
   let deleted = false;
   const corrections: unknown[] = [];
+  const creations: unknown[] = [];
 
   await page.route("**/v1/me/memories**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     if (url.pathname === "/v1/me/memories" && request.method() === "GET") {
       await json(route, { items: deleted ? [] : [memory], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/v1/me/memories" && request.method() === "POST") {
+      const payload = request.postDataJSON() as {
+        key: string; value: string; tags: string;
+      };
+      creations.push(payload);
+      await json(route, {
+        ...payload,
+        created_at: "2026-09-01T00:02:00Z",
+        updated_at: "2026-09-01T00:02:00Z",
+      });
       return;
     }
     if (url.pathname === "/v1/me/memories/preferred_name" && request.method() === "PUT") {
@@ -1267,6 +1280,16 @@ test("manages saved memories through the production browser bundle", async ({ pa
   await dialog.getByRole("button", { name: "Confirm delete memory preferred_name" }).click();
   await expect(dialog.getByText("No saved memories.")).toBeVisible();
   expect(deleted).toBe(true);
+
+  await dialog.getByRole("button", { name: "Add memory" }).click();
+  await dialog.getByRole("textbox", { name: "New memory key" }).fill("response_style");
+  await dialog.getByRole("textbox", { name: "New memory text" }).fill("Prefer concise replies.");
+  await dialog.getByRole("textbox", { name: "New memory tags" }).fill("profile");
+  await dialog.getByRole("button", { name: "Save memory" }).click();
+  await expect(dialog.getByText("Prefer concise replies.")).toBeVisible();
+  expect(creations).toEqual([{
+    key: "response_style", value: "Prefer concise replies.", tags: "profile",
+  }]);
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations).toEqual([]);
 });

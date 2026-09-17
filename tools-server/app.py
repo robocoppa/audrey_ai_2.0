@@ -357,6 +357,13 @@ class UserDataPageRequest(BaseModel):
     cursor: Annotated[str | None, Field(max_length=512)] = None
 
 
+class MemoryCreateRequest(BaseModel):
+    user: Annotated[str, Field(min_length=1, max_length=200)]
+    key: Annotated[str, Field(min_length=1, max_length=200)]
+    value: Annotated[str, Field(min_length=1, max_length=20_000)]
+    tags: Annotated[str, Field(max_length=500)] = ""
+
+
 class MemoryMutationRequest(BaseModel):
     user: Annotated[str, Field(min_length=1, max_length=200)]
     key: Annotated[str, Field(min_length=1, max_length=200)]
@@ -1167,6 +1174,38 @@ async def user_data_memories_list(
         items=[MemoryEntryResponse.from_entry(item) for item in items],
         next_cursor=next_cursor,
     )
+
+
+@app.post(
+    "/user_data/memories/create",
+    response_model=MemoryEntryResponse,
+    status_code=status.HTTP_201_CREATED,
+    include_in_schema=False,
+    tags=["internal"],
+)
+async def user_data_memories_create(
+    req: MemoryCreateRequest,
+    _: None = Depends(_require_internal_service),
+) -> MemoryEntryResponse:
+    _require_capabilities("text_embedding")
+    memory = _memory_store()
+    try:
+        item = await memory.create_user(
+            user=req.user,
+            key=req.key,
+            value=req.value,
+            tags=req.tags,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e),
+        ) from e
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="memory_already_exists",
+        )
+    return MemoryEntryResponse.from_entry(item)
 
 
 @app.post(

@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 
 import {
+  ApiError,
   createPersonalToken,
+  createSavedMemory,
   correctSavedMemory,
   deleteSavedMemory,
   exportChatHistory,
@@ -66,6 +68,11 @@ export function AccountSettings({
   const [memories, setMemories] = useState<SavedMemory[]>([]);
   const [nextMemoryCursor, setNextMemoryCursor] = useState<string | null>(null);
   const [memoriesLoading, setMemoriesLoading] = useState(false);
+  const [memoryCreateOpen, setMemoryCreateOpen] = useState(false);
+  const [memoryCreating, setMemoryCreating] = useState(false);
+  const [newMemoryKey, setNewMemoryKey] = useState("");
+  const [newMemoryValue, setNewMemoryValue] = useState("");
+  const [newMemoryTags, setNewMemoryTags] = useState("");
   const [memoryEditingKey, setMemoryEditingKey] = useState("");
   const [memoryValue, setMemoryValue] = useState("");
   const [memoryTags, setMemoryTags] = useState("");
@@ -83,7 +90,8 @@ export function AccountSettings({
   const [purgeIdempotencyKey, setPurgeIdempotencyKey] = useState("");
   const [purgeStatus, setPurgeStatus] = useState<AccountPurgeStatus | null>(null);
   const tokenBusy = tokensLoading || tokenCreating || Boolean(revokingTokenId);
-  const memoryBusy = memoriesLoading || Boolean(memorySavingKey) || Boolean(memoryDeletingKey);
+  const memoryBusy = memoriesLoading || memoryCreating
+    || Boolean(memorySavingKey) || Boolean(memoryDeletingKey);
   const dataBusy = dataExporting || purgeRequesting;
   const busy = profileSaving || preferencesSaving || tokenBusy || memoryBusy || dataBusy
     || Boolean(issuedToken);
@@ -263,6 +271,29 @@ export function AccountSettings({
   async function openMemories() {
     setMemoriesOpen(true);
     await loadMemories();
+  }
+
+  async function addMemory(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!newMemoryKey.trim() || !newMemoryValue.trim()) return;
+    setMemoryCreating(true);
+    setMemoryError("");
+    try {
+      const created = await createSavedMemory(
+        newMemoryKey.trim(), newMemoryValue.trim(), newMemoryTags.trim(),
+      );
+      setMemories((current) => [created, ...current.filter(({ key }) => key !== created.key)]);
+      setMemoryCreateOpen(false);
+      setNewMemoryKey("");
+      setNewMemoryValue("");
+      setNewMemoryTags("");
+    } catch (reason) {
+      setMemoryError(reason instanceof ApiError && reason.status === 409
+        ? "A memory with that key already exists. Edit it instead."
+        : messageOf(reason, "Memory could not be added."));
+    } finally {
+      setMemoryCreating(false);
+    }
   }
 
   function startMemoryEdit(item: SavedMemory) {
@@ -701,7 +732,7 @@ export function AccountSettings({
         <section className="settings-section" aria-labelledby="saved-memories-title">
           <div className="settings-section-heading">
             <h3 id="saved-memories-title">Saved memories</h3>
-            <p>Review what Audrey remembers about you. Correct a memory or delete it if it is no longer useful.</p>
+            <p>Add a memory, or review, correct, and delete what Audrey remembers about you.</p>
           </div>
           {!memoriesOpen ? (
             <button type="button" onClick={() => void openMemories()}>
@@ -710,6 +741,68 @@ export function AccountSettings({
           ) : (
             <div className="memory-manager">
               {memoryError ? <p className="settings-error" role="alert">{memoryError}</p> : null}
+              {!memoryCreateOpen ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMemoryCreateOpen(true);
+                    setMemoryError("");
+                  }}
+                  disabled={memoryBusy}
+                >
+                  Add memory
+                </button>
+              ) : (
+                <form className="memory-edit-form memory-create-form" onSubmit={(event) => void addMemory(event)}>
+                  <label>
+                    <span>Key</span>
+                    <input
+                      aria-label="New memory key"
+                      maxLength={200}
+                      required
+                      value={newMemoryKey}
+                      onChange={(event) => setNewMemoryKey(event.target.value)}
+                      disabled={memoryCreating}
+                    />
+                  </label>
+                  <label>
+                    <span>Memory text</span>
+                    <textarea
+                      aria-label="New memory text"
+                      maxLength={20_000}
+                      required
+                      value={newMemoryValue}
+                      onChange={(event) => setNewMemoryValue(event.target.value)}
+                      disabled={memoryCreating}
+                    />
+                  </label>
+                  <label>
+                    <span>Tags</span>
+                    <input
+                      aria-label="New memory tags"
+                      maxLength={500}
+                      value={newMemoryTags}
+                      onChange={(event) => setNewMemoryTags(event.target.value)}
+                      disabled={memoryCreating}
+                    />
+                  </label>
+                  <div className="token-actions">
+                    <button
+                      type="submit"
+                      disabled={memoryCreating || !newMemoryKey.trim() || !newMemoryValue.trim()}
+                    >
+                      {memoryCreating ? "Saving…" : "Save memory"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMemoryCreateOpen(false)}
+                      disabled={memoryCreating}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
               {memoriesLoading && memories.length === 0 ? (
                 <p className="token-empty" role="status">Loading saved memories…</p>
               ) : memories.length === 0 && !memoryError ? (

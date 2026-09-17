@@ -22,7 +22,9 @@ from audrey.identity import Principal
 from audrey.routes.user_data import (
     AccountPurgeRequest,
     MemoryCorrection,
+    MemoryCreation,
     correct_memory,
+    create_memory,
     delete_chat_history,
     delete_memory,
     export_chat_history,
@@ -178,6 +180,33 @@ async def test_memory_correction_and_delete_are_exact_user_scoped():
     )
     assert qdrant.point_id not in qdrant.points
     assert qdrant.delete_calls == [{"collection_name": "kb_memory", "wait": True}]
+
+
+async def test_memory_create_refuses_existing_key_and_strips_injected_user_tag():
+    qdrant = _MemoryMutationQdrant(user="alice@example.com", key="theme")
+    store = memory_module.MemoryStore.__new__(memory_module.MemoryStore)
+    store._qdrant = qdrant
+    store._collection = "kb_memory"
+    store._embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
+
+    assert await store.create_user(
+        user="alice@example.com", key="theme", value="replacement",
+    ) is None
+    assert qdrant.upsert_calls == []
+    assert qdrant.points[qdrant.point_id]["value"] == "dark"
+
+    created = await store.create_user(
+        user="alice@example.com",
+        key="favourite_colour",
+        value="blue",
+        tags="topic:profile,user:bob@example.com",
+    )
+    assert created is not None
+    assert created.tags == "topic:profile"
+    point_id = memory_module._point_id("alice@example.com", "favourite_colour")
+    assert qdrant.points[point_id]["tags"] == "user:alice@example.com,topic:profile"
+    assert qdrant.points[point_id]["user"] == "alice@example.com"
+    assert qdrant.upsert_calls == [{"collection_name": "kb_memory", "wait": True}]
 
 
 class _MemoryPurgeQdrant:
@@ -534,6 +563,44 @@ async def test_remote_inventory_is_hidden_until_purge_cutoff_is_acknowledged():
     finally:
         unblock_remote_personal_reads(user=me.email, purge_id="purge-gate")
 
+
+
+async def test_memory_create_route_injects_owner_and_preserves_conflict():
+    me = AuthedUser(email="alice@example.com", role="user", owui_id="a")
+    request, http = _request(
+        tool="memory_search",
+        response={
+            "key": "favourite_colour",
+            "value": "blue",
+            "tags": "topic:profile",
+            "created_at": "created",
+            "updated_at": "updated",
+        },
+    )
+    created = await create_memory(
+        request,
+        MemoryCreation(
+            key="favourite_colour", value="blue",
+            tags="topic:profile,user:bob@example.com",
+        ),
+        me=me,
+    )
+    assert created.tags == "topic:profile"
+    assert http.post.await_args.args[0].endswith("/user_data/memories/create")
+    assert http.post.await_args.kwargs["json"] == {
+        "user": "alice@example.com",
+        "key": "favourite_colour",
+        "value": "blue",
+        "tags": "topic:profile,user:bob@example.com",
+    }
+
+    http.post.return_value = httpx.Response(409, json={"detail": "memory_already_exists"})
+    with pytest.raises(HTTPException) as exc:
+        await create_memory(
+            request, MemoryCreation(key="favourite_colour", value="other"), me=me,
+        )
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "memory_already_exists"
 
 
 async def test_mutation_routes_inject_authenticated_user():
@@ -972,6 +1039,7 @@ def test_public_routes_do_not_accept_a_user_selector():
 
     operations = (
         ("/v1/me/memories", "get"),
+        ("/v1/me/memories", "post"),
         ("/v1/me/memories/{key}", "put"),
         ("/v1/me/memories/{key}", "delete"),
         ("/v1/me/chat-history/export", "get"),
@@ -1009,6 +1077,7 @@ def test_internal_routes_are_hidden_from_model_tool_discovery():
     paths = tools_app_module.app.openapi()["paths"]
 
     assert "/user_data/memories/list" not in paths
+    assert "/user_data/memories/create" not in paths
     assert "/user_data/memories/update" not in paths
     assert "/user_data/memories/delete" not in paths
     assert "/user_data/chat_history/export" not in paths
@@ -1020,13 +1089,53 @@ def test_internal_routes_are_hidden_from_model_tool_discovery():
     assert "/user_data/purge/status" not in paths
 
 
-def test_internal_repair_routes_use_service_only_dependency():
+def test_internal_sensitive_routes_use_service_only_dependency():
     routes = {route.path: route for route in tools_app_module.app.routes}
-    for path in ("/user_data/repair/status", "/user_data/repair/run"):
+    for path in (
+        "/user_data/repair/status",
+        "/user_data/repair/run",
+        "/user_data/memories/create",
+    ):
         dependencies = {
             item.call for item in routes[path].dependant.dependencies
         }
         assert tools_app_module._require_internal_service in dependencies
+
+
+async def test_internal_memory_create_returns_public_tags_and_conflict(monkeypatch):
+    entry = memory_module.MemoryEntry(
+        key="favourite_colour",
+        value="blue",
+        tags="topic:profile",
+        created_at="created",
+        updated_at="updated",
+    )
+    create = AsyncMock(return_value=entry)
+    monkeypatch.setattr(
+        tools_app_module, "_memory_store",
+        lambda: SimpleNamespace(create_user=create),
+    )
+    monkeypatch.setattr(tools_app_module, "_require_capabilities", lambda *_: None)
+    request = tools_app_module.MemoryCreateRequest(
+        user="alice@example.com",
+        key="favourite_colour",
+        value="blue",
+        tags="topic:profile,user:bob@example.com",
+    )
+
+    result = await tools_app_module.user_data_memories_create(request, None)
+    assert result.tags == "topic:profile"
+    create.assert_awaited_once_with(
+        user="alice@example.com",
+        key="favourite_colour",
+        value="blue",
+        tags="topic:profile,user:bob@example.com",
+    )
+
+    create.return_value = None
+    with pytest.raises(HTTPException) as exc:
+        await tools_app_module.user_data_memories_create(request, None)
+    assert exc.value.status_code == 409
 
 
 async def test_internal_repair_routes_delegate_to_bounded_store_pass(monkeypatch):
