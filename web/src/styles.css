@@ -325,28 +325,6 @@ button:disabled {
   color: var(--danger);
 }
 
-.sidebar-delete-confirmation {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  padding: 0.35rem 0.5rem 0.55rem;
-  color: var(--danger);
-  font-size: 0.7rem;
-}
-
-.sidebar-delete-confirmation span {
-  flex: 1 1 100%;
-}
-
-.sidebar-delete-confirmation button {
-  padding: 0.3rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 0.45rem;
-  background: var(--surface-raised);
-  font-size: 0.68rem;
-}
-
 @media (hover: none) {
   .conversation-delete {
     opacity: 1;
@@ -450,8 +428,7 @@ button:disabled {
 }
 
 .thread-controls,
-.conversation-actions,
-.delete-confirmation {
+.conversation-actions {
   display: flex;
   align-items: center;
   gap: 0.45rem;
@@ -466,14 +443,17 @@ button:disabled {
   color: var(--danger) !important;
 }
 
-.delete-confirmation {
-  padding-left: 0.45rem;
-  border-left: 1px solid rgb(255 145 164 / 28%);
+button.confirming-delete {
+  border-color: rgb(255 145 164 / 56%);
+  background: rgb(255 145 164 / 12%);
+  color: var(--danger) !important;
+  font-weight: 800;
 }
 
-.delete-confirmation span {
-  color: var(--danger);
-  font-size: 0.7rem;
+.conversation-delete.confirming-delete {
+  opacity: 1;
+  pointer-events: auto;
+  font-size: 1.05rem;
 }
 
 .conversation-mutation-error {
@@ -518,7 +498,7 @@ a:focus-visible {
   position: relative;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 1rem max(1rem, calc((100% - 50rem) / 2));
+  padding: 1rem max(1rem, calc((100% - 64rem) / 2));
   scrollbar-gutter: stable;
 }
 
@@ -750,7 +730,7 @@ a:focus-visible {
   position: sticky;
   z-index: 4;
   bottom: 0;
-  width: min(100%, 50rem);
+  width: min(100%, 64rem);
   margin: 1rem auto 0;
   padding: 0.5rem 0 max(1rem, env(safe-area-inset-bottom));
   background: linear-gradient(
@@ -2085,21 +2065,6 @@ a:focus-visible {
   white-space: nowrap;
 }
 
-.admin-delete-confirmation {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-}
-
-.admin-delete-confirmation span {
-  flex: 1 1 100%;
-  color: var(--danger);
-  font-size: 0.72rem;
-  line-height: 1.45;
-}
-
 .admin-model-state {
   display: flex;
   flex: 0 0 auto;
@@ -3156,8 +3121,7 @@ a:focus-visible {
   color: var(--warning);
 }
 
-.file-remove,
-.file-delete-confirm button {
+.file-remove {
   padding: 0.4rem 0.55rem;
   border: 1px solid var(--border);
   border-radius: 0.5rem;
@@ -3168,16 +3132,6 @@ a:focus-visible {
 
 .file-remove:hover {
   border-color: rgb(255 145 164 / 45%);
-  color: var(--danger);
-}
-
-.file-delete-confirm {
-  display: flex;
-  gap: 0.3rem;
-}
-
-.file-delete-confirm .danger-button {
-  border-color: rgb(255 145 164 / 36%);
   color: var(--danger);
 }
 
@@ -3327,8 +3281,7 @@ a:focus-visible {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .file-remove,
-  .file-delete-confirm {
+  .file-remove {
     grid-column: 2;
     justify-self: start;
   }

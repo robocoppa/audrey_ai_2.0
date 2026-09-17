@@ -292,7 +292,10 @@ describe("AdminPanel", () => {
     expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/admin/users/usr_pending", expect.objectContaining({ method: "DELETE" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Yes, delete account" }));
+    const confirmDelete = screen.getByRole("button", { name: "Confirm delete account Pending Person" });
+    expect(confirmDelete).toHaveTextContent("✓");
+    expect(confirmDelete).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(confirmDelete);
     await waitFor(() => expect(screen.getByText("deleting")).toBeVisible());
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/admin/users/usr_pending", expect.objectContaining({ method: "DELETE" }),

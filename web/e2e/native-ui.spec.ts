@@ -745,6 +745,8 @@ test("keeps the composer docked and returns to the latest message", async ({ pag
   const dockAtLatest = await dock.boundingBox();
   const viewportBox = await viewport.boundingBox();
   expect(dockAtLatest).not.toBeNull();
+  expect(dockAtLatest?.width ?? 0).toBeGreaterThan(810);
+  expect((dockAtLatest?.x ?? 0) + (dockAtLatest?.width ?? 0)).toBeLessThanOrEqual(1280);
   expect(viewportBox).not.toBeNull();
 
   await viewport.evaluate((element) => element.scrollTo({ top: 0 }));
@@ -925,9 +927,9 @@ test("searches, renames, archives, restores, and deletes a conversation", async 
   await sidebarRow.hover();
   await expect(trash).toHaveCSS("opacity", "1");
   await trash.click();
-  const confirmation = sidebarRow.getByRole("group", { name: "Confirm deletion of Lifecycle renamed" });
-  await expect(confirmation).toBeVisible();
-  await confirmation.getByRole("button", { name: "Delete", exact: true }).click();
+  const confirmTrash = sidebarRow.getByRole("button", { name: "Confirm delete conversation Lifecycle renamed" });
+  await expect(confirmTrash).toHaveText("✓");
+  await confirmTrash.click();
   await expect(page.getByText("No matching conversation titles.")).toBeVisible();
 });
 
@@ -1262,7 +1264,7 @@ test("manages saved memories through the production browser bundle", async ({ pa
 
   await dialog.getByRole("button", { name: "Delete memory preferred_name" }).click();
   expect(deleted).toBe(false);
-  await dialog.getByRole("button", { name: "Confirm delete memory" }).click();
+  await dialog.getByRole("button", { name: "Confirm delete memory preferred_name" }).click();
   await expect(dialog.getByText("No saved memories.")).toBeVisible();
   expect(deleted).toBe(true);
   const accessibility = await new AxeBuilder({ page }).analyze();
@@ -1370,7 +1372,7 @@ test("manages personal tokens through the production browser bundle", async ({ p
   await dialog.getByRole("button", { name: "I saved it" }).click();
   await expect(dialog.getByRole("button", { name: "Close settings" })).toBeEnabled();
   await dialog.getByRole("button", { name: "Revoke Browser CLI" }).click();
-  await dialog.getByRole("button", { name: "Confirm revoke" }).click();
+  await dialog.getByRole("button", { name: "Confirm revoke Browser CLI" }).click();
   await expect(dialog.getByText("Browser CLI")).toHaveCount(0);
   await expect(dialog.getByText("Existing client")).toBeVisible();
 
@@ -1717,8 +1719,9 @@ test("manages owner-bound files without a browser bearer token", async ({ page }
   await expect(dialog.getByText("new-notes.txt")).toBeVisible();
 
   await dialog.getByRole("button", { name: "Delete new-notes.txt" }).click();
-  const confirmation = dialog.getByRole("group", { name: "Delete new-notes.txt" });
-  await confirmation.getByRole("button", { name: "Delete", exact: true }).click();
+  const confirmDelete = dialog.getByRole("button", { name: "Confirm delete new-notes.txt" });
+  await expect(confirmDelete).toHaveText("✓");
+  await confirmDelete.click();
   await expect(dialog.getByText("new-notes.txt")).toHaveCount(0);
   expect(authorizationHeaders.every((value) => value === undefined)).toBe(true);
 });

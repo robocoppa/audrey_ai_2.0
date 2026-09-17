@@ -666,35 +666,30 @@ export function AccountSettings({
                           </dd>
                         </div>
                       </dl>
-                      {revokeConfirmId === record.id ? (
-                        <div className="token-actions">
-                          <button
-                            className="danger-button"
-                            type="button"
-                            onClick={() => void revokeToken(record.id)}
-                            disabled={Boolean(revokingTokenId)}
-                          >
-                            {revokingTokenId === record.id ? "Revoking…" : "Confirm revoke"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setRevokeConfirmId("")}
-                            disabled={Boolean(revokingTokenId)}
-                          >
-                            Keep token
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          className="token-revoke-button"
-                          type="button"
-                          aria-label={`Revoke ${record.name}`}
-                          onClick={() => setRevokeConfirmId(record.id)}
-                          disabled={tokenBusy}
-                        >
-                          Revoke
-                        </button>
-                      )}
+                      <button
+                        className={revokeConfirmId === record.id
+                          ? "token-revoke-button confirming-delete"
+                          : "token-revoke-button"}
+                        type="button"
+                        aria-label={`${revokeConfirmId === record.id ? "Confirm revoke" : "Revoke"} ${record.name}`}
+                        aria-pressed={revokeConfirmId === record.id}
+                        title={revokeConfirmId === record.id ? "Click again to revoke" : "Revoke token"}
+                        onClick={() => {
+                          if (revokeConfirmId === record.id) {
+                            void revokeToken(record.id);
+                          } else {
+                            setRevokeConfirmId(record.id);
+                          }
+                        }}
+                        onBlur={() => setRevokeConfirmId((current) =>
+                          current === record.id ? "" : current)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape") setRevokeConfirmId("");
+                        }}
+                        disabled={tokenBusy}
+                      >
+                        {revokingTokenId === record.id ? "Revoking…" : revokeConfirmId === record.id ? "✓" : "Revoke"}
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -765,45 +760,40 @@ export function AccountSettings({
                         <>
                           <p className="memory-value">{item.value}</p>
                           {item.tags ? <p className="memory-tags">Tags: {item.tags}</p> : null}
-                          {memoryDeleteConfirmKey === item.key ? (
-                            <div className="token-actions">
-                              <button
-                                className="danger-button"
-                                type="button"
-                                onClick={() => void removeMemory(item.key)}
-                                disabled={Boolean(memoryDeletingKey)}
-                              >
-                                {memoryDeletingKey ? "Deleting…" : "Confirm delete memory"}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setMemoryDeleteConfirmKey("")}
-                                disabled={Boolean(memoryDeletingKey)}
-                              >
-                                Keep memory
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="token-actions">
-                              <button
-                                type="button"
-                                aria-label={`Edit memory ${item.key}`}
-                                onClick={() => startMemoryEdit(item)}
-                                disabled={memoryBusy}
-                              >
-                                Edit
-                              </button>
-                              <button
-                                className="danger-button"
-                                type="button"
-                                aria-label={`Delete memory ${item.key}`}
-                                onClick={() => setMemoryDeleteConfirmKey(item.key)}
-                                disabled={memoryBusy}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          )}
+                          <div className="token-actions">
+                            <button
+                              type="button"
+                              aria-label={`Edit memory ${item.key}`}
+                              onClick={() => startMemoryEdit(item)}
+                              disabled={memoryBusy}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className={memoryDeleteConfirmKey === item.key
+                                ? "danger-button confirming-delete"
+                                : "danger-button"}
+                              type="button"
+                              aria-label={`${memoryDeleteConfirmKey === item.key ? "Confirm delete" : "Delete"} memory ${item.key}`}
+                              aria-pressed={memoryDeleteConfirmKey === item.key}
+                              title={memoryDeleteConfirmKey === item.key ? "Click again to delete" : "Delete memory"}
+                              onClick={() => {
+                                if (memoryDeleteConfirmKey === item.key) {
+                                  void removeMemory(item.key);
+                                } else {
+                                  setMemoryDeleteConfirmKey(item.key);
+                                }
+                              }}
+                              onBlur={() => setMemoryDeleteConfirmKey((current) =>
+                                current === item.key ? "" : current)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Escape") setMemoryDeleteConfirmKey("");
+                              }}
+                              disabled={memoryBusy}
+                            >
+                              {memoryDeletingKey === item.key ? "Deleting…" : memoryDeleteConfirmKey === item.key ? "✓" : "Delete"}
+                            </button>
+                          </div>
                         </>
                       )}
                     </li>

@@ -622,30 +622,41 @@ export function AdminPanel({
                         </div>
                       )}
                       {!isSelf && !user.deletion_pending ? (
-                        <>
-                          <button
-                            className="admin-delete-trigger danger-button"
-                            type="button"
-                            aria-label={`Delete account ${user.display_name || user.email}`}
-                            title="Delete account"
-                            aria-expanded={deleteConfirmId === user.id}
-                            onClick={() => setDeleteConfirmId(user.id)}
-                            disabled={rowBusy}
-                          >
+                        <button
+                          className={deleteConfirmId === user.id
+                            ? "admin-delete-trigger danger-button confirming-delete"
+                            : "admin-delete-trigger danger-button"}
+                          type="button"
+                          aria-label={`${deleteConfirmId === user.id ? "Confirm delete" : "Delete"} account ${user.display_name || user.email}`}
+                          aria-description="Permanently removes this account and its Audrey data. The identity provider may still allow them to sign in again."
+                          aria-pressed={deleteConfirmId === user.id}
+                          title={deleteConfirmId === user.id
+                            ? "Click again to permanently delete this account and its Audrey data"
+                            : "Delete account"}
+                          onClick={() => {
+                            if (deleteConfirmId === user.id) {
+                              void deleteUser(user);
+                            } else {
+                              setDeleteConfirmId(user.id);
+                            }
+                          }}
+                          onBlur={() => setDeleteConfirmId((current) =>
+                            current === user.id ? "" : current)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Escape") setDeleteConfirmId("");
+                          }}
+                          disabled={rowBusy}
+                        >
+                          {busyKey === `user:${user.id}` && deleteConfirmId === user.id ? (
+                            <span aria-hidden="true">…</span>
+                          ) : deleteConfirmId === user.id ? (
+                            <span aria-hidden="true">✓</span>
+                          ) : (
                             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                               <path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v6m4-6v6" />
                             </svg>
-                          </button>
-                          {deleteConfirmId === user.id ? (
-                            <div className="admin-delete-confirmation" role="group" aria-label={`Confirm deletion of ${user.email}`}>
-                              <span>Delete this account and all its Audrey data permanently? They can sign in again if their identity provider still allows access.</span>
-                              <button className="danger-button" type="button" onClick={() => void deleteUser(user)} disabled={rowBusy}>
-                                {rowBusy ? "Deleting…" : "Yes, delete account"}
-                              </button>
-                              <button type="button" onClick={() => setDeleteConfirmId("")} disabled={rowBusy}>Cancel</button>
-                            </div>
-                          ) : null}
-                        </>
+                          )}
+                        </button>
                       ) : null}
                     </article>
                   );
@@ -738,18 +749,30 @@ export function AdminPanel({
                               setRoleName(role.name);
                               setRoleDescription(role.description);
                             }}>Edit</button>
-                            {deleteRoleId === role.id ? (
-                              <>
-                                <button className="danger-button" type="button" disabled={busy} onClick={() => void removeRole(role)}>
-                                  Confirm delete
-                                </button>
-                                <button type="button" disabled={busy} onClick={() => setDeleteRoleId("")}>Cancel</button>
-                              </>
-                            ) : (
-                              <button className="danger-button" type="button" disabled={busy} onClick={() => setDeleteRoleId(role.id)}>
-                                Delete
-                              </button>
-                            )}
+                            <button
+                              className={deleteRoleId === role.id
+                                ? "danger-button confirming-delete"
+                                : "danger-button"}
+                              type="button"
+                              aria-label={`${deleteRoleId === role.id ? "Confirm delete" : "Delete"} role ${role.name}`}
+                              aria-pressed={deleteRoleId === role.id}
+                              title={deleteRoleId === role.id ? "Click again to delete role" : "Delete role"}
+                              disabled={busy}
+                              onClick={() => {
+                                if (deleteRoleId === role.id) {
+                                  void removeRole(role);
+                                } else {
+                                  setDeleteRoleId(role.id);
+                                }
+                              }}
+                              onBlur={() => setDeleteRoleId((current) =>
+                                current === role.id ? "" : current)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Escape") setDeleteRoleId("");
+                              }}
+                            >
+                              {busyKey === `role:${role.id}` ? "Deleting…" : deleteRoleId === role.id ? "✓" : "Delete"}
+                            </button>
                           </div>
                         ) : null}
                       </>

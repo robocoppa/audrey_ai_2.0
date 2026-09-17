@@ -172,29 +172,27 @@ export function FileManager({ onClose }: { onClose: () => void }) {
                   {file.failure_reason ? <small>{file.failure_reason}</small> : null}
                   {file.source_freed_at ? <small>Original media reclaimed; derived text remains searchable.</small> : null}
                 </div>
-                {confirmingId === file.id ? (
-                  <div className="file-delete-confirm" role="group" aria-label={`Delete ${file.filename}`}>
-                    <button
-                      className="danger-button"
-                      type="button"
-                      onClick={() => void remove(file)}
-                      disabled={deletingId !== null}
-                    >
-                      {deletingId === file.id ? "Deleting…" : "Delete"}
-                    </button>
-                    <button type="button" onClick={() => setConfirmingId(null)}>Keep</button>
-                  </div>
-                ) : (
-                  <button
-                    className="file-remove"
-                    type="button"
-                    onClick={() => setConfirmingId(file.id)}
-                    disabled={uploading || deletingId !== null}
-                    aria-label={`Delete ${file.filename}`}
-                  >
-                    Remove
-                  </button>
-                )}
+                <button
+                  className={confirmingId === file.id ? "file-remove confirming-delete" : "file-remove"}
+                  type="button"
+                  aria-label={`${confirmingId === file.id ? "Confirm delete" : "Delete"} ${file.filename}`}
+                  aria-pressed={confirmingId === file.id}
+                  title={confirmingId === file.id ? "Click again to delete" : "Delete file"}
+                  onClick={() => {
+                    if (confirmingId === file.id) {
+                      void remove(file);
+                    } else {
+                      setConfirmingId(file.id);
+                    }
+                  }}
+                  onBlur={() => setConfirmingId((current) => current === file.id ? null : current)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setConfirmingId(null);
+                  }}
+                  disabled={uploading || deletingId !== null}
+                >
+                  {deletingId === file.id ? "Deleting…" : confirmingId === file.id ? "✓" : "Remove"}
+                </button>
               </li>
             ))}
           </ul>

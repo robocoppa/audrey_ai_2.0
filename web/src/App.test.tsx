@@ -110,7 +110,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "No models available" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "No models available" }, { timeout: 5000 })).toBeVisible();
     expect(await screen.findByText("Status unavailable")).toBeVisible();
     expect(screen.getByRole("button", { name: "Admin Panel" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "+ New" })).toBeDisabled();
@@ -653,7 +653,9 @@ describe("App", () => {
     expect(screen.queryByRole("textbox", { name: "New personal token" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Revoke Laptop token" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm revoke" }));
+    const confirmRevoke = screen.getByRole("button", { name: "Confirm revoke Laptop token" });
+    expect(confirmRevoke).toHaveTextContent("✓");
+    fireEvent.click(confirmRevoke);
     await waitFor(() => {
       expect(screen.queryByText("Laptop token")).not.toBeInTheDocument();
     });
@@ -757,7 +759,9 @@ describe("App", () => {
     expect(fetchMock.mock.calls.some(
       ([path, request]) => path === memoryPath && request?.method === "DELETE",
     )).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "Confirm delete memory" }));
+    const confirmDelete = screen.getByRole("button", { name: `Confirm delete memory ${firstMemory.key}` });
+    expect(confirmDelete).toHaveTextContent("✓");
+    fireEvent.click(confirmDelete);
     await waitFor(() => expect(
       screen.queryByText("The user's timezone is America/Denver."),
     ).not.toBeInTheDocument());

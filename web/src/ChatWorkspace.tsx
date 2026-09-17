@@ -359,26 +359,37 @@ export function ChatWorkspace({
                 <small>{modelLabel(models, conversation)}</small>
               </button>
               <button
-                className="conversation-delete"
+                className={confirmDeleteId === conversation.id
+                  ? "conversation-delete confirming-delete"
+                  : "conversation-delete"}
                 type="button"
-                aria-label={`Delete conversation ${conversation.title || "New conversation"}`}
-                title="Delete conversation"
-                onClick={() => setConfirmDeleteId(conversation.id)}
-                disabled={deletingId === conversation.id}
+                aria-label={`${confirmDeleteId === conversation.id ? "Confirm delete" : "Delete"} conversation ${conversation.title || "New conversation"}`}
+                aria-pressed={confirmDeleteId === conversation.id}
+                title={confirmDeleteId === conversation.id ? "Click again to delete" : "Delete conversation"}
+                onClick={() => {
+                  if (confirmDeleteId === conversation.id) {
+                    void deleteFromSidebar(conversation.id);
+                  } else {
+                    setConfirmDeleteId(conversation.id);
+                  }
+                }}
+                onBlur={() => setConfirmDeleteId((current) =>
+                  current === conversation.id ? null : current)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setConfirmDeleteId(null);
+                }}
+                disabled={deletingId !== null}
               >
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v6m4-6v6" />
-                </svg>
+                {deletingId === conversation.id ? (
+                  <span aria-hidden="true">…</span>
+                ) : confirmDeleteId === conversation.id ? (
+                  <span aria-hidden="true">✓</span>
+                ) : (
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v6m4-6v6" />
+                  </svg>
+                )}
               </button>
-              {confirmDeleteId === conversation.id ? (
-                <div className="sidebar-delete-confirmation" role="group" aria-label={`Confirm deletion of ${conversation.title || "New conversation"}`}>
-                  <span>Delete permanently?</span>
-                  <button className="danger-button" type="button" onClick={() => void deleteFromSidebar(conversation.id)} disabled={deletingId === conversation.id}>
-                    {deletingId === conversation.id ? "Deleting…" : "Delete"}
-                  </button>
-                  <button type="button" onClick={() => setConfirmDeleteId(null)} disabled={deletingId === conversation.id}>Cancel</button>
-                </div>
-              ) : null}
             </div>
           ))}
         </nav>
@@ -596,29 +607,27 @@ function ConversationThread({
               >
                 {archived ? "Restore" : "Archive"}
               </button>
-              {!confirmingDelete ? (
-                <button
-                  className="danger-button"
-                  type="button"
-                  onClick={() => setConfirmingDelete(true)}
-                  disabled={runActive || mutation !== null}
-                >
-                  Delete
-                </button>
-              ) : (
-                <div className="delete-confirmation" role="group" aria-label="Confirm deletion">
-                  <span>Delete permanently?</span>
-                  <button
-                    className="danger-button"
-                    type="button"
-                    onClick={() => void removeConversation()}
-                    disabled={mutation !== null}
-                  >
-                    Yes, delete
-                  </button>
-                  <button type="button" onClick={() => setConfirmingDelete(false)}>Keep</button>
-                </div>
-              )}
+              <button
+                className={confirmingDelete ? "danger-button confirming-delete" : "danger-button"}
+                type="button"
+                aria-label={confirmingDelete ? "Confirm delete conversation" : "Delete conversation"}
+                aria-pressed={confirmingDelete}
+                title={confirmingDelete ? "Click again to delete" : "Delete conversation"}
+                onClick={() => {
+                  if (confirmingDelete) {
+                    void removeConversation();
+                  } else {
+                    setConfirmingDelete(true);
+                  }
+                }}
+                onBlur={() => setConfirmingDelete(false)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setConfirmingDelete(false);
+                }}
+                disabled={runActive || mutation !== null}
+              >
+                {mutation === "delete" ? "Deleting…" : confirmingDelete ? "✓" : "Delete"}
+              </button>
             </div>
           </div>
         </header>
