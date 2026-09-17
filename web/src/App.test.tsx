@@ -663,6 +663,111 @@ describe("App", () => {
     );
   });
 
+  it("lists, corrects, and confirms deletion of owner-scoped memories", async () => {
+    const firstMemory = {
+      key: "profile/timezone",
+      value: "The user's timezone is UTC.",
+      tags: "profile",
+      created_at: "2026-09-01T00:00:00+00:00",
+      updated_at: "2026-09-01T00:00:00+00:00",
+    };
+    const secondMemory = {
+      ...firstMemory,
+      key: "preferred_name",
+      value: "Call the user Alice.",
+      tags: "",
+    };
+    const memoryPath = "/v1/me/memories/profile%2Ftimezone";
+    const fetchMock = vi.fn().mockImplementation((path: string, request?: RequestInit) => {
+      if (path === "/v1/me/memories?limit=50") {
+        return Promise.resolve(new Response(JSON.stringify({
+          items: [firstMemory],
+          next_cursor: "next/page",
+        }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      }
+      if (path === "/v1/me/memories?limit=50&cursor=next%2Fpage") {
+        return Promise.resolve(new Response(JSON.stringify({
+          items: [secondMemory],
+          next_cursor: null,
+        }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      }
+      if (path === memoryPath && request?.method === "PUT") {
+        return Promise.resolve(new Response(JSON.stringify({
+          ...firstMemory,
+          value: "The user's timezone is America/Denver.",
+          tags: "profile, corrected",
+        }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      }
+      if (path === memoryPath && request?.method === "DELETE") {
+        return Promise.resolve(new Response(JSON.stringify({
+          key: firstMemory.key,
+          deleted: true,
+        }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      }
+      const payload = path === "/api/me"
+        ? {
+            id: "usr_example",
+            email: "alice@example.com",
+            display_name: "Alice Example",
+            role: "user",
+            status: "active",
+            groups: ["users"],
+            auth_provider: "cloudflare_access",
+          }
+        : path === "/api/me/preferences"
+          ? DEFAULT_PREFERENCES
+          : collectionPayload(path);
+      return Promise.resolve(new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open account settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Manage saved memories" }));
+    expect(await screen.findByText(firstMemory.value)).toBeInTheDocument();
+    expect(screen.queryByText(secondMemory.value)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load more memories" }));
+    expect(await screen.findByText(secondMemory.value)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: `Edit memory ${firstMemory.key}` }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Memory text" }), {
+      target: { value: "The user's timezone is America/Denver." },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Memory tags" }), {
+      target: { value: "profile, corrected" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save correction" }));
+    await waitFor(() => expect(screen.queryByText("Saving…")).not.toBeInTheDocument());
+    expect(await screen.findByText("The user's timezone is America/Denver.")).toBeInTheDocument();
+    const update = fetchMock.mock.calls.find(
+      ([path, request]) => path === memoryPath && request?.method === "PUT",
+    ) as [string, RequestInit] | undefined;
+    expect(update).toBeDefined();
+    expect(JSON.parse(String(update?.[1].body))).toEqual({
+      value: "The user's timezone is America/Denver.",
+      tags: "profile, corrected",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: `Delete memory ${firstMemory.key}` }));
+    expect(fetchMock.mock.calls.some(
+      ([path, request]) => path === memoryPath && request?.method === "DELETE",
+    )).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm delete memory" }));
+    await waitFor(() => expect(
+      screen.queryByText("The user's timezone is America/Denver."),
+    ).not.toBeInTheDocument());
+    expect(screen.getByText(secondMemory.value)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      memoryPath,
+      expect.objectContaining({ method: "DELETE", credentials: "same-origin" }),
+    );
+  });
+
   it("downloads every chat-export page and confirms durable account deletion", async () => {
     const firstMessage = {
       message_id: "msg_export_1",

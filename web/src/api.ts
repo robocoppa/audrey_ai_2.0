@@ -137,6 +137,14 @@ export interface ChatHistoryExport {
   items: ChatExportMessage[];
 }
 
+export interface SavedMemory {
+  key: string;
+  value: string;
+  tags: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PurgeQueueStatus {
   pending: number;
   attempts: number;
@@ -513,6 +521,30 @@ export function revokePersonalToken(tokenId: string): Promise<{
   revoked: boolean;
 }> {
   return apiJson(`/api/tokens/${encodeURIComponent(tokenId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function listSavedMemories(cursor?: string): Promise<ListResponse<SavedMemory>> {
+  const params = new URLSearchParams({ limit: "50" });
+  if (cursor) params.set("cursor", cursor);
+  return apiJson<ListResponse<SavedMemory>>(`/v1/me/memories?${params}`);
+}
+
+export function correctSavedMemory(
+  key: string,
+  value: string,
+  tags: string,
+): Promise<SavedMemory> {
+  return apiJson<SavedMemory>(`/v1/me/memories/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value, tags }),
+  });
+}
+
+export function deleteSavedMemory(key: string): Promise<{ key: string; deleted: boolean }> {
+  return apiJson(`/v1/me/memories/${encodeURIComponent(key)}`, {
     method: "DELETE",
   });
 }

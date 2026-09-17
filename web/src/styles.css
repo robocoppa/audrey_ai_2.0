@@ -2670,6 +2670,85 @@ a:focus-visible {
   line-height: 1.45;
 }
 
+.memory-manager,
+.memory-edit-form {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.memory-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  list-style: none;
+}
+
+.memory-list > li {
+  display: grid;
+  min-width: 0;
+  gap: 0.55rem;
+  padding: 0.85rem;
+}
+
+.memory-list > li + li {
+  border-top: 1px solid var(--border);
+}
+
+.memory-key,
+.memory-value,
+.memory-tags {
+  overflow-wrap: anywhere;
+}
+
+.memory-key {
+  font-size: 0.8rem;
+}
+
+.memory-value,
+.memory-tags {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.memory-value {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+}
+
+.memory-tags {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.memory-edit-form textarea {
+  min-height: 5rem;
+}
+
+.memory-manager > button {
+  justify-self: start;
+  padding: 0.58rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.memory-manager > button:focus-visible {
+  outline: none;
+  border-color: var(--border-strong);
+  box-shadow: var(--focus-glow);
+}
+
+.memory-manager > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .data-export-control,
 .data-danger-zone,
 .purge-confirmation,

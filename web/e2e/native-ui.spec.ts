@@ -1193,6 +1193,82 @@ test("saves and reloads native Audrey preferences", async ({ page }) => {
     name: "Show the live stage and source summary above the composer",
   })).not.toBeChecked();
 });
+
+test("manages saved memories through the production browser bundle", async ({ page }) => {
+  let memory = {
+    key: "preferred_name",
+    value: "Call the user Alice.",
+    tags: "profile",
+    created_at: "2026-09-01T00:00:00Z",
+    updated_at: "2026-09-01T00:00:00Z",
+  };
+  let deleted = false;
+  const corrections: unknown[] = [];
+
+  await page.route("**/v1/me/memories**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/v1/me/memories" && request.method() === "GET") {
+      await json(route, { items: deleted ? [] : [memory], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/v1/me/memories/preferred_name" && request.method() === "PUT") {
+      const payload = request.postDataJSON() as { value: string; tags: string };
+      corrections.push(payload);
+      memory = { ...memory, ...payload, updated_at: "2026-09-01T00:01:00Z" };
+      await json(route, memory);
+      return;
+    }
+    if (url.pathname === "/v1/me/memories/preferred_name" && request.method() === "DELETE") {
+      deleted = true;
+      await json(route, { key: memory.key, deleted: true });
+      return;
+    }
+    await route.abort("failed");
+  });
+  await page.route("**/api/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/me") {
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
+    if (url.pathname === "/api/conversations") {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await page.getByRole("button", { name: "Open account settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await dialog.getByRole("button", { name: "Manage saved memories" }).click();
+  await expect(dialog.getByText("Call the user Alice.")).toBeVisible();
+
+  await dialog.getByRole("button", { name: "Edit memory preferred_name" }).click();
+  await dialog.getByRole("textbox", { name: "Memory text" }).fill("Call the user Alex.");
+  await dialog.getByRole("textbox", { name: "Memory tags" }).fill("profile, corrected");
+  await dialog.getByRole("button", { name: "Save correction" }).click();
+  await expect(dialog.getByText("Call the user Alex.")).toBeVisible();
+  expect(corrections).toEqual([{ value: "Call the user Alex.", tags: "profile, corrected" }]);
+
+  await dialog.getByRole("button", { name: "Delete memory preferred_name" }).click();
+  expect(deleted).toBe(false);
+  await dialog.getByRole("button", { name: "Confirm delete memory" }).click();
+  await expect(dialog.getByText("No saved memories.")).toBeVisible();
+  expect(deleted).toBe(true);
+  const accessibility = await new AxeBuilder({ page }).analyze();
+  expect(accessibility.violations).toEqual([]);
+});
+
 test("manages personal tokens through the production browser bundle", async ({ page }) => {
   const requests: unknown[] = [];
   let tokens = [{

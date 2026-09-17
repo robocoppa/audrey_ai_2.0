@@ -2,8 +2,11 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import {
   createPersonalToken,
+  correctSavedMemory,
+  deleteSavedMemory,
   exportChatHistory,
   getAccountDataPurge,
+  listSavedMemories,
   listPersonalTokens,
   requestAccountDataPurge,
   revokePersonalToken,
@@ -13,6 +16,7 @@ import {
   type CurrentUser,
   type PersonalTokenRecord,
   type PersonalTokenScope,
+  type SavedMemory,
   type UserPreferences,
   type UserPreferencesUpdate,
 } from "./api";
@@ -58,6 +62,17 @@ export function AccountSettings({
   const [issuedToken, setIssuedToken] = useState("");
   const [tokenCopied, setTokenCopied] = useState(false);
   const [tokenError, setTokenError] = useState("");
+  const [memoriesOpen, setMemoriesOpen] = useState(false);
+  const [memories, setMemories] = useState<SavedMemory[]>([]);
+  const [nextMemoryCursor, setNextMemoryCursor] = useState<string | null>(null);
+  const [memoriesLoading, setMemoriesLoading] = useState(false);
+  const [memoryEditingKey, setMemoryEditingKey] = useState("");
+  const [memoryValue, setMemoryValue] = useState("");
+  const [memoryTags, setMemoryTags] = useState("");
+  const [memorySavingKey, setMemorySavingKey] = useState("");
+  const [memoryDeleteConfirmKey, setMemoryDeleteConfirmKey] = useState("");
+  const [memoryDeletingKey, setMemoryDeletingKey] = useState("");
+  const [memoryError, setMemoryError] = useState("");
   const [dataExporting, setDataExporting] = useState(false);
   const [dataMessage, setDataMessage] = useState("");
   const [dataError, setDataError] = useState("");
@@ -68,8 +83,9 @@ export function AccountSettings({
   const [purgeIdempotencyKey, setPurgeIdempotencyKey] = useState("");
   const [purgeStatus, setPurgeStatus] = useState<AccountPurgeStatus | null>(null);
   const tokenBusy = tokensLoading || tokenCreating || Boolean(revokingTokenId);
+  const memoryBusy = memoriesLoading || Boolean(memorySavingKey) || Boolean(memoryDeletingKey);
   const dataBusy = dataExporting || purgeRequesting;
-  const busy = profileSaving || preferencesSaving || tokenBusy || dataBusy
+  const busy = profileSaving || preferencesSaving || tokenBusy || memoryBusy || dataBusy
     || Boolean(issuedToken);
 
   useEffect(() => {
@@ -222,6 +238,70 @@ export function AccountSettings({
       setTokenCopied(true);
     } catch {
       setTokenError("Copy failed. Select the token and copy it manually.");
+    }
+  }
+
+  async function loadMemories(cursor?: string) {
+    setMemoriesLoading(true);
+    setMemoryError("");
+    try {
+      const page = await listSavedMemories(cursor);
+      if (cursor && page.next_cursor === cursor) {
+        throw new Error("Memory list returned a repeated pagination cursor.");
+      }
+      setMemories((current) => cursor
+        ? [...current, ...page.items.filter((item) => !current.some(({ key }) => key === item.key))]
+        : page.items);
+      setNextMemoryCursor(page.next_cursor);
+    } catch (reason) {
+      setMemoryError(messageOf(reason, "Saved memories could not be loaded."));
+    } finally {
+      setMemoriesLoading(false);
+    }
+  }
+
+  async function openMemories() {
+    setMemoriesOpen(true);
+    await loadMemories();
+  }
+
+  function startMemoryEdit(item: SavedMemory) {
+    setMemoryEditingKey(item.key);
+    setMemoryValue(item.value);
+    setMemoryTags(item.tags);
+    setMemoryDeleteConfirmKey("");
+    setMemoryError("");
+  }
+
+  async function saveMemory(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!memoryEditingKey || !memoryValue.trim()) return;
+    const key = memoryEditingKey;
+    setMemorySavingKey(key);
+    setMemoryError("");
+    try {
+      const updated = await correctSavedMemory(key, memoryValue.trim(), memoryTags.trim());
+      setMemories((current) => current.map((item) => item.key === key ? updated : item));
+      setMemoryEditingKey("");
+    } catch (reason) {
+      setMemoryError(messageOf(reason, "Memory correction could not be saved."));
+    } finally {
+      setMemorySavingKey("");
+    }
+  }
+
+  async function removeMemory(key: string) {
+    setMemoryDeletingKey(key);
+    setMemoryError("");
+    try {
+      const result = await deleteSavedMemory(key);
+      if (!result.deleted) throw new Error("Audrey did not delete this memory.");
+      setMemories((current) => current.filter((item) => item.key !== key));
+      setMemoryDeleteConfirmKey("");
+    } catch (reason) {
+      setMemoryError(messageOf(reason, "Memory could not be deleted."));
+    } finally {
+      setMemoryDeletingKey("");
     }
   }
 
@@ -619,6 +699,132 @@ export function AccountSettings({
                   ))}
                 </ul>
               )}
+            </div>
+          )}
+        </section>
+
+        <section className="settings-section" aria-labelledby="saved-memories-title">
+          <div className="settings-section-heading">
+            <h3 id="saved-memories-title">Saved memories</h3>
+            <p>Review what Audrey remembers about you. Correct a memory or delete it if it is no longer useful.</p>
+          </div>
+          {!memoriesOpen ? (
+            <button type="button" onClick={() => void openMemories()}>
+              Manage saved memories
+            </button>
+          ) : (
+            <div className="memory-manager">
+              {memoryError ? <p className="settings-error" role="alert">{memoryError}</p> : null}
+              {memoriesLoading && memories.length === 0 ? (
+                <p className="token-empty" role="status">Loading saved memories…</p>
+              ) : memories.length === 0 && !memoryError ? (
+                <p className="token-empty">No saved memories.</p>
+              ) : null}
+              {memories.length > 0 ? (
+                <ul className="memory-list" aria-label="Saved memories">
+                  {memories.map((item) => (
+                    <li key={item.key}>
+                      <strong className="memory-key">{item.key}</strong>
+                      {memoryEditingKey === item.key ? (
+                        <form className="memory-edit-form" onSubmit={(event) => void saveMemory(event)}>
+                          <label>
+                            <span>Memory text</span>
+                            <textarea
+                              aria-label="Memory text"
+                              maxLength={20_000}
+                              required
+                              value={memoryValue}
+                              onChange={(event) => setMemoryValue(event.target.value)}
+                              disabled={Boolean(memorySavingKey)}
+                            />
+                          </label>
+                          <label>
+                            <span>Tags</span>
+                            <input
+                              aria-label="Memory tags"
+                              maxLength={500}
+                              value={memoryTags}
+                              onChange={(event) => setMemoryTags(event.target.value)}
+                              disabled={Boolean(memorySavingKey)}
+                            />
+                          </label>
+                          <div className="token-actions">
+                            <button type="submit" disabled={Boolean(memorySavingKey) || !memoryValue.trim()}>
+                              {memorySavingKey ? "Saving…" : "Save correction"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setMemoryEditingKey("")}
+                              disabled={Boolean(memorySavingKey)}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <>
+                          <p className="memory-value">{item.value}</p>
+                          {item.tags ? <p className="memory-tags">Tags: {item.tags}</p> : null}
+                          {memoryDeleteConfirmKey === item.key ? (
+                            <div className="token-actions">
+                              <button
+                                className="danger-button"
+                                type="button"
+                                onClick={() => void removeMemory(item.key)}
+                                disabled={Boolean(memoryDeletingKey)}
+                              >
+                                {memoryDeletingKey ? "Deleting…" : "Confirm delete memory"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setMemoryDeleteConfirmKey("")}
+                                disabled={Boolean(memoryDeletingKey)}
+                              >
+                                Keep memory
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="token-actions">
+                              <button
+                                type="button"
+                                aria-label={`Edit memory ${item.key}`}
+                                onClick={() => startMemoryEdit(item)}
+                                disabled={memoryBusy}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="danger-button"
+                                type="button"
+                                aria-label={`Delete memory ${item.key}`}
+                                onClick={() => setMemoryDeleteConfirmKey(item.key)}
+                                disabled={memoryBusy}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {nextMemoryCursor ? (
+                <button
+                  type="button"
+                  className="memory-load-more"
+                  onClick={() => void loadMemories(nextMemoryCursor)}
+                  disabled={memoryBusy}
+                >
+                  {memoriesLoading ? "Loading…" : "Load more memories"}
+                </button>
+              ) : null}
+              {memoryError && memories.length === 0 ? (
+                <button type="button" onClick={() => void loadMemories()} disabled={memoryBusy}>
+                  Retry memories
+                </button>
+              ) : null}
             </div>
           )}
         </section>
