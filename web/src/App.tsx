@@ -32,7 +32,11 @@ type SessionState =
   | { status: "unauthenticated" }
   | { status: "error"; message: string };
 
-const ACCESS_BOOTSTRAP_DELAYS_MS = [0, 500, 1_000, 2_000, 4_000, 7_500, 15_000];
+const ACCESS_BOOTSTRAP_DELAYS_MS = [0, 500, 1_000, 2_000, 4_000, 7_500, 15_000, 7_500, 7_500];
+const ACCESS_BOOTSTRAP_WAIT_SECONDS = ACCESS_BOOTSTRAP_DELAYS_MS.reduce(
+  (total, delay) => total + delay,
+  0,
+) / 1_000;
 
 function hasCloudflareAccessMessage() {
   return new URLSearchParams(window.location.search).has("__cf_access_message");
@@ -281,7 +285,7 @@ function SessionTimeout({
     ? "Sign-in is taking longer than expected"
     : "Audrey could not finish opening";
   const detail = timedOut
-    ? "Cloudflare Access did not establish this browser session within 30 seconds."
+    ? `Cloudflare Access did not establish this browser session within ${ACCESS_BOOTSTRAP_WAIT_SECONDS} seconds.`
     : `The session check ended early. ${session.message}`;
 
   return (

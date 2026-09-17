@@ -275,6 +275,65 @@ describe("App", () => {
     expect(window.location.href).not.toContain("__cf_access_message");
   });
 
+  it("keeps checking through 45 seconds without requiring a manual retry", async () => {
+    vi.useFakeTimers();
+    window.history.replaceState({}, "", "/?__cf_access_message=logged_out");
+    let identityReads = 0;
+    const fetchMock = vi.fn().mockImplementation((path: string) => {
+      if (path === "/api/me") {
+        identityReads += 1;
+        if (identityReads < 9) {
+          return Promise.resolve(new Response(JSON.stringify({ detail: "Not authenticated." }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
+        return Promise.resolve(new Response(JSON.stringify({
+          id: "usr_example",
+          email: "alice@example.com",
+          display_name: "Alice Example",
+          role: "user",
+          status: "active",
+          groups: ["users"],
+          auth_provider: "cloudflare_access",
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+      }
+      const payload = path === "/api/me/preferences"
+        ? DEFAULT_PREFERENCES
+        : collectionPayload(path);
+      return Promise.resolve(new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(identityReads).toBe(7);
+    expect(screen.getByRole("status", { name: "Finishing secure sign-in" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Retry session" })).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(7_500);
+    });
+    expect(identityReads).toBe(8);
+    expect(screen.queryByRole("button", { name: "Retry session" })).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(7_500);
+    });
+    expect(identityReads).toBe(9);
+    expect(screen.getByLabelText("Signed in user")).toHaveTextContent("Alice");
+    expect(window.location.search).toBe("");
+  });
+
   it("offers retry and logout after Access authentication remains unavailable", async () => {
     vi.useFakeTimers();
     let sessionReady = false;
@@ -313,7 +372,7 @@ describe("App", () => {
       await vi.runAllTimersAsync();
     });
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "did not establish this browser session within 30 seconds",
+      "did not establish this browser session within 45 seconds",
     );
     expect(screen.getByRole("heading", {
       name: "Sign-in is taking longer than expected",

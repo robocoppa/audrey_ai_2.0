@@ -771,13 +771,14 @@ The second allowed Access identity subsequently produced a distinct active
 Audrey principal and default preference row; direct identity and preference
 reads both succeeded. Its first redirects nevertheless hit transient
 authentication rejections while the Access session propagated. The client now
-resolves identity before preferences and retries `401`/`403` seven times over
-about 30 seconds. Callback URLs use a dedicated full-screen portrait handoff
+resolves identity before preferences and makes nine `401`/`403`-aware attempts over
+about 45 seconds. Callback URLs use a dedicated full-screen portrait handoff
 with simple status text and no application chrome; success removes only
 Cloudflare's stale message parameter while preserving the rest of the URL.
 Only a persistent failure reaches the isolated Retry and Access-logout timeout
-screen. Thirteen Vitest contracts and all 19 production-preview Chromium
-workflows pass. Redeployment and conversation-isolation verification remain.
+screen. The 45-second follow-up passed 23 Vitest contracts, all 22
+production-preview Chromium workflows, typecheck, lint, and build.
+Redeployment and conversation-isolation verification remain.
 
 The subsequent refresh check exposed a second browser defect: Canonical
 messages were assigned to `HttpAgent`, while assistant-ui renders a separate
