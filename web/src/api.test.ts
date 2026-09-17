@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createConversation,
+  fetchVideoFromUrl,
   resetAdminModelPolicy,
   updateAdminModel,
   updateConversationModel,
@@ -15,11 +16,38 @@ const LIMITS: AudreyFileLimits = {
   allowed_extensions: [".txt"],
   chunked_max_bytes: 20,
   part_size: 4,
+  fetch_hosts: ["www.youtube.com"],
 };
 
 describe("native file uploads", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("queues a trimmed video URL through the same-origin native API", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      id: "file_video",
+      filename: "video123",
+      mime: "",
+      bytes: 0,
+      kind: "video",
+      chunks: 0,
+      status: "fetch_pending",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchVideoFromUrl("  https://www.youtube.com/watch?v=video123  ");
+
+    expect(result.status).toBe("fetch_pending");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/files/from-url",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ url: "https://www.youtube.com/watch?v=video123" }),
+        credentials: "same-origin",
+      }),
+    );
+    expect((fetchMock.mock.calls[0][1] as RequestInit).headers).not.toHaveProperty("Authorization");
   });
 
   it("uses multipart for a file within the single-request limit", async () => {

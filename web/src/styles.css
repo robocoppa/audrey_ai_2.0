@@ -2899,8 +2899,8 @@ a:focus-visible {
 
 .file-manager {
   display: flex;
-  width: min(46rem, 100%);
-  max-height: min(46rem, calc(100dvh - 2.5rem));
+  width: min(54rem, 100%);
+  max-height: min(52rem, calc(100dvh - 2.5rem));
   overflow: hidden;
   flex-direction: column;
   border: 1px solid rgb(99 181 255 / 28%);
@@ -3050,6 +3050,70 @@ a:focus-visible {
   white-space: nowrap;
 }
 
+.file-url-form {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.95rem 1.4rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-url-form label {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.file-url-form > div {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.file-url-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  outline: none;
+  background: var(--input-surface);
+  color: var(--text-soft);
+  font-size: 0.76rem;
+}
+
+.file-url-form input:focus-visible {
+  border-color: var(--border-strong);
+  box-shadow: var(--focus-glow);
+}
+
+.file-url-form button {
+  padding: 0.55rem 0.9rem;
+  border: 0;
+  border-radius: 0.65rem;
+  background: var(--brand-gradient);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.file-url-form button:disabled,
+.file-url-form input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.file-url-form small,
+.file-url-form p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.file-url-form p {
+  color: var(--success);
+}
+
 .file-manager-status,
 .file-manager-empty,
 .file-manager-error {
@@ -3106,6 +3170,39 @@ a:focus-visible {
   gap: 0.2rem;
 }
 
+.file-details a {
+  justify-self: start;
+  color: var(--accent);
+  font-size: 0.7rem;
+}
+
+.file-details .file-failure {
+  overflow: visible;
+  color: var(--danger);
+  white-space: normal;
+}
+
+.file-summary {
+  min-width: 0;
+  margin-top: 0.35rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.file-summary summary {
+  overflow: hidden;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-summary p {
+  margin: 0.5rem 0 0;
+  color: var(--text-soft);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
 .file-details strong,
 .file-details span,
 .file-details small {
@@ -3116,6 +3213,12 @@ a:focus-visible {
 
 .file-details strong {
   font-size: 0.84rem;
+}
+
+.file-details .file-status {
+  overflow: visible;
+  color: var(--accent);
+  white-space: normal;
 }
 
 .file-details span,
@@ -3280,8 +3383,13 @@ a:focus-visible {
     grid-template-columns: 1fr;
   }
 
-  .file-upload button {
+  .file-upload button,
+  .file-url-form button {
     width: 100%;
+  }
+
+  .file-url-form > div {
+    flex-direction: column;
   }
 
   .file-list li {

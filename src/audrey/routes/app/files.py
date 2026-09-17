@@ -24,6 +24,7 @@ class NativeFileLimits(BaseModel):
     allowed_extensions: list[str]
     chunked_max_bytes: int
     part_size: int
+    fetch_hosts: list[str]
 
 
 class NativeFileRecord(BaseModel):
@@ -188,6 +189,7 @@ async def list_files(
             allowed_extensions=result.limits.allowed_extensions,
             chunked_max_bytes=result.limits.chunked_max_bytes,
             part_size=result.limits.part_size,
+            fetch_hosts=result.limits.fetch_hosts,
         ),
     )
 
@@ -215,6 +217,22 @@ async def upload_file(
         request=request,
         me=_compat_user(principal),
         file=file,
+    )
+    return _upload_response(result)
+
+
+@router.post("/files/from-url", response_model=NativeFileUploadResponse)
+async def fetch_file_from_url(
+    payload: upload_routes.UrlIngestRequest,
+    request: Request,
+    principal: Principal = Depends(_files_access),
+) -> NativeFileUploadResponse:
+    """Queue an allowlisted video URL using the authenticated owner's namespace."""
+
+    result = await upload_routes.ingest_from_url(
+        body=payload,
+        request=request,
+        me=_compat_user(principal),
     )
     return _upload_response(result)
 

@@ -261,6 +261,7 @@ export interface AudreyFileLimits {
   allowed_extensions: string[];
   chunked_max_bytes: number;
   part_size: number;
+  fetch_hosts: string[];
 }
 
 export interface AudreyFileList {
@@ -687,6 +688,14 @@ export function listFiles(): Promise<AudreyFileList> {
 
 export function getFile(fileId: string): Promise<AudreyFile> {
   return apiJson<AudreyFile>(`/api/files/${encodeURIComponent(fileId)}`);
+}
+
+export function fetchVideoFromUrl(url: string): Promise<AudreyFileUpload> {
+  return apiJson<AudreyFileUpload>("/api/files/from-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: url.trim() }),
+  });
 }
 
 export async function uploadFile(

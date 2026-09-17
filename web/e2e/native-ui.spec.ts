@@ -1749,6 +1749,93 @@ test("manages owner-bound files without a browser bearer token", async ({ page }
   expect(authorizationHeaders.every((value) => value === undefined)).toBe(true);
 });
 
+test("queues a video link through native files and follows its summary", async ({ page }) => {
+  const sourceUrl = "https://www.youtube.com/watch?v=video123";
+  let video: Record<string, unknown> | null = null;
+  let submitted: Record<string, unknown> | null = null;
+  const authorizationHeaders: Array<string | undefined> = [];
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    authorizationHeaders.push(request.headers().authorization);
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
+    if (url.pathname === "/api/me") {
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      await json(route, { items: [browserConversation("Video")], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/conversations/" + CONVERSATION_ID + "/messages") {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/files" && request.method() === "GET") {
+      await json(route, { ...browserFileListing([]), items: video ? [video] : [] });
+      return;
+    }
+    if (url.pathname === "/api/files/from-url" && request.method() === "POST") {
+      submitted = request.postDataJSON() as Record<string, unknown>;
+      video = {
+        ...browserFile("file_video", "video123", 0),
+        kind: "video",
+        mime: "",
+        status: "fetching",
+        source_url: sourceUrl,
+        fetch_downloaded_bytes: 10 * 1024 * 1024,
+        fetch_total_bytes: 20 * 1024 * 1024,
+      };
+      await json(route, {
+        id: "file_video",
+        filename: "video123",
+        mime: "",
+        bytes: 0,
+        kind: "video",
+        chunks: 0,
+        status: "fetch_pending",
+      });
+      return;
+    }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Your files" });
+  await dialog.getByLabel("Paste a video link").fill("  " + sourceUrl + "  ");
+  await dialog.getByRole("button", { name: "Fetch video" }).click();
+
+  await expect(dialog.getByText("Queued. Watch the file below for download and summarization progress.")).toBeVisible();
+  await expect(dialog.getByText(/Downloading 50%/)).toBeVisible();
+  await expect(dialog.getByRole("link", { name: "Source video" })).toHaveAttribute("href", sourceUrl);
+  expect(submitted).toEqual({ url: sourceUrl });
+
+  video = {
+    ...video,
+    filename: "Audrey launch.mp4",
+    mime: "video/mp4",
+    bytes: 20 * 1024 * 1024,
+    status: "ready",
+    summary: "A short overview of the Audrey launch video.",
+    transcript_source: "auto_captions",
+  };
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect(dialog.getByText("Audrey launch.mp4")).toBeVisible();
+  await expect(dialog.getByText("Transcript: auto-captions")).toBeVisible();
+  await dialog.locator(".file-summary summary").click();
+  await expect(dialog.locator(".file-summary p")).toHaveText("A short overview of the Audrey launch video.");
+  expect(authorizationHeaders.every((value) => value === undefined)).toBe(true);
+});
+
 test("surfaces an expired session during a run", async ({ page }) => {
   await mockAudreyApi(page, (route) =>
     route.fulfill({
@@ -1989,6 +2076,7 @@ function browserFileListing(files: ReturnType<typeof browserFile>[]) {
       allowed_extensions: [".txt"],
       chunked_max_bytes: 2 * 1024 * 1024 * 1024,
       part_size: 8 * 1024 * 1024,
+      fetch_hosts: ["www.youtube.com", "youtu.be"],
     },
   };
 }

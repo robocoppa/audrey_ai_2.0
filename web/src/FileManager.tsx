@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 
 import {
   deleteFile,
+  fetchVideoFromUrl,
   listFiles,
   uploadFile,
   type AudreyFile,
@@ -13,14 +14,23 @@ export function FileManager({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [videoUrl, setVideoUrl] = useState("");
+  const [fetchingUrl, setFetchingUrl] = useState(false);
+  const [queuedUrl, setQueuedUrl] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const refreshInFlight = useRef<Promise<AudreyFileList> | null>(null);
 
   const refresh = useCallback(async () => {
-    const next = await listFiles();
+    if (!refreshInFlight.current) {
+      refreshInFlight.current = listFiles().finally(() => {
+        refreshInFlight.current = null;
+      });
+    }
+    const next = await refreshInFlight.current;
     setListing(next);
   }, []);
 
@@ -41,13 +51,32 @@ export function FileManager({ onClose }: { onClose: () => void }) {
     };
   }, [refresh]);
 
+  const hasMovingFiles = listing?.items.some((file) =>
+    ["fetch_pending", "fetching", "pending", "processing"].includes(file.status),
+  ) ?? false;
+
+  useEffect(() => {
+    if (!hasMovingFiles) return;
+    const update = () => {
+      if (document.visibilityState === "visible") {
+        void refresh().catch((reason: unknown) => setError(messageOf(reason)));
+      }
+    };
+    const timer = window.setInterval(update, 5000);
+    document.addEventListener("visibilitychange", update);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", update);
+    };
+  }, [hasMovingFiles, refresh]);
+
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape" && !uploading && deletingId === null) onClose();
+      if (event.key === "Escape" && !uploading && !fetchingUrl && deletingId === null) onClose();
     }
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [deletingId, onClose, uploading]);
+  }, [deletingId, fetchingUrl, onClose, uploading]);
 
   async function submitUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -66,6 +95,25 @@ export function FileManager({ onClose }: { onClose: () => void }) {
     } finally {
       setLoading(false);
       setUploading(false);
+    }
+  }
+
+  async function submitVideoUrl(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const url = videoUrl.trim();
+    if (!url || fetchingUrl) return;
+    setFetchingUrl(true);
+    setQueuedUrl(false);
+    setError("");
+    try {
+      await fetchVideoFromUrl(url);
+      setVideoUrl("");
+      setQueuedUrl(true);
+      await refresh();
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setFetchingUrl(false);
     }
   }
 
@@ -89,10 +137,11 @@ export function FileManager({ onClose }: { onClose: () => void }) {
     ? Math.min(100, (listing.total_bytes / listing.limits.max_user_bytes) * 100)
     : 0;
   const accept = listing?.limits.allowed_extensions.join(",") ?? undefined;
+  const fetchHosts = listing?.limits.fetch_hosts ?? [];
 
   return (
     <div className="file-manager-backdrop" role="presentation" onMouseDown={(event) => {
-      if (event.currentTarget === event.target && !uploading && deletingId === null) onClose();
+      if (event.currentTarget === event.target && !uploading && !fetchingUrl && deletingId === null) onClose();
     }}>
       <section
         className="file-manager"
@@ -109,7 +158,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
             className="file-manager-close"
             type="button"
             onClick={onClose}
-            disabled={uploading || deletingId !== null}
+            disabled={uploading || fetchingUrl || deletingId !== null}
             aria-label="Close files"
             autoFocus
           >
@@ -154,6 +203,29 @@ export function FileManager({ onClose }: { onClose: () => void }) {
           ) : null}
         </form>
 
+        <form className="file-url-form" onSubmit={(event) => void submitVideoUrl(event)}>
+          <label htmlFor="file-video-url">Paste a video link</label>
+          <div>
+            <input
+              id="file-video-url"
+              type="url"
+              value={videoUrl}
+              onChange={(event) => {
+                setVideoUrl(event.target.value);
+                setQueuedUrl(false);
+              }}
+              placeholder={fetchHosts.length ? "Allowed: " + fetchHosts.join(", ") : "Video links are unavailable"}
+              disabled={!listing || fetchHosts.length === 0 || fetchingUrl}
+              required
+            />
+            <button type="submit" disabled={!videoUrl.trim() || fetchingUrl || fetchHosts.length === 0}>
+              {fetchingUrl ? "Queueing…" : "Fetch video"}
+            </button>
+          </div>
+          <small>Audrey downloads the video and prepares its summary for your private files.</small>
+          {queuedUrl ? <p role="status">Queued. Watch the file below for download and summarization progress.</p> : null}
+        </form>
+
         {error ? <p className="file-manager-error" role="alert">{error}</p> : null}
         {loading ? <p className="file-manager-status" role="status">Loading files…</p> : null}
         {!loading && listing?.items.length === 0 ? (
@@ -166,11 +238,22 @@ export function FileManager({ onClose }: { onClose: () => void }) {
                 <div className="file-kind" aria-hidden="true">{kindSymbol(file.kind)}</div>
                 <div className="file-details">
                   <strong>{file.filename}</strong>
-                  <span>
-                    {file.kind} · {formatBytes(file.bytes)} · {statusLabel(file.status)}
+                  <span className="file-meta">
+                    {file.kind} · {file.bytes || !["fetch_pending", "fetching"].includes(file.status) ? formatBytes(file.bytes) : "Size pending"}
                   </span>
-                  {file.failure_reason ? <small>{file.failure_reason}</small> : null}
+                  <span className="file-status">{fileStatus(file)}</span>
+                  {file.source_url ? (
+                    <a href={file.source_url} target="_blank" rel="noopener noreferrer">Source video</a>
+                  ) : null}
+                  {file.transcript_source ? <small>Transcript: {transcriptLabel(file.transcript_source)}</small> : null}
+                  {file.failure_reason ? <small className="file-failure">{file.failure_reason}</small> : null}
                   {file.source_freed_at ? <small>Original media reclaimed; derived text remains searchable.</small> : null}
+                  {file.summary ? (
+                    <details className="file-summary">
+                      <summary>{summaryTeaser(file.summary)}</summary>
+                      <p>{file.summary}</p>
+                    </details>
+                  ) : null}
                 </div>
                 <button
                   className={confirmingId === file.id ? "file-remove confirming-delete" : "file-remove"}
@@ -208,8 +291,28 @@ function kindSymbol(kind: AudreyFile["kind"]): string {
   return "≡";
 }
 
-function statusLabel(status: string): string {
-  return status.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
+function fileStatus(file: AudreyFile): string {
+  if (file.status === "fetch_pending") return "Waiting to download";
+  if (file.status === "fetching") {
+    const total = file.fetch_total_bytes;
+    const done = file.fetch_downloaded_bytes;
+    if (total > 0) return "Downloading " + Math.min(100, Math.round((done / total) * 100)) + "% (" + formatBytes(done) + " of " + formatBytes(total) + ")";
+    if (done > 0) return "Downloading " + formatBytes(done) + " so far";
+    return "Downloading";
+  }
+  if (file.status === "pending" || file.status === "processing") {
+    return file.kind === "video" ? "Preparing summary" : "Processing";
+  }
+  return file.status.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function transcriptLabel(source: string): string {
+  return source === "auto_captions" ? "auto-captions" : source;
+}
+
+function summaryTeaser(summary: string): string {
+  const text = summary.replace(/\s+/g, " ").trim();
+  return text.length > 100 ? text.slice(0, 99).trimEnd() + "…" : text;
 }
 
 function formatBytes(bytes: number): string {

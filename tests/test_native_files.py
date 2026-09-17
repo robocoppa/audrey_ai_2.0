@@ -119,11 +119,12 @@ def test_native_list_uses_server_owned_namespace_and_hides_compat_fields(monkeyp
             "allowed_extensions": [".txt"],
             "chunked_max_bytes": 2_000_000_000,
             "part_size": 8_000_000,
+            "fetch_hosts": ["example.com"],
         },
     }
     assert "private-storage-123" not in response.text
     assert "collection" not in response.text
-    assert "fetch_hosts" not in response.text
+    assert "fetch_hosts" in response.text
 
 
 def test_native_get_returns_only_a_file_in_the_owner_listing(monkeypatch):
@@ -223,6 +224,62 @@ def test_native_upload_delegates_bytes_with_server_owned_identity(monkeypatch):
     assert "collection" not in response.text
 
 
+def test_native_url_fetch_queues_for_authenticated_owner_without_compat_fields(monkeypatch):
+    captured = SimpleNamespace(user="", url="")
+
+    async def fake_fetch(*, body, request, me):
+        captured.user = me.email
+        captured.url = body.url
+        return upload_routes.UploadResponse(
+            file_id="file_video",
+            filename="video-id",
+            mime="",
+            bytes=0,
+            kind="video",
+            collection="private-internal-collection",
+            chunks=0,
+            status="fetch_pending",
+        )
+
+    monkeypatch.setattr(native_files.upload_routes, "ingest_from_url", fake_fetch)
+    response = TestClient(_app()).post(
+        "/api/files/from-url",
+        json={"url": "https://example.com/watch?v=video-id", "user": "someone-else"},
+    )
+
+    assert response.status_code == 200
+    assert captured.user == "private-storage-123"
+    assert captured.url == "https://example.com/watch?v=video-id"
+    assert response.json() == {
+        "id": "file_video",
+        "filename": "video-id",
+        "mime": "",
+        "bytes": 0,
+        "kind": "video",
+        "chunks": 0,
+        "status": "fetch_pending",
+    }
+    assert "collection" not in response.text
+
+
+def test_native_url_fetch_preserves_duplicate_and_host_rejections(monkeypatch):
+    async def rejected(*, body, request, me):
+        raise HTTPException(
+            status_code=409 if "duplicate" in body.url else 403,
+            detail="Already queued" if "duplicate" in body.url else "Host not allowed",
+        )
+
+    monkeypatch.setattr(native_files.upload_routes, "ingest_from_url", rejected)
+    client = TestClient(_app())
+    duplicate = client.post("/api/files/from-url", json={"url": "https://example.com/duplicate"})
+    blocked = client.post("/api/files/from-url", json={"url": "https://evil.test/video"})
+
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"] == "Already queued"
+    assert blocked.status_code == 403
+    assert blocked.json()["detail"] == "Host not allowed"
+
+
 def test_native_delete_preserves_deferred_cleanup_and_uses_404_for_unknown(monkeypatch):
     calls: list[tuple[str, str]] = []
 
@@ -257,6 +314,6 @@ def test_native_files_require_authentication():
     app = FastAPI()
     app.include_router(router)
 
-    response = TestClient(app).get("/api/files")
-
-    assert response.status_code == 401
+    client = TestClient(app)
+    assert client.get("/api/files").status_code == 401
+    assert client.post("/api/files/from-url", json={"url": "https://example.com/video"}).status_code == 401
