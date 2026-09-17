@@ -1666,6 +1666,81 @@ class ApplicationStore:
                 self._conn.rollback()
                 raise
 
+    async def list_model_display_order(self) -> dict[str, tuple[str, int]]:
+        """Return saved positions by model id, including temporarily absent tags."""
+
+        return await asyncio.to_thread(self._list_model_display_order_sync)
+
+    def _list_model_display_order_sync(self) -> dict[str, tuple[str, int]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT model_id, kind, position FROM model_display_order"
+            ).fetchall()
+        return {
+            str(row["model_id"]): (str(row["kind"]), int(row["position"]))
+            for row in rows
+        }
+
+    async def set_model_display_order(
+        self, *, actor_user_id: str, kind: str, model_ids: Iterable[str]
+    ) -> None:
+        await asyncio.to_thread(
+            self._set_model_display_order_sync, actor_user_id, kind, tuple(model_ids)
+        )
+
+    def _set_model_display_order_sync(
+        self, actor_user_id: str, kind: str, model_ids: tuple[str, ...]
+    ) -> None:
+        actor_user_id = _required(actor_user_id, "actor user id")
+        if kind not in {"workflow", "direct"}:
+            raise AccountAdministrationError("unsupported model kind")
+        if (
+            not model_ids
+            or len(model_ids) != len(set(model_ids))
+            or any(not model_id or len(model_id) > 200 for model_id in model_ids)
+        ):
+            raise AccountAdministrationError("invalid model order")
+
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._assert_admin_locked(actor_user_id)
+                before_rows = self._conn.execute(
+                    "SELECT model_id FROM model_display_order "
+                    "WHERE kind = ? ORDER BY position, model_id",
+                    (kind,),
+                ).fetchall()
+                before = [str(row["model_id"]) for row in before_rows]
+                # Keep temporarily absent Ollama tags after the current inventory.
+                retained = [model_id for model_id in before if model_id not in model_ids]
+                ordered = (*model_ids, *retained)
+                now = _utc_now()
+                self._conn.execute(
+                    "DELETE FROM model_display_order WHERE kind = ?", (kind,)
+                )
+                self._conn.executemany(
+                    "INSERT INTO model_display_order "
+                    "(model_id, kind, position, updated_by_user_id, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        (model_id, kind, position, actor_user_id, now)
+                        for position, model_id in enumerate(ordered)
+                    ),
+                )
+                self._insert_audit_locked(
+                    actor_user_id=actor_user_id,
+                    target_type="model",
+                    target_id=kind,
+                    action="set_model_display_order",
+                    before={"model_ids": before},
+                    after={"model_ids": list(ordered)},
+                    now=now,
+                )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+
     async def list_model_access_policies(self) -> tuple[ModelAccessPolicy, ...]:
         return await asyncio.to_thread(self._list_model_access_policies_sync)
 

@@ -1578,6 +1578,30 @@ a:focus-visible {
   gap: 0.45rem;
 }
 
+.capability-badge {
+  max-width: 11rem;
+  overflow: hidden;
+  padding: 0.32rem 0.6rem;
+  border: 1px solid rgb(239 192 113 / 38%);
+  border-radius: 999px;
+  color: var(--warning);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capability-badge-unavailable {
+  border-color: rgb(255 145 164 / 45%);
+  color: var(--danger);
+}
+
+@media (max-width: 700px) {
+  .capability-badge {
+    max-width: 6.5rem;
+  }
+}
+
 .session-name {
   padding: 0.42rem 0.58rem;
   border: 0;
@@ -2088,6 +2112,29 @@ a:focus-visible {
   color: var(--accent);
 }
 
+.admin-model-order-controls {
+  display: flex;
+  gap: 0.15rem;
+}
+
+.admin-model-order-controls button {
+  display: grid;
+  place-items: center;
+  width: 1.8rem;
+  min-height: 2rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  font-size: 0.95rem;
+}
+
+.admin-model-order-controls button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
 .admin-model-controls {
   display: flex;
   flex-wrap: nowrap;
@@ -2096,7 +2143,7 @@ a:focus-visible {
 }
 
 .admin-model-audience {
-  flex: 0 0 9.75rem;
+  flex: 0 0 8rem;
 }
 
 .admin-model-controls > button {

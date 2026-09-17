@@ -146,7 +146,7 @@ async def test_v6_upgrade_adds_access_groups_and_model_ids_without_data_loss(tmp
 
     store = ApplicationStore(path)
     try:
-        assert store.schema_version == 10
+        assert store.schema_version == 11
         principal = await store.resolve_external_identity(
             provider="owui",
             subject="owui-admin",
@@ -235,7 +235,7 @@ async def test_v4_upgrade_adds_video_mode_without_losing_canonical_state(tmp_pat
 
     store = ApplicationStore(path)
     try:
-        assert store.schema_version == 10
+        assert store.schema_version == 11
         existing = await store.conversations.get(
             user_id="usr_existing",
             conversation_id="con_existing",
@@ -303,7 +303,7 @@ async def test_v2_upgrade_backfills_preferences_without_changing_identity_or_tok
     try:
         after = await _resolve(upgraded)
         preferences = await upgraded.preferences.get(user_id=owner.user_id)
-        assert upgraded.schema_version == 10
+        assert upgraded.schema_version == 11
         assert after.user_id == owner.user_id
         assert preferences is not None
         assert preferences.timezone == "UTC"
@@ -710,7 +710,7 @@ async def test_schema_v3_upgrade_does_not_duplicate_legacy_archive_writes(tmp_pa
 
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 10
+        assert upgraded.schema_version == 11
         assert await upgraded.chat_projections.due() == ()
         existing = await upgraded.conversations.get_run(
             user_id=owner.user_id,

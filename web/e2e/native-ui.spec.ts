@@ -494,8 +494,8 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect(modelPicker).toHaveValue("fast");
   const directMenu = page.getByRole("menu", { name: "Other models" });
   await expect(directMenu).toBeVisible();
-  const firstDirectModel = directMenu.getByRole("menuitem", { name: "Qwen 3.8", exact: true });
-  await expect(firstDirectModel).toHaveText("Qwen 3.8");
+  const firstDirectModel = directMenu.getByRole("menuitem", { name: "qwen3.8:latest", exact: true });
+  await expect(firstDirectModel).toHaveText("qwen3.8:latest");
   await expect(directMenu).not.toContainText("Direct local Qwen");
   await expect(firstDirectModel).toBeFocused();
   await firstDirectModel.press("Escape");
@@ -1049,7 +1049,7 @@ test("keeps canonical messages when changing model", async ({ page }) => {
   await page.getByRole("combobox", { name: "Audrey model" }).selectOption("__other_models__");
   const directMenu = page.getByRole("menu", { name: "Other models" });
   await expect(directMenu).toBeVisible();
-  await directMenu.getByRole("menuitem", { name: "Qwen 3.8", exact: true }).click();
+  await directMenu.getByRole("menuitem", { name: "qwen3.8:latest", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue(
     "direct/qwen3.8:latest",
   );

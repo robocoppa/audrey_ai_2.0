@@ -671,6 +671,68 @@ def test_native_model_route_exposes_only_the_callers_catalog(tmp_path):
         store.close()
 
 
+def test_admin_model_order_persists_and_filters_for_each_user(tmp_path):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
+    admin = asyncio.run(_resolve(
+        store, subject="admin", email="admin@example.com", role="admin"
+    ))
+    member = asyncio.run(_resolve(
+        store, subject="member", email="member@example.com"
+    ))
+    app = FastAPI()
+    app.state.application_store = store
+    app.state.cfg = _cfg()
+    app.state.ollama = _OllamaInventory("alpha:latest", "beta:cloud")
+    app.include_router(router)
+    app.dependency_overrides[require_admin_principal] = lambda: admin
+    app.dependency_overrides[require_principal] = lambda: member
+    try:
+        with TestClient(app) as client:
+            initial = client.get("/api/admin/models").json()["items"]
+            workflows = [item["id"] for item in initial if item["kind"] == "workflow"]
+            directs = [item["id"] for item in initial if item["kind"] == "direct"]
+            assert directs == ["direct/alpha:latest", "direct/beta:cloud"]
+
+            invalid = client.put("/api/admin/model-order", json={
+                "kind": "direct", "model_ids": ["direct/alpha:latest"]
+            })
+            assert invalid.status_code == 409
+            assert asyncio.run(store.list_model_display_order()) == {}
+
+            reordered_workflows = [workflows[1], workflows[0], *workflows[2:]]
+            assert client.put("/api/admin/model-order", json={
+                "kind": "workflow", "model_ids": reordered_workflows
+            }).status_code == 200
+            assert client.put("/api/admin/model-order", json={
+                "kind": "direct", "model_ids": list(reversed(directs))
+            }).status_code == 200
+            assert [item["id"] for item in client.get("/api/admin/models").json()["items"]] == [
+                *reordered_workflows, *reversed(directs)
+            ]
+            assert [item["id"] for item in client.get("/api/models").json()["items"]] == (
+                reordered_workflows
+            )
+
+            # Publishing one direct model preserves its relative place in the user catalog.
+            assert client.patch("/api/admin/model-profiles/direct/beta:cloud", json={
+                "visibility": "public", "roles": ["users"], "display_name": ""
+            }).status_code == 200
+            assert [item["id"] for item in client.get("/api/models").json()["items"]] == [
+                *reordered_workflows, "direct/beta:cloud"
+            ]
+    finally:
+        store.close()
+
+    reopened = ApplicationStore(path)
+    try:
+        assert (asyncio.run(reopened.list_model_display_order()))["direct/beta:cloud"] == (
+            "direct", 0
+        )
+    finally:
+        reopened.close()
+
+
 def test_admin_routes_reject_personal_tokens_even_for_admin_account(tmp_path):
     store = ApplicationStore(tmp_path / "app.sqlite")
     admin = asyncio.run(

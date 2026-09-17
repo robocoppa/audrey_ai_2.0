@@ -111,6 +111,7 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "No models available" })).toBeVisible();
+    expect(await screen.findByText("Status unavailable")).toBeVisible();
     expect(screen.getByRole("button", { name: "Admin Panel" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "+ New" })).toBeDisabled();
   });
@@ -162,6 +163,47 @@ describe("App", () => {
     );
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/me",
+      expect.objectContaining({ credentials: "same-origin" }),
+    );
+  });
+
+  it("reports degraded capabilities without blocking the workspace", async () => {
+    const fetchMock = vi.fn().mockImplementation((path: string) => {
+      const payload = path === "/api/me"
+        ? {
+            id: "usr_example",
+            email: "alice@example.com",
+            display_name: "Alice",
+            role: "user",
+            status: "active",
+            groups: ["users"],
+            auth_provider: "cloudflare_access",
+          }
+        : path === "/api/me/preferences"
+          ? DEFAULT_PREFERENCES
+          : path === "/api/capabilities"
+            ? {
+                status: "degraded",
+                generated_at: "2026-09-16T12:00:00+00:00",
+                chat: { status: "available" },
+                tools: { status: "degraded" },
+                knowledge: { status: "available" },
+                skills: { status: "disabled" },
+              }
+            : collectionPayload(path);
+      return Promise.resolve(new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByText("Some features degraded")).toBeVisible();
+    expect(screen.getByLabelText("Signed in user")).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/capabilities",
       expect.objectContaining({ credentials: "same-origin" }),
     );
   });

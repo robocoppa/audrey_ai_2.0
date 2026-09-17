@@ -563,6 +563,22 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        11,
+        """
+        CREATE TABLE IF NOT EXISTS model_display_order (
+          model_id           TEXT PRIMARY KEY,
+          kind               TEXT NOT NULL CHECK (kind IN ('workflow', 'direct')),
+          position           INTEGER NOT NULL CHECK (position >= 0),
+          updated_by_user_id TEXT,
+          updated_at         TEXT NOT NULL,
+          FOREIGN KEY (updated_by_user_id) REFERENCES app_users(user_id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_model_display_order_kind_position
+          ON model_display_order(kind, position, model_id);
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS"]

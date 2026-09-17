@@ -103,7 +103,7 @@ export function ChatWorkspace({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const listKeyRef = useRef("");
   const selectedIdRef = useRef<string | null>(null);
-  const defaultModelId = models[0]?.id ?? null;
+  const defaultModelId = models.find(({ id }) => id === "auto")?.id ?? models[0]?.id ?? null;
   const catalogUnavailable = defaultModelId === null;
   const canBrowseDirectModels = models.some((model) =>
     model.kind === "direct"
@@ -445,7 +445,7 @@ function ConversationThread({
   const [modelId, setModelId] = useState(
     models.some(({ id }) => id === conversation.default_model_id)
       ? conversation.default_model_id
-      : models[0].id,
+      : (models.find(({ id }) => id === "auto") ?? models[0]).id,
   );
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(conversation.title);
@@ -456,7 +456,7 @@ function ConversationThread({
   const archived = conversation.archived_at !== null;
   const selectedModelId = models.some(({ id }) => id === modelId)
     ? modelId
-    : models[0].id;
+    : (models.find(({ id }) => id === "auto") ?? models[0]).id;
 
   useEffect(() => {
     let active = true;
@@ -1099,7 +1099,7 @@ function ComposerModelPicker({
       </optgroup>
       {selected.kind === "direct" && canBrowseDirectModels ? (
         <optgroup label="Selected direct model">
-          <option value={selected.id}>{selected.label}</option>
+          <option value={selected.id}>{selected.id.slice("direct/".length)}</option>
         </optgroup>
       ) : null}
       {directModels.length > 0 ? (
@@ -1141,7 +1141,7 @@ function ComposerModelPicker({
                   void onChange(item.id);
                 }}
               >
-                {item.label}
+                {item.id.slice("direct/".length)}
               </button>
             ))}
           </div>

@@ -244,7 +244,20 @@ async def catalog_for_principal(
     available = inventory
     if available is None:
         available = (await discover_models(cfg, ollama)).models
-    for model in available:
+    order = await store.list_model_display_order()
+    indexed = enumerate(available)
+    ordered = sorted(
+        indexed,
+        key=lambda pair: (
+            0 if pair[1].kind == "workflow" else 1,
+            0 if pair[1].id in order and order[pair[1].id][0] == pair[1].kind else 1,
+            order[pair[1].id][1]
+            if pair[1].id in order and order[pair[1].id][0] == pair[1].kind
+            else 0,
+            pair[0],
+        ),
+    )
+    for _, model in ordered:
         model = _apply_policy(model, policies.get(model.id))
         model = _apply_profile(model, profiles.get(model.id))
         if include_hidden and principal.is_admin:

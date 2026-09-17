@@ -15,6 +15,7 @@ import {
   listAdminModels,
   listAdminUsers,
   resetAdminModelPolicy,
+  setAdminModelOrder,
   updateAdminModel,
   updateAdminUser,
   type AccessGroup,
@@ -79,6 +80,7 @@ export function AdminPanel({
       || user.email.toLocaleLowerCase().includes(query);
     return matchesQuery && (accountFilter === "all" || user.status === accountFilter);
   });
+  const modelOrderLocked = Boolean(modelQuery.trim()) || modelStatusFilter !== "all";
   const filteredModels = models.filter((model) => {
     const query = modelQuery.trim().toLocaleLowerCase();
     const matchesQuery = !query
@@ -277,6 +279,31 @@ export function AdminPanel({
       setDeleteRoleId("");
     } catch (reason) {
       setError(messageOf(reason, "The role could not be deleted."));
+    } finally {
+      setBusyKey("");
+    }
+  }
+
+  async function moveModel(model: AdminModel, direction: -1 | 1) {
+    const siblings = models.filter((item) => item.kind === model.kind);
+    const index = siblings.findIndex((item) => item.id === model.id);
+    const target = index + direction;
+    if (modelOrderLocked || busy || target < 0 || target >= siblings.length) return;
+    const reordered = [...siblings];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    setBusyKey("model-order");
+    setError("");
+    try {
+      await setAdminModelOrder(model.kind, reordered.map((item) => item.id));
+      setModels((current) => {
+        const byId = new Map(current.map((item) => [item.id, item]));
+        const ordered = reordered.map((item) => byId.get(item.id) ?? item);
+        let next = 0;
+        return current.map((item) => item.kind === model.kind ? ordered[next++] : item);
+      });
+      onChanged();
+    } catch (reason) {
+      setError(messageOf(reason, "The model order could not be saved."));
     } finally {
       setBusyKey("");
     }
@@ -751,6 +778,7 @@ export function AdminPanel({
                   Audrey policy overrides and do not alter Ollama itself.
                 </p>
                 {modelWarning ? <p className="admin-inventory-warning" role="status">{modelWarning}</p> : null}
+                <p>Use the arrows to set the order within Audrey workflows or Other models. Clear search and state filters to reorder.</p>
               </div>
               <div className="admin-toolbar">
                 <label>
@@ -790,6 +818,8 @@ export function AdminPanel({
               <div className="admin-record-list">
                 {filteredModels.map((model) => {
                   const rowBusy = busyKey === `model:${model.id}`;
+                  const siblings = models.filter((item) => item.kind === model.kind);
+                  const orderIndex = siblings.findIndex((item) => item.id === model.id);
                   return (
                     <article className="admin-record admin-model-record" key={model.id}>
                       <div className="admin-record-heading" title={model.description}>
@@ -804,6 +834,22 @@ export function AdminPanel({
                       </div>
                       <p className="admin-visually-hidden">{model.description}</p>
                       <div className="admin-model-controls">
+                        <div className="admin-model-order-controls" aria-label={`Order for ${model.label}`}>
+                          <button
+                            type="button"
+                            aria-label={`Move ${model.label} up`}
+                            title="Move up"
+                            onClick={() => void moveModel(model, -1)}
+                            disabled={busy || modelOrderLocked || orderIndex === 0}
+                          >↑</button>
+                          <button
+                            type="button"
+                            aria-label={`Move ${model.label} down`}
+                            title="Move down"
+                            onClick={() => void moveModel(model, 1)}
+                            disabled={busy || modelOrderLocked || orderIndex === siblings.length - 1}
+                          >↓</button>
+                        </div>
                         <button
                           type="button"
                           aria-pressed={model.enabled}

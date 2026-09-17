@@ -106,6 +106,13 @@ class AdminModelListResponse(BaseModel):
     warning: str
 
 
+class AdminModelOrderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["workflow", "direct"]
+    model_ids: list[str]
+
+
 class AdminModelPatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -367,6 +374,36 @@ async def list_models(
         source=inventory.source,
         warning=inventory.warning,
     )
+
+
+@router.put("/model-order")
+async def update_model_order(
+    payload: AdminModelOrderRequest,
+    request: Request,
+    principal: Principal = Depends(require_admin_principal),
+) -> dict[str, list[str]]:
+    inventory = await discover_models(
+        request.app.state.cfg, getattr(request.app.state, "ollama", None)
+    )
+    expected = {
+        model.id for model in inventory.models if model.kind == payload.kind
+    }
+    if (
+        len(payload.model_ids) != len(expected)
+        or set(payload.model_ids) != expected
+    ):
+        raise HTTPException(
+            status_code=409, detail="Model inventory changed; refresh and retry."
+        )
+    try:
+        await application_store(request).set_model_display_order(
+            actor_user_id=principal.user_id,
+            kind=payload.kind,
+            model_ids=payload.model_ids,
+        )
+    except AccountAdministrationError as exc:
+        raise _admin_error(exc) from exc
+    return {"model_ids": payload.model_ids}
 
 
 @router.patch("/models/{model_id:path}", response_model=AdminModelResponse)

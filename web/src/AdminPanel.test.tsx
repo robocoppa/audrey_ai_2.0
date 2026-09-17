@@ -227,6 +227,48 @@ describe("AdminPanel", () => {
     );
   });
 
+  it("reorders direct models and disables ordering while search hides rows", async () => {
+    const second = {
+      ...DIRECT_MODEL,
+      id: "direct/other:cloud",
+      label: "Other",
+      concrete_model: "other:cloud",
+    };
+    const changed = vi.fn();
+    const fetchMock = vi.fn().mockImplementation(async (path: string, request?: RequestInit) => {
+      if (path === "/api/admin/users") return jsonResponse({ items: [] });
+      if (path === "/api/admin/roles") return jsonResponse({ items: [] });
+      if (path === "/api/admin/models") {
+        return jsonResponse({ items: [DIRECT_MODEL, second], source: "ollama", warning: "" });
+      }
+      if (path === "/api/admin/model-order" && request?.method === "PUT") {
+        return jsonResponse({ model_ids: ["direct/other:cloud", DIRECT_MODEL.id] });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AdminPanel currentUserId="usr_admin" onChanged={changed} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Models/u }));
+
+    expect(screen.getByRole("button", { name: "Move Qwen 3.8 27B up" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Move Qwen 3.8 27B down" }));
+    await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+    expect(fetchMock).toHaveBeenCalledWith("/api/admin/model-order", expect.objectContaining({
+      method: "PUT",
+      body: JSON.stringify({
+        kind: "direct",
+        model_ids: ["direct/other:cloud", DIRECT_MODEL.id],
+      }),
+    }));
+    const labels = Array.from(document.querySelectorAll(".admin-model-record strong"))
+      .map((element) => element.textContent);
+    expect(labels).toEqual(["Other", "Qwen 3.8 27B"]);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Find a model" }), {
+      target: { value: "Other" },
+    });
+    expect(screen.getByRole("button", { name: "Move Other down" })).toBeDisabled();
+  });
+
   it("confirms permanent account deletion and shows durable progress", async () => {
     const fetchMock = vi.fn().mockImplementation(async (path: string, request?: RequestInit) => {
       if (path === "/api/admin/users" && !request?.method) {

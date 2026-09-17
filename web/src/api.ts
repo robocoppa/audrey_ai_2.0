@@ -25,6 +25,26 @@ export interface AudreyModel {
   portrait_url: string;
 }
 
+export interface CapabilityHealth {
+  status: "ready" | "degraded" | "unavailable";
+  generated_at: string;
+  chat: { status: "available" | "unavailable" };
+  tools: { status: "available" | "degraded" | "unavailable" | "disabled" };
+  knowledge: { status: "available" | "degraded" | "unavailable" };
+  skills: { status: "disabled" };
+}
+
+export interface SkillSummary {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface SkillsCatalog {
+  enabled: boolean;
+  items: SkillSummary[];
+}
+
 export interface AdminModel extends AudreyModel {
   concrete_model: string;
   policy_overridden: boolean;
@@ -301,6 +321,14 @@ export function listModels(): Promise<{ items: AudreyModel[] }> {
   return apiJson<{ items: AudreyModel[] }>("/api/models");
 }
 
+export function getCapabilities(): Promise<CapabilityHealth> {
+  return apiJson<CapabilityHealth>("/api/capabilities");
+}
+
+export function listSkills(): Promise<SkillsCatalog> {
+  return apiJson<SkillsCatalog>("/api/skills");
+}
+
 export function listAdminUsers(): Promise<{ items: AdminUser[] }> {
   return apiJson<{ items: AdminUser[] }>("/api/admin/users");
 }
@@ -385,6 +413,17 @@ export async function deleteAdminRole(roleId: string): Promise<void> {
 
 export function listAdminModels(): Promise<AdminModelCatalog> {
   return apiJson<AdminModelCatalog>("/api/admin/models");
+}
+
+export function setAdminModelOrder(
+  kind: "workflow" | "direct",
+  modelIds: string[],
+): Promise<{ model_ids: string[] }> {
+  return apiJson<{ model_ids: string[] }>("/api/admin/model-order", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, model_ids: modelIds }),
+  });
 }
 
 export function updateAdminModel(

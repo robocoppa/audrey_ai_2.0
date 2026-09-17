@@ -6,10 +6,12 @@ import builtryteWordmark from "./assets/brand/builtryte-wordmark.png";
 import { AccountSettings } from "./AccountSettings";
 import {
   ApiError,
+  getCapabilities,
   getCurrentUser,
   getCurrentUserPreferences,
   listModels,
   type AudreyModel,
+  type CapabilityHealth,
   type CurrentUser,
   type UserPreferences,
 } from "./api";
@@ -50,6 +52,8 @@ function clearCloudflareAccessMessage() {
 
 export function App() {
   const [session, setSession] = useState<SessionState>({ status: "loading" });
+  const [capabilityHealth, setCapabilityHealth] = useState<CapabilityHealth | null>(null);
+  const [healthUnavailable, setHealthUnavailable] = useState(false);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [sessionRevision, setSessionRevision] = useState(0);
   const [showAccessHandoff, setShowAccessHandoff] = useState(hasCloudflareAccessMessage);
@@ -110,6 +114,34 @@ export function App() {
     };
   }, [sessionRevision]);
 
+  const sessionReady = session.status === "ready";
+  useEffect(() => {
+    if (!sessionReady) return;
+    let active = true;
+    const refresh = () => {
+      void getCapabilities().then((health) => {
+        if (!active) return;
+        if (!["ready", "degraded", "unavailable"].includes(health?.status)
+          || !health?.chat?.status || !health?.tools?.status
+          || !health?.knowledge?.status) {
+          throw new Error("Invalid capability health response.");
+        }
+        setCapabilityHealth(health);
+        setHealthUnavailable(false);
+      }).catch(() => {
+        if (!active) return;
+        setCapabilityHealth(null);
+        setHealthUnavailable(true);
+      });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 30_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [sessionReady]);
+
   const retrySession = () => {
     setShowAccessHandoff(true);
     setSession({ status: "loading" });
@@ -158,6 +190,8 @@ export function App() {
         <ReadySessionControls
           user={session.user}
           preferences={session.preferences}
+          capabilityHealth={capabilityHealth}
+          healthUnavailable={healthUnavailable}
           onUserChange={(user) => {
             setSession((current) =>
               current.status === "ready" ? { ...current, user } : current,
@@ -281,6 +315,8 @@ function SessionTimeout({
 function ReadySessionControls({
   user,
   preferences,
+  capabilityHealth,
+  healthUnavailable,
   onUserChange,
   onPreferencesChange,
   onDataPurgeAttempted,
@@ -288,6 +324,8 @@ function ReadySessionControls({
 }: {
   user: CurrentUser;
   preferences: UserPreferences;
+  capabilityHealth: CapabilityHealth | null;
+  healthUnavailable: boolean;
   onUserChange: (user: CurrentUser) => void;
   onPreferencesChange: (preferences: UserPreferences) => void;
   onDataPurgeAttempted: () => void;
@@ -295,9 +333,25 @@ function ReadySessionControls({
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const healthDetails = capabilityHealth
+    ? `Chat: ${capabilityHealth.chat.status} · Tools: ${capabilityHealth.tools.status} · Knowledge: ${capabilityHealth.knowledge.status}`
+    : undefined;
 
   return (
     <div className="session-controls" aria-label="Signed in user">
+      {capabilityHealth?.status === "unavailable" ? (
+        <span className="capability-badge capability-badge-unavailable" role="status" title={healthDetails}>
+          Models offline
+        </span>
+      ) : capabilityHealth?.status === "degraded" ? (
+        <span className="capability-badge" role="status" title={healthDetails}>
+          Some features degraded
+        </span>
+      ) : healthUnavailable ? (
+        <span className="capability-badge" role="status">
+          Status unavailable
+        </span>
+      ) : null}
       <button
         className="session-name"
         type="button"
