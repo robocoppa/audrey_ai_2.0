@@ -186,6 +186,9 @@ test("approves an account and changes a model policy in the admin panel", async 
     capabilities: ["text", "thinking"],
     enabled: true,
     audience: "testers",
+    visibility: "public",
+    roles: ["testers"],
+    portrait_url: "",
     concrete_model: "qwen3.8:latest",
   };
   const modelPatches: unknown[] = [];
@@ -225,6 +228,14 @@ test("approves an account and changes a model policy in the admin panel", async 
     }
     if (url.pathname === "/api/admin/models") {
       await json(route, { items: [directModel], source: "ollama", warning: "" });
+      return;
+    }
+    if (url.pathname === "/api/admin/roles") {
+      await json(route, { items: [
+        { id: "users", name: "Users", description: "", system: true, user_count: 1 },
+        { id: "testers", name: "Testers", description: "", system: true, user_count: 0 },
+        { id: "admins", name: "Administrators", description: "", system: true, user_count: 1 },
+      ] });
       return;
     }
     if (url.pathname === "/api/admin/models/direct%2Fqwen3.8%3Alatest") {
@@ -483,7 +494,9 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect(modelPicker).toHaveValue("fast");
   const directMenu = page.getByRole("menu", { name: "Other models" });
   await expect(directMenu).toBeVisible();
-  const firstDirectModel = directMenu.getByRole("menuitem", { name: /Qwen 3.8/u });
+  const firstDirectModel = directMenu.getByRole("menuitem", { name: "Qwen 3.8", exact: true });
+  await expect(firstDirectModel).toHaveText("Qwen 3.8");
+  await expect(directMenu).not.toContainText("Direct local Qwen");
   await expect(firstDirectModel).toBeFocused();
   await firstDirectModel.press("Escape");
   await expect(directMenu).toHaveCount(0);
@@ -1036,7 +1049,7 @@ test("keeps canonical messages when changing model", async ({ page }) => {
   await page.getByRole("combobox", { name: "Audrey model" }).selectOption("__other_models__");
   const directMenu = page.getByRole("menu", { name: "Other models" });
   await expect(directMenu).toBeVisible();
-  await directMenu.getByRole("menuitem", { name: /Qwen 3.8/u }).click();
+  await directMenu.getByRole("menuitem", { name: "Qwen 3.8", exact: true }).click();
   await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue(
     "direct/qwen3.8:latest",
   );
@@ -1788,6 +1801,9 @@ function browserModels() {
     capabilities: ["text", "files", "tools"],
     enabled: true,
     audience: "users",
+    visibility: "public",
+    roles: ["users"],
+    portrait_url: "",
   }));
   return [
     ...workflows,
@@ -1801,6 +1817,9 @@ function browserModels() {
       capabilities: ["text", "thinking"],
       enabled: true,
       audience: "testers",
+      visibility: "public",
+      roles: ["testers"],
+      portrait_url: "",
     },
   ];
 }

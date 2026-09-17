@@ -2,6 +2,14 @@ import { useEffect, useState } from "react";
 
 import {
   approveAdminUser,
+  createPendingAdminUser,
+  createAdminRole,
+  deleteAdminRole,
+  listAdminRoles,
+  removeAdminModelPortrait,
+  updateAdminModelProfile,
+  updateAdminRole,
+  uploadAdminModelPortrait,
   deleteAdminUser,
   denyAdminUser,
   listAdminModels,
@@ -11,14 +19,15 @@ import {
   updateAdminUser,
   type AccessGroup,
   type AdminModel,
+  type AdminRole,
   type AdminUser,
 } from "./api";
 
-type AdminView = "accounts" | "models";
+type AdminView = "accounts" | "models" | "roles";
 type AccountFilter = "all" | "pending" | "active" | "disabled";
 type ModelFilter = "all" | "workflow" | "direct";
 type ModelStatusFilter = "all" | "enabled" | "disabled";
-type AccessRole = "user" | "tester" | "admin";
+type AccessRole = string;
 
 export function AdminPanel({
   currentUserId,
@@ -31,6 +40,18 @@ export function AdminPanel({
 }) {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [models, setModels] = useState<AdminModel[]>([]);
+  const [roles, setRoles] = useState<AdminRole[]>([]);
+  const [newRoleId, setNewRoleId] = useState("");
+  const [newRoleName, setNewRoleName] = useState("");
+  const [newRoleDescription, setNewRoleDescription] = useState("");
+  const [editingRoleId, setEditingRoleId] = useState("");
+  const [roleName, setRoleName] = useState("");
+  const [roleDescription, setRoleDescription] = useState("");
+  const [deleteRoleId, setDeleteRoleId] = useState("");
+  const [editingModel, setEditingModel] = useState<AdminModel | null>(null);
+  const [modelName, setModelName] = useState("");
+  const [modelRoles, setModelRoles] = useState<AccessGroup[]>([]);
+  const [modelPortrait, setModelPortrait] = useState<File | null>(null);
   const [modelSource, setModelSource] = useState<"ollama" | "configuration">("ollama");
   const [modelWarning, setModelWarning] = useState("");
   const [loading, setLoading] = useState(true);
@@ -41,6 +62,8 @@ export function AdminPanel({
   const [view, setView] = useState<AdminView>("accounts");
   const [accountQuery, setAccountQuery] = useState("");
   const [accountFilter, setAccountFilter] = useState<AccountFilter>("all");
+  const [newAccountEmail, setNewAccountEmail] = useState("");
+  const [newAccountName, setNewAccountName] = useState("");
   const [modelQuery, setModelQuery] = useState("");
   const [modelFilter, setModelFilter] = useState<ModelFilter>("all");
   const [modelStatusFilter, setModelStatusFilter] = useState<ModelStatusFilter>("all");
@@ -69,11 +92,12 @@ export function AdminPanel({
 
   useEffect(() => {
     let active = true;
-    Promise.all([listAdminUsers(), listAdminModels()])
-      .then(([userResponse, modelResponse]) => {
+    Promise.all([listAdminUsers(), listAdminModels(), listAdminRoles()])
+      .then(([userResponse, modelResponse, roleResponse]) => {
         if (!active) return;
         setUsers(userResponse.items);
         setModels(modelResponse.items);
+        setRoles(roleResponse.items);
         setModelSource(modelResponse.source);
         setModelWarning(modelResponse.warning);
       })
@@ -100,17 +124,39 @@ export function AdminPanel({
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape" && !busy) onClose();
+      if (event.key === "Escape" && !busy) {
+        if (editingModel) setEditingModel(null);
+        else onClose();
+      }
     }
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [busy, onClose]);
+  }, [busy, editingModel, onClose]);
 
   function replaceUser(updated: AdminUser) {
     setUsers((current) => current.map((user) =>
       user.id === updated.id ? updated : user,
     ));
     onChanged();
+  }
+
+  async function addPendingAccount(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusyKey("new-account");
+    setError("");
+    try {
+      const created = await createPendingAdminUser(newAccountEmail.trim(), newAccountName.trim());
+      setUsers((current) => [created, ...current]);
+      setNewAccountEmail("");
+      setNewAccountName("");
+      setAccountFilter("pending");
+      setAccountQuery("");
+      onChanged();
+    } catch (reason) {
+      setError(messageOf(reason, "The pending account could not be added."));
+    } finally {
+      setBusyKey("");
+    }
   }
 
   async function approve(user: AdminUser, tester: boolean) {
@@ -179,6 +225,126 @@ export function AdminPanel({
       }));
     } catch (reason) {
       setError(messageOf(reason, "The access groups could not be changed."));
+    } finally {
+      setBusyKey("");
+    }
+  }
+
+  async function addRole(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusyKey("new-role");
+    setError("");
+    try {
+      const created = await createAdminRole({
+        id: newRoleId.trim().toLowerCase(),
+        name: newRoleName.trim(),
+        description: newRoleDescription.trim(),
+      });
+      setRoles((current) => [...current, created]);
+      setNewRoleId("");
+      setNewRoleName("");
+      setNewRoleDescription("");
+    } catch (reason) {
+      setError(messageOf(reason, "The role could not be created."));
+    } finally {
+      setBusyKey("");
+    }
+  }
+
+  async function saveRole(role: AdminRole) {
+    setBusyKey(`role:${role.id}`);
+    setError("");
+    try {
+      const updated = await updateAdminRole(role.id, {
+        name: roleName.trim(),
+        description: roleDescription.trim(),
+      });
+      setRoles((current) => current.map((item) => item.id === role.id ? updated : item));
+      setEditingRoleId("");
+    } catch (reason) {
+      setError(messageOf(reason, "The role could not be saved."));
+    } finally {
+      setBusyKey("");
+    }
+  }
+
+  async function removeRole(role: AdminRole) {
+    setBusyKey(`role:${role.id}`);
+    setError("");
+    try {
+      await deleteAdminRole(role.id);
+      setRoles((current) => current.filter((item) => item.id !== role.id));
+      setDeleteRoleId("");
+    } catch (reason) {
+      setError(messageOf(reason, "The role could not be deleted."));
+    } finally {
+      setBusyKey("");
+    }
+  }
+
+  async function changeModelVisibility(model: AdminModel, visibility: "public" | "private") {
+    setBusyKey(`model:${model.id}`);
+    setError("");
+    try {
+      const updated = await updateAdminModelProfile(model.id, {
+        visibility,
+        roles: visibility === "public"
+          ? (model.roles.length ? model.roles : ["users"])
+          : model.roles,
+        display_name: model.label,
+      });
+      setModels((current) => current.map((item) => item.id === model.id ? updated : item));
+      onChanged();
+    } catch (reason) {
+      setError(messageOf(reason, "The model visibility could not be changed."));
+    } finally {
+      setBusyKey("");
+    }
+  }
+
+  function openModelEditor(model: AdminModel) {
+    setEditingModel(model);
+    setModelName(model.label);
+    setModelRoles(model.roles);
+    setModelPortrait(null);
+  }
+
+  async function saveModelEditor(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingModel) return;
+    setBusyKey(`model:${editingModel.id}`);
+    setError("");
+    try {
+      let updated = await updateAdminModelProfile(editingModel.id, {
+        visibility: editingModel.visibility,
+        roles: modelRoles,
+        display_name: modelName.trim(),
+      });
+      if (modelPortrait) {
+        updated = await uploadAdminModelPortrait(editingModel.id, modelPortrait);
+      }
+      setModels((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setEditingModel(null);
+      setModelPortrait(null);
+      onChanged();
+    } catch (reason) {
+      setError(messageOf(reason, "The model settings could not be saved."));
+    } finally {
+      setBusyKey("");
+    }
+  }
+
+  async function removePortrait() {
+    if (!editingModel) return;
+    setBusyKey(`model:${editingModel.id}`);
+    setError("");
+    try {
+      const updated = await removeAdminModelPortrait(editingModel.id);
+      setModels((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setEditingModel(updated);
+      onChanged();
+    } catch (reason) {
+      setError(messageOf(reason, "The portrait could not be removed."));
     } finally {
       setBusyKey("");
     }
@@ -270,6 +436,17 @@ export function AdminPanel({
                 Models <span>{models.length}</span>
                 <em>{enabledDirectCount} direct enabled</em>
               </button>
+              <button
+                type="button"
+                role="tab"
+                id="admin-tab-roles"
+                aria-controls="admin-roles-panel"
+                aria-selected={view === "roles"}
+                onClick={() => setView("roles")}
+              >
+                Roles <span>{roles.length}</span>
+                <em>Manage access groups</em>
+              </button>
             </div>
 
             {view === "accounts" ? (
@@ -283,6 +460,32 @@ export function AdminPanel({
                 <h3 id="admin-users-title">Accounts</h3>
                 <p>Approve sign-ins, assign one clear access role, suspend or permanently delete accounts.</p>
               </div>
+              <form className="admin-add-account" onSubmit={(event) => void addPendingAccount(event)}>
+                <label>
+                  <span>Add a pending account by email</span>
+                  <input
+                    type="email"
+                    required
+                    value={newAccountEmail}
+                    onChange={(event) => setNewAccountEmail(event.target.value)}
+                    placeholder="email@example.com"
+                    disabled={busy}
+                  />
+                </label>
+                <label>
+                  <span>Name (optional)</span>
+                  <input
+                    type="text"
+                    maxLength={100}
+                    value={newAccountName}
+                    onChange={(event) => setNewAccountName(event.target.value)}
+                    disabled={busy}
+                  />
+                </label>
+                <button type="submit" disabled={busy || !newAccountEmail.trim()}>
+                  {busyKey === "new-account" ? "Adding…" : "Add pending"}
+                </button>
+              </form>
               <div className="admin-toolbar admin-account-toolbar">
                 <label>
                   <span>Find an account</span>
@@ -371,6 +574,9 @@ export function AdminPanel({
                               <option value="user">User</option>
                               <option value="tester">Tester</option>
                               <option value="admin">Administrator</option>
+                              {roles.filter((role) => !role.system).map((role) => (
+                                <option key={role.id} value={role.id}>{role.name}</option>
+                              ))}
                             </select>
                           </label>
                           <button
@@ -420,6 +626,109 @@ export function AdminPanel({
                 {filteredUsers.length === 0 ? (
                   <p className="admin-empty">No accounts match these filters.</p>
                 ) : null}
+              </div>
+            </section>
+            ) : null}
+
+            {view === "roles" ? (
+            <section
+              className="settings-section admin-workspace"
+              id="admin-roles-panel"
+              role="tabpanel"
+              aria-labelledby="admin-tab-roles"
+            >
+              <div className="settings-section-heading">
+                <h3>Roles</h3>
+                <p>Create roles for account assignments and Public model access. Built-in roles are protected.</p>
+              </div>
+              <form className="admin-role-form" onSubmit={(event) => void addRole(event)}>
+                <label>
+                  <span>Role ID</span>
+                  <input
+                    value={newRoleId}
+                    onChange={(event) => setNewRoleId(event.target.value)}
+                    placeholder="researchers"
+                    pattern="[a-z][a-z0-9_-]{1,31}"
+                    maxLength={32}
+                    required
+                    disabled={busy}
+                  />
+                </label>
+                <label>
+                  <span>Name</span>
+                  <input
+                    value={newRoleName}
+                    onChange={(event) => setNewRoleName(event.target.value)}
+                    placeholder="Researchers"
+                    maxLength={60}
+                    required
+                    disabled={busy}
+                  />
+                </label>
+                <label>
+                  <span>Description (optional)</span>
+                  <input
+                    value={newRoleDescription}
+                    onChange={(event) => setNewRoleDescription(event.target.value)}
+                    maxLength={240}
+                    disabled={busy}
+                  />
+                </label>
+                <button type="submit" disabled={busy}>Add role</button>
+              </form>
+              <div className="admin-record-list">
+                {roles.map((role) => (
+                  <article className="admin-record admin-role-record" key={role.id}>
+                    {editingRoleId === role.id ? (
+                      <form className="admin-role-edit" onSubmit={(event) => {
+                        event.preventDefault();
+                        void saveRole(role);
+                      }}>
+                        <label>
+                          <span>Name</span>
+                          <input value={roleName} onChange={(event) => setRoleName(event.target.value)} maxLength={60} required />
+                        </label>
+                        <label>
+                          <span>Description</span>
+                          <input value={roleDescription} onChange={(event) => setRoleDescription(event.target.value)} maxLength={240} />
+                        </label>
+                        <button type="submit" disabled={busy}>Save</button>
+                        <button type="button" onClick={() => setEditingRoleId("")} disabled={busy}>Cancel</button>
+                      </form>
+                    ) : (
+                      <>
+                        <div className="admin-record-heading">
+                          <div>
+                            <strong>{role.name}</strong>
+                            <span>{role.id} · {role.user_count} users{role.description ? ` · ${role.description}` : ""}</span>
+                          </div>
+                          <span>{role.system ? "Built-in" : "Custom"}</span>
+                        </div>
+                        {!role.system ? (
+                          <div className="admin-role-actions">
+                            <button type="button" disabled={busy} onClick={() => {
+                              setEditingRoleId(role.id);
+                              setRoleName(role.name);
+                              setRoleDescription(role.description);
+                            }}>Edit</button>
+                            {deleteRoleId === role.id ? (
+                              <>
+                                <button className="danger-button" type="button" disabled={busy} onClick={() => void removeRole(role)}>
+                                  Confirm delete
+                                </button>
+                                <button type="button" disabled={busy} onClick={() => setDeleteRoleId("")}>Cancel</button>
+                              </>
+                            ) : (
+                              <button className="danger-button" type="button" disabled={busy} onClick={() => setDeleteRoleId(role.id)}>
+                                Delete
+                              </button>
+                            )}
+                          </div>
+                        ) : null}
+                      </>
+                    )}
+                  </article>
+                ))}
               </div>
             </section>
             ) : null}
@@ -504,19 +813,21 @@ export function AdminPanel({
                           {rowBusy ? "Saving…" : model.enabled ? "Enabled" : "Disabled"}
                         </button>
                         <label className="admin-model-audience">
-                          <span>Minimum role</span>
+                          <span>Visibility</span>
                           <select
-                            value={model.audience}
-                            onChange={(event) => void setModel(model, {
-                              audience: event.target.value as AccessGroup,
-                            })}
+                            value={model.visibility}
+                            onChange={(event) => void changeModelVisibility(
+                              model, event.target.value as "public" | "private",
+                            )}
                             disabled={rowBusy}
                           >
-                            <option value="users">All users</option>
-                            <option value="testers">Testers + admins</option>
-                            <option value="admins">Admins only</option>
+                            <option value="public">Public</option>
+                            <option value="private">Private</option>
                           </select>
                         </label>
+                        <button type="button" onClick={() => openModelEditor(model)} disabled={rowBusy}>
+                          Edit…
+                        </button>
                         {model.policy_overridden ? (
                           <button type="button" onClick={() => void resetModel(model)} disabled={rowBusy}>
                             Reset default
@@ -532,6 +843,72 @@ export function AdminPanel({
               </div>
             </section>
             ) : null}
+
+            {editingModel ? (
+              <div className="admin-editor-backdrop" role="presentation" onMouseDown={(event) => {
+                if (event.currentTarget === event.target && !busy) setEditingModel(null);
+              }}>
+                <section className="admin-model-editor" role="dialog" aria-modal="true" aria-labelledby="admin-model-editor-title">
+                  <div className="admin-editor-heading">
+                    <div>
+                      <span>Model settings</span>
+                      <h3 id="admin-model-editor-title">{editingModel.label}</h3>
+                    </div>
+                    <button type="button" aria-label="Close model editor" onClick={() => setEditingModel(null)} disabled={busy}>×</button>
+                  </div>
+                  <form onSubmit={(event) => void saveModelEditor(event)}>
+                    <label>
+                      <span>Display name</span>
+                      <input value={modelName} onChange={(event) => setModelName(event.target.value)} maxLength={80} required />
+                    </label>
+                    <div className="admin-portrait-editor">
+                      {editingModel.portrait_url ? (
+                        <img src={editingModel.portrait_url} alt="" />
+                      ) : (
+                        <span className="admin-portrait-placeholder" aria-hidden="true">✦</span>
+                      )}
+                      <label>
+                        <span>Portrait (PNG, JPEG or WebP, up to 2 MB)</span>
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          onChange={(event) => setModelPortrait(event.target.files?.[0] ?? null)}
+                        />
+                      </label>
+                      {editingModel.portrait_url ? (
+                        <button type="button" onClick={() => void removePortrait()} disabled={busy}>Remove portrait</button>
+                      ) : null}
+                    </div>
+                    <fieldset>
+                      <legend>Roles allowed when Public</legend>
+                      <p>Private models are always limited to administrators, regardless of these selections.</p>
+                      <div className="admin-role-checks">
+                        {roles.filter((role) => role.id !== "admins").map((role) => (
+                          <label key={role.id}>
+                            <input
+                              type="checkbox"
+                              checked={modelRoles.includes(role.id)}
+                              onChange={(event) => setModelRoles((current) =>
+                                event.target.checked
+                                  ? [...current, role.id]
+                                  : current.filter((id) => id !== role.id),
+                              )}
+                            />
+                            {role.name}
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                    <div className="admin-editor-actions">
+                      <button type="submit" disabled={busy || !modelName.trim() || (editingModel.visibility === "public" && modelRoles.length === 0)}>
+                        {busy ? "Saving…" : "Save model"}
+                      </button>
+                      <button type="button" onClick={() => setEditingModel(null)} disabled={busy}>Cancel</button>
+                    </div>
+                  </form>
+                </section>
+              </div>
+            ) : null}
           </>
         )}
       </section>
@@ -541,6 +918,8 @@ export function AdminPanel({
 
 function roleForUser(user: AdminUser): AccessRole {
   if (user.groups.includes("admins") || user.role === "admin") return "admin";
+  const custom = user.groups.find((group) => !["users", "testers", "admins"].includes(group));
+  if (custom) return custom;
   if (user.groups.includes("testers")) return "tester";
   return "user";
 }
@@ -548,7 +927,8 @@ function roleForUser(user: AdminUser): AccessRole {
 function groupsForRole(role: AccessRole): AccessGroup[] {
   if (role === "admin") return ["admins", "users"];
   if (role === "tester") return ["testers", "users"];
-  return ["users"];
+  if (role === "user") return ["users"];
+  return ["users", role];
 }
 
 function normalizedGroups(groups: AccessGroup[]): AccessGroup[] {

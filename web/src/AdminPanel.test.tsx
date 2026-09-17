@@ -26,6 +26,9 @@ const DIRECT_MODEL = {
   capabilities: ["text"],
   enabled: true,
   audience: "admins",
+  visibility: "private",
+  roles: [],
+  portrait_url: "",
   concrete_model: "qwen3.8:27b",
   policy_overridden: false,
 } as const;
@@ -41,6 +44,13 @@ describe("AdminPanel", () => {
     const fetchMock = vi.fn().mockImplementation(
       async (path: string, request?: RequestInit) => {
         if (path === "/api/admin/users") return jsonResponse({ items: [PENDING_USER] });
+        if (path === "/api/admin/roles") {
+          return jsonResponse({ items: [
+            { id: "users", name: "Users", description: "", system: true, user_count: 1 },
+            { id: "testers", name: "Testers", description: "", system: true, user_count: 0 },
+            { id: "admins", name: "Administrators", description: "", system: true, user_count: 1 },
+          ] });
+        }
         if (path === "/api/admin/models") {
           return jsonResponse({ items: [DIRECT_MODEL], source: "ollama", warning: "" });
         }
@@ -122,6 +132,101 @@ describe("AdminPanel", () => {
     expect(changed).toHaveBeenCalledTimes(4);
   });
 
+  it("adds pending accounts and roles, then publishes and edits a model", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (path: string, request?: RequestInit) => {
+      if (path === "/api/admin/users" && !request?.method) {
+        return jsonResponse({ items: [] });
+      }
+      if (path === "/api/admin/users" && request?.method === "POST") {
+        return jsonResponse({ ...PENDING_USER, email: "new@example.com", display_name: "New" });
+      }
+      if (path === "/api/admin/models") {
+        return jsonResponse({ items: [DIRECT_MODEL], source: "ollama", warning: "" });
+      }
+      if (path === "/api/admin/roles" && !request?.method) {
+        return jsonResponse({ items: [
+          { id: "users", name: "Users", description: "", system: true, user_count: 0 },
+        ] });
+      }
+      if (path === "/api/admin/roles" && request?.method === "POST") {
+        return jsonResponse({
+          id: "researchers", name: "Researchers", description: "",
+          system: false, user_count: 0,
+        });
+      }
+      if (path === "/api/admin/model-profiles/direct%2Fqwen3.8-27b") {
+        const profile = JSON.parse(String(request?.body)) as {
+          visibility: "public" | "private";
+          roles: string[];
+          display_name: string;
+        };
+        return jsonResponse({
+          ...DIRECT_MODEL,
+          visibility: profile.visibility,
+          roles: profile.roles,
+          label: profile.display_name,
+          policy_overridden: true,
+        });
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<AdminPanel currentUserId="usr_admin" onChanged={vi.fn()} onClose={vi.fn()} />);
+
+    fireEvent.change(await screen.findByRole("textbox", { name: "Add a pending account by email" }), {
+      target: { value: "new@example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add pending" }));
+    await waitFor(() => expect(screen.getByText("new@example.com")).toBeVisible());
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/users",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ email: "new@example.com", display_name: "" }),
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: /Roles/u }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Role ID" }), {
+      target: { value: "researchers" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "Researchers" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add role" }));
+    await waitFor(() => expect(screen.getByText("Researchers")).toBeVisible());
+
+    fireEvent.click(screen.getByRole("tab", { name: /Models/u }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Visibility" }), {
+      target: { value: "public" },
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/model-profiles/direct%2Fqwen3.8-27b",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          visibility: "public", roles: ["users"], display_name: "Qwen 3.8 27B",
+        }),
+      }),
+    ));
+    fireEvent.click(screen.getByRole("button", { name: "Edit…" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Display name" }), {
+      target: { value: "Research Qwen" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Researchers" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save model" }));
+    await waitFor(() => expect(screen.getByText("Research Qwen")).toBeVisible());
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/model-profiles/direct%2Fqwen3.8-27b",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({
+          visibility: "public", roles: ["users", "researchers"], display_name: "Research Qwen",
+        }),
+      }),
+    );
+  });
+
   it("confirms permanent account deletion and shows durable progress", async () => {
     const fetchMock = vi.fn().mockImplementation(async (path: string, request?: RequestInit) => {
       if (path === "/api/admin/users" && !request?.method) {
@@ -129,6 +234,9 @@ describe("AdminPanel", () => {
       }
       if (path === "/api/admin/models") {
         return jsonResponse({ items: [], source: "ollama", warning: "" });
+      }
+      if (path === "/api/admin/roles") {
+        return jsonResponse({ items: [] });
       }
       if (path === "/api/admin/users/usr_pending" && request?.method === "DELETE") {
         return jsonResponse({ id: "usr_pending", status: "deleting", purge_id: "purge_test" });

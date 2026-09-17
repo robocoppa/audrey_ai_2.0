@@ -547,6 +547,22 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         );
         """,
     ),
+    (
+        10,
+        """
+        CREATE TABLE IF NOT EXISTS model_publication_profiles (
+          model_id           TEXT PRIMARY KEY,
+          visibility         TEXT NOT NULL CHECK (visibility IN ('public', 'private')),
+          roles_json         TEXT NOT NULL DEFAULT '[]',
+          display_name       TEXT NOT NULL DEFAULT '',
+          portrait_mime      TEXT NOT NULL DEFAULT '',
+          portrait_data      BLOB,
+          updated_by_user_id TEXT,
+          updated_at         TEXT NOT NULL,
+          FOREIGN KEY (updated_by_user_id) REFERENCES app_users(user_id) ON DELETE SET NULL
+        );
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS"]

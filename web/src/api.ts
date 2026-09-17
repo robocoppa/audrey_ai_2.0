@@ -1,4 +1,4 @@
-export type AccessGroup = "users" | "testers" | "admins";
+export type AccessGroup = string;
 
 export interface CurrentUser {
   id: string;
@@ -20,11 +20,22 @@ export interface AudreyModel {
   capabilities: string[];
   enabled: boolean;
   audience: AccessGroup;
+  visibility: "public" | "private";
+  roles: AccessGroup[];
+  portrait_url: string;
 }
 
 export interface AdminModel extends AudreyModel {
   concrete_model: string;
   policy_overridden: boolean;
+}
+
+export interface AdminRole {
+  id: string;
+  name: string;
+  description: string;
+  system: boolean;
+  user_count: number;
 }
 
 export interface AdminModelCatalog {
@@ -294,6 +305,17 @@ export function listAdminUsers(): Promise<{ items: AdminUser[] }> {
   return apiJson<{ items: AdminUser[] }>("/api/admin/users");
 }
 
+export function createPendingAdminUser(
+  email: string,
+  displayName = "",
+): Promise<AdminUser> {
+  return apiJson<AdminUser>("/api/admin/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, display_name: displayName }),
+  });
+}
+
 export function approveAdminUser(
   userId: string,
   tester: boolean,
@@ -332,6 +354,35 @@ export function deleteAdminUser(userId: string): Promise<{
   });
 }
 
+export function listAdminRoles(): Promise<{ items: AdminRole[] }> {
+  return apiJson<{ items: AdminRole[] }>("/api/admin/roles");
+}
+
+export function createAdminRole(role: Pick<AdminRole, "id" | "name" | "description">): Promise<AdminRole> {
+  return apiJson<AdminRole>("/api/admin/roles", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(role),
+  });
+}
+
+export function updateAdminRole(
+  roleId: string,
+  patch: Pick<AdminRole, "name" | "description">,
+): Promise<AdminRole> {
+  return apiJson<AdminRole>(`/api/admin/roles/${encodeURIComponent(roleId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteAdminRole(roleId: string): Promise<void> {
+  await apiResponse(`/api/admin/roles/${encodeURIComponent(roleId)}`, {
+    method: "DELETE",
+  });
+}
+
 export function listAdminModels(): Promise<AdminModelCatalog> {
   return apiJson<AdminModelCatalog>("/api/admin/models");
 }
@@ -344,6 +395,32 @@ export function updateAdminModel(
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
+  });
+}
+
+export function updateAdminModelProfile(
+  modelId: string,
+  profile: { visibility: "public" | "private"; roles: AccessGroup[]; display_name: string },
+): Promise<AdminModel> {
+  return apiJson<AdminModel>(`/api/admin/model-profiles/${encodeURIComponent(modelId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(profile),
+  });
+}
+
+export function uploadAdminModelPortrait(modelId: string, file: File): Promise<AdminModel> {
+  const body = new FormData();
+  body.append("portrait", file);
+  return apiJson<AdminModel>(`/api/admin/model-portraits/${encodeURIComponent(modelId)}`, {
+    method: "PUT",
+    body,
+  });
+}
+
+export function removeAdminModelPortrait(modelId: string): Promise<AdminModel> {
+  return apiJson<AdminModel>(`/api/admin/model-portraits/${encodeURIComponent(modelId)}`, {
+    method: "DELETE",
   });
 }
 

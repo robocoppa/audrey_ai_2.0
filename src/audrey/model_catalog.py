@@ -11,8 +11,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, replace
 from typing import Any, Literal
+from urllib.parse import quote
 
-from audrey.app_state import ApplicationStore, ModelAccessPolicy
+from audrey.app_state import ApplicationStore, ModelAccessPolicy, ModelPublicationProfile
 from audrey.config import Config
 from audrey.identity import Principal
 from audrey.models.ollama import OllamaError
@@ -40,6 +41,9 @@ class ServedModel:
     capabilities: tuple[str, ...]
     enabled: bool
     audience: ModelAudience
+    visibility: Literal["public", "private"] = "public"
+    roles: tuple[str, ...] = ("users",)
+    portrait_url: str = ""
     num_ctx: int | None = None
     max_tokens: int | None = None
 
@@ -232,15 +236,20 @@ async def catalog_for_principal(
         policy.model_id: policy
         for policy in await store.list_model_access_policies()
     }
+    profiles = {
+        profile.model_id: profile
+        for profile in await store.list_model_publication_profiles()
+    }
     result: list[ServedModel] = []
     available = inventory
     if available is None:
         available = (await discover_models(cfg, ollama)).models
     for model in available:
         model = _apply_policy(model, policies.get(model.id))
+        model = _apply_profile(model, profiles.get(model.id))
         if include_hidden and principal.is_admin:
             result.append(model)
-        elif model.enabled and _audience_allows(model.audience, principal):
+        elif model.enabled and _model_allows(model, principal):
             result.append(model)
     return tuple(result)
 
@@ -277,7 +286,32 @@ def _apply_policy(
 ) -> ServedModel:
     if policy is None:
         return model
-    return replace(model, enabled=policy.enabled, audience=policy.audience)
+    return replace(
+        model,
+        enabled=policy.enabled,
+        audience=policy.audience,
+        visibility="private" if policy.audience == "admins" else "public",
+        roles=() if policy.audience == "admins" else (policy.audience,),
+    )
+
+
+def _apply_profile(
+    model: ServedModel,
+    profile: ModelPublicationProfile | None,
+) -> ServedModel:
+    if profile is None:
+        return model
+    portrait_url = (
+        f"/api/model-portraits/{quote(model.id, safe='')}?v={quote(profile.updated_at)}"
+        if profile.portrait_mime else ""
+    )
+    return replace(
+        model,
+        label=profile.display_name or model.label,
+        visibility=profile.visibility,
+        roles=profile.roles,
+        portrait_url=portrait_url,
+    )
 
 
 def _direct_model(
@@ -304,6 +338,16 @@ def _direct_model(
         capabilities=tuple(entry.get("capabilities") or ("text",)),
         enabled=bool(entry.get("enabled", direct_defaults.get("enabled", True))),
         audience=str(entry.get("audience", direct_defaults.get("audience", "admins"))),
+        visibility=(
+            "private" if str(entry.get("audience", direct_defaults.get("audience", "admins")))
+            == "admins" else "public"
+        ),
+        roles=(
+            () if str(entry.get("audience", direct_defaults.get("audience", "admins")))
+            == "admins" else (
+                str(entry.get("audience", direct_defaults.get("audience", "admins"))),
+            )
+        ),
         num_ctx=_optional_positive_int(
             entry.get("num_ctx", direct_defaults.get("num_ctx"))
         ),
@@ -327,16 +371,14 @@ def _installed_model_names(items: list[dict[str, Any]]) -> tuple[str, ...]:
     return tuple(sorted(names, key=str.casefold))
 
 
-def _audience_allows(audience: str, principal: Principal) -> bool:
+def _model_allows(model: ServedModel, principal: Principal) -> bool:
     if principal.status != "active":
         return False
     if principal.is_admin:
         return True
-    if audience == "users":
-        return "users" in principal.groups
-    if audience == "testers":
-        return principal.is_tester
-    return False
+    if model.visibility == "private":
+        return False
+    return bool(set(model.roles) & principal.groups)
 
 
 def _model_label(concrete: str) -> str:

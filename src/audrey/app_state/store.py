@@ -23,7 +23,13 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from audrey.app_state.migrations import MIGRATIONS
-from audrey.app_state.records import AdminUserRecord, LocalUserDataPurge, ModelAccessPolicy
+from audrey.app_state.records import (
+    AccessRoleRecord,
+    AdminUserRecord,
+    LocalUserDataPurge,
+    ModelAccessPolicy,
+    ModelPublicationProfile,
+)
 from audrey.app_state.repositories import (
     ChatProjectionsRepository,
     ConversationsRepository,
@@ -38,7 +44,6 @@ from audrey.identity import (
 
 _ALLOWED_ROLES = frozenset({"user", "admin"})
 _ALLOWED_ACCOUNT_STATUSES = frozenset({"pending", "active", "disabled"})
-_ALLOWED_GROUPS = frozenset({"users", "testers", "admins"})
 _ALLOWED_MODEL_AUDIENCES = frozenset({"users", "testers", "admins"})
 _TOKEN_RE = re.compile(r"\Aaud_(pat_[0-9a-f]{32})\.([A-Za-z0-9_-]{32,})\Z")
 _LAST_USED_WRITE_INTERVAL = dt.timedelta(minutes=5)
@@ -49,7 +54,7 @@ class InvalidIdentityError(ValueError):
 
 
 class IdentityConflictError(RuntimeError):
-    """A provider binding would implicitly merge two Audrey accounts."""
+    """Verified email cannot be linked to exactly one Audrey account safely."""
 
 
 class PersonalTokenAuthenticationError(ValueError):
@@ -162,10 +167,11 @@ class ApplicationStore:
 
         Existing OWUI users pass their exact current email as
         ``legacy_storage_namespace`` so deployed collections and disk paths are
-        not renamed. The provider subject, never a similar-looking email,
-        controls whether a later login is the same Audrey account. Providers
-        without Audrey role authority pass ``sync_role=False`` so a login can
-        refresh profile evidence without granting or removing local access.
+        not renamed. A verified, case-insensitive email match binds a new
+        provider subject to the existing Audrey account; ambiguous legacy
+        duplicates fail closed. A bound subject cannot silently change its
+        canonical email. Providers without Audrey role authority pass
+        ``sync_role=False`` so a login cannot change local access.
         """
 
         return await asyncio.to_thread(
@@ -214,15 +220,48 @@ class ApplicationStore:
             try:
                 row = self._identity_row_locked(provider, subject)
                 now = _utc_now()
+                if row is None:
+                    matches = self._conn.execute(
+                        "SELECT user_id FROM app_users "
+                        "WHERE lower(current_email) = lower(?) ORDER BY user_id",
+                        (email,),
+                    ).fetchall()
+                    if len(matches) > 1:
+                        raise IdentityConflictError(
+                            "multiple accounts use that email; reconcile them before linking"
+                        )
+                    if matches:
+                        user_id = str(matches[0]["user_id"])
+                        deletion = self._conn.execute(
+                            "SELECT 1 FROM account_deletion_requests WHERE user_id = ?",
+                            (user_id,),
+                        ).fetchone()
+                        if deletion is not None:
+                            raise IdentityConflictError(
+                                "account deletion is in progress for that email"
+                            )
+                        self._conn.execute(
+                            "INSERT INTO external_identities "
+                            "(provider, subject, user_id, email, created_at, last_seen_at) "
+                            "VALUES (?, ?, ?, ?, ?, ?)",
+                            (provider, subject, user_id, email, now, now),
+                        )
+                        row = self._identity_row_locked(provider, subject)
+                        # A new login method inherits Audrey access and profile state.
+                        sync_role = False
+                        sync_display_name = False
                 if row is not None:
+                    if str(row["current_email"]).casefold() != email.casefold():
+                        raise IdentityConflictError(
+                            "provider email changed; explicit account migration is required"
+                        )
                     user_id = str(row["user_id"])
                     self._conn.execute(
-                        "UPDATE app_users SET current_email = ?, "
+                        "UPDATE app_users SET "
                         "display_name = CASE WHEN ? THEN ? ELSE display_name END, "
                         "role = CASE WHEN ? THEN ? ELSE role END, updated_at = ? "
                         "WHERE user_id = ?",
                         (
-                            email,
                             sync_display_name,
                             display_name,
                             sync_role,
@@ -321,6 +360,101 @@ class ApplicationStore:
                 raise
 
         return _principal_from_row(row, auth_method=auth_method)
+
+    async def import_pending_owui_user(
+        self,
+        *,
+        subject: str,
+        email: str,
+        display_name: str,
+        apply: bool = False,
+    ) -> str:
+        """Preview or create a pending roster entry without changing existing users."""
+
+        return await asyncio.to_thread(
+            self._import_pending_owui_user_sync,
+            subject,
+            email,
+            display_name,
+            apply,
+        )
+
+    def _import_pending_owui_user_sync(
+        self,
+        subject: str,
+        email: str,
+        display_name: str,
+        apply: bool,
+    ) -> str:
+        subject = _required(subject, "OWUI user id")
+        email = _required(email, "OWUI email")
+        display_name = display_name.strip() or email
+        if len(subject) > 200 or len(email) > 320 or len(display_name) > 100:
+            raise InvalidIdentityError("OWUI account field is too long")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE" if apply else "BEGIN")
+            try:
+                bound = self._conn.execute(
+                    "SELECT u.current_email FROM external_identities AS i "
+                    "JOIN app_users AS u ON u.user_id = i.user_id "
+                    "WHERE i.provider = 'owui' AND i.subject = ?",
+                    (subject,),
+                ).fetchone()
+                if bound is not None:
+                    outcome = (
+                        "existing" if str(bound["current_email"]).casefold()
+                        == email.casefold() else "conflict"
+                    )
+                else:
+                    matches = self._conn.execute(
+                        "SELECT user_id FROM app_users "
+                        "WHERE lower(current_email) = lower(?) LIMIT 2",
+                        (email,),
+                    ).fetchall()
+                    if len(matches) > 1:
+                        outcome = "ambiguous"
+                    elif matches:
+                        outcome = "existing"
+                    else:
+                        outcome = "pending"
+                        if apply:
+                            now = _utc_now()
+                            user_id = f"usr_{uuid.uuid4().hex}"
+                            self._conn.execute(
+                                "INSERT INTO app_users "
+                                "(user_id, storage_namespace, current_email, "
+                                "display_name, role, status, created_at, updated_at) "
+                                "VALUES (?, ?, ?, ?, 'user', 'pending', ?, ?)",
+                                (
+                                    user_id,
+                                    f"ns_{uuid.uuid4().hex}",
+                                    email,
+                                    display_name,
+                                    now,
+                                    now,
+                                ),
+                            )
+                            self._conn.execute(
+                                "INSERT INTO user_preferences "
+                                "(user_id, timezone, persona, response_preferences_json, "
+                                "created_at, updated_at) "
+                                "VALUES (?, 'UTC', '', '{}', ?, ?)",
+                                (user_id, now, now),
+                            )
+                            self._conn.execute(
+                                "INSERT INTO external_identities "
+                                "(provider, subject, user_id, email, created_at, last_seen_at) "
+                                "VALUES ('owui_import', ?, ?, ?, ?, ?)",
+                                (subject, user_id, email, now, now),
+                            )
+                if apply:
+                    self._conn.commit()
+                else:
+                    self._conn.rollback()
+            except BaseException:
+                self._conn.rollback()
+                raise
+        return outcome
 
     def _identity_row_locked(
         self,
@@ -692,7 +826,7 @@ class ApplicationStore:
         search = str(search).strip()
         if status and status not in _ALLOWED_ACCOUNT_STATUSES:
             raise AccountAdministrationError("unsupported account status filter")
-        if group and group not in _ALLOWED_GROUPS:
+        if group and not re.fullmatch(r"[a-z][a-z0-9_-]{1,31}", group):
             raise AccountAdministrationError("unsupported account group filter")
         if len(search) > 200:
             raise AccountAdministrationError("account search is too long")
@@ -761,6 +895,219 @@ class ApplicationStore:
             (user_id,),
         ).fetchone()
 
+    async def list_access_roles(self) -> tuple[AccessRoleRecord, ...]:
+        return await asyncio.to_thread(self._list_access_roles_sync)
+
+    def _list_access_roles_sync(self) -> tuple[AccessRoleRecord, ...]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT g.group_id, g.label, g.description, g.system, "
+                "COUNT(m.user_id) AS user_count FROM access_groups AS g "
+                "LEFT JOIN user_group_memberships AS m ON m.group_id = g.group_id "
+                "GROUP BY g.group_id ORDER BY g.system DESC, g.label COLLATE NOCASE"
+            ).fetchall()
+        return tuple(
+            AccessRoleRecord(
+                role_id=str(row["group_id"]),
+                label=str(row["label"]),
+                description=str(row["description"]),
+                system=bool(row["system"]),
+                user_count=int(row["user_count"]),
+            )
+            for row in rows
+        )
+
+    async def create_access_role(
+        self, *, actor_user_id: str, role_id: str, label: str, description: str = ""
+    ) -> AccessRoleRecord:
+        return await asyncio.to_thread(
+            self._mutate_access_role_sync, actor_user_id, role_id, label, description, "create"
+        )
+
+    async def update_access_role(
+        self, *, actor_user_id: str, role_id: str, label: str, description: str = ""
+    ) -> AccessRoleRecord:
+        return await asyncio.to_thread(
+            self._mutate_access_role_sync, actor_user_id, role_id, label, description, "update"
+        )
+
+    def _mutate_access_role_sync(
+        self, actor_user_id: str, role_id: str, label: str, description: str, action: str
+    ) -> AccessRoleRecord:
+        actor_user_id = _required(actor_user_id, "actor user id")
+        role_id = _required(role_id, "role id").lower()
+        label = _required(label, "role name")
+        description = description.strip()
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{1,31}", role_id):
+            raise AccountAdministrationError(
+                "role id must be 2-32 lowercase letters, digits, dashes or underscores"
+            )
+        if len(label) > 60 or len(description) > 240:
+            raise AccountAdministrationError("role name or description is too long")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._assert_admin_locked(actor_user_id)
+                before = self._conn.execute(
+                    "SELECT system FROM access_groups WHERE group_id = ?", (role_id,)
+                ).fetchone()
+                if action == "create":
+                    if before:
+                        raise AccountAdministrationError("role already exists")
+                    self._conn.execute(
+                        "INSERT INTO access_groups "
+                        "(group_id, label, description, system, created_at) "
+                        "VALUES (?, ?, ?, 0, ?)",
+                        (role_id, label, description, _utc_now()),
+                    )
+                else:
+                    if before is None:
+                        raise AccountAdministrationError("role does not exist")
+                    if bool(before["system"]):
+                        raise AccountAdministrationError("built-in roles cannot be edited")
+                    self._conn.execute(
+                        "UPDATE access_groups SET label = ?, description = ? "
+                        "WHERE group_id = ?",
+                        (label, description, role_id),
+                    )
+                row = self._conn.execute(
+                    "SELECT g.group_id, g.label, g.description, g.system, "
+                    "COUNT(m.user_id) AS user_count FROM access_groups AS g "
+                    "LEFT JOIN user_group_memberships AS m ON m.group_id = g.group_id "
+                    "WHERE g.group_id = ? GROUP BY g.group_id",
+                    (role_id,),
+                ).fetchone()
+                assert row is not None
+                record = AccessRoleRecord(
+                    role_id=str(row["group_id"]),
+                    label=str(row["label"]),
+                    description=str(row["description"]),
+                    system=bool(row["system"]),
+                    user_count=int(row["user_count"]),
+                )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+        return record
+
+    async def delete_access_role(self, *, actor_user_id: str, role_id: str) -> None:
+        await asyncio.to_thread(self._delete_access_role_sync, actor_user_id, role_id)
+
+    def _delete_access_role_sync(self, actor_user_id: str, role_id: str) -> None:
+        actor_user_id = _required(actor_user_id, "actor user id")
+        role_id = _required(role_id, "role id")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._assert_admin_locked(actor_user_id)
+                row = self._conn.execute(
+                    "SELECT system FROM access_groups WHERE group_id = ?", (role_id,)
+                ).fetchone()
+                if row is None:
+                    raise AccountAdministrationError("role does not exist")
+                if bool(row["system"]):
+                    raise AccountAdministrationError("built-in roles cannot be deleted")
+                member = self._conn.execute(
+                    "SELECT 1 FROM user_group_memberships WHERE group_id = ? LIMIT 1",
+                    (role_id,),
+                ).fetchone()
+                profiles = self._conn.execute(
+                    "SELECT roles_json FROM model_publication_profiles"
+                ).fetchall()
+                used_by_model = any(
+                    role_id in json.loads(str(profile["roles_json"])) for profile in profiles
+                )
+                if member or used_by_model:
+                    raise AccountAdministrationError(
+                        "remove this role from users and models before deleting it"
+                    )
+                self._conn.execute(
+                    "DELETE FROM access_groups WHERE group_id = ?", (role_id,)
+                )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+
+    async def admin_create_pending_user(
+        self,
+        *,
+        actor_user_id: str,
+        email: str,
+        display_name: str = "",
+    ) -> AdminUserRecord:
+        """Create a manually invited pending account keyed by email."""
+
+        return await asyncio.to_thread(
+            self._admin_create_pending_user_sync,
+            actor_user_id,
+            email,
+            display_name,
+        )
+
+    def _admin_create_pending_user_sync(
+        self,
+        actor_user_id: str,
+        email: str,
+        display_name: str,
+    ) -> AdminUserRecord:
+        actor_user_id = _required(actor_user_id, "actor user id")
+        email = _required(email, "email")
+        display_name = display_name.strip() or email
+        if len(email) > 320 or "@" not in email or any(ch.isspace() for ch in email):
+            raise AccountAdministrationError("enter a valid email address")
+        if len(display_name) > 100:
+            raise AccountAdministrationError("display name must be at most 100 characters")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._assert_admin_locked(actor_user_id)
+                existing = self._conn.execute(
+                    "SELECT 1 FROM app_users WHERE lower(current_email) = lower(?)",
+                    (email,),
+                ).fetchone()
+                if existing:
+                    raise AccountAdministrationError("an account already uses that email")
+                now = _utc_now()
+                user_id = f"usr_{uuid.uuid4().hex}"
+                self._conn.execute(
+                    "INSERT INTO app_users "
+                    "(user_id, storage_namespace, current_email, display_name, "
+                    "role, status, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, 'user', 'pending', ?, ?)",
+                    (user_id, f"ns_{uuid.uuid4().hex}", email, display_name, now, now),
+                )
+                self._conn.execute(
+                    "INSERT INTO user_preferences "
+                    "(user_id, timezone, persona, response_preferences_json, "
+                    "created_at, updated_at) VALUES (?, 'UTC', '', '{}', ?, ?)",
+                    (user_id, now, now),
+                )
+                self._conn.execute(
+                    "INSERT INTO external_identities "
+                    "(provider, subject, user_id, email, created_at, last_seen_at) "
+                    "VALUES ('manual', ?, ?, ?, ?, ?)",
+                    (email.casefold(), user_id, email, now, now),
+                )
+                row = self._admin_user_row_locked(user_id)
+                assert row is not None
+                created = _admin_user_from_row(row)
+                self._insert_audit_locked(
+                    actor_user_id=actor_user_id,
+                    target_type="user",
+                    target_id=user_id,
+                    action="create_pending_user",
+                    before={},
+                    after=_admin_user_snapshot(created),
+                    now=now,
+                )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+        return created
+
     async def admin_update_user(
         self,
         *,
@@ -807,6 +1154,18 @@ class ApplicationStore:
                 before = _admin_user_from_row(before_row)
                 if before.deletion_pending:
                     raise AccountAdministrationError("account deletion is in progress")
+                if requested_groups is not None:
+                    known = {
+                        str(row["group_id"])
+                        for row in self._conn.execute(
+                            "SELECT group_id FROM access_groups"
+                        ).fetchall()
+                    }
+                    unknown = sorted(set(requested_groups) - known)
+                    if unknown:
+                        raise AccountAdministrationError(
+                            "unsupported account group: " + ", ".join(unknown)
+                        )
                 next_status = requested_status or before.status
                 next_groups = (
                     set(requested_groups)
@@ -1102,6 +1461,211 @@ class ApplicationStore:
                 raise
         return after
 
+    async def list_model_publication_profiles(
+        self,
+    ) -> tuple[ModelPublicationProfile, ...]:
+        return await asyncio.to_thread(self._list_model_publication_profiles_sync)
+
+    def _list_model_publication_profiles_sync(
+        self,
+    ) -> tuple[ModelPublicationProfile, ...]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT model_id, visibility, roles_json, display_name, "
+                "portrait_mime, updated_at FROM model_publication_profiles "
+                "ORDER BY model_id"
+            ).fetchall()
+        return tuple(_model_profile_from_row(row) for row in rows)
+
+    async def set_model_publication_profile(
+        self,
+        *,
+        actor_user_id: str,
+        model_id: str,
+        visibility: str,
+        roles: Iterable[str],
+        display_name: str,
+    ) -> ModelPublicationProfile:
+        return await asyncio.to_thread(
+            self._set_model_publication_profile_sync,
+            actor_user_id,
+            model_id,
+            visibility,
+            roles,
+            display_name,
+        )
+
+    def _set_model_publication_profile_sync(
+        self,
+        actor_user_id: str,
+        model_id: str,
+        visibility: str,
+        roles: Iterable[str],
+        display_name: str,
+    ) -> ModelPublicationProfile:
+        actor_user_id = _required(actor_user_id, "actor user id")
+        model_id = _required(model_id, "model id")
+        visibility = str(visibility).strip().lower()
+        display_name = display_name.strip()
+        role_ids = _normalize_groups(roles)
+        if len(model_id) > 200 or len(display_name) > 80:
+            raise AccountAdministrationError("model id or name is too long")
+        if visibility not in {"public", "private"}:
+            raise AccountAdministrationError("unsupported model visibility")
+        if visibility == "public" and not role_ids:
+            raise AccountAdministrationError("public models need at least one role")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._assert_admin_locked(actor_user_id)
+                known = {
+                    str(row["group_id"])
+                    for row in self._conn.execute(
+                        "SELECT group_id FROM access_groups"
+                    ).fetchall()
+                }
+                if set(role_ids) - known:
+                    raise AccountAdministrationError("model has an unknown role")
+                before_row = self._conn.execute(
+                    "SELECT model_id, visibility, roles_json, display_name, "
+                    "portrait_mime, updated_at FROM model_publication_profiles "
+                    "WHERE model_id = ?",
+                    (model_id,),
+                ).fetchone()
+                now = _utc_now()
+                self._conn.execute(
+                    "INSERT INTO model_publication_profiles "
+                    "(model_id, visibility, roles_json, display_name, "
+                    "updated_by_user_id, updated_at) VALUES (?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(model_id) DO UPDATE SET "
+                    "visibility = excluded.visibility, roles_json = excluded.roles_json, "
+                    "display_name = excluded.display_name, "
+                    "updated_by_user_id = excluded.updated_by_user_id, "
+                    "updated_at = excluded.updated_at",
+                    (model_id, visibility, json.dumps(role_ids), display_name, actor_user_id, now),
+                )
+                row = self._conn.execute(
+                    "SELECT model_id, visibility, roles_json, display_name, "
+                    "portrait_mime, updated_at FROM model_publication_profiles "
+                    "WHERE model_id = ?", (model_id,),
+                ).fetchone()
+                assert row is not None
+                profile = _model_profile_from_row(row)
+                self._insert_audit_locked(
+                    actor_user_id=actor_user_id,
+                    target_type="model",
+                    target_id=model_id,
+                    action="set_model_publication",
+                    before=(
+                        _model_profile_snapshot(_model_profile_from_row(before_row))
+                        if before_row is not None else {}
+                    ),
+                    after=_model_profile_snapshot(profile),
+                    now=now,
+                )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+        return profile
+
+    async def set_model_portrait(
+        self, *, actor_user_id: str, model_id: str, mime: str, data: bytes
+    ) -> None:
+        await asyncio.to_thread(
+            self._set_model_portrait_sync, actor_user_id, model_id, mime, data
+        )
+
+    def _set_model_portrait_sync(
+        self, actor_user_id: str, model_id: str, mime: str, data: bytes
+    ) -> None:
+        actor_user_id = _required(actor_user_id, "actor user id")
+        model_id = _required(model_id, "model id")
+        if mime not in {"image/png", "image/jpeg", "image/webp"} or not data:
+            raise AccountAdministrationError("unsupported model portrait")
+        if len(data) > 2_000_000:
+            raise AccountAdministrationError("model portrait exceeds 2 MB")
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._assert_admin_locked(actor_user_id)
+                now = _utc_now()
+                row = self._conn.execute(
+                    "UPDATE model_publication_profiles SET portrait_mime = ?, "
+                    "portrait_data = ?, updated_by_user_id = ?, updated_at = ? "
+                    "WHERE model_id = ?",
+                    (mime, data, actor_user_id, now, model_id),
+                )
+                if row.rowcount != 1:
+                    raise AccountAdministrationError(
+                        "save the model settings before uploading a portrait"
+                    )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+
+    async def get_model_portrait(self, *, model_id: str) -> tuple[str, bytes] | None:
+        return await asyncio.to_thread(self._get_model_portrait_sync, model_id)
+
+    def _get_model_portrait_sync(self, model_id: str) -> tuple[str, bytes] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT portrait_mime, portrait_data FROM model_publication_profiles "
+                "WHERE model_id = ?", (model_id,),
+            ).fetchone()
+        if row is None or row["portrait_data"] is None:
+            return None
+        return str(row["portrait_mime"]), bytes(row["portrait_data"])
+
+    async def delete_model_portrait(
+        self, *, actor_user_id: str, model_id: str
+    ) -> None:
+        await asyncio.to_thread(
+            self._delete_model_portrait_sync, actor_user_id, model_id
+        )
+
+    def _delete_model_portrait_sync(
+        self, actor_user_id: str, model_id: str
+    ) -> None:
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._assert_admin_locked(actor_user_id)
+                self._conn.execute(
+                    "UPDATE model_publication_profiles SET portrait_mime = '', "
+                    "portrait_data = NULL, updated_by_user_id = ?, updated_at = ? "
+                    "WHERE model_id = ?",
+                    (actor_user_id, _utc_now(), model_id),
+                )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+
+    async def delete_model_publication_profile(
+        self, *, actor_user_id: str, model_id: str
+    ) -> None:
+        await asyncio.to_thread(
+            self._delete_model_publication_profile_sync, actor_user_id, model_id
+        )
+
+    def _delete_model_publication_profile_sync(
+        self, actor_user_id: str, model_id: str
+    ) -> None:
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._assert_admin_locked(actor_user_id)
+                self._conn.execute(
+                    "DELETE FROM model_publication_profiles WHERE model_id = ?",
+                    (model_id,),
+                )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+
     async def list_model_access_policies(self) -> tuple[ModelAccessPolicy, ...]:
         return await asyncio.to_thread(self._list_model_access_policies_sync)
 
@@ -1326,11 +1890,8 @@ def _normalize_groups(groups: Iterable[str]) -> tuple[str, ...]:
     clean = tuple(
         sorted({str(group).strip().lower() for group in groups if str(group).strip()})
     )
-    unknown = sorted(set(clean) - _ALLOWED_GROUPS)
-    if unknown:
-        raise AccountAdministrationError(
-            "unsupported account group: " + ", ".join(unknown)
-        )
+    if any(not re.fullmatch(r"[a-z][a-z0-9_-]{1,31}", group) for group in clean):
+        raise AccountAdministrationError("unsupported account group")
     return clean
 
 
@@ -1355,6 +1916,26 @@ def _admin_user_snapshot(record: AdminUserRecord) -> dict[str, object]:
         "status": record.status,
         "role": record.role,
         "groups": list(record.groups),
+    }
+
+
+def _model_profile_from_row(row: sqlite3.Row) -> ModelPublicationProfile:
+    return ModelPublicationProfile(
+        model_id=str(row["model_id"]),
+        visibility=str(row["visibility"]),
+        roles=tuple(json.loads(str(row["roles_json"]))),
+        display_name=str(row["display_name"]),
+        portrait_mime=str(row["portrait_mime"]),
+        updated_at=str(row["updated_at"]),
+    )
+
+
+def _model_profile_snapshot(profile: ModelPublicationProfile) -> dict[str, object]:
+    return {
+        "visibility": profile.visibility,
+        "roles": list(profile.roles),
+        "display_name": profile.display_name,
+        "has_portrait": bool(profile.portrait_mime),
     }
 
 

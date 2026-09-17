@@ -66,7 +66,7 @@ CLOUD_MODELS=(
   "kimi-k2.6:cloud"
   "kimi-k2.7-code:cloud"
   "qwen3.5:397b-cloud"
-  "deepseek-v4-flash:cloud"
+  "deepseek-v4.1-flash:cloud"
   "nemotron-3-super:cloud"
   # 2026-08-29: `glm-5.3` REPLACES `glm-5.2` in every role glm held (registries,
   # tool-capable list, both cloud panels, the research pools, the video

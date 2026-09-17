@@ -391,6 +391,41 @@ async def test_owui_login_does_not_overwrite_audrey_profile_name(
     assert me.principal.display_name == "Audrey Profile"
 
 
+async def test_owui_login_cannot_demote_audrey_owned_admin(monkeypatch, tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    owner = await store.resolve_external_identity(
+        provider="owui",
+        subject="owui-admin-subject",
+        email="alice@example.com",
+        display_name="Alice",
+        role="user",
+        auth_method="owui_bearer",
+        legacy_storage_namespace="alice@example.com",
+    )
+    await store.bootstrap_admin(user_id=owner.user_id)
+    _patch_async_client(
+        monkeypatch,
+        _FakeResponse(
+            200,
+            body={
+                "id": "owui-admin-subject",
+                "email": "alice@example.com",
+                "name": "Alice",
+                "role": "user",
+            },
+        ),
+    )
+    try:
+        me = await require_account_user(
+            _fake_request(application_store=store),
+            authorization="Bearer owui-admin-token",
+        )
+    finally:
+        store.close()
+    assert me.principal is not None
+    assert me.principal.is_admin
+
+
 async def test_require_user_rejects_missing_stable_subject_when_store_is_active(
     monkeypatch,
     tmp_path,
@@ -535,7 +570,7 @@ def test_fastapi_reads_cloudflare_access_assertion_header(tmp_path):
     assert verifier.tokens == ["http-access-token"]
 
 
-async def test_cloudflare_email_match_does_not_implicitly_merge_owui_account(tmp_path):
+async def test_cloudflare_email_match_reuses_owui_account(tmp_path):
     store = ApplicationStore(tmp_path / "app.sqlite")
     owui = await store.resolve_external_identity(
         provider="owui",
@@ -562,9 +597,9 @@ async def test_cloudflare_email_match_does_not_implicitly_merge_owui_account(tmp
         store.close()
 
     assert me.principal is not None
-    assert me.principal.user_id != owui.user_id
-    assert me.principal.storage_namespace != owui.storage_namespace
-    assert me.principal.status == "pending"
+    assert me.principal.user_id == owui.user_id
+    assert me.principal.storage_namespace == owui.storage_namespace
+    assert me.principal.status == "active"
 
 
 async def test_invalid_cloudflare_header_never_falls_back_to_valid_owui_bearer(

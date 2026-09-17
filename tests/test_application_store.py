@@ -9,6 +9,7 @@ import sqlite3
 import pytest
 
 from audrey.app_state import (
+    AccountAdministrationError,
     ApplicationStore,
     IdentityConflictError,
     InvalidIdentityError,
@@ -49,18 +50,20 @@ async def test_first_owui_login_keeps_exact_legacy_namespace(tmp_path):
         store.close()
 
 
-async def test_provider_subject_survives_email_change_without_namespace_rename(tmp_path):
+async def test_provider_email_change_requires_explicit_account_migration(tmp_path):
     store = ApplicationStore(tmp_path / "app.sqlite")
     try:
         before = await _resolve(store)
-        after = await _resolve(
-            store,
-            email="alice-renamed@example.com",
-            namespace="alice-renamed@example.com",
-        )
+        with pytest.raises(IdentityConflictError, match="provider email changed"):
+            await _resolve(
+                store,
+                email="alice-renamed@example.com",
+                namespace="alice-renamed@example.com",
+            )
+        after = await _resolve(store)
         assert after.user_id == before.user_id
         assert after.storage_namespace == "alice@example.com"
-        assert after.email == "alice-renamed@example.com"
+        assert after.email == "alice@example.com"
     finally:
         store.close()
 
@@ -87,12 +90,65 @@ async def test_similar_looking_emails_are_distinct_accounts(tmp_path):
         store.close()
 
 
-async def test_different_subject_cannot_claim_existing_storage_namespace(tmp_path):
-    store = ApplicationStore(tmp_path / "app.sqlite")
+async def test_same_email_binds_new_subject_to_existing_account(tmp_path):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
     try:
-        await _resolve(store, subject="owui-a")
-        with pytest.raises(IdentityConflictError, match="storage namespace"):
-            await _resolve(store, subject="owui-b")
+        first = await _resolve(store, subject="owui-a")
+        await store.bootstrap_admin(user_id=first.user_id)
+        second = await store.resolve_external_identity(
+            provider="cloudflare_access",
+            subject="cf-b",
+            email="ALICE@example.com",
+            display_name="",
+            role="user",
+            auth_method="cloudflare_access",
+            sync_role=False,
+            sync_display_name=False,
+            initial_status="pending",
+        )
+        assert second.user_id == first.user_id
+        assert second.storage_namespace == first.storage_namespace
+        assert second.status == "active"
+        assert second.role == "admin"
+        assert "admins" in second.groups
+        assert second.email == first.email
+        with sqlite3.connect(path) as conn:
+            assert conn.execute("SELECT count(*) FROM app_users").fetchone()[0] == 1
+            assert conn.execute("SELECT count(*) FROM external_identities").fetchone()[0] == 2
+    finally:
+        store.close()
+
+
+async def test_ambiguous_legacy_email_does_not_bind_new_provider(tmp_path):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
+    try:
+        await _resolve(store, subject="owui-a", email="shared@example.com",
+                       namespace="shared@example.com")
+        second = await _resolve(store, subject="owui-b", email="other@example.com",
+                                namespace="other@example.com")
+        with sqlite3.connect(path) as conn:
+            conn.execute(
+                "UPDATE app_users SET current_email = ? WHERE user_id = ?",
+                ("shared@example.com", second.user_id),
+            )
+
+        with pytest.raises(IdentityConflictError, match="multiple accounts"):
+            await store.resolve_external_identity(
+                provider="cloudflare_access",
+                subject="cf-new",
+                email="shared@example.com",
+                display_name="",
+                role="user",
+                auth_method="cloudflare_access",
+                sync_role=False,
+                sync_display_name=False,
+                initial_status="pending",
+            )
+        with sqlite3.connect(path) as conn:
+            assert conn.execute("SELECT count(*) FROM app_users").fetchone()[0] == 2
+            assert conn.execute("SELECT count(*) FROM external_identities").fetchone()[0] == 2
     finally:
         store.close()
 
@@ -123,7 +179,7 @@ async def test_provider_without_role_authority_cannot_demote_or_promote_existing
         after = await store.resolve_external_identity(
             provider="cloudflare_access",
             subject="cf-subject",
-            email="renamed@example.com",
+            email="admin@example.com",
             display_name="Untrusted Provider Name",
             role="user",
             auth_method="cloudflare_access",
@@ -135,7 +191,7 @@ async def test_provider_without_role_authority_cannot_demote_or_promote_existing
 
     assert before.role == "admin"
     assert after.role == "admin"
-    assert after.email == "renamed@example.com"
+    assert after.email == "admin@example.com"
     assert after.display_name == ""
 
 
@@ -230,7 +286,7 @@ async def test_binding_persists_across_reopen(tmp_path):
     try:
         after = await _resolve(reopened)
         assert after.user_id == before.user_id
-        assert reopened.schema_version == 9
+        assert reopened.schema_version == 10
         with sqlite3.connect(path) as conn:
             assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     finally:
@@ -441,6 +497,76 @@ async def test_personal_token_bulk_delete_is_owner_bound_and_invalidates_secrets
         store.close()
 
 
+async def test_owui_roster_import_only_creates_unmatched_pending_accounts(tmp_path):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
+    try:
+        active = await _resolve(store, subject="owui-existing")
+        await store.bootstrap_admin(user_id=active.user_id)
+        assert await store.import_pending_owui_user(
+            subject="owui-new", email="new@example.com", display_name="New"
+        ) == "pending"
+        assert await store.list_admin_users(status="pending") == ()
+        assert await store.import_pending_owui_user(
+            subject="owui-new", email="new@example.com", display_name="New", apply=True
+        ) == "pending"
+        assert await store.import_pending_owui_user(
+            subject="owui-new", email="new@example.com", display_name="Changed", apply=True
+        ) == "existing"
+        assert await store.import_pending_owui_user(
+            subject="owui-existing", email="ALICE@example.com", display_name="Changed", apply=True
+        ) == "existing"
+        pending = (await store.list_admin_users(status="pending"))[0]
+        assert pending.email == "new@example.com"
+        assert pending.display_name == "New"
+        assert pending.groups == ()
+        assert (await store.get_admin_user(user_id=active.user_id)).role == "admin"
+        signed_in = await _resolve(
+            store, subject="owui-new", email="new@example.com", namespace="new@example.com"
+        )
+        assert signed_in.user_id == pending.user_id
+        assert signed_in.status == "pending"
+        with sqlite3.connect(path) as conn:
+            assert conn.execute("SELECT count(*) FROM app_users").fetchone()[0] == 2
+    finally:
+        store.close()
+
+
+async def test_admin_can_add_pending_account_by_email_without_duplicates(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    try:
+        admin = await _resolve(store)
+        await store.bootstrap_admin(user_id=admin.user_id)
+        created = await store.admin_create_pending_user(
+            actor_user_id=admin.user_id,
+            email="Invited@example.com",
+            display_name="Invited",
+        )
+        assert created.status == "pending"
+        assert created.auth_provider == "manual"
+        assert created.groups == ()
+        with pytest.raises(AccountAdministrationError, match="already uses"):
+            await store.admin_create_pending_user(
+                actor_user_id=admin.user_id,
+                email="invited@EXAMPLE.com",
+            )
+        linked = await store.resolve_external_identity(
+            provider="cloudflare_access",
+            subject="cf-invited",
+            email="invited@example.com",
+            display_name="Wrong",
+            role="user",
+            auth_method="cloudflare_access",
+            sync_role=False,
+            sync_display_name=False,
+            initial_status="pending",
+        )
+        assert linked.user_id == created.user_id
+        assert linked.status == "pending"
+    finally:
+        store.close()
+
+
 async def test_v1_database_migrates_additively_without_changing_user_id(tmp_path):
     path = tmp_path / "app.sqlite"
     first = ApplicationStore(path)
@@ -460,7 +586,7 @@ async def test_v1_database_migrates_additively_without_changing_user_id(tmp_path
     upgraded = ApplicationStore(path)
     try:
         after = await _resolve(upgraded)
-        assert upgraded.schema_version == 9
+        assert upgraded.schema_version == 10
         assert after.user_id == before.user_id
         assert await upgraded.list_personal_tokens(user_id=after.user_id) == ()
         assert (await upgraded.preferences.get(user_id=after.user_id)).timezone == "UTC"

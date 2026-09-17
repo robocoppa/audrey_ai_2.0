@@ -218,6 +218,7 @@ async def _bind_audrey_principal(
             role=user.role,
             auth_method="owui_bearer",
             legacy_storage_namespace=user.email,
+            sync_role=False,
             sync_display_name=False,
         )
     except InvalidIdentityError as exc:
@@ -243,7 +244,7 @@ async def _resolve_cloudflare_access(
     *,
     allow_inactive: bool = False,
 ) -> AuthedUser:
-    """Verify Access evidence and bind it without trusting email or role."""
+    """Bind verified Access email to Audrey while keeping roles Audrey-owned."""
 
     verifier = getattr(request.app.state, "cloudflare_access_verifier", None)
     if verifier is None:

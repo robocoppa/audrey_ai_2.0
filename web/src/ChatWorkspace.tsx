@@ -105,9 +105,12 @@ export function ChatWorkspace({
   const selectedIdRef = useRef<string | null>(null);
   const defaultModelId = models[0]?.id ?? null;
   const catalogUnavailable = defaultModelId === null;
-  const canBrowseDirectModels = user.role === "admin"
-    || user.groups.includes("admins")
-    || user.groups.includes("testers");
+  const canBrowseDirectModels = models.some((model) =>
+    model.kind === "direct"
+    && (user.role === "admin"
+      || user.groups.includes("admins")
+      || model.roles?.some((role) => user.groups.includes(role))),
+  );
 
   function selectConversation(conversation: Conversation | null) {
     if (conversation) {
@@ -1113,10 +1116,7 @@ function ComposerModelPicker({
       {directMenuVisible ? (
         <div className="direct-model-menu" role="menu" aria-label="Other models">
           <header>
-            <div>
-              <strong>Other models</strong>
-              <span>Direct Ollama models</span>
-            </div>
+            <strong>Other models</strong>
             <button
               className="direct-model-menu-close"
               type="button"
@@ -1141,8 +1141,7 @@ function ComposerModelPicker({
                   void onChange(item.id);
                 }}
               >
-                <strong>{item.label}</strong>
-                <span>{item.description}</span>
+                {item.label}
               </button>
             ))}
           </div>
@@ -1264,7 +1263,7 @@ function modelDetails(models: AudreyModel[], modelId: string) {
   const model = models.find(({ id }) => id === modelId) ?? models[0];
   return {
     ...model,
-    portrait: MODEL_PORTRAITS[model.presentation] ?? autoPortrait,
+    portrait: model.portrait_url || MODEL_PORTRAITS[model.presentation] || autoPortrait,
   };
 }
 

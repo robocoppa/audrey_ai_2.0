@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import io
 import sqlite3
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from audrey import admin_cli
 from audrey.app_state import (
@@ -311,7 +314,8 @@ async def test_operator_cli_bootstraps_the_exact_pending_email(
 
 
 async def test_operator_email_bootstrap_refuses_ambiguous_accounts(tmp_path):
-    store = ApplicationStore(tmp_path / "app.sqlite")
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
     try:
         await _resolve(
             store,
@@ -320,13 +324,19 @@ async def test_operator_email_bootstrap_refuses_ambiguous_accounts(tmp_path):
             provider="cloudflare_access",
             initial_status="pending",
         )
-        await _resolve(
+        other = await _resolve(
             store,
-            subject="owui-shared-email",
-            email="shared@example.com",
+            subject="owui-other-email",
+            email="other@example.com",
             provider="owui",
             initial_status="pending",
         )
+        # Simulate duplicate email rows created by the older subject-only binder.
+        with sqlite3.connect(path) as conn:
+            conn.execute(
+                "UPDATE app_users SET current_email = ? WHERE user_id = ?",
+                ("shared@example.com", other.user_id),
+            )
 
         with pytest.raises(AccountAdministrationError, match="multiple accounts"):
             await store.bootstrap_admin_by_email(email="shared@example.com")
@@ -645,6 +655,9 @@ def test_native_model_route_exposes_only_the_callers_catalog(tmp_path):
             "capabilities": ["text", "thinking"],
             "enabled": True,
             "audience": "testers",
+            "visibility": "public",
+            "roles": ["testers"],
+            "portrait_url": "",
         }
         assert "concrete_model" not in tester_response.text
 
@@ -692,6 +705,170 @@ def test_admin_routes_reject_personal_tokens_even_for_admin_account(tmp_path):
     assert response.json()["detail"] == (
         "External provider authentication is required for this operation."
     )
+
+
+def test_managed_roles_and_model_publication_enforce_private_admin_only(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    admin = asyncio.run(_resolve(
+        store, subject="admin", email="admin@example.com", role="admin"
+    ))
+    member = asyncio.run(_resolve(
+        store, subject="member", email="member@example.com"
+    ))
+    app = FastAPI()
+    app.state.application_store = store
+    app.state.cfg = _cfg()
+    app.state.ollama = _OllamaInventory(_DIRECT_MODEL)
+    app.include_router(router)
+    app.dependency_overrides[require_admin_principal] = lambda: admin
+    model_id = f"direct/{_DIRECT_MODEL}"
+    try:
+        with TestClient(app) as client:
+            created = client.post(
+                "/api/admin/roles",
+                json={"id": "researchers", "name": "Researchers", "description": "Lab"},
+            )
+            assert created.status_code == 201
+            assert created.json()["system"] is False
+            assert client.get("/api/admin/roles").json()["items"][-1]["id"] == "researchers"
+            assigned = client.patch(
+                f"/api/admin/users/{member.user_id}",
+                json={"groups": ["users", "researchers"]},
+            )
+            assert assigned.status_code == 200
+            assert assigned.json()["groups"] == ["researchers", "users"]
+            member = asyncio.run(_resolve(
+                store, subject="member", email="member@example.com"
+            ))
+            app.dependency_overrides[require_principal] = lambda: member
+
+            published = client.patch(
+                f"/api/admin/model-profiles/{model_id}",
+                json={
+                    "visibility": "public",
+                    "roles": ["researchers"],
+                    "display_name": "Research Qwen",
+                },
+            )
+            assert published.status_code == 200
+            assert published.json()["label"] == "Research Qwen"
+            assert published.json()["roles"] == ["researchers"]
+            user_models = client.get("/api/models").json()["items"]
+            assert model_id in {item["id"] for item in user_models}
+
+            source = io.BytesIO()
+            Image.new("RGB", (12, 12), (20, 100, 180)).save(source, "PNG")
+            upload = client.put(
+                f"/api/admin/model-portraits/{model_id}",
+                files={"portrait": ("model.png", source.getvalue(), "image/png")},
+            )
+            assert upload.status_code == 200
+            assert upload.json()["portrait_url"]
+            portrait = client.get(f"/api/model-portraits/{model_id}")
+            assert portrait.status_code == 200
+            assert portrait.headers["content-type"].startswith("image/webp")
+
+            private = client.patch(
+                f"/api/admin/model-profiles/{model_id}",
+                json={
+                    "visibility": "private",
+                    "roles": ["researchers"],
+                    "display_name": "Research Qwen",
+                },
+            )
+            assert private.status_code == 200
+            assert model_id not in {item["id"] for item in client.get("/api/models").json()["items"]}
+            assert client.get(f"/api/model-portraits/{model_id}").status_code == 404
+            assert client.delete("/api/admin/roles/researchers").status_code == 409
+            app.dependency_overrides[require_principal] = lambda: admin
+            assert model_id in {item["id"] for item in client.get("/api/models").json()["items"]}
+            assert client.get(f"/api/model-portraits/{model_id}").status_code == 200
+            assert client.delete("/api/admin/model-policies/" + model_id).status_code == 200
+            assert client.patch(
+                f"/api/admin/users/{member.user_id}", json={"groups": ["users"]}
+            ).status_code == 200
+            assert client.delete("/api/admin/roles/researchers").status_code == 204
+    finally:
+        store.close()
+
+
+def test_manual_pending_account_route_rejects_duplicate_email(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    admin = asyncio.run(_resolve(
+        store, subject="admin", email="admin@example.com", role="admin"
+    ))
+    app = FastAPI()
+    app.state.application_store = store
+    app.state.cfg = _cfg()
+    app.include_router(router)
+    app.dependency_overrides[require_admin_principal] = lambda: admin
+    try:
+        with TestClient(app) as client:
+            created = client.post(
+                "/api/admin/users",
+                json={"email": "invited@example.com", "display_name": "Invited"},
+            )
+            assert created.status_code == 201
+            assert created.json()["status"] == "pending"
+            assert created.json()["groups"] == []
+            duplicate = client.post(
+                "/api/admin/users", json={"email": "INVITED@example.com"}
+            )
+            assert duplicate.status_code == 409
+            assert len(client.get("/api/admin/users?status=pending").json()["items"]) == 1
+    finally:
+        store.close()
+
+
+def test_owui_import_command_previews_then_creates_pending_accounts(
+    tmp_path, monkeypatch, capsys
+):
+    path = tmp_path / "app.sqlite"
+    original_client = httpx.AsyncClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/users/all"
+        assert request.headers["Authorization"] == "Bearer test-token"
+        return httpx.Response(200, json={
+            "users": [
+                {"id": "owui-1", "email": "alice@example.com", "name": "Alice"},
+                {"id": "owui-2", "email": "bob@example.com", "name": "Bob"},
+            ],
+            "total": 2,
+        })
+
+    monkeypatch.setattr(admin_cli, "get_config", lambda: SimpleNamespace(
+        env=SimpleNamespace(owui_url="http://open-webui:8080"),
+        raw={"application": {"sqlite_path": str(path)}},
+    ))
+    monkeypatch.setattr(admin_cli, "getpass", lambda _prompt: "test-token")
+    monkeypatch.setattr(
+        admin_cli.httpx, "AsyncClient",
+        lambda **kwargs: original_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    assert asyncio.run(admin_cli._import_owui_users()) == 0
+    assert '"would_create": 2' in capsys.readouterr().out
+    store = ApplicationStore(path)
+    try:
+        assert awaitable_users(store) == ()
+        admin = asyncio.run(_resolve(store, subject="owui-1", email="alice@example.com"))
+        asyncio.run(store.bootstrap_admin(user_id=admin.user_id))
+    finally:
+        store.close()
+    assert asyncio.run(admin_cli._import_owui_users(apply=True)) == 0
+    output = capsys.readouterr().out
+    assert '"created_pending": 1' in output
+    assert "test-token" not in output
+    store = ApplicationStore(path)
+    try:
+        pending = asyncio.run(store.list_admin_users(status="pending"))
+        assert [user.email for user in pending] == ["bob@example.com"]
+    finally:
+        store.close()
+
+
+def awaitable_users(store: ApplicationStore):
+    return asyncio.run(store.list_admin_users(status="pending"))
 
 
 async def test_require_admin_principal_rejects_non_admin():

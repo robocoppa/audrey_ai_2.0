@@ -104,7 +104,9 @@ model_registry:
     # box — see the note on the local pools below.
     - { name: "nemotron-3.5-lightning:latest", priority: 80, speed: 85, quality: 84, location: local }
     - { name: "kimi-k2.6:cloud",          priority:  78, speed: 90, quality: 92, location: cloud }
-    - { name: "deepseek-v4-flash:cloud",  priority:  72, speed: 92, quality: 90, location: cloud }
+    # v4.1 replaces the retired v4 Flash tag. Speed/quality are inherited
+    # routing hints, not measurements of the new model.
+    - { name: "deepseek-v4.1-flash:cloud",  priority:  72, speed: 92, quality: 90, location: cloud }
     # ⚠️ 2026-08-30: `deepseek-v3.2:cloud` (70) REMOVED — named in three places
     # (here, `fast_path.tool_capable_models`, `passthrough.allowed_models`) and
     # NOT on the box. Same standing rule as the 2026-08-16 sweep: not pulled
@@ -137,7 +139,7 @@ model_registry:
     - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 93, location: cloud }
     - { name: "kimi-k2.7-code:cloud",     priority:  88, speed: 90, quality: 92, location: cloud }
     - { name: "qwen3.5:397b-cloud",       priority:  90, speed: 80, quality: 94, location: cloud }
-    - { name: "deepseek-v4-flash:cloud",  priority:  82, speed: 92, quality: 89, location: cloud }
+    - { name: "deepseek-v4.1-flash:cloud",  priority:  82, speed: 92, quality: 89, location: cloud }
     # ⚠️ 2026-08-16: `olmo-3.1:32b` (70, local) REMOVED — never pulled.
     # `muse-glimmer:latest` takes the second local slot here too.
     - { name: "muse-glimmer:latest",      priority:  84, speed: 82, quality: 86, location: local }
@@ -245,7 +247,8 @@ fast_path:
     - "kimi-k2.7-code:cloud"
     - "kimi-k2.6:cloud"
     - "deepseek-v4-pro:cloud"
-    - "deepseek-v4-flash:cloud"
+    # Ollama lists v4.1 Flash with tools; verify the installed tag at the live gate.
+    - "deepseek-v4.1-flash:cloud"
     - "qwen3.5:397b-cloud"
     - "nemotron-3-super:cloud"
     # ✅ `ollama show glm-5.3:cloud` declares `tools` (verified against the box
@@ -1618,7 +1621,7 @@ passthrough:
     # name earned a probe rather than a promotion.
     - glm-5.3-flash:cloud
     - kimi-k2.6:cloud
-    - deepseek-v4-flash:cloud
+    - deepseek-v4.1-flash:cloud
     - nemotron-3-super:cloud
     - qwen3.5:397b-cloud
     - llama4:latest

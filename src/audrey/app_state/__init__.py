@@ -1,6 +1,7 @@
 """Audrey-owned transactional application state."""
 
 from audrey.app_state.records import (
+    AccessRoleRecord,
     AdminUserRecord,
     AttachmentSnapshot,
     ChatProjectionDeletionRecord,
@@ -10,6 +11,7 @@ from audrey.app_state.records import (
     LocalUserDataPurge,
     MessageRecord,
     ModelAccessPolicy,
+    ModelPublicationProfile,
     RunRecord,
     StartedRun,
     UserPreferences,
@@ -33,6 +35,7 @@ from audrey.app_state.store import (
 
 __all__ = [
     "AccountAdministrationError",
+    "AccessRoleRecord",
     "AdminUserRecord",
     "ApplicationStore",
     "AttachmentSnapshot",
@@ -50,6 +53,7 @@ __all__ = [
     "LocalUserDataPurge",
     "MessageRecord",
     "ModelAccessPolicy",
+    "ModelPublicationProfile",
     "PersonalTokenAuthenticationError",
     "PreferencesRepository",
     "RunAlreadyTerminalError",

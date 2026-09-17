@@ -158,6 +158,29 @@ class AdminUserRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class AccessRoleRecord:
+    """A managed user role and its membership count."""
+
+    role_id: str
+    label: str
+    description: str
+    system: bool
+    user_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class ModelPublicationProfile:
+    """Audrey-owned presentation and role grants for one model."""
+
+    model_id: str
+    visibility: str
+    roles: tuple[str, ...]
+    display_name: str
+    portrait_mime: str
+    updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
 class ModelAccessPolicy:
     """Mutable audience overlay for one deployment-defined model."""
 
@@ -168,7 +191,9 @@ class ModelAccessPolicy:
 
 
 __all__ = [
+    "AccessRoleRecord",
     "AdminUserRecord",
+    "ModelPublicationProfile",
     "AttachmentSnapshot",
     "ChatProjectionDeletionRecord",
     "ChatProjectionRecord",
