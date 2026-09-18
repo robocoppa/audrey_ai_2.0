@@ -293,6 +293,16 @@ export function FileManager({ onClose }: { onClose: () => void }) {
             onDragLeave={() => setDraggingFiles(false)}
             onDrop={dropFiles}
           >Drop files here, or choose several below.</div>
+          {listing ? (
+            <p className="file-upload-hint">
+              Up to {formatBytes(listing.limits.chunked_max_bytes || listing.limits.max_upload_bytes)} per file.
+              {listing.limits.chunked_max_bytes > listing.limits.max_upload_bytes
+                ? " Files over " + formatBytes(listing.limits.max_upload_bytes) + " upload in parts."
+                : ""}
+              {" Supported: " + listing.limits.allowed_extensions.join(", ") + "."}
+              {" Videos become searchable after processing."}
+            </p>
+          ) : null}
           <label>
             <span>Choose files</span>
             <input
@@ -417,7 +427,12 @@ export function FileManager({ onClose }: { onClose: () => void }) {
                   <span className="file-meta">
                     {file.kind} · {file.bytes || !["fetch_pending", "fetching"].includes(file.status) ? formatBytes(file.bytes) : "Size pending"}
                   </span>
-                  <span className="file-status">{fileStatus(file)}</span>
+                  <span className="file-status">{fileStatus(file, listing?.server_time)}</span>
+                  <small className="file-index-meta" title={file.uploaded_at}>
+                    {file.mime || "Type pending"} · {file.status === "ready"
+                      ? file.chunks + " indexed " + (file.chunks === 1 ? "chunk" : "chunks")
+                      : "Index pending"} · Uploaded {formatFileTime(file.uploaded_at)}
+                  </small>
                   {file.source_url ? (
                     <a href={file.source_url} target="_blank" rel="noopener noreferrer">Source video</a>
                   ) : null}
@@ -632,19 +647,37 @@ function kindSymbol(kind: AudreyFile["kind"]): string {
   return "≡";
 }
 
-function fileStatus(file: AudreyFile): string {
-  if (file.status === "fetch_pending") return "Waiting to download";
+function fileStatus(file: AudreyFile, serverTime: string | undefined): string {
+  // Both timestamps come from Audrey. Browser clock skew cannot invent a stalled job.
+  const elapsed = elapsedSince(file.uploaded_at, serverTime);
+  const age = elapsed === null ? "" : " · " + formatElapsed(elapsed) + " elapsed";
+  if (file.status === "fetch_pending") return "Waiting to download" + age;
   if (file.status === "fetching") {
     const total = file.fetch_total_bytes;
     const done = file.fetch_downloaded_bytes;
     if (total > 0) return "Downloading " + Math.min(100, Math.round((done / total) * 100)) + "% (" + formatBytes(done) + " of " + formatBytes(total) + ")";
     if (done > 0) return "Downloading " + formatBytes(done) + " so far";
-    return "Downloading";
+    return "Downloading" + age;
   }
   if (file.status === "pending" || file.status === "processing") {
-    return file.kind === "video" ? "Preparing summary" : "Processing";
+    return (file.kind === "video" ? "Preparing summary" : "Processing") + age;
   }
   return file.status.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function elapsedSince(startedAt: string, serverTime: string | undefined): number | null {
+  if (!serverTime) return null;
+  const started = Date.parse(startedAt);
+  const now = Date.parse(serverTime);
+  if (!Number.isFinite(started) || !Number.isFinite(now)) return null;
+  return Math.max(0, Math.round((now - started) / 1000));
+}
+
+function formatElapsed(seconds: number): string {
+  if (seconds < 60) return seconds + "s";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes + "m " + String(seconds % 60).padStart(2, "0") + "s";
+  return Math.floor(minutes / 60) + "h " + String(minutes % 60).padStart(2, "0") + "m";
 }
 
 function transcriptLabel(source: string): string {
@@ -654,6 +687,15 @@ function transcriptLabel(source: string): string {
 function summaryTeaser(summary: string): string {
   const text = summary.replace(/\s+/g, " ").trim();
   return text.length > 100 ? text.slice(0, 99).trimEnd() + "…" : text;
+}
+
+function formatFileTime(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value || "unknown";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(parsed);
 }
 
 function formatBytes(bytes: number): string {

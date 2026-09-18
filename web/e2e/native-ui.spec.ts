@@ -1777,7 +1777,11 @@ test("browses files by name, source link, kind, status, and sort order", async (
       return;
     }
     if (url.pathname === "/api/files" && request.method() === "GET") {
-      await json(route, { ...browserFileListing([]), items: files });
+      await json(route, {
+        ...browserFileListing([]),
+        server_time: "2026-09-04T00:02:03Z",
+        items: files,
+      });
       return;
     }
     if (url.pathname === "/api/models") {
@@ -1797,6 +1801,13 @@ test("browses files by name, source link, kind, status, and sort order", async (
   const sort = dialog.getByRole("combobox", { name: "Sort by" });
 
   await expect(names).toHaveText(["clip.mp4", "photo.png", "Broken.pdf", "Alpha.txt"]);
+  await expect(dialog.getByText("Downloading · 2m 03s elapsed")).toBeVisible();
+  await expect(dialog.locator(".file-upload-hint")).toContainText("Up to 2.0 GB per file.");
+  await expect(dialog.locator(".file-upload-hint")).toContainText("Files over 50 MB upload in parts.");
+  await expect(dialog.locator(".file-upload-hint")).toContainText("Supported: .txt.");
+  const photoDetails = dialog.locator(".file-list li").filter({ hasText: "photo.png" }).locator(".file-index-meta");
+  await expect(photoDetails).toContainText("image/png · 1 indexed chunk · Uploaded");
+  await expect(photoDetails).toHaveAttribute("title", "2026-09-03T00:00:00Z");
   await sort.selectOption("name-asc");
   await expect(names).toHaveText(["Alpha.txt", "Broken.pdf", "clip.mp4", "photo.png"]);
   await search.fill("PHOTO");
