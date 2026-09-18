@@ -1733,7 +1733,7 @@ test("manages owner-bound files without a browser bearer token", async ({ page }
   const dialog = page.getByRole("dialog", { name: "Your files" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("field-notes.txt")).toBeVisible();
-  await dialog.getByLabel("Choose a file").setInputFiles({
+  await dialog.getByLabel("Choose files").setInputFiles({
     name: "new-notes.txt",
     mimeType: "text/plain",
     buffer: Buffer.from("native bytes"),
@@ -1745,7 +1745,97 @@ test("manages owner-bound files without a browser bearer token", async ({ page }
   const confirmDelete = dialog.getByRole("button", { name: "Confirm delete new-notes.txt" });
   await expect(confirmDelete).toHaveText("✓");
   await confirmDelete.click();
-  await expect(dialog.getByText("new-notes.txt")).toHaveCount(0);
+  await expect(dialog.locator(".file-list").getByText("new-notes.txt")).toHaveCount(0);
+  expect(authorizationHeaders.every((value) => value === undefined)).toBe(true);
+});
+
+test("uploads dropped and picked batches while isolating per-file failures", async ({ page }) => {
+  let files: ReturnType<typeof browserFile>[] = [];
+  const postedNames: string[] = [];
+  const authorizationHeaders: Array<string | undefined> = [];
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    authorizationHeaders.push(request.headers().authorization);
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
+    if (url.pathname === "/api/me") {
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      await json(route, { items: [browserConversation("Batch files")], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/conversations/" + CONVERSATION_ID + "/messages") {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/files" && request.method() === "GET") {
+      await json(route, browserFileListing(files));
+      return;
+    }
+    if (url.pathname === "/api/files" && request.method() === "POST") {
+      const name = /filename="([^"]+)"/.exec(request.postData() ?? "")?.[1] ?? "";
+      postedNames.push(name);
+      if (name === "second.txt") {
+        await route.fulfill({
+          status: 413,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "quota exceeded" }),
+        });
+        return;
+      }
+      files = [...files, browserFile("file_" + postedNames.length, name, 5)];
+      await json(route, {
+        id: "file_" + postedNames.length,
+        filename: name,
+        mime: "text/plain",
+        bytes: 5,
+        kind: "text",
+        chunks: 1,
+        status: "ready",
+      });
+      return;
+    }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Your files" });
+  await page.evaluate(() => {
+    const zone = document.querySelector(".file-drop-zone");
+    if (!zone) throw new Error("Missing file drop zone");
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(["first"], "first.txt", { type: "text/plain" }));
+    transfer.items.add(new File(["bad"], "blocked.exe", { type: "application/octet-stream" }));
+    zone.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+  });
+
+  await expect(dialog.getByText(/2 selected/)).toBeVisible();
+  await dialog.getByRole("button", { name: "Upload 2 files" }).click();
+  await expect(dialog.getByRole("list", { name: "Upload results" })).toContainText("first.txt: uploaded");
+  await expect(dialog.getByRole("list", { name: "Upload results" })).toContainText("blocked.exe: skipped");
+  await expect(dialog.getByText("first.txt", { exact: true })).toBeVisible();
+
+  await dialog.getByLabel("Choose files").setInputFiles([
+    { name: "second.txt", mimeType: "text/plain", buffer: Buffer.from("second") },
+    { name: "third.txt", mimeType: "text/plain", buffer: Buffer.from("third") },
+  ]);
+  await dialog.getByRole("button", { name: "Upload 2 files" }).click();
+  await expect(dialog.getByRole("list", { name: "Upload results" })).toContainText("second.txt: failed — quota exceeded");
+  await expect(dialog.getByRole("list", { name: "Upload results" })).toContainText("third.txt: uploaded");
+  await expect(dialog.locator(".file-list").getByText("second.txt", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByText("third.txt", { exact: true })).toBeVisible();
+  expect(postedNames).toEqual(["first.txt", "second.txt", "third.txt"]);
   expect(authorizationHeaders.every((value) => value === undefined)).toBe(true);
 });
 

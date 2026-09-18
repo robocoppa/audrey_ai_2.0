@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
 
 import {
   deleteFile,
@@ -6,6 +6,7 @@ import {
   listFiles,
   uploadFile,
   type AudreyFile,
+  type AudreyFileLimits,
   type AudreyFileList,
 } from "./api";
 
@@ -13,7 +14,10 @@ export function FileManager({ onClose }: { onClose: () => void }) {
   const [listing, setListing] = useState<AudreyFileList | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [draggingFiles, setDraggingFiles] = useState(false);
+  const [uploadResults, setUploadResults] = useState<string[]>([]);
+  const [activeUpload, setActiveUpload] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [fetchingUrl, setFetchingUrl] = useState(false);
   const [queuedUrl, setQueuedUrl] = useState(false);
@@ -80,22 +84,52 @@ export function FileManager({ onClose }: { onClose: () => void }) {
 
   async function submitUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedFile || !listing) return;
+    if (!selectedFiles.length || !listing || uploading || fetchingUrl) return;
     setUploading(true);
     setProgress(0);
     setError("");
+    setUploadResults([]);
+    let uploaded = false;
     try {
-      await uploadFile(selectedFile, listing.limits, setProgress);
-      setSelectedFile(null);
+      for (const file of selectedFiles) {
+        const precheck = uploadPrecheck(file, listing.limits);
+        if (precheck) {
+          setUploadResults((results) => [...results, file.name + ": skipped — " + precheck]);
+          continue;
+        }
+        setActiveUpload(file.name);
+        setProgress(0);
+        try {
+          const result = await uploadFile(file, listing.limits, setProgress);
+          uploaded = true;
+          setUploadResults((results) => [...results, file.name + ": " + (result.status === "ready" ? "uploaded" : "stored; processing")]);
+        } catch (reason) {
+          setUploadResults((results) => [...results, file.name + ": failed — " + messageOf(reason)]);
+        }
+      }
+      setSelectedFiles([]);
       if (inputRef.current) inputRef.current.value = "";
-      setLoading(true);
-      await refresh();
+      if (uploaded) await refresh();
     } catch (reason) {
       setError(messageOf(reason));
     } finally {
-      setLoading(false);
+      setActiveUpload("");
+      setProgress(0);
       setUploading(false);
     }
+  }
+
+  function selectFiles(files: FileList | File[]) {
+    if (uploading || fetchingUrl || files.length === 0) return;
+    setSelectedFiles(Array.from(files));
+    setUploadResults([]);
+    setError("");
+  }
+
+  function dropFiles(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setDraggingFiles(false);
+    if (event.dataTransfer.files.length) selectFiles(event.dataTransfer.files);
   }
 
   async function submitVideoUrl(event: FormEvent<HTMLFormElement>) {
@@ -179,27 +213,44 @@ export function FileManager({ onClose }: { onClose: () => void }) {
         ) : null}
 
         <form className="file-upload" onSubmit={(event) => void submitUpload(event)}>
+          <div
+            className={draggingFiles ? "file-drop-zone dragging" : "file-drop-zone"}
+            role="region"
+            aria-label="Drop files to upload"
+            onDragOver={(event) => event.preventDefault()}
+            onDragEnter={(event) => {
+              event.preventDefault();
+              if (!uploading && !fetchingUrl && event.dataTransfer.types.includes("Files")) setDraggingFiles(true);
+            }}
+            onDragLeave={() => setDraggingFiles(false)}
+            onDrop={dropFiles}
+          >Drop files here, or choose several below.</div>
           <label>
-            <span>Choose a file</span>
+            <span>Choose files</span>
             <input
               ref={inputRef}
               type="file"
+              multiple
               accept={accept}
-              disabled={uploading}
-              onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
+              disabled={uploading || fetchingUrl}
+              onChange={(event) => selectFiles(event.target.files ?? [])}
             />
           </label>
-          <button type="submit" disabled={!selectedFile || !listing || uploading}>
-            {uploading ? `Uploading ${Math.round(progress * 100)}%` : "Upload"}
+          <button type="submit" disabled={!selectedFiles.length || !listing || uploading || fetchingUrl}>
+            {uploading ? "Uploading " + activeUpload + " · " + Math.round(progress * 100) + "%" : selectedFiles.length > 1 ? "Upload " + selectedFiles.length + " files" : "Upload"}
           </button>
           {uploading ? (
             <progress value={progress} max={1} aria-label="Upload progress" />
           ) : null}
-          {selectedFile && listing ? (
+          {selectedFiles.length > 0 ? (
             <small>
-              {selectedFile.name} · {formatBytes(selectedFile.size)}
-              {selectedFile.size > listing.limits.max_upload_bytes ? " · chunked upload" : ""}
+              {selectedFiles.length} selected · {formatBytes(selectedFiles.reduce((total, file) => total + file.size, 0))}
             </small>
+          ) : null}
+          {uploadResults.length ? (
+            <ul className="file-upload-results" aria-label="Upload results" aria-live="polite">
+              {uploadResults.map((result, index) => <li key={index}>{result}</li>)}
+            </ul>
           ) : null}
         </form>
 
@@ -215,10 +266,10 @@ export function FileManager({ onClose }: { onClose: () => void }) {
                 setQueuedUrl(false);
               }}
               placeholder={fetchHosts.length ? "Allowed: " + fetchHosts.join(", ") : "Video links are unavailable"}
-              disabled={!listing || fetchHosts.length === 0 || fetchingUrl}
+              disabled={!listing || fetchHosts.length === 0 || fetchingUrl || uploading}
               required
             />
-            <button type="submit" disabled={!videoUrl.trim() || fetchingUrl || fetchHosts.length === 0}>
+            <button type="submit" disabled={!videoUrl.trim() || fetchingUrl || uploading || fetchHosts.length === 0}>
               {fetchingUrl ? "Queueing…" : "Fetch video"}
             </button>
           </div>
@@ -283,6 +334,21 @@ export function FileManager({ onClose }: { onClose: () => void }) {
       </section>
     </div>
   );
+}
+
+function uploadPrecheck(file: File, limits: AudreyFileLimits): string | null {
+  if (file.size === 0) return "the file is empty";
+  if (file.size > limits.chunked_max_bytes) {
+    return "over the " + formatBytes(limits.chunked_max_bytes) + " per-file limit";
+  }
+  const dot = file.name.lastIndexOf(".");
+  const extension = dot > 0 ? file.name.slice(dot).toLowerCase() : "";
+  if (!limits.allowed_extensions.includes(extension)) {
+    return extension ? "unsupported format " + extension : "a file extension is required";
+  }
+  // The server checks quota: listed historical video bytes can outlive the
+  // reclaimed source, so list.total_bytes is not a safe client-side quota gate.
+  return null;
 }
 
 function kindSymbol(kind: AudreyFile["kind"]): string {

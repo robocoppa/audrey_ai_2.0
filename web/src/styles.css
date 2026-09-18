@@ -2990,6 +2990,23 @@ a:focus-visible {
   border-bottom: 1px solid var(--border);
 }
 
+.file-drop-zone {
+  grid-column: 1 / -1;
+  padding: 1.15rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: 0.7rem;
+  background: rgb(7 16 31 / 38%);
+  color: var(--muted);
+  font-size: 0.76rem;
+  text-align: center;
+}
+
+.file-drop-zone.dragging {
+  border-color: var(--accent);
+  background: rgb(52 153 250 / 14%);
+  color: var(--text);
+}
+
 .file-upload label {
   display: grid;
   min-width: 0;
@@ -3048,6 +3065,25 @@ a:focus-visible {
   font-size: 0.72rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.file-upload-results {
+  display: grid;
+  grid-column: 1 / -1;
+  max-height: 8rem;
+  overflow-y: auto;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  list-style: none;
+}
+
+.file-upload-results li {
+  overflow-wrap: anywhere;
 }
 
 .file-url-form {
