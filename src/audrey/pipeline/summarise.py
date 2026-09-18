@@ -35,6 +35,7 @@ queue as the chat turn waiting behind it, for a stage nobody is waiting on.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from audrey.models.ollama import OllamaClient
@@ -44,18 +45,46 @@ from audrey.pipeline.fair_gate import FairLocalGate
 log = logging.getLogger(__name__)
 
 SUMMARY_SYSTEM = (
-    "You are summarising a video for someone deciding whether to watch it and "
-    "for a search index that will store your summary as one chunk.\n"
-    "- Open with one sentence saying what the video IS — the kind of thing it "
-    "is, who is in it, and what happens.\n"
-    "- Then the substance: what is discussed, what is shown, what is decided "
-    "or concluded. Name people, places, products and figures that appear.\n"
-    "- Write plain prose in one or two short paragraphs. No headings, no "
-    "bullet lists, no preamble like 'This video shows'.\n"
-    "- Use only what is in the material below. Do not speculate about what "
-    "happens off-camera or between the excerpts, and do not describe the "
-    "material itself ('the transcript mentions')."
+    "Write a brief library description of the video in one or two complete "
+    "sentences, at most 45 words. State its main subject, action, and useful "
+    "takeaway. Prefer the point of the video over incidental visual details. "
+    "Start directly with the subject; do not write a preamble, first-person "
+    "analysis, title, heading, bullets, or transcript/source attribution. "
+    "Use only the material below; do not invent events between excerpts."
 )
+
+SUMMARY_MAX_WORDS = 45
+SUMMARY_MAX_CHARS = 320
+SUMMARY_MAX_OUTPUT_TOKENS = 160
+
+_PREAMBLE = re.compile(
+    r"^(?:let me|i(?:'ll| will)) (?:analy[sz]e|summari[sz]e|review) "
+    r"(?:this|the) video[.!:]?\s*|"
+    r"^here(?:'s| is) (?:a |the )?(?:brief )?summary[.:]?\s*|"
+    r"^(?:#+\s*)?(?:\*\*)?summary(?:\*\*)?\s*:\s*",
+    re.IGNORECASE,
+)
+
+
+def brief_video_summary(raw: str) -> str:
+    """Keep only a short answer, even when the model ignores the length request."""
+    result = " ".join(raw.split())
+    for _ in range(3):
+        trimmed = _PREAMBLE.sub("", result, count=1).strip()
+        if trimmed == result:
+            break
+        result = trimmed
+    sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", result)
+    result = sentences[0]
+    if len(sentences) > 1:
+        candidate = result + " " + sentences[1]
+        if len(candidate.split()) <= SUMMARY_MAX_WORDS and len(candidate) <= SUMMARY_MAX_CHARS:
+            result = candidate
+    if len(result.split()) > SUMMARY_MAX_WORDS:
+        result = " ".join(result.split()[:SUMMARY_MAX_WORDS]).rstrip(".,;:") + "…"
+    if len(result) > SUMMARY_MAX_CHARS:
+        result = result[: SUMMARY_MAX_CHARS - 1].rsplit(" ", 1)[0].rstrip(".,;:") + "…"
+    return result
 
 #: Characters of transcript + descriptions handed to the model. A two-hour
 #: transcript is ~100k characters and will not fit any context we want to pay
@@ -185,8 +214,9 @@ async def summarise_video(
             ],
             timeout_s=float(_cfg(cfg).get("summary_timeout_s", DEFAULT_TIMEOUT_S)),
             think=think,
+            options={"num_predict": SUMMARY_MAX_OUTPUT_TOKENS},
         )
-    text = str((resp.get("message") or {}).get("content") or "").strip()
+    text = brief_video_summary(str((resp.get("message") or {}).get("content") or ""))
     if not text:
         raise SummaryUnavailableError(f"{model} returned an empty summary")
     # `think=` and `thinking=` are both here on purpose, and they are different
@@ -260,6 +290,7 @@ __all__ = [
     "DEFAULT_INPUT_BUDGET",
     "SUMMARY_SYSTEM",
     "SummaryUnavailableError",
+    "brief_video_summary",
     "build_input",
     "summarise_video",
 ]

@@ -17,7 +17,11 @@ import pytest
 from audrey.kb.ingest import ingest_summary
 from audrey.kb.qdrant import point_id
 from audrey.pipeline.summarise import (
+    SUMMARY_MAX_CHARS,
+    SUMMARY_MAX_OUTPUT_TOKENS,
+    SUMMARY_MAX_WORDS,
     SummaryUnavailableError,
+    brief_video_summary,
     build_input,
     summarise_video,
 )
@@ -92,8 +96,10 @@ class _Ollama:
         self.thinking = ""
         self.calls: list[dict] = []
 
-    async def chat(self, *, model, messages, timeout_s, think=None):
-        self.calls.append({"model": model, "messages": messages, "think": think})
+    async def chat(self, *, model, messages, timeout_s, think=None, options=None):
+        self.calls.append({
+            "model": model, "messages": messages, "think": think, "options": options,
+        })
         if self.boom:
             raise self.boom
         return {
@@ -140,6 +146,61 @@ class TestSummariseVideo:
             ollama=_Ollama(), registry=_Registry(), gate=_Gate(), cfg=_cfg())
 
         assert got == "A retirement party for Jason."
+
+    @pytest.mark.asyncio
+    async def test_the_prompt_and_generation_budget_request_a_short_blurb(self):
+        ollama = _Ollama()
+        await summarise_video(
+            _segments(3), _frames(2), filename="v.mp4", duration_s=60.0,
+            ollama=ollama, registry=_Registry(), gate=_Gate(), cfg=_cfg())
+
+        prompt = ollama.calls[0]["messages"][0]["content"]
+        assert "at most 45 words" in prompt
+        assert "first-person" in prompt
+        assert ollama.calls[0]["options"] == {"num_predict": SUMMARY_MAX_OUTPUT_TOKENS}
+
+    @pytest.mark.asyncio
+    async def test_verbose_model_output_is_shortened_before_storage(self):
+        content = (
+            "Let me analyze this video. Here is a summary: "
+            "A Minecraft tutorial demonstrates a compact tree-growing technique. "
+            "The player places saplings near a structure to make harvesting easier. "
+            + " ".join(["An unrelated extra detail."] * 40)
+        )
+        got = await summarise_video(
+            _segments(3), _frames(2), filename="v.mp4", duration_s=60.0,
+            ollama=_Ollama(content=content), registry=_Registry(), gate=_Gate(), cfg=_cfg())
+
+        assert got == (
+            "A Minecraft tutorial demonstrates a compact tree-growing technique. "
+            "The player places saplings near a structure to make harvesting easier."
+        )
+        assert len(got.split()) <= SUMMARY_MAX_WORDS
+        assert len(got) <= SUMMARY_MAX_CHARS
+
+    def test_an_oversized_second_sentence_does_not_leave_a_fragment(self):
+        first = "A Minecraft tutorial demonstrates a compact tree-growing technique."
+        second = "The presenter " + " ".join(["explains"] * 60) + "."
+        assert brief_video_summary(first + " " + second) == first
+
+    @pytest.mark.asyncio
+    async def test_runaway_single_sentence_is_hard_capped(self):
+        got = await summarise_video(
+            _segments(3), [], filename="v.mp4", duration_s=60.0,
+            ollama=_Ollama(content="Minecraft trees " * 200),
+            registry=_Registry(), gate=_Gate(), cfg=_cfg())
+
+        assert len(got.split()) <= SUMMARY_MAX_WORDS
+        assert len(got) <= SUMMARY_MAX_CHARS
+        assert got.endswith("…")
+
+    @pytest.mark.asyncio
+    async def test_preamble_only_is_not_saved_as_a_summary(self):
+        with pytest.raises(SummaryUnavailableError):
+            await summarise_video(
+                _segments(3), [], filename="v.mp4", duration_s=60.0,
+                ollama=_Ollama(content="Let me analyze this video."),
+                registry=_Registry(), gate=_Gate(), cfg=_cfg())
 
     @pytest.mark.asyncio
     async def test_the_default_summariser_is_a_cloud_model(self):

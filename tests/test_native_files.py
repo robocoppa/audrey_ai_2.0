@@ -127,6 +127,30 @@ def test_native_list_uses_server_owned_namespace_and_hides_compat_fields(monkeyp
     assert "fetch_hosts" in response.text
 
 
+def test_native_file_list_briefs_an_existing_verbose_video_summary(monkeypatch):
+    listing = _listing()
+    listing.files[0].mime = "video/mp4"
+    listing.files[0].summary = (
+        "Let me analyze this video. "
+        "A Minecraft tutorial demonstrates a way to grow trees close together. "
+        "The player places saplings beside a compact structure for easier harvesting. "
+        "The streamer is wearing earphones and a dark shirt."
+    )
+
+    async def fake_list(request, me):
+        return listing
+
+    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+
+    response = TestClient(_app()).get("/api/files")
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["summary"] == (
+        "A Minecraft tutorial demonstrates a way to grow trees close together. "
+        "The player places saplings beside a compact structure for easier harvesting."
+    )
+
+
 def test_native_get_returns_only_a_file_in_the_owner_listing(monkeypatch):
     async def fake_list(request, me):
         return _listing()

@@ -12,6 +12,7 @@ from audrey.app_state import AttachmentSnapshot
 from audrey.auth import AuthedUser, require_scope
 from audrey.identity import Principal
 from audrey.kb.extract import is_image_mime, is_video_mime
+from audrey.pipeline.summarise import brief_video_summary
 from audrey.routes import files as upload_routes
 
 router = APIRouter(tags=["application-files"])
@@ -107,7 +108,7 @@ def _file_record(row: upload_routes.FileRow) -> NativeFileRecord:
         status=row.status,
         failure_reason=row.failure_reason,
         duration_s=row.duration_s,
-        summary=row.summary,
+        summary=brief_video_summary(row.summary),
         source_freed_at=row.source_freed_at,
         leased_at=row.leased_at,
         source_url=row.source_url,
