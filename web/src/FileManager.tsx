@@ -3,9 +3,12 @@ import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEven
 import {
   deleteFile,
   fetchVideoFromUrl,
+  getFileArtifact,
   listFiles,
   uploadFile,
   type AudreyFile,
+  type AudreyFileArtifact,
+  type AudreyFileArtifactKind,
   type AudreyFileLimits,
   type AudreyFileList,
 } from "./api";
@@ -25,6 +28,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
   const [progress, setProgress] = useState(0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const refreshInFlight = useRef<Promise<AudreyFileList> | null>(null);
 
@@ -157,6 +161,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
     try {
       await deleteFile(file.id);
       setConfirmingId(null);
+      if (selectedVideoId === file.id) setSelectedVideoId(null);
       setLoading(true);
       await refresh();
     } catch (reason) {
@@ -172,6 +177,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
     : 0;
   const accept = listing?.limits.allowed_extensions.join(",") ?? undefined;
   const fetchHosts = listing?.limits.fetch_hosts ?? [];
+  const selectedVideo = listing?.items.find((file) => file.id === selectedVideoId) ?? null;
 
   return (
     <div className="file-manager-backdrop" role="presentation" onMouseDown={(event) => {
@@ -212,6 +218,14 @@ export function FileManager({ onClose }: { onClose: () => void }) {
           </div>
         ) : null}
 
+        {selectedVideo ? (
+          <VideoArtifactViewer
+            key={selectedVideo.id}
+            file={selectedVideo}
+            onBack={() => setSelectedVideoId(null)}
+          />
+        ) : (
+          <>
         <form className="file-upload" onSubmit={(event) => void submitUpload(event)}>
           <div
             className={draggingFiles ? "file-drop-zone dragging" : "file-drop-zone"}
@@ -306,32 +320,136 @@ export function FileManager({ onClose }: { onClose: () => void }) {
                     </details>
                   ) : null}
                 </div>
-                <button
-                  className={confirmingId === file.id ? "file-remove confirming-delete" : "file-remove"}
-                  type="button"
-                  aria-label={`${confirmingId === file.id ? "Confirm delete" : "Delete"} ${file.filename}`}
-                  aria-pressed={confirmingId === file.id}
-                  title={confirmingId === file.id ? "Click again to delete" : "Delete file"}
-                  onClick={() => {
-                    if (confirmingId === file.id) {
-                      void remove(file);
-                    } else {
-                      setConfirmingId(file.id);
-                    }
-                  }}
-                  onBlur={() => setConfirmingId((current) => current === file.id ? null : current)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") setConfirmingId(null);
-                  }}
-                  disabled={uploading || deletingId !== null}
-                >
-                  {deletingId === file.id ? "Deleting…" : confirmingId === file.id ? "✓" : "Remove"}
-                </button>
+                <div className="file-actions">
+                  {file.kind === "video" && file.status === "ready" ? (
+                    <button
+                      className="file-view"
+                      type="button"
+                      onClick={() => setSelectedVideoId(file.id)}
+                      aria-label={`View video text for ${file.filename}`}
+                    >View text</button>
+                  ) : null}
+                  <button
+                    className={confirmingId === file.id ? "file-remove confirming-delete" : "file-remove"}
+                    type="button"
+                    aria-label={`${confirmingId === file.id ? "Confirm delete" : "Delete"} ${file.filename}`}
+                    aria-pressed={confirmingId === file.id}
+                    title={confirmingId === file.id ? "Click again to delete" : "Delete file"}
+                    onClick={() => {
+                      if (confirmingId === file.id) {
+                        void remove(file);
+                      } else {
+                        setConfirmingId(file.id);
+                      }
+                    }}
+                    onBlur={() => setConfirmingId((current) => current === file.id ? null : current)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") setConfirmingId(null);
+                    }}
+                    disabled={uploading || deletingId !== null}
+                  >
+                    {deletingId === file.id ? "Deleting…" : confirmingId === file.id ? "✓" : "Remove"}
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
         ) : null}
+          </>
+        )}
       </section>
+    </div>
+  );
+}
+
+const artifactKinds: AudreyFileArtifactKind[] = ["summary", "transcript", "visual"];
+
+function VideoArtifactViewer({ file, onBack }: { file: AudreyFile; onBack: () => void }) {
+  const [artifact, setArtifact] = useState<AudreyFileArtifactKind>("summary");
+
+  return (
+    <div className="file-artifact-viewer">
+      <div className="file-artifact-heading">
+        <button type="button" onClick={onBack}>← All files</button>
+        <div>
+          <h3>{file.filename}</h3>
+          <small>Video text · {formatBytes(file.bytes)}</small>
+        </div>
+      </div>
+      <div className="file-artifact-tabs" role="group" aria-label="Video text type">
+        {artifactKinds.map((kind) => (
+          <button
+            key={kind}
+            type="button"
+            aria-pressed={artifact === kind}
+            onClick={() => setArtifact(kind)}
+          >{kind === "visual" ? "Visual notes" : kind[0].toUpperCase() + kind.slice(1)}</button>
+        ))}
+      </div>
+      <ArtifactPage key={file.id + ":" + artifact} file={file} artifact={artifact} />
+    </div>
+  );
+}
+
+function ArtifactPage({ file, artifact }: { file: AudreyFile; artifact: AudreyFileArtifactKind }) {
+  const [page, setPage] = useState<AudreyFileArtifact | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    getFileArtifact(file.id, artifact)
+      .then((result) => {
+        if (active) setPage(result);
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(messageOf(reason));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, [artifact, file.id]);
+
+  async function loadMore() {
+    if (loading || page?.next_offset == null) return;
+    const nextOffset = page.next_offset;
+    setLoading(true);
+    setError("");
+    try {
+      const next = await getFileArtifact(file.id, artifact, nextOffset);
+      setPage((current) => current && current.next_offset === next.offset
+        ? { ...next, text: current.text + next.text, offset: 0 }
+        : current);
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const fallbackSummary = artifact === "summary" && page?.total_chars === 0 && file.summary;
+  const visibleText = fallbackSummary ? file.summary : page?.text;
+
+  return (
+    <div className="file-artifact-body" aria-live="polite">
+      {loading && !page ? <p role="status">Loading {artifact}…</p> : null}
+      {error ? <p className="file-manager-error" role="alert">{error}</p> : null}
+      {visibleText ? <div className="file-artifact-text">{visibleText}</div> : null}
+      {!loading && !error && !visibleText ? (
+        <p>{artifact === "visual"
+          ? "No visual notes are available for this video."
+          : `No ${artifact} is available for this video.`}</p>
+      ) : null}
+      {fallbackSummary ? <small>Only the brief listing summary is available for this video.</small> : null}
+      {page?.next_offset != null ? (
+        <button type="button" onClick={() => void loadMore()} disabled={loading}>
+          {loading ? "Loading more…" : "Load more"}
+        </button>
+      ) : null}
+      {page && page.total_chars > 0 ? (
+        <small>{Math.min(page.text.length, page.total_chars).toLocaleString()} of {page.total_chars.toLocaleString()} characters</small>
+      ) : null}
     </div>
   );
 }

@@ -1839,6 +1839,85 @@ test("uploads dropped and picked batches while isolating per-file failures", asy
   expect(authorizationHeaders.every((value) => value === undefined)).toBe(true);
 });
 
+test("reads paged video text inside Files without a browser bearer token", async ({ page }) => {
+  const video = {
+    ...browserFile("file_video", "walkthrough.mp4", 1024),
+    kind: "video",
+    mime: "video/mp4",
+    summary: "Brief listing summary.",
+  };
+  const artifactCalls: string[] = [];
+  const authorizationHeaders: Array<string | undefined> = [];
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    authorizationHeaders.push(request.headers().authorization);
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
+    if (url.pathname === "/api/me") {
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      await json(route, { items: [browserConversation("Video text")], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/conversations/" + CONVERSATION_ID + "/messages") {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/files" && request.method() === "GET") {
+      await json(route, { ...browserFileListing([]), items: [video] });
+      return;
+    }
+    if (url.pathname.startsWith("/api/files/file_video/artifacts/")) {
+      artifactCalls.push(url.pathname + url.search);
+      const kind = url.pathname.split("/").at(-1);
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      const text = kind === "summary" ? "Full stored summary." :
+        kind === "transcript" ? (offset === 0 ? "[00:01] Hello\n" : "[00:02] World") : "";
+      await json(route, {
+        id: "file_video",
+        artifact: kind,
+        text,
+        offset,
+        next_offset: kind === "transcript" && offset === 0 ? 14 : null,
+        total_chars: kind === "summary" ? 20 : kind === "transcript" ? 27 : 0,
+      });
+      return;
+    }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Your files" });
+  await dialog.getByRole("button", { name: "View video text for walkthrough.mp4" }).click();
+  await expect(dialog.locator(".file-artifact-text")).toHaveText("Full stored summary.");
+  await dialog.getByRole("button", { name: "Transcript", exact: true }).click();
+  await expect(dialog.locator(".file-artifact-text")).toHaveText("[00:01] Hello\n");
+  await dialog.getByRole("button", { name: "Load more" }).click();
+  await expect(dialog.locator(".file-artifact-text")).toHaveText("[00:01] Hello\n[00:02] World");
+  await dialog.getByRole("button", { name: "Visual notes" }).click();
+  await expect(dialog.getByText("No visual notes are available for this video.")).toBeVisible();
+  await dialog.getByRole("button", { name: "← All files" }).click();
+  await expect(dialog.getByText("walkthrough.mp4")).toBeVisible();
+  expect(artifactCalls).toEqual([
+    "/api/files/file_video/artifacts/summary?offset=0",
+    "/api/files/file_video/artifacts/transcript?offset=0",
+    "/api/files/file_video/artifacts/transcript?offset=14",
+    "/api/files/file_video/artifacts/visual?offset=0",
+  ]);
+  expect(authorizationHeaders.every((value) => value === undefined)).toBe(true);
+});
+
 test("queues a video link through native files and follows its summary", async ({ page }) => {
   const sourceUrl = "https://www.youtube.com/watch?v=video123";
   let video: Record<string, unknown> | null = null;

@@ -164,6 +164,85 @@ def test_native_get_returns_only_a_file_in_the_owner_listing(monkeypatch):
     assert missing.json() == {"detail": "File not found."}
 
 
+def test_native_video_artifact_uses_exact_owned_id_and_pages_on_lines(monkeypatch, tmp_path):
+    listing = _listing()
+    listing.files[0].file_id = "file_first"
+    listing.files[0].filename = "same-name.mp4"
+    listing.files[0].mime = "video/mp4"
+    listing.files.append(
+        upload_routes.FileRow(
+            file_id="file_second",
+            filename="same-name.mp4",
+            mime="video/mp4",
+            bytes=100,
+            uploaded_at="2026-09-07T13:00:00+00:00",
+            chunks=1,
+            status="ready",
+        )
+    )
+
+    async def fake_list(request, me):
+        assert me.email == "private-storage-123"
+        return listing
+
+    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
+    owner_dir = tmp_path / upload_routes.sanitize_user("private-storage-123")
+    owner_dir.mkdir()
+    (owner_dir / "file_first.transcript.txt").write_text("A" * 4000 + "\nsecond line")
+    (owner_dir / "file_second.transcript.txt").write_text("different file")
+    (owner_dir / "file_foreign.transcript.txt").write_text("private")
+
+    client = TestClient(_app())
+    first = client.get("/api/files/file_first/artifacts/transcript")
+    assert first.status_code == 200
+    assert first.json() == {
+        "id": "file_first",
+        "artifact": "transcript",
+        "text": "A" * 4000 + "\n",
+        "offset": 0,
+        "next_offset": 4001,
+        "total_chars": 4012,
+    }
+    second_page = client.get("/api/files/file_first/artifacts/transcript?offset=4001")
+    assert second_page.status_code == 200
+    assert second_page.json()["text"] == "second line"
+    assert second_page.json()["next_offset"] is None
+
+    second = client.get("/api/files/file_second/artifacts/transcript")
+    assert second.json()["text"] == "different file"
+    foreign = client.get("/api/files/file_foreign/artifacts/transcript")
+    assert foreign.status_code == 404
+    assert foreign.json() == {"detail": "File not found."}
+
+
+def test_native_video_artifact_absence_and_validation(monkeypatch, tmp_path):
+    listing = _listing()
+    listing.files[0].mime = "video/mp4"
+
+    async def fake_list(request, me):
+        return listing
+
+    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
+    client = TestClient(_app())
+
+    absent = client.get("/api/files/file_123/artifacts/visual")
+    assert absent.status_code == 200
+    assert absent.json() == {
+        "id": "file_123",
+        "artifact": "visual",
+        "text": "",
+        "offset": 0,
+        "next_offset": None,
+        "total_chars": 0,
+    }
+    assert client.get("/api/files/file_123/artifacts/unknown").status_code == 422
+    assert client.get("/api/files/file_123/artifacts/transcript?offset=-1").status_code == 422
+    listing.files[0].mime = "text/plain"
+    assert client.get("/api/files/file_123/artifacts/transcript").status_code == 422
+
+
 async def test_attachment_resolution_is_ready_owner_bound_and_indistinguishable(
     monkeypatch,
 ):

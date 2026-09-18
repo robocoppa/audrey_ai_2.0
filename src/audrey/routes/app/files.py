@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 
 from audrey.app_state import AttachmentSnapshot
@@ -69,6 +70,15 @@ class NativeFileDeleteResponse(BaseModel):
     id: str
     deleted: bool
     pending_cleanup: bool
+
+
+class NativeFileArtifactResponse(BaseModel):
+    id: str
+    artifact: Literal["transcript", "visual", "summary"]
+    text: str
+    offset: int
+    next_offset: int | None
+    total_chars: int
 
 
 def _compat_user(principal: Principal) -> AuthedUser:
@@ -206,6 +216,52 @@ async def get_file(
     if row is None:
         raise HTTPException(status_code=404, detail="File not found.")
     return _file_record(row)
+
+
+@router.get(
+    "/files/{file_id}/artifacts/{artifact}",
+    response_model=NativeFileArtifactResponse,
+)
+async def get_file_artifact(
+    file_id: str,
+    artifact: Literal["transcript", "visual", "summary"],
+    request: Request,
+    offset: int = Query(default=0, ge=0),
+    principal: Principal = Depends(_files_access),
+) -> NativeFileArtifactResponse:
+    """Read one page of a video sidecar by exact owner-bound file ID."""
+
+    result = await _list_for_owner(request, principal)
+    row = next((item for item in result.files if item.file_id == file_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="File not found.")
+    if _kind(row.mime) != "video":
+        raise HTTPException(status_code=422, detail="Artifacts are available for videos only.")
+
+    path = (
+        upload_routes._upload_root(request)
+        / upload_routes.sanitize_user(principal.storage_namespace)
+        / f"{row.file_id}.{upload_routes._ARTIFACT_SIDECARS[artifact]}"
+    )
+    try:
+        text = await asyncio.to_thread(path.read_text, "utf-8")
+    except OSError:
+        text = ""
+
+    total = len(text)
+    start = min(offset, total)
+    end = min(start + 4000, total)
+    if end < total:
+        newline = text.find("\n", end)
+        end = total if newline == -1 else newline + 1
+    return NativeFileArtifactResponse(
+        id=row.file_id,
+        artifact=artifact,
+        text=text[start:end],
+        offset=start,
+        next_offset=end if end < total else None,
+        total_chars=total,
+    )
 
 
 @router.post("/files", response_model=NativeFileUploadResponse)

@@ -281,6 +281,17 @@ export interface AudreyFileUpload {
   status: string;
 }
 
+export type AudreyFileArtifactKind = "transcript" | "visual" | "summary";
+
+export interface AudreyFileArtifact {
+  id: string;
+  artifact: AudreyFileArtifactKind;
+  text: string;
+  offset: number;
+  next_offset: number | null;
+  total_chars: number;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -688,6 +699,16 @@ export function listFiles(): Promise<AudreyFileList> {
 
 export function getFile(fileId: string): Promise<AudreyFile> {
   return apiJson<AudreyFile>(`/api/files/${encodeURIComponent(fileId)}`);
+}
+
+export function getFileArtifact(
+  fileId: string,
+  artifact: AudreyFileArtifactKind,
+  offset = 0,
+): Promise<AudreyFileArtifact> {
+  return apiJson<AudreyFileArtifact>(
+    `/api/files/${encodeURIComponent(fileId)}/artifacts/${artifact}?offset=${offset}`,
+  );
 }
 
 export function fetchVideoFromUrl(url: string): Promise<AudreyFileUpload> {

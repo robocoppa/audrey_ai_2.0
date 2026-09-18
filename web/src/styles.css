@@ -3267,6 +3267,13 @@ a:focus-visible {
   color: var(--warning);
 }
 
+.file-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.file-view,
 .file-remove {
   padding: 0.4rem 0.55rem;
   border: 1px solid var(--border);
@@ -3276,9 +3283,108 @@ a:focus-visible {
   font-size: 0.7rem;
 }
 
+.file-view:hover {
+  border-color: var(--border-strong);
+  color: var(--accent);
+}
+
 .file-remove:hover {
   border-color: rgb(255 145 164 / 45%);
   color: var(--danger);
+}
+
+.file-artifact-viewer {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  padding: 1rem 1.4rem 1.4rem;
+}
+
+.file-artifact-heading {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.file-artifact-heading > button,
+.file-artifact-body > button {
+  flex: none;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--input-surface);
+  color: var(--accent);
+}
+
+.file-artifact-heading > div {
+  min-width: 0;
+}
+
+.file-artifact-heading h3 {
+  overflow: hidden;
+  margin: 0;
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-artifact-heading small,
+.file-artifact-body small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.file-artifact-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 1rem 0 0.8rem;
+}
+
+.file-artifact-tabs button {
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  background: transparent;
+  color: var(--muted);
+}
+
+.file-artifact-tabs button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: rgb(52 153 250 / 12%);
+  color: var(--accent);
+}
+
+.file-artifact-body {
+  display: flex;
+  min-height: 0;
+  overflow-y: auto;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: rgb(7 16 31 / 56%);
+}
+
+.file-artifact-body p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.file-artifact-body .file-manager-error {
+  color: var(--danger);
+}
+
+.file-artifact-text {
+  width: 100%;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .welcome {
@@ -3432,7 +3538,7 @@ a:focus-visible {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .file-remove {
+  .file-actions {
     grid-column: 2;
     justify-self: start;
   }
