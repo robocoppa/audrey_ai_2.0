@@ -4,11 +4,14 @@ import {
   deleteFile,
   fetchVideoFromUrl,
   getFileArtifact,
+  getFileImageUrl,
+  getFileText,
   listFiles,
   uploadFile,
   type AudreyFile,
   type AudreyFileArtifact,
   type AudreyFileArtifactKind,
+  type AudreyFileText,
   type AudreyFileLimits,
   type AudreyFileList,
 } from "./api";
@@ -34,7 +37,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
   const [progress, setProgress] = useState(0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
-  const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
+  const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [fileSearch, setFileSearch] = useState("");
   const [kindFilter, setKindFilter] = useState<FileKindFilter>("all");
   const [statusFilter, setStatusFilter] = useState<FileStatusFilter>("all");
@@ -171,7 +174,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
     try {
       await deleteFile(file.id);
       setConfirmingId(null);
-      if (selectedVideoId === file.id) setSelectedVideoId(null);
+      if (selectedFileId === file.id) setSelectedFileId(null);
       setLoading(true);
       await refresh();
     } catch (reason) {
@@ -187,7 +190,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
     : 0;
   const accept = listing?.limits.allowed_extensions.join(",") ?? undefined;
   const fetchHosts = listing?.limits.fetch_hosts ?? [];
-  const selectedVideo = listing?.items.find((file) => file.id === selectedVideoId) ?? null;
+  const selectedFile = listing?.items.find((file) => file.id === selectedFileId) ?? null;
   const visibleFiles = useMemo(() => {
     const search = fileSearch.trim().toLocaleLowerCase();
     return (listing?.items ?? [])
@@ -255,12 +258,26 @@ export function FileManager({ onClose }: { onClose: () => void }) {
           </div>
         ) : null}
 
-        {selectedVideo ? (
-          <VideoArtifactViewer
-            key={selectedVideo.id}
-            file={selectedVideo}
-            onBack={() => setSelectedVideoId(null)}
-          />
+        {selectedFile ? (
+          selectedFile.kind === "video" ? (
+            <VideoArtifactViewer
+              key={selectedFile.id}
+              file={selectedFile}
+              onBack={() => setSelectedFileId(null)}
+            />
+          ) : selectedFile.kind === "image" ? (
+            <ImagePreviewViewer
+              key={selectedFile.id}
+              file={selectedFile}
+              onBack={() => setSelectedFileId(null)}
+            />
+          ) : (
+            <DocumentTextViewer
+              key={selectedFile.id}
+              file={selectedFile}
+              onBack={() => setSelectedFileId(null)}
+            />
+          )
         ) : (
           <>
         <form className="file-upload" onSubmit={(event) => void submitUpload(event)}>
@@ -415,13 +432,13 @@ export function FileManager({ onClose }: { onClose: () => void }) {
                   ) : null}
                 </div>
                 <div className="file-actions">
-                  {file.kind === "video" && file.status === "ready" ? (
+                  {file.status === "ready" ? (
                     <button
                       className="file-view"
                       type="button"
-                      onClick={() => setSelectedVideoId(file.id)}
-                      aria-label={`View video text for ${file.filename}`}
-                    >View text</button>
+                      onClick={() => setSelectedFileId(file.id)}
+                      aria-label={`View ${file.kind === "image" ? "image" : file.kind === "video" ? "video text" : "document text"} for ${file.filename}`}
+                    >{file.kind === "image" ? "View image" : "View text"}</button>
                   ) : null}
                   <button
                     className={confirmingId === file.id ? "file-remove confirming-delete" : "file-remove"}
@@ -458,6 +475,48 @@ export function FileManager({ onClose }: { onClose: () => void }) {
 
 const artifactKinds: AudreyFileArtifactKind[] = ["summary", "transcript", "visual"];
 
+function DocumentTextViewer({ file, onBack }: { file: AudreyFile; onBack: () => void }) {
+  return (
+    <div className="file-artifact-viewer">
+      <div className="file-artifact-heading">
+        <button type="button" onClick={onBack}>← All files</button>
+        <div>
+          <h3>{file.filename}</h3>
+          <small>Document text · {formatBytes(file.bytes)}</small>
+        </div>
+      </div>
+      <ArtifactPage file={file} />
+    </div>
+  );
+}
+
+function ImagePreviewViewer({ file, onBack }: { file: AudreyFile; onBack: () => void }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className="file-artifact-viewer">
+      <div className="file-artifact-heading">
+        <button type="button" onClick={onBack}>← All files</button>
+        <div>
+          <h3>{file.filename}</h3>
+          <small>Image preview · {formatBytes(file.bytes)}</small>
+        </div>
+      </div>
+      <div className="file-artifact-body file-image-preview">
+        {failed ? (
+          <p className="file-manager-error" role="alert">Image preview is unavailable.</p>
+        ) : (
+          <img
+            src={getFileImageUrl(file.id)}
+            alt={`Preview of ${file.filename}`}
+            onError={() => setFailed(true)}
+          />
+        )}
+        {file.mime === "image/gif" ? <small>Animated images show their first frame.</small> : null}
+      </div>
+    </div>
+  );
+}
+
 function VideoArtifactViewer({ file, onBack }: { file: AudreyFile; onBack: () => void }) {
   const [artifact, setArtifact] = useState<AudreyFileArtifactKind>("summary");
 
@@ -485,14 +544,15 @@ function VideoArtifactViewer({ file, onBack }: { file: AudreyFile; onBack: () =>
   );
 }
 
-function ArtifactPage({ file, artifact }: { file: AudreyFile; artifact: AudreyFileArtifactKind }) {
-  const [page, setPage] = useState<AudreyFileArtifact | null>(null);
+function ArtifactPage({ file, artifact }: { file: AudreyFile; artifact?: AudreyFileArtifactKind }) {
+  const [page, setPage] = useState<AudreyFileArtifact | AudreyFileText | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let active = true;
-    getFileArtifact(file.id, artifact)
+    const readPage = artifact ? getFileArtifact(file.id, artifact) : getFileText(file.id);
+    readPage
       .then((result) => {
         if (active) setPage(result);
       })
@@ -511,7 +571,9 @@ function ArtifactPage({ file, artifact }: { file: AudreyFile; artifact: AudreyFi
     setLoading(true);
     setError("");
     try {
-      const next = await getFileArtifact(file.id, artifact, nextOffset);
+      const next = artifact
+        ? await getFileArtifact(file.id, artifact, nextOffset)
+        : await getFileText(file.id, nextOffset);
       setPage((current) => current && current.next_offset === next.offset
         ? { ...next, text: current.text + next.text, offset: 0 }
         : current);
@@ -527,13 +589,14 @@ function ArtifactPage({ file, artifact }: { file: AudreyFile; artifact: AudreyFi
 
   return (
     <div className="file-artifact-body" aria-live="polite">
-      {loading && !page ? <p role="status">Loading {artifact}…</p> : null}
+      {loading && !page ? <p role="status">Loading {artifact ?? "document text"}…</p> : null}
       {error ? <p className="file-manager-error" role="alert">{error}</p> : null}
       {visibleText ? <div className="file-artifact-text">{visibleText}</div> : null}
       {!loading && !error && !visibleText ? (
         <p>{artifact === "visual"
           ? "No visual notes are available for this video."
-          : `No ${artifact} is available for this video.`}</p>
+          : artifact ? `No ${artifact} is available for this video.`
+            : "No extracted text is available for this document."}</p>
       ) : null}
       {fallbackSummary ? <small>Only the brief listing summary is available for this video.</small> : null}
       {page?.next_offset != null ? (

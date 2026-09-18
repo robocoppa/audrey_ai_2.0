@@ -1916,6 +1916,85 @@ test("uploads dropped and picked batches while isolating per-file failures", asy
   expect(authorizationHeaders.every((value) => value === undefined)).toBe(true);
 });
 
+test("inspects owner documents and images inside Files", async ({ page }) => {
+  const documentFile = browserFile("file_document", "notes.txt", 17);
+  const imageFile = { ...browserFile("file_image", "drawing.png", 42), kind: "image", mime: "image/png" };
+  const previewCalls: string[] = [];
+  const authorizationHeaders: Array<string | undefined> = [];
+  const pixel = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==",
+    "base64",
+  );
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    authorizationHeaders.push(request.headers().authorization);
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
+    if (url.pathname === "/api/me") {
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      await json(route, { items: [browserConversation("File previews")], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/conversations/" + CONVERSATION_ID + "/messages") {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/files" && request.method() === "GET") {
+      await json(route, { ...browserFileListing([]), items: [documentFile, imageFile] });
+      return;
+    }
+    if (url.pathname === "/api/files/file_document/text") {
+      previewCalls.push(url.pathname + url.search);
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      await json(route, {
+        id: "file_document",
+        text: offset === 0 ? "First " : "page.",
+        offset,
+        next_offset: offset === 0 ? 6 : null,
+        total_chars: 11,
+      });
+      return;
+    }
+    if (url.pathname === "/api/files/file_image/image") {
+      previewCalls.push(url.pathname);
+      await route.fulfill({ status: 200, contentType: "image/png", body: pixel });
+      return;
+    }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Your files" });
+  await dialog.getByRole("button", { name: "View document text for notes.txt" }).click();
+  await expect(dialog.locator(".file-artifact-text")).toHaveText("First ");
+  await dialog.getByRole("button", { name: "Load more" }).click();
+  await expect(dialog.locator(".file-artifact-text")).toHaveText("First page.");
+  await dialog.getByRole("button", { name: "← All files" }).click();
+  await dialog.getByRole("button", { name: "View image for drawing.png" }).click();
+  const image = dialog.getByRole("img", { name: "Preview of drawing.png" });
+  await expect(image).toBeVisible();
+  await expect.poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth))
+    .toBeGreaterThan(0);
+  expect(previewCalls).toEqual([
+    "/api/files/file_document/text?offset=0",
+    "/api/files/file_document/text?offset=6",
+    "/api/files/file_image/image",
+  ]);
+  expect(authorizationHeaders.every((value) => value === undefined)).toBe(true);
+});
+
 test("reads paged video text inside Files without a browser bearer token", async ({ page }) => {
   const video = {
     ...browserFile("file_video", "walkthrough.mp4", 1024),

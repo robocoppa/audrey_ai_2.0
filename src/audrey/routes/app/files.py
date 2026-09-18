@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import io
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
+from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel
 
 from audrey.app_state import AttachmentSnapshot
 from audrey.auth import AuthedUser, require_scope
 from audrey.identity import Principal
-from audrey.kb.extract import is_image_mime, is_video_mime
+from audrey.kb.extract import EmptyExtractionError, extract_text, is_image_mime, is_video_mime
 from audrey.pipeline.summarise import brief_video_summary
 from audrey.routes import files as upload_routes
 
@@ -75,6 +78,14 @@ class NativeFileDeleteResponse(BaseModel):
 class NativeFileArtifactResponse(BaseModel):
     id: str
     artifact: Literal["transcript", "visual", "summary"]
+    text: str
+    offset: int
+    next_offset: int | None
+    total_chars: int
+
+
+class NativeFileTextResponse(BaseModel):
+    id: str
     text: str
     offset: int
     next_offset: int | None
@@ -149,6 +160,50 @@ async def _list_for_owner(
     return await upload_routes.list_files(request, _compat_user(principal))
 
 
+async def _owned_row(
+    request: Request,
+    principal: Principal,
+    file_id: str,
+) -> upload_routes.FileRow:
+    result = await _list_for_owner(request, principal)
+    row = next((item for item in result.files if item.file_id == file_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="File not found.")
+    return row
+
+
+def _source_path(
+    request: Request,
+    principal: Principal,
+    row: upload_routes.FileRow,
+) -> Path:
+    return upload_routes._source_path(
+        request,
+        {"user": principal.storage_namespace, "file_id": row.file_id, "filename": row.filename},
+    )
+
+
+def _image_preview(path: Path) -> bytes:
+    """Render one bounded frame; do not send untrusted original metadata to the browser."""
+
+    with Image.open(path) as source:
+        if source.width * source.height > 50_000_000:
+            raise ValueError("Image exceeds preview pixel limit.")
+        source.seek(0)
+        preview = ImageOps.exif_transpose(source)
+        preview.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
+        if preview.mode in ("RGBA", "LA") or "transparency" in preview.info:
+            rgba = preview.convert("RGBA")
+            flattened = Image.new("RGB", rgba.size, "white")
+            flattened.paste(rgba, mask=rgba.getchannel("A"))
+            preview = flattened
+        else:
+            preview = preview.convert("RGB")
+        output = io.BytesIO()
+        preview.save(output, format="JPEG", quality=85)
+        return output.getvalue()
+
+
 async def resolve_owned_attachments(
     request: Request,
     principal: Principal,
@@ -211,11 +266,65 @@ async def get_file(
     request: Request,
     principal: Principal = Depends(_files_access),
 ) -> NativeFileRecord:
-    result = await _list_for_owner(request, principal)
-    row = next((item for item in result.files if item.file_id == file_id), None)
-    if row is None:
-        raise HTTPException(status_code=404, detail="File not found.")
-    return _file_record(row)
+    return _file_record(await _owned_row(request, principal, file_id))
+
+
+@router.get("/files/{file_id}/text", response_model=NativeFileTextResponse)
+async def get_file_text(
+    file_id: str,
+    request: Request,
+    response: Response,
+    offset: int = Query(default=0, ge=0),
+    principal: Principal = Depends(_files_access),
+) -> NativeFileTextResponse:
+    """Page through the same extracted document text used by ingestion."""
+
+    row = await _owned_row(request, principal, file_id)
+    if _kind(row.mime) != "text" or row.status != "ready":
+        raise HTTPException(status_code=422, detail="Text is available for ready documents only.")
+    path = _source_path(request, principal, row)
+    if row.source_freed_at or not await asyncio.to_thread(path.is_file):
+        raise HTTPException(status_code=410, detail="Stored document is unavailable.")
+    try:
+        content = await asyncio.to_thread(extract_text, path)
+    except (EmptyExtractionError, OSError) as exc:
+        raise HTTPException(status_code=409, detail="Document text is unavailable.") from exc
+
+    start = min(offset, len(content))
+    end = min(start + 4000, len(content))
+    response.headers["Cache-Control"] = "private, no-store"
+    return NativeFileTextResponse(
+        id=row.file_id,
+        text=content[start:end],
+        offset=start,
+        next_offset=end if end < len(content) else None,
+        total_chars=len(content),
+    )
+
+
+@router.get("/files/{file_id}/image")
+async def get_file_image(
+    file_id: str,
+    request: Request,
+    principal: Principal = Depends(_files_access),
+) -> Response:
+    """Return a resized, metadata-free preview of an owned image."""
+
+    row = await _owned_row(request, principal, file_id)
+    if _kind(row.mime) != "image" or row.status != "ready":
+        raise HTTPException(status_code=422, detail="Preview is available for ready images only.")
+    path = _source_path(request, principal, row)
+    if row.source_freed_at or not await asyncio.to_thread(path.is_file):
+        raise HTTPException(status_code=410, detail="Stored image is unavailable.")
+    try:
+        preview = await asyncio.to_thread(_image_preview, path)
+    except (OSError, ValueError, UnidentifiedImageError) as exc:
+        raise HTTPException(status_code=409, detail="Image preview is unavailable.") from exc
+    return Response(
+        content=preview,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get(
@@ -231,10 +340,7 @@ async def get_file_artifact(
 ) -> NativeFileArtifactResponse:
     """Read one page of a video sidecar by exact owner-bound file ID."""
 
-    result = await _list_for_owner(request, principal)
-    row = next((item for item in result.files if item.file_id == file_id), None)
-    if row is None:
-        raise HTTPException(status_code=404, detail="File not found.")
+    row = await _owned_row(request, principal, file_id)
     if _kind(row.mime) != "video":
         raise HTTPException(status_code=422, detail="Artifacts are available for videos only.")
 

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import io
 from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from PIL import Image, PngImagePlugin
 
 from audrey.identity import Principal
 from audrey.kb.uploads_db import QuotaUsage
@@ -162,6 +164,86 @@ def test_native_get_returns_only_a_file_in_the_owner_listing(monkeypatch):
     missing = client.get("/api/files/another-users-file")
     assert missing.status_code == 404
     assert missing.json() == {"detail": "File not found."}
+
+
+def test_native_document_text_is_owner_bound_and_paged_without_gaps(monkeypatch, tmp_path):
+    listing = _listing()
+    content = "A" * 3999 + "é" + "B" * 17
+    owner_dir = tmp_path / upload_routes.sanitize_user("private-storage-123")
+    owner_dir.mkdir()
+    (owner_dir / "file_123.txt").write_text(content, encoding="utf-8")
+    foreign_dir = tmp_path / upload_routes.sanitize_user("another-owner")
+    foreign_dir.mkdir()
+    (foreign_dir / "file_foreign.txt").write_text("private", encoding="utf-8")
+
+    async def fake_list(request, me):
+        assert me.email == "private-storage-123"
+        return listing
+
+    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
+    client = TestClient(_app())
+
+    first = client.get("/api/files/file_123/text")
+    assert first.status_code == 200
+    assert first.headers["cache-control"] == "private, no-store"
+    assert first.json() == {
+        "id": "file_123",
+        "text": content[:4000],
+        "offset": 0,
+        "next_offset": 4000,
+        "total_chars": len(content),
+    }
+    rest = client.get("/api/files/file_123/text?offset=4000")
+    assert rest.json()["text"] == content[4000:]
+    assert rest.json()["next_offset"] is None
+    assert first.json()["text"] + rest.json()["text"] == content
+    assert client.get("/api/files/file_foreign/text").status_code == 404
+    assert client.get("/api/files/file_123/text?offset=-1").status_code == 422
+
+    (owner_dir / "file_123.txt").unlink()
+    assert client.get("/api/files/file_123/text").status_code == 410
+    listing.files[0].mime = "image/png"
+    assert client.get("/api/files/file_123/text").status_code == 422
+
+
+def test_native_image_preview_is_owner_bound_resized_and_strips_metadata(
+    monkeypatch, tmp_path,
+):
+    listing = _listing()
+    listing.files[0].filename = "portrait.png"
+    listing.files[0].mime = "image/png"
+    owner_dir = tmp_path / upload_routes.sanitize_user("private-storage-123")
+    owner_dir.mkdir()
+    metadata = PngImagePlugin.PngInfo()
+    metadata.add_text("private", "secret-image-metadata")
+    Image.new("RGBA", (2000, 1000), (255, 0, 0, 128)).save(
+        owner_dir / "file_123.png", pnginfo=metadata,
+    )
+
+    async def fake_list(request, me):
+        assert me.email == "private-storage-123"
+        return listing
+
+    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
+    client = TestClient(_app())
+
+    preview = client.get("/api/files/file_123/image")
+    assert preview.status_code == 200
+    assert preview.headers["content-type"] == "image/jpeg"
+    assert preview.headers["cache-control"] == "private, no-store"
+    assert preview.headers["x-content-type-options"] == "nosniff"
+    assert b"secret-image-metadata" not in preview.content
+    with Image.open(io.BytesIO(preview.content)) as image:
+        assert image.size == (1600, 800)
+        assert image.mode == "RGB"
+    assert client.get("/api/files/file_foreign/image").status_code == 404
+
+    (owner_dir / "file_123.png").unlink()
+    assert client.get("/api/files/file_123/image").status_code == 410
+    listing.files[0].status = "processing"
+    assert client.get("/api/files/file_123/image").status_code == 422
 
 
 def test_native_video_artifact_uses_exact_owned_id_and_pages_on_lines(monkeypatch, tmp_path):

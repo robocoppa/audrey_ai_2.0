@@ -292,6 +292,14 @@ export interface AudreyFileArtifact {
   total_chars: number;
 }
 
+export interface AudreyFileText {
+  id: string;
+  text: string;
+  offset: number;
+  next_offset: number | null;
+  total_chars: number;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -709,6 +717,16 @@ export function getFileArtifact(
   return apiJson<AudreyFileArtifact>(
     `/api/files/${encodeURIComponent(fileId)}/artifacts/${artifact}?offset=${offset}`,
   );
+}
+
+export function getFileText(fileId: string, offset = 0): Promise<AudreyFileText> {
+  return apiJson<AudreyFileText>(
+    `/api/files/${encodeURIComponent(fileId)}/text?offset=${offset}`,
+  );
+}
+
+export function getFileImageUrl(fileId: string): string {
+  return `/api/files/${encodeURIComponent(fileId)}/image`;
 }
 
 export function fetchVideoFromUrl(url: string): Promise<AudreyFileUpload> {
