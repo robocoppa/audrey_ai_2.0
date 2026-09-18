@@ -30,10 +30,14 @@ import {
   getConversation,
   listConversations,
   listFiles,
+  getFile,
   listMessages,
+  uploadFile,
+  uploadPrecheck,
   updateConversation,
   updateConversationModel,
   type AudreyFile,
+  type AudreyFileLimits,
   type AudreyModel,
   type Conversation,
   type ConversationMessage,
@@ -71,6 +75,11 @@ type RunSource = {
   id: string;
   title: string;
   url: string;
+};
+
+type LastAttempt = {
+  text: string;
+  attachments: AudreyFile[];
 };
 
 type ConversationView = "active" | "archived";
@@ -690,12 +699,25 @@ function AudreyThread({
 }) {
   const [runError, setRunError] = useState("");
   const [activity, setActivity] = useState<RunActivity>(IDLE_ACTIVITY);
+  const [lastAttempt, setLastAttempt] = useState<LastAttempt | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const [queuedRetry, setQueuedRetry] = useState<{ text: string } | null>(null);
+  const dispatchedRetryRef = useRef<object | null>(null);
   const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
   const [attachmentFiles, setAttachmentFiles] = useState<AudreyFile[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentError, setAttachmentError] = useState("");
   const [selectedAttachments, setSelectedAttachments] = useState<AudreyFile[]>([]);
   const [imageLimit, setImageLimit] = useState<number | null>(null);
+  const [fileLimits, setFileLimits] = useState<AudreyFileLimits | null>(null);
+  const [uploadingFile, setUploadingFile] = useState("");
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [pendingAttachment, setPendingAttachment] = useState<AudreyFile | null>(null);
+  const [uploadIssue, setUploadIssue] = useState("");
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
+  const attachmentBusy = Boolean(uploadingFile) || pendingAttachment !== null;
+  const submissionBlocked = attachmentBusy || retrying || Boolean(uploadIssue);
   const selectedImageCount = selectedAttachments.filter(({ kind }) => kind === "image").length;
   const selectedModel = modelDetails(models, modelId);
   const supportsFiles = selectedModel.capabilities.includes("files");
@@ -724,6 +746,7 @@ function AudreyThread({
     [attachmentIds, conversationId, modelId],
   );
   async function changeModel(nextModelId: string) {
+    if (attachmentBusy || retrying) return;
     await onModelChange(nextModelId);
     const nextModel = modelDetails(models, nextModelId);
     if (!nextModel.capabilities.includes("files")) {
@@ -739,6 +762,7 @@ function AudreyThread({
     const subscriber: AgentSubscriber = {
       onRunInitialized: () => {
         onRunActiveChange(true);
+        setRetrying(false);
         setRunError("");
         setActivity({
           status: "running",
@@ -795,6 +819,8 @@ function AudreyThread({
       },
       onRunFinishedEvent: () => {
         onRunActiveChange(false);
+        setRetrying(false);
+        setLastAttempt(null);
         setSelectedAttachments([]);
         setActivity((current) => ({
           ...current,
@@ -805,6 +831,7 @@ function AudreyThread({
       },
       onRunErrorEvent: ({ event }) => {
         onRunActiveChange(false);
+        setRetrying(false);
         setSelectedAttachments([]);
         const cancelled = event.code === "cancelled_by_user" || isAbortMessage(event.message);
         setActivity((current) => ({
@@ -816,6 +843,7 @@ function AudreyThread({
       },
       onRunFailed: ({ error }) => {
         onRunActiveChange(false);
+        setRetrying(false);
         const cancelled = isAbortError(error);
         setActivity((current) => ({
           ...current,
@@ -834,7 +862,14 @@ function AudreyThread({
     showThinking: false,
     onError: (reason) => {
       onRunActiveChange(false);
+      setRetrying(false);
       setRunError(reason.message);
+      setActivity((current) => current.status === "error" ? current : {
+        ...current,
+        status: "error",
+        label: "Run failed",
+        detail: reason.message,
+      });
     },
     onCancel: () => {
       onRunActiveChange(false);
@@ -849,6 +884,51 @@ function AudreyThread({
     },
   });
 
+  async function retryLastQuestion() {
+    if (!lastAttempt || retrying || modeDisabled || attachmentBusy || readOnly) return;
+    setRetrying(true);
+    setRunError("");
+    try {
+      if (lastAttempt.attachments.length > 0 && !supportsFiles) {
+        throw new Error("The selected model accepts text only. Choose a file-capable model to retry this question.");
+      }
+      const attachments = await Promise.all(lastAttempt.attachments.map(({ id }) => getFile(id)));
+      if (attachments.some(({ status }) => status !== "ready")) {
+        throw new Error("An attached file is no longer ready. Choose a ready file before sending again.");
+      }
+      if (imageLimit !== null && attachments.filter(({ kind }) => kind === "image").length > imageLimit) {
+        throw new Error("The image limit changed. Remove an image before sending again.");
+      }
+      setSelectedAttachments(attachments);
+      setUploadIssue("");
+      setQueuedRetry({ text: lastAttempt.text });
+    } catch (reason) {
+      setRetrying(false);
+      setRunError("Could not retry: " + messageOf(reason));
+      setActivity((current) => ({ ...current, status: "error", label: "Run failed" }));
+    }
+  }
+
+  useEffect(() => {
+    if (!queuedRetry || dispatchedRetryRef.current === queuedRetry) return;
+    // Defer until the runtime has installed the agent for the validated IDs.
+    const timer = window.setTimeout(() => {
+      if (dispatchedRetryRef.current === queuedRetry) return;
+      dispatchedRetryRef.current = queuedRetry;
+      setActivity({ status: "running", label: "Retrying", detail: "Starting another run", sources: [] });
+      try {
+        runtime.thread.append(queuedRetry.text);
+      } catch (reason) {
+        setRunError("Could not retry: " + messageOf(reason));
+        setActivity((current) => ({ ...current, status: "error", label: "Run failed" }));
+      } finally {
+        setQueuedRetry(null);
+        setRetrying(false);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [queuedRetry, runtime]);
+
   async function toggleAttachmentPicker() {
     if (attachmentPickerOpen) {
       setAttachmentPickerOpen(false);
@@ -860,6 +940,7 @@ function AudreyThread({
     try {
       const listing = await listFiles();
       setAttachmentFiles(listing.items.filter(({ status }) => status === "ready"));
+      setFileLimits(listing.limits);
       setImageLimit(Number.isInteger(listing.limits.max_images_per_turn)
         ? Math.max(0, listing.limits.max_images_per_turn)
         : null);
@@ -871,6 +952,7 @@ function AudreyThread({
   }
 
   function toggleAttachment(file: AudreyFile) {
+    if (attachmentBusy) return;
     setSelectedAttachments((current) => {
       if (current.some(({ id }) => id === file.id)) {
         return current.filter(({ id }) => id !== file.id);
@@ -884,6 +966,80 @@ function AudreyThread({
       return [...current, file];
     });
   }
+
+  async function uploadFromChat(file: File) {
+    if (!fileLimits || attachmentBusy || selectedAttachments.length >= 10) return;
+    const precheck = uploadPrecheck(file, fileLimits);
+    if (precheck) {
+      setUploadIssue(file.name + ": " + precheck);
+      return;
+    }
+    setUploadIssue("");
+    setUploadingFile(file.name);
+    setUploadProgress(0);
+    let stored = false;
+    try {
+      const uploaded = await uploadFile(file, fileLimits, setUploadProgress);
+      stored = true;
+      // The upload response has no failure details; fetch the owned row before attaching.
+      const row = await getFile(uploaded.id);
+      if (row.status === "ready") {
+        if (row.kind === "image" && imageLimit !== null && selectedImageCount >= imageLimit) {
+          setUploadIssue(row.filename + " was uploaded to Files, but the image limit is full. Remove an image to attach it.");
+          setAttachmentFiles((current) => [row, ...current]);
+          return;
+        }
+        setSelectedAttachments((current) => [...current, row]);
+        setAttachmentFiles((current) => [row, ...current.filter(({ id }) => id !== row.id)]);
+      } else {
+        setPendingAttachment(row);
+      }
+      setAttachmentPickerOpen(false);
+    } catch (reason) {
+      setUploadIssue(stored
+        ? file.name + " was uploaded to Files, but could not be attached: " + messageOf(reason)
+        : file.name + ": " + messageOf(reason));
+    } finally {
+      setUploadingFile("");
+      setUploadProgress(0);
+    }
+  }
+
+  const pendingId = pendingAttachment?.id;
+  const pendingStatus = pendingAttachment?.status;
+  useEffect(() => {
+    if (!pendingId || pendingStatus === "failed") return;
+    const fileId = pendingId;
+    let active = true;
+    let checking = false;
+    async function checkReady() {
+      if (!active || checking || document.visibilityState === "hidden") return;
+      checking = true;
+      try {
+        const row = await getFile(fileId);
+        if (!active) return;
+        if (row.status === "ready") {
+          setSelectedAttachments((current) => current.some(({ id }) => id === row.id)
+            ? current : [...current, row]);
+          setAttachmentFiles((current) => [row, ...current.filter(({ id }) => id !== row.id)]);
+          setPendingAttachment(null);
+        } else {
+          setPendingAttachment(row);
+        }
+      } catch {
+        // A transient list/read failure should not silently detach a processing video.
+      } finally {
+        checking = false;
+      }
+    }
+    const timer = window.setInterval(() => void checkReady(), 5000);
+    document.addEventListener("visibilitychange", checkReady);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", checkReady);
+    };
+  }, [pendingId, pendingStatus]);
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -912,29 +1068,67 @@ function AudreyThread({
               <>
                 {runError ? <p className="run-error" role="alert">{runError}</p> : null}
                 {showProgress ? <RunActivityStatus activity={activity} /> : null}
+                {lastAttempt && (activity.status === "error" || runError) ? (
+                  <button
+                    className="retry-button"
+                    type="button"
+                    onClick={() => void retryLastQuestion()}
+                    disabled={retrying || modeDisabled || attachmentBusy}
+                  >{retrying ? "Checking attachments…" : "Retry last question"}</button>
+                ) : null}
                 <ThreadPrimitive.Empty>
                   <ComposerModelPicker
                     models={models}
                     canBrowseDirectModels={canBrowseDirectModels}
                     modelId={modelId}
-                    disabled={modeDisabled}
+                    disabled={modeDisabled || attachmentBusy || retrying}
                     onChange={changeModel}
                   />
                 </ThreadPrimitive.Empty>
-                {selectedAttachments.length > 0 ? (
+                {selectedAttachments.length > 0 || pendingAttachment ? (
                   <div className="selected-attachments" aria-label="Selected attachments">
                     {selectedAttachments.map((file) => (
                       <button
                         type="button"
                         key={file.id}
                         onClick={() => toggleAttachment(file)}
-                        disabled={modeDisabled}
+                        disabled={modeDisabled || attachmentBusy}
                         aria-label={`Remove attachment ${file.filename}`}
                       >
                         <span aria-hidden="true">×</span>
                         {file.filename}
                       </button>
                     ))}
+                    {pendingAttachment ? (
+                      <button
+                        type="button"
+                        className="pending-attachment"
+                        onClick={() => setPendingAttachment(null)}
+                        aria-label={`Remove attachment ${pendingAttachment.filename}`}
+                      >
+                        <span aria-hidden="true">×</span>
+                        {pendingAttachment.filename} · {pendingAttachment.status === "failed"
+                          ? "Processing failed" : "Processing…"}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+                {uploadingFile ? (
+                  <p className="attachment-status" role="status">
+                    Uploading {uploadingFile} · {Math.round(uploadProgress * 100)}%
+                  </p>
+                ) : null}
+                {pendingAttachment ? (
+                  <p className="attachment-status" role="status">
+                    {pendingAttachment.status === "failed"
+                      ? `${pendingAttachment.filename}: ${pendingAttachment.failure_reason || "Processing failed"}. Remove it to continue.`
+                      : `${pendingAttachment.filename} is processing. You can write your question; send is available when it is ready.`}
+                  </p>
+                ) : null}
+                {uploadIssue ? (
+                  <div className="attachment-issue" role="alert">
+                    <span>{uploadIssue}</span>
+                    <button type="button" onClick={() => setUploadIssue("")}>Dismiss</button>
                   </div>
                 ) : null}
                 {attachmentPickerOpen ? (
@@ -946,10 +1140,29 @@ function AudreyThread({
                         {imageLimit === null ? "" : " · " + selectedImageCount + "/" + imageLimit + " images"}
                       </span>
                     </header>
+                    <div className="attachment-upload">
+                      <button
+                        type="button"
+                        onClick={() => uploadInputRef.current?.click()}
+                        disabled={!fileLimits || attachmentBusy || selectedAttachments.length >= 10}
+                      >Upload from device</button>
+                      <input
+                        ref={uploadInputRef}
+                        type="file"
+                        aria-label="Choose a file from your device"
+                        tabIndex={-1}
+                        accept={fileLimits?.allowed_extensions.join(",")}
+                        onChange={(event) => {
+                          const file = event.currentTarget.files?.[0];
+                          event.currentTarget.value = "";
+                          if (file) void uploadFromChat(file);
+                        }}
+                      />
+                    </div>
                     {attachmentsLoading ? <p role="status">Loading files…</p> : null}
                     {attachmentError ? <p className="attachment-error" role="alert">{attachmentError}</p> : null}
                     {!attachmentsLoading && !attachmentError && attachmentFiles.length === 0 ? (
-                      <p>No ready files. Use Files to upload one first.</p>
+                      <p>No ready files yet. Upload one here to ask about it.</p>
                     ) : null}
                     {attachmentFiles.length > 0 ? (
                       <div className="attachment-options">
@@ -961,12 +1174,12 @@ function AudreyThread({
                               key={file.id}
                               aria-pressed={selected}
                               onClick={() => toggleAttachment(file)}
-                              disabled={!selected && (
+                              disabled={attachmentBusy || (!selected && (
                                 selectedAttachments.length >= 10
                                 || (file.kind === "image"
                                   && imageLimit !== null
                                   && selectedImageCount >= imageLimit)
-                              )}
+                              ))}
                             >
                               <span aria-hidden="true">{selected ? "✓" : "+"}</span>
                               <span>{file.filename}</span>
@@ -978,14 +1191,25 @@ function AudreyThread({
                     ) : null}
                   </section>
                 ) : null}
-                <ComposerPrimitive.Root className="composer">
+                <ComposerPrimitive.Root
+                  className="composer"
+                  onSubmitCapture={(event) => {
+                    if (submissionBlocked) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      return;
+                    }
+                    const text = composerInputRef.current?.value.trim() ?? "";
+                    if (text) setLastAttempt({ text, attachments: [...selectedAttachments] });
+                  }}
+                >
                   <ThreadPrimitive.If empty={false}>
                     <ComposerModelPicker
                       compact
                       models={models}
                       canBrowseDirectModels={canBrowseDirectModels}
                       modelId={modelId}
-                      disabled={modeDisabled}
+                      disabled={modeDisabled || attachmentBusy || retrying}
                       onChange={changeModel}
                     />
                   </ThreadPrimitive.If>
@@ -993,7 +1217,7 @@ function AudreyThread({
                     className="attach-button"
                     type="button"
                     onClick={() => void toggleAttachmentPicker()}
-                    disabled={modeDisabled || !supportsFiles}
+                    disabled={modeDisabled || retrying || !supportsFiles}
                     title={supportsFiles ? "Attach files" : `${selectedModel.label} accepts text only`}
                     aria-label={attachmentPickerOpen ? "Close attachment picker" : "Attach files"}
                     aria-expanded={attachmentPickerOpen}
@@ -1003,6 +1227,7 @@ function AudreyThread({
                     </svg>
                   </button>
                   <ComposerPrimitive.Input
+                    ref={composerInputRef}
                     className="composer-input"
                     aria-label="Ask Audrey"
                     placeholder="Ask Audrey…"
@@ -1010,7 +1235,11 @@ function AudreyThread({
                   />
                   <div className="composer-actions">
                     <ComposerPrimitive.Cancel className="cancel-button">Stop</ComposerPrimitive.Cancel>
-                    <ComposerPrimitive.Send className="send-button" aria-label="Send message">
+                    <ComposerPrimitive.Send
+                      className="send-button"
+                      aria-label="Send message"
+                      disabled={submissionBlocked}
+                    >
                       <svg viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M12 19V5M6.5 10.5 12 5l5.5 5.5" />
                       </svg>

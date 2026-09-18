@@ -8,11 +8,11 @@ import {
   getFileText,
   listFiles,
   uploadFile,
+  uploadPrecheck,
   type AudreyFile,
   type AudreyFileArtifact,
   type AudreyFileArtifactKind,
   type AudreyFileText,
-  type AudreyFileLimits,
   type AudreyFileList,
 } from "./api";
 
@@ -624,21 +624,6 @@ function ArtifactPage({ file, artifact }: { file: AudreyFile; artifact?: AudreyF
       ) : null}
     </div>
   );
-}
-
-function uploadPrecheck(file: File, limits: AudreyFileLimits): string | null {
-  if (file.size === 0) return "the file is empty";
-  if (file.size > limits.chunked_max_bytes) {
-    return "over the " + formatBytes(limits.chunked_max_bytes) + " per-file limit";
-  }
-  const dot = file.name.lastIndexOf(".");
-  const extension = dot > 0 ? file.name.slice(dot).toLowerCase() : "";
-  if (!limits.allowed_extensions.includes(extension)) {
-    return extension ? "unsupported format " + extension : "a file extension is required";
-  }
-  // The server checks quota: listed historical video bytes can outlive the
-  // reclaimed source, so list.total_bytes is not a safe client-side quota gate.
-  return null;
 }
 
 function kindSymbol(kind: AudreyFile["kind"]): string {

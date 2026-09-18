@@ -1652,6 +1652,127 @@ test("cancels an active browser run without leaving an error state", async ({ pa
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
+test("uploads an image and a document in chat, then sends both with the question", async ({ page }) => {
+  const files: Array<Record<string, unknown>> = [];
+  let uploads = 0;
+  let requestBody: Record<string, unknown> | null = null;
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me/preferences") return json(route, browserPreferences());
+    if (url.pathname === "/api/me") return json(route, browserUser());
+    if (url.pathname === "/api/models") return json(route, { items: browserModels() });
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      return json(route, { items: [browserConversation("Direct upload")], next_cursor: null });
+    }
+    if (url.pathname === "/api/conversations/" + CONVERSATION_ID + "/messages") {
+      return json(route, { items: [], next_cursor: null });
+    }
+    if (url.pathname === "/api/files" && request.method() === "GET") {
+      const listing = browserFileListing([]);
+      return json(route, {
+        ...listing,
+        items: files,
+        limits: { ...listing.limits, allowed_extensions: [".png", ".txt"] },
+      });
+    }
+    if (url.pathname === "/api/files" && request.method() === "POST") {
+      uploads += 1;
+      const image = uploads === 1;
+      const id = image ? "file_chat_image" : "file_chat_notes";
+      const filename = image ? "diagram.png" : "notes.txt";
+      const row = {
+        ...browserFile(id, filename, 12),
+        kind: image ? "image" : "text",
+        mime: image ? "image/png" : "text/plain",
+      };
+      files.push(row);
+      return json(route, row);
+    }
+    if (url.pathname === "/api/files/file_chat_image" || url.pathname === "/api/files/file_chat_notes") {
+      return json(route, files.find((file) => file.id === url.pathname.slice("/api/files/".length)));
+    }
+    if (url.pathname === "/api/agent") {
+      requestBody = request.postDataJSON() as Record<string, unknown>;
+      await route.fulfill({ status: 200, contentType: "text/event-stream", body: aguiStream(canonicalBrowserEvents()) });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await page.getByRole("button", { name: "Attach files" }).click();
+  const input = page.getByLabel("Choose a file from your device");
+  await input.setInputFiles({ name: "diagram.png", mimeType: "image/png", buffer: Buffer.from("image") });
+  await expect(page.getByRole("button", { name: "Remove attachment diagram.png" })).toBeVisible();
+  await page.getByRole("button", { name: "Attach files" }).click();
+  await input.setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("notes") });
+  await expect(page.getByRole("button", { name: "Remove attachment notes.txt" })).toBeVisible();
+
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+  await composer.fill("What do these show?");
+  await composer.press("Enter");
+  await expect(page.getByText("Complete", { exact: true })).toBeVisible();
+  expect(requestBody).toMatchObject({
+    threadId: CONVERSATION_ID,
+    attachmentIds: ["file_chat_image", "file_chat_notes"],
+  });
+});
+
+test("keeps a video question drafted until the chat upload is ready", async ({ page }) => {
+  let videoStatus = "pending";
+  let agentRequests = 0;
+  let requestBody: Record<string, unknown> | null = null;
+  const video = { ...browserFile("file_chat_video", "clip.mp4", 12), kind: "video", mime: "video/mp4" };
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me/preferences") return json(route, browserPreferences());
+    if (url.pathname === "/api/me") return json(route, browserUser());
+    if (url.pathname === "/api/models") return json(route, { items: browserModels() });
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      return json(route, { items: [browserConversation("Video upload")], next_cursor: null });
+    }
+    if (url.pathname === "/api/conversations/" + CONVERSATION_ID + "/messages") {
+      return json(route, { items: [], next_cursor: null });
+    }
+    if (url.pathname === "/api/files" && request.method() === "GET") {
+      const listing = browserFileListing([]);
+      return json(route, { ...listing, limits: { ...listing.limits, allowed_extensions: [".mp4"] } });
+    }
+    if (url.pathname === "/api/files" && request.method() === "POST") {
+      return json(route, { ...video, status: "pending" });
+    }
+    if (url.pathname === "/api/files/file_chat_video") {
+      return json(route, { ...video, status: videoStatus });
+    }
+    if (url.pathname === "/api/agent") {
+      agentRequests += 1;
+      requestBody = request.postDataJSON() as Record<string, unknown>;
+      await route.fulfill({ status: 200, contentType: "text/event-stream", body: aguiStream(canonicalBrowserEvents()) });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await page.getByRole("button", { name: "Attach files" }).click();
+  await page.getByLabel("Choose a file from your device")
+    .setInputFiles({ name: "clip.mp4", mimeType: "video/mp4", buffer: Buffer.from("video") });
+  await expect(page.getByText(/clip.mp4 is processing/)).toBeVisible();
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+  await composer.fill("Summarize this clip.");
+  await composer.press("Enter");
+  await expect(composer).toHaveValue("Summarize this clip.");
+  expect(agentRequests).toBe(0);
+  videoStatus = "ready";
+  await expect(page.getByText(/clip.mp4 is processing/)).toHaveCount(0, { timeout: 10000 });
+  await composer.press("Enter");
+  await expect(page.getByText("Complete", { exact: true })).toBeVisible();
+  expect(agentRequests).toBe(1);
+  expect(requestBody).toMatchObject({ attachmentIds: ["file_chat_video"] });
+});
+
 test("attaches an owner file through the minimized AG-UI request", async ({ page }) => {
   let requestBody: Record<string, unknown> | null = null;
   const existingMessages = [
@@ -2249,6 +2370,68 @@ test("queues a video link through native files and follows its summary", async (
   await dialog.locator(".file-summary summary").click();
   await expect(dialog.locator(".file-summary p")).toHaveText("A short overview of the Audrey launch video.");
   expect(authorizationHeaders.every((value) => value === undefined)).toBe(true);
+});
+
+test("retries a failed attached question as a fresh owner-bound turn", async ({ page }) => {
+  const requests: Array<Record<string, unknown>> = [];
+  const file = browserFile("file_retry_notes", "retry-notes.txt", 28);
+  let fileStatus = "ready";
+  let fileReads = 0;
+  await mockAudreyApi(page, async (route) => {
+    requests.push(route.request().postDataJSON() as Record<string, unknown>);
+    const events = requests.length === 1
+      ? [
+        { type: "RUN_STARTED", timestamp: 1, threadId: CONVERSATION_ID, runId: "run_failed" },
+        { type: "RUN_ERROR", timestamp: 2, code: "provider_error", message: "Run failed." },
+      ]
+      : canonicalBrowserEvents();
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body: aguiStream(events),
+    });
+  });
+  await page.route("**/api/files**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/files") return json(route, browserFileListing([file]));
+    if (url.pathname === "/api/files/file_retry_notes") {
+      fileReads += 1;
+      return json(route, { ...file, status: fileStatus });
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await page.getByRole("button", { name: "Attach files" }).click();
+  await page.getByRole("region", { name: "Choose attachments" })
+    .getByRole("button", { name: /retry-notes\.txt/ }).click();
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+  await composer.fill("Summarize these notes.");
+  await composer.press("Enter");
+
+  const retry = page.getByRole("button", { name: "Retry last question" });
+  await expect(retry).toBeVisible();
+  await expect(page.getByText("Run failed", { exact: true })).toBeVisible();
+  fileStatus = "failed";
+  await retry.click();
+  await expect(page.getByText(/Could not retry/)).toBeVisible();
+  expect(requests).toHaveLength(1);
+  fileStatus = "ready";
+  await retry.click();
+  await expect(page.getByText("Complete", { exact: true })).toBeVisible();
+  expect(requests).toHaveLength(2);
+  expect(fileReads).toBe(2);
+  for (const body of requests) {
+    expect(body).toMatchObject({
+      threadId: CONVERSATION_ID,
+      attachmentIds: ["file_retry_notes"],
+    });
+    expect(body.messages).toHaveLength(1);
+    expect(body.messages).toEqual([
+      expect.objectContaining({ role: "user", content: "Summarize these notes." }),
+    ]);
+  }
+  await expect(retry).toHaveCount(0);
 });
 
 test("surfaces an expired session during a run", async ({ page }) => {

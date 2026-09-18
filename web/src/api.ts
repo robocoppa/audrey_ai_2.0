@@ -738,6 +738,20 @@ export function fetchVideoFromUrl(url: string): Promise<AudreyFileUpload> {
   });
 }
 
+export function uploadPrecheck(file: File, limits: AudreyFileLimits): string | null {
+  if (file.size === 0) return "the file is empty";
+  if (file.size > limits.chunked_max_bytes) {
+    return "over the " + formatByteLimit(limits.chunked_max_bytes) + " per-file limit";
+  }
+  const dot = file.name.lastIndexOf(".");
+  const extension = dot > 0 ? file.name.slice(dot).toLowerCase() : "";
+  if (!limits.allowed_extensions.includes(extension)) {
+    return extension ? "unsupported format " + extension : "a file extension is required";
+  }
+  // Listed historical video bytes can outlive the source; the server checks quota.
+  return null;
+}
+
 export async function uploadFile(
   file: File,
   limits: AudreyFileLimits,

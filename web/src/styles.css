@@ -941,6 +941,24 @@ a:focus-visible {
   background: var(--danger);
 }
 
+.retry-button {
+  margin: 0 0 0.55rem 0.65rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.55rem;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  font-size: 0.72rem;
+}
+
+.retry-button:hover:not(:disabled) {
+  background: var(--surface-active);
+}
+
+.retry-button:disabled {
+  opacity: 0.55;
+}
+
 .run-sources {
   position: relative;
   min-width: 0;
@@ -1034,6 +1052,49 @@ a:focus-visible {
   color: var(--accent);
   font-size: 1rem;
   line-height: 0.7;
+}
+
+.attachment-status {
+  margin: 0 0 0.45rem 0.65rem;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+}
+
+.attachment-issue {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0 0 0.45rem 0.65rem;
+  color: var(--danger);
+  font-size: 0.72rem;
+}
+
+.attachment-issue button {
+  flex: 0 0 auto;
+  color: var(--text-soft);
+  text-decoration: underline;
+}
+
+.attachment-upload {
+  margin-bottom: 0.55rem;
+}
+
+.attachment-upload button {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.55rem;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  font-size: 0.74rem;
+}
+
+.attachment-upload input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .attachment-picker {

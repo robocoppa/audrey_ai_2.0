@@ -1247,6 +1247,61 @@ async def test_native_manager_cancel_persists_partial_answer(tmp_path):
         store.close()
 
 
+def test_retry_keeps_failed_partial_answer_out_of_model_context(tmp_path):
+    captured_routing: list[list[dict[str, Any]]] = []
+
+    async def capture_stream(app, payload, messages, options, **kwargs):
+        captured_routing.append(kwargs["routing_messages"])
+        async for chunk in _successful_stream(app, payload, messages, options, **kwargs):
+            yield chunk
+
+    app, store, owner, _manager = _native_app(tmp_path, stream_factory=capture_stream)
+    conversation = asyncio.run(
+        store.conversations.create(user_id=owner.user_id, default_mode="fast")
+    )
+    failed = asyncio.run(
+        store.conversations.begin_run(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="Explain the diagram.",
+        )
+    )
+    assert failed is not None
+    asyncio.run(
+        store.conversations.finish_run(
+            user_id=owner.user_id,
+            run_id=failed.run.run_id,
+            outcome="failed",
+            assistant_content="Incomplete, possibly wrong explanation",
+            error_code="provider_error",
+        )
+    )
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/agent?model=fast",
+                json={
+                    "threadId": conversation.conversation_id,
+                    "runId": "browser-retry",
+                    "messages": [
+                        {"id": "retry-user", "role": "user", "content": "Explain the diagram."}
+                    ],
+                },
+            )
+            assert response.status_code == 200
+            assert captured_routing == [[
+                {"role": "user", "content": "Explain the diagram."},
+                {"role": "user", "content": "Explain the diagram."},
+            ]]
+            saved = client.get(
+                f"/api/conversations/{conversation.conversation_id}/messages"
+            ).json()["items"]
+            assert saved[1]["status"] == "incomplete"
+            assert saved[1]["content"] == "Incomplete, possibly wrong explanation"
+    finally:
+        store.close()
+
+
 async def test_native_manager_terminalizes_pipeline_failure(tmp_path):
     async def failing_stream(
         _app,

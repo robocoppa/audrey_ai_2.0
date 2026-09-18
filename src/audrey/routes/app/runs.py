@@ -695,6 +695,10 @@ def _history_messages(
             continue
         if record.role not in {"user", "assistant"}:
             continue
+        # Failed or cancelled output is still visible in canonical history, but
+        # must not become model context for a later turn or retry.
+        if record.role == "assistant" and record.status != "completed":
+            continue
         if record.role == "assistant" and not record.content:
             continue
         content: str | list[dict[str, Any]] = record.content
