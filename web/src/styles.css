@@ -3150,6 +3150,73 @@ a:focus-visible {
   color: var(--success);
 }
 
+.file-browser {
+  flex: none;
+  padding: 0.75rem 1.4rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-browser-controls {
+  display: grid;
+  grid-template-columns: minmax(10rem, 2fr) repeat(3, minmax(6rem, 1fr));
+  gap: 0.6rem;
+}
+
+.file-browser-controls label {
+  display: grid;
+  min-width: 0;
+  gap: 0.3rem;
+}
+
+.file-browser-controls label > span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.file-browser-controls input,
+.file-browser-controls select {
+  min-width: 0;
+  width: 100%;
+  padding: 0.48rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  outline: none;
+  background: var(--input-surface);
+  color: var(--text-soft);
+  font-size: 0.75rem;
+}
+
+.file-browser-controls input:focus-visible,
+.file-browser-controls select:focus-visible {
+  border-color: var(--border-strong);
+  box-shadow: var(--focus-glow);
+}
+
+.file-browser-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 1.9rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.file-browser-result button {
+  padding: 0.2rem 0.4rem;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.72rem;
+}
+
+.file-browser-result button:hover {
+  text-decoration: underline;
+}
+
 .file-manager-status,
 .file-manager-empty,
 .file-manager-error {
@@ -3517,8 +3584,20 @@ a:focus-visible {
     width: 100%;
     max-height: 100dvh;
     min-height: 100dvh;
+    overflow-y: auto;
     border: 0;
     border-radius: 0;
+  }
+
+  .file-manager > .file-upload,
+  .file-manager > .file-url-form,
+  .file-manager > .file-browser,
+  .file-manager > .file-list {
+    flex-shrink: 0;
+  }
+
+  .file-list {
+    overflow: visible;
   }
 
   .file-upload {
@@ -3532,6 +3611,14 @@ a:focus-visible {
 
   .file-url-form > div {
     flex-direction: column;
+  }
+
+  .file-browser-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .file-browser-controls label:first-child {
+    grid-column: 1 / -1;
   }
 
   .file-list li {

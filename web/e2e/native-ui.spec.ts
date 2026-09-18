@@ -1739,7 +1739,7 @@ test("manages owner-bound files without a browser bearer token", async ({ page }
     buffer: Buffer.from("native bytes"),
   });
   await dialog.getByRole("button", { name: "Upload", exact: true }).click();
-  await expect(dialog.getByText("new-notes.txt")).toBeVisible();
+  await expect(dialog.locator(".file-list").getByText("new-notes.txt", { exact: true })).toBeVisible();
 
   await dialog.getByRole("button", { name: "Delete new-notes.txt" }).click();
   const confirmDelete = dialog.getByRole("button", { name: "Confirm delete new-notes.txt" });
@@ -1747,6 +1747,83 @@ test("manages owner-bound files without a browser bearer token", async ({ page }
   await confirmDelete.click();
   await expect(dialog.locator(".file-list").getByText("new-notes.txt")).toHaveCount(0);
   expect(authorizationHeaders.every((value) => value === undefined)).toBe(true);
+});
+
+test("browses files by name, source link, kind, status, and sort order", async ({ page }) => {
+  const files = [
+    { ...browserFile("file_alpha", "Alpha.txt", 10), uploaded_at: "2026-09-01T00:00:00Z" },
+    { ...browserFile("file_photo", "photo.png", 20), uploaded_at: "2026-09-03T00:00:00Z", kind: "image" as const, mime: "image/png" },
+    { ...browserFile("file_clip", "clip.mp4", 30), uploaded_at: "2026-09-04T00:00:00Z", kind: "video" as const, mime: "video/mp4", status: "fetching", source_url: "https://www.youtube.com/watch?v=clip42" },
+    { ...browserFile("file_broken", "Broken.pdf", 40), uploaded_at: "2026-09-02T00:00:00Z", status: "failed" },
+  ];
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me/preferences") {
+      await json(route, browserPreferences());
+      return;
+    }
+    if (url.pathname === "/api/me") {
+      await json(route, browserUser());
+      return;
+    }
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      await json(route, { items: [browserConversation("Browse files")], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/conversations/" + CONVERSATION_ID + "/messages") {
+      await json(route, { items: [], next_cursor: null });
+      return;
+    }
+    if (url.pathname === "/api/files" && request.method() === "GET") {
+      await json(route, { ...browserFileListing([]), items: files });
+      return;
+    }
+    if (url.pathname === "/api/models") {
+      await json(route, { items: browserModels() });
+      return;
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await page.getByRole("button", { name: "Files", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Your files" });
+  const names = dialog.locator(".file-list .file-details strong");
+  const search = dialog.getByRole("searchbox", { name: "Search files" });
+  const type = dialog.getByRole("combobox", { name: "Type" });
+  const status = dialog.getByRole("combobox", { name: "Status" });
+  const sort = dialog.getByRole("combobox", { name: "Sort by" });
+
+  await expect(names).toHaveText(["clip.mp4", "photo.png", "Broken.pdf", "Alpha.txt"]);
+  await sort.selectOption("name-asc");
+  await expect(names).toHaveText(["Alpha.txt", "Broken.pdf", "clip.mp4", "photo.png"]);
+  await search.fill("PHOTO");
+  await expect(names).toHaveText(["photo.png"]);
+  await expect(dialog.locator(".file-browser-result")).toContainText("Showing 1 of 4 files");
+
+  await type.selectOption("video");
+  await expect(dialog.getByText("No files match these filters.")).toBeVisible();
+  await dialog.getByRole("button", { name: "Clear filters" }).click();
+  await expect(names).toHaveText(["clip.mp4", "photo.png", "Broken.pdf", "Alpha.txt"]);
+  await expect(sort).toHaveValue("newest");
+
+  await status.selectOption("active");
+  await search.fill("clip42");
+  await expect(names).toHaveText(["clip.mp4"]);
+  await status.selectOption("failed");
+  await expect(dialog.getByText("No files match these filters.")).toBeVisible();
+  await search.clear();
+  await expect(names).toHaveText(["Broken.pdf"]);
+
+  await page.setViewportSize({ width: 390, height: 667 });
+  await dialog.getByText("Broken.pdf").scrollIntoViewIfNeeded();
+  const visibleOnPhone = await dialog.getByText("Broken.pdf").evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return bounds.top >= 0 && bounds.bottom <= window.innerHeight;
+  });
+  expect(visibleOnPhone).toBe(true);
 });
 
 test("uploads dropped and picked batches while isolating per-file failures", async ({ page }) => {

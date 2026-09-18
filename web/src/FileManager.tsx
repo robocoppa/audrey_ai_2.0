@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
 
 import {
   deleteFile,
@@ -12,6 +12,12 @@ import {
   type AudreyFileLimits,
   type AudreyFileList,
 } from "./api";
+
+type FileKindFilter = "all" | AudreyFile["kind"];
+type FileStatusFilter = "all" | "ready" | "active" | "failed";
+type FileSort = "newest" | "oldest" | "name-asc" | "name-desc";
+
+const fileNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 export function FileManager({ onClose }: { onClose: () => void }) {
   const [listing, setListing] = useState<AudreyFileList | null>(null);
@@ -29,6 +35,10 @@ export function FileManager({ onClose }: { onClose: () => void }) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [selectedVideoId, setSelectedVideoId] = useState<string | null>(null);
+  const [fileSearch, setFileSearch] = useState("");
+  const [kindFilter, setKindFilter] = useState<FileKindFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<FileStatusFilter>("all");
+  const [fileSort, setFileSort] = useState<FileSort>("newest");
   const inputRef = useRef<HTMLInputElement>(null);
   const refreshInFlight = useRef<Promise<AudreyFileList> | null>(null);
 
@@ -178,6 +188,33 @@ export function FileManager({ onClose }: { onClose: () => void }) {
   const accept = listing?.limits.allowed_extensions.join(",") ?? undefined;
   const fetchHosts = listing?.limits.fetch_hosts ?? [];
   const selectedVideo = listing?.items.find((file) => file.id === selectedVideoId) ?? null;
+  const visibleFiles = useMemo(() => {
+    const search = fileSearch.trim().toLocaleLowerCase();
+    return (listing?.items ?? [])
+      .map((file, index) => ({ file, index, uploaded: Date.parse(file.uploaded_at) || 0 }))
+      .filter(({ file }) => {
+        if (search && !file.filename.toLocaleLowerCase().includes(search)
+          && !file.source_url.toLocaleLowerCase().includes(search)) return false;
+        if (kindFilter !== "all" && file.kind !== kindFilter) return false;
+        if (statusFilter === "ready" && file.status !== "ready") return false;
+        if (statusFilter === "failed" && file.status !== "failed") return false;
+        if (statusFilter === "active" && !["fetch_pending", "fetching", "pending", "processing"].includes(file.status)) return false;
+        return true;
+      })
+      .sort((left, right) => {
+        if (fileSort === "name-asc" || fileSort === "name-desc") {
+          const byName = fileNameCollator.compare(left.file.filename, right.file.filename);
+          if (byName) return fileSort === "name-asc" ? byName : -byName;
+        }
+        const byDate = fileSort === "oldest"
+          ? left.uploaded - right.uploaded
+          : right.uploaded - left.uploaded;
+        return byDate || left.index - right.index;
+      })
+      .map(({ file }) => file);
+  }, [fileSearch, fileSort, kindFilter, listing, statusFilter]);
+  const browseChanged = fileSearch.trim() !== "" || kindFilter !== "all"
+    || statusFilter !== "all" || fileSort !== "newest";
 
   return (
     <div className="file-manager-backdrop" role="presentation" onMouseDown={(event) => {
@@ -291,14 +328,71 @@ export function FileManager({ onClose }: { onClose: () => void }) {
           {queuedUrl ? <p role="status">Queued. Watch the file below for download and summarization progress.</p> : null}
         </form>
 
+        {listing?.items.length ? (
+          <div className="file-browser">
+            <div className="file-browser-controls">
+              <label>
+                <span>Search files</span>
+                <input
+                  type="search"
+                  value={fileSearch}
+                  onChange={(event) => setFileSearch(event.target.value)}
+                  placeholder="Filename or video link"
+                />
+              </label>
+              <label>
+                <span>Type</span>
+                <select value={kindFilter} onChange={(event) => setKindFilter(event.target.value as FileKindFilter)}>
+                  <option value="all">All types</option>
+                  <option value="text">Documents</option>
+                  <option value="image">Images</option>
+                  <option value="video">Videos</option>
+                </select>
+              </label>
+              <label>
+                <span>Status</span>
+                <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as FileStatusFilter)}>
+                  <option value="all">All statuses</option>
+                  <option value="ready">Ready</option>
+                  <option value="active">In progress</option>
+                  <option value="failed">Failed</option>
+                </select>
+              </label>
+              <label>
+                <span>Sort by</span>
+                <select value={fileSort} onChange={(event) => setFileSort(event.target.value as FileSort)}>
+                  <option value="newest">Newest</option>
+                  <option value="oldest">Oldest</option>
+                  <option value="name-asc">Name A–Z</option>
+                  <option value="name-desc">Name Z–A</option>
+                </select>
+              </label>
+            </div>
+            <div className="file-browser-result">
+              <span role="status">Showing {visibleFiles.length} of {listing.items.length} files</span>
+              {browseChanged ? (
+                <button type="button" onClick={() => {
+                  setFileSearch("");
+                  setKindFilter("all");
+                  setStatusFilter("all");
+                  setFileSort("newest");
+                }}>Clear filters</button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
         {error ? <p className="file-manager-error" role="alert">{error}</p> : null}
         {loading ? <p className="file-manager-status" role="status">Loading files…</p> : null}
         {!loading && listing?.items.length === 0 ? (
           <p className="file-manager-empty">No files yet. Upload a document, image, or video for Audrey to use.</p>
         ) : null}
-        {listing?.items.length ? (
+        {!loading && listing?.items.length && visibleFiles.length === 0 ? (
+          <p className="file-manager-empty">No files match these filters.</p>
+        ) : null}
+        {visibleFiles.length ? (
           <ul className="file-list">
-            {listing.items.map((file) => (
+            {visibleFiles.map((file) => (
               <li key={file.id}>
                 <div className="file-kind" aria-hidden="true">{kindSymbol(file.kind)}</div>
                 <div className="file-details">
