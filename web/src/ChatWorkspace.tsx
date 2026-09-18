@@ -64,8 +64,13 @@ type RunActivity = {
   status: "idle" | "running" | "complete" | "cancelled" | "error";
   label: string;
   detail: string;
-  sourceCount: number;
-  latestSource: string;
+  sources: RunSource[];
+};
+
+type RunSource = {
+  id: string;
+  title: string;
+  url: string;
 };
 
 type ConversationView = "active" | "archived";
@@ -74,8 +79,7 @@ const IDLE_ACTIVITY: RunActivity = {
   status: "idle",
   label: "Ready",
   detail: "",
-  sourceCount: 0,
-  latestSource: "",
+  sources: [],
 };
 
 export function ChatWorkspace({
@@ -691,6 +695,8 @@ function AudreyThread({
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentError, setAttachmentError] = useState("");
   const [selectedAttachments, setSelectedAttachments] = useState<AudreyFile[]>([]);
+  const [imageLimit, setImageLimit] = useState<number | null>(null);
+  const selectedImageCount = selectedAttachments.filter(({ kind }) => kind === "image").length;
   const selectedModel = modelDetails(models, modelId);
   const supportsFiles = selectedModel.capabilities.includes("files");
   const attachmentIds = useMemo(
@@ -738,8 +744,7 @@ function AudreyThread({
           status: "running",
           label: "Starting",
           detail: "Preparing Audrey's run",
-          sourceCount: 0,
-          latestSource: "",
+          sources: [],
         });
       },
       onRunStartedEvent: () => {
@@ -775,12 +780,17 @@ function AudreyThread({
         }
         if (event.name === "audrey.source.observed") {
           const value = recordOf(event.value);
-          const title = stringOf(value.title);
-          setActivity((current) => ({
-            ...current,
-            sourceCount: current.sourceCount + 1,
-            latestSource: title || current.latestSource,
-          }));
+          const id = stringOf(value.sourceId) || stringOf(value.url);
+          if (id) {
+            const source = {
+              id,
+              title: stringOf(value.title),
+              url: safeSourceUrl(stringOf(value.url)),
+            };
+            setActivity((current) => current.sources.some((item) => item.id === id)
+              ? current
+              : { ...current, sources: [...current.sources, source] });
+          }
         }
       },
       onRunFinishedEvent: () => {
@@ -850,6 +860,9 @@ function AudreyThread({
     try {
       const listing = await listFiles();
       setAttachmentFiles(listing.items.filter(({ status }) => status === "ready"));
+      setImageLimit(Number.isInteger(listing.limits.max_images_per_turn)
+        ? Math.max(0, listing.limits.max_images_per_turn)
+        : null);
     } catch (reason) {
       setAttachmentError(messageOf(reason));
     } finally {
@@ -862,7 +875,13 @@ function AudreyThread({
       if (current.some(({ id }) => id === file.id)) {
         return current.filter(({ id }) => id !== file.id);
       }
-      return current.length < 10 ? [...current, file] : current;
+      if (current.length >= 10) return current;
+      if (
+        file.kind === "image"
+        && imageLimit !== null
+        && current.filter(({ kind }) => kind === "image").length >= imageLimit
+      ) return current;
+      return [...current, file];
     });
   }
 
@@ -922,7 +941,10 @@ function AudreyThread({
                   <section className="attachment-picker" aria-label="Choose attachments">
                     <header>
                       <strong>Attach your files</strong>
-                      <span>{selectedAttachments.length}/10 selected</span>
+                      <span>
+                        {selectedAttachments.length}/10 files
+                        {imageLimit === null ? "" : " · " + selectedImageCount + "/" + imageLimit + " images"}
+                      </span>
                     </header>
                     {attachmentsLoading ? <p role="status">Loading files…</p> : null}
                     {attachmentError ? <p className="attachment-error" role="alert">{attachmentError}</p> : null}
@@ -939,7 +961,12 @@ function AudreyThread({
                               key={file.id}
                               aria-pressed={selected}
                               onClick={() => toggleAttachment(file)}
-                              disabled={!selected && selectedAttachments.length >= 10}
+                              disabled={!selected && (
+                                selectedAttachments.length >= 10
+                                || (file.kind === "image"
+                                  && imageLimit !== null
+                                  && selectedImageCount >= imageLimit)
+                              )}
                             >
                               <span aria-hidden="true">{selected ? "✓" : "+"}</span>
                               <span>{file.filename}</span>
@@ -1001,19 +1028,46 @@ function AudreyThread({
 
 function RunActivityStatus({ activity }: { activity: RunActivity }) {
   if (activity.status === "idle") return null;
-  const sourceLabel = activity.sourceCount === 1 ? "1 source" : `${activity.sourceCount} sources`;
+  const sourceCount = activity.sources.length;
+  const sourceLabel = sourceCount === 1 ? "1 source found" : String(sourceCount) + " sources found";
+  const latestSource = activity.sources.at(-1)?.title;
   return (
     <div className="run-activity" data-status={activity.status} role="status" aria-live="polite">
       <span className="run-activity-dot" aria-hidden="true" />
       <strong>{activity.label}</strong>
       {activity.detail ? <span>{activity.detail}</span> : null}
-      {activity.sourceCount > 0 ? (
-        <span className="run-sources">
-          {sourceLabel}{activity.latestSource ? ` · ${activity.latestSource}` : ""}
-        </span>
+      {sourceCount > 0 ? (
+        <details className="run-sources">
+          <summary>{sourceLabel}{latestSource ? " · " + latestSource : ""}</summary>
+          <ul>
+            {activity.sources.map(({ id, title, url }, index) => (
+              <li key={id}>
+                {url ? (
+                  <a href={url} target="_blank" rel="noreferrer noopener">
+                    {title || url}
+                  </a>
+                ) : (title || "Source " + (index + 1))}
+              </li>
+            ))}
+          </ul>
+        </details>
       ) : null}
     </div>
   );
+}
+
+function safeSourceUrl(raw: string): string {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
 }
 
 function UserMessage() {

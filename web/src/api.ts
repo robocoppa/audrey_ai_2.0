@@ -262,6 +262,7 @@ export interface AudreyFileLimits {
   chunked_max_bytes: number;
   part_size: number;
   fetch_hosts: string[];
+  max_images_per_turn: number;
 }
 
 export interface AudreyFileList {

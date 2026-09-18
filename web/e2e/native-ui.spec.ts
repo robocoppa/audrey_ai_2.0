@@ -397,7 +397,31 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
           type: "CUSTOM",
           timestamp: 5,
           name: "audrey.source.observed",
-          value: { sourceId: "source_1", title: "Official source" },
+          value: {
+            sourceId: "source_1",
+            title: "Official source",
+            url: "https://example.org/report?private=discard#section",
+          },
+        },
+        {
+          type: "CUSTOM",
+          timestamp: 5,
+          name: "audrey.source.observed",
+          value: {
+            sourceId: "source_2",
+            title: "Untrusted source",
+            url: "javascript:alert(1)",
+          },
+        },
+        {
+          type: "CUSTOM",
+          timestamp: 5,
+          name: "audrey.source.observed",
+          value: {
+            sourceId: "source_1",
+            title: "Official source",
+            url: "https://example.org/report",
+          },
         },
         {
           type: "TOOL_CALL_START",
@@ -561,7 +585,15 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect(assistantMessage.getByRole("listitem")).toHaveCount(2);
   await expect(assistantMessage).not.toContainText("**answer**");
   await expect(page.getByText("web_search · complete")).toBeVisible();
-  await expect(page.getByText("1 source · Official source")).toBeVisible();
+  const sourceSummary = page.getByText("2 sources found · Untrusted source");
+  await expect(sourceSummary).toBeVisible();
+  await sourceSummary.click();
+  const sourceLink = page.getByRole("link", { name: "Official source" });
+  await expect(sourceLink).toHaveAttribute("href", "https://example.org/report");
+  await expect(sourceLink).toHaveAttribute("rel", "noreferrer noopener");
+  await expect(page.getByText("Untrusted source", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Untrusted source" })).toHaveCount(0);
+  await expect(page.locator(".run-sources li")).toHaveCount(2);
   await expect(page.getByText("Complete", { exact: true })).toBeVisible();
   await expect(page.locator(".composer-model-picker")).toHaveCount(0);
   await expect(page.locator(".composer .compact-model-picker")).toBeVisible();
@@ -577,6 +609,42 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
 
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations).toEqual([]);
+});
+
+test("keeps saved answer images and citations inside a mobile message", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/answer-diagram.svg", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600"></svg>',
+    });
+  });
+  const messages = canonicalBrowserTurn().map((message) => message.role === "assistant"
+    ? {
+        ...message,
+        content: "See [the reference](https://example.org/reference).\n\n![Wide diagram](/answer-diagram.svg)",
+      }
+    : message);
+  await mockAudreyApi(page, undefined, messages);
+
+  await page.goto("./");
+  const image = page.getByRole("img", { name: "Wide diagram" });
+  await expect(image).toBeVisible();
+  await expect.poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth))
+    .toBe(1200);
+  const message = page.locator(".message-assistant .markdown-content");
+  const imageBox = await image.boundingBox();
+  const messageBox = await message.boundingBox();
+  expect(imageBox).not.toBeNull();
+  expect(messageBox).not.toBeNull();
+  expect((imageBox?.width ?? 0)).toBeLessThanOrEqual((messageBox?.width ?? 0) + 1);
+  await expect(page.getByRole("link", { name: "the reference" }))
+    .toHaveAttribute("href", "https://example.org/reference");
+
+  await page.reload();
+  await expect(page.getByRole("img", { name: "Wide diagram" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "the reference" })).toBeVisible();
 });
 
 test("hides the run summary when the saved presentation preference is off", async ({ page }) => {
@@ -1636,7 +1704,14 @@ test("attaches an owner file through the minimized AG-UI request", async ({ page
       return;
     }
     if (url.pathname === "/api/files" && request.method() === "GET") {
-      await json(route, browserFileListing([browserFile("file_existing", "field-notes.txt", 42)]));
+      await json(route, {
+        ...browserFileListing([browserFile("file_existing", "field-notes.txt", 42)], 1),
+        items: [
+          browserFile("file_existing", "field-notes.txt", 42),
+          { ...browserFile("file_image_one", "portrait-one.png", 100), kind: "image", mime: "image/png" },
+          { ...browserFile("file_image_two", "portrait-two.png", 100), kind: "image", mime: "image/png" },
+        ],
+      });
       return;
     }
     if (url.pathname === "/api/agent") {
@@ -1660,7 +1735,11 @@ test("attaches an owner file through the minimized AG-UI request", async ({ page
   await page.getByRole("button", { name: "Attach files" }).click();
   const picker = page.getByRole("region", { name: "Choose attachments" });
   await picker.getByRole("button", { name: /field-notes\.txt/ }).click();
+  await picker.getByRole("button", { name: /portrait-one\.png/ }).click();
+  await expect(picker).toContainText("1/1 images");
+  await expect(picker.getByRole("button", { name: /portrait-two\.png/ })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Remove attachment field-notes.txt" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remove attachment portrait-one.png" })).toBeVisible();
 
   const composer = page.getByRole("textbox", { name: "Ask Audrey" });
   await composer.fill("Use the attached notes again.");
@@ -1669,7 +1748,7 @@ test("attaches an owner file through the minimized AG-UI request", async ({ page
   await expect(page.getByText("Complete", { exact: true })).toBeVisible();
   expect(requestBody).toMatchObject({
     threadId: CONVERSATION_ID,
-    attachmentIds: ["file_existing"],
+    attachmentIds: ["file_existing", "file_image_one"],
   });
   expect(requestBody?.messages).toHaveLength(1);
   await expect(page.getByRole("button", { name: "Remove attachment field-notes.txt" })).toHaveCount(0);
@@ -2401,7 +2480,7 @@ function browserFile(id: string, filename: string, bytes: number) {
   };
 }
 
-function browserFileListing(files: ReturnType<typeof browserFile>[]) {
+function browserFileListing(files: ReturnType<typeof browserFile>[], maxImages = 4) {
   return {
     items: files,
     total_bytes: files.reduce((total, file) => total + file.bytes, 0),
@@ -2413,6 +2492,7 @@ function browserFileListing(files: ReturnType<typeof browserFile>[]) {
       chunked_max_bytes: 2 * 1024 * 1024 * 1024,
       part_size: 8 * 1024 * 1024,
       fetch_hosts: ["www.youtube.com", "youtu.be"],
+      max_images_per_turn: maxImages,
     },
   };
 }

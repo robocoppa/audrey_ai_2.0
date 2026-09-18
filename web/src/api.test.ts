@@ -17,6 +17,7 @@ const LIMITS: AudreyFileLimits = {
   chunked_max_bytes: 20,
   part_size: 4,
   fetch_hosts: ["www.youtube.com"],
+  max_images_per_turn: 4,
 };
 
 describe("native file uploads", () => {

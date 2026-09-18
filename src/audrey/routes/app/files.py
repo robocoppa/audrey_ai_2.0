@@ -17,6 +17,7 @@ from audrey.auth import AuthedUser, require_scope
 from audrey.identity import Principal
 from audrey.kb.extract import EmptyExtractionError, extract_text, is_image_mime, is_video_mime
 from audrey.pipeline.summarise import brief_video_summary
+from audrey.pipeline.vision import vision_cfg
 from audrey.routes import files as upload_routes
 
 router = APIRouter(tags=["application-files"])
@@ -30,6 +31,7 @@ class NativeFileLimits(BaseModel):
     chunked_max_bytes: int
     part_size: int
     fetch_hosts: list[str]
+    max_images_per_turn: int
 
 
 class NativeFileRecord(BaseModel):
@@ -107,6 +109,12 @@ def _compat_user(principal: Principal) -> AuthedUser:
         display_name=principal.display_name,
         principal=principal,
     )
+
+
+def native_image_limit(cfg: object) -> int:
+    """Use the same image cap as the vision transcription path."""
+
+    return max(0, int(vision_cfg(cfg).get("max_images_per_turn", 4)))
 
 
 def _kind(mime: str) -> Literal["text", "image", "video"]:
@@ -256,6 +264,7 @@ async def list_files(
             chunked_max_bytes=result.limits.chunked_max_bytes,
             part_size=result.limits.part_size,
             fetch_hosts=result.limits.fetch_hosts,
+            max_images_per_turn=native_image_limit(getattr(request.app.state, "cfg", None)),
         ),
     )
 
@@ -302,13 +311,12 @@ async def get_file_text(
     )
 
 
-@router.get("/files/{file_id}/image")
-async def get_file_image(
-    file_id: str,
+async def read_owned_image_preview(
     request: Request,
-    principal: Principal = Depends(_files_access),
-) -> Response:
-    """Return a resized, metadata-free preview of an owned image."""
+    principal: Principal,
+    file_id: str,
+) -> bytes:
+    """Read bounded JPEG bytes after rechecking current owner and file state."""
 
     row = await _owned_row(request, principal, file_id)
     if _kind(row.mime) != "image" or row.status != "ready":
@@ -317,9 +325,20 @@ async def get_file_image(
     if row.source_freed_at or not await asyncio.to_thread(path.is_file):
         raise HTTPException(status_code=410, detail="Stored image is unavailable.")
     try:
-        preview = await asyncio.to_thread(_image_preview, path)
+        return await asyncio.to_thread(_image_preview, path)
     except (OSError, ValueError, UnidentifiedImageError) as exc:
         raise HTTPException(status_code=409, detail="Image preview is unavailable.") from exc
+
+
+@router.get("/files/{file_id}/image")
+async def get_file_image(
+    file_id: str,
+    request: Request,
+    principal: Principal = Depends(_files_access),
+) -> Response:
+    """Return a resized, metadata-free preview of an owned image."""
+
+    preview = await read_owned_image_preview(request, principal, file_id)
     return Response(
         content=preview,
         media_type="image/jpeg",
@@ -471,4 +490,9 @@ async def delete_file(
     )
 
 
-__all__ = ["resolve_owned_attachments", "router"]
+__all__ = [
+    "native_image_limit",
+    "read_owned_image_preview",
+    "resolve_owned_attachments",
+    "router",
+]

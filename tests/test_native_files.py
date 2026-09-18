@@ -87,7 +87,9 @@ def test_native_list_uses_server_owned_namespace_and_hides_compat_fields(monkeyp
 
     monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
 
-    response = TestClient(_app()).get("/api/files")
+    app = _app()
+    app.state.cfg = SimpleNamespace(raw={"vision": {"max_images_per_turn": 2}})
+    response = TestClient(app).get("/api/files")
 
     assert response.status_code == 200
     assert captured.user == "private-storage-123"
@@ -122,6 +124,7 @@ def test_native_list_uses_server_owned_namespace_and_hides_compat_fields(monkeyp
             "chunked_max_bytes": 2_000_000_000,
             "part_size": 8_000_000,
             "fetch_hosts": ["example.com"],
+            "max_images_per_turn": 2,
         },
     }
     assert "private-storage-123" not in response.text

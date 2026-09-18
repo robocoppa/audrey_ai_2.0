@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -11,6 +13,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from PIL import Image
 
 import audrey.routes.app.runs as app_runs
 from audrey.app_state import ApplicationStore, AttachmentSnapshot
@@ -19,7 +22,10 @@ from audrey.identity import Principal
 from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.pipeline.messages import conversation_has_image, has_image_part
 from audrey.pipeline.run_events import RunEventContext, RunEventEmitter, RunFinishedEvent
+from audrey.routes import files as upload_routes
+from audrey.routes.app import files as native_files
 from audrey.routes.app import router
 from audrey.routes.app.runs import (
     _MODELS,
@@ -178,10 +184,12 @@ def _direct_cfg():
 def test_native_route_resolves_direct_model_and_persists_stable_selection(tmp_path):
     captured_models: list[str] = []
     captured_selected_ids: list[str] = []
+    captured_messages: list[list[dict[str, Any]]] = []
 
     async def capture_stream(app, payload, messages, options, **kwargs):
         captured_models.append(payload.model)
         captured_selected_ids.append(kwargs["selected_model"].id)
+        captured_messages.append(messages)
         async for chunk in _successful_stream(
             app,
             payload,
@@ -228,6 +236,34 @@ def test_native_route_resolves_direct_model_and_persists_stable_selection(tmp_pa
             assert conversation["default_mode"] == "direct"
             assert conversation["default_model_id"] == model_id
 
+            seeded = asyncio.run(
+                store.conversations.begin_run(
+                    user_id=tester.user_id,
+                    conversation_id=conversation["id"],
+                    user_content="What was in this image?",
+                    mode="fast",
+                    model_id="fast",
+                    attachments=(
+                        AttachmentSnapshot(
+                            file_id="file_old_image",
+                            filename="old-image.png",
+                            mime="image/png",
+                            kind="image",
+                            bytes=100,
+                        ),
+                    ),
+                )
+            )
+            assert seeded is not None
+            asyncio.run(
+                store.conversations.finish_run(
+                    user_id=tester.user_id,
+                    run_id=seeded.run.run_id,
+                    outcome="succeeded",
+                    assistant_content="It was a diagram.",
+                )
+            )
+
             rejected_attachment = client.post(
                 f"/api/conversations/{conversation['id']}/runs",
                 json={"content": "Read this.", "attachment_ids": ["file_1"]},
@@ -248,6 +284,8 @@ def test_native_route_resolves_direct_model_and_persists_stable_selection(tmp_pa
 
         assert captured_models == ["audrey_passthrough/qwen-test:latest"]
         assert captured_selected_ids == [model_id]
+        assert not conversation_has_image(captured_messages[0])
+        assert "not in this run's visual context" in captured_messages[0][1]["content"]
     finally:
         store.close()
 
@@ -609,6 +647,169 @@ def test_http_agent_persists_owner_verified_attachments_without_mutating_user_te
         assert "Do not infer file contents from filenames" in model_content
         assert "file_notes" not in model_content
         assert captured_pipeline_messages[0][0]["name"] == "audrey_user_preferences"
+    finally:
+        store.close()
+
+
+def test_native_image_attachment_uses_owned_preview_and_survives_follow_up(
+    tmp_path,
+    monkeypatch,
+):
+    captured: list[tuple[list[dict[str, Any]], list[dict[str, Any]]]] = []
+
+    async def capture_stream(app, payload, messages, options, **kwargs):
+        captured.append((messages, kwargs["routing_messages"]))
+        async for chunk in _successful_stream(app, payload, messages, options, **kwargs):
+            yield chunk
+
+    app, store, owner, _manager = _native_app(tmp_path, stream_factory=capture_stream)
+    owner_dir = tmp_path / upload_routes.sanitize_user(owner.storage_namespace)
+    owner_dir.mkdir()
+    Image.new("RGB", (1800, 900), (30, 80, 120)).save(owner_dir / "file_photo.png")
+    listing = upload_routes.ListResponse(
+        user=owner.storage_namespace,
+        files=[
+            upload_routes.FileRow(
+                file_id="file_photo",
+                filename="photo.png",
+                mime="image/png",
+                bytes=900,
+                uploaded_at="2026-09-18T00:00:00Z",
+                chunks=1,
+                status="ready",
+            )
+        ],
+        total_bytes=900,
+        server_time="2026-09-18T00:01:00Z",
+        limits=upload_routes.Limits(
+            max_upload_bytes=50_000_000,
+            max_user_bytes=1_000_000_000,
+            allowed_extensions=[".png"],
+            chunked_max_bytes=2_000_000_000,
+            part_size=8_000_000,
+            fetch_hosts=[],
+        ),
+    )
+
+    async def fake_list(request, me):
+        assert me.email == owner.storage_namespace
+        return listing
+
+    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
+    conversation = asyncio.run(
+        store.conversations.create(user_id=owner.user_id, default_mode="fast")
+    )
+    try:
+        with TestClient(app) as client:
+            first = client.post(
+                "/api/agent",
+                json={
+                    "threadId": conversation.conversation_id,
+                    "runId": "browser-image-run",
+                    "attachmentIds": ["file_photo"],
+                    "messages": [{"id": "turn-1", "role": "user", "content": "What is in this image?"}],
+                },
+            )
+            assert first.status_code == 200
+            saved = client.get(
+                f"/api/conversations/{conversation.conversation_id}/messages"
+            ).json()["items"]
+            assert saved[0]["content"] == "What is in this image?"
+            assert saved[0]["attachments"][0]["id"] == "file_photo"
+            first_prompt, first_routing = captured[0]
+            assert first_prompt[0]["name"] == "audrey_user_preferences"
+            assert first_routing == first_prompt[1:]
+            user_parts = first_prompt[-1]["content"]
+            assert [part["type"] for part in user_parts] == ["text", "image_url"]
+            assert "photo.png" in user_parts[0]["text"]
+            assert "file_photo" not in user_parts[0]["text"]
+            data_url = user_parts[1]["image_url"]["url"]
+            assert data_url.startswith("data:image/jpeg;base64,")
+            with Image.open(io.BytesIO(base64.b64decode(data_url.split(",", 1)[1]))) as image:
+                assert image.size == (1600, 800)
+            assert has_image_part(first_routing)
+
+            follow_up = client.post(
+                "/api/agent",
+                json={
+                    "threadId": conversation.conversation_id,
+                    "runId": "browser-follow-up",
+                    "messages": [{"id": "turn-2", "role": "user", "content": "What color was it?"}],
+                },
+            )
+            assert follow_up.status_code == 200
+            second_routing = captured[1][1]
+            assert second_routing[0]["content"][1]["image_url"]["url"] == data_url
+            assert not has_image_part(second_routing)
+            assert conversation_has_image(second_routing)
+
+            (owner_dir / "file_photo.png").unlink()
+            after_delete = client.post(
+                "/api/agent",
+                json={
+                    "threadId": conversation.conversation_id,
+                    "runId": "browser-after-delete",
+                    "messages": [{"id": "turn-3", "role": "user", "content": "And now?"}],
+                },
+            )
+            assert after_delete.status_code == 200
+            third_routing = captured[2][1]
+            assert isinstance(third_routing[0]["content"], str)
+            assert "not in this run's visual context" in third_routing[0]["content"]
+            assert not conversation_has_image(third_routing)
+
+            rejected = client.post(
+                f"/api/conversations/{conversation.conversation_id}/runs",
+                json={"content": "Try the missing image.", "attachment_ids": ["file_photo"]},
+            )
+            assert rejected.status_code == 410
+            saved_after = client.get(
+                f"/api/conversations/{conversation.conversation_id}/messages"
+            ).json()["items"]
+            assert len(saved_after) == 6
+    finally:
+        store.close()
+
+
+def test_native_image_limit_rejects_before_creating_messages(tmp_path, monkeypatch):
+    async def resolve_attachments(request, principal, file_ids):
+        return tuple(
+            AttachmentSnapshot(
+                file_id=file_id,
+                filename=file_id + ".png",
+                mime="image/png",
+                kind="image",
+                bytes=10,
+            )
+            for file_id in file_ids
+        )
+
+    monkeypatch.setattr(app_runs, "resolve_owned_attachments", resolve_attachments)
+    app, store, owner, _manager = _native_app(
+        tmp_path,
+        cfg=SimpleNamespace(
+            raw={
+                "passthrough": {"enabled": False},
+                "vision": {"max_images_per_turn": 1},
+            }
+        ),
+    )
+    conversation = asyncio.run(
+        store.conversations.create(user_id=owner.user_id, default_mode="fast")
+    )
+    try:
+        with TestClient(app) as client:
+            rejected = client.post(
+                f"/api/conversations/{conversation.conversation_id}/runs",
+                json={"content": "Describe these.", "attachment_ids": ["a", "b"]},
+            )
+            assert rejected.status_code == 422
+            assert "At most 1 image" in rejected.json()["detail"]
+            saved = client.get(
+                f"/api/conversations/{conversation.conversation_id}/messages"
+            ).json()["items"]
+            assert saved == []
     finally:
         store.close()
 
