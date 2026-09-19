@@ -16,6 +16,8 @@ from audrey.app_state import (
     InvalidApplicationStateError,
     PersonalTokenAuthenticationError,
     RunAlreadyTerminalError,
+    SourceSnapshot,
+    ToolCallSnapshot,
 )
 from audrey.app_state.migrations import MIGRATIONS
 
@@ -146,7 +148,7 @@ async def test_v6_upgrade_adds_access_groups_and_model_ids_without_data_loss(tmp
 
     store = ApplicationStore(path)
     try:
-        assert store.schema_version == 12
+        assert store.schema_version == 14
         principal = await store.resolve_external_identity(
             provider="owui",
             subject="owui-admin",
@@ -235,7 +237,7 @@ async def test_v4_upgrade_adds_video_mode_without_losing_canonical_state(tmp_pat
 
     store = ApplicationStore(path)
     try:
-        assert store.schema_version == 12
+        assert store.schema_version == 14
         existing = await store.conversations.get(
             user_id="usr_existing",
             conversation_id="con_existing",
@@ -291,6 +293,8 @@ async def test_v2_upgrade_backfills_preferences_without_changing_identity_or_tok
         conn.execute("PRAGMA foreign_keys = OFF")
         conn.execute("DROP TABLE app_chat_projections")
         conn.execute("DROP TABLE app_chat_projection_deletions")
+        conn.execute("DROP TABLE app_message_tool_calls")
+        conn.execute("DROP TABLE app_message_sources")
         conn.execute("DROP TABLE app_message_attachments")
         conn.execute("DROP TABLE app_messages")
         conn.execute("DROP TABLE app_runs")
@@ -303,7 +307,7 @@ async def test_v2_upgrade_backfills_preferences_without_changing_identity_or_tok
     try:
         after = await _resolve(upgraded)
         preferences = await upgraded.preferences.get(user_id=owner.user_id)
-        assert upgraded.schema_version == 12
+        assert upgraded.schema_version == 14
         assert after.user_id == owner.user_id
         assert preferences is not None
         assert preferences.timezone == "UTC"
@@ -710,7 +714,7 @@ async def test_schema_v3_upgrade_does_not_duplicate_legacy_archive_writes(tmp_pa
 
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 12
+        assert upgraded.schema_version == 14
         assert await upgraded.chat_projections.due() == ()
         existing = await upgraded.conversations.get_run(
             user_id=owner.user_id,
@@ -979,6 +983,145 @@ async def test_cross_user_reads_and_mutations_are_indistinguishable_from_missing
         store.close()
 
 
+async def test_observed_sources_are_sanitized_and_owned_by_the_assistant_message(tmp_path):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
+    alice = await _resolve(store)
+    bob = await _resolve(store, subject="owui-bob", email="bob@example.com")
+    try:
+        conversation = await store.conversations.create(user_id=alice.user_id)
+        started = await store.conversations.begin_run(
+            user_id=alice.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="Find the report",
+        )
+        assert started is not None
+        finished = await store.conversations.finish_run(
+            user_id=alice.user_id,
+            run_id=started.run.run_id,
+            outcome="succeeded",
+            assistant_content="Here is the report.",
+            sources=(
+                SourceSnapshot("report", "Official report", "https://user:secret@example.org/report?q=private#section"),
+                SourceSnapshot("report", "Duplicate", "https://other.example/"),
+                SourceSnapshot("internal", "Knowledge note", "javascript:alert(1)"),
+            ),
+        )
+        assert finished is not None
+        expected = (
+            SourceSnapshot("report", "Official report", "https://example.org/report"),
+            SourceSnapshot("internal", "Knowledge note", ""),
+        )
+        assert finished.assistant_message.sources == expected
+        page = await store.conversations.list_message_page(
+            user_id=alice.user_id,
+            conversation_id=conversation.conversation_id,
+            after_sequence=0,
+            limit=10,
+        )
+        assert page is not None
+        assert page[0].sources == ()
+        assert page[1].sources == expected
+        assert await store.conversations.list_message_page(
+            user_id=bob.user_id,
+            conversation_id=conversation.conversation_id,
+            after_sequence=0,
+            limit=10,
+        ) is None
+        assert await store.conversations.delete(
+            user_id=alice.user_id,
+            conversation_id=conversation.conversation_id,
+        )
+        with sqlite3.connect(path) as connection:
+            assert connection.execute("SELECT COUNT(*) FROM app_message_sources").fetchone()[0] == 0
+    finally:
+        store.close()
+
+
+async def test_tool_activity_is_bounded_safe_and_owned_by_the_assistant_message(tmp_path):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
+    alice = await _resolve(store)
+    bob = await _resolve(store, subject="owui-bob", email="bob@example.com")
+    try:
+        conversation = await store.conversations.create(user_id=alice.user_id)
+        started = await store.conversations.begin_run(
+            user_id=alice.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="Use my saved preference.",
+        )
+        assert started is not None
+        finished = await store.conversations.finish_run(
+            user_id=alice.user_id,
+            run_id=started.run.run_id,
+            outcome="succeeded",
+            assistant_content="Done.",
+            tool_calls=(
+                ToolCallSnapshot(
+                    "tool_store", "memory_store", "succeeded",
+                    {"key": "preferred-theme", "value": "[redacted]"},
+                    {"status": "succeeded", "elapsedMs": 12, "contentBytes": 51}, "",
+                ),
+                ToolCallSnapshot(
+                    "tool_failed", "web_search", "failed", {"query": "coffee"},
+                    {"private": "provider body"}, "Bearer secret@example.com",
+                ),
+                ToolCallSnapshot(
+                    "tool_large", "web_fetch", "incomplete", {"url": "x" * 5_000},
+                    None, "",
+                ),
+            ),
+        )
+        assert finished is not None
+        expected = (
+            ToolCallSnapshot(
+                "tool_store", "memory_store", "succeeded",
+                {"key": "preferred-theme", "value": "[redacted]"},
+                {"contentBytes": 51, "elapsedMs": 12, "status": "succeeded"}, "",
+            ),
+            ToolCallSnapshot(
+                "tool_failed", "web_search", "failed", {"query": "coffee"},
+                {"error": "tool_failed", "status": "failed"}, "tool_failed",
+            ),
+            ToolCallSnapshot(
+                "tool_large", "web_fetch", "incomplete",
+                {"_status": "details_omitted"}, None, "",
+            ),
+        )
+        assert finished.assistant_message.tool_calls == expected
+        messages = await store.conversations.list_message_page(
+            user_id=alice.user_id,
+            conversation_id=conversation.conversation_id,
+            after_sequence=0,
+            limit=10,
+        )
+        assert messages is not None
+        assert messages[0].tool_calls == ()
+        assert messages[1].tool_calls == expected
+        assert await store.conversations.list_message_page(
+            user_id=bob.user_id,
+            conversation_id=conversation.conversation_id,
+            after_sequence=0,
+            limit=10,
+        ) is None
+        with sqlite3.connect(path) as connection:
+            stored = " ".join(str(value) for row in connection.execute(
+                "SELECT arguments_json, result_json, error_code FROM app_message_tool_calls"
+            ) for value in row)
+            assert "provider body" not in stored
+            assert "secret@example.com" not in stored
+        assert await store.conversations.delete(
+            user_id=alice.user_id,
+            conversation_id=conversation.conversation_id,
+        )
+        with sqlite3.connect(path) as connection:
+            assert connection.execute(
+                "SELECT COUNT(*) FROM app_message_tool_calls"
+            ).fetchone()[0] == 0
+    finally:
+        store.close()
+
+
 async def test_conversation_metadata_archive_and_delete_are_owner_bound(tmp_path):
     store = ApplicationStore(tmp_path / "app.sqlite")
     alice = await _resolve(store)
@@ -1045,6 +1188,44 @@ async def test_conversation_metadata_archive_and_delete_are_owner_bound(tmp_path
         )
         assert deletions[0].user_id == alice.user_id
         assert deletions[0].storage_namespace == "alice@example.com"
+    finally:
+        store.close()
+
+
+async def test_discard_empty_conversation_preserves_populated_and_other_owner_rows(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    alice = await _resolve(store)
+    bob = await _resolve(store, subject="owui-bob", email="bob@example.com")
+    try:
+        empty = await store.conversations.create(user_id=alice.user_id)
+        populated = await store.conversations.create(user_id=alice.user_id)
+        assert not await store.conversations.delete_if_empty(
+            user_id=bob.user_id, conversation_id=empty.conversation_id
+        )
+        started = await store.conversations.begin_run(
+            user_id=alice.user_id,
+            conversation_id=populated.conversation_id,
+            user_content="Question with an attachment",
+        )
+        assert started is not None
+        await store.conversations.finish_run(
+            user_id=alice.user_id,
+            run_id=started.run.run_id,
+            outcome="cancelled",
+            assistant_content="",
+        )
+        assert not await store.conversations.delete_if_empty(
+            user_id=alice.user_id, conversation_id=populated.conversation_id
+        )
+        assert await store.conversations.get(
+            user_id=alice.user_id, conversation_id=populated.conversation_id
+        ) is not None
+        assert await store.conversations.delete_if_empty(
+            user_id=alice.user_id, conversation_id=empty.conversation_id
+        )
+        assert await store.conversations.get(
+            user_id=alice.user_id, conversation_id=empty.conversation_id
+        ) is None
     finally:
         store.close()
 

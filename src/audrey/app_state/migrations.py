@@ -626,6 +626,53 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         END;
         """,
     ),
+    (
+        13,
+        """
+        CREATE TABLE IF NOT EXISTS app_message_sources (
+          message_id      TEXT NOT NULL,
+          conversation_id TEXT NOT NULL,
+          user_id         TEXT NOT NULL,
+          position        INTEGER NOT NULL CHECK (position >= 0),
+          source_id       TEXT NOT NULL,
+          title           TEXT NOT NULL DEFAULT '',
+          url             TEXT NOT NULL DEFAULT '',
+          PRIMARY KEY (message_id, position),
+          UNIQUE (message_id, source_id),
+          FOREIGN KEY (message_id, conversation_id, user_id)
+            REFERENCES app_messages(message_id, conversation_id, user_id)
+            ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_app_message_sources_owner
+          ON app_message_sources(user_id, conversation_id, message_id, position);
+        """,
+    ),
+    (
+        14,
+        """
+        CREATE TABLE IF NOT EXISTS app_message_tool_calls (
+          message_id      TEXT NOT NULL,
+          conversation_id TEXT NOT NULL,
+          user_id         TEXT NOT NULL,
+          position        INTEGER NOT NULL CHECK (position >= 0),
+          tool_call_id    TEXT NOT NULL,
+          name            TEXT NOT NULL,
+          status          TEXT NOT NULL CHECK (status IN ('succeeded', 'failed', 'incomplete')),
+          arguments_json  TEXT NOT NULL DEFAULT '{}',
+          result_json     TEXT NOT NULL DEFAULT 'null',
+          error_code      TEXT NOT NULL DEFAULT '',
+          PRIMARY KEY (message_id, position),
+          UNIQUE (message_id, tool_call_id),
+          FOREIGN KEY (message_id, conversation_id, user_id)
+            REFERENCES app_messages(message_id, conversation_id, user_id)
+            ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_app_message_tool_calls_owner
+          ON app_message_tool_calls(user_id, conversation_id, message_id, position);
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS"]

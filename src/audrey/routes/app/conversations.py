@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -85,6 +85,21 @@ class MessageAttachmentResponse(BaseModel):
     bytes: int
 
 
+class MessageSourceResponse(BaseModel):
+    id: str
+    title: str
+    url: str
+
+
+class MessageToolCallResponse(BaseModel):
+    id: str
+    name: str
+    status: Literal["succeeded", "failed", "incomplete"]
+    arguments: dict[str, Any]
+    result: Any | None
+    error_code: str
+
+
 class MessageResponse(BaseModel):
     id: str
     run_id: str | None
@@ -95,6 +110,8 @@ class MessageResponse(BaseModel):
     created_at: str
     updated_at: str
     attachments: list[MessageAttachmentResponse]
+    sources: list[MessageSourceResponse]
+    tool_calls: list[MessageToolCallResponse]
 
 
 class MessageListResponse(BaseModel):
@@ -161,6 +178,21 @@ def _message_response(record: MessageRecord) -> MessageResponse:
                 bytes=attachment.bytes,
             )
             for attachment in record.attachments
+        ],
+        sources=[
+            MessageSourceResponse(id=source.source_id, title=source.title, url=source.url)
+            for source in record.sources
+        ],
+        tool_calls=[
+            MessageToolCallResponse(
+                id=tool_call.tool_call_id,
+                name=tool_call.name,
+                status=tool_call.status,
+                arguments=tool_call.arguments,
+                result=tool_call.result,
+                error_code=tool_call.error_code,
+            )
+            for tool_call in record.tool_calls
         ],
     )
 
@@ -325,6 +357,35 @@ async def delete_conversation(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="Conversation not found.")
+    projector = getattr(request.app.state, "archive_projector", None)
+    wake = getattr(projector, "wake", None)
+    if callable(wake):
+        wake()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/{conversation_id}/empty", status_code=status.HTTP_204_NO_CONTENT)
+async def discard_empty_conversation(
+    conversation_id: str,
+    request: Request,
+    principal: Principal = Depends(_conversation_access),
+) -> Response:
+    """Discard an abandoned draft only if it still contains no messages."""
+    store = _store(request)
+    try:
+        deleted = await store.conversations.delete_if_empty(
+            user_id=principal.user_id,
+            conversation_id=conversation_id,
+        )
+    except ConversationHasActiveRunError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
+        existing = await store.conversations.get(
+            user_id=principal.user_id, conversation_id=conversation_id
+        )
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Conversation not found.")
+        raise HTTPException(status_code=409, detail="Conversation is no longer empty.")
     projector = getattr(request.app.state, "archive_projector", None)
     wake = getattr(projector, "wake", None)
     if callable(wake):

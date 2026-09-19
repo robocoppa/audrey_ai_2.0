@@ -690,8 +690,7 @@ a:focus-visible {
   color: #79bfff;
 }
 
-.message-error,
-.run-error {
+.message-error {
   color: var(--danger);
 }
 
@@ -900,6 +899,32 @@ a:focus-visible {
   line-height: 1.45;
 }
 
+.recovered-run {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 1rem;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-soft);
+  font-size: 0.8rem;
+}
+
+.recovered-run button {
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.5rem;
+  background: var(--surface-deep);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.recovered-run button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 .run-activity {
   display: flex;
   align-items: center;
@@ -1005,6 +1030,40 @@ a:focus-visible {
 }
 
 .run-sources a {
+  color: var(--accent);
+  text-underline-offset: 0.18em;
+}
+
+.saved-sources {
+  margin-top: 0.7rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-soft);
+  font-size: 0.75rem;
+}
+
+.saved-sources summary {
+  width: fit-content;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.saved-sources p {
+  margin: 0.5rem 0;
+  color: var(--muted);
+}
+
+.saved-sources ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.15rem;
+}
+
+.saved-sources li {
+  margin-top: 0.3rem;
+  overflow-wrap: anywhere;
+}
+
+.saved-sources a {
   color: var(--accent);
   text-underline-offset: 0.18em;
 }
@@ -1300,12 +1359,6 @@ a:focus-visible {
   background: transparent;
   color: var(--danger);
   font-size: 0.75rem;
-}
-
-.run-error {
-  margin: 0.45rem 0 0;
-  text-align: center;
-  font-size: 0.68rem;
 }
 
 .archived-notice {

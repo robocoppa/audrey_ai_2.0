@@ -1032,6 +1032,64 @@ def test_native_run_routes_hide_cross_owner_and_reject_archived_or_active(tmp_pa
         store.close()
 
 
+def test_observed_sources_and_tools_survive_in_canonical_history(tmp_path):
+    async def source_stream(
+        _app, _payload, _messages, _options, *, event_context, **_kwargs,
+    ):
+        emitter = event_context.emitter
+        assert emitter is not None
+        emitter.run_started()
+        emitter.message_started()
+        emitter.tool_started("tool_search", name="web_search")
+        emitter.tool_arguments("tool_search", arguments={"query": "annual report"})
+        emitter.tool_finished(
+            "tool_search", status="succeeded",
+            result={"status": "succeeded", "elapsedMs": 14, "contentBytes": 120},
+        )
+        emitter.source_observed(
+            "source_report", title="Official report",
+            url="https://user:secret@example.org/report?token=private#section",
+        )
+        emitter.text_delta("Answer from the report.")
+        emitter.message_finished(status="completed")
+        emitter.run_finished(status="succeeded", finish_reason="stop")
+        yield "ignored"
+
+    app, store, owner, _manager = _native_app(tmp_path, stream_factory=source_stream)
+    conversation = asyncio.run(store.conversations.create(user_id=owner.user_id))
+    try:
+        with TestClient(app) as client:
+            created = client.post(
+                f"/api/conversations/{conversation.conversation_id}/runs",
+                json={"content": "Find the report."},
+            )
+            assert created.status_code == 202
+            client.get(created.json()["events_url"])
+            history = client.get(
+                f"/api/conversations/{conversation.conversation_id}/messages"
+            )
+            assert history.status_code == 200
+            user, assistant = history.json()["items"]
+            assert user["sources"] == []
+            assert user["tool_calls"] == []
+            assert assistant["content"] == "Answer from the report."
+            assert assistant["tool_calls"] == [{
+                "id": "tool_search",
+                "name": "web_search",
+                "status": "succeeded",
+                "arguments": {"query": "annual report"},
+                "result": {"contentBytes": 120, "elapsedMs": 14, "status": "succeeded"},
+                "error_code": "",
+            }]
+            assert assistant["sources"] == [{
+                "id": "source_report",
+                "title": "Official report",
+                "url": "https://example.org/report",
+            }]
+    finally:
+        store.close()
+
+
 def test_agui_tool_fanout_cursor_resumes_without_duplication(tmp_path):
     async def tool_stream(
         _app,

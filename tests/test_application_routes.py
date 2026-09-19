@@ -497,6 +497,32 @@ def test_conversation_routes_create_update_archive_list_and_delete(tmp_path):
         store.close()
 
 
+def test_discard_empty_route_preserves_a_conversation_with_messages(tmp_path):
+    app, store, owner = _conversation_app(tmp_path)
+    try:
+        with TestClient(app) as client:
+            blank = client.post("/api/conversations", json={"model_id": "auto"}).json()
+            populated = client.post("/api/conversations", json={"model_id": "auto"}).json()
+            started = asyncio.run(store.conversations.begin_run(
+                user_id=owner.user_id,
+                conversation_id=populated["id"],
+                user_content="Question",
+            ))
+            assert started is not None
+            asyncio.run(store.conversations.finish_run(
+                user_id=owner.user_id,
+                run_id=started.run.run_id,
+                outcome="cancelled",
+                assistant_content="",
+            ))
+            assert client.delete(f"/api/conversations/{populated['id']}/empty").status_code == 409
+            assert client.get(f"/api/conversations/{populated['id']}").status_code == 200
+            assert client.delete(f"/api/conversations/{blank['id']}/empty").status_code == 204
+            assert client.delete(f"/api/conversations/{blank['id']}/empty").status_code == 404
+    finally:
+        store.close()
+
+
 def test_conversation_and_message_routes_paginate_without_overlap(tmp_path):
     app, store, owner = _conversation_app(tmp_path)
     try:
@@ -603,6 +629,7 @@ def test_conversation_routes_hide_cross_owner_resources(tmp_path):
             assert client.get(conversation_path).status_code == 404
             assert client.patch(conversation_path, json={"title": "Intrusion"}).status_code == 404
             assert client.delete(conversation_path).status_code == 404
+            assert client.delete(f"{conversation_path}/empty").status_code == 404
             assert client.get(f"{conversation_path}/messages").status_code == 404
             assert client.get("/api/conversations").json()["items"] == []
     finally:

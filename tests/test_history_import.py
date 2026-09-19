@@ -307,10 +307,12 @@ def test_preview_does_not_migrate_v11_and_apply_migrates_after_backup(
     db_path = store.path
     store.close()
     with sqlite3.connect(db_path) as connection:
+        connection.execute("DROP TABLE app_message_tool_calls")
+        connection.execute("DROP TABLE app_message_sources")
         connection.execute("DROP TRIGGER trg_app_history_import_conversation_deleted")
         connection.execute("DROP TABLE app_history_import_messages")
         connection.execute("DROP TABLE app_history_import_conversations")
-        connection.execute("DELETE FROM app_schema_migrations WHERE version = 12")
+        connection.execute("DELETE FROM app_schema_migrations WHERE version >= 12")
     monkeypatch.setattr(
         admin_cli, "get_config",
         lambda: SimpleNamespace(raw={"application": {"sqlite_path": str(db_path)}}),
@@ -344,7 +346,7 @@ def test_preview_does_not_migrate_v11_and_apply_migrates_after_backup(
     with sqlite3.connect(db_path) as connection:
         assert connection.execute(
             "SELECT MAX(version) FROM app_schema_migrations"
-        ).fetchone()[0] == 12
+        ).fetchone()[0] == 14
         assert connection.execute(
             "SELECT COUNT(*) FROM app_history_import_conversations"
         ).fetchone()[0] == 1

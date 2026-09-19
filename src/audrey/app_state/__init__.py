@@ -13,7 +13,9 @@ from audrey.app_state.records import (
     ModelAccessPolicy,
     ModelPublicationProfile,
     RunRecord,
+    SourceSnapshot,
     StartedRun,
+    ToolCallSnapshot,
     UserPreferences,
 )
 from audrey.app_state.repositories import (
@@ -58,6 +60,8 @@ __all__ = [
     "PreferencesRepository",
     "RunAlreadyTerminalError",
     "RunRecord",
+    "SourceSnapshot",
     "StartedRun",
+    "ToolCallSnapshot",
     "UserPreferences",
 ]

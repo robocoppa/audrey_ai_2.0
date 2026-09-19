@@ -24,7 +24,9 @@ from audrey.app_state import (
     MessageRecord,
     RunAlreadyTerminalError,
     RunRecord,
+    SourceSnapshot,
     StartedRun,
+    ToolCallSnapshot,
 )
 from audrey.auth import require_scope
 from audrey.conversation_titles import ConversationTitleGenerator
@@ -45,7 +47,11 @@ from audrey.pipeline.run_events import (
     RunEventContext,
     RunEventEmitter,
     RunFinishedEvent,
+    SourceObservedEvent,
     TextDeltaEvent,
+    ToolCallArgumentsEvent,
+    ToolCallFinishedEvent,
+    ToolCallStartedEvent,
     UsageReportedEvent,
     dump_run_event,
 )
@@ -183,6 +189,8 @@ class _LiveRun:
     cancel_error_code: str = "cancelled_by_user"
     answer_parts: list[str] = field(default_factory=list)
     latest_usage: UsageReportedEvent | None = None
+    observed_sources: list[SourceSnapshot] = field(default_factory=list)
+    observed_tool_calls: dict[str, ToolCallSnapshot] = field(default_factory=dict)
 
     def publish(self, event: RunEvent) -> None:
         expected = self.events[-1].sequence + 1 if self.events else 1
@@ -192,6 +200,45 @@ class _LiveRun:
             self.answer_parts.append(event.delta)
         elif isinstance(event, UsageReportedEvent):
             self.latest_usage = event
+        elif isinstance(event, SourceObservedEvent):
+            if len(self.observed_sources) < 50 and not any(
+                source.source_id == event.source_id for source in self.observed_sources
+            ):
+                self.observed_sources.append(SourceSnapshot(
+                    source_id=event.source_id, title=event.title, url=event.url,
+                ))
+        elif isinstance(event, ToolCallStartedEvent):
+            if len(self.observed_tool_calls) < 50:
+                self.observed_tool_calls[event.tool_call_id] = ToolCallSnapshot(
+                    tool_call_id=event.tool_call_id,
+                    name=event.name,
+                    status="incomplete",
+                    arguments={},
+                    result=None,
+                    error_code="",
+                )
+        elif isinstance(event, ToolCallArgumentsEvent):
+            current = self.observed_tool_calls.get(event.tool_call_id)
+            if current is not None:
+                self.observed_tool_calls[event.tool_call_id] = ToolCallSnapshot(
+                    tool_call_id=current.tool_call_id,
+                    name=current.name,
+                    status=current.status,
+                    arguments=event.arguments,
+                    result=current.result,
+                    error_code=current.error_code,
+                )
+        elif isinstance(event, ToolCallFinishedEvent):
+            current = self.observed_tool_calls.get(event.tool_call_id)
+            if current is not None:
+                self.observed_tool_calls[event.tool_call_id] = ToolCallSnapshot(
+                    tool_call_id=current.tool_call_id,
+                    name=current.name,
+                    status=event.status,
+                    arguments=current.arguments,
+                    result=event.result,
+                    error_code=event.error,
+                )
         self.events.append(event)
         previous = self.changed
         self.changed = asyncio.Event()
@@ -488,6 +535,8 @@ class NativeRunManager:
                 concrete_model=terminal.concrete_model,
                 prompt_tokens=usage.prompt_tokens if usage is not None else 0,
                 completion_tokens=usage.completion_tokens if usage is not None else 0,
+                sources=live.observed_sources,
+                tool_calls=tuple(live.observed_tool_calls.values()),
             )
             if finished is not None and self._archive_wake is not None:
                 self._archive_wake()

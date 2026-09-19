@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +15,27 @@ class AttachmentSnapshot:
     mime: str
     kind: str
     bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class SourceSnapshot:
+    """A source observed during a run, attached to its saved assistant message."""
+
+    source_id: str
+    title: str
+    url: str
+
+
+@dataclass(frozen=True, slots=True)
+class ToolCallSnapshot:
+    """Safe owner-visible activity captured for one server-side tool call."""
+
+    tool_call_id: str
+    name: str
+    status: str
+    arguments: dict[str, Any]
+    result: Any | None
+    error_code: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +80,8 @@ class MessageRecord:
     created_at: str
     updated_at: str
     attachments: tuple[AttachmentSnapshot, ...] = ()
+    sources: tuple[SourceSnapshot, ...] = ()
+    tool_calls: tuple[ToolCallSnapshot, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

@@ -701,6 +701,7 @@ test("summarizes a new conversation from its first prompt", async ({ page }) => 
   let createBody: unknown = null;
   let conversation = {
     ...browserConversation(""),
+    last_message_at: null as string | null,
     default_mode: "auto" as const,
     default_model_id: "auto",
   };
@@ -741,6 +742,7 @@ test("summarizes a new conversation from its first prompt", async ({ page }) => 
       conversation = {
         ...conversation,
         title: "Weekend Hiking Trip Planning",
+        last_message_at: "2026-09-04T00:00:00Z",
       };
       await route.fulfill({
         status: 200,
@@ -2372,6 +2374,65 @@ test("queues a video link through native files and follows its summary", async (
   expect(authorizationHeaders.every((value) => value === undefined)).toBe(true);
 });
 
+test("shows observed sources with the saved assistant answer after reload", async ({ page }) => {
+  const messages = canonicalBrowserTurn().map((message) => message.role === "assistant"
+    ? { ...message, sources: [
+      { id: "report", title: "Official report", url: "https://user:secret@example.org/report?token=private#section" },
+      { id: "note", title: "Knowledge note", url: "javascript:alert(1)" },
+    ] }
+    : message);
+  await mockAudreyApi(page, undefined, messages);
+  await page.goto("./");
+  const answer = page.locator(".message-assistant");
+  await expect(answer.getByText("Canonical mode answer.")).toBeVisible();
+  await answer.locator(".saved-sources summary").click();
+  await expect(answer.getByText("Observed during this run; the answer may cite a different set.")).toBeVisible();
+  await expect(answer.getByRole("link", { name: "Official report" }))
+    .toHaveAttribute("href", "https://example.org/report");
+  await expect(answer.getByText("Knowledge note")).toBeVisible();
+  await expect(answer.getByRole("link")).toHaveCount(1);
+});
+
+test("restores safe tool activity with a saved assistant answer", async ({ page }) => {
+  const messages = canonicalBrowserTurn().map((message) => message.role === "assistant"
+    ? { ...message, tool_calls: [
+      {
+        id: "tool_search", name: "web_search", status: "succeeded",
+        arguments: { query: "annual report" },
+        result: { status: "succeeded", elapsedMs: 14, contentBytes: 120, sourceCount: 1 },
+        error_code: "",
+      },
+      {
+        id: "tool_memory", name: "memory_store", status: "failed",
+        arguments: { key: "preference", value: "[redacted]" },
+        result: { error: "tool_failed", status: "failed" },
+        error_code: "tool_failed",
+      },
+      {
+        id: "tool_fetch", name: "web_fetch", status: "incomplete",
+        arguments: { url: "https://example.org/report" },
+        result: null,
+        error_code: "",
+      },
+    ] }
+    : message);
+  await mockAudreyApi(page, undefined, messages);
+  await page.goto("./");
+  const answer = page.locator(".message-assistant");
+  await expect(answer.getByText("Canonical mode answer.")).toBeVisible();
+  const completed = answer.locator(".tool-activity").filter({ hasText: "web_search" });
+  const failed = answer.locator(".tool-activity").filter({ hasText: "memory_store" });
+  const incomplete = answer.locator(".tool-activity").filter({ hasText: "web_fetch" });
+  await expect(completed.locator("summary")).toContainText("complete");
+  await expect(failed.locator("summary")).toContainText("failed");
+  await expect(incomplete.locator("summary")).toContainText("incomplete");
+  await completed.locator("summary").click();
+  await failed.locator("summary").click();
+  await expect(completed.locator("pre")).toContainText("annual report");
+  await expect(failed.locator("pre")).toContainText("[redacted]");
+  await expect(answer).not.toContainText("private-memory-value");
+});
+
 test("retries a failed attached question as a fresh owner-bound turn", async ({ page }) => {
   const requests: Array<Record<string, unknown>> = [];
   const file = browserFile("file_retry_notes", "retry-notes.txt", 28);
@@ -2434,6 +2495,110 @@ test("retries a failed attached question as a fresh owner-bound turn", async ({ 
   await expect(retry).toHaveCount(0);
 });
 
+test("recovers a reloaded active attached run and retries after stopping it", async ({ page }) => {
+  const file = browserFile("file_reload", "uploaded-notes.txt", 32);
+  const userMessage = {
+    id: "msg_reload_user", run_id: "run_reload", sequence: 3,
+    role: "user", status: "completed", content: "Summarize the upload.",
+    created_at: "2026-09-05T00:00:00Z", updated_at: "2026-09-05T00:00:00Z",
+    attachments: [{ id: file.id, filename: file.filename, mime: file.mime, kind: file.kind, bytes: file.bytes }],
+  };
+  let status: "running" | "cancelled" = "running";
+  let posts = 0;
+  let attachmentIds: unknown = null;
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me/preferences") return json(route, browserPreferences());
+    if (url.pathname === "/api/me") return json(route, browserTester());
+    if (url.pathname === "/api/models") return json(route, { items: browserModels() });
+    if (url.pathname === "/api/conversations") {
+      return json(route, { items: [browserConversation("Reloaded file chat")], next_cursor: null });
+    }
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}/messages`) {
+      if (!url.searchParams.has("cursor")) {
+        return json(route, { items: canonicalBrowserTurn(), next_cursor: "latest" });
+      }
+      return json(route, { items: [userMessage, {
+        id: "msg_reload_assistant", run_id: "run_reload", sequence: 4,
+        role: "assistant", status: status === "running" ? "in_progress" : "incomplete",
+        content: "", created_at: "2026-09-05T00:00:01Z", updated_at: "2026-09-05T00:00:01Z",
+        attachments: [],
+      }], next_cursor: null });
+    }
+    if (url.pathname === "/api/runs/run_reload" && request.method() === "GET") {
+      return json(route, { id: "run_reload", conversation_id: CONVERSATION_ID, status });
+    }
+    if (url.pathname === "/api/runs/run_reload/cancel" && request.method() === "POST") {
+      status = "cancelled";
+      return json(route, { id: "run_reload", conversation_id: CONVERSATION_ID, status });
+    }
+    if (url.pathname === "/api/files/file_reload") return json(route, file);
+    if (url.pathname === `/api/conversations/${CONVERSATION_ID}`) {
+      return json(route, browserConversation("Reloaded file chat"));
+    }
+    if (url.pathname === "/api/agent") {
+      posts += 1;
+      attachmentIds = (request.postDataJSON() as Record<string, unknown>).attachmentIds;
+      return route.fulfill({
+        status: 200, contentType: "text/event-stream", body: aguiStream(canonicalBrowserEvents()),
+      });
+    }
+    await route.abort("failed");
+  });
+  await page.goto("./");
+  await expect(page.getByText("Audrey is still answering the previous question.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Retry last question" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Stop current run" }).click();
+  const retry = page.getByRole("button", { name: "Retry last question" });
+  await expect(retry).toBeVisible();
+  await retry.click();
+  await expect(page.getByText("Complete", { exact: true })).toBeVisible();
+  expect(posts).toBe(1);
+  expect(attachmentIds).toEqual(["file_reload"]);
+  await expect(page.getByText(/HTTP 409/)).toHaveCount(0);
+});
+
+test("discards abandoned empty conversations from history", async ({ page }) => {
+  let next = 0;
+  const drafts: Array<ReturnType<typeof browserConversation>> = [];
+  const discarded: string[] = [];
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me/preferences") return json(route, browserPreferences());
+    if (url.pathname === "/api/me") return json(route, browserTester());
+    if (url.pathname === "/api/models") return json(route, { items: browserModels() });
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      return json(route, { items: drafts, next_cursor: null });
+    }
+    if (url.pathname === "/api/conversations" && request.method() === "POST") {
+      next += 1;
+      const draft = { ...browserConversation(""), id: `con_draft_${next}`, last_message_at: null };
+      drafts.unshift(draft);
+      return json(route, draft);
+    }
+    if (url.pathname.endsWith("/messages")) return json(route, { items: [], next_cursor: null });
+    if (url.pathname.endsWith("/empty") && request.method() === "DELETE") {
+      const id = url.pathname.split("/").at(-2)!;
+      discarded.push(id);
+      const index = drafts.findIndex((draft) => draft.id === id);
+      if (index !== -1) drafts.splice(index, 1);
+      return route.fulfill({ status: 204 });
+    }
+    await route.abort("failed");
+  });
+  await page.goto("./");
+  await expect(page.getByRole("heading", { name: "New conversation" })).toBeVisible();
+  await page.getByRole("button", { name: "+ New" }).click();
+  await expect.poll(() => discarded.length).toBe(1);
+  await page.getByRole("button", { name: "+ New" }).click();
+  await expect.poll(() => discarded.length).toBe(2);
+  expect(drafts).toHaveLength(1);
+  await expect(page.getByRole("navigation", { name: "Conversation history" }).locator(".conversation-row")).toHaveCount(0);
+});
+
 test("surfaces an expired session during a run", async ({ page }) => {
   await mockAudreyApi(page, (route) =>
     route.fulfill({
@@ -2449,6 +2614,7 @@ test("surfaces an expired session during a run", async ({ page }) => {
   await composer.press("Enter");
 
   await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(1);
   await expect(page.getByText("Connection failed")).toBeVisible();
 });
 
@@ -2636,7 +2802,7 @@ function browserConversation(title: string) {
     default_model_id: "fast",
     created_at: "2026-09-04T00:00:00Z",
     updated_at: "2026-09-04T00:00:00Z",
-    last_message_at: null,
+    last_message_at: "2026-09-04T00:00:00Z" as string | null,
     archived_at: null as string | null,
   };
 }

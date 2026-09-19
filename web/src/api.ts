@@ -207,6 +207,27 @@ export interface ConversationMessage {
   created_at: string;
   updated_at: string;
   attachments: MessageAttachment[];
+  sources?: MessageSource[];
+  tool_calls?: MessageToolCall[];
+}
+
+export type JsonValue = null | boolean | number | string | JsonValue[] | {
+  [key: string]: JsonValue;
+};
+
+export interface MessageToolCall {
+  id: string;
+  name: string;
+  status: "succeeded" | "failed" | "incomplete";
+  arguments: Record<string, JsonValue>;
+  result: JsonValue;
+  error_code: string;
+}
+
+export interface MessageSource {
+  id: string;
+  title: string;
+  url: string;
 }
 
 export interface MessageAttachment {
@@ -660,12 +681,40 @@ export function getConversation(conversationId: string): Promise<Conversation> {
   );
 }
 
-export function listMessages(
+export async function listMessages(
   conversationId: string,
 ): Promise<ListResponse<ConversationMessage>> {
-  return apiJson<ListResponse<ConversationMessage>>(
-    `/api/conversations/${encodeURIComponent(conversationId)}/messages?limit=100`,
-  );
+  const items: ConversationMessage[] = [];
+  let cursor: string | null = null;
+  const seen = new Set<string>();
+  do {
+    const params = new URLSearchParams({ limit: "100" });
+    if (cursor) params.set("cursor", cursor);
+    const page: ListResponse<ConversationMessage> = await apiJson(
+      `/api/conversations/${encodeURIComponent(conversationId)}/messages?${params}`,
+    );
+    items.push(...page.items);
+    cursor = page.next_cursor;
+    if (cursor && seen.has(cursor)) throw new Error("Message history cursor repeated.");
+    if (cursor) seen.add(cursor);
+  } while (cursor);
+  return { items, next_cursor: null };
+}
+
+export interface AudreyRun {
+  id: string;
+  conversation_id: string;
+  status: "running" | "succeeded" | "cancelled" | "failed";
+}
+
+export function getRun(runId: string): Promise<AudreyRun> {
+  return apiJson<AudreyRun>(`/api/runs/${encodeURIComponent(runId)}`);
+}
+
+export function cancelRun(runId: string): Promise<AudreyRun> {
+  return apiJson<AudreyRun>(`/api/runs/${encodeURIComponent(runId)}/cancel`, {
+    method: "POST",
+  });
 }
 
 export function updateConversationMode(
@@ -698,6 +747,12 @@ export function updateConversation(
 
 export async function deleteConversation(conversationId: string): Promise<void> {
   await apiResponse(`/api/conversations/${encodeURIComponent(conversationId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function discardEmptyConversation(conversationId: string): Promise<void> {
+  await apiResponse(`/api/conversations/${encodeURIComponent(conversationId)}/empty`, {
     method: "DELETE",
   });
 }

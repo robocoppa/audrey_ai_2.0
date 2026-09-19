@@ -9,9 +9,10 @@ import {
   type ThreadMessageLike,
   type TextMessagePartProps,
   type ToolCallMessagePartProps,
+  useAuiState,
 } from "@assistant-ui/react";
 import { useAgUiRuntime } from "@assistant-ui/react-ag-ui";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -25,9 +26,12 @@ import localPortrait from "./assets/models/localModel.png";
 
 import { AudreyLoader } from "./AudreyLoader";
 import {
+  cancelRun,
   createConversation,
   deleteConversation,
+  discardEmptyConversation,
   getConversation,
+  getRun,
   listConversations,
   listFiles,
   getFile,
@@ -41,6 +45,7 @@ import {
   type AudreyModel,
   type Conversation,
   type ConversationMessage,
+  type MessageSource,
   type CurrentUser,
   type UserPreferences,
 } from "./api";
@@ -79,10 +84,12 @@ type RunSource = {
 
 type LastAttempt = {
   text: string;
-  attachments: AudreyFile[];
+  attachmentIds: string[];
 };
 
 type ConversationView = "active" | "archived";
+
+const SavedSourcesContext = createContext<ReadonlyMap<string, MessageSource[]>>(new Map());
 
 const IDLE_ACTIVITY: RunActivity = {
   status: "idle",
@@ -126,6 +133,26 @@ export function ChatWorkspace({
   );
 
   function selectConversation(conversation: Conversation | null) {
+    const previousId = selectedIdRef.current;
+    if (previousId && previousId !== conversation?.id) {
+      const previous = openedConversations.find(({ id }) => id === previousId)
+        ?? conversations.find(({ id }) => id === previousId);
+      if (previous?.last_message_at === null) {
+        void discardEmptyConversation(previousId)
+          .then(() => {
+            setConversations((current) => current.filter(({ id }) => id !== previousId));
+            setOpenedConversations((current) => current.filter(({ id }) => id !== previousId));
+          })
+          .catch(async () => {
+            // The server may have accepted a message after the list snapshot.
+            try {
+              replaceConversation(await getConversation(previousId));
+            } catch {
+              // A deleted draft has no history row to restore.
+            }
+          });
+      }
+    }
     if (conversation) {
       setOpenedConversations((current) => upsertConversation(current, conversation));
     }
@@ -183,6 +210,7 @@ export function ChatWorkspace({
   }, [defaultModelId, searchQuery, view]);
 
   const selected = conversations.find(({ id }) => id === selectedId) ?? null;
+  const historyConversations = conversations.filter(({ last_message_at }) => last_message_at !== null);
   const renderedConversations = selected
     && !openedConversations.some(({ id }) => id === selected.id)
     ? [...openedConversations, selected]
@@ -350,7 +378,7 @@ export function ChatWorkspace({
         {catalogUnavailable ? (
           <p className="sidebar-error" role="alert">No models are enabled for this account.</p>
         ) : null}
-        {!catalogUnavailable && !loading && conversations.length === 0 ? (
+        {!catalogUnavailable && !loading && historyConversations.length === 0 ? (
           <p className="sidebar-status">
             {searchQuery
               ? "No matching conversation titles."
@@ -360,7 +388,7 @@ export function ChatWorkspace({
           </p>
         ) : null}
         <nav className="conversation-list" aria-label="Conversation history">
-          {conversations.map((conversation) => (
+          {historyConversations.map((conversation) => (
             <div className="conversation-row" key={conversation.id}>
               <button
                 className={conversation.id === selectedId ? "conversation active" : "conversation"}
@@ -477,6 +505,12 @@ function ConversationThread({
   const [mutationError, setMutationError] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [runActive, setRunActive] = useState(false);
+  const [recoveredRunId, setRecoveredRunId] = useState<string | null>(null);
+  const [recoveryError, setRecoveryError] = useState("");
+  const [stoppingRecovered, setStoppingRecovered] = useState(false);
+  const [threadRevision, setThreadRevision] = useState(0);
+  const onConversationChangeRef = useRef(onConversationChange);
+  useEffect(() => { onConversationChangeRef.current = onConversationChange; }, [onConversationChange]);
   const archived = conversation.archived_at !== null;
   const selectedModelId = models.some(({ id }) => id === modelId)
     ? modelId
@@ -484,17 +518,93 @@ function ConversationThread({
 
   useEffect(() => {
     let active = true;
-    listMessages(conversation.id)
-      .then(({ items }) => {
+    async function restoreThread() {
+      try {
+        let { items } = await listMessages(conversation.id);
+        const latestAssistant = items.filter(({ role }) => role === "assistant").at(-1);
+        if (latestAssistant && latestAssistant.status !== "completed" && latestAssistant.run_id) {
+          const run = await getRun(latestAssistant.run_id);
+          if (run.conversation_id !== conversation.id) throw new Error("Run belongs to another conversation.");
+          if (run.status === "running") {
+            if (active) {
+              setRecoveredRunId(run.id);
+              setRunActive(true);
+            }
+          } else {
+            items = (await listMessages(conversation.id)).items;
+          }
+        }
         if (active) setThread({ status: "ready", messages: items });
-      })
-      .catch((reason: unknown) => {
+      } catch (reason) {
         if (active) setThread({ status: "error", message: messageOf(reason) });
-      });
+      }
+    }
+    void restoreThread();
+    return () => { active = false; };
+  }, [conversation.id]);
+
+  useEffect(() => {
+    if (!recoveredRunId) return;
+    let active = true;
+    let checking = false;
+    async function checkRun() {
+      if (checking || !active) return;
+      checking = true;
+      try {
+        const run = await getRun(recoveredRunId!);
+        if (!active) return;
+        if (run.conversation_id !== conversation.id) throw new Error("Run belongs to another conversation.");
+        setRecoveryError("");
+        if (run.status !== "running") {
+          const messages = await listMessages(conversation.id);
+          if (!active) return;
+          setThread({ status: "ready", messages: messages.items });
+          setThreadRevision((revision) => revision + 1);
+          setRecoveredRunId(null);
+          setRunActive(false);
+          void getConversation(conversation.id).then((updated) => {
+            if (active) {
+              setTitleDraft(updated.title);
+              onConversationChangeRef.current(updated);
+            }
+          }).catch(() => {});
+        }
+      } catch (reason) {
+        if (active) setRecoveryError(messageOf(reason));
+      } finally {
+        checking = false;
+      }
+    }
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") void checkRun();
+    }, 3000);
+    document.addEventListener("visibilitychange", checkRun);
     return () => {
       active = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", checkRun);
     };
-  }, [conversation.id]);
+  }, [conversation.id, recoveredRunId]);
+
+  async function stopRecoveredRun() {
+    if (!recoveredRunId || stoppingRecovered) return;
+    setStoppingRecovered(true);
+    setRecoveryError("");
+    try {
+      const run = await cancelRun(recoveredRunId);
+      if (run.status !== "running") {
+        const messages = await listMessages(conversation.id);
+        setThread({ status: "ready", messages: messages.items });
+        setThreadRevision((revision) => revision + 1);
+        setRecoveredRunId(null);
+        setRunActive(false);
+      }
+    } catch (reason) {
+      setRecoveryError(messageOf(reason));
+    } finally {
+      setStoppingRecovered(false);
+    }
+  }
 
   async function changeModel(next: string) {
     if (next === modelId || runActive) return;
@@ -514,7 +624,6 @@ function ConversationThread({
   }
 
   async function refreshAutomaticTitle() {
-    if (conversation.title.trim()) return;
     try {
       const updated = await getConversation(conversation.id);
       setTitleDraft(updated.title);
@@ -653,8 +762,18 @@ function ConversationThread({
       {thread.status === "error" ? (
         <div className="thread-loading thread-error" role="alert">{thread.message}</div>
       ) : null}
+      {recoveredRunId ? (
+        <div className="recovered-run" role="status">
+          <span>Audrey is still answering the previous question.</span>
+          <button type="button" onClick={() => void stopRecoveredRun()} disabled={stoppingRecovered}>
+            {stoppingRecovered ? "Stopping…" : "Stop current run"}
+          </button>
+          {recoveryError ? <span>Could not check run: {recoveryError}</span> : null}
+        </div>
+      ) : null}
       {thread.status === "ready" ? (
         <AudreyThread
+          key={threadRevision}
           conversationId={conversation.id}
           models={models}
           canBrowseDirectModels={canBrowseDirectModels}
@@ -699,7 +818,17 @@ function AudreyThread({
 }) {
   const [runError, setRunError] = useState("");
   const [activity, setActivity] = useState<RunActivity>(IDLE_ACTIVITY);
-  const [lastAttempt, setLastAttempt] = useState<LastAttempt | null>(null);
+  const restoredIncomplete = initialMessages.filter(({ role }) => role === "assistant").at(-1)?.status === "incomplete";
+  const [lastAttempt, setLastAttempt] = useState<LastAttempt | null>(() => {
+    const assistant = initialMessages.filter(({ role }) => role === "assistant").at(-1);
+    if (assistant?.status !== "incomplete" || !assistant.run_id) return null;
+    const user = [...initialMessages].reverse().find((message) =>
+      message.role === "user" && message.run_id === assistant.run_id);
+    return user ? {
+      text: user.content,
+      attachmentIds: user.attachments.map(({ id }) => id),
+    } : null;
+  });
   const [retrying, setRetrying] = useState(false);
   const [queuedRetry, setQueuedRetry] = useState<{ text: string } | null>(null);
   const dispatchedRetryRef = useRef<object | null>(null);
@@ -717,7 +846,7 @@ function AudreyThread({
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const attachmentBusy = Boolean(uploadingFile) || pendingAttachment !== null;
-  const submissionBlocked = attachmentBusy || retrying || Boolean(uploadIssue);
+  const submissionBlocked = modeDisabled || attachmentBusy || retrying || Boolean(uploadIssue);
   const selectedImageCount = selectedAttachments.filter(({ kind }) => kind === "image").length;
   const selectedModel = modelDetails(models, modelId);
   const supportsFiles = selectedModel.capabilities.includes("files");
@@ -725,6 +854,10 @@ function AudreyThread({
     () => selectedAttachments.map(({ id }) => id),
     [selectedAttachments],
   );
+  const savedSources = useMemo(() => new Map(
+    initialMessages.filter(({ role }) => role === "assistant")
+      .map(({ id, sources }) => [id, sources ?? []] as const),
+  ), [initialMessages]);
   const history = useMemo<ThreadHistoryAdapter>(
     () => ({
       load: () => Promise.resolve(
@@ -889,10 +1022,10 @@ function AudreyThread({
     setRetrying(true);
     setRunError("");
     try {
-      if (lastAttempt.attachments.length > 0 && !supportsFiles) {
+      if (lastAttempt.attachmentIds.length > 0 && !supportsFiles) {
         throw new Error("The selected model accepts text only. Choose a file-capable model to retry this question.");
       }
-      const attachments = await Promise.all(lastAttempt.attachments.map(({ id }) => getFile(id)));
+      const attachments = await Promise.all(lastAttempt.attachmentIds.map((id) => getFile(id)));
       if (attachments.some(({ status }) => status !== "ready")) {
         throw new Error("An attached file is no longer ready. Choose a ready file before sending again.");
       }
@@ -1042,6 +1175,7 @@ function AudreyThread({
   }, [pendingId, pendingStatus]);
 
   return (
+    <SavedSourcesContext.Provider value={savedSources}>
     <AssistantRuntimeProvider runtime={runtime}>
       <ThreadPrimitive.Root className="thread-root">
         <ThreadPrimitive.Viewport className="thread-viewport">
@@ -1066,9 +1200,10 @@ function AudreyThread({
               </p>
             ) : (
               <>
-                {runError ? <p className="run-error" role="alert">{runError}</p> : null}
-                {showProgress ? <RunActivityStatus activity={activity} /> : null}
-                {lastAttempt && (activity.status === "error" || runError) ? (
+                {(showProgress || activity.status === "error") ? (
+                  <RunActivityStatus activity={activity} error={runError} />
+                ) : null}
+                {lastAttempt && (restoredIncomplete || activity.status === "error" || runError) ? (
                   <button
                     className="retry-button"
                     type="button"
@@ -1200,7 +1335,7 @@ function AudreyThread({
                       return;
                     }
                     const text = composerInputRef.current?.value.trim() ?? "";
-                    if (text) setLastAttempt({ text, attachments: [...selectedAttachments] });
+                    if (text) setLastAttempt({ text, attachmentIds: selectedAttachments.map(({ id }) => id) });
                   }}
                 >
                   <ThreadPrimitive.If empty={false}>
@@ -1252,19 +1387,20 @@ function AudreyThread({
         </ThreadPrimitive.Viewport>
       </ThreadPrimitive.Root>
     </AssistantRuntimeProvider>
+    </SavedSourcesContext.Provider>
   );
 }
 
-function RunActivityStatus({ activity }: { activity: RunActivity }) {
+function RunActivityStatus({ activity, error }: { activity: RunActivity; error: string }) {
   if (activity.status === "idle") return null;
   const sourceCount = activity.sources.length;
   const sourceLabel = sourceCount === 1 ? "1 source found" : String(sourceCount) + " sources found";
   const latestSource = activity.sources.at(-1)?.title;
   return (
-    <div className="run-activity" data-status={activity.status} role="status" aria-live="polite">
+    <div className="run-activity" data-status={activity.status} role={activity.status === "error" ? "alert" : "status"} aria-live="polite">
       <span className="run-activity-dot" aria-hidden="true" />
       <strong>{activity.label}</strong>
-      {activity.detail ? <span>{activity.detail}</span> : null}
+      {error || activity.detail ? <span>{error || activity.detail}</span> : null}
       {sourceCount > 0 ? (
         <details className="run-sources">
           <summary>{sourceLabel}{latestSource ? " · " + latestSource : ""}</summary>
@@ -1309,12 +1445,28 @@ function UserMessage() {
 }
 
 function AssistantMessage() {
+  const messageId = useAuiState((state) => state.message.id);
+  const sources = useContext(SavedSourcesContext).get(messageId) ?? [];
   return (
     <MessagePrimitive.Root className="message message-assistant">
       <div className="message-label">Audrey</div>
       <MessagePrimitive.Parts
         components={{ Text: MarkdownText, tools: { Fallback: ToolActivity } }}
       />
+      {sources.length > 0 ? (
+        <details className="saved-sources">
+          <summary>{sources.length === 1 ? "1 source found" : `${sources.length} sources found`}</summary>
+          <p>Observed during this run; the answer may cite a different set.</p>
+          <ul>
+            {sources.map(({ id, title, url }) => {
+              const safeUrl = safeSourceUrl(url);
+              return <li key={id}>{safeUrl ? (
+                <a href={safeUrl} target="_blank" rel="noreferrer noopener">{title || safeUrl}</a>
+              ) : (title || "Source")}</li>;
+            })}
+          </ul>
+        </details>
+      ) : null}
     </MessagePrimitive.Root>
   );
 }
@@ -1479,13 +1631,17 @@ function MarkdownText({ text }: TextMessagePartProps) {
   );
 }
 
-function ToolActivity({ toolName, args, result, status }: ToolCallMessagePartProps) {
+function ToolActivity({ toolName, args, result, status, isError }: ToolCallMessagePartProps) {
   const finished = status.type === "complete";
+  const persistedIncomplete = stringOf(recordOf(result).status) === "incomplete";
+  const outcome = persistedIncomplete
+    ? "incomplete"
+    : !finished ? "running" : isError ? "failed" : "complete";
   return (
     <details className="tool-activity">
       <summary>
-        <span className={finished ? "tool-dot complete" : "tool-dot"} aria-hidden="true" />
-        {toolName} · {finished ? "complete" : "running"}
+        <span className={finished && !isError && !persistedIncomplete ? "tool-dot complete" : "tool-dot"} aria-hidden="true" />
+        {toolName} · {outcome}
       </summary>
       <pre>{JSON.stringify({ arguments: args, ...(result === undefined ? {} : { result }) }, null, 2)}</pre>
     </details>
@@ -1499,7 +1655,25 @@ function toThreadMessages(messages: ConversationMessage[]): ThreadMessageLike[] 
       return [{ id: message.id, role: "user", content }];
     }
     if (message.role === "assistant") {
-      return [{ id: message.id, role: "assistant", content: message.content }];
+      const toolParts = (message.tool_calls ?? []).map((toolCall) => ({
+        type: "tool-call" as const,
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        args: toolCall.arguments,
+        argsText: JSON.stringify(toolCall.arguments),
+        result: toolCall.status === "incomplete"
+          ? { status: "incomplete" }
+          : toolCall.result,
+        ...(toolCall.status === "failed" ? { isError: true } : {}),
+      }));
+      return [{
+        id: message.id,
+        role: "assistant",
+        content: [
+          ...(message.content ? [{ type: "text" as const, text: message.content }] : []),
+          ...toolParts,
+        ],
+      }];
     }
     return [];
   });

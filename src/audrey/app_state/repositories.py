@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import json
+import re
 import sqlite3
 import threading
 import uuid
 from collections.abc import Mapping, Sequence
+from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from audrey.app_state.records import (
@@ -19,7 +21,9 @@ from audrey.app_state.records import (
     FinishedRun,
     MessageRecord,
     RunRecord,
+    SourceSnapshot,
     StartedRun,
+    ToolCallSnapshot,
     UserPreferences,
 )
 from audrey.app_state.titles import fallback_conversation_title
@@ -28,6 +32,7 @@ _ALLOWED_MODES = frozenset(
     {"auto", "fast", "deep", "research", "local", "cloud", "video", "direct"}
 )
 _TERMINAL_RUN_STATUSES = frozenset({"succeeded", "cancelled", "failed"})
+_SAFE_TOOL_ERROR_CODE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
 class InvalidApplicationStateError(ValueError):
@@ -389,7 +394,12 @@ class ConversationsRepository:
     async def delete(self, *, user_id: str, conversation_id: str) -> bool:
         return await asyncio.to_thread(self._delete_sync, user_id, conversation_id)
 
-    def _delete_sync(self, user_id: str, conversation_id: str) -> bool:
+    async def delete_if_empty(self, *, user_id: str, conversation_id: str) -> bool:
+        return await asyncio.to_thread(self._delete_sync, user_id, conversation_id, True)
+
+    def _delete_sync(
+        self, user_id: str, conversation_id: str, empty_only: bool = False
+    ) -> bool:
         user_id = _required(user_id, "user id")
         conversation_id = _required(conversation_id, "conversation id")
         now = _utc_now()
@@ -400,6 +410,12 @@ class ConversationsRepository:
                     raise ConversationHasActiveRunError(
                         "conversation cannot be deleted while a run is active"
                     )
+                if empty_only and self._conn.execute(
+                    "SELECT 1 FROM app_messages WHERE user_id = ? AND conversation_id = ? LIMIT 1",
+                    (user_id, conversation_id),
+                ).fetchone() is not None:
+                    self._conn.rollback()
+                    return False
                 self._conn.execute(
                     """
                     INSERT OR IGNORE INTO app_chat_projection_deletions
@@ -719,10 +735,39 @@ class ConversationsRepository:
             by_message.setdefault(str(row["message_id"]), []).append(
                 _attachment_from_row(row)
             )
+        source_rows = self._conn.execute(
+            "SELECT message_id, source_id, title, url FROM app_message_sources "
+            "WHERE message_id IN (SELECT value FROM json_each(?)) "
+            "ORDER BY message_id, position",
+            (json.dumps(message_ids),),
+        ).fetchall()
+        sources_by_message: dict[str, list[SourceSnapshot]] = {}
+        for row in source_rows:
+            sources_by_message.setdefault(str(row["message_id"]), []).append(
+                SourceSnapshot(
+                    source_id=str(row["source_id"]),
+                    title=str(row["title"]),
+                    url=str(row["url"]),
+                )
+            )
+        tool_rows = self._conn.execute(
+            "SELECT message_id, tool_call_id, name, status, arguments_json, "
+            "result_json, error_code FROM app_message_tool_calls "
+            "WHERE message_id IN (SELECT value FROM json_each(?)) "
+            "ORDER BY message_id, position",
+            (json.dumps(message_ids),),
+        ).fetchall()
+        tools_by_message: dict[str, list[ToolCallSnapshot]] = {}
+        for row in tool_rows:
+            tools_by_message.setdefault(str(row["message_id"]), []).append(
+                _tool_call_from_row(row)
+            )
         return tuple(
             _message_from_row(
                 row,
                 attachments=tuple(by_message.get(str(row["message_id"]), ())),
+                sources=tuple(sources_by_message.get(str(row["message_id"]), ())),
+                tool_calls=tuple(tools_by_message.get(str(row["message_id"]), ())),
             )
             for row in rows
         )
@@ -740,6 +785,8 @@ class ConversationsRepository:
         concrete_model: str = "",
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
+        sources: Sequence[SourceSnapshot] = (),
+        tool_calls: Sequence[ToolCallSnapshot] = (),
     ) -> FinishedRun | None:
         """Atomically finalize assistant content and the run's sole outcome."""
 
@@ -755,6 +802,8 @@ class ConversationsRepository:
             concrete_model,
             prompt_tokens,
             completion_tokens,
+            tuple(sources),
+            tuple(tool_calls),
         )
 
     def _finish_run_sync(
@@ -769,6 +818,8 @@ class ConversationsRepository:
         concrete_model: str,
         prompt_tokens: int,
         completion_tokens: int,
+        sources: tuple[SourceSnapshot, ...],
+        tool_calls: tuple[ToolCallSnapshot, ...],
     ) -> FinishedRun | None:
         user_id = _required(user_id, "user id")
         run_id = _required(run_id, "run id")
@@ -782,6 +833,8 @@ class ConversationsRepository:
         virtual_model = _bounded_metadata(virtual_model, "virtual model")
         concrete_model = _bounded_metadata(concrete_model, "concrete model")
         assistant_content = str(assistant_content)
+        normalized_sources = _normalize_sources(sources)
+        normalized_tool_calls = _normalize_tool_calls(tool_calls)
         now = _utc_now()
         message_status = "completed" if outcome == "succeeded" else "incomplete"
 
@@ -832,6 +885,40 @@ class ConversationsRepository:
                     (user_id, run_id),
                 ).fetchone()
                 assert run_row is not None and message_row is not None
+                for position, source in enumerate(normalized_sources):
+                    self._conn.execute(
+                        "INSERT INTO app_message_sources "
+                        "(message_id, conversation_id, user_id, position, source_id, title, url) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            str(message_row["message_id"]),
+                            str(message_row["conversation_id"]),
+                            user_id,
+                            position,
+                            source.source_id,
+                            source.title,
+                            source.url,
+                        ),
+                    )
+                for position, tool_call in enumerate(normalized_tool_calls):
+                    self._conn.execute(
+                        "INSERT INTO app_message_tool_calls "
+                        "(message_id, conversation_id, user_id, position, tool_call_id, "
+                        "name, status, arguments_json, result_json, error_code) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            str(message_row["message_id"]),
+                            str(message_row["conversation_id"]),
+                            user_id,
+                            position,
+                            tool_call.tool_call_id,
+                            tool_call.name,
+                            tool_call.status,
+                            _encode_tool_json(tool_call.arguments),
+                            _encode_tool_json(tool_call.result),
+                            tool_call.error_code,
+                        ),
+                    )
                 self._insert_native_projection_locked(run_id)
                 self._conn.commit()
             except BaseException:
@@ -840,7 +927,11 @@ class ConversationsRepository:
                 raise
         return FinishedRun(
             run=_run_from_row(run_row),
-            assistant_message=_message_from_row(message_row),
+            assistant_message=_message_from_row(
+                message_row,
+                sources=normalized_sources,
+                tool_calls=normalized_tool_calls,
+            ),
         )
 
     async def recover_interrupted_runs(self) -> int:
@@ -1415,10 +1506,118 @@ def _attachment_from_row(row: sqlite3.Row) -> AttachmentSnapshot:
     )
 
 
+def _bounded_tool_json(value: object, *, object_only: bool = False) -> object:
+    try:
+        encoded = json.dumps(
+            value, default=str, ensure_ascii=False, allow_nan=False,
+            separators=(",", ":"), sort_keys=True,
+        )
+    except (TypeError, ValueError):
+        return {"_status": "details_unavailable"}
+    if len(encoded.encode("utf-8")) > 4_096:
+        return {"_status": "details_omitted"}
+    decoded = json.loads(encoded)
+    if object_only and not isinstance(decoded, dict):
+        return {"_status": "arguments_not_object"}
+    return decoded
+
+
+def _encode_tool_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def _normalize_tool_calls(
+    tool_calls: Sequence[ToolCallSnapshot],
+) -> tuple[ToolCallSnapshot, ...]:
+    result: list[ToolCallSnapshot] = []
+    seen: set[str] = set()
+    for value in tool_calls:
+        tool_call_id = str(value.tool_call_id).strip()[:200]
+        name = str(value.name).strip()[:100]
+        if not tool_call_id or not name or tool_call_id in seen:
+            continue
+        status = str(value.status).strip().lower()
+        if status not in {"succeeded", "failed", "incomplete"}:
+            status = "incomplete"
+        arguments = _bounded_tool_json(value.arguments, object_only=True)
+        assert isinstance(arguments, dict)
+        error_code = str(value.error_code).strip().lower()
+        if status == "failed":
+            if not _SAFE_TOOL_ERROR_CODE.fullmatch(error_code):
+                error_code = "tool_failed"
+            tool_result: object = {"error": "tool_failed", "status": "failed"}
+        elif status == "succeeded":
+            error_code = ""
+            tool_result = _bounded_tool_json(value.result)
+        else:
+            error_code = ""
+            tool_result = None
+        seen.add(tool_call_id)
+        result.append(ToolCallSnapshot(
+            tool_call_id=tool_call_id,
+            name=name,
+            status=status,
+            arguments=arguments,
+            result=tool_result,
+            error_code=error_code,
+        ))
+        if len(result) == 50:
+            break
+    return tuple(result)
+
+
+def _normalize_sources(sources: Sequence[SourceSnapshot]) -> tuple[SourceSnapshot, ...]:
+    """Bound and sanitize observed links before they become durable history."""
+
+    result: list[SourceSnapshot] = []
+    seen: set[str] = set()
+    for source in sources:
+        source_id = str(source.source_id).strip()[:200]
+        title = str(source.title).strip()[:300]
+        if not source_id or source_id in seen:
+            continue
+        raw_url = str(source.url).strip()
+        url = ""
+        if raw_url:
+            try:
+                parts = urlsplit(raw_url)
+                if parts.scheme.lower() in {"http", "https"} and parts.hostname:
+                    host = parts.hostname
+                    authority = f"[{host}]" if ":" in host else host
+                    if parts.port is not None:
+                        authority += f":{parts.port}"
+                    url = urlunsplit((parts.scheme.lower(), authority, parts.path, "", ""))
+            except ValueError:
+                pass
+        if not title and not url:
+            continue
+        seen.add(source_id)
+        result.append(SourceSnapshot(source_id=source_id, title=title, url=url[:2048]))
+        if len(result) == 50:
+            break
+    return tuple(result)
+
+
+def _tool_call_from_row(row: sqlite3.Row) -> ToolCallSnapshot:
+    arguments = json.loads(str(row["arguments_json"]))
+    if not isinstance(arguments, dict):
+        arguments = {"_status": "arguments_not_object"}
+    return ToolCallSnapshot(
+        tool_call_id=str(row["tool_call_id"]),
+        name=str(row["name"]),
+        status=str(row["status"]),
+        arguments=arguments,
+        result=json.loads(str(row["result_json"])),
+        error_code=str(row["error_code"]),
+    )
+
+
 def _message_from_row(
     row: sqlite3.Row,
     *,
     attachments: tuple[AttachmentSnapshot, ...] = (),
+    sources: tuple[SourceSnapshot, ...] = (),
+    tool_calls: tuple[ToolCallSnapshot, ...] = (),
 ) -> MessageRecord:
     return MessageRecord(
         message_id=str(row["message_id"]),
@@ -1432,6 +1631,8 @@ def _message_from_row(
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
         attachments=attachments,
+        sources=sources,
+        tool_calls=tool_calls,
     )
 
 
