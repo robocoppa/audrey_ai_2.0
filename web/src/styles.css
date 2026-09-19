@@ -496,10 +496,17 @@ a:focus-visible {
 
 .thread-viewport {
   position: relative;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 1rem max(1rem, calc((100% - 64rem) / 2));
   scrollbar-gutter: stable;
+}
+
+.thread-message-spacer {
+  min-height: 0;
+  flex: 1 0 0;
 }
 
 .thread-empty {
@@ -917,6 +924,7 @@ a:focus-visible {
 
 .run-activity {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.45rem;
   width: fit-content;
@@ -974,7 +982,8 @@ a:focus-visible {
   opacity: 0.55;
 }
 
-.run-sources {
+.run-sources,
+.run-tools {
   position: relative;
   min-width: 0;
   max-width: min(22rem, 55vw);
@@ -983,14 +992,16 @@ a:focus-visible {
   color: var(--accent);
 }
 
-.run-sources summary {
+.run-sources summary,
+.run-tools summary {
   overflow: hidden;
   cursor: pointer;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.run-sources ul {
+.run-sources ul,
+.run-tools ul {
   position: absolute;
   left: 0.45rem;
   bottom: calc(100% + 0.5rem);
@@ -1010,13 +1021,32 @@ a:focus-visible {
   white-space: normal;
 }
 
-.run-sources li {
+.run-sources li,
+.run-tools li {
   overflow-wrap: anywhere;
   padding: 0.3rem 0;
 }
 
-.run-sources li + li {
+.run-sources li + li,
+.run-tools li + li {
   border-top: 1px solid var(--border);
+}
+
+.run-tools li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.run-tools li span {
+  color: var(--text-soft);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.run-tools li small {
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 .run-sources a {
@@ -1024,7 +1054,11 @@ a:focus-visible {
   text-underline-offset: 0.18em;
 }
 
-.saved-sources {
+.saved-run-details {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.65rem;
   margin-top: 0.7rem;
   padding-top: 0.55rem;
   border-top: 1px solid var(--border);
@@ -1032,7 +1066,19 @@ a:focus-visible {
   font-size: 0.75rem;
 }
 
-.saved-sources summary {
+.saved-sources,
+.saved-tools {
+  position: relative;
+  min-width: 0;
+}
+
+.saved-tools {
+  padding-left: 0.65rem;
+  border-left: 1px solid var(--border);
+}
+
+.saved-sources summary,
+.saved-tools summary {
   width: fit-content;
   color: var(--accent);
   cursor: pointer;
@@ -1048,9 +1094,24 @@ a:focus-visible {
   padding-left: 1.15rem;
 }
 
-.saved-sources li {
+.saved-sources li,
+.saved-tools li {
   margin-top: 0.3rem;
   overflow-wrap: anywhere;
+}
+
+.saved-tools ul {
+  padding-left: 1.15rem;
+}
+
+.saved-tools li span {
+  color: var(--text-soft);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.saved-tools li small {
+  margin-left: 0.35rem;
+  color: var(--muted);
 }
 
 .saved-sources a {

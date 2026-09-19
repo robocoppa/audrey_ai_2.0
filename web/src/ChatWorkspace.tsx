@@ -45,6 +45,7 @@ import {
   type Conversation,
   type ConversationMessage,
   type MessageSource,
+  type MessageToolCall,
   type CurrentUser,
   type UserPreferences,
 } from "./api";
@@ -73,12 +74,19 @@ type RunActivity = {
   label: string;
   detail: string;
   sources: RunSource[];
+  tools: RunTool[];
 };
 
 type RunSource = {
   id: string;
   title: string;
   url: string;
+};
+
+type RunTool = {
+  id: string;
+  name: string;
+  status: "running" | "succeeded" | "failed" | "incomplete";
 };
 
 type LastAttempt = {
@@ -89,12 +97,14 @@ type LastAttempt = {
 type ConversationView = "active" | "archived";
 
 const SavedSourcesContext = createContext<ReadonlyMap<string, MessageSource[]>>(new Map());
+const SavedToolsContext = createContext<ReadonlyMap<string, MessageToolCall[]>>(new Map());
 
 const IDLE_ACTIVITY: RunActivity = {
   status: "idle",
   label: "Ready",
   detail: "",
   sources: [],
+  tools: [],
 };
 
 export function ChatWorkspace({
@@ -859,6 +869,10 @@ function AudreyThread({
     initialMessages.filter(({ role }) => role === "assistant")
       .map(({ id, sources }) => [id, sources ?? []] as const),
   ), [initialMessages]);
+  const savedTools = useMemo(() => new Map(
+    initialMessages.filter(({ role }) => role === "assistant")
+      .map(({ id, tool_calls: tools }) => [id, tools ?? []] as const),
+  ), [initialMessages]);
   const history = useMemo<ThreadHistoryAdapter>(
     () => ({
       load: () => Promise.resolve(
@@ -909,6 +923,7 @@ function AudreyThread({
           label: "Starting",
           detail: "Preparing Audrey's run",
           sources: [],
+          tools: [],
         });
       },
       onRunStartedEvent: () => {
@@ -957,6 +972,29 @@ function AudreyThread({
           }
         }
       },
+      onToolCallStartEvent: ({ event }) => {
+        setActivity((current) => {
+          const tool: RunTool = {
+            id: event.toolCallId,
+            name: event.toolCallName,
+            status: "running",
+          };
+          const index = current.tools.findIndex(({ id }) => id === tool.id);
+          if (index < 0) return { ...current, tools: [...current.tools, tool] };
+          const tools = [...current.tools];
+          tools[index] = tool;
+          return { ...current, tools };
+        });
+      },
+      onToolCallResultEvent: ({ event }) => {
+        const status = toolResultFailed(event.content) ? "failed" : "succeeded";
+        setActivity((current) => ({
+          ...current,
+          tools: current.tools.map((tool) => (
+            tool.id === event.toolCallId ? { ...tool, status } : tool
+          )),
+        }));
+      },
       onRunFinishedEvent: () => {
         setActiveRunId(null);
         userRequestedCancelRef.current = false;
@@ -969,6 +1007,7 @@ function AudreyThread({
           status: "complete",
           label: "Complete",
           detail: "Response finished",
+          tools: settleRunningTools(current.tools),
         }));
       },
       onRunErrorEvent: ({ event }) => {
@@ -983,6 +1022,7 @@ function AudreyThread({
           status: cancelled ? "cancelled" : "error",
           label: cancelled ? "Stopped" : "Run failed",
           detail: cancelled ? "Run cancelled" : event.message || "The response did not finish cleanly",
+          tools: settleRunningTools(current.tools),
         }));
       },
       onRunFailed: ({ error }) => {
@@ -995,6 +1035,7 @@ function AudreyThread({
           status: cancelled ? "cancelled" : "error",
           label: cancelled ? "Stopped" : "Connection failed",
           detail: cancelled ? "Run cancelled" : error.message,
+          tools: settleRunningTools(current.tools),
         }));
       },
     };
@@ -1093,7 +1134,13 @@ function AudreyThread({
     const timer = window.setTimeout(() => {
       if (dispatchedRetryRef.current === queuedRetry) return;
       dispatchedRetryRef.current = queuedRetry;
-      setActivity({ status: "running", label: "Retrying", detail: "Starting another run", sources: [] });
+      setActivity({
+        status: "running",
+        label: "Retrying",
+        detail: "Starting another run",
+        sources: [],
+        tools: [],
+      });
       try {
         runtime.thread.append(queuedRetry.text);
       } catch (reason) {
@@ -1221,7 +1268,8 @@ function AudreyThread({
 
   return (
     <SavedSourcesContext.Provider value={savedSources}>
-    <AssistantRuntimeProvider runtime={runtime}>
+      <SavedToolsContext.Provider value={savedTools}>
+        <AssistantRuntimeProvider runtime={runtime}>
       <ThreadPrimitive.Root className="thread-root">
         <ThreadPrimitive.Viewport className="thread-viewport">
           <ThreadPrimitive.Messages
@@ -1230,6 +1278,9 @@ function AudreyThread({
               AssistantMessage,
             }}
           />
+          <ThreadPrimitive.If empty={false}>
+            <div className="thread-message-spacer" aria-hidden="true" />
+          </ThreadPrimitive.If>
           <ThreadPrimitive.ViewportFooter className="composer-dock">
             <ThreadPrimitive.ScrollToBottom
               className="scroll-bottom"
@@ -1434,7 +1485,8 @@ function AudreyThread({
           </ThreadPrimitive.ViewportFooter>
         </ThreadPrimitive.Viewport>
       </ThreadPrimitive.Root>
-    </AssistantRuntimeProvider>
+        </AssistantRuntimeProvider>
+      </SavedToolsContext.Provider>
     </SavedSourcesContext.Provider>
   );
 }
@@ -1465,8 +1517,78 @@ function RunActivityStatus({ activity, error }: { activity: RunActivity; error: 
           </ul>
         </details>
       ) : null}
+      {activity.tools.length > 0 ? (
+        <ToolSummary tools={activity.tools} className="run-tools" />
+      ) : null}
     </div>
   );
+}
+
+function ToolSummary({
+  tools,
+  className,
+}: {
+  tools: readonly Pick<RunTool, "name" | "status">[];
+  className: string;
+}) {
+  const groups = summarizeTools(tools);
+  const label = tools.length === 1 ? "1 tool call" : `${tools.length} tool calls`;
+  return (
+    <details className={className}>
+      <summary>{label}</summary>
+      <ul>
+        {groups.map(({ name, count, status }) => (
+          <li key={name}>
+            <span>{name}</span>
+            <small>{count > 1 ? ` × ${count}` : ""} · {toolStatusLabel(status)}</small>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function summarizeTools(tools: readonly Pick<RunTool, "name" | "status">[]) {
+  const groups = new Map<string, { name: string; count: number; statuses: RunTool["status"][] }>();
+  for (const tool of tools) {
+    const group = groups.get(tool.name);
+    if (group) {
+      group.count += 1;
+      group.statuses.push(tool.status);
+    } else {
+      groups.set(tool.name, { name: tool.name, count: 1, statuses: [tool.status] });
+    }
+  }
+  return [...groups.values()].map(({ name, count, statuses }) => ({
+    name,
+    count,
+    status: statuses.includes("failed")
+      ? "failed" as const
+      : statuses.includes("running")
+        ? "running" as const
+        : statuses.includes("incomplete")
+          ? "incomplete" as const
+          : "succeeded" as const,
+  }));
+}
+
+function toolStatusLabel(status: RunTool["status"]): string {
+  return status === "succeeded" ? "complete" : status;
+}
+
+function toolResultFailed(content: string): boolean {
+  try {
+    const result = recordOf(JSON.parse(content));
+    return stringOf(result.status) === "failed" || stringOf(result.error) === "tool_failed";
+  } catch {
+    return false;
+  }
+}
+
+function settleRunningTools(tools: RunTool[]): RunTool[] {
+  return tools.map((tool) => tool.status === "running"
+    ? { ...tool, status: "incomplete" }
+    : tool);
 }
 
 function safeSourceUrl(raw: string): string {
@@ -1495,25 +1617,31 @@ function UserMessage() {
 function AssistantMessage() {
   const messageId = useAuiState((state) => state.message.id);
   const sources = useContext(SavedSourcesContext).get(messageId) ?? [];
+  const tools = useContext(SavedToolsContext).get(messageId) ?? [];
   return (
     <MessagePrimitive.Root className="message message-assistant">
       <div className="message-label">Audrey</div>
       <MessagePrimitive.Parts
         components={{ Text: MarkdownText, tools: { Fallback: HiddenToolActivity } }}
       />
-      {sources.length > 0 ? (
-        <details className="saved-sources">
-          <summary>{sources.length === 1 ? "1 source found" : `${sources.length} sources found`}</summary>
-          <p>Observed during this run; the answer may cite a different set.</p>
-          <ul>
-            {sources.map(({ id, title, url }) => {
-              const safeUrl = safeSourceUrl(url);
-              return <li key={id}>{safeUrl ? (
-                <a href={safeUrl} target="_blank" rel="noreferrer noopener">{title || safeUrl}</a>
-              ) : (title || "Source")}</li>;
-            })}
-          </ul>
-        </details>
+      {sources.length > 0 || tools.length > 0 ? (
+        <div className="saved-run-details">
+          {sources.length > 0 ? (
+            <details className="saved-sources">
+              <summary>{sources.length === 1 ? "1 source found" : `${sources.length} sources found`}</summary>
+              <p>Observed during this run; the answer may cite a different set.</p>
+              <ul>
+                {sources.map(({ id, title, url }) => {
+                  const safeUrl = safeSourceUrl(url);
+                  return <li key={id}>{safeUrl ? (
+                    <a href={safeUrl} target="_blank" rel="noreferrer noopener">{title || safeUrl}</a>
+                  ) : (title || "Source")}</li>;
+                })}
+              </ul>
+            </details>
+          ) : null}
+          {tools.length > 0 ? <ToolSummary tools={tools} className="saved-tools" /> : null}
+        </div>
       ) : null}
     </MessagePrimitive.Root>
   );

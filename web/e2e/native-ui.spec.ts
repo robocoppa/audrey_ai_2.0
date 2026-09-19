@@ -539,10 +539,14 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   const portraitBox = await portrait.boundingBox();
   const pickerBox = await page.getByRole("combobox", { name: "Audrey model" }).boundingBox();
   const composerBox = await page.locator(".composer").boundingBox();
+  const emptyDockBox = await page.locator(".composer-dock").boundingBox();
+  const threadViewportBox = await page.locator(".thread-viewport").boundingBox();
   const viewport = page.viewportSize();
   expect(portraitBox).not.toBeNull();
   expect(pickerBox).not.toBeNull();
   expect(composerBox).not.toBeNull();
+  expect(emptyDockBox).not.toBeNull();
+  expect(threadViewportBox).not.toBeNull();
   expect(viewport).not.toBeNull();
   expect(portraitBox?.width ?? 0).toBeGreaterThanOrEqual(200);
   expect((pickerBox?.y ?? 0) - ((portraitBox?.y ?? 0) + (portraitBox?.height ?? 0)))
@@ -584,10 +588,19 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect(assistantMessage.getByText("code", { exact: true })).toHaveJSProperty("tagName", "CODE");
   await expect(assistantMessage.getByRole("listitem")).toHaveCount(2);
   await expect(assistantMessage).not.toContainText("**answer**");
-  await expect(page.getByText("web_search · complete")).toHaveCount(0);
+  await expect(page.getByText("web_search · complete")).toBeHidden();
   await expect(page.locator(".tool-activity")).toHaveCount(0);
   const sourceSummary = page.getByText("2 sources found · Untrusted source");
+  const toolSummary = page.locator(".run-tools summary");
   await expect(sourceSummary).toBeVisible();
+  await expect(toolSummary).toHaveText("1 tool call");
+  const liveSourceSummaryBox = await sourceSummary.boundingBox();
+  const liveToolSummaryBox = await toolSummary.boundingBox();
+  expect(liveSourceSummaryBox).not.toBeNull();
+  expect(liveToolSummaryBox).not.toBeNull();
+  expect(liveToolSummaryBox?.x ?? 0)
+    .toBeGreaterThan((liveSourceSummaryBox?.x ?? 0) + (liveSourceSummaryBox?.width ?? 0));
+  expect(Math.abs((liveToolSummaryBox?.y ?? 0) - (liveSourceSummaryBox?.y ?? 0))).toBeLessThan(2);
   await sourceSummary.click();
   const sourceLink = page.getByRole("link", { name: "Official source" });
   await expect(sourceLink).toHaveAttribute("href", "https://example.org/report");
@@ -600,10 +613,18 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   expect(sourcePanelBox).not.toBeNull();
   expect(sourceSummaryBox).not.toBeNull();
   expect(sourcePanelBox?.x ?? 0).toBeGreaterThanOrEqual((sourceSummaryBox?.x ?? 0) - 1);
+  await sourceSummary.click();
+  await toolSummary.click();
+  await expect(page.locator(".run-tools li")).toContainText("web_search · complete");
   await expect(page.getByText("Complete", { exact: true })).toBeVisible();
   await expect(page.locator(".composer-model-picker")).toHaveCount(0);
   await expect(page.locator(".composer .compact-model-picker")).toBeVisible();
   await expect(page.locator(".model-description")).toHaveCount(0);
+  const populatedDockBox = await page.locator(".composer-dock").boundingBox();
+  expect(populatedDockBox).not.toBeNull();
+  expect((populatedDockBox?.y ?? 0) + (populatedDockBox?.height ?? 0))
+    .toBeGreaterThanOrEqual((threadViewportBox?.y ?? 0) + (threadViewportBox?.height ?? 0) - 18);
+  expect(populatedDockBox?.y ?? 0).toBeGreaterThan(emptyDockBox?.y ?? 0);
   expect(requestBody).toMatchObject({ threadId: CONVERSATION_ID });
   expect(requestBody?.messages).toHaveLength(1);
 
@@ -2454,13 +2475,19 @@ test("shows observed sources with the saved assistant answer after reload", asyn
   await expect(answer.getByRole("link")).toHaveCount(1);
 });
 
-test("keeps saved tool activity out of the conversation transcript", async ({ page }) => {
+test("summarizes saved tool activity without restoring transcript cards", async ({ page }) => {
   const messages = canonicalBrowserTurn().map((message) => message.role === "assistant"
     ? { ...message, tool_calls: [
       {
         id: "tool_search", name: "web_search", status: "succeeded",
         arguments: { query: "annual report" },
         result: { status: "succeeded", elapsedMs: 14, contentBytes: 120, sourceCount: 1 },
+        error_code: "",
+      },
+      {
+        id: "tool_search_again", name: "web_search", status: "succeeded",
+        arguments: { query: "quarterly report" },
+        result: { status: "succeeded", elapsedMs: 10, contentBytes: 90, sourceCount: 1 },
         error_code: "",
       },
       {
@@ -2482,10 +2509,18 @@ test("keeps saved tool activity out of the conversation transcript", async ({ pa
   const answer = page.locator(".message-assistant");
   await expect(answer.getByText("Canonical mode answer.")).toBeVisible();
   await expect(answer.locator(".tool-activity")).toHaveCount(0);
-  await expect(answer).not.toContainText("web_search");
-  await expect(answer).not.toContainText("memory_store");
-  await expect(answer).not.toContainText("web_fetch");
+  const savedToolSummary = answer.locator(".saved-tools summary");
+  await expect(savedToolSummary).toHaveText("4 tool calls");
+  await expect(answer.getByText("web_search", { exact: true })).toBeHidden();
+  await savedToolSummary.click();
+  await expect(answer.locator(".saved-tools li")).toHaveCount(3);
+  await expect(answer.locator(".saved-tools")).toContainText("web_search × 2 · complete");
+  await expect(answer.locator(".saved-tools")).toContainText("memory_store · failed");
+  await expect(answer.locator(".saved-tools")).toContainText("web_fetch · incomplete");
+  await expect(answer).not.toContainText("annual report");
+  await expect(answer).not.toContainText("quarterly report");
   await expect(answer).not.toContainText("private-memory-value");
+  await expect(answer).not.toContainText("https://example.org/report");
 });
 
 test("retries a failed attached question as a fresh owner-bound turn", async ({ page }) => {
