@@ -959,8 +959,12 @@ describe("App", () => {
 
 
 
-  it("sends only the latest user action through the same-origin transport", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+  it("sends only the latest user action and captures the server run id", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, {
+      status: 200,
+      headers: { "X-Audrey-Run-ID": "run_server_owned" },
+    }));
+    const onRunId = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     await latestActionFetch(
@@ -980,9 +984,11 @@ describe("App", () => {
         }),
       },
       ["file_notes"],
+      onRunId,
     );
 
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(onRunId).toHaveBeenCalledWith("run_server_owned");
     const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/api/agent?mode=fast");
     expect(request.credentials).toBe("same-origin");

@@ -185,6 +185,7 @@ class _LiveRun:
     events: deque[RunEvent]
     changed: asyncio.Event
     settled: asyncio.Event
+    settlement_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     task: asyncio.Task[None] | None = None
     cancel_error_code: str = "cancelled_by_user"
     answer_parts: list[str] = field(default_factory=list)
@@ -470,24 +471,6 @@ class NativeRunManager:
             sink=live.publish,
             emitter=live.emitter,
         )
-        terminal_settled = False
-
-        async def settle_terminal() -> None:
-            nonlocal terminal_settled
-            if terminal_settled:
-                return
-            try:
-                await self._persist_terminal(live)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                log.exception(
-                    "native run terminal persistence failed run_id=%s",
-                    live.started.run.run_id,
-                )
-            terminal_settled = True
-            live.settled.set()
-
         try:
             async for _frame in self._stream_factory(
                 self._app,
@@ -506,7 +489,7 @@ class NativeRunManager:
                 # reloaded browser does not keep seeing a running row while
                 # the model has visibly finished.
                 if live.emitter.is_finished:
-                    await settle_terminal()
+                    await self._settle_terminal(live)
         except asyncio.CancelledError:
             if not live.emitter.is_finished:
                 live.emitter.terminate_incomplete(
@@ -524,9 +507,28 @@ class NativeRunManager:
                 )
         finally:
             try:
-                await settle_terminal()
+                await self._settle_terminal(live)
             finally:
                 await self._retain_completed(live)
+
+    async def _settle_terminal(self, live: _LiveRun) -> None:
+        """Persist one terminal outcome without waiting for pipeline cleanup."""
+
+        if live.settled.is_set():
+            return
+        async with live.settlement_lock:
+            if live.settled.is_set():
+                return
+            try:
+                await self._persist_terminal(live)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception(
+                    "native run terminal persistence failed run_id=%s",
+                    live.started.run.run_id,
+                )
+            live.settled.set()
 
     async def _persist_terminal(self, live: _LiveRun) -> None:
         terminal = live.terminal_event
@@ -632,18 +634,19 @@ class NativeRunManager:
                 run_id=run_id,
             )
         task = live.task
-        if live.emitter.is_finished:
-            # The answer is already terminal even if pipeline cleanup is still
-            # unwinding. Wait only for its short database transaction, not for
-            # unrelated cleanup that no longer changes the answer.
-            await live.settled.wait()
-            return await self._store.conversations.get_run(
-                user_id=user_id, run_id=run_id
-            )
-        if task is not None and not task.done():
+        if not live.emitter.is_finished:
             live.cancel_error_code = "cancelled_by_user"
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            if task is not None and not task.done():
+                task.cancel()
+            # Cancellation cleanup may include provider or child-task teardown.
+            # Make the owner-visible run terminal first so Stop never waits on it.
+            if not live.emitter.is_finished:
+                live.emitter.terminate_incomplete(
+                    status="cancelled",
+                    finish_reason="cancelled",
+                    error_code=live.cancel_error_code,
+                )
+        await self._settle_terminal(live)
         return await self._store.conversations.get_run(user_id=user_id, run_id=run_id)
 
     async def stop(self) -> None:
@@ -1008,12 +1011,13 @@ async def run_agui_agent(
         request=request,
         principal=principal,
     )
+    # The manager owns the run independently of this response. A browser
+    # refresh drops the SSE connection but must not cancel the answer.
     response = await _agui_stream_response(
         run_id=created.id,
         request=request,
         principal=principal,
         cursor=AgUiCursor(source_sequence=0, part=None),
-        cancel_on_disconnect=True,
     )
     response.headers["X-Audrey-Run-ID"] = created.id
     return response
@@ -1147,7 +1151,6 @@ async def stream_run_agui_events(
         request=request,
         principal=principal,
         cursor=cursor,
-        cancel_on_disconnect=False,
     )
 
 
@@ -1157,7 +1160,6 @@ async def _agui_stream_response(
     request: Request,
     principal: Principal,
     cursor: AgUiCursor,
-    cancel_on_disconnect: bool,
 ) -> StreamingResponse:
     manager = _manager(request)
     try:
@@ -1185,31 +1187,26 @@ async def _agui_stream_response(
     _validate_agui_fanout_cursor(live=live, cursor=cursor, adapter=adapter)
 
     async def _events() -> AsyncIterator[str]:
-        try:
-            async for event in manager.iter_events(
-                live,
-                after_sequence=cursor.native_after_sequence,
-            ):
-                if event is None:
-                    yield ": keep-alive\n\n"
+        async for event in manager.iter_events(
+            live,
+            after_sequence=cursor.native_after_sequence,
+        ):
+            if event is None:
+                yield ": keep-alive\n\n"
+                continue
+            for part, agui_event in enumerate(adapter.adapt(event), start=1):
+                if cursor.consumed(source_sequence=event.sequence, part=part):
                     continue
-                for part, agui_event in enumerate(adapter.adapt(event), start=1):
-                    if cursor.consumed(source_sequence=event.sequence, part=part):
-                        continue
-                    event_cursor = format_agui_cursor(
-                        source_sequence=event.sequence,
-                        part=part,
-                    )
-                    data = json.dumps(
-                        dump_agui_event(agui_event),
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    )
-                    yield f"id: {event_cursor}\ndata: {data}\n\n"
-        except asyncio.CancelledError:
-            if cancel_on_disconnect:
-                await manager.cancel(user_id=principal.user_id, run_id=run_id)
-            raise
+                event_cursor = format_agui_cursor(
+                    source_sequence=event.sequence,
+                    part=part,
+                )
+                data = json.dumps(
+                    dump_agui_event(agui_event),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                yield f"id: {event_cursor}\ndata: {data}\n\n"
 
     return StreamingResponse(
         _events(),

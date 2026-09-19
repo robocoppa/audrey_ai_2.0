@@ -1657,7 +1657,62 @@ test("cancels an active browser run without leaving an error state", async ({ pa
   await expect.poll(
     () => page.evaluate(() => Boolean((window as Window & { __cancelObserved?: boolean }).__cancelObserved)),
   ).toBe(true);
+  await expect.poll(
+    () => page.evaluate(() => Boolean((window as Window & { __runCancelObserved?: boolean }).__runCancelObserved)),
+  ).toBe(true);
   await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+test("keeps the server-owned run alive when the browser reloads", async ({ page }) => {
+  let recovering = false;
+  await installHangingAgent(page);
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me/preferences") return json(route, browserPreferences());
+    if (url.pathname === "/api/me") return json(route, browserTester());
+    if (url.pathname === "/api/models") return json(route, { items: browserModels() });
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      return json(route, { items: [browserConversation("Reload without cancellation")], next_cursor: null });
+    }
+    if (url.pathname === "/api/conversations/" + CONVERSATION_ID + "/messages") {
+      return json(route, { items: recovering ? [
+        {
+          id: "msg_reload_owner_user", run_id: "run_hanging", sequence: 1,
+          role: "user", status: "completed", content: "Keep working through reload.",
+          created_at: "2026-09-05T00:00:00Z", updated_at: "2026-09-05T00:00:00Z",
+          attachments: [],
+        },
+        {
+          id: "msg_reload_owner_assistant", run_id: "run_hanging", sequence: 2,
+          role: "assistant", status: "in_progress", content: "",
+          created_at: "2026-09-05T00:00:01Z", updated_at: "2026-09-05T00:00:01Z",
+          attachments: [],
+        },
+      ] : [], next_cursor: null });
+    }
+    if (url.pathname === "/api/runs/run_hanging" && request.method() === "GET") {
+      return json(route, {
+        id: "run_hanging",
+        conversation_id: CONVERSATION_ID,
+        status: "running",
+      });
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+  await composer.fill("Keep working through reload.");
+  await composer.press("Enter");
+  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible();
+
+  recovering = true;
+  await page.reload();
+
+  await expect(page.getByRole("status", { name: "Audrey is answering" })
+    .locator(".recovered-run-orb")).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem("__testRunCancelObserved"))).toBeNull();
 });
 
 test("uploads an image and a document in chat, then sends both with the question", async ({ page }) => {
@@ -2971,6 +3026,18 @@ async function installHangingAgent(page: Page) {
     const originalFetch = window.fetch.bind(window);
     window.fetch = (input, init) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, location.href);
+      if (url.pathname === "/api/runs/run_hanging/cancel") {
+        (window as Window & { __runCancelObserved?: boolean }).__runCancelObserved = true;
+        sessionStorage.setItem("__testRunCancelObserved", "true");
+        return Promise.resolve(new Response(JSON.stringify({
+          id: "run_hanging",
+          conversation_id: "con_browser_test",
+          status: "cancelled",
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+      }
       if (url.pathname !== "/api/agent") return originalFetch(input, init);
 
       const encoder = new TextEncoder();
@@ -2994,7 +3061,10 @@ async function installHangingAgent(page: Page) {
       }, { once: true });
       return Promise.resolve(new Response(stream, {
         status: 200,
-        headers: { "Content-Type": "text/event-stream" },
+        headers: {
+          "Content-Type": "text/event-stream",
+          "X-Audrey-Run-ID": "run_hanging",
+        },
       }));
     };
   });

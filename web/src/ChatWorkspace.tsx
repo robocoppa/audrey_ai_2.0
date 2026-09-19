@@ -844,6 +844,8 @@ function AudreyThread({
   const [uploadIssue, setUploadIssue] = useState("");
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const userRequestedCancelRef = useRef(false);
   const attachmentBusy = Boolean(uploadingFile) || pendingAttachment !== null;
   const submissionBlocked = modeDisabled || attachmentBusy || retrying || Boolean(uploadIssue);
   const selectedImageCount = selectedAttachments.filter(({ kind }) => kind === "image").length;
@@ -873,7 +875,12 @@ function AudreyThread({
       new HttpAgent({
         url: `/api/agent?model=${encodeURIComponent(modelId)}`,
         threadId: conversationId,
-        fetch: (url, init) => latestActionFetch(url, init, attachmentIds),
+        fetch: (url, init) => latestActionFetch(
+          url,
+          init,
+          attachmentIds,
+          setActiveRunId,
+        ),
       }),
     [attachmentIds, conversationId, modelId],
   );
@@ -893,6 +900,7 @@ function AudreyThread({
   useEffect(() => {
     const subscriber: AgentSubscriber = {
       onRunInitialized: () => {
+        userRequestedCancelRef.current = false;
         onRunActiveChange(true);
         setRetrying(false);
         setRunError("");
@@ -950,6 +958,8 @@ function AudreyThread({
         }
       },
       onRunFinishedEvent: () => {
+        setActiveRunId(null);
+        userRequestedCancelRef.current = false;
         onRunActiveChange(false);
         setRetrying(false);
         setLastAttempt(null);
@@ -962,6 +972,8 @@ function AudreyThread({
         }));
       },
       onRunErrorEvent: ({ event }) => {
+        setActiveRunId(null);
+        userRequestedCancelRef.current = false;
         onRunActiveChange(false);
         setRetrying(false);
         setSelectedAttachments([]);
@@ -977,6 +989,7 @@ function AudreyThread({
         onRunActiveChange(false);
         setRetrying(false);
         const cancelled = isAbortError(error);
+        if (!cancelled) setActiveRunId(null);
         setActivity((current) => ({
           ...current,
           status: cancelled ? "cancelled" : "error",
@@ -1004,15 +1017,48 @@ function AudreyThread({
       });
     },
     onCancel: () => {
-      onRunActiveChange(false);
+      const explicitlyStopped = userRequestedCancelRef.current;
+      userRequestedCancelRef.current = false;
+      const runId = activeRunId;
       setSelectedAttachments([]);
       setRunError("");
+      if (!explicitlyStopped || !runId) {
+        onRunActiveChange(false);
+        setActivity((current) => ({
+          ...current,
+          status: "cancelled",
+          label: "Stopped",
+          detail: "Run cancelled",
+        }));
+        return;
+      }
+      onRunActiveChange(true);
       setActivity((current) => ({
         ...current,
-        status: "cancelled",
-        label: "Stopped",
-        detail: "Run cancelled",
+        status: "running",
+        label: "Stopping",
+        detail: "Finishing cancellation",
       }));
+      void cancelRun(runId).then(() => {
+        setActiveRunId(null);
+        onRunActiveChange(false);
+        setActivity((current) => ({
+          ...current,
+          status: "cancelled",
+          label: "Stopped",
+          detail: "Run cancelled",
+        }));
+      }).catch((reason) => {
+        onRunActiveChange(false);
+        const detail = messageOf(reason);
+        setRunError("Could not stop run: " + detail);
+        setActivity((current) => ({
+          ...current,
+          status: "error",
+          label: "Stop failed",
+          detail,
+        }));
+      });
     },
   });
 
@@ -1368,7 +1414,10 @@ function AudreyThread({
                     rows={1}
                   />
                   <div className="composer-actions">
-                    <ComposerPrimitive.Cancel className="cancel-button">Stop</ComposerPrimitive.Cancel>
+                    <ComposerPrimitive.Cancel
+                      className="cancel-button"
+                      onClick={() => { userRequestedCancelRef.current = true; }}
+                    >Stop</ComposerPrimitive.Cancel>
                     <ComposerPrimitive.Send
                       className="send-button"
                       aria-label="Send message"

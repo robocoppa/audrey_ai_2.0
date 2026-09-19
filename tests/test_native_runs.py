@@ -1305,6 +1305,9 @@ async def test_native_manager_persists_answer_before_post_terminal_cleanup(tmp_p
 
 async def test_native_manager_cancel_persists_partial_answer(tmp_path):
     ready = asyncio.Event()
+    cancellation_seen = asyncio.Event()
+    release_cleanup = asyncio.Event()
+    cleanup_finished = asyncio.Event()
 
     async def blocking_stream(
         _app,
@@ -1321,7 +1324,15 @@ async def test_native_manager_cancel_persists_partial_answer(tmp_path):
         emitter.message_started()
         emitter.text_delta("partial answer")
         ready.set()
-        await asyncio.Event().wait()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancellation_seen.set()
+            try:
+                await release_cleanup.wait()
+            finally:
+                cleanup_finished.set()
+            raise
         yield "unreachable"
 
     store = ApplicationStore(tmp_path / "app.sqlite")
@@ -1352,10 +1363,15 @@ async def test_native_manager_cancel_persists_partial_answer(tmp_path):
             options={},
         )
         await ready.wait()
-        cancelled = await manager.cancel(
-            user_id=owner.user_id,
-            run_id=started.run.run_id,
+        cancelled = await asyncio.wait_for(
+            manager.cancel(
+                user_id=owner.user_id,
+                run_id=started.run.run_id,
+            ),
+            timeout=0.5,
         )
+        await asyncio.wait_for(cancellation_seen.wait(), timeout=0.5)
+        assert not cleanup_finished.is_set()
         assert cancelled is not None
         assert cancelled.status == "cancelled"
         assert cancelled.error_code == "cancelled_by_user"
@@ -1383,6 +1399,7 @@ async def test_native_manager_cancel_persists_partial_answer(tmp_path):
         assert isinstance(events[-1], RunFinishedEvent)
         assert events[-1].status == "cancelled"
     finally:
+        release_cleanup.set()
         await manager.stop()
         store.close()
 

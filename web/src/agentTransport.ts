@@ -1,7 +1,8 @@
-export function latestActionFetch(
+export async function latestActionFetch(
   url: string,
   init: RequestInit,
   attachmentIds: readonly string[] = [],
+  onRunId?: (runId: string) => void,
 ): Promise<Response> {
   if (typeof init.body !== "string") {
     throw new Error("Audrey's agent request body was not JSON text.");
@@ -20,11 +21,14 @@ export function latestActionFetch(
     messages: [latestMessage],
     ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
   });
-  return fetch(url, {
+  const response = await fetch(url, {
     ...init,
     body,
     credentials: "same-origin",
   });
+  const runId = response.headers.get("X-Audrey-Run-ID")?.trim();
+  if (runId) onRunId?.(runId);
+  return response;
 }
 
 function recordOf(value: unknown): Record<string, unknown> {
