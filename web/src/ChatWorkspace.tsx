@@ -8,7 +8,6 @@ import {
   type ThreadHistoryAdapter,
   type ThreadMessageLike,
   type TextMessagePartProps,
-  type ToolCallMessagePartProps,
   useAuiState,
 } from "@assistant-ui/react";
 import { useAgUiRuntime } from "@assistant-ui/react-ag-ui";
@@ -763,8 +762,8 @@ function ConversationThread({
         <div className="thread-loading thread-error" role="alert">{thread.message}</div>
       ) : null}
       {recoveredRunId ? (
-        <div className="recovered-run" role="status">
-          <span>Audrey is still answering the previous question.</span>
+        <div className="recovered-run" role="status" aria-label="Audrey is answering">
+          <span className="recovered-run-orb" aria-hidden="true" />
           <button type="button" onClick={() => void stopRecoveredRun()} disabled={stoppingRecovered}>
             {stoppingRecovered ? "Stopping…" : "Stop current run"}
           </button>
@@ -1451,7 +1450,7 @@ function AssistantMessage() {
     <MessagePrimitive.Root className="message message-assistant">
       <div className="message-label">Audrey</div>
       <MessagePrimitive.Parts
-        components={{ Text: MarkdownText, tools: { Fallback: ToolActivity } }}
+        components={{ Text: MarkdownText, tools: { Fallback: HiddenToolActivity } }}
       />
       {sources.length > 0 ? (
         <details className="saved-sources">
@@ -1631,21 +1630,8 @@ function MarkdownText({ text }: TextMessagePartProps) {
   );
 }
 
-function ToolActivity({ toolName, args, result, status, isError }: ToolCallMessagePartProps) {
-  const finished = status.type === "complete";
-  const persistedIncomplete = stringOf(recordOf(result).status) === "incomplete";
-  const outcome = persistedIncomplete
-    ? "incomplete"
-    : !finished ? "running" : isError ? "failed" : "complete";
-  return (
-    <details className="tool-activity">
-      <summary>
-        <span className={finished && !isError && !persistedIncomplete ? "tool-dot complete" : "tool-dot"} aria-hidden="true" />
-        {toolName} · {outcome}
-      </summary>
-      <pre>{JSON.stringify({ arguments: args, ...(result === undefined ? {} : { result }) }, null, 2)}</pre>
-    </details>
-  );
+function HiddenToolActivity() {
+  return null;
 }
 
 function toThreadMessages(messages: ConversationMessage[]): ThreadMessageLike[] {
@@ -1655,24 +1641,10 @@ function toThreadMessages(messages: ConversationMessage[]): ThreadMessageLike[] 
       return [{ id: message.id, role: "user", content }];
     }
     if (message.role === "assistant") {
-      const toolParts = (message.tool_calls ?? []).map((toolCall) => ({
-        type: "tool-call" as const,
-        toolCallId: toolCall.id,
-        toolName: toolCall.name,
-        args: toolCall.arguments,
-        argsText: JSON.stringify(toolCall.arguments),
-        result: toolCall.status === "incomplete"
-          ? { status: "incomplete" }
-          : toolCall.result,
-        ...(toolCall.status === "failed" ? { isError: true } : {}),
-      }));
       return [{
         id: message.id,
         role: "assistant",
-        content: [
-          ...(message.content ? [{ type: "text" as const, text: message.content }] : []),
-          ...toolParts,
-        ],
+        content: message.content ? [{ type: "text" as const, text: message.content }] : [],
       }];
     }
     return [];

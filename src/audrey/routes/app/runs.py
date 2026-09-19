@@ -470,6 +470,24 @@ class NativeRunManager:
             sink=live.publish,
             emitter=live.emitter,
         )
+        terminal_settled = False
+
+        async def settle_terminal() -> None:
+            nonlocal terminal_settled
+            if terminal_settled:
+                return
+            try:
+                await self._persist_terminal(live)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception(
+                    "native run terminal persistence failed run_id=%s",
+                    live.started.run.run_id,
+                )
+            terminal_settled = True
+            live.settled.set()
+
         try:
             async for _frame in self._stream_factory(
                 self._app,
@@ -483,7 +501,12 @@ class NativeRunManager:
                 routing_messages=routing_messages,
                 selected_model=selected_model,
             ):
-                pass
+                # A pipeline can have post-answer cleanup after its terminal
+                # frame. Persist the canonical answer before that cleanup so a
+                # reloaded browser does not keep seeing a running row while
+                # the model has visibly finished.
+                if live.emitter.is_finished:
+                    await settle_terminal()
         except asyncio.CancelledError:
             if not live.emitter.is_finished:
                 live.emitter.terminate_incomplete(
@@ -501,14 +524,8 @@ class NativeRunManager:
                 )
         finally:
             try:
-                await self._persist_terminal(live)
-            except Exception:
-                log.exception(
-                    "native run terminal persistence failed run_id=%s",
-                    live.started.run.run_id,
-                )
+                await settle_terminal()
             finally:
-                live.settled.set()
                 await self._retain_completed(live)
 
     async def _persist_terminal(self, live: _LiveRun) -> None:
@@ -615,10 +632,17 @@ class NativeRunManager:
                 run_id=run_id,
             )
         task = live.task
-        if not live.emitter.is_finished and task is not None and not task.done():
+        if live.emitter.is_finished:
+            # The answer is already terminal even if pipeline cleanup is still
+            # unwinding. Wait only for its short database transaction, not for
+            # unrelated cleanup that no longer changes the answer.
+            await live.settled.wait()
+            return await self._store.conversations.get_run(
+                user_id=user_id, run_id=run_id
+            )
+        if task is not None and not task.done():
             live.cancel_error_code = "cancelled_by_user"
             task.cancel()
-        if task is not None and not task.done():
             await asyncio.gather(task, return_exceptions=True)
         return await self._store.conversations.get_run(user_id=user_id, run_id=run_id)
 

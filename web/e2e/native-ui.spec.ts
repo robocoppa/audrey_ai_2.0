@@ -584,7 +584,8 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect(assistantMessage.getByText("code", { exact: true })).toHaveJSProperty("tagName", "CODE");
   await expect(assistantMessage.getByRole("listitem")).toHaveCount(2);
   await expect(assistantMessage).not.toContainText("**answer**");
-  await expect(page.getByText("web_search · complete")).toBeVisible();
+  await expect(page.getByText("web_search · complete")).toHaveCount(0);
+  await expect(page.locator(".tool-activity")).toHaveCount(0);
   const sourceSummary = page.getByText("2 sources found · Untrusted source");
   await expect(sourceSummary).toBeVisible();
   await sourceSummary.click();
@@ -594,6 +595,11 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect(page.getByText("Untrusted source", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Untrusted source" })).toHaveCount(0);
   await expect(page.locator(".run-sources li")).toHaveCount(2);
+  const sourcePanelBox = await page.locator(".run-sources ul").boundingBox();
+  const sourceSummaryBox = await sourceSummary.boundingBox();
+  expect(sourcePanelBox).not.toBeNull();
+  expect(sourceSummaryBox).not.toBeNull();
+  expect(sourcePanelBox?.x ?? 0).toBeGreaterThanOrEqual((sourceSummaryBox?.x ?? 0) - 1);
   await expect(page.getByText("Complete", { exact: true })).toBeVisible();
   await expect(page.locator(".composer-model-picker")).toHaveCount(0);
   await expect(page.locator(".composer .compact-model-picker")).toBeVisible();
@@ -2393,7 +2399,7 @@ test("shows observed sources with the saved assistant answer after reload", asyn
   await expect(answer.getByRole("link")).toHaveCount(1);
 });
 
-test("restores safe tool activity with a saved assistant answer", async ({ page }) => {
+test("keeps saved tool activity out of the conversation transcript", async ({ page }) => {
   const messages = canonicalBrowserTurn().map((message) => message.role === "assistant"
     ? { ...message, tool_calls: [
       {
@@ -2420,16 +2426,10 @@ test("restores safe tool activity with a saved assistant answer", async ({ page 
   await page.goto("./");
   const answer = page.locator(".message-assistant");
   await expect(answer.getByText("Canonical mode answer.")).toBeVisible();
-  const completed = answer.locator(".tool-activity").filter({ hasText: "web_search" });
-  const failed = answer.locator(".tool-activity").filter({ hasText: "memory_store" });
-  const incomplete = answer.locator(".tool-activity").filter({ hasText: "web_fetch" });
-  await expect(completed.locator("summary")).toContainText("complete");
-  await expect(failed.locator("summary")).toContainText("failed");
-  await expect(incomplete.locator("summary")).toContainText("incomplete");
-  await completed.locator("summary").click();
-  await failed.locator("summary").click();
-  await expect(completed.locator("pre")).toContainText("annual report");
-  await expect(failed.locator("pre")).toContainText("[redacted]");
+  await expect(answer.locator(".tool-activity")).toHaveCount(0);
+  await expect(answer).not.toContainText("web_search");
+  await expect(answer).not.toContainText("memory_store");
+  await expect(answer).not.toContainText("web_fetch");
   await expect(answer).not.toContainText("private-memory-value");
 });
 
@@ -2495,6 +2495,58 @@ test("retries a failed attached question as a fresh owner-bound turn", async ({ 
   await expect(retry).toHaveCount(0);
 });
 
+test("remounts a recovered answer as soon as the durable run finishes", async ({ page }) => {
+  let status: "running" | "succeeded" = "running";
+  const userMessage = {
+    id: "msg_recovered_user", run_id: "run_recovered", sequence: 1,
+    role: "user", status: "completed", content: "Finish after reload.",
+    created_at: "2026-09-05T00:00:00Z", updated_at: "2026-09-05T00:00:00Z",
+    attachments: [],
+  };
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/me/preferences") return json(route, browserPreferences());
+    if (url.pathname === "/api/me") return json(route, browserTester());
+    if (url.pathname === "/api/models") return json(route, { items: browserModels() });
+    if (url.pathname === "/api/conversations" && request.method() === "GET") {
+      return json(route, { items: [browserConversation("Recovered answer")], next_cursor: null });
+    }
+    if (url.pathname === "/api/conversations/" + CONVERSATION_ID + "/messages") {
+      return json(route, { items: [userMessage, {
+        id: "msg_recovered_assistant", run_id: "run_recovered", sequence: 2,
+        role: "assistant", status: status === "running" ? "in_progress" : "completed",
+        content: status === "running" ? "" : "The recovered answer is now visible.",
+        created_at: "2026-09-05T00:00:01Z", updated_at: "2026-09-05T00:00:01Z",
+        attachments: [],
+      }], next_cursor: null });
+    }
+    if (url.pathname === "/api/runs/run_recovered" && request.method() === "GET") {
+      return json(route, {
+        id: "run_recovered",
+        conversation_id: CONVERSATION_ID,
+        status,
+      });
+    }
+    if (url.pathname === "/api/conversations/" + CONVERSATION_ID) {
+      return json(route, browserConversation("Recovered answer"));
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  const recoveredStatus = page.getByRole("status", { name: "Audrey is answering" });
+  await expect(recoveredStatus.locator(".recovered-run-orb")).toBeVisible();
+
+  status = "succeeded";
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+
+  await expect(page.getByText("The recovered answer is now visible.")).toBeVisible();
+  await expect(recoveredStatus).toHaveCount(0);
+  await page.getByRole("textbox", { name: "Ask Audrey" }).fill("A follow-up question");
+  await expect(page.getByRole("button", { name: "Send message" })).toBeEnabled();
+});
+
 test("recovers a reloaded active attached run and retries after stopping it", async ({ page }) => {
   const file = browserFile("file_reload", "uploaded-notes.txt", 32);
   const userMessage = {
@@ -2547,7 +2599,10 @@ test("recovers a reloaded active attached run and retries after stopping it", as
     await route.abort("failed");
   });
   await page.goto("./");
-  await expect(page.getByText("Audrey is still answering the previous question.")).toBeVisible();
+  const recoveredStatus = page.getByRole("status", { name: "Audrey is answering" });
+  await expect(recoveredStatus).toBeVisible();
+  await expect(recoveredStatus.locator(".recovered-run-orb")).toBeVisible();
+  await expect(page.getByText("Audrey is still answering the previous question.")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Retry last question" })).toHaveCount(0);
   await page.getByRole("button", { name: "Stop current run" }).click();

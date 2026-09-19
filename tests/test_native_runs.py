@@ -1221,6 +1221,88 @@ async def test_native_manager_keeps_full_answer_beyond_reconnect_window(tmp_path
         store.close()
 
 
+async def test_native_manager_persists_answer_before_post_terminal_cleanup(tmp_path):
+    terminal_emitted = asyncio.Event()
+    release_cleanup = asyncio.Event()
+    cleanup_finished = asyncio.Event()
+
+    async def slow_cleanup_stream(
+        _app,
+        _payload,
+        _messages,
+        _options,
+        *,
+        event_context,
+        **_kwargs,
+    ):
+        emitter = event_context.emitter
+        assert emitter is not None
+        emitter.run_started()
+        emitter.message_started()
+        emitter.text_delta("answer before cleanup")
+        emitter.message_finished(status="completed")
+        emitter.run_finished(status="succeeded", finish_reason="stop")
+        terminal_emitted.set()
+        yield "terminal frame"
+        try:
+            await release_cleanup.wait()
+        finally:
+            cleanup_finished.set()
+
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    owner = await _resolve(store)
+    conversation = await store.conversations.create(user_id=owner.user_id)
+    started = await store.conversations.begin_run(
+        user_id=owner.user_id,
+        conversation_id=conversation.conversation_id,
+        user_content="Finish before cleanup",
+    )
+    assert started is not None
+    manager = NativeRunManager(
+        app=SimpleNamespace(),
+        store=store,
+        stream_factory=slow_cleanup_stream,
+    )
+    payload = ChatCompletionRequest(
+        model="audrey_fast",
+        messages=[{"role": "user", "content": "Finish before cleanup"}],
+        stream=True,
+    )
+    try:
+        await manager.launch(
+            principal=owner,
+            started=started,
+            payload=payload,
+            messages=payload.model_dump()["messages"],
+            options={},
+        )
+        await terminal_emitted.wait()
+        live = await manager.open_events(
+            user_id=owner.user_id,
+            run_id=started.run.run_id,
+            after_sequence=0,
+        )
+        await asyncio.wait_for(live.settled.wait(), timeout=0.5)
+
+        persisted = await asyncio.wait_for(
+            manager.cancel(user_id=owner.user_id, run_id=started.run.run_id),
+            timeout=0.5,
+        )
+        assert persisted is not None and persisted.status == "succeeded"
+        assert not cleanup_finished.is_set()
+        messages = await store.conversations.list_messages(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+        )
+        assert messages is not None
+        assert messages[-1].status == "completed"
+        assert messages[-1].content == "answer before cleanup"
+    finally:
+        release_cleanup.set()
+        await manager.stop()
+        store.close()
+
+
 async def test_native_manager_cancel_persists_partial_answer(tmp_path):
     ready = asyncio.Event()
 
