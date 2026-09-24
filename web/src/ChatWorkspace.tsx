@@ -5,13 +5,25 @@ import {
   ExportedMessageRepository,
   MessagePrimitive,
   ThreadPrimitive,
+  type CompleteAttachment,
+  type CreateAttachment,
   type ThreadHistoryAdapter,
   type ThreadMessageLike,
   type TextMessagePartProps,
+  useAui,
   useAuiState,
 } from "@assistant-ui/react";
 import { useAgUiRuntime } from "@assistant-ui/react-ag-ui";
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  isValidElement,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -31,6 +43,7 @@ import {
   discardEmptyConversation,
   getConversation,
   getRun,
+  getFileImageUrl,
   listConversations,
   listFiles,
   getFile,
@@ -44,6 +57,7 @@ import {
   type AudreyModel,
   type Conversation,
   type ConversationMessage,
+  type MessageAttachment,
   type MessageSource,
   type MessageToolCall,
   type CurrentUser,
@@ -763,6 +777,15 @@ function ConversationThread({
           </div>
         </header>
         {mutationError ? <p className="conversation-mutation-error" role="alert">{mutationError}</p> : null}
+        {recoveredRunId ? (
+          <div className="recovered-run" role="status" aria-label="Audrey is answering">
+            <span className="recovered-run-orb" aria-hidden="true" />
+            <button type="button" onClick={() => void stopRecoveredRun()} disabled={stoppingRecovered}>
+              {stoppingRecovered ? "Stopping…" : "Stop current run"}
+            </button>
+            {recoveryError ? <span>Could not check run: {recoveryError}</span> : null}
+          </div>
+        ) : null}
       </div>
 
       {thread.status === "loading" || thread.status === "idle" ? (
@@ -770,15 +793,6 @@ function ConversationThread({
       ) : null}
       {thread.status === "error" ? (
         <div className="thread-loading thread-error" role="alert">{thread.message}</div>
-      ) : null}
-      {recoveredRunId ? (
-        <div className="recovered-run" role="status" aria-label="Audrey is answering">
-          <span className="recovered-run-orb" aria-hidden="true" />
-          <button type="button" onClick={() => void stopRecoveredRun()} disabled={stoppingRecovered}>
-            {stoppingRecovered ? "Stopping…" : "Stop current run"}
-          </button>
-          {recoveryError ? <span>Could not check run: {recoveryError}</span> : null}
-        </div>
       ) : null}
       {thread.status === "ready" ? (
         <AudreyThread
@@ -839,7 +853,10 @@ function AudreyThread({
     } : null;
   });
   const [retrying, setRetrying] = useState(false);
-  const [queuedRetry, setQueuedRetry] = useState<{ text: string } | null>(null);
+  const [queuedRetry, setQueuedRetry] = useState<{
+    text: string;
+    attachments: AudreyFile[];
+  } | null>(null);
   const dispatchedRetryRef = useRef<object | null>(null);
   const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
   const [attachmentFiles, setAttachmentFiles] = useState<AudreyFile[]>([]);
@@ -903,6 +920,7 @@ function AudreyThread({
     await onModelChange(nextModelId);
     const nextModel = modelDetails(models, nextModelId);
     if (!nextModel.capabilities.includes("files")) {
+      void runtime.thread.composer.clearAttachments();
       setAttachmentPickerOpen(false);
       setSelectedAttachments([]);
     }
@@ -1120,7 +1138,7 @@ function AudreyThread({
       }
       setSelectedAttachments(attachments);
       setUploadIssue("");
-      setQueuedRetry({ text: lastAttempt.text });
+      setQueuedRetry({ text: lastAttempt.text, attachments });
     } catch (reason) {
       setRetrying(false);
       setRunError("Could not retry: " + messageOf(reason));
@@ -1142,7 +1160,11 @@ function AudreyThread({
         tools: [],
       });
       try {
-        runtime.thread.append(queuedRetry.text);
+        runtime.thread.append({
+          role: "user",
+          content: [{ type: "text", text: queuedRetry.text }],
+          attachments: queuedRetry.attachments.map(toCompleteAttachment),
+        });
       } catch (reason) {
         setRunError("Could not retry: " + messageOf(reason));
         setActivity((current) => ({ ...current, status: "error", label: "Run failed" }));
@@ -1178,18 +1200,41 @@ function AudreyThread({
 
   function toggleAttachment(file: AudreyFile) {
     if (attachmentBusy) return;
-    setSelectedAttachments((current) => {
-      if (current.some(({ id }) => id === file.id)) {
-        return current.filter(({ id }) => id !== file.id);
-      }
-      if (current.length >= 10) return current;
-      if (
-        file.kind === "image"
-        && imageLimit !== null
-        && current.filter(({ kind }) => kind === "image").length >= imageLimit
-      ) return current;
-      return [...current, file];
-    });
+    const selected = selectedAttachments.some(({ id }) => id === file.id);
+    if (!selected && selectedAttachments.length >= 10) return;
+    if (
+      !selected
+      && file.kind === "image"
+      && imageLimit !== null
+      && selectedImageCount >= imageLimit
+    ) return;
+    void (selected ? removeComposerAttachment(file.id) : addComposerAttachment(file))
+      .then(() => {
+        setSelectedAttachments((current) => selected
+          ? current.filter(({ id }) => id !== file.id)
+          : current.some(({ id }) => id === file.id) ? current : [...current, file]);
+      })
+      .catch((reason) => setUploadIssue(
+        `Could not ${selected ? "remove" : "attach"} ${file.filename}: ${messageOf(reason)}`,
+      ));
+  }
+
+  async function addComposerAttachment(file: AudreyFile) {
+    const composer = runtime.thread.composer;
+    if (composer.getState().attachments.some(({ id }) => id === file.id)) return;
+    await composer.addAttachment(toCreateAttachment(file));
+  }
+
+  async function removeComposerAttachment(fileId: string) {
+    const composer = runtime.thread.composer;
+    const index = composer.getState().attachments.findIndex(({ id }) => id === fileId);
+    if (index >= 0) await composer.getAttachmentByIndex(index).remove();
+  }
+
+  async function selectUploadedAttachment(file: AudreyFile) {
+    await addComposerAttachment(file);
+    setSelectedAttachments((current) => current.some(({ id }) => id === file.id)
+      ? current : [...current, file]);
   }
 
   async function uploadFromChat(file: File) {
@@ -1214,7 +1259,7 @@ function AudreyThread({
           setAttachmentFiles((current) => [row, ...current]);
           return;
         }
-        setSelectedAttachments((current) => [...current, row]);
+        await selectUploadedAttachment(row);
         setAttachmentFiles((current) => [row, ...current.filter(({ id }) => id !== row.id)]);
       } else {
         setPendingAttachment(row);
@@ -1244,6 +1289,11 @@ function AudreyThread({
         const row = await getFile(fileId);
         if (!active) return;
         if (row.status === "ready") {
+          const composer = runtime.thread.composer;
+          if (!composer.getState().attachments.some(({ id }) => id === row.id)) {
+            await composer.addAttachment(toCreateAttachment(row));
+          }
+          if (!active) return;
           setSelectedAttachments((current) => current.some(({ id }) => id === row.id)
             ? current : [...current, row]);
           setAttachmentFiles((current) => [row, ...current.filter(({ id }) => id !== row.id)]);
@@ -1264,7 +1314,7 @@ function AudreyThread({
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", checkReady);
     };
-  }, [pendingId, pendingStatus]);
+  }, [pendingId, pendingStatus, runtime]);
 
   return (
     <SavedSourcesContext.Provider value={savedSources}>
@@ -1610,7 +1660,48 @@ function UserMessage() {
     <MessagePrimitive.Root className="message message-user">
       <div className="message-label">You</div>
       <MessagePrimitive.Parts components={{ Text: MarkdownText }} />
+      <MessagePrimitive.Attachments>
+        {({ attachment }) => <ChatAttachment attachment={attachment} />}
+      </MessagePrimitive.Attachments>
     </MessagePrimitive.Root>
+  );
+}
+
+function ChatAttachment({ attachment }: { attachment: CompleteAttachment }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  if (attachment.type === "image") {
+    return (
+      <figure className="chat-attachment chat-image-attachment">
+        {imageFailed ? (
+          <div
+            className="chat-image-unavailable"
+            role="img"
+            aria-label={`${attachment.name} preview unavailable`}
+          >
+            <span aria-hidden="true">◫</span>
+            <small>Preview unavailable</small>
+          </div>
+        ) : (
+          <img
+            src={getFileImageUrl(attachment.id)}
+            alt={attachment.name}
+            loading="lazy"
+            onError={() => setImageFailed(true)}
+          />
+        )}
+        <figcaption>{attachment.name}</figcaption>
+      </figure>
+    );
+  }
+  const video = attachment.contentType?.startsWith("video/") ?? false;
+  return (
+    <div className="chat-attachment chat-file-attachment" aria-label={`Attached file ${attachment.name}`}>
+      <span className="chat-file-icon" aria-hidden="true">{video ? "▶" : "▤"}</span>
+      <span>
+        <strong>{attachment.name}</strong>
+        <small>{video ? "Video" : "File"}</small>
+      </span>
+    </div>
   );
 }
 
@@ -1643,7 +1734,34 @@ function AssistantMessage() {
           {tools.length > 0 ? <ToolSummary tools={tools} className="saved-tools" /> : null}
         </div>
       ) : null}
+      <AnswerCopyAction />
     </MessagePrimitive.Root>
+  );
+}
+
+function AnswerCopyAction() {
+  const aui = useAui();
+  const hasText = useAuiState((state) =>
+    state.message.parts.some((part) => part.type === "text" && part.text.length > 0));
+  const { status, copy } = useClipboardFeedback();
+  if (!hasText) return null;
+
+  const label = status === "copied"
+    ? "Answer copied"
+    : status === "failed"
+      ? "Could not copy answer"
+      : "Copy answer";
+  return (
+    <div className="message-actions" aria-label="Message actions">
+      <button
+        type="button"
+        className="copy-action"
+        aria-label={label}
+        onClick={() => void copy(aui.message.getCopyText())}
+      >
+        {status === "copied" ? "Copied" : status === "failed" ? "Copy failed" : "Copy"}
+      </button>
+    </div>
   );
 }
 
@@ -1799,6 +1917,7 @@ function MarkdownText({ text }: TextMessagePartProps) {
               {children}
             </a>
           ),
+          pre: ({ children }) => <MarkdownCodeBlock>{children}</MarkdownCodeBlock>,
         }}
       >
         {text}
@@ -1807,15 +1926,92 @@ function MarkdownText({ text }: TextMessagePartProps) {
   );
 }
 
+function MarkdownCodeBlock({ children }: { children: ReactNode }) {
+  const { status, copy } = useClipboardFeedback();
+  const language = codeLanguage(children);
+  const code = reactNodeText(children).replace(/\n$/, "");
+  const codeDescription = language ? language + " code" : "code";
+  const label = status === "copied"
+    ? (language ? language + " " : "") + "code copied"
+    : status === "failed"
+      ? "Could not copy " + codeDescription
+      : "Copy " + codeDescription;
+  return (
+    <div className="markdown-code-block">
+      <div className="code-block-header">
+        <span>{language ?? "Code"}</span>
+        <button
+          type="button"
+          className="copy-action"
+          aria-label={label}
+          onClick={() => void copy(code)}
+        >
+          {status === "copied" ? "Copied" : status === "failed" ? "Copy failed" : "Copy"}
+        </button>
+      </div>
+      <pre>{children}</pre>
+    </div>
+  );
+}
+
+function reactNodeText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(reactNodeText).join("");
+  if (isValidElement<{ children?: ReactNode }>(node)) return reactNodeText(node.props.children);
+  return "";
+}
+
+function codeLanguage(node: ReactNode): string | null {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const language = codeLanguage(child);
+      if (language) return language;
+    }
+    return null;
+  }
+  if (!isValidElement<{ children?: ReactNode; className?: string }>(node)) return null;
+  const languageClass = node.props.className
+    ?.split(/\s+/)
+    .find((className) => className.startsWith("language-"));
+  return languageClass?.slice("language-".length) || codeLanguage(node.props.children);
+}
+
+function useClipboardFeedback() {
+  const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (resetTimer.current) clearTimeout(resetTimer.current);
+  }, []);
+
+  const copy = async (text: string) => {
+    if (resetTimer.current) clearTimeout(resetTimer.current);
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard access is unavailable.");
+      await navigator.clipboard.writeText(text);
+      setStatus("copied");
+    } catch {
+      setStatus("failed");
+    }
+    resetTimer.current = setTimeout(() => setStatus("idle"), 2_000);
+  };
+
+  return { status, copy };
+}
+
 function HiddenToolActivity() {
   return null;
 }
 
 function toThreadMessages(messages: ConversationMessage[]): ThreadMessageLike[] {
   return messages.flatMap<ThreadMessageLike>((message) => {
-    const content = messageWithAttachments(message);
     if (message.role === "user") {
-      return [{ id: message.id, role: "user", content }];
+      return [{
+        id: message.id,
+        role: "user",
+        content: message.content,
+        attachments: (message.attachments ?? []).map(toCompleteAttachment),
+      }];
     }
     if (message.role === "assistant") {
       return [{
@@ -1828,21 +2024,34 @@ function toThreadMessages(messages: ConversationMessage[]): ThreadMessageLike[] 
   });
 }
 
-function messageWithAttachments(message: ConversationMessage): string {
-  if (message.role !== "user" || !message.attachments?.length) return message.content;
-  const files = message.attachments
-    .map(({ filename }) => `📎 ${escapeMarkdown(filename)}`)
-    .join("\n");
-  return `${message.content}\n\n${files}`;
+function toCompleteAttachment(file: MessageAttachment | AudreyFile): CompleteAttachment {
+  return {
+    id: file.id,
+    type: attachmentPresentationType(file),
+    name: file.filename,
+    contentType: file.mime,
+    content: [],
+    status: { type: "complete" },
+  };
 }
 
-function escapeMarkdown(value: string): string {
-  return value
-    .replaceAll("\r", " ")
-    .replaceAll("\n", " ")
-    .replace(/([\\`*_{}[\]()<>#+\-.!|])/g, "\\$1");
+function toCreateAttachment(file: MessageAttachment | AudreyFile): CreateAttachment {
+  return {
+    id: file.id,
+    type: attachmentPresentationType(file),
+    name: file.filename,
+    contentType: file.mime,
+    // The server loads file bytes by authenticated attachment id. The runtime
+    // carries only display metadata and the minimized transport strips it.
+    content: [],
+  };
 }
 
+function attachmentPresentationType(file: MessageAttachment | AudreyFile) {
+  return file.kind === "image"
+    ? "image" as const
+    : file.kind === "video" ? "file" as const : "document" as const;
+}
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB"];

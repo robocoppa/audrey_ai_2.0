@@ -15,10 +15,15 @@ export async function latestActionFetch(
   if (latestMessage.role !== "user") {
     throw new Error("Audrey's latest browser action was not a user message.");
   }
+  const message = {
+    id: latestMessage.id,
+    role: "user",
+    content: latestMessage.content,
+  };
   const body = JSON.stringify({
     threadId: envelope.threadId,
     runId: envelope.runId,
-    messages: [latestMessage],
+    messages: [message],
     ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
   });
   const response = await fetch(url, {

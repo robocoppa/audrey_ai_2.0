@@ -1776,6 +1776,13 @@ test("uploads an image and a document in chat, then sends both with the question
     if (url.pathname === "/api/files/file_chat_image" || url.pathname === "/api/files/file_chat_notes") {
       return json(route, files.find((file) => file.id === url.pathname.slice("/api/files/".length)));
     }
+    if (url.pathname === "/api/files/file_chat_image/image") {
+      return route.fulfill({
+        status: 200,
+        contentType: "image/svg+xml",
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#3499fa"/></svg>',
+      });
+    }
     if (url.pathname === "/api/agent") {
       requestBody = request.postDataJSON() as Record<string, unknown>;
       await route.fulfill({ status: 200, contentType: "text/event-stream", body: aguiStream(canonicalBrowserEvents()) });
@@ -1801,6 +1808,11 @@ test("uploads an image and a document in chat, then sends both with the question
     threadId: CONVERSATION_ID,
     attachmentIds: ["file_chat_image", "file_chat_notes"],
   });
+  const sentMessage = page.locator(".message-user").last();
+  await expect(sentMessage.getByRole("img", { name: "diagram.png" })).toBeVisible();
+  await expect(sentMessage.getByLabel("Attached file notes.txt")).toBeVisible();
+  const sentAction = (requestBody?.messages as Array<Record<string, unknown>>)[0];
+  expect(sentAction).not.toHaveProperty("attachments");
 });
 
 test("keeps a video question drafted until the chat upload is ready", async ({ page }) => {
@@ -1869,13 +1881,22 @@ test("attaches an owner file through the minimized AG-UI request", async ({ page
       content: "Review my notes.",
       created_at: "2026-09-07T00:00:00Z",
       updated_at: "2026-09-07T00:00:00Z",
-      attachments: [{
-        id: "file_existing",
-        filename: "field-notes.txt",
-        mime: "text/plain",
-        kind: "text",
-        bytes: 42,
-      }],
+      attachments: [
+        {
+          id: "file_existing",
+          filename: "field-notes.txt",
+          mime: "text/plain",
+          kind: "text",
+          bytes: 42,
+        },
+        {
+          id: "file_saved_image",
+          filename: "saved-diagram.png",
+          mime: "image/png",
+          kind: "image",
+          bytes: 100,
+        },
+      ],
     },
     {
       id: "msg_attached_assistant",
@@ -1919,6 +1940,13 @@ test("attaches an owner file through the minimized AG-UI request", async ({ page
       });
       return;
     }
+    if (url.pathname === "/api/files/file_saved_image/image") {
+      return route.fulfill({
+        status: 200,
+        contentType: "image/svg+xml",
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450"><rect width="800" height="450" fill="#10223b"/></svg>',
+      });
+    }
     if (url.pathname === "/api/agent") {
       requestBody = request.postDataJSON() as Record<string, unknown>;
       await route.fulfill({
@@ -1936,7 +1964,9 @@ test("attaches an owner file through the minimized AG-UI request", async ({ page
   });
 
   await page.goto("./");
-  await expect(page.locator(".message-user").first()).toContainText("📎 field-notes.txt");
+  const savedQuestion = page.locator(".message-user").first();
+  await expect(savedQuestion.getByLabel("Attached file field-notes.txt")).toBeVisible();
+  await expect(savedQuestion.getByRole("img", { name: "saved-diagram.png" })).toBeVisible();
   await page.getByRole("button", { name: "Attach files" }).click();
   const picker = page.getByRole("region", { name: "Choose attachments" });
   await picker.getByRole("button", { name: /field-notes\.txt/ }).click();
@@ -2521,6 +2551,60 @@ test("summarizes saved tool activity without restoring transcript cards", async 
   await expect(answer).not.toContainText("quarterly report");
   await expect(answer).not.toContainText("private-memory-value");
   await expect(answer).not.toContainText("https://example.org/report");
+});
+
+test("copies complete answers and individual code blocks", async ({ page, context }) => {
+  const savedContent = "Saved explanation.\n\n\x60\x60\x60python\nprint(\"saved\")\n\x60\x60\x60";
+  const liveContent = "Live explanation.\n\n\x60\x60\x60javascript\nconsole.log(\"live\");\n\x60\x60\x60";
+  const messages = canonicalBrowserTurn().map((message) => message.role === "assistant"
+    ? { ...message, content: savedContent }
+    : message);
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: "http://127.0.0.1:4173",
+  });
+  await mockAudreyApi(page, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body: aguiStream([
+        { type: "RUN_STARTED", timestamp: 1, threadId: CONVERSATION_ID, runId: "run_copy" },
+        { type: "TEXT_MESSAGE_START", timestamp: 2, messageId: "msg_copy" },
+        { type: "TEXT_MESSAGE_CONTENT", timestamp: 3, messageId: "msg_copy", delta: liveContent },
+        { type: "TEXT_MESSAGE_END", timestamp: 4, messageId: "msg_copy" },
+        {
+          type: "RUN_FINISHED",
+          timestamp: 5,
+          threadId: CONVERSATION_ID,
+          runId: "run_copy",
+          outcome: { type: "success" },
+        },
+      ]),
+    });
+  }, messages);
+
+  await page.goto("./");
+  const savedAnswer = page.locator(".message-assistant").first();
+  await savedAnswer.getByRole("button", { name: "Copy answer" }).click();
+  await expect(savedAnswer.getByRole("button", { name: "Answer copied" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toContain("Saved explanation.");
+
+  await savedAnswer.getByRole("button", { name: "Copy python code" }).click();
+  await expect(savedAnswer.getByRole("button", { name: "python code copied" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe('print("saved")');
+
+  const composer = page.getByRole("textbox", { name: "Ask Audrey" });
+  await composer.fill("Show another code example");
+  await composer.press("Enter");
+  const liveAnswer = page.locator(".message-assistant").last();
+  await expect(liveAnswer.getByText("Live explanation.")).toBeVisible();
+  await liveAnswer.getByRole("button", { name: "Copy answer" }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toContain("Live explanation.");
+  await liveAnswer.getByRole("button", { name: "Copy javascript code" }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe('console.log("live");');
 });
 
 test("retries a failed attached question as a fresh owner-bound turn", async ({ page }) => {

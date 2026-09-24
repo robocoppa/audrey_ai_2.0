@@ -556,6 +556,101 @@ a:focus-visible {
   background: rgb(52 153 250 / 12%);
 }
 
+.message-user .chat-attachment {
+  margin-top: 0.7rem;
+}
+
+.chat-image-attachment {
+  width: min(24rem, 100%);
+  overflow: hidden;
+  margin-right: 0;
+  margin-bottom: 0;
+  margin-left: 0;
+  border: 1px solid var(--border);
+  border-radius: 0.72rem;
+  background: var(--surface-deep);
+}
+
+.chat-image-attachment img,
+.chat-image-unavailable {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 20rem;
+  object-fit: contain;
+  background: #081426;
+}
+
+.chat-image-unavailable {
+  display: grid;
+  min-height: 8rem;
+  place-content: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.chat-image-unavailable span {
+  font-size: 1.5rem;
+}
+
+.chat-image-attachment figcaption {
+  overflow: hidden;
+  padding: 0.45rem 0.6rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-file-attachment {
+  display: flex;
+  width: min(19rem, 100%);
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  background: var(--surface-deep);
+  line-height: 1.3;
+}
+
+.chat-file-icon {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 0.55rem;
+  background: rgb(52 153 250 / 14%);
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
+.chat-file-attachment > span:last-child {
+  min-width: 0;
+}
+
+.chat-file-attachment strong,
+.chat-file-attachment small {
+  display: block;
+}
+
+.chat-file-attachment strong {
+  overflow: hidden;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-file-attachment small {
+  margin-top: 0.15rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
 .markdown-content > :first-child {
   margin-top: 0;
 }
@@ -636,6 +731,35 @@ a:focus-visible {
   box-shadow: var(--shadow-sm);
 }
 
+.markdown-code-block {
+  overflow: hidden;
+  margin: 0.75rem 0;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: #081426;
+  box-shadow: var(--shadow-sm);
+}
+
+.code-block-header {
+  display: flex;
+  min-height: 2.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.35rem 0.55rem 0.35rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.68rem;
+}
+
+.markdown-content .markdown-code-block pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
 .markdown-content pre code {
   padding: 0;
   background: transparent;
@@ -695,6 +819,29 @@ a:focus-visible {
 
 .message-user .message-label {
   color: #79bfff;
+}
+
+.message-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.45rem;
+}
+
+.copy-action {
+  min-width: 3.65rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.2;
+}
+
+.copy-action:hover {
+  border-color: var(--border);
+  background: var(--surface-active);
+  color: var(--text-soft);
 }
 
 .message-error {

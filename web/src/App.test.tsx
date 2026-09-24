@@ -977,7 +977,12 @@ describe("App", () => {
           messages: [
             { id: "prior-user", role: "user", content: "Prior question" },
             { id: "prior-assistant", role: "assistant", content: "Prior answer" },
-            { id: "latest-user", role: "user", content: "Hello natively" },
+            {
+              id: "latest-user",
+              role: "user",
+              content: "Hello natively",
+              attachments: [{ id: "file_notes", name: "notes.txt" }],
+            },
           ],
           state: { browserOwned: false },
           tools: [{ name: "browser_tool" }],
@@ -1002,6 +1007,7 @@ describe("App", () => {
     expect(body.messages[0]).toEqual(
       expect.objectContaining({ role: "user", content: "Hello natively" }),
     );
+    expect(body.messages[0]).not.toHaveProperty("attachments");
     expect(body.attachmentIds).toEqual(["file_notes"]);
     expect(body).not.toHaveProperty("state");
     expect(body).not.toHaveProperty("tools");
