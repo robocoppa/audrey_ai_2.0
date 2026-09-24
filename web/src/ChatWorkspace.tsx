@@ -870,6 +870,8 @@ function AudreyThread({
   const [pendingAttachment, setPendingAttachment] = useState<AudreyFile | null>(null);
   const [uploadIssue, setUploadIssue] = useState("");
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const attachmentPickerRef = useRef<HTMLElement>(null);
+  const attachButtonRef = useRef<HTMLButtonElement>(null);
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const userRequestedCancelRef = useRef(false);
@@ -890,6 +892,29 @@ function AudreyThread({
     initialMessages.filter(({ role }) => role === "assistant")
       .map(({ id, tool_calls: tools }) => [id, tools ?? []] as const),
   ), [initialMessages]);
+  useEffect(() => {
+    if (!attachmentPickerOpen) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (
+        attachmentPickerRef.current?.contains(target)
+        || attachButtonRef.current?.contains(target)
+      ) return;
+      setAttachmentPickerOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setAttachmentPickerOpen(false);
+      attachButtonRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [attachmentPickerOpen]);
   const history = useMemo<ThreadHistoryAdapter>(
     () => ({
       load: () => Promise.resolve(
@@ -1413,13 +1438,32 @@ function AudreyThread({
                   </div>
                 ) : null}
                 {attachmentPickerOpen ? (
-                  <section className="attachment-picker" aria-label="Choose attachments">
+                  <section
+                    ref={attachmentPickerRef}
+                    className="attachment-picker"
+                    aria-label="Choose attachments"
+                  >
                     <header>
-                      <strong>Attach your files</strong>
-                      <span>
-                        {selectedAttachments.length}/10 files
-                        {imageLimit === null ? "" : " · " + selectedImageCount + "/" + imageLimit + " images"}
-                      </span>
+                      <div>
+                        <strong>Attach your files</strong>
+                        <span>
+                          {selectedAttachments.length}/10 files
+                          {imageLimit === null ? "" : " · " + selectedImageCount + "/" + imageLimit + " images"}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="attachment-picker-close"
+                        aria-label="Hide attachment picker"
+                        onClick={() => {
+                          setAttachmentPickerOpen(false);
+                          attachButtonRef.current?.focus();
+                        }}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="m6.5 9 5.5 5.5L17.5 9" />
+                        </svg>
+                      </button>
                     </header>
                     <div className="attachment-upload">
                       <button
@@ -1495,6 +1539,7 @@ function AudreyThread({
                     />
                   </ThreadPrimitive.If>
                   <button
+                    ref={attachButtonRef}
                     className="attach-button"
                     type="button"
                     onClick={() => void toggleAttachmentPicker()}

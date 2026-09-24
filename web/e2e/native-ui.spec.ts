@@ -1736,6 +1736,26 @@ test("keeps the server-owned run alive when the browser reloads", async ({ page 
   expect(await page.evaluate(() => sessionStorage.getItem("__testRunCancelObserved"))).toBeNull();
 });
 
+test("closes the attachment picker with its arrow and an outside click", async ({ page }) => {
+  await mockAudreyApi(page);
+  await page.route("**/api/files**", (route) => json(route, browserFileListing([])));
+  await page.goto("./");
+
+  const attachButton = page.getByRole("button", { name: "Attach files" });
+  const picker = page.getByRole("region", { name: "Choose attachments" });
+  await attachButton.click();
+  await expect(picker).toBeVisible();
+  await picker.getByRole("button", { name: "Hide attachment picker" }).click();
+  await expect(picker).toHaveCount(0);
+  await expect(attachButton).toHaveAttribute("aria-expanded", "false");
+
+  await attachButton.click();
+  await expect(picker).toBeVisible();
+  await page.getByRole("heading", { name: "Browser smoke" }).click();
+  await expect(picker).toHaveCount(0);
+  await expect(attachButton).toHaveAttribute("aria-expanded", "false");
+});
+
 test("uploads an image and a document in chat, then sends both with the question", async ({ page }) => {
   const files: Array<Record<string, unknown>> = [];
   let uploads = 0;
