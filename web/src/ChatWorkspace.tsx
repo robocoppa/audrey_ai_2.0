@@ -780,8 +780,12 @@ function ConversationThread({
         {recoveredRunId ? (
           <div className="recovered-run" role="status" aria-label="Audrey is answering">
             <span className="recovered-run-orb" aria-hidden="true" />
+            <div className="recovered-run-copy">
+              <strong>Audrey is thinking</strong>
+              <span>Your answer will appear here when it is ready.</span>
+            </div>
             <button type="button" onClick={() => void stopRecoveredRun()} disabled={stoppingRecovered}>
-              {stoppingRecovered ? "Stopping…" : "Stop current run"}
+              {stoppingRecovered ? "Stopping…" : "Stop run"}
             </button>
             {recoveryError ? <span>Could not check run: {recoveryError}</span> : null}
           </div>
@@ -805,6 +809,7 @@ function ConversationThread({
           initialMessages={thread.messages}
           readOnly={archived}
           modeDisabled={runActive || mutation !== null}
+          recoveredRunActive={recoveredRunId !== null}
           onModelChange={changeModel}
           onRunActiveChange={setRunActive}
           onRunStarted={() => void refreshAutomaticTitle()}
@@ -823,6 +828,7 @@ function AudreyThread({
   initialMessages,
   readOnly,
   modeDisabled,
+  recoveredRunActive,
   onModelChange,
   onRunActiveChange,
   onRunStarted,
@@ -835,6 +841,7 @@ function AudreyThread({
   initialMessages: ConversationMessage[];
   readOnly: boolean;
   modeDisabled: boolean;
+  recoveredRunActive: boolean;
   onModelChange: (modelId: string) => Promise<void>;
   onRunActiveChange: (active: boolean) => void;
   onRunStarted: () => void;
@@ -1560,10 +1567,12 @@ function AudreyThread({
                     rows={1}
                   />
                   <div className="composer-actions">
-                    <ComposerPrimitive.Cancel
-                      className="cancel-button"
-                      onClick={() => { userRequestedCancelRef.current = true; }}
-                    >Stop</ComposerPrimitive.Cancel>
+                    {!recoveredRunActive ? (
+                      <ComposerPrimitive.Cancel
+                        className="cancel-button"
+                        onClick={() => { userRequestedCancelRef.current = true; }}
+                      >Stop</ComposerPrimitive.Cancel>
+                    ) : null}
                     <ComposerPrimitive.Send
                       className="send-button"
                       aria-label="Send message"

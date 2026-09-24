@@ -2,10 +2,12 @@
 
 Accepts `Authorization: Bearer <credential>` and, when explicitly enabled,
 Cloudflare Access's `Cf-Access-Jwt-Assertion` header. Audrey personal tokens
-use an `aud_pat_` discriminator and resolve locally; other bearers are proxied
-to the Open WebUI session endpoint (`GET /api/v1/auths/`, trailing slash
-load-bearing — OWUI 0.9.2 specifically). External providers prove identity
-while Audrey owns the stable user id, role, and private-storage namespace.
+use an `aud_pat_` discriminator and resolve locally. During the migration,
+other bearers may be proxied to the Open WebUI session endpoint
+(`GET /api/v1/auths/`, trailing slash load-bearing — OWUI 0.9.2 specifically).
+`OWUI_AUTH_ENABLED=0` removes that runtime dependency and rejects those
+bearers locally. External providers prove identity while Audrey owns the
+stable user id, role, and private-storage namespace.
 
 Flow:
     browser --Bearer <jwt>--> cloudflared --same-origin--> audrey
@@ -331,6 +333,12 @@ async def require_user(
 
     if token.startswith(_PERSONAL_TOKEN_PREFIX):
         return await _resolve_personal_token(request, token)
+
+    if not getattr(request.app.state.cfg.env, "owui_auth_enabled", True):
+        raise HTTPException(
+            status_code=401,
+            detail="Open WebUI bearer authentication is disabled.",
+        )
 
     now = time.monotonic()
     cached = _cache.get(token)

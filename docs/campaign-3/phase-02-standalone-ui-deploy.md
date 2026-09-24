@@ -18,6 +18,14 @@ reaches Audrey through the explicit
 external network `ollama-net`. No Access JWT or API key belongs in the UI
 container environment.
 
+## Deferred Phase 2E regression gate
+
+The standalone UI and public Cloudflare route are already live. The combined
+browser regression below remains owed. The user explicitly authorized Slice
+2F.1 before completing it, but the gate must still close before broader 2F
+dependency removal. Keep the embedded backend shell, Open WebUI, temporary
+network alias, and rollback container until that normal-use soak closes.
+
 ## Rename the backend and build the private origin
 
 From the Unraid Audrey checkout:
@@ -140,6 +148,98 @@ domain unchanged. Then use an allowed browser identity to verify:
 4. A small file uploads, can be attached to a turn, and can be removed.
 5. Profile and preference changes still persist.
 6. A second allowed identity cannot see the first identity's conversation.
+
+The current Phase 2E browser regression also verifies:
+
+1. An untouched blank conversation disappears when another new conversation
+   opens.
+2. The composer is centered before the first message and docked at the bottom
+   afterward, including short conversations.
+3. New image previews and document/video cards appear immediately and survive
+   hard refresh.
+4. Ordinary startup says `Loading`; the post-login Access callback says
+   `Authenticating with Cloudflare`.
+5. Hard refresh during an attached-file run does not cancel it; one centered
+   recovery panel shows its larger orb, thinking text, and Stop run control, and
+   the durable answer mounts when the run completes.
+6. Explicit Stop settles promptly, exposes Retry, and Retry preserves the
+   original validated attachments.
+7. Research shows one source disclosure and one grouped tool disclosure without
+   individual tool cards; both open into the chat instead of behind the sidebar.
+8. Full-answer and fenced-code Copy controls work before and after refresh.
+9. The attachment picker closes from its arrow, an outside click, and Escape
+   without clearing already selected files.
+
+Record each failure with the conversation id, run id when available, and whether
+the behavior changed after refresh. Do not advance to Milestone 2F until this
+regression and the normal-use soak pass.
+
+The user explicitly deferred that gate on 2026-09-24 and authorized the first
+bounded 2F slice. The regression remains owed; it was not reclassified as
+passed.
+
+## Cut over Open WebUI bearer authentication
+
+Slice 2F.1 keeps a one-setting rollback while removing Open WebUI from Audrey's
+runtime authentication path. First confirm `.env.smoke.local` contains a fresh
+`AUDREY_SMOKE_USER_ACCESS_JWT` plus a distinct
+`AUDREY_SMOKE_ADMIN_ACCESS_JWT` for the companion native UI smoke. The focused
+cutover smoke itself uses the user assertion and refuses legacy OWUI credentials
+by design.
+
+In the Audrey deployment's `.env`, set:
+
+```text
+OWUI_AUTH_ENABLED=0
+```
+
+Recreate Audrey and read the effective startup state:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build --force-recreate audrey
+docker compose logs --since=5m audrey
+```
+
+The logs must contain `auth: Open WebUI bearer adapter disabled`. Load the
+private smoke environment, then run the cutover smoke through the standalone
+proxy:
+
+```bash
+set -a
+source .env.smoke.local
+set +a
+AUDREY_SMOKE_BASE_URL=http://127.0.0.1:8090 .venv/bin/python scripts/smoke_native_auth_cutover.py
+```
+
+Success ends with `"status": "passed"`, reports
+`"legacy_bearer_rejected_locally": true`, and has no `cleanup_error`.
+
+For the actual independence proof, stop Open WebUI temporarily and repeat the
+focused smoke plus the existing native UI smoke:
+
+```bash
+docker stop open-webui
+AUDREY_SMOKE_BASE_URL=http://127.0.0.1:8090 .venv/bin/python scripts/smoke_native_auth_cutover.py
+AUDREY_SMOKE_BASE_URL=http://127.0.0.1:8090 .venv/bin/python scripts/smoke_native_ui.py
+docker start open-webui
+```
+
+Run each command separately and always restart Open WebUI before investigating
+a failed smoke. While it is stopped, also open the public Audrey URL, start one
+native Fast turn, refresh it, open Files and Settings, and confirm Admin remains
+available to the administrator. This proves browser authentication,
+conversations, files, preferences, and administration do not fall through to
+OWUI. The focused script separately proves a scoped Audrey token still reaches
+the native account resource and protected `/v1/files`.
+
+Starting the Open WebUI container does not make it a functional Audrey client
+while the adapter remains disabled. Until evals and every other compatibility
+client have moved to Audrey personal tokens, finish this bounded proof by
+setting `OWUI_AUTH_ENABLED=1` in `.env`, recreating Audrey, and confirming the
+startup log reports the adapter enabled. No data migration or identity rewrite
+is involved. Once those consumers have migrated, the later permanent cutover
+keeps the flag disabled and stops Open WebUI instead.
 
 ## Rollback
 

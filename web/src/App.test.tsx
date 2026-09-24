@@ -47,9 +47,9 @@ describe("App", () => {
 
     render(<App />);
 
-    const loader = screen.getByRole("status", { name: "Loading Audrey" });
+    const loader = screen.getByRole("status", { name: "Loading" });
     expect(loader).toHaveClass("audrey-loader-fullscreen");
-    expect(loader).toHaveTextContent("Loading...");
+    expect(loader).toHaveTextContent("Loading");
     expect(loader.querySelector(".audrey-loading-orbit")).toBeInTheDocument();
     expect(loader.querySelector("img")).toHaveAttribute(
       "src",
@@ -256,10 +256,9 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(screen.getByRole("status", { name: "Finishing secure sign-in" })).toHaveTextContent(
-      "Finishing your secure sign-in",
+    expect(screen.getByRole("status", { name: "Authenticating with Cloudflare" })).toHaveTextContent(
+      "Authenticating with Cloudflare",
     );
-    expect(screen.getByText(/Cloudflare Access is confirming this browser\./u)).toBeInTheDocument();
     expect(screen.queryByRole("banner")).not.toBeInTheDocument();
 
     const identity = await screen.findByLabelText(
@@ -317,7 +316,7 @@ describe("App", () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
     expect(identityReads).toBe(7);
-    expect(screen.getByRole("status", { name: "Finishing secure sign-in" })).toBeVisible();
+    expect(screen.getByRole("status", { name: "Authenticating with Cloudflare" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Retry session" })).not.toBeInTheDocument();
 
     await act(async () => {

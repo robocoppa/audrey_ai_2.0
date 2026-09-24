@@ -2,7 +2,7 @@ import autoPortrait from "./assets/models/audrey2.png";
 
 export function AudreyLoader({
   fullscreen = false,
-  label = "Loading Audrey",
+  label = "Loading",
   showPortrait = true,
   message,
   detail,
@@ -27,7 +27,7 @@ export function AudreyLoader({
               <img src={autoPortrait} alt="" />
             </div>
             {!message ? (
-              <span className="audrey-loading-label" aria-hidden="true">Loading...</span>
+              <span className="audrey-loading-label" aria-hidden="true">Loading</span>
             ) : null}
           </div>
         ) : null}

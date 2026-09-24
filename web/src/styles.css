@@ -1016,52 +1016,84 @@ a:focus-visible {
 }
 
 .recovered-run {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.8rem 1rem 0.3rem;
+  display: grid;
+  width: min(24rem, calc(100% - 2rem));
+  justify-items: center;
+  gap: 0.8rem;
+  margin: clamp(1.25rem, 4vh, 2.5rem) auto;
+  padding: clamp(1.5rem, 4vw, 2rem);
+  border: 1px solid rgb(99 181 255 / 18%);
+  border-radius: 1.15rem;
+  background:
+    radial-gradient(circle at 50% 32%, rgb(52 153 250 / 13%), transparent 8rem),
+    rgb(15 28 49 / 72%);
   color: var(--text-soft);
-  font-size: 0.8rem;
+  text-align: center;
+  box-shadow: 0 1.25rem 3.5rem rgb(0 0 0 / 22%);
 }
 
 .recovered-run-orb {
   position: relative;
-  width: 1.55rem;
-  height: 1.55rem;
-  flex: 0 0 auto;
+  width: 4rem;
+  height: 4rem;
+  margin: 0.3rem 0 0.2rem;
   border: 1px solid rgb(99 181 255 / 28%);
   border-radius: 50%;
   box-shadow:
-    0 0 0.8rem rgb(52 153 250 / 28%),
-    inset 0 0 0.65rem rgb(52 153 250 / 10%);
-  filter: drop-shadow(0 0 0.35rem rgb(52 153 250 / 30%));
+    0 0 1.5rem rgb(52 153 250 / 30%),
+    inset 0 0 1.15rem rgb(52 153 250 / 12%);
+  filter: drop-shadow(0 0 0.65rem rgb(52 153 250 / 34%));
   animation: audrey-loading-orbit 2.4s linear infinite;
 }
 
 .recovered-run-orb::after {
   position: absolute;
-  top: -0.18rem;
+  top: -0.28rem;
   left: 50%;
-  width: 0.42rem;
-  height: 0.42rem;
+  width: 0.72rem;
+  height: 0.72rem;
   transform: translateX(-50%);
   border-radius: 50%;
   background: #b9ddff;
   box-shadow:
-    0 0 0.45rem rgb(185 221 255 / 92%),
-    0 0 0.9rem rgb(52 153 250 / 72%);
+    0 0 0.65rem rgb(185 221 255 / 92%),
+    0 0 1.35rem rgb(52 153 250 / 76%);
   content: "";
 }
 
-.recovered-run button {
-  padding: 0.35rem 0.65rem;
-  border: 1px solid var(--border-strong);
-  border-radius: 0.5rem;
-  background: var(--surface-deep);
+.recovered-run-copy {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.recovered-run-copy strong {
   color: var(--text);
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.recovered-run-copy span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.recovered-run button {
+  min-width: 6.5rem;
+  margin-top: 0.1rem;
+  padding: 0.48rem 0.85rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-deep);
+  color: var(--text-soft);
+  font-size: 0.76rem;
   cursor: pointer;
+}
+
+.recovered-run button:hover {
+  background: var(--surface-active);
+  color: var(--text);
 }
 
 .recovered-run button:disabled {

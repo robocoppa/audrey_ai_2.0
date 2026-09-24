@@ -1,17 +1,20 @@
 # Campaign 3 Phase 2 — Audrey application and web UI
 
 **Status:** In progress. Milestones 2A and 2B are complete and
-Unraid-verified, including provider-neutral identity, canonical application
-state, native conversation/run resources, typed and AG-UI events, real
-pipeline observations, and rebuildable canonical archive projection.
-Milestone 2C's native client and public route are live, with the broader browser
-and soak gate still open. Milestone 2D slices 2D.1–2D.4 are Unraid-verified;
-slice 2D.5 account administration and model publication is laptop-complete and
-awaits its Unraid gate.
-The no-landing startup corrective is user-verified; its
-loader-transition and Research/Video artwork follow-up awaits redeployment.
-The second-user Access handoff and isolated timeout controls also await
-redeployment.
+Unraid-verified. Slices 2C.1–2C.3 and 2D.1–2D.4 are also Unraid-verified, and
+the standalone browser client is the live public route. Slice 2D.5 is deployed;
+its administration, role, model-publication, exact-owner bootstrap, and
+provider-binding soak remains open.
+
+The Milestone 2E parity build is laptop-complete. Native memory and
+files, video ingestion and inspection, source and tool summaries, image and
+direct chat attachments, durable run recovery, empty-draft cleanup, attachment
+presentation, answer and code copying, attachment-picker dismissal, and
+contextual startup and recovered-run presentation are all implemented. The
+user deferred the combined live regression gate and normal-use native/OWUI
+soak, then explicitly authorized Milestone 2F to begin. Slice 2F.1's
+rollback-safe Open WebUI authentication cutover is laptop-complete; its live
+stop-OWUI gate remains open.
 
 ## Goal
 
@@ -1089,6 +1092,36 @@ and derived stores, including interrupted cleanup and restart.
 - Compare answer, tool, source, image, history, and mode behavior.
 - Publish deployment, backup, rollback, and recovery instructions.
 
+The current parity implementation covers the user-facing paths required for
+normal native use: memory settings; uploaded file and video lifecycle; document,
+image, and video inspection; owner-bound image input; direct chat uploads;
+restored attachment previews and file cards; research source and grouped tool
+summaries; and complete-answer plus fenced-code copying. The composer stays
+centered before the first message and docks to the viewport after a conversation
+starts. The attachment picker closes from its arrow, an outside click, or Escape
+without clearing selected files.
+
+Run ownership now remains server-side when a browser stream disconnects.
+Hard refresh reconnects to the durable run without issuing cancellation;
+explicit Stop persists cancellation and the partial answer before provider
+cleanup; retry reuses validated owner attachments; and natural completion
+persists before the browser remounts canonical messages. Empty drafts are
+discarded instead of becoming history rows. Individual tool cards remain hidden
+while compact source and grouped-tool disclosures survive refresh. Ordinary
+startup displays only `Loading`; the Cloudflare callback displays
+`Authenticating with Cloudflare`. A reloaded active run presents one centered,
+well-spaced recovery panel with a larger activity orb, thinking copy, and the
+sole visible Stop action.
+
+The laptop gate currently passes all 2,865 backend tests, 25 Vitest contracts,
+and 40 production-preview Chromium workflows. TypeScript, scoped lint with two
+pre-existing hook warnings, the production build, and diff checks are clean.
+Live checks have already confirmed empty-draft cleanup, attached stop/retry, and
+saved source/tool durability. The latest run-ownership corrective, restored
+attachment presentation, copy controls, picker dismissal, the two-account
+Uploads boundary, and the broader native/OWUI soak remain in the combined live
+gate.
+
 The preview-first Audrey Settings export importer remains available but dormant;
 it is not a deployment or parity gate. Its optional operator procedure is in
 `phase-02-history-import.md`.
@@ -1116,6 +1149,32 @@ period without returning to OWUI for a missing core capability.
 
 Gate: stopping OWUI has no effect on native authentication, conversations,
 files, memory, tools, or administration; rollback and restore work on Unraid.
+
+Slice 2F.1 introduces the explicit runtime authentication cutover. The
+rollback-compatible default keeps Open WebUI bearer validation enabled;
+`OWUI_AUTH_ENABLED=0` makes every non-Audrey bearer fail locally before cache
+lookup or network access. Cloudflare Access assertions retain strict precedence,
+and Audrey personal tokens continue to resolve locally with the existing
+`account:read` and `compat:full` scope boundaries. The setting is startup-bound,
+so both cutover and rollback require recreating Audrey, and the effective state
+is named in the startup log.
+
+`scripts/smoke_native_auth_cutover.py` packages the focused live gate. It
+requires a real Cloudflare Access application assertion, proves a random legacy
+bearer receives the cutover-specific local `401`, creates a disposable one-day
+Audrey token with both scopes, verifies the same account through `/api/me` and
+the protected compatibility file listing through `/v1/files`, revokes the token, and confirms
+revocation immediately. Its failure path attempts token cleanup without
+printing either credential. The deployment gate runs this smoke and the native
+UI smoke while Open WebUI is temporarily stopped. Until eval and other
+compatibility clients have migrated to Audrey tokens, the bounded proof ends by
+restoring the adapter flag and restarting the functional rollback client.
+
+Laptop status: all 2,869 backend tests and 70 focused authentication/smoke
+contracts pass. Scoped ruff and Python compilation are clean. The lesson-link
+scan reports zero broken links; its existing 99 hard and 162 advisory drifts
+remain deferred. The 2E live regression is still owed and is not reclassified
+as passed by starting this slice.
 
 ## Verification and operations
 

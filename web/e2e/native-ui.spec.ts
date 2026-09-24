@@ -37,11 +37,11 @@ test("centers Audrey Auto with a glowing orbit and loading label", async ({ page
 
   await page.goto("./", { waitUntil: "domcontentloaded" });
 
-  const loader = page.getByRole("status", { name: "Loading Audrey" });
+  const loader = page.getByRole("status", { name: "Loading" });
   const portrait = loader.locator("img");
   const orbit = loader.locator(".audrey-loading-orbit");
   await expect(loader).toBeVisible();
-  await expect(loader).toHaveText("Loading...");
+  await expect(loader).toHaveText("Loading");
   await expect(portrait).toBeVisible();
   await expect.poll(
     () => portrait.evaluate((image) => (image as HTMLImageElement).naturalWidth),
@@ -117,9 +117,8 @@ test("holds through multiple transient Access bootstrap rejections", async ({ pa
 
   await page.goto("./?__cf_access_message=logged_out&kept=yes#chat");
 
-  const handoff = page.getByRole("status", { name: "Finishing secure sign-in" });
-  await expect(handoff).toContainText("Finishing your secure sign-in");
-  await expect(handoff).toContainText("Cloudflare Access is confirming this browser.");
+  const handoff = page.getByRole("status", { name: "Authenticating with Cloudflare" });
+  await expect(handoff).toHaveText("Authenticating with Cloudflare");
   await expect(page.locator(".topbar")).toHaveCount(0);
   await expect(page.getByText("A quieter place to think.")).toHaveCount(0);
 
@@ -1731,8 +1730,21 @@ test("keeps the server-owned run alive when the browser reloads", async ({ page 
   recovering = true;
   await page.reload();
 
-  await expect(page.getByRole("status", { name: "Audrey is answering" })
-    .locator(".recovered-run-orb")).toBeVisible();
+  const recoveredStatus = page.getByRole("status", { name: "Audrey is answering" });
+  await expect(recoveredStatus.locator(".recovered-run-orb")).toBeVisible();
+  await expect(recoveredStatus).toContainText("Audrey is thinking");
+  await expect(recoveredStatus.getByRole("button", { name: "Stop run" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Stop/u })).toHaveCount(1);
+  const recoveredBox = await recoveredStatus.boundingBox();
+  const recoveredOrbBox = await recoveredStatus.locator(".recovered-run-orb").boundingBox();
+  expect(recoveredBox).not.toBeNull();
+  expect(recoveredOrbBox).not.toBeNull();
+  expect(recoveredOrbBox?.width ?? 0).toBeGreaterThanOrEqual(60);
+  expect(Math.abs(
+    (recoveredOrbBox?.x ?? 0) + (recoveredOrbBox?.width ?? 0) / 2
+      - ((recoveredBox?.x ?? 0) + (recoveredBox?.width ?? 0) / 2),
+  )).toBeLessThan(2);
+  expect((recoveredOrbBox?.y ?? 0) - (recoveredBox?.y ?? 0)).toBeGreaterThan(20);
   expect(await page.evaluate(() => sessionStorage.getItem("__testRunCancelObserved"))).toBeNull();
 });
 
@@ -2799,7 +2811,7 @@ test("recovers a reloaded active attached run and retries after stopping it", as
   await expect(page.getByText("Audrey is still answering the previous question.")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Send message" })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Retry last question" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Stop current run" }).click();
+  await page.getByRole("button", { name: "Stop run" }).click();
   const retry = page.getByRole("button", { name: "Retry last question" });
   await expect(retry).toBeVisible();
   await retry.click();

@@ -157,9 +157,8 @@ export function App() {
       return (
         <AudreyLoader
           fullscreen
-          label="Finishing secure sign-in"
-          message="Finishing your secure sign-in"
-          detail="Cloudflare Access is confirming this browser. Audrey will open automatically."
+          label="Authenticating with Cloudflare"
+          message="Authenticating with Cloudflare"
         />
       );
     }

@@ -16,6 +16,7 @@ import pytest
 from scripts.smoke_native_auth import SmokeCredentials
 
 _SCRIPTS = (
+    "smoke_native_auth_cutover",
     "smoke_native_ui",
     "smoke_native_files",
     "smoke_native_chat_projection",
@@ -24,6 +25,7 @@ _SCRIPTS = (
     "smoke_native_tool_events",
     "smoke_native_modes",
 )
+_STREAMING_SCRIPTS = frozenset(_SCRIPTS) - {"smoke_native_auth_cutover"}
 
 
 def test_access_assertions_take_precedence_and_secrets_stay_out_of_repr(monkeypatch):
@@ -83,7 +85,7 @@ class _Response:
 
 
 @pytest.mark.parametrize("module_name", _SCRIPTS)
-def test_every_native_smoke_uses_access_for_rest_and_stream(
+def test_every_native_smoke_uses_access_for_requests(
     monkeypatch,
     module_name,
 ):
@@ -112,8 +114,9 @@ def test_every_native_smoke_uses_access_for_rest_and_stream(
     assert "authorization" not in headers(seen[1])
     assert headers(seen[2])["authorization"] == "Bearer pat-one-time"
     assert "cf-access-jwt-assertion" not in headers(seen[2])
-    source = inspect.getsource(smoke)
-    assert "**_auth_headers(USER_TOKEN)" in source or "**_auth_headers(token)" in source
+    if module_name in _STREAMING_SCRIPTS:
+        source = inspect.getsource(smoke)
+        assert "**_auth_headers(USER_TOKEN)" in source or "**_auth_headers(token)" in source
 
 
 def test_direct_script_execution_still_resolves_helper(tmp_path):
@@ -137,3 +140,26 @@ def test_direct_script_execution_still_resolves_helper(tmp_path):
     )
     assert result.returncode == 2
     assert "AUDREY_SMOKE_USER_ACCESS_JWT" in result.stderr
+
+
+def test_cutover_smoke_refuses_legacy_owui_credentials():
+    env = os.environ.copy()
+    env.pop("AUDREY_SMOKE_USER_ACCESS_JWT", None)
+    env.pop("AUDREY_SMOKE_ADMIN_ACCESS_JWT", None)
+    env["TEST_OWUI_TOKEN"] = "legacy-user-secret"  # noqa: S105 - fake test value
+    env["ADMIN_OWUI_TOKEN"] = "legacy-admin-secret"  # noqa: S105 - fake test value
+    root = Path(__file__).resolve().parent.parent
+
+    result = subprocess.run(
+        [sys.executable, str(root / "scripts" / "smoke_native_auth_cutover.py")],
+        cwd=root,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert "AUDREY_SMOKE_USER_ACCESS_JWT" in result.stderr
+    assert "legacy-user-secret" not in result.stderr
+    assert "legacy-admin-secret" not in result.stderr

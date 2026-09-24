@@ -98,6 +98,7 @@ def _isolate_cache():
 def _fake_request(
     owui_url: str = "http://open-webui:8080",
     *,
+    owui_auth_enabled: bool = True,
     application_store=None,
     cloudflare_access_verifier=None,
     path: str = "/v1/chat/completions",
@@ -106,7 +107,12 @@ def _fake_request(
     # is the OWUI base URL. Build the smallest object graph that exposes
     # that attribute path.
     state = SimpleNamespace(
-        cfg=SimpleNamespace(env=SimpleNamespace(owui_url=owui_url)),
+        cfg=SimpleNamespace(
+            env=SimpleNamespace(
+                owui_auth_enabled=owui_auth_enabled,
+                owui_url=owui_url,
+            )
+        ),
         cloudflare_access_verifier=cloudflare_access_verifier,
     )
     if application_store is not None:
@@ -272,6 +278,23 @@ async def test_require_user_empty_bearer_raises_401(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         await require_user(_fake_request(), authorization="Bearer ")
     assert exc.value.status_code == 401
+
+
+async def test_disabled_owui_auth_rejects_unknown_bearer_without_network(monkeypatch):
+    def _unexpected_owui(*args, **kwargs):
+        raise AssertionError("disabled OWUI authentication must not make a network request")
+
+    monkeypatch.setattr(auth_module.httpx, "AsyncClient", _unexpected_owui)
+
+    with pytest.raises(HTTPException) as exc:
+        await require_user(
+            _fake_request(owui_auth_enabled=False),
+            authorization="Bearer former-owui-token",
+        )
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Open WebUI bearer authentication is disabled."
+    assert auth_module.cache_size() == 0
 
 
 # ─── require_user happy path + cache ───────────────────────────────────
@@ -522,6 +545,7 @@ async def test_cloudflare_header_creates_provider_neutral_principal_without_owui
     try:
         me = await require_account_user(
             _fake_request(
+                owui_auth_enabled=False,
                 application_store=store,
                 cloudflare_access_verifier=verifier,
             ),
@@ -713,7 +737,10 @@ async def test_personal_token_auth_is_local_and_uses_storage_namespace(
     monkeypatch.setattr(auth_module.httpx, "AsyncClient", _unexpected_owui)
     try:
         me = await require_user(
-            _fake_request(application_store=store),
+            _fake_request(
+                owui_auth_enabled=False,
+                application_store=store,
+            ),
             authorization=f"Bearer {token}",
         )
     finally:

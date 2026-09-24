@@ -1,6 +1,6 @@
-# Phase 2E: native smoke credentials
+# Phase 2E–2F: native smoke credentials
 
-Seven existing native smoke scripts can now authenticate without
+Eight native smoke scripts can now authenticate without
 Open WebUI. Supply two **different approved accounts**: a disposable ordinary
 user and an Audrey administrator. Each credential must be the short-lived
 Cloudflare Access **application** JWT for Audrey's hostname, not a service
@@ -28,5 +28,12 @@ state and perform cleanup, so use only a disposable account. Success means a
 zero exit, JSON evidence, and no `cleanup_error`. Browser sign-in and the
 Cloudflare handoff remain a separate manual gate; replaying a valid JWT to the
 origin does not prove the browser login path.
+
+The eighth script, `scripts/smoke_native_auth_cutover.py`, is the focused 2F.1
+gate and deliberately refuses the legacy OWUI fallback. It needs the user
+Access assertion, creates and revokes one disposable Audrey personal token, and
+proves unknown legacy bearers are rejected locally. Run it after setting
+`OWUI_AUTH_ENABLED=0` and recreating Audrey, including once while Open WebUI is
+temporarily stopped.
 
 The historical chat-export importer is optional and is not part of this gate.

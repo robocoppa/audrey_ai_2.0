@@ -92,6 +92,10 @@ async def lifespan(app: FastAPI):
     else:
         log.info("auth: Cloudflare Access disabled")
     log.info(
+        "auth: Open WebUI bearer adapter %s",
+        "enabled" if cfg.env.owui_auth_enabled else "disabled",
+    )
+    log.info(
         "native_ui: %s route=/",
         "enabled" if cfg.env.native_ui_enabled else "disabled",
     )
