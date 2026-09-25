@@ -8,7 +8,7 @@
 # The harness's ONLY third-party dependency is httpx; everything else is stdlib
 # (its .env loader is hand-rolled — no python-dotenv). So this image is tiny.
 #
-# NO SECRET IS BAKED IN. The OWUI `sk-…` key is passed at run time via a
+# NO SECRET IS BAKED IN. The Audrey `aud_pat_…` token is passed at run time via a
 # locked-down --env-file (never -e, never COPY'd). Build + run recipe and the
 # full security rationale ("only I can use it") live in the phase-27 doc.
 #

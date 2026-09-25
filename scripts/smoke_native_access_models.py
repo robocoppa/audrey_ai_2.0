@@ -376,9 +376,9 @@ def main() -> int:
         if "users" not in original_user.get("groups", []):
             raise SmokeError("the ordinary smoke account must belong to users")
         if "admins" in original_user.get("groups", []):
-            raise SmokeError("TEST_OWUI_TOKEN must belong to a non-admin account")
+            raise SmokeError("the user smoke credential must belong to a non-admin account")
         if "admins" not in admin_record.get("groups", []):
-            raise SmokeError("ADMIN_OWUI_TOKEN does not resolve to an Audrey admin")
+            raise SmokeError("the admin smoke credential does not resolve to an Audrey admin")
         if original_model.get("kind") != "direct":
             raise SmokeError(f"{DIRECT_MODEL_ID} is not a direct model")
         if not isinstance(original_model.get("policy_overridden"), bool):

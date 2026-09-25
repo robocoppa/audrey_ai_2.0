@@ -297,6 +297,25 @@ async def test_disabled_owui_auth_rejects_unknown_bearer_without_network(monkeyp
     assert auth_module.cache_size() == 0
 
 
+# ─── require_user fail-closed defaults ─────────────────────────────────
+
+
+async def test_missing_owui_auth_setting_defaults_to_disabled(monkeypatch):
+    def _unexpected_owui(*args, **kwargs):
+        raise AssertionError("missing setting must not enable a network adapter")
+
+    monkeypatch.setattr(auth_module.httpx, "AsyncClient", _unexpected_owui)
+    request = _fake_request()
+    delattr(request.app.state.cfg.env, "owui_auth_enabled")
+
+    with pytest.raises(HTTPException) as exc:
+        await require_user(request, authorization="Bearer former-owui-token")
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Open WebUI bearer authentication is disabled."
+    assert auth_module.cache_size() == 0
+
+
 # ─── require_user happy path + cache ───────────────────────────────────
 
 

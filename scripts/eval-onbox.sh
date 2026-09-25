@@ -14,7 +14,7 @@
 #   - leaves the answers file in the mounted testing-out dir.
 #
 # Secrets are SOURCED at runtime, never baked in:
-#   - the OWUI key from the eval env-file (EVAL_ENV below),
+#   - the Audrey PAT from the eval env-file (EVAL_ENV below),
 #   - the Telegram token/chat-id from the fleet-watchdog hub .env (WATCHDOG_ENV).
 #
 # USAGE (on the box):
@@ -60,7 +60,7 @@ set -uo pipefail
 APPDATA="${APPDATA:-/mnt/user/appdata/audrey_ai_2.0}"
 IMAGE="${IMAGE:-audrey-eval:latest}"
 NETWORK="${NETWORK:-ollama-net}"
-EVAL_ENV="${EVAL_ENV:-${APPDATA}/eval.env}"                 # OWUI base-url + sk- key
+EVAL_ENV="${EVAL_ENV:-${APPDATA}/eval.env}"                 # Audrey /v1 base + PAT
 WATCHDOG_ENV="${WATCHDOG_ENV:-/mnt/user/appdata/fleet-watchdog/.env}"  # Telegram creds
 OUT_DIR="${OUT_DIR:-${APPDATA}/testing-out}"
 CONTAINER="${CONTAINER:-audrey-eval}"
@@ -109,24 +109,12 @@ if [[ -n "${MODELS}" ]]; then
 fi
 
 # THINK selects the passthrough thinking arm for this run: on | off | default.
-# ⚠️ It also SWITCHES THE BASE URL to Audrey direct, because it has to. `think`
-# is Audrey's vendor field on /v1/chat/completions and Open WebUI — which
-# `eval.env` points at, and which every historical run went through — builds
-# its own upstream payload and drops unknown body fields. The harness refuses
-# (exit 2) rather than record an arm it did not actually send, so setting THINK
-# without this would simply fail. The eval container is on `ollama-net`
-# alongside `audrey`, and the `sk-` OWUI key authenticates against Audrey
-# (verified 2026-08-19: /v1/models → 200), so direct is reachable here even
-# though Audrey's :8000 is not published to the LAN.
-#
-# ⚠️⚠️ **A DIRECT RUN IS NOT COMPARABLE TO AN OWUI RUN.** OWUI can add a system
-# prompt, its own sampling params and retrieval context; going direct removes
-# all of that. Cleaner for comparing MODELS, and a different baseline — so run
-# a whole comparison one way or the other, never half and half.
+# `eval.env` already targets Audrey directly; the harness refuses an OWUI URL
+# when this vendor field is requested so the recorded arm cannot be a lie.
 #   THINK=on CASES=eval_prompts_models_ab.json MODELS='...' scripts/eval-onbox.sh
 THINK_ARGS=()
 if [[ -n "${THINK:-}" ]]; then
-  THINK_ARGS=(--think "${THINK}" --base-url "${DIRECT_URL:-http://audrey:8000/v1}")
+  THINK_ARGS=(--think "${THINK}")
 fi
 
 # ARGS forwards extra harness flags verbatim. Added 2026-08-12: without it
@@ -147,7 +135,7 @@ fi
 # your own terminal — but the readiness gate below can fire after a 180s wait,
 # on a run you launched with `nohup … &` and walked away from. On 2026-08-18
 # that produced the worst possible outcome: no eval, no ping, and no signal at
-# all until the models were noticed missing from OWUI by hand.
+# all until the failed run was noticed by hand.
 # ▶ So a setup failure notifies too, matching `probe-onbox.sh`, which has always
 # reported exit 2 as "❌ setup error — nothing probed".
 notify_setup_failure() {
@@ -180,12 +168,10 @@ mkdir -p "${OUT_DIR}"; chmod 700 "${OUT_DIR}"
 # ⚠️ The STAMP step above does NOT cover this. `docker exec … date` succeeds the
 # instant the container starts, which is why the run was stamped 14:50:32 and
 # still had nothing to talk to.
-# Both containers are gated, for different reasons: `audrey` is what was late
-# here, and `open-webui` is what the harness actually talks to — an
-# `allowed_models` change requires bouncing it, so it is routinely restarted
-# moments before a run.
+# Native evals depend only on Audrey. Open WebUI is deliberately not part of
+# this readiness gate.
 READY_TIMEOUT="${READY_TIMEOUT:-180}"
-READY_CONTAINERS="${READY_CONTAINERS:-audrey open-webui}"
+READY_CONTAINERS="${READY_CONTAINERS:-audrey}"
 
 wait_ready() {
   local name="$1" deadline=$(( SECONDS + READY_TIMEOUT )) state health
@@ -197,9 +183,7 @@ wait_ready() {
     state="$(docker inspect -f '{{.State.Status}}' "${name}" 2>/dev/null || echo missing)"
     # ⚠️ `.State.Health` is ABSENT unless the image declares a HEALTHCHECK, and
     # the template prints an empty string rather than failing — so an empty
-    # health field means "no healthcheck", not "unhealthy". open-webui may or
-    # may not declare one depending on how it was recreated on the Unraid UI,
-    # so running is all that can be required of it.
+    # health field means "no healthcheck", not "unhealthy".
     health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "${name}" 2>/dev/null || true)"
     if [[ "${state}" == "running" && ( -z "${health}" || "${health}" == "healthy" ) ]]; then
       echo ">> ready   : ${name} (${health:-no healthcheck})"

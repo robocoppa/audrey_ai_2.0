@@ -1,5 +1,9 @@
 # Phase 27 — Run the live eval ON THE BOX (laptop-internet-independent)
 
+> Authentication details below are historical. Campaign 3 slice 2F.2 moved
+> evals to Audrey's direct `/v1` endpoint with an `aud_pat_…` token. Use
+> `docs/testing/README.md` for the current setup.
+
 One small, additive deploy: package the existing eval harness
 (`scripts/eval_research.py`) into a standalone container that runs **on the box's
 Docker network**, so a long protocol run no longer dies when the laptop's

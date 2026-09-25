@@ -43,12 +43,11 @@ class EnvOverrides(BaseSettings):
     # `kb.dataset_paths` wins when KB_DATASET_PATHS is unset.
     kb_dataset_paths: str | None = Field(default=None, alias="KB_DATASET_PATHS")
 
-    # Transitional Open WebUI authentication. Keep the rollback-compatible
-    # default until browser and automation credentials have migrated, then set
-    # OWUI_AUTH_ENABLED=0 so unknown bearers fail locally without contacting
-    # Open WebUI. `owui_url` remains available to the explicit roster-import
-    # command even after runtime authentication is disabled.
-    owui_auth_enabled: bool = Field(default=True, alias="OWUI_AUTH_ENABLED")
+    # Open WebUI authentication is a dormant compatibility adapter. Native
+    # Cloudflare sessions and Audrey PATs are the product paths, so unknown
+    # bearers fail locally unless an operator explicitly opts back in.
+    # `owui_url` remains available to the roster-import command.
+    owui_auth_enabled: bool = Field(default=False, alias="OWUI_AUTH_ENABLED")
     owui_url: str = Field(default="http://open-webui:8080", alias="OWUI_URL")
 
     # The same Open WebUI, addressed the way a BROWSER can reach it — which is

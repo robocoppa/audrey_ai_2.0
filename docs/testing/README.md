@@ -71,14 +71,14 @@ You need two things; the harness refuses to start without them.
 
    ```text
    # .env.test.local  (repo root)
-   AUDREY_EVAL_BASE_URL=http://192.168.1.11:8080/api   # OWUI host:port + /api
-   AUDREY_EVAL_API_KEY=sk-...                          # OWUI API key
+   AUDREY_EVAL_BASE_URL=http://192.168.1.11:8000/v1   # WARP → Audrey
+   AUDREY_EVAL_API_KEY=aud_pat_...                     # compat:full token
    ```
 
-   Mint the `sk-…` key in OWUI → Settings → Account → API Keys. (Why OWUI and
-   not Audrey directly: Audrey's API needs an OWUI-validated bearer token, so
-   the script hits OWUI's OpenAI-compatible API and OWUI forwards to Audrey with
-   the session JWT — the repeatable path. Full rationale in the script docstring.)
+   Create the token in native Audrey Settings → Personal access tokens with the
+   `compat:full` scope. Use `http://100.113.157.98:8000/v1` instead while
+   connected through Tailscale. The harness rejects mismatched legacy
+   credentials before it starts a long run.
 
 You must also be **on the LAN/VPN** to reach the box — these run against the
 live stack, never from off-network and never from inside a container.
@@ -157,9 +157,9 @@ latency is the model itself.
 **Prerequisite (once per model set):** the concrete model name must be in
 `passthrough.allowed_models` in `config.yaml` — the registry text-pool models
 are already listed. After editing, redeploy on the box
-(`docker compose up -d --force-recreate audrey-ai` — config-only, no rebuild)
-and confirm the new `audrey_passthrough/<name>` ids show up in OWUI's model
-list.
+(`docker compose up -d --force-recreate audrey` — config-only, no rebuild)
+and confirm the new `audrey_passthrough/<name>` ids appear in the direct
+`/v1/models` response.
 
 **Run a sweep** (`--models` runs every case once per model, grouped by model so
 local models don't thrash GPU loads; ` [<model>]` is auto-suffixed onto case

@@ -5,7 +5,7 @@ to tell running-vs-stalled. Two environments:
 
 - **Laptop** (this repo, `.venv`) — hermetic harnesses, no box needed.
 - **Box** (`root@Tower`, `/mnt/user/appdata/audrey_ai_2.0`) — anything that hits the
-  live stack (`audrey-ai:8000`, the KB, the research pipeline). The box has its own
+  live stack (`audrey:8000`, the KB, the research pipeline). The box has its own
   git checkout; `git pull` there first, and note newly-pulled scripts are NOT inside
   a running container until it's rebuilt (mount them into a throwaway instead).
 
@@ -43,7 +43,7 @@ cat testing-out/last-research-run.log                                    # launc
 - Normal: a case shows no new output for 1–4 min (it's grinding stages).
 - Stalled: one case frozen >6–7 min (past the 360s `deep_worker` timeout), OR the
   container vanished with no answers file.
-- Backend check: `docker run --rm --network ollama-net curlimages/curl:latest -s -o /dev/null -w "%{http_code}\n" http://audrey-ai:8000/health` → want `200`.
+- Backend check: `docker run --rm --network ollama-net curlimages/curl:latest -s -o /dev/null -w "%{http_code}\n" http://audrey:8000/health` → want `200`.
 
 **Output:** `testing-out/<stamp>-<LABEL>-onbox-answers.md` (+ `-results.json`).
 
@@ -66,12 +66,12 @@ distributions + the safe-floor window (for tuning `kb.min_score`). Fast: 22 quer
 each capped at 30s, healthy run <2 min.
 
 The script isn't inside the running container, so mount the host scripts dir into a
-throwaway on `ollama-net` (has httpx, resolves `audrey-ai`):
+throwaway on `ollama-net` (has httpx, resolves `audrey`):
 ```bash
 docker run --rm --network ollama-net \
   -v /mnt/user/appdata/audrey_ai_2.0/scripts:/s \
   audrey-custom-tools \
-  python3 /s/kb_score_probe.py --base-url http://audrey-ai:8000
+  python3 /s/kb_score_probe.py --base-url http://audrey:8000
 # machine-readable:  … python3 /s/kb_score_probe.py --save-json /s/../testing-out/kb-scores.json
 ```
 Args: `--base-url --queries --top-k --timeout --save-json`. Query set:
@@ -79,7 +79,7 @@ Args: `--base-url --queries --top-k --timeout --save-json`. Query set:
 
 **Running vs stalled:** prints one line per query as each completes. No query blocks
 >30s (per-query timeout). No new line for >30s = stalled; else just slow. If it looks
-frozen, health-check `audrey-ai:8000/health` — a down backend times out every query.
+frozen, health-check `audrey:8000/health` — a down backend times out every query.
 
 ---
 
@@ -116,10 +116,10 @@ All of these run to completion in seconds and print a result; there's no
 ## The one universal stall check
 
 Anything that hits the box's live stack (research eval, KB probe) ultimately depends
-on `audrey-ai` being up. When in doubt:
+on `audrey` being up. When in doubt:
 ```bash
 docker run --rm --network ollama-net curlimages/curl:latest \
-  -s -o /dev/null -w "%{http_code}\n" http://audrey-ai:8000/health
+  -s -o /dev/null -w "%{http_code}\n" http://audrey:8000/health
 ```
 `200` → backend fine, the harness is just working. Anything else → the stack is down
 and every call is timing out, which *looks* like a stall but is a backend outage.

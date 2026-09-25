@@ -11,9 +11,10 @@
 # the paired <date>-<mode>-report.md by hand — see docs/testing/README.md).
 #
 # PREREQUISITES (same as the harness — see docs/testing/README.md):
-#   - You are on the LAN/VPN and can reach the box (default 192.168.1.11:8080).
-#   - .env.test.local exists at the repo root with AUDREY_EVAL_BASE_URL and
-#     AUDREY_EVAL_API_KEY (the harness auto-loads it). This script does a
+#   - You are on WARP or Tailscale and can reach Audrey directly on :8000/v1.
+#   - .env.test.local exists at the repo root with AUDREY_EVAL_BASE_URL and an
+#     Audrey PAT carrying `compat:full` as AUDREY_EVAL_API_KEY. The harness
+#     auto-loads it. This script does a
 #     preflight check and refuses to start if it's missing.
 #   - .venv exists (.venv/bin/python). Run from the repo root.
 #

@@ -95,11 +95,18 @@ def _stub_owui(monkeypatch, email: str, role: str = "user"):
     monkeypatch.setattr(auth_module.httpx, "AsyncClient", lambda *a, **k: _FakeClient(resp))
 
 
-def _fake_request(service_token: str = SECRET, owui_url: str = "http://owui"):
+def _fake_request(
+    service_token: str = SECRET,
+    owui_url: str = "http://owui",
+    *,
+    owui_auth_enabled: bool = False,
+):
     return SimpleNamespace(
         app=SimpleNamespace(state=SimpleNamespace(
             cfg=SimpleNamespace(env=SimpleNamespace(
-                kb_service_token=service_token, owui_url=owui_url,
+                owui_url=owui_url,
+                owui_auth_enabled=owui_auth_enabled,
+                kb_service_token=service_token,
             )),
         )),
     )
@@ -129,7 +136,9 @@ async def test_resolve_bad_service_token_falls_through_to_bearer_401():
 async def test_resolve_user_bearer_yields_user_caller(monkeypatch):
     _stub_owui(monkeypatch, email="alice@example.com")
     caller = await resolve_kb_caller(
-        _fake_request(), x_audrey_service_token=None, authorization="Bearer tok",
+        _fake_request(owui_auth_enabled=True),
+        x_audrey_service_token=None,
+        authorization="Bearer tok",
     )
     assert caller == KBCaller(email="alice@example.com", is_service=False)
 

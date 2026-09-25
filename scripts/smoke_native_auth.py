@@ -1,8 +1,7 @@
 """Credentials for live native smoke scripts during the OWUI cutover.
 
-Cloudflare Access assertions take precedence. Legacy OWUI bearer tokens remain
-an explicit fallback while the old client is still deployed. Never print the
-tokens: the application JWT is an account credential, not a service token.
+All native smokes require Cloudflare Access application assertions. Never print
+the tokens: an application JWT is an account credential, not a service token.
 """
 
 from __future__ import annotations
@@ -23,8 +22,8 @@ class SmokeCredentials:
         user_access_jwt = os.getenv("AUDREY_SMOKE_USER_ACCESS_JWT", "").strip()
         admin_access_jwt = os.getenv("AUDREY_SMOKE_ADMIN_ACCESS_JWT", "").strip()
         credentials = cls(
-            user=user_access_jwt or os.getenv("TEST_OWUI_TOKEN", "").strip(),
-            admin=admin_access_jwt or os.getenv("ADMIN_OWUI_TOKEN", "").strip(),
+            user=user_access_jwt,
+            admin=admin_access_jwt,
             user_access=bool(user_access_jwt),
             admin_access=bool(admin_access_jwt),
         )
@@ -49,8 +48,7 @@ class SmokeCredentials:
 
 MISSING_CREDENTIALS = (
     "Set distinct user/admin credentials with AUDREY_SMOKE_USER_ACCESS_JWT "
-    "and AUDREY_SMOKE_ADMIN_ACCESS_JWT (or legacy TEST_OWUI_TOKEN and "
-    "ADMIN_OWUI_TOKEN)."
+    "and AUDREY_SMOKE_ADMIN_ACCESS_JWT."
 )
 
 

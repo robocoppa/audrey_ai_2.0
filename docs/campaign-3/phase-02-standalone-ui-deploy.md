@@ -8,8 +8,8 @@ identity, authorization, conversations, runs, files, and preferences.
 
 Keep `AUDREY_NATIVE_UI_ENABLED=1` during this first deployment. The backend's
 embedded shell is the rollback target until the standalone container has passed
-the smoke, browser checks, and a normal-use soak. Do not remove Open WebUI or
-change the Access application during this gate.
+the smoke, browser checks, and a normal-use soak. Open WebUI is no longer a
+rollback target and remains stopped after the 2F.2 native cutover.
 
 The host-network `cloudflared` instance reaches the new UI through
 `http://127.0.0.1:8090`; host port 8088 remains assigned to SearXNG. The UI
@@ -18,13 +18,13 @@ reaches Audrey through the explicit
 external network `ollama-net`. No Access JWT or API key belongs in the UI
 container environment.
 
-## Deferred Phase 2E regression gate
+## Settled Phase 2E regression record
 
-The standalone UI and public Cloudflare route are already live. The combined
-browser regression below remains owed. The user explicitly authorized Slice
-2F.1 before completing it, but the gate must still close before broader 2F
-dependency removal. Keep the embedded backend shell, Open WebUI, temporary
-network alias, and rollback container until that normal-use soak closes.
+The standalone UI and public Cloudflare route are already live. On 2026-09-24
+the user marked the combined browser regression and soak tested and settled.
+The checklist remains below so a later report can be diagnosed as a concrete
+regression. Keep the embedded backend shell and retained rollback container
+only until their separate 2F removal gates close.
 
 ## Rename the backend and build the private origin
 
@@ -46,18 +46,21 @@ The UI port is bound to loopback, not the LAN. Keep the stopped
 it as an orphan, which is expected. Do not use `--remove-orphans` during this
 migration.
 
-The new `audrey` service retains `audrey-ai` as a temporary network alias.
-Existing OWUI and monitoring configuration can therefore continue to resolve
-the former hostname while their settings move to `http://audrey:8000`.
+The backend is reachable as `audrey` on its Docker networks. The temporary
+`audrey-ai` alias is gone; monitoring and internal clients must use
+`http://audrey:8000`.
 
-Run the existing full native-client smoke through the standalone proxy:
+Run the existing full native-client smoke through the standalone proxy using
+the already-built Audrey image. Tower has no host Python environment:
 
 ```bash
-cd /mnt/user/appdata/audrey_ai_2.0
-set -a
-source .env.smoke.local
-set +a
-AUDREY_SMOKE_BASE_URL=http://127.0.0.1:8090 .venv/bin/python scripts/smoke_native_ui.py
+docker run --rm \
+  --network ollama-net \
+  --env-file /mnt/user/appdata/audrey_ai_2.0/.env.smoke.local \
+  --env AUDREY_SMOKE_BASE_URL=http://audrey-ui:8080 \
+  --volume /mnt/user/appdata/audrey_ai_2.0/scripts:/smoke:ro \
+  audrey:latest \
+  /opt/venv/bin/python /smoke/smoke_native_ui.py
 ```
 
 The result must end with `"status": "passed"`, cross-owner reads must remain
@@ -71,11 +74,13 @@ After deploying the schema-v7/v8 build, run the focused 2D.5 smoke through the
 same standalone proxy:
 
 ```bash
-cd /mnt/user/appdata/audrey_ai_2.0
-set -a
-source .env.smoke.local
-set +a
-AUDREY_SMOKE_BASE_URL=http://127.0.0.1:8090 .venv/bin/python scripts/smoke_native_access_models.py
+docker run --rm \
+  --network ollama-net \
+  --env-file /mnt/user/appdata/audrey_ai_2.0/.env.smoke.local \
+  --env AUDREY_SMOKE_BASE_URL=http://audrey-ui:8080 \
+  --volume /mnt/user/appdata/audrey_ai_2.0/scripts:/smoke:ro \
+  audrey:latest \
+  /opt/venv/bin/python /smoke/smoke_native_access_models.py
 ```
 
 The result must end with `"status": "passed"`. It proves provider-only admin
@@ -88,7 +93,14 @@ Override the target only when the deployment intentionally uses a different
 direct model:
 
 ```bash
-AUDREY_DIRECT_SMOKE_MODEL_ID=direct/example-model:latest AUDREY_SMOKE_BASE_URL=http://127.0.0.1:8090 .venv/bin/python scripts/smoke_native_access_models.py
+docker run --rm \
+  --network ollama-net \
+  --env-file /mnt/user/appdata/audrey_ai_2.0/.env.smoke.local \
+  --env AUDREY_SMOKE_BASE_URL=http://audrey-ui:8080 \
+  --env AUDREY_DIRECT_SMOKE_MODEL_ID=direct/example-model:latest \
+  --volume /mnt/user/appdata/audrey_ai_2.0/scripts:/smoke:ro \
+  audrey:latest \
+  /opt/venv/bin/python /smoke/smoke_native_access_models.py
 ```
 
 Four checks remain interactive because bearer-token automation cannot reproduce
@@ -170,28 +182,32 @@ The current Phase 2E browser regression also verifies:
 9. The attachment picker closes from its arrow, an outside click, and Escape
    without clearing already selected files.
 
-Record each failure with the conversation id, run id when available, and whether
-the behavior changed after refresh. Do not advance to Milestone 2F until this
-regression and the normal-use soak pass.
+For any future regression, record the conversation id, run id when available,
+and whether the behavior changed after refresh. The user closed this gate as
+tested and settled on 2026-09-24; later failures reopen as new regressions.
 
-The user explicitly deferred that gate on 2026-09-24 and authorized the first
-bounded 2F slice. The regression remains owed; it was not reclassified as
-passed.
+## Make the native frontend authoritative
 
-## Cut over Open WebUI bearer authentication
-
-Slice 2F.1 keeps a one-setting rollback while removing Open WebUI from Audrey's
-runtime authentication path. First confirm `.env.smoke.local` contains a fresh
+Slice 2F.2 completes the operational cutover started by 2F.1, removing Open
+WebUI from Audrey's runtime authentication path. First confirm
+`.env.smoke.local` contains a fresh
 `AUDREY_SMOKE_USER_ACCESS_JWT` plus a distinct
 `AUDREY_SMOKE_ADMIN_ACCESS_JWT` for the companion native UI smoke. The focused
 cutover smoke itself uses the user assertion and refuses legacy OWUI credentials
-by design.
+by design. The authoritative runner and credential matrix is
+`../reference/live-smoke-testing.md`: the focused API-only smoke normally runs
+from the laptop over VPN, while the full standalone-proxy smoke runs on Tower
+or through an explicit tunnel.
 
 In the Audrey deployment's `.env`, set:
 
 ```text
 OWUI_AUTH_ENABLED=0
 ```
+
+Before stopping OWUI, migrate the laptop `.env.test.local` and Tower
+`eval.env` to a direct Audrey `/v1` URL plus an Audrey PAT with
+`compat:full`, following the live-smoke guide.
 
 Recreate Audrey and read the effective startup state:
 
@@ -201,45 +217,60 @@ docker compose up -d --build --force-recreate audrey
 docker compose logs --since=5m audrey
 ```
 
-The logs must contain `auth: Open WebUI bearer adapter disabled`. Load the
-private smoke environment, then run the cutover smoke through the standalone
-proxy:
+The logs must contain `auth: Open WebUI bearer adapter disabled`. Run the
+focused smoke from the laptop as documented in the live-smoke guide. The
+following disposable-container form is a Tower fallback, not the default:
 
 ```bash
-set -a
-source .env.smoke.local
-set +a
-AUDREY_SMOKE_BASE_URL=http://127.0.0.1:8090 .venv/bin/python scripts/smoke_native_auth_cutover.py
+docker run --rm \
+  --network ollama-net \
+  --env-file /mnt/user/appdata/audrey_ai_2.0/.env.smoke.local \
+  --env AUDREY_SMOKE_BASE_URL=http://audrey-ui:8080 \
+  --volume /mnt/user/appdata/audrey_ai_2.0/scripts:/smoke:ro \
+  audrey:latest \
+  /opt/venv/bin/python /smoke/smoke_native_auth_cutover.py
 ```
 
 Success ends with `"status": "passed"`, reports
 `"legacy_bearer_rejected_locally": true`, and has no `cleanup_error`.
+The first deployed run met that contract on 2026-09-24. The stop-Open-WebUI
+independence proof below remains open.
 
-For the actual independence proof, stop Open WebUI temporarily and repeat the
-focused smoke plus the existing native UI smoke:
+For the actual independence proof, stop Open WebUI and repeat the
+focused smoke from the laptop plus the existing native UI smoke on Tower. In
+the command block below, the first `docker run` is the Tower fallback for the
+focused smoke; omit it when the laptop run is used:
 
 ```bash
 docker stop open-webui
-AUDREY_SMOKE_BASE_URL=http://127.0.0.1:8090 .venv/bin/python scripts/smoke_native_auth_cutover.py
-AUDREY_SMOKE_BASE_URL=http://127.0.0.1:8090 .venv/bin/python scripts/smoke_native_ui.py
-docker start open-webui
+docker run --rm \
+  --network ollama-net \
+  --env-file /mnt/user/appdata/audrey_ai_2.0/.env.smoke.local \
+  --env AUDREY_SMOKE_BASE_URL=http://audrey-ui:8080 \
+  --volume /mnt/user/appdata/audrey_ai_2.0/scripts:/smoke:ro \
+  audrey:latest \
+  /opt/venv/bin/python /smoke/smoke_native_auth_cutover.py
+docker run --rm \
+  --network ollama-net \
+  --env-file /mnt/user/appdata/audrey_ai_2.0/.env.smoke.local \
+  --env AUDREY_SMOKE_BASE_URL=http://audrey-ui:8080 \
+  --volume /mnt/user/appdata/audrey_ai_2.0/scripts:/smoke:ro \
+  audrey:latest \
+  /opt/venv/bin/python /smoke/smoke_native_ui.py
 ```
 
-Run each command separately and always restart Open WebUI before investigating
-a failed smoke. While it is stopped, also open the public Audrey URL, start one
+Run each command separately. Leave Open WebUI stopped while investigating a
+failed smoke. Also open the public Audrey URL, start one
 native Fast turn, refresh it, open Files and Settings, and confirm Admin remains
 available to the administrator. This proves browser authentication,
 conversations, files, preferences, and administration do not fall through to
 OWUI. The focused script separately proves a scoped Audrey token still reaches
 the native account resource and protected `/v1/files`.
 
-Starting the Open WebUI container does not make it a functional Audrey client
-while the adapter remains disabled. Until evals and every other compatibility
-client have moved to Audrey personal tokens, finish this bounded proof by
-setting `OWUI_AUTH_ENABLED=1` in `.env`, recreating Audrey, and confirming the
-startup log reports the adapter enabled. No data migration or identity rewrite
-is involved. Once those consumers have migrated, the later permanent cutover
-keeps the flag disabled and stops Open WebUI instead.
+Leave `OWUI_AUTH_ENABLED=0` and Open WebUI stopped after this gate. The dormant
+adapter may be enabled with `OWUI_AUTH_ENABLED=1` only for a short diagnostic
+if native authentication itself is broken; it is not the normal rollback path.
+No data migration or identity rewrite is involved.
 
 ## Rollback
 

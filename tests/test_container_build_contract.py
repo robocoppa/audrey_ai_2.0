@@ -79,8 +79,7 @@ def test_native_ui_build_is_self_contained_and_has_a_transitional_fallback():
     assert backend["container_name"] == "audrey"
     assert backend["image"] == "audrey:latest"
     assert set(backend["networks"]) == {"ollama-net", "media-net", "fetch-net"}
-    for network in backend["networks"].values():
-        assert network["aliases"] == ["audrey-ai"]
+    assert all(config is None for config in backend["networks"].values())
     assert service["build"] == {"context": "./web", "dockerfile": "Dockerfile"}
     assert service["depends_on"]["audrey"]["condition"] == "service_healthy"
     assert service["networks"] == ["ollama-net"]

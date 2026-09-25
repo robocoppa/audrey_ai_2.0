@@ -28,7 +28,7 @@ _SCRIPTS = (
 _STREAMING_SCRIPTS = frozenset(_SCRIPTS) - {"smoke_native_auth_cutover"}
 
 
-def test_access_assertions_take_precedence_and_secrets_stay_out_of_repr(monkeypatch):
+def test_access_assertions_are_authoritative_and_secrets_stay_out_of_repr(monkeypatch):
     monkeypatch.setenv("AUDREY_SMOKE_USER_ACCESS_JWT", " user-jwt ")
     monkeypatch.setenv("AUDREY_SMOKE_ADMIN_ACCESS_JWT", " admin-jwt ")
     monkeypatch.setenv("TEST_OWUI_TOKEN", "legacy-user")
@@ -49,18 +49,16 @@ def test_access_assertions_take_precedence_and_secrets_stay_out_of_repr(monkeypa
     assert "admin-jwt" not in repr(credentials)
 
 
-def test_legacy_bearers_remain_a_transition_fallback(monkeypatch):
+def test_legacy_bearers_are_ignored(monkeypatch):
     monkeypatch.delenv("AUDREY_SMOKE_USER_ACCESS_JWT", raising=False)
     monkeypatch.delenv("AUDREY_SMOKE_ADMIN_ACCESS_JWT", raising=False)
     monkeypatch.setenv("TEST_OWUI_TOKEN", "legacy-user")
     monkeypatch.setenv("ADMIN_OWUI_TOKEN", "legacy-admin")
     credentials = SmokeCredentials.from_env()
-    assert credentials.headers_for(
-        credentials.user, user_token=credentials.user, admin_token=credentials.admin
-    ) == {"Authorization": "Bearer legacy-user"}
-    assert credentials.headers_for(
-        credentials.admin, user_token=credentials.user, admin_token=credentials.admin
-    ) == {"Authorization": "Bearer legacy-admin"}
+    assert credentials.user == ""
+    assert credentials.admin == ""
+    assert credentials.user_access is False
+    assert credentials.admin_access is False
 
 
 def test_same_credential_is_refused_before_any_live_write(monkeypatch):
@@ -142,7 +140,8 @@ def test_direct_script_execution_still_resolves_helper(tmp_path):
     assert "AUDREY_SMOKE_USER_ACCESS_JWT" in result.stderr
 
 
-def test_cutover_smoke_refuses_legacy_owui_credentials():
+@pytest.mark.parametrize("module_name", _SCRIPTS)
+def test_every_native_smoke_refuses_legacy_owui_credentials(module_name):
     env = os.environ.copy()
     env.pop("AUDREY_SMOKE_USER_ACCESS_JWT", None)
     env.pop("AUDREY_SMOKE_ADMIN_ACCESS_JWT", None)
@@ -151,7 +150,7 @@ def test_cutover_smoke_refuses_legacy_owui_credentials():
     root = Path(__file__).resolve().parent.parent
 
     result = subprocess.run(
-        [sys.executable, str(root / "scripts" / "smoke_native_auth_cutover.py")],
+        [sys.executable, str(root / "scripts" / f"{module_name}.py")],
         cwd=root,
         env=env,
         text=True,

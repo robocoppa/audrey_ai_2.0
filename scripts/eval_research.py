@@ -17,12 +17,11 @@ and diffable run-to-run.
 
 HOW IT CONNECTS
 
-Audrey's `/v1/chat/completions` requires an OWUI-validated bearer token
-(there is no static API key). So by default this script talks to **OWUI's**
-OpenAI-compatible API with an OWUI API key (`sk-…`); OWUI forwards to Audrey
-with the session JWT — the same supported path OpenClaw/Hermes use.
+Audrey's `/v1/chat/completions` accepts a first-party Audrey personal token,
+so the normal path talks directly to Audrey and does not depend on Open WebUI.
 
-    Settings → Account → API Keys in OWUI mints the `sk-…` key.
+Create the token in native Audrey Settings → Personal access tokens with the
+`compat:full` scope. Copy it once and store it only in the private eval file.
 
 PERMANENT SETUP (laptop-local, gitignored)
 
@@ -31,18 +30,16 @@ Put the two values in `.env.test.local` at the repo root (gitignored via the
 your laptop and can't be committed). The script auto-loads them:
 
     # .env.test.local  (repo root)
-    AUDREY_EVAL_BASE_URL=http://192.168.1.11:8080/api    # OWUI host:port + /api
-    AUDREY_EVAL_API_KEY=sk-...                           # OWUI API key
+    AUDREY_EVAL_BASE_URL=http://192.168.1.11:8000/v1    # WARP → Audrey
+    AUDREY_EVAL_API_KEY=aud_pat_...                     # compat:full token
+
+Use `http://100.113.157.98:8000/v1` instead when connected by Tailscale.
 
 Then just run `.venv/bin/python scripts/eval_research.py` — no exports needed.
 A one-off `export AUDREY_EVAL_*` or a `--flag` still overrides the file.
 
-(`--base-url` / `--api-key` flags override env / .env. The OWUI path above is
-the repeatable one and needs nothing else. Hitting Audrey directly is no longer
-possible over the LAN — as of the 2026-07-18 security review Audrey's `:8000`
-is not published to the host (ollama-net only). To debug against Audrey
-directly, tunnel it first — `ssh -N -L 8000:audrey:8000 <unraid>` — then
-`--base-url http://localhost:8000/v1` with a valid (short-lived) OWUI JWT.)
+The harness refuses an OWUI endpoint or a non-PAT credential before starting
+a long run. Open WebUI is no longer an eval transport.
 
 WHAT IT CHECKS (structural / heuristic — no exact-match, models vary)
 
@@ -157,12 +154,13 @@ WHAT IT DOES NOT DO
 
   - It does not assert a model said anything specific — quality is YOUR
     read of the printed answer. The checks are guardrails, not a grader.
-  - It does not modify Audrey, OWUI, or any config. Send-and-read only.
+  - It does not change Audrey's configuration. Requests may appear in the
+    authenticated user's compatibility chat history.
   - It cannot run from the laptop without LAN/VPN reachability to the host.
 
 USAGE
 
-    # All cases, streaming, against OWUI:
+    # All cases, streaming, directly against Audrey:
     .venv/bin/python scripts/eval_research.py
 
     # One model, custom case file, show raw SSE on failure:
@@ -227,8 +225,8 @@ def load_dotenv(path: Path = REPO_ROOT / ".env.test.local") -> None:
     `.env.test.local` is the eval harness's own secret file — kept separate
     from the app's `.env` (which `config.py` reads for AUDREY_* settings) so a
     test credential never mingles with app config. It's gitignored (matches the
-    `.env.*.local` rule), laptop-local; the OWUI API key lives there so you
-    don't re-enter it each run. Only fills a variable that is NOT already set in
+    `.env.*.local` rule), laptop-local; the Audrey PAT lives there so you do
+    not re-enter it each run. Only fills a variable that is NOT already set in
     the real environment, so an explicit `export` or a `--flag` always wins.
     Tiny hand parser (KEY=VALUE, `#` comments, optional surrounding quotes) — no
     python-dotenv dependency, and it only ever reads our own `AUDREY_EVAL_*`
@@ -326,18 +324,42 @@ _CONNECT_RETRY_DELAY_S = 60.0
 def _is_direct_audrey(base_url: str) -> bool:
     """True when the base-url points at Audrey itself rather than Open WebUI.
 
-    Audrey's `:8000` is not published to the host (2026-07-18 security review),
-    so the LAN path is OWUI — but the eval CONTAINER runs on `ollama-net`
-    alongside `audrey`, which is why direct is reachable at all from a box
-    run. Matched on host/port rather than on a flag so a stale `eval.env`
-    cannot claim direct while pointing somewhere else.
+    Direct Audrey is reachable through the published backend port on the
+    laptop VPN, through Docker DNS for on-box evals, and through the standalone
+    proxy when explicitly selected. Match the actual endpoint rather than a
+    flag so stale environment files cannot mislabel an OWUI-proxied run.
     """
-    from urllib.parse import urlparse
-    host = (urlparse(base_url).hostname or "").lower()
-    port = urlparse(base_url).port
-    # Keep the former hostname during the compatibility-alias migration.
-    return host in {"audrey", "audrey-ai"} or (
-        host in {"localhost", "127.0.0.1"} and port == 8000)
+    parsed = urlparse(base_url)
+    host = (parsed.hostname or "").lower()
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    return host in {"audrey", "audrey-ui"} or port in {8000, 8090}
+
+
+def _connection_setup_error(base_url: str, api_key: str) -> str:
+    """Return a credential/endpoint mismatch without exposing the credential."""
+
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return "AUDREY_EVAL_BASE_URL must be an absolute http(s) URL."
+    try:
+        _ = parsed.port
+    except ValueError:
+        return "AUDREY_EVAL_BASE_URL must contain a valid port."
+    direct = _is_direct_audrey(base_url)
+    if not direct:
+        return "Live evals must target Audrey's direct /v1 endpoint."
+    path = parsed.path.rstrip("/")
+    if path != "/v1":
+        return "A direct Audrey eval base URL must end with /v1."
+    if not api_key.startswith("aud_pat_"):
+        return (
+            "Direct Audrey evals require an Audrey personal token with "
+            "compat:full scope (aud_pat_…)."
+        )
+    return ""
 
 
 def _request_body(model: str, prompt: str, think: bool | None) -> dict:
@@ -2105,10 +2127,10 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--base-url", default=os.environ.get("AUDREY_EVAL_BASE_URL", ""),
-                   help="OWUI API base, e.g. http://192.168.1.11:3000/api "
+                   help="Audrey API base, e.g. http://192.168.1.11:8000/v1 "
                         "(or env AUDREY_EVAL_BASE_URL)")
     p.add_argument("--api-key", default=os.environ.get("AUDREY_EVAL_API_KEY", ""),
-                   help="OWUI API key sk-… (or env AUDREY_EVAL_API_KEY)")
+                   help="Audrey personal token aud_pat_… (or env AUDREY_EVAL_API_KEY)")
     p.add_argument("--model", default="audrey_research",
                    help="default model for cases that don't pin one (default audrey_research)")
     p.add_argument("--models", default="",
@@ -2147,8 +2169,13 @@ def main() -> int:
 
     if not args.base_url or not args.api_key:
         print("error: set --base-url and --api-key (or AUDREY_EVAL_BASE_URL / "
-              "AUDREY_EVAL_API_KEY). See the module docstring for the OWUI setup.",
+              "AUDREY_EVAL_API_KEY). See the module docstring for setup.",
               file=sys.stderr)
+        return 2
+
+    setup_error = _connection_setup_error(args.base_url, args.api_key)
+    if setup_error:
+        print(f"error: {setup_error}", file=sys.stderr)
         return 2
 
     if not args.cases.exists():

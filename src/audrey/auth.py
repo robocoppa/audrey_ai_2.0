@@ -334,7 +334,7 @@ async def require_user(
     if token.startswith(_PERSONAL_TOKEN_PREFIX):
         return await _resolve_personal_token(request, token)
 
-    if not getattr(request.app.state.cfg.env, "owui_auth_enabled", True):
+    if not getattr(request.app.state.cfg.env, "owui_auth_enabled", False):
         raise HTTPException(
             status_code=401,
             detail="Open WebUI bearer authentication is disabled.",

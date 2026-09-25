@@ -2034,19 +2034,41 @@ def test_request_body_omits_think_unless_asked():
 
 @pytest.mark.parametrize(("url", "direct"), [
     ("http://audrey:8000/v1", True),
-    ("http://audrey-ai:8000/v1", True),  # transitional Docker alias
+    ("http://audrey-ui:8080/v1", True),
     ("http://localhost:8000/v1", True),
+    ("http://192.168.1.11:8000/v1", True),
+    ("http://100.113.157.98:8000/v1", True),
     ("http://localhost:8080/api", False),      # Open WebUI — drops the field
     ("http://192.168.1.11:8080/v1", False),
 ])
 def test_only_a_direct_audrey_url_may_set_the_arm(url, direct):
-    """Through OWUI the `think` field is dropped and the recorded arm would be
-    a lie. The runner exits 2 rather than produce a mislabelled result."""
+    """Only native Audrey endpoints may label a direct vendor-extension arm."""
     assert er._is_direct_audrey(url) is direct
+
+
+@pytest.mark.parametrize(
+    ("url", "token", "message"),
+    [
+        ("http://192.168.1.11:8000/v1", "aud_pat_secret", ""),
+        ("http://100.113.157.98:8000/v1", "aud_pat_secret", ""),
+        ("http://192.168.1.11:8000", "aud_pat_secret", "must end with /v1"),
+        ("http://192.168.1.11:8000/v1", "sk-legacy", "require an Audrey personal token"),
+        ("http://192.168.1.11:8080/api", "sk-legacy", "must target Audrey's direct"),
+        ("http://192.168.1.11:8080/api", "aud_pat_secret", "must target Audrey's direct"),
+    ],
+)
+def test_eval_connection_rejects_mismatched_endpoint_and_credential(url, token, message):
+    error = er._connection_setup_error(url, token)
+    if message:
+        assert message in error
+        assert token not in error
+    else:
+        assert error == ""
 
 
 def test_think_requested_is_written_into_the_results_json(tmp_path):
     import json
+
     out = tmp_path / "r.json"
     er.save_json([er.CaseResult(name="a", model="m", ok=True, checks={},
                                 answer="hi", think_requested=True)], out)

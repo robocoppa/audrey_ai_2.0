@@ -10,11 +10,14 @@ The Milestone 2E parity build is laptop-complete. Native memory and
 files, video ingestion and inspection, source and tool summaries, image and
 direct chat attachments, durable run recovery, empty-draft cleanup, attachment
 presentation, answer and code copying, attachment-picker dismissal, and
-contextual startup and recovered-run presentation are all implemented. The
-user deferred the combined live regression gate and normal-use native/OWUI
-soak, then explicitly authorized Milestone 2F to begin. Slice 2F.1's
-rollback-safe Open WebUI authentication cutover is laptop-complete; its live
-stop-OWUI gate remains open.
+contextual startup and recovered-run presentation are all implemented. On
+2026-09-24 the user marked the combined live regression gate and normal-use
+soak tested and settled, then explicitly authorized Milestone 2F to begin.
+Slice 2F.1's focused authentication cutover smoke passed on 2026-09-24. Slice
+2F.2 is laptop-complete: native auth is the default, evals use direct Audrey
+personal tokens, and Open WebUI is no longer an operational dependency. The
+user directed an immediate native-front-end migration; the live stop-OWUI
+independence gate remains open.
 
 ## Goal
 
@@ -1119,23 +1122,27 @@ pre-existing hook warnings, the production build, and diff checks are clean.
 Live checks have already confirmed empty-draft cleanup, attached stop/retry, and
 saved source/tool durability. The latest run-ownership corrective, restored
 attachment presentation, copy controls, picker dismissal, the two-account
-Uploads boundary, and the broader native/OWUI soak remain in the combined live
-gate.
+Uploads boundary, and the broader native/OWUI soak were included when the user
+marked the combined gate tested and settled.
 
 The preview-first Audrey Settings export importer remains available but dormant;
 it is not a deployment or parity gate. Its optional operator procedure is in
 `phase-02-history-import.md`.
 
-This laptop slice lets all seven native smoke scripts use two distinct
+This laptop slice lets all eight native smoke scripts use two distinct
 Cloudflare Access application assertions instead of OWUI bearer tokens. Legacy
-bearers remain a transition fallback. Run against the standalone proxy's
+bearers were a transition fallback in that slice. Run against the standalone proxy's
 loopback address so Audrey verifies the supplied assertions; the public
 Cloudflare edge may replace the assertion header. This proves the origin auth
-and native API paths, while browser login remains a separate live gate. The
-credential procedure is in `phase-02-native-smoke-auth.md`.
+and native API paths; browser login was evaluated separately before user
+acceptance. The credential procedure is in `phase-02-native-smoke-auth.md`.
 
 Gate: the user's normal workflow completes in the native UI for a defined soak
 period without returning to OWUI for a missing core capability.
+
+Implementation status: Complete by user acceptance on 2026-09-24. Any later
+issue reopens as a new regression rather than leaving this gate perpetually
+pending.
 
 ### Milestone 2F — cutover and dependency removal
 
@@ -1145,17 +1152,17 @@ period without returning to OWUI for a missing core capability.
   full-history image-resend special cases.
 - Complete first-party chat-history and memory ownership.
 - Preserve /v1 compatibility for external clients and evals.
-- Retain a time-bounded rollback deployment, then stop OWUI.
+- Stop OWUI after the native independence gate; retain only a dormant adapter.
 
 Gate: stopping OWUI has no effect on native authentication, conversations,
 files, memory, tools, or administration; rollback and restore work on Unraid.
 
-Slice 2F.1 introduces the explicit runtime authentication cutover. The
-rollback-compatible default keeps Open WebUI bearer validation enabled;
+Slice 2F.1 introduced the explicit runtime authentication cutover.
 `OWUI_AUTH_ENABLED=0` makes every non-Audrey bearer fail locally before cache
-lookup or network access. Cloudflare Access assertions retain strict precedence,
-and Audrey personal tokens continue to resolve locally with the existing
-`account:read` and `compat:full` scope boundaries. The setting is startup-bound,
+lookup or network access and is now the native-first default. Cloudflare Access
+assertions retain strict precedence, and Audrey personal tokens continue to
+resolve locally with the existing `account:read` and `compat:full` scope
+boundaries. The setting is startup-bound,
 so both cutover and rollback require recreating Audrey, and the effective state
 is named in the startup log.
 
@@ -1163,18 +1170,28 @@ is named in the startup log.
 requires a real Cloudflare Access application assertion, proves a random legacy
 bearer receives the cutover-specific local `401`, creates a disposable one-day
 Audrey token with both scopes, verifies the same account through `/api/me` and
-the protected compatibility file listing through `/v1/files`, revokes the token, and confirms
-revocation immediately. Its failure path attempts token cleanup without
-printing either credential. The deployment gate runs this smoke and the native
-UI smoke while Open WebUI is temporarily stopped. Until eval and other
-compatibility clients have migrated to Audrey tokens, the bounded proof ends by
-restoring the adapter flag and restarting the functional rollback client.
+the protected compatibility file listing through `/v1/files`, revokes the
+token, and confirms revocation immediately. Its failure path attempts cleanup without
+printing either credential. The first deployed run passed on 2026-09-24:
+Cloudflare and Audrey providers resolved correctly, the unknown legacy bearer
+and revoked PAT returned `401`, protected `/v1/files` access succeeded, and no
+cleanup error occurred.
 
-Laptop status: all 2,869 backend tests and 70 focused authentication/smoke
-contracts pass. Scoped ruff and Python compilation are clean. The lesson-link
+Slice 2F.2 moves operational clients immediately to the native surface. The
+eval harness now requires a direct Audrey `/v1` URL plus a `compat:full`
+personal token, fails fast on endpoint/credential mismatches, and no longer
+waits for Open WebUI on Tower. The retired `audrey-ai` network alias is
+removed. All eight native smoke scripts require Cloudflare application
+assertions and ignore the old OWUI credential variables. The legacy bearer
+adapter remains available only through an explicit
+`OWUI_AUTH_ENABLED=1` emergency opt-in; it is not the deploy target.
+
+Laptop status: all 2,885 backend tests and 334 focused cutover, authentication,
+configuration, and Compose contracts pass. Scoped ruff and compilation are clean. The
+lesson-link
 scan reports zero broken links; its existing 99 hard and 162 advisory drifts
-remain deferred. The 2E live regression is still owed and is not reclassified
-as passed by starting this slice.
+remain deferred. Milestone 2E is settled by user acceptance and no longer
+blocks this slice.
 
 ## Verification and operations
 
