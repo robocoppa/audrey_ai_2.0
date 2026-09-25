@@ -9,7 +9,7 @@ identity, authorization, conversations, runs, files, and preferences.
 Keep `AUDREY_NATIVE_UI_ENABLED=1` during this first deployment. The backend's
 embedded shell is the rollback target until the standalone container has passed
 the smoke, browser checks, and a normal-use soak. Open WebUI is no longer a
-rollback target and remains stopped after the 2F.2 native cutover.
+rollback target and is to remain stopped after the 2F.2 native cutover.
 
 The host-network `cloudflared` instance reaches the new UI through
 `http://127.0.0.1:8090`; host port 8088 remains assigned to SearXNG. The UI
@@ -216,25 +216,42 @@ Success ends with `"status": "passed"`, reports
 The first deployed run met that contract on 2026-09-24. The stop-Open-WebUI
 independence proof below remains open.
 
-For the actual independence proof, stop Open WebUI and repeat the
-focused smoke from the laptop plus the existing native UI smoke on Tower. In
-the command block below, the first wrapper call is the Tower fallback for the
-focused smoke; omit it when the laptop run is used:
+The authentication-cutover and full standalone-proxy smokes have already
+passed. The remaining independence proof is intentionally narrow: after the
+corrected `fast-capital` case reaches Tower, stop Open WebUI, run that one
+`/v1` case, and complete one public native Fast turn.
+
+From the Tower checkout:
 
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
-docker stop open-webui
-bash scripts/smoke-native-onbox.sh smoke_native_auth_cutover.py
-bash scripts/smoke-native-onbox.sh smoke_native_ui.py
 ```
 
-Run each command separately. Leave Open WebUI stopped while investigating a
-failed smoke. Also open the public Audrey URL, start one
-native Fast turn, refresh it, open Files and Settings, and confirm Admin remains
-available to the administrator. This proves browser authentication,
-conversations, files, preferences, and administration do not fall through to
-OWUI. The focused script separately proves a scoped Audrey token still reaches
-the native account resource and protected `/v1/files`.
+Stop Open WebUI:
+
+```bash
+docker stop open-webui
+```
+
+Run only the corrected eval case:
+
+```bash
+MODEL=audrey_fast \
+CASES=eval_prompts_fast.json \
+LABEL=native-cutover-fixed \
+ARGS='--only fast-capital' \
+bash scripts/eval-onbox.sh
+```
+
+Success is `[PASS] fast-capital`, `contains:✅`, `has_answer:✅`, and
+`1/1 cases passed all applicable checks`.
+
+Then refresh the public Audrey URL and complete one native Fast turn. This
+is the minimum post-stop proof: the eval exercises direct Audrey PAT `/v1`
+compatibility, while the browser turn exercises Cloudflare authentication,
+the standalone proxy, canonical conversation state, and native streaming.
+Leave Open WebUI stopped. Do not repeat the broader passed smokes unless this
+targeted proof fails.
 
 Leave `OWUI_AUTH_ENABLED=0` and Open WebUI stopped after this gate. The dormant
 adapter may be enabled with `OWUI_AUTH_ENABLED=1` only for a short diagnostic

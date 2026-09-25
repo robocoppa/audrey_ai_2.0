@@ -4,7 +4,8 @@
     "prompt": "What's the capital of Australia?",
     "model": "audrey_fast",
     "expect_banners": false,
-    "expect_sources": false
+    "expect_sources": false,
+    "answer_contains": ["Canberra"]
   },
   {
     "name": "fast-idempotent",

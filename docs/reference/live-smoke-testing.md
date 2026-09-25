@@ -12,6 +12,13 @@ happens in the laptop checkout; Tower is the Docker-only deployment host.
 | Eval harness | Laptop over Tailscale; WARP fallback | Tower backend `/v1` on port `8000` | Audrey PAT with `compat:full` |
 | Full native UI/proxy smoke | Disposable container on Tower, or laptop through an explicit SSH tunnel | `http://audrey-ui:8080` inside `ollama-net`, or tunneled loopback port `8090` | Native smoke user/admin assertions |
 
+Choose the smallest proof that exercises the changed functionality and its
+direct dependency or failure boundary. Do not rerun broad live suites merely
+because they exist or because an older phase checklist names them. Reuse
+current evidence for unchanged surfaces. Escalate to a broader smoke only when
+the targeted check fails, the change crosses additional boundaries, or the
+user explicitly asks for broader coverage. Hermetic laptop verification is a
+
 Current VPN addresses:
 
 - Primary — Tailscale: `http://100.113.157.98:8000`

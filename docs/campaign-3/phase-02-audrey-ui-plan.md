@@ -17,10 +17,13 @@ Slice 2F.1's focused authentication cutover smoke passed on 2026-09-24. Slice
 2F.2 is deployed: native auth is the default, evals use direct Audrey personal
 tokens, and Open WebUI is no longer an intended operational dependency. The
 startup log, fresh auth-cutover smoke, and laptop direct fast eval passed. The
-standalone-proxy smoke was blocked before execution by its legacy env-file
-syntax, and the on-box fast eval completed with one failed structural check.
-The user directed an immediate native-front-end migration; the proxy, browser,
-on-box-eval, and confirmed stop-OWUI evidence remains open.
+standalone-proxy native UI smoke also passed, including assets and CSP,
+two-user isolation, one streamed Fast turn, conversation management, cleanup,
+and repair readiness. The on-box fast eval returned the correct `Canberra.`
+answer but the old case false-failed it against a generic length floor. The
+case now declares its `Canberra` contract. The user directed an immediate
+native-front-end migration; only the corrected post-stop one-case rerun and
+one public native Fast turn remain open.
 
 ## Goal
 
@@ -1192,17 +1195,26 @@ adapter remains available only through an explicit
 Live status on 2026-09-25 is partial. Audrey started with the OWUI adapter
 disabled and all ten tools ready. A fresh auth-cutover smoke passed, including
 local legacy-bearer rejection and immediate PAT revocation, and a direct laptop
-fast eval passed 1/1. The standalone-proxy smoke did not execute because the
-Tower env file used shell `export` syntax that Docker rejects. The on-box fast
-eval ran but returned exit 1 without exposing its failed check.
-`scripts/smoke-native-onbox.sh` now validates native env-file keys and syntax
-before Docker, and `eval-onbox.sh` prints evaluator diagnostics for every
-nonzero result. The proxy, browser, on-box-eval, and confirmed stop-OWUI
-evidence remains open.
+fast eval passed 1/1. After correcting the Tower env file, the
+standalone-proxy native UI smoke passed. It loaded the built application shell,
+hashed entry asset, and CSP; resolved distinct user and admin identities;
+returned `404` for both cross-user read directions; completed a Fast AG-UI run
+with two canonical messages; exercised rename, literal search, archive, and
+restore; and finished canonical/projection cleanup with repair ready. The
+on-box fast eval returned the correct `Canberra.` answer in one second, but
+`has_answer` false-failed it because the case lacked an `answer_contains`
+contract and the generic empty-response guard uses a 20-character floor. The
+case now declares `Canberra`, with a regression test for the live terse
+answer. `scripts/smoke-native-onbox.sh` validates native env files before
+Docker, and `eval-onbox.sh` prints evaluator diagnostics for nonzero results.
+Only the corrected one-case post-stop rerun and one public native Fast turn
+remain open; broader passed smokes are not repeated unless this proof fails.
 
-Laptop status: all 2,891 backend tests pass; this correction's 260 focused
-smoke, eval, authentication, and configuration contracts pass. Scoped ruff,
-Bash syntax, and diff checks are clean. No lesson sweep ran; lesson-link sweeps
+Laptop status: all 2,892 backend tests pass; the eval correction's 212 focused
+contracts and the prior cutover correction's 260 focused smoke, eval,
+authentication, and configuration contracts pass. Scoped ruff, JSON
+validation, Bash syntax, and diff checks are clean. No lesson sweep ran;
+lesson-link sweeps
 are user-directed. Milestone 2E is settled by user acceptance and no longer
 blocks this slice.
 

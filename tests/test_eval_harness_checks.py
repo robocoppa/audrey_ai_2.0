@@ -2303,6 +2303,18 @@ def test_an_exact_short_answer_is_not_failed_for_being_short(monkeypatch):
     assert checks["contains"] is True
     assert checks["has_answer"] is True
 
+def test_fast_capital_accepts_the_live_terse_answer(monkeypatch):
+    """The one-case cutover probe may correctly answer only ``Canberra.``."""
+    case = next(c for c in _load_suite("eval_prompts_fast.json")
+                if c["name"] == "fast-capital")
+
+    checks = _canned_run(monkeypatch, "Canberra.", case)
+
+    assert case["answer_contains"] == ["Canberra"]
+    assert checks["contains"] is True
+    assert checks["has_answer"] is True
+
+
 
 def test_the_empty_response_this_floor_exists_for_still_fails(monkeypatch):
     """The other half: waiving the floor must not disarm it.
