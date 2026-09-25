@@ -14,10 +14,13 @@ contextual startup and recovered-run presentation are all implemented. On
 2026-09-24 the user marked the combined live regression gate and normal-use
 soak tested and settled, then explicitly authorized Milestone 2F to begin.
 Slice 2F.1's focused authentication cutover smoke passed on 2026-09-24. Slice
-2F.2 is laptop-complete: native auth is the default, evals use direct Audrey
-personal tokens, and Open WebUI is no longer an operational dependency. The
-user directed an immediate native-front-end migration; the live stop-OWUI
-independence gate remains open.
+2F.2 is deployed: native auth is the default, evals use direct Audrey personal
+tokens, and Open WebUI is no longer an intended operational dependency. The
+startup log, fresh auth-cutover smoke, and laptop direct fast eval passed. The
+standalone-proxy smoke was blocked before execution by its legacy env-file
+syntax, and the on-box fast eval completed with one failed structural check.
+The user directed an immediate native-front-end migration; the proxy, browser,
+on-box-eval, and confirmed stop-OWUI evidence remains open.
 
 ## Goal
 
@@ -1186,11 +1189,21 @@ assertions and ignore the old OWUI credential variables. The legacy bearer
 adapter remains available only through an explicit
 `OWUI_AUTH_ENABLED=1` emergency opt-in; it is not the deploy target.
 
-Laptop status: all 2,885 backend tests and 334 focused cutover, authentication,
-configuration, and Compose contracts pass. Scoped ruff and compilation are clean. The
-lesson-link
-scan reports zero broken links; its existing 99 hard and 162 advisory drifts
-remain deferred. Milestone 2E is settled by user acceptance and no longer
+Live status on 2026-09-25 is partial. Audrey started with the OWUI adapter
+disabled and all ten tools ready. A fresh auth-cutover smoke passed, including
+local legacy-bearer rejection and immediate PAT revocation, and a direct laptop
+fast eval passed 1/1. The standalone-proxy smoke did not execute because the
+Tower env file used shell `export` syntax that Docker rejects. The on-box fast
+eval ran but returned exit 1 without exposing its failed check.
+`scripts/smoke-native-onbox.sh` now validates native env-file keys and syntax
+before Docker, and `eval-onbox.sh` prints evaluator diagnostics for every
+nonzero result. The proxy, browser, on-box-eval, and confirmed stop-OWUI
+evidence remains open.
+
+Laptop status: all 2,891 backend tests pass; this correction's 260 focused
+smoke, eval, authentication, and configuration contracts pass. Scoped ruff,
+Bash syntax, and diff checks are clean. No lesson sweep ran; lesson-link sweeps
+are user-directed. Milestone 2E is settled by user acceptance and no longer
 blocks this slice.
 
 ## Verification and operations

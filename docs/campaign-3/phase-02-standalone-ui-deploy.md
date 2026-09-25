@@ -54,13 +54,8 @@ Run the existing full native-client smoke through the standalone proxy using
 the already-built Audrey image. Tower has no host Python environment:
 
 ```bash
-docker run --rm \
-  --network ollama-net \
-  --env-file /mnt/user/appdata/audrey_ai_2.0/.env.smoke.local \
-  --env AUDREY_SMOKE_BASE_URL=http://audrey-ui:8080 \
-  --volume /mnt/user/appdata/audrey_ai_2.0/scripts:/smoke:ro \
-  audrey:latest \
-  /opt/venv/bin/python /smoke/smoke_native_ui.py
+cd /mnt/user/appdata/audrey_ai_2.0
+bash scripts/smoke-native-onbox.sh smoke_native_ui.py
 ```
 
 The result must end with `"status": "passed"`, cross-owner reads must remain
@@ -74,13 +69,8 @@ After deploying the schema-v7/v8 build, run the focused 2D.5 smoke through the
 same standalone proxy:
 
 ```bash
-docker run --rm \
-  --network ollama-net \
-  --env-file /mnt/user/appdata/audrey_ai_2.0/.env.smoke.local \
-  --env AUDREY_SMOKE_BASE_URL=http://audrey-ui:8080 \
-  --volume /mnt/user/appdata/audrey_ai_2.0/scripts:/smoke:ro \
-  audrey:latest \
-  /opt/venv/bin/python /smoke/smoke_native_access_models.py
+cd /mnt/user/appdata/audrey_ai_2.0
+bash scripts/smoke-native-onbox.sh smoke_native_access_models.py
 ```
 
 The result must end with `"status": "passed"`. It proves provider-only admin
@@ -93,14 +83,9 @@ Override the target only when the deployment intentionally uses a different
 direct model:
 
 ```bash
-docker run --rm \
-  --network ollama-net \
-  --env-file /mnt/user/appdata/audrey_ai_2.0/.env.smoke.local \
-  --env AUDREY_SMOKE_BASE_URL=http://audrey-ui:8080 \
-  --env AUDREY_DIRECT_SMOKE_MODEL_ID=direct/example-model:latest \
-  --volume /mnt/user/appdata/audrey_ai_2.0/scripts:/smoke:ro \
-  audrey:latest \
-  /opt/venv/bin/python /smoke/smoke_native_access_models.py
+cd /mnt/user/appdata/audrey_ai_2.0
+AUDREY_DIRECT_SMOKE_MODEL_ID=direct/example-model:latest \
+bash scripts/smoke-native-onbox.sh smoke_native_access_models.py
 ```
 
 Four checks remain interactive because bearer-token automation cannot reproduce
@@ -222,13 +207,8 @@ focused smoke from the laptop as documented in the live-smoke guide. The
 following disposable-container form is a Tower fallback, not the default:
 
 ```bash
-docker run --rm \
-  --network ollama-net \
-  --env-file /mnt/user/appdata/audrey_ai_2.0/.env.smoke.local \
-  --env AUDREY_SMOKE_BASE_URL=http://audrey-ui:8080 \
-  --volume /mnt/user/appdata/audrey_ai_2.0/scripts:/smoke:ro \
-  audrey:latest \
-  /opt/venv/bin/python /smoke/smoke_native_auth_cutover.py
+cd /mnt/user/appdata/audrey_ai_2.0
+bash scripts/smoke-native-onbox.sh smoke_native_auth_cutover.py
 ```
 
 Success ends with `"status": "passed"`, reports
@@ -238,25 +218,14 @@ independence proof below remains open.
 
 For the actual independence proof, stop Open WebUI and repeat the
 focused smoke from the laptop plus the existing native UI smoke on Tower. In
-the command block below, the first `docker run` is the Tower fallback for the
+the command block below, the first wrapper call is the Tower fallback for the
 focused smoke; omit it when the laptop run is used:
 
 ```bash
+cd /mnt/user/appdata/audrey_ai_2.0
 docker stop open-webui
-docker run --rm \
-  --network ollama-net \
-  --env-file /mnt/user/appdata/audrey_ai_2.0/.env.smoke.local \
-  --env AUDREY_SMOKE_BASE_URL=http://audrey-ui:8080 \
-  --volume /mnt/user/appdata/audrey_ai_2.0/scripts:/smoke:ro \
-  audrey:latest \
-  /opt/venv/bin/python /smoke/smoke_native_auth_cutover.py
-docker run --rm \
-  --network ollama-net \
-  --env-file /mnt/user/appdata/audrey_ai_2.0/.env.smoke.local \
-  --env AUDREY_SMOKE_BASE_URL=http://audrey-ui:8080 \
-  --volume /mnt/user/appdata/audrey_ai_2.0/scripts:/smoke:ro \
-  audrey:latest \
-  /opt/venv/bin/python /smoke/smoke_native_ui.py
+bash scripts/smoke-native-onbox.sh smoke_native_auth_cutover.py
+bash scripts/smoke-native-onbox.sh smoke_native_ui.py
 ```
 
 Run each command separately. Leave Open WebUI stopped while investigating a

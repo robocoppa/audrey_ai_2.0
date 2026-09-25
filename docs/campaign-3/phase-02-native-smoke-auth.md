@@ -18,6 +18,12 @@ or paste either token into a ticket or chat. Legacy OWUI variables are ignored.
 Refresh expired Access assertions before a long all-mode smoke. Identical user/
 admin credentials fail before any live write.
 
+The file must use Docker-compatible `KEY=value` lines, without `export` or
+spaces around `=`. It should contain only the two `AUDREY_SMOKE_*_ACCESS_JWT`
+entries; remove obsolete `OWUI_API_KEY`, `TEST_OWUI_TOKEN`, and
+`ADMIN_OWUI_TOKEN` lines. This same strict format can be sourced by Bash for a
+laptop smoke.
+
 Tower is Docker-only and has no host Python, `uv`, or repository `.venv`. Run
 the scripts in a disposable container from the already-built `audrey:latest`
 image. Mount the checkout's `scripts/` directory read-only at `/smoke`, pass the
@@ -28,16 +34,11 @@ Docker DNS. Do not target the public Cloudflare hostname for assertion replay:
 the edge can replace the origin assertion header. The proxy explicitly forwards
 `Cf-Access-Jwt-Assertion` to Audrey.
 
-The common command shape is:
+The checked Tower command is:
 
 ```bash
-docker run --rm \
-  --network ollama-net \
-  --env-file /mnt/user/appdata/audrey_ai_2.0/.env.smoke.local \
-  --env AUDREY_SMOKE_BASE_URL=http://audrey-ui:8080 \
-  --volume /mnt/user/appdata/audrey_ai_2.0/scripts:/smoke:ro \
-  audrey:latest \
-  /opt/venv/bin/python /smoke/smoke_native_ui.py
+cd /mnt/user/appdata/audrey_ai_2.0
+bash scripts/smoke-native-onbox.sh smoke_native_ui.py
 ```
 
 Start with the native UI smoke, then the account/model smoke. The remaining

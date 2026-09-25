@@ -173,10 +173,13 @@ indentation/quoting may differ from what a strict pattern assumes).
 
 `scripts/eval-onbox.sh` runs the eval container detached, waits, and Telegram-pings
 on completion. Output lands in `/mnt/user/appdata/audrey_ai_2.0/testing-out/`.
-Secrets sourced at runtime: OWUI key from `${APPDATA}/eval.env`, Telegram creds
-from `/mnt/user/appdata/fleet-watchdog/.env`. Case files are **baked into the eval
-image** — rebuild (`docker compose --profile eval build audrey-eval`) after any
-case-file or harness change. Detached run pattern:
+Secrets supplied at runtime: Audrey's direct `/v1` URL plus a `compat:full` PAT
+from `${APPDATA}/eval.env`, and Telegram credentials from
+`/mnt/user/appdata/fleet-watchdog/.env`. By default the current checkout's
+`scripts/` directory is mounted read-only into the eval container, so harness
+and case-file edits do not require rebuilding the image. Rebuild only when the
+eval image itself changes. A nonzero run now prints its evaluator diagnostics
+before reporting the saved artifacts. Detached run pattern:
 ```bash
 nohup env MODEL=audrey_research CASES=<file>.json LABEL=<label> \
   scripts/eval-onbox.sh \

@@ -11,7 +11,7 @@
 # the paired <date>-<mode>-report.md by hand — see docs/testing/README.md).
 #
 # PREREQUISITES (same as the harness — see docs/testing/README.md):
-#   - You are on WARP or Tailscale and can reach Audrey directly on :8000/v1.
+#   - You are on Tailscale (or WARP as fallback) and can reach Audrey directly on :8000/v1.
 #   - .env.test.local exists at the repo root with AUDREY_EVAL_BASE_URL and an
 #     Audrey PAT carrying `compat:full` as AUDREY_EVAL_API_KEY. The harness
 #     auto-loads it. This script does a

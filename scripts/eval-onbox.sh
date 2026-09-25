@@ -253,6 +253,17 @@ echo ">> waiting for ${CONTAINER} to finish…"
 rc="$(docker wait "${CONTAINER}")"
 echo ">> ${CONTAINER} exited: ${rc}"
 
+# A nonzero harness result is actionable only when its evidence is visible.
+# The old wrapper printed just "exited: 1", forcing a second command to learn
+# which structural check failed. Successful runs stay concise; failures print
+# the evaluator output automatically and still preserve the answers/results
+# artifacts below.
+if [[ "${rc}" != "0" ]]; then
+  echo ">> evaluator diagnostics (${CONTAINER}):" >&2
+  docker logs "${CONTAINER}" >&2 \
+    || echo "WARN: could not read ${CONTAINER} logs." >&2
+fi
+
 # Telegram push via the fleet-watchdog watcher bot. Non-fatal throughout — the
 # eval already ran and its answers are saved; a failed send shouldn't mask that.
 #   1. a SUMMARY message (verdict + the harness's "N/N cases passed" line), and

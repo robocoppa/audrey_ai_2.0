@@ -16,11 +16,13 @@ contextual startup and recovered-run presentation.
 Selected corrections passed live checks, and on 2026-09-24 the user marked the
 combined 2E regression gate and normal-use soak tested and settled. Milestone
 2F has therefore started. Slice 2F.1's focused authentication smoke passed on
-2026-09-24. Slice 2F.2 is laptop-complete and makes the native application
-operationally authoritative: the OWUI bearer adapter defaults off, evals use
-Audrey personal tokens directly, the on-box harness has no OWUI readiness
-dependency, and the obsolete backend alias is removed. The live stop-OWUI
-independence gate remains open.
+2026-09-24. Slice 2F.2 is deployed and makes the native application
+operationally authoritative: the OWUI bearer adapter is disabled, its startup
+state is live-confirmed, and a fresh auth-cutover smoke plus a direct laptop
+fast eval passed. The standalone-proxy smoke did not execute because its old
+env file was not Docker-compatible; the on-box fast eval completed with one
+failed structural check whose diagnostic was hidden by the old wrapper. The
+proxy, browser, on-box-eval, and confirmed stop-OWUI evidence remains open.
 Historical chat import is optional and runs only after a new explicit request.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
@@ -33,7 +35,7 @@ and finally adds the first general skills layer on that owned surface.
 | Phase | Plan | Outcome | Entry gate | Status |
 |---|---|---|---|---|
 | 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | Complete |
-| 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (2A–2B, 2C.1–2C.3, and 2D.1–2D.4 verified; 2D.5 deployed; 2E settled by user acceptance; 2F.2 native-first cutover laptop-complete) |
+| 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (2A–2B, 2C.1–2C.3, and 2D.1–2D.4 verified; 2D.5 deployed; 2E settled; 2F.2 deployed with live proxy/browser gate partial) |
 | 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | Planned |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1,
@@ -54,8 +56,8 @@ Campaign 3 Phase 2, and Campaign 3 Phase 3, or use the topic filenames.
 - Skills do not execute code or grant permissions. Tools act; skills instruct;
   platform policy authorizes.
 - A feature is not called verified on Unraid until the user confirms it.
-- Any source/config edit runs the full hermetic suite, changed-file ruff, and
-  the lesson-link checker required by `AGENTS.md`.
+- Any source/config edit runs the full hermetic suite and changed-file ruff.
+  Lesson-link sweeps run only when the user explicitly requests one.
 
 ## What comes after these plans
 

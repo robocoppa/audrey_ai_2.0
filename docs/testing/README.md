@@ -70,15 +70,17 @@ You need two things; the harness refuses to start without them.
    rule — laptop-local, never committed). The harness auto-loads it:
 
    ```text
-   # .env.test.local  (repo root)
-   AUDREY_EVAL_BASE_URL=http://192.168.1.11:8000/v1   # WARP → Audrey
-   AUDREY_EVAL_API_KEY=aud_pat_...                     # compat:full token
+   AUDREY_EVAL_BASE_URL=http://100.113.157.98:8000/v1
+   AUDREY_EVAL_API_KEY=aud_pat_...
    ```
 
    Create the token in native Audrey Settings → Personal access tokens with the
-   `compat:full` scope. Use `http://100.113.157.98:8000/v1` instead while
-   connected through Tailscale. The harness rejects mismatched legacy
-   credentials before it starts a long run.
+   `compat:full` scope. Use `http://192.168.1.11:8000/v1` only when falling back
+   to WARP. The harness rejects mismatched legacy credentials before it starts a
+   long run. Keep explanations on separate comment lines: the harness
+   intentionally treats everything after `=` as the value and does not accept
+   inline comments.
+   Keep `.env.test.local` mode `600`; it contains a live personal token.
 
 You must also be **on the LAN/VPN** to reach the box — these run against the
 live stack, never from off-network and never from inside a container.

@@ -390,6 +390,14 @@ class TestEvalOnboxWaitsForTheStack:
         assert "no such container, skipping" in text
 
 
+    def test_a_nonzero_result_prints_the_evaluator_evidence(self):
+        text = self._text()
+        wait = text.index("docker wait")
+        diagnostic = text.index("evaluator diagnostics")
+        logs = text.index("docker logs", diagnostic)
+        assert wait < diagnostic < logs
+
+
 class TestASetupFailureStillNotifies:
     """`die` exits before the notify block, so a gate failure was silent.
 
