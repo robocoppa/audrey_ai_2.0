@@ -52,6 +52,7 @@ class PipelineState(TypedDict, total=False):
     max_tokens: int | None
     user_id: str                     # OpenAI-spec `user` field; "" if unset. Required to enable memory.
     tool_observer: RunEventToolObserver  # native-only transient event projection
+    compatibility_request: bool      # /v1 client semantics; false for native Audrey runs
 
     # Memory (per-user, keyword-match via custom-tools /memory_search)
     memory_hits: list[dict]          # recalled entries shown to the model as a system hint

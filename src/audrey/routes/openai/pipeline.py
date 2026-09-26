@@ -147,6 +147,7 @@ async def _generate_via_pipeline(
         "top_p": payload.top_p,
         "max_tokens": payload.max_tokens,
         "user_id": user_id,
+        "compatibility_request": True,
     }
     async with inflight.slot(user_id):
         try:
@@ -276,7 +277,8 @@ async def _stream_via_pipeline(
     chosen_concrete: str = "?"
     is_deep_branch = False  # deep handles its own archive write to skip banners
     decision_messages = messages if routing_messages is None else routing_messages
-    owui_task = is_owui_task_request(decision_messages)
+    compatibility_request = event_context is None
+    owui_task = compatibility_request and is_owui_task_request(decision_messages)
 
     try:
         async with inflight.slot(user_id):
@@ -442,6 +444,7 @@ async def _stream_via_pipeline(
                     "max_tokens": payload.max_tokens,
                     "user_id": user_id,
                     "tool_observer": tool_observer,
+                    "compatibility_request": compatibility_request,
                 }
                 banner_q: asyncio.Queue[str | None] = asyncio.Queue(maxsize=128)
 

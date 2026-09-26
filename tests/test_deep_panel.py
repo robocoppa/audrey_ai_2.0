@@ -486,6 +486,37 @@ async def test_node_complexity_forces_deep_for_research():
     assert out["mode"] == "deep"
 
 
+async def test_node_complexity_limits_owui_utility_routing_to_compatibility():
+    cfg = get_config()
+    ollama = OllamaClient(base_url="http://unused")
+    compiled = gmod.build_graph(
+        cfg, ollama, ModelRegistry(cfg), HealthTracker(),
+        FairLocalGate(concurrency=1), _NoTools(), _HTTP,
+    )
+    node = compiled.nodes["complexity"].bound
+    messages = [{
+        "role": "user",
+        "content": "### Task:\nWrite a detailed migration plan",
+    }]
+
+    compatibility = await node.ainvoke({
+        "virtual_model": "audrey_deep",
+        "messages": messages,
+        "compatibility_request": True,
+    })
+    native = await node.ainvoke({
+        "virtual_model": "audrey_deep",
+        "messages": messages,
+        "compatibility_request": False,
+    })
+    await ollama.aclose()
+
+    assert compatibility["mode"] == "fast"
+    assert compatibility["owui_task"] is True
+    assert native["mode"] == "deep"
+    assert native["owui_task"] is False
+
+
 # ─── audrey_research staged pipeline (Phase 24) ────────────────────────
 #
 # The staged executor: research fan-out → verify → write. We stub a fake

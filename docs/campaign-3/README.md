@@ -21,12 +21,13 @@ operationally authoritative: the OWUI bearer adapter is disabled, its startup
 state is live-confirmed, and a fresh auth-cutover smoke plus a direct laptop
 fast eval passed. The standalone-proxy native UI smoke also passed, covering
 the built assets and CSP, two-user isolation, a streamed Fast turn,
-conversation management, cleanup, and repair readiness. The on-box fast eval
-returned the correct `Canberra.` answer, but the old `fast-capital` case
-false-failed it against the generic 20-character floor. The case now declares
-its `Canberra` content contract. After that update reaches Tower, only the
-corrected one-case post-stop rerun and one public native Fast turn remain for
-the cutover proof.
+conversation management, cleanup, and repair readiness. The corrected on-box
+`fast-capital` eval now passes 1/1 with its `Canberra` content contract.
+Slice 2F.3 is laptop-complete: native runs no longer apply OWUI's `### Task:`
+utility routing, while `/v1` compatibility requests retain it. Only one
+targeted public native Deep turn and explicit confirmation that Open WebUI
+remains stopped are open; the already-passed auth, proxy, and eval smokes are
+not repeated.
 Historical chat import is optional and runs only after a new explicit request.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
@@ -39,7 +40,7 @@ and finally adds the first general skills layer on that owned surface.
 | Phase | Plan | Outcome | Entry gate | Status |
 |---|---|---|---|---|
 | 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | Complete |
-| 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (2A–2B, 2C.1–2C.3, and 2D.1–2D.4 verified; 2D.5 deployed; 2E settled; 2F.2 deployed with one corrected post-stop eval and one native Fast turn still open) |
+| 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (2A–2B, 2C.1–2C.3, and 2D.1–2D.4 verified; 2D.5 deployed; 2E settled; 2F.2 corrected eval passed; 2F.3 laptop-complete with one targeted native Deep turn open) |
 | 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | Planned |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1,

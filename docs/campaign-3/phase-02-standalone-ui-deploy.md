@@ -217,9 +217,14 @@ The first deployed run met that contract on 2026-09-24. The stop-Open-WebUI
 independence proof below remains open.
 
 The authentication-cutover and full standalone-proxy smokes have already
-passed. The remaining independence proof is intentionally narrow: after the
-corrected `fast-capital` case reaches Tower, stop Open WebUI, run that one
-`/v1` case, and complete one public native Fast turn.
+passed. The corrected `fast-capital` case also passed on Tower on 2026-09-25:
+`contains:✅`, `has_answer:✅`, and 1/1 applicable cases passed in 20.2 seconds.
+That result is settled; do not rerun it for 2F.3.
+
+The remaining independence proof is intentionally narrow. Deploy 2F.3, leave
+Open WebUI stopped, and complete one public native Deep turn whose prompt
+begins with the Open WebUI utility marker. This verifies that native routing
+honors the selected model instead of inheriting `/v1` compatibility semantics.
 
 From the Tower checkout:
 
@@ -227,31 +232,25 @@ From the Tower checkout:
 cd /mnt/user/appdata/audrey_ai_2.0
 ```
 
-Stop Open WebUI:
+If Open WebUI is not already stopped, stop it:
 
 ```bash
 docker stop open-webui
 ```
 
-Run only the corrected eval case:
+After 2F.3 reaches Tower, refresh the public Audrey URL, select Deep, and send:
 
-```bash
-MODEL=audrey_fast \
-CASES=eval_prompts_fast.json \
-LABEL=native-cutover-fixed \
-ARGS='--only fast-capital' \
-bash scripts/eval-onbox.sh
+```text
+### Task:
+Write a detailed migration plan for moving a service with no downtime.
 ```
 
-Success is `[PASS] fast-capital`, `contains:✅`, `has_answer:✅`, and
-`1/1 cases passed all applicable checks`.
-
-Then refresh the public Audrey URL and complete one native Fast turn. This
-is the minimum post-stop proof: the eval exercises direct Audrey PAT `/v1`
-compatibility, while the browser turn exercises Cloudflare authentication,
-the standalone proxy, canonical conversation state, and native streaming.
-Leave Open WebUI stopped. Do not repeat the broader passed smokes unless this
-targeted proof fails.
+Success is a normal answer with Deep's Planning, Dispatching panel, and
+Synthesizing banners, not a Thinking-only utility response. This one turn is
+the minimum 2F.3 proof and also covers Cloudflare authentication, the standalone
+proxy, native streaming, and the post-stop browser path. Leave Open WebUI
+stopped. Do not repeat the passed eval or broader smokes unless this targeted
+proof fails.
 
 Leave `OWUI_AUTH_ENABLED=0` and Open WebUI stopped after this gate. The dormant
 adapter may be enabled with `OWUI_AUTH_ENABLED=1` only for a short diagnostic

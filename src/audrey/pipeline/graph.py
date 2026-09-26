@@ -342,7 +342,8 @@ def build_graph(
         deep_intent = has_deep_intent(routing_messages, deep_intent_phrases)
         forced_deep = vm in ("audrey_deep", "audrey_cloud", "audrey_local", "audrey_research")
         forced_fast = vm == "audrey_fast"
-        owui_task = is_owui_task_request(routing_messages)
+        compatibility_request = state.get("compatibility_request", True)
+        owui_task = compatibility_request and is_owui_task_request(routing_messages)
         image_turn = has_image_part(routing_messages)
         task_override: str | None = None
         describe_first = image_turn and forced_deep and describe_enabled(cfg)

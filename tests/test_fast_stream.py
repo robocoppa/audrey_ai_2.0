@@ -473,10 +473,12 @@ class _FixedGraph:
 class _ObservedGraph:
     def __init__(self) -> None:
         self.observer_seen: bool | None = None
+        self.compatibility_request: bool | None = None
 
     async def ainvoke(self, state):
         observer = state["tool_observer"]
         self.observer_seen = observer is not None
+        self.compatibility_request = state["compatibility_request"]
         if observer is not None:
             call_id = observer.started({
                 "function": {
@@ -740,6 +742,7 @@ async def test_fast_tool_route_emits_native_observations_without_leaking_to_v1(
     ]
 
     assert graph.observer_seen is True
+    assert graph.compatibility_request is False
     observed = [
         event for event in events
         if event.type.startswith("tool.") or event.type == "source.observed"
@@ -800,6 +803,7 @@ async def test_compatibility_tool_route_does_not_create_native_observer(monkeypa
     ]
 
     assert graph.observer_seen is False
+    assert graph.compatibility_request is True
     rendered = "".join(frames)
     assert "fast observed answer" in rendered
     assert frames[-1] == "data: [DONE]\n\n"
@@ -835,7 +839,9 @@ async def test_nonstream_owui_utility_turn_is_not_archived():
     assert archive.calls == []
 
 
-async def test_stream_owui_utility_turn_is_not_archived(monkeypatch):
+async def test_stream_compatibility_owui_utility_forces_fast_and_is_not_archived(
+    monkeypatch,
+):
     cfg = _Cfg(("a", 100, "local"))
     ollama = _ScriptedOllama({
         "a": [{
@@ -852,7 +858,7 @@ async def test_stream_owui_utility_turn_is_not_archived(monkeypatch):
     app = _route_app(cfg, ollama, archive)
     messages = [{"role": "user", "content": "### Task:\nGenerate a title"}]
     payload = ChatCompletionRequest(
-        model="audrey_fast",
+        model="audrey_deep",
         messages=messages,
         stream=True,
     )
@@ -871,6 +877,57 @@ async def test_stream_owui_utility_turn_is_not_archived(monkeypatch):
 
     assert frames[-1] == "data: [DONE]\n\n"
     assert archive.calls == []
+    assert ollama.calls[0]["model"] == "a"
+
+
+async def test_stream_native_task_header_obeys_the_requested_deep_mode(monkeypatch):
+    cfg = _Cfg(("a", 100, "local"))
+    ollama = _ScriptedOllama({})
+    user_text = "### Task:\nWrite a detailed migration plan"
+
+    async def classify(*args, **kwargs):
+        return "general", "test", 1.0
+
+    deep_calls: list[dict[str, Any]] = []
+
+    async def stream_deep(*args, **kwargs):
+        deep_calls.append(kwargs)
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(route_pipeline, "classify_with_registry", classify)
+    monkeypatch.setattr(
+        route_pipeline,
+        "_stream_deep_with_banners",
+        stream_deep,
+    )
+    app = _route_app(cfg, ollama, _RecordingArchive())
+    messages = [{"role": "user", "content": user_text}]
+    payload = ChatCompletionRequest(
+        model="audrey_deep",
+        messages=messages,
+        stream=True,
+    )
+
+    frames = [
+        frame async for frame in _stream_via_pipeline(
+            app,
+            payload,
+            messages,
+            {},
+            user_id="alice@example.com",
+            conversation_id="conversation-native-task",
+            user_turn_text=user_text,
+            event_context=RunEventContext(
+                run_id="run-native-task",
+                conversation_id="conversation-native-task",
+                assistant_message_id="message-native-task",
+                mode="deep",
+                sink=lambda _event: None,
+            ),
+        )
+    ]
+
+    assert frames == ["data: [DONE]\n\n"]
 
 
 async def test_route_archives_missing_done_as_partial_without_banner_text(

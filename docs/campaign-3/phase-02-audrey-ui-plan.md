@@ -19,11 +19,12 @@ tokens, and Open WebUI is no longer an intended operational dependency. The
 startup log, fresh auth-cutover smoke, and laptop direct fast eval passed. The
 standalone-proxy native UI smoke also passed, including assets and CSP,
 two-user isolation, one streamed Fast turn, conversation management, cleanup,
-and repair readiness. The on-box fast eval returned the correct `Canberra.`
-answer but the old case false-failed it against a generic length floor. The
-case now declares its `Canberra` contract. The user directed an immediate
-native-front-end migration; only the corrected post-stop one-case rerun and
-one public native Fast turn remain open.
+and repair readiness. The corrected on-box `fast-capital` eval now passes
+1/1 with its `Canberra` content contract. Slice 2F.3 is laptop-complete:
+native runs no longer apply OWUI's `### Task:` utility routing, while `/v1`
+compatibility requests retain it. The user directed an immediate
+native-front-end migration; only one targeted public native Deep turn and
+explicit confirmation that Open WebUI remains stopped are open.
 
 ## Goal
 
@@ -1201,22 +1202,28 @@ hashed entry asset, and CSP; resolved distinct user and admin identities;
 returned `404` for both cross-user read directions; completed a Fast AG-UI run
 with two canonical messages; exercised rename, literal search, archive, and
 restore; and finished canonical/projection cleanup with repair ready. The
-on-box fast eval returned the correct `Canberra.` answer in one second, but
-`has_answer` false-failed it because the case lacked an `answer_contains`
-contract and the generic empty-response guard uses a 20-character floor. The
-case now declares `Canberra`, with a regression test for the live terse
-answer. `scripts/smoke-native-onbox.sh` validates native env files before
-Docker, and `eval-onbox.sh` prints evaluator diagnostics for nonzero results.
-Only the corrected one-case post-stop rerun and one public native Fast turn
-remain open; broader passed smokes are not repeated unless this proof fails.
+initial on-box fast eval returned the correct `Canberra.` answer but
+false-failed only the old 20-character heuristic. After the case declared its
+`Canberra` content contract, the corrected on-box run passed 1/1 in 20.2
+seconds with both `contains` and `has_answer` green.
+`scripts/smoke-native-onbox.sh` validates native env files before Docker, and
+`eval-onbox.sh` prints evaluator diagnostics for nonzero results. Only one
+targeted public native Deep turn and explicit confirmation that Open WebUI
+remains stopped are open.
 
-Laptop status: all 2,892 backend tests pass; the eval correction's 212 focused
-contracts and the prior cutover correction's 260 focused smoke, eval,
-authentication, and configuration contracts pass. Scoped ruff, JSON
-validation, Bash syntax, and diff checks are clean. No lesson sweep ran;
-lesson-link sweeps
-are user-directed. Milestone 2E is settled by user acceptance and no longer
-blocks this slice.
+Slice 2F.3 makes the request surface explicit at the shared pipeline boundary.
+Native runs set `compatibility_request=false`, so a user's literal
+`### Task:` prefix obeys the selected native model instead of activating an
+OWUI-only title/tag optimization. The same flag reaches the compiled graph for
+tool-capable Fast turns. OpenAI-compatible `/v1` requests keep the utility
+optimization and archive suppression unchanged.
+
+Laptop status: all 2,894 backend tests pass. The 2F.3 routing change has 195
+focused routing, streaming, and compatibility contracts passing; scoped ruff
+and diff checks are clean. The prior eval correction's 212 focused contracts
+and the cutover correction's 260 focused contracts remain current. No lesson
+sweep ran; lesson-link sweeps are user-directed. Milestone 2E is settled by
+user acceptance and no longer blocks this slice.
 
 ## Verification and operations
 

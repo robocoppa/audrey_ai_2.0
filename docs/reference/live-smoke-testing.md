@@ -18,6 +18,7 @@ because they exist or because an older phase checklist names them. Reuse
 current evidence for unchanged surfaces. Escalate to a broader smoke only when
 the targeted check fails, the change crosses additional boundaries, or the
 user explicitly asks for broader coverage. Hermetic laptop verification is a
+separate required gate for code changes; it does not substitute for live proof.
 
 Current VPN addresses:
 
