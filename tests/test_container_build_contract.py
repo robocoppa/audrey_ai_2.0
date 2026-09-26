@@ -10,6 +10,8 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
 AUDREY_DOCKERFILE = ROOT / "docker" / "audrey.Dockerfile"
+AUDREY_MAIN = ROOT / "src" / "audrey" / "main.py"
+PROJECT = ROOT / "pyproject.toml"
 UI_DOCKERFILE = ROOT / "web" / "Dockerfile"
 UI_NGINX_TEMPLATE = ROOT / "web" / "docker" / "default.conf.template"
 UI_VITE_CONFIG = ROOT / "web" / "vite.config.ts"
@@ -45,14 +47,20 @@ def test_python_services_install_from_the_workspace_lock():
         assert "uv pip compile" not in text
 
 
-def test_native_ui_build_is_self_contained_and_has_a_transitional_fallback():
+def test_native_ui_build_is_self_contained_and_not_duplicated_in_backend():
     audrey = _text(AUDREY_DOCKERFILE)
+    main = _text(AUDREY_MAIN)
+    project = _text(PROJECT)
     ui = _text(UI_DOCKERFILE)
     vite = _text(UI_VITE_CONFIG)
     compose = yaml.safe_load(COMPOSE.read_text())
 
     assert "COPY images /workspace/images" not in audrey
-    assert "COPY --from=web-build /workspace/web/dist" in audrey
+    assert "FROM node:" not in audrey
+    assert "web-build" not in audrey
+    assert "src/audrey/static/app" not in audrey
+    assert "native_ui_router" not in main
+    assert "src/audrey/static/app" not in project
     assert "COPY --from=build --chown=101:101 /workspace/dist" in ui
     assert (
         "nginxinc/nginx-unprivileged:1.30.4-alpine3.24@"
@@ -89,6 +97,7 @@ def test_native_ui_build_is_self_contained_and_has_a_transitional_fallback():
     )
     assert service["cap_drop"] == ["ALL"]
     assert service["security_opt"] == ["no-new-privileges:true"]
+    assert "AUDREY_NATIVE_UI_ENABLED" not in backend["environment"]
     assert compose["services"]["custom-tools"]["environment"]["AUDREY_URL"] == (
         "${AUDREY_URL:-http://audrey:8000}"
     )

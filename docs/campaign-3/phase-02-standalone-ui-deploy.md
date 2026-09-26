@@ -6,10 +6,10 @@ identity, authorization, conversations, runs, files, and preferences.
 
 ## Transition boundary
 
-Keep `AUDREY_NATIVE_UI_ENABLED=1` during this first deployment. The backend's
-embedded shell is the rollback target until the standalone container has passed
-the smoke, browser checks, and a normal-use soak. Open WebUI is no longer a
-rollback target and is to remain stopped after the 2F.2 native cutover.
+The transition is complete. `audrey-ui` is the sole browser surface and the
+Audrey backend serves APIs only; its embedded shell, feature flag, packaged
+assets, and Node build stage were removed in 2F.4. Open WebUI remains stopped
+and is not a rollback target.
 
 The host-network `cloudflared` instance reaches the new UI through
 `http://127.0.0.1:8090`; host port 8088 remains assigned to SearXNG. The UI
@@ -20,11 +20,11 @@ container environment.
 
 ## Settled Phase 2E regression record
 
-The standalone UI and public Cloudflare route are already live. On 2026-09-24
-the user marked the combined browser regression and soak tested and settled.
-The checklist remains below so a later report can be diagnosed as a concrete
-regression. Keep the embedded backend shell and retained rollback container
-only until their separate 2F removal gates close.
+The standalone UI and public Cloudflare route are live. On 2026-09-24 the user
+marked the combined browser regression and soak tested and settled. The 2F.3
+native-independence proof passed with Open WebUI stopped, and 2F.4 removed the
+backend browser fallback. The checklist remains below only as a concrete
+regression reference.
 
 ## Rename the backend and build the private origin
 
@@ -202,95 +202,48 @@ docker compose up -d --build --force-recreate audrey
 docker compose logs --since=5m audrey
 ```
 
-The logs must contain `auth: Open WebUI bearer adapter disabled`. Run the
-focused smoke from the laptop as documented in the live-smoke guide. The
-following disposable-container form is a Tower fallback, not the default:
+The authentication-cutover smoke, full standalone-proxy smoke, corrected
+`fast-capital` eval, and targeted native Deep independence proof have all
+passed. Open WebUI remained stopped for the Deep proof. These results are
+settled; do not rerun them for 2F.4.
 
-```bash
-cd /mnt/user/appdata/audrey_ai_2.0
-bash scripts/smoke-native-onbox.sh smoke_native_auth_cutover.py
-```
+The 2F.4 live proof is intentionally limited to the affected boundary after
+rebuilding `audrey`:
 
-Success ends with `"status": "passed"`, reports
-`"legacy_bearer_rejected_locally": true`, and has no `cleanup_error`.
-The first deployed run met that contract on 2026-09-24. The stop-Open-WebUI
-independence proof below remains open.
+1. Confirm `audrey` and `audrey-ui` are healthy.
+2. Refresh the public Audrey URL and confirm the authenticated account label
+   and existing conversation history load.
 
-The authentication-cutover and full standalone-proxy smokes have already
-passed. The corrected `fast-capital` case also passed on Tower on 2026-09-25:
-`contains:✅`, `has_answer:✅`, and 1/1 applicable cases passed in 20.2 seconds.
-That result is settled; do not rerun it for 2F.3.
-
-The remaining independence proof is intentionally narrow. Deploy 2F.3, leave
-Open WebUI stopped, and complete one public native Deep turn whose prompt
-begins with the Open WebUI utility marker. This verifies that native routing
-honors the selected model instead of inheriting `/v1` compatibility semantics.
-
-From the Tower checkout:
-
-```bash
-cd /mnt/user/appdata/audrey_ai_2.0
-```
-
-If Open WebUI is not already stopped, stop it:
-
-```bash
-docker stop open-webui
-```
-
-After 2F.3 reaches Tower, refresh the public Audrey URL, select Deep, and send:
-
-```text
-### Task:
-Write a detailed migration plan for moving a service with no downtime.
-```
-
-Success is a normal answer with Deep's Planning, Dispatching panel, and
-Synthesizing banners, not a Thinking-only utility response. This one turn is
-the minimum 2F.3 proof and also covers Cloudflare authentication, the standalone
-proxy, native streaming, and the post-stop browser path. Leave Open WebUI
-stopped. Do not repeat the passed eval or broader smokes unless this targeted
-proof fails.
-
-Leave `OWUI_AUTH_ENABLED=0` and Open WebUI stopped after this gate. The dormant
-adapter may be enabled with `OWUI_AUTH_ENABLED=1` only for a short diagnostic
-if native authentication itself is broken; it is not the normal rollback path.
-No data migration or identity rewrite is involved.
+That refresh covers the standalone proxy-to-API path and proves that removing
+the backend shell did not disturb canonical application state. It does not
+require a prompt, an eval, or a broad smoke suite. Leave `OWUI_AUTH_ENABLED=0`
+and Open WebUI stopped. The dormant adapter is diagnostic-only and is not the
+normal rollback path.
 
 ## Rollback
 
-If the UI container, proxy, upload, or stream path misbehaves, change the tunnel
-origin back to `http://127.0.0.1:8000`. No database rollback or data migration
-is involved because the browser client never owns canonical state. Keep the
-standalone container available for diagnosis and leave the Access application
-protecting the hostname.
+The backend no longer serves a browser shell, so port 8000 is API-only and must
+not become the public browser origin. If the UI container, proxy, upload, or
+stream path fails, redeploy a known-good `audrey-ui` image or repair the
+standalone proxy while leaving Cloudflare Access on the hostname. Audrey owns
+the canonical data, so a UI rollback does not require a database rollback or
+identity rewrite.
 
-If the renamed backend itself fails before the gate, restore the retained
-container without deleting either image:
+If the Audrey backend itself fails, redeploy its known-good image through the
+current Compose service. The retired pre-cutover container rename ceremony is
+no longer part of normal recovery, and Open WebUI remains stopped.
 
-```bash
-docker compose stop audrey
-docker rename audrey audrey-failed
-docker rename audrey-ai-retired audrey-ai
-docker start audrey-ai
-```
+## Optional UI repository extraction
 
-The old Compose service remains outside the new graph, so do not run
-`docker compose up` against it. Diagnose or remove `audrey-failed` only
-after normal service has been restored.
-
-## Extraction gate
-
-After the standalone origin passes the smoke, browser checks, and a defined
-normal-use soak:
+The embedded backend fallback was removed in 2F.4. Moving `web/` to a separate
+repository is an optional packaging decision, not a Phase 2 product-cutover
+gate. If that split becomes useful:
 
 1. Move `web/` intact into its own GitHub repository.
 2. Give that repository its own release/image workflow and deployment Compose
    file while retaining external `ollama-net` and the same proxy contract.
 3. Point Audrey's Compose deployment at the released UI image rather than a
    local build context.
-4. In a later Audrey change, remove the backend Node build stage, embedded
-   static router/flag, wheel artifact, and fallback assets.
 
 The current UI protocol is Audrey-specific. Reuse by another project should be
 implemented behind a typed platform adapter for identity, conversations, runs,

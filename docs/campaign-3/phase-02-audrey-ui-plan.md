@@ -20,11 +20,12 @@ startup log, fresh auth-cutover smoke, and laptop direct fast eval passed. The
 standalone-proxy native UI smoke also passed, including assets and CSP,
 two-user isolation, one streamed Fast turn, conversation management, cleanup,
 and repair readiness. The corrected on-box `fast-capital` eval now passes
-1/1 with its `Canberra` content contract. Slice 2F.3 is laptop-complete:
-native runs no longer apply OWUI's `### Task:` utility routing, while `/v1`
-compatibility requests retain it. The user directed an immediate
-native-front-end migration; only one targeted public native Deep turn and
-explicit confirmation that Open WebUI remains stopped are open.
+1/1 with its `Canberra` content contract. Slice 2F.3 is live-passed: native
+runs no longer apply OWUI's `### Task:` utility routing, `/v1` compatibility
+requests retain it, and the targeted native Deep proof passed with Open WebUI
+stopped. Slice 2F.4 is laptop-complete: the backend no longer builds, packages,
+configures, or serves an embedded browser shell. The standalone `audrey-ui`
+service is the sole browser surface.
 
 ## Goal
 
@@ -32,9 +33,10 @@ Make Audrey the product application, not an OpenAI-compatible backend hidden
 behind another agent platform.
 
 The native web client should make chat, tools, files, memory, modes, sources,
-and later skills feel like one Audrey system. Open WebUI remains a migration
-client while the native surface reaches parity; it is not the future source of
-identity, conversation state, prompt behavior, or tool continuation.
+and later skills feel like one Audrey system. The native surface is
+authoritative and Open WebUI remains stopped. Only its dormant authentication
+adapter and Audrey's `/v1` compatibility surface remain available for bounded
+diagnostics and API clients; OWUI is not a browser rollback target.
 
 ## Current implementation slice
 
@@ -874,15 +876,17 @@ writing outside that directory. A pinned, non-root NGINX runtime serves the SPA
 and forwards `/api/*` and `/v1/*` to `audrey` on `ollama-net`, including the
 Cloudflare Access assertion, unbuffered SSE, and streamed upload bodies. Compose
 publishes the UI only on loopback port 8090 for the host-network tunnel; 8088
-remains assigned to SearXNG. The
-backend image keeps an embedded copy for one transition release; after the live
-soak, the frontend can move intact to its own GitHub repository before that
-fallback is removed. See the
+remains assigned to SearXNG. The transition soak and native-independence gate
+passed. Slice 2F.4 removed the backend Node build stage, static router and
+feature flag, packaged assets, and fallback tests. The backend now serves APIs
+only, while `audrey-ui` is the sole browser shell. Moving `web/` to its own
+repository remains an optional packaging change. See the
 [standalone UI deployment runbook](phase-02-standalone-ui-deploy.md).
 
-Rollback removes or disables the public tunnel route first, then disables the
-Audrey Access flag and recreates `audrey`. Disabling the Access application
-while leaving its tunnel route public is not a safe rollback.
+Operational browser rollback redeploys a known-good `audrey-ui` while keeping
+Cloudflare Access on the hostname. If the public route itself must be removed,
+remove it before disabling Access. Never leave the route public without Access
+or point it at the API-only backend port.
 
 ### Milestone 2D — files, preferences, and ownership operations
 
@@ -1207,9 +1211,9 @@ false-failed only the old 20-character heuristic. After the case declared its
 `Canberra` content contract, the corrected on-box run passed 1/1 in 20.2
 seconds with both `contains` and `has_answer` green.
 `scripts/smoke-native-onbox.sh` validates native env files before Docker, and
-`eval-onbox.sh` prints evaluator diagnostics for nonzero results. Only one
-targeted public native Deep turn and explicit confirmation that Open WebUI
-remains stopped are open.
+`eval-onbox.sh` prints evaluator diagnostics for nonzero results. The targeted
+public native Deep turn also passed with Open WebUI stopped, settling the 2F.3
+independence proof.
 
 Slice 2F.3 makes the request surface explicit at the shared pipeline boundary.
 Native runs set `compatibility_request=false`, so a user's literal
@@ -1218,9 +1222,18 @@ OWUI-only title/tag optimization. The same flag reaches the compiled graph for
 tool-capable Fast turns. OpenAI-compatible `/v1` requests keep the utility
 optimization and archive suppression unchanged.
 
-Laptop status: all 2,894 backend tests pass. The 2F.3 routing change has 195
-focused routing, streaming, and compatibility contracts passing; scoped ruff
-and diff checks are clean. The prior eval correction's 212 focused contracts
+Slice 2F.4 completes the browser-runtime cutover. The Audrey backend no longer
+builds or ships the Vite application, mounts a root SPA router, or exposes an
+environment flag for an embedded UI. The standalone `audrey-ui` image owns the
+only browser build and continues to proxy `/api` and `/v1` to Audrey.
+
+Laptop status: all 2,889 backend tests pass. The 2F.4 container and
+configuration boundary has 127 focused contracts passing, and its TOML/YAML
+parsing, compile checks, scoped ruff, diff checks, and built-wheel inspection
+are clean; the wheel contains no `audrey/static/app` assets. The five-test
+reduction removes tests for the deleted backend shell itself. The 2F.3 routing
+change has 195 focused routing, streaming, and compatibility contracts passing.
+The prior eval correction's 212 focused contracts
 and the cutover correction's 260 focused contracts remain current. No lesson
 sweep ran; lesson-link sweeps are user-directed. Milestone 2E is settled by
 user acceptance and no longer blocks this slice.
@@ -1247,9 +1260,9 @@ Qdrant projections must be rebuildable. Schema migration is an explicit
 deployment step with a recorded prior version and rollback limit.
 
 Production runs a dedicated static frontend service and keeps application state
-in Audrey. During the transition, the backend retains the embedded shell and
-OWUI remains separately routable, so rollback changes traffic rather than
-rewriting data.
+in Audrey. The backend is API-only, `audrey-ui` is the sole browser surface,
+and Open WebUI remains stopped. Browser rollback redeploys a known-good UI
+image; it does not point the public hostname at the backend API port.
 
 ## Decision gates before implementation
 

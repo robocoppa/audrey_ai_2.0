@@ -46,7 +46,6 @@ from audrey.routes.files import router as files_router
 from audrey.routes.inflight import UserInflightRegistry
 from audrey.routes.kb import router as kb_router
 from audrey.routes.media import router as media_router
-from audrey.routes.native_ui import router as native_ui_router
 from audrey.routes.openai import VIRTUAL_MODELS
 from audrey.routes.openai import router as openai_router
 from audrey.routes.upload_ui import router as upload_ui_router
@@ -94,10 +93,6 @@ async def lifespan(app: FastAPI):
     log.info(
         "auth: Open WebUI bearer adapter %s",
         "enabled" if cfg.env.owui_auth_enabled else "disabled",
-    )
-    log.info(
-        "native_ui: %s route=/",
-        "enabled" if cfg.env.native_ui_enabled else "disabled",
     )
 
     application_cfg = cfg.raw.get("application", {}) or {}
@@ -482,7 +477,6 @@ app.include_router(application_router)
 app.include_router(kb_router)
 app.include_router(files_router)
 app.include_router(media_router)
-app.include_router(native_ui_router)
 app.include_router(upload_ui_router)
 app.include_router(user_data_router)
 app.include_router(admin_router)
