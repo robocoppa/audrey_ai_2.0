@@ -368,10 +368,16 @@ describe("App", () => {
     render(<App />);
 
     await act(async () => {
-      await vi.runAllTimersAsync();
+      await vi.advanceTimersByTimeAsync(55_000);
+    });
+    expect(screen.getByRole("status", { name: "Loading" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Retry session" })).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
     });
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "did not establish this browser session within 45 seconds",
+      "did not establish this browser session within 65 seconds",
     );
     expect(screen.getByRole("heading", {
       name: "Sign-in is taking longer than expected",

@@ -34,59 +34,62 @@ The standalone UI bind `127.0.0.1:8090` is Tower-loopback-only. A laptop cannot
 reach it at either private IP without an SSH tunnel. Do not confuse that limit
 with the published backend port `8000`.
 
-## Keep the credential sets separate
+## Keep credentials private and runner-specific
 
-The laptop's gitignored `.env.test.local` belongs to the eval harness. It
-contains a direct Audrey URL and a first-party personal token:
+The laptop's gitignored `.env.test.local` is the permanent local credential
+file for evals and native API smokes. It contains the direct Audrey eval URL,
+the first-party personal token, and the two Cloudflare Access application
+assertions:
 
 ```text
 AUDREY_EVAL_BASE_URL=http://100.113.157.98:8000/v1
 AUDREY_EVAL_API_KEY=aud_pat_...
+AUDREY_USER_JWT=eyJ...
+AUDREY_ADMIN_JWT=eyJ...
 ```
 
 Use `http://192.168.1.11:8000/v1` only when falling back to WARP. Create the
-token in native Audrey Settings with `compat:full` scope. This file is not a
-native Cloudflare smoke environment and must never contain an Access assertion.
-Keep `.env.test.local` mode `600`; it contains a live personal token.
+personal token in native Audrey Settings with `compat:full` scope. Native smoke
+commands source this file; the eval harness reads only its `AUDREY_EVAL_*`
+entries. Keep it mode `600`. The variable entries are permanent, but expired
+Access JWT values still need to be refreshed in place.
 
-Native smoke credentials belong in the gitignored `.env.smoke.local` file on
-the machine that runs the smoke. Use Docker-compatible env-file syntax so the
-same format works when sourced by Bash on the laptop and passed to Docker on
-Tower:
+The Docker-only Tower fallback keeps a separate, gitignored
+`.env.smoke.local`, because Docker's `--env-file` would otherwise pass the
+unrelated eval PAT into the disposable container. That root-owned file contains
+only these same two native credential names:
 
 ```text
-AUDREY_SMOKE_USER_ACCESS_JWT=eyJ...
-AUDREY_SMOKE_ADMIN_ACCESS_JWT=eyJ...
+AUDREY_USER_JWT=eyJ...
+AUDREY_ADMIN_JWT=eyJ...
 ```
 
-Use exactly `KEY=value`: no `export`, no spaces around `=`, no Markdown link
-syntax, and no obsolete `OWUI_API_KEY`, `TEST_OWUI_TOKEN`, or
-`ADMIN_OWUI_TOKEN` entries. Before telling the user to source the file, confirm
-it exists and inspect key names without printing values.
+Both files use exactly `KEY=value`: no `export`, no spaces around `=`, no
+Markdown link syntax, and no obsolete `OWUI_API_KEY`, `TEST_OWUI_TOKEN`, or
+`ADMIN_OWUI_TOKEN` entries. Before telling the user to source a file, confirm it
+exists and inspect key names without printing values.
 
-Every native smoke script ignores legacy OWUI credentials.
-It requires a current Cloudflare Access **application** JWT for the user in
-`AUDREY_SMOKE_USER_ACCESS_JWT`. Obtain it either with `cloudflared access token`
-for Audrey's public application, or from the `CF_Authorization` cookie on the
-protected Audrey hostname in browser developer tools. Do not use the separate
-team-domain global-session cookie. Treat the value like a password: never print
-it, commit it, or paste it into chat.
+Every native smoke script ignores legacy OWUI credentials. It requires a
+current Cloudflare Access **application** JWT for the user in `AUDREY_USER_JWT`.
+Obtain it either with `cloudflared access token` for Audrey's public application,
+or from the `CF_Authorization` cookie on the protected Audrey hostname in browser
+developer tools. Do not use the separate team-domain global-session cookie.
+Treat the value like a password: never print it, commit it, or paste it into chat.
 
-The broader native UI smokes require both
-`AUDREY_SMOKE_USER_ACCESS_JWT` and a distinct
-`AUDREY_SMOKE_ADMIN_ACCESS_JWT`. A Tower `.env.smoke.local`, when used, must be
-root-owned or otherwise private and mode `600`.
+The broader native UI smokes require both `AUDREY_USER_JWT` and a distinct
+`AUDREY_ADMIN_JWT`. Tower's `.env.smoke.local` must be root-owned or otherwise
+private and mode `600`.
 
 ## Run the 2F.1 authentication smoke from the laptop
 
 Use Tailscale. This consumes the credential already stored in
-`.env.smoke.local`; do not prompt for it again:
+`.env.test.local`; do not prompt for it again:
 
 ```bash
 cd /home/bart/Documents/github/audrey_ai_2.0
 (
   set -a
-  source .env.smoke.local
+  source .env.test.local
   set +a
   AUDREY_SMOKE_BASE_URL=http://100.113.157.98:8000 .venv/bin/python scripts/smoke_native_auth_cutover.py
 )
@@ -98,7 +101,7 @@ If Tailscale is unavailable, use the complete WARP fallback:
 cd /home/bart/Documents/github/audrey_ai_2.0
 (
   set -a
-  source .env.smoke.local
+  source .env.test.local
   set +a
   AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python scripts/smoke_native_auth_cutover.py
 )
@@ -119,7 +122,7 @@ user data, conversations, tokens, files, or model calls. Use Tailscale first:
 cd /home/bart/Documents/github/audrey_ai_2.0
 (
   set -a
-  source .env.smoke.local
+  source .env.test.local
   set +a
   AUDREY_SMOKE_BASE_URL=http://100.113.157.98:8000 .venv/bin/python scripts/smoke_skills_foundation.py
 )

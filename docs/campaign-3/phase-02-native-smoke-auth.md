@@ -12,27 +12,30 @@ Cloudflare Access **application** JWT for Audrey's hostname, not a service
 token or the team-domain global-session token. Audrey verifies the JWT
 signature, audience, issuer, expiry, and account binding on every request.
 
-Set `AUDREY_SMOKE_USER_ACCESS_JWT` and `AUDREY_SMOKE_ADMIN_ACCESS_JWT` in the
-private, root-owned `.env.smoke.local` file (mode `600`). Do not commit, print,
-or paste either token into a ticket or chat. Legacy OWUI variables are ignored.
-Refresh expired Access assertions before a long all-mode smoke. Identical user/
-admin credentials fail before any live write.
+On the laptop, set `AUDREY_USER_JWT` and `AUDREY_ADMIN_JWT` in the private,
+gitignored `.env.test.local` file (mode `600`) alongside the eval variables.
+Do not commit, print, or paste either token into a ticket or chat. Legacy OWUI
+variables are ignored. Refresh expired Access assertions in place before a long
+all-mode smoke. Identical user/admin credentials fail before any live write.
 
-The file must use Docker-compatible `KEY=value` lines, without `export` or
-spaces around `=`. It should contain only the two `AUDREY_SMOKE_*_ACCESS_JWT`
-entries; remove obsolete `OWUI_API_KEY`, `TEST_OWUI_TOKEN`, and
-`ADMIN_OWUI_TOKEN` lines. This same strict format can be sourced by Bash for a
-laptop smoke.
+The file must use `KEY=value` lines, without `export` or spaces around `=`.
+Remove obsolete `OWUI_API_KEY`, `TEST_OWUI_TOKEN`, and `ADMIN_OWUI_TOKEN`
+lines. Source it from a subshell for laptop smokes so the assertions do not
+remain exported afterward.
 
 Tower is Docker-only and has no host Python, `uv`, or repository `.venv`. Run
 the scripts in a disposable container from the already-built `audrey:latest`
 image. Mount the checkout's `scripts/` directory read-only at `/smoke`, pass the
-root-owned credential file with Docker's `--env-file`, join `ollama-net`, and
+root-owned `.env.smoke.local` with Docker's `--env-file`, join `ollama-net`, and
 set `AUDREY_SMOKE_BASE_URL=http://audrey-ui:8080`. The scripts are intentionally
 not baked into the Audrey image. This reaches the standalone proxy through
 Docker DNS. Do not target the public Cloudflare hostname for assertion replay:
 the edge can replace the origin assertion header. The proxy explicitly forwards
 `Cf-Access-Jwt-Assertion` to Audrey.
+
+Tower's `.env.smoke.local` must contain only `AUDREY_USER_JWT` and
+`AUDREY_ADMIN_JWT`, with no eval PAT. The checked wrapper validates that strict
+shape before starting Docker.
 
 The checked Tower command is:
 

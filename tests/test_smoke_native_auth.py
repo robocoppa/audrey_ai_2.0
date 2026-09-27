@@ -33,8 +33,8 @@ _STREAMING_SCRIPTS = frozenset(_SCRIPTS) - {
 
 
 def test_access_assertions_are_authoritative_and_secrets_stay_out_of_repr(monkeypatch):
-    monkeypatch.setenv("AUDREY_SMOKE_USER_ACCESS_JWT", " user-jwt ")
-    monkeypatch.setenv("AUDREY_SMOKE_ADMIN_ACCESS_JWT", " admin-jwt ")
+    monkeypatch.setenv("AUDREY_USER_JWT", " user-jwt ")
+    monkeypatch.setenv("AUDREY_ADMIN_JWT", " admin-jwt ")
     monkeypatch.setenv("TEST_OWUI_TOKEN", "legacy-user")
     monkeypatch.setenv("ADMIN_OWUI_TOKEN", "legacy-admin")
     credentials = SmokeCredentials.from_env()
@@ -54,8 +54,8 @@ def test_access_assertions_are_authoritative_and_secrets_stay_out_of_repr(monkey
 
 
 def test_legacy_bearers_are_ignored(monkeypatch):
-    monkeypatch.delenv("AUDREY_SMOKE_USER_ACCESS_JWT", raising=False)
-    monkeypatch.delenv("AUDREY_SMOKE_ADMIN_ACCESS_JWT", raising=False)
+    monkeypatch.delenv("AUDREY_USER_JWT", raising=False)
+    monkeypatch.delenv("AUDREY_ADMIN_JWT", raising=False)
     monkeypatch.setenv("TEST_OWUI_TOKEN", "legacy-user")
     monkeypatch.setenv("ADMIN_OWUI_TOKEN", "legacy-admin")
     credentials = SmokeCredentials.from_env()
@@ -66,8 +66,8 @@ def test_legacy_bearers_are_ignored(monkeypatch):
 
 
 def test_same_credential_is_refused_before_any_live_write(monkeypatch):
-    monkeypatch.setenv("AUDREY_SMOKE_USER_ACCESS_JWT", "same-jwt")
-    monkeypatch.setenv("AUDREY_SMOKE_ADMIN_ACCESS_JWT", "same-jwt")
+    monkeypatch.setenv("AUDREY_USER_JWT", "same-jwt")
+    monkeypatch.setenv("AUDREY_ADMIN_JWT", "same-jwt")
     with pytest.raises(ValueError, match="must differ"):
         SmokeCredentials.from_env()
 
@@ -125,8 +125,8 @@ def test_direct_script_execution_still_resolves_helper(tmp_path):
     del tmp_path
     env = os.environ.copy()
     for key in (
-        "AUDREY_SMOKE_USER_ACCESS_JWT",
-        "AUDREY_SMOKE_ADMIN_ACCESS_JWT",
+        "AUDREY_USER_JWT",
+        "AUDREY_ADMIN_JWT",
         "TEST_OWUI_TOKEN",
         "ADMIN_OWUI_TOKEN",
     ):
@@ -141,14 +141,14 @@ def test_direct_script_execution_still_resolves_helper(tmp_path):
         check=False,
     )
     assert result.returncode == 2
-    assert "AUDREY_SMOKE_USER_ACCESS_JWT" in result.stderr
+    assert "AUDREY_USER_JWT" in result.stderr
 
 
 @pytest.mark.parametrize("module_name", _SCRIPTS)
 def test_every_native_smoke_refuses_legacy_owui_credentials(module_name):
     env = os.environ.copy()
-    env.pop("AUDREY_SMOKE_USER_ACCESS_JWT", None)
-    env.pop("AUDREY_SMOKE_ADMIN_ACCESS_JWT", None)
+    env.pop("AUDREY_USER_JWT", None)
+    env.pop("AUDREY_ADMIN_JWT", None)
     env["TEST_OWUI_TOKEN"] = "legacy-user-secret"  # noqa: S105 - fake test value
     env["ADMIN_OWUI_TOKEN"] = "legacy-admin-secret"  # noqa: S105 - fake test value
     root = Path(__file__).resolve().parent.parent
@@ -163,6 +163,6 @@ def test_every_native_smoke_refuses_legacy_owui_credentials(module_name):
     )
 
     assert result.returncode == 2
-    assert "AUDREY_SMOKE_USER_ACCESS_JWT" in result.stderr
+    assert "AUDREY_USER_JWT" in result.stderr
     assert "legacy-user-secret" not in result.stderr
     assert "legacy-admin-secret" not in result.stderr

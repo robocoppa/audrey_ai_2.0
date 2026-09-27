@@ -101,7 +101,7 @@ def _json_request(
 def main() -> int:
     if not USER_TOKEN or not _CREDENTIALS.user_access:
         print(
-            "Set AUDREY_SMOKE_USER_ACCESS_JWT to an active Cloudflare Access "
+            "Set AUDREY_USER_JWT to an active Cloudflare Access "
             "application assertion.",
             file=sys.stderr,
         )

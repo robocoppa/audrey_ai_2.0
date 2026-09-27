@@ -179,8 +179,8 @@ tested and settled on 2026-09-24; later failures reopen as new regressions.
 Slice 2F.2 completes the operational cutover started by 2F.1, removing Open
 WebUI from Audrey's runtime authentication path. First confirm
 `.env.smoke.local` contains a fresh
-`AUDREY_SMOKE_USER_ACCESS_JWT` plus a distinct
-`AUDREY_SMOKE_ADMIN_ACCESS_JWT` for the companion native UI smoke. The focused
+`AUDREY_USER_JWT` plus a distinct
+`AUDREY_ADMIN_JWT` for the companion native UI smoke. The focused
 cutover smoke itself uses the user assertion and refuses legacy OWUI credentials
 by design. The authoritative runner and credential matrix is
 `../reference/live-smoke-testing.md`: the focused API-only smoke normally runs

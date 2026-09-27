@@ -32,8 +32,8 @@ def test_rejects_shell_export_syntax_before_docker(tmp_path):
     result = _run(
         tmp_path,
         "export OWUI_API_KEY = legacy\n"
-        "AUDREY_SMOKE_USER_ACCESS_JWT=user-jwt\n"
-        "AUDREY_SMOKE_ADMIN_ACCESS_JWT=admin-jwt\n",
+        "AUDREY_USER_JWT=user-jwt\n"
+        "AUDREY_ADMIN_JWT=admin-jwt\n",
     )
 
     assert result.returncode == 2
@@ -45,8 +45,8 @@ def test_rejects_legacy_key_without_printing_its_value(tmp_path):
     result = _run(
         tmp_path,
         "OWUI_API_KEY=legacy-secret\n"
-        "AUDREY_SMOKE_USER_ACCESS_JWT=user-jwt\n"
-        "AUDREY_SMOKE_ADMIN_ACCESS_JWT=admin-jwt\n",
+        "AUDREY_USER_JWT=user-jwt\n"
+        "AUDREY_ADMIN_JWT=admin-jwt\n",
     )
 
     assert result.returncode == 2
@@ -57,11 +57,11 @@ def test_rejects_legacy_key_without_printing_its_value(tmp_path):
 def test_requires_both_native_accounts_for_ui_smoke(tmp_path):
     result = _run(
         tmp_path,
-        "AUDREY_SMOKE_USER_ACCESS_JWT=user-jwt\n",
+        "AUDREY_USER_JWT=user-jwt\n",
     )
 
     assert result.returncode == 2
-    assert "missing AUDREY_SMOKE_ADMIN_ACCESS_JWT" in result.stderr
+    assert "missing AUDREY_ADMIN_JWT" in result.stderr
     assert "user-jwt" not in result.stderr
 
 def test_wrapper_pins_the_tower_runtime_contract():
@@ -79,8 +79,8 @@ def test_valid_native_env_invokes_the_expected_container_contract(tmp_path):
     (scripts / "smoke_native_ui.py").write_text("# fixture\n")
     env_file = appdata / ".env.smoke.local"
     env_file.write_text(
-        "AUDREY_SMOKE_USER_ACCESS_JWT=user-jwt\n"
-        "AUDREY_SMOKE_ADMIN_ACCESS_JWT=admin-jwt\n"
+        "AUDREY_USER_JWT=user-jwt\n"
+        "AUDREY_ADMIN_JWT=admin-jwt\n"
     )
 
     bin_dir = tmp_path / "bin"

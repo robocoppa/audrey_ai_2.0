@@ -44,19 +44,19 @@ while IFS= read -r line || [[ -n "${line}" ]]; do
   value="${line#*=}"
   [[ -n "${value}" ]] || die "${ENV_FILE}:${line_number} has an empty ${key} value"
   case "${key}" in
-    AUDREY_SMOKE_USER_ACCESS_JWT) have_user=1 ;;
-    AUDREY_SMOKE_ADMIN_ACCESS_JWT) have_admin=1 ;;
+    AUDREY_USER_JWT) have_user=1 ;;
+    AUDREY_ADMIN_JWT) have_admin=1 ;;
     *)
-      die "${ENV_FILE}:${line_number} contains unsupported key ${key}; keep only native AUDREY_SMOKE_*_ACCESS_JWT entries"
+      die "${ENV_FILE}:${line_number} contains unsupported key ${key}; keep only native AUDREY_USER_JWT and AUDREY_ADMIN_JWT entries"
       ;;
   esac
 done < "${ENV_FILE}"
 
 (( have_user == 1 )) \
-  || die "${ENV_FILE} is missing AUDREY_SMOKE_USER_ACCESS_JWT"
+  || die "${ENV_FILE} is missing AUDREY_USER_JWT"
 if [[ "${SMOKE_SCRIPT}" != "smoke_native_auth_cutover.py" ]]; then
   (( have_admin == 1 )) \
-    || die "${ENV_FILE} is missing AUDREY_SMOKE_ADMIN_ACCESS_JWT"
+    || die "${ENV_FILE} is missing AUDREY_ADMIN_JWT"
 fi
 
 OPTIONAL_ENV_NAMES=(

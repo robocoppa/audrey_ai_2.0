@@ -32,7 +32,19 @@ type SessionState =
   | { status: "unauthenticated" }
   | { status: "error"; message: string };
 
-const ACCESS_BOOTSTRAP_DELAYS_MS = [0, 500, 1_000, 2_000, 4_000, 7_500, 15_000, 7_500, 7_500];
+const ACCESS_BOOTSTRAP_DELAYS_MS = [
+  0,
+  500,
+  1_000,
+  2_000,
+  4_000,
+  7_500,
+  15_000,
+  7_500,
+  7_500,
+  10_000,
+  10_000,
+];
 const ACCESS_BOOTSTRAP_WAIT_SECONDS = ACCESS_BOOTSTRAP_DELAYS_MS.reduce(
   (total, delay) => total + delay,
   0,

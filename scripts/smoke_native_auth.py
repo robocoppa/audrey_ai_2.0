@@ -19,8 +19,8 @@ class SmokeCredentials:
 
     @classmethod
     def from_env(cls) -> SmokeCredentials:
-        user_access_jwt = os.getenv("AUDREY_SMOKE_USER_ACCESS_JWT", "").strip()
-        admin_access_jwt = os.getenv("AUDREY_SMOKE_ADMIN_ACCESS_JWT", "").strip()
+        user_access_jwt = os.getenv("AUDREY_USER_JWT", "").strip()
+        admin_access_jwt = os.getenv("AUDREY_ADMIN_JWT", "").strip()
         credentials = cls(
             user=user_access_jwt,
             admin=admin_access_jwt,
@@ -47,8 +47,8 @@ class SmokeCredentials:
 
 
 MISSING_CREDENTIALS = (
-    "Set distinct user/admin credentials with AUDREY_SMOKE_USER_ACCESS_JWT "
-    "and AUDREY_SMOKE_ADMIN_ACCESS_JWT."
+    "Set distinct user/admin credentials with AUDREY_USER_JWT "
+    "and AUDREY_ADMIN_JWT."
 )
 
 
