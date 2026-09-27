@@ -491,3 +491,59 @@ def test_admin_repair_routes_require_admin_and_accept_no_user_selector():
         assert require_admin in {item.call for item in route.dependant.dependencies}
         assert all(parameter.name != "user" for parameter in route.dependant.query_params)
         assert all(parameter.name != "user" for parameter in route.dependant.path_params)
+
+
+@pytest.mark.asyncio
+async def test_skills_rediscover_refreshes_readiness_and_returns_sanitized_counts():
+    from audrey.routes import admin as admin_module
+
+    snapshot = SimpleNamespace(
+        enabled=True,
+        status="degraded",
+        loaded_count=1,
+        available_count=0,
+        degraded_count=1,
+        invalid_count=1,
+        invalid=(SimpleNamespace(skill_id="bundle-0-1", code="invalid_yaml"),),
+    )
+    registry = SimpleNamespace(rediscover=Mock(return_value=snapshot))
+    tools = SimpleNamespace(names=Mock(return_value=["kb_search"]))
+    readiness = SimpleNamespace(collect=AsyncMock())
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                skills=registry,
+                tools=tools,
+                readiness=readiness,
+            )
+        )
+    )
+
+    response = await admin_module.skills_rediscover(request, _fake_admin())
+
+    registry.rediscover.assert_called_once_with(
+        available_tools=frozenset({"kb_search"})
+    )
+    readiness.collect.assert_awaited_once_with(force=True)
+    assert response.model_dump() == {
+        "enabled": True,
+        "status": "degraded",
+        "loaded_count": 1,
+        "available_count": 0,
+        "degraded_count": 1,
+        "invalid_count": 1,
+        "invalid": [{"skill_id": "bundle-0-1", "code": "invalid_yaml"}],
+    }
+
+
+def test_skills_rediscover_route_requires_admin():
+    from audrey.auth import require_admin
+    from audrey.routes import admin as admin_module
+
+    route = next(
+        route
+        for route in admin_module.router.routes
+        if route.path == "/v1/admin/skills/rediscover"
+    )
+
+    assert require_admin in {item.call for item in route.dependant.dependencies}

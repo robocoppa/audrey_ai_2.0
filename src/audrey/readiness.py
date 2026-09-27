@@ -44,6 +44,21 @@ class ToolReadiness(BaseModel):
     unavailable: list[ToolFailure] = Field(default_factory=list)
 
 
+class SkillFailure(BaseModel):
+    skill_id: str
+    code: str
+
+
+class SkillReadiness(BaseModel):
+    enabled: bool = False
+    status: Literal["disabled", "ready", "degraded", "unavailable"] = "disabled"
+    loaded_count: int = 0
+    available_count: int = 0
+    degraded_count: int = 0
+    invalid_count: int = 0
+    invalid: list[SkillFailure] = Field(default_factory=list)
+
+
 class QueueReadiness(BaseModel):
     available: bool = True
     depth: int = 0
@@ -90,6 +105,7 @@ class ReadinessStatus(BaseModel):
     generated_at: str
     components: dict[str, ComponentReadiness]
     tools: ToolReadiness
+    skills: SkillReadiness
     queues: dict[str, QueueReadiness]
     workers: dict[str, WorkerReadiness]
     pressure: PressureReadiness
@@ -168,6 +184,7 @@ class ReadinessCollector:
         )
 
         tools = self._tool_status(state, enabled=bool(cfg.tools.get("enabled", True)))
+        skills = self._skill_status(state)
         workers = self._worker_status(state, cfg)
         remote_archive, archive_stats, work_stats = await asyncio.gather(
             self._remote_archive_status(state),
@@ -200,6 +217,12 @@ class ReadinessCollector:
                 tools_ok,
                 "tool_server_unreachable",
                 disabled=not bool(cfg.tools.get("enabled", True)),
+            ),
+            "skills": self._component(
+                "skills",
+                skills.status == "ready",
+                f"skill_registry_{skills.status}",
+                disabled=not skills.enabled,
             ),
             "chat_archive": self._component(
                 "chat_archive",
@@ -256,6 +279,7 @@ class ReadinessCollector:
             generated_at=now.isoformat(timespec="seconds"),
             components=components,
             tools=tools,
+            skills=skills,
             queues=queues,
             workers=workers,
             pressure=PressureReadiness(
@@ -365,6 +389,24 @@ class ReadinessCollector:
                 for name in all_capabilities
             ],
             unavailable=sorted(unavailable, key=lambda item: item.name),
+        )
+
+    def _skill_status(self, state: Any) -> SkillReadiness:
+        registry = getattr(state, "skills", None)
+        snapshot = registry.snapshot() if registry is not None else None
+        if snapshot is None:
+            return SkillReadiness()
+        return SkillReadiness(
+            enabled=snapshot.enabled,
+            status=snapshot.status,
+            loaded_count=snapshot.loaded_count,
+            available_count=snapshot.available_count,
+            degraded_count=snapshot.degraded_count,
+            invalid_count=snapshot.invalid_count,
+            invalid=[
+                SkillFailure(skill_id=issue.skill_id, code=issue.code)
+                for issue in snapshot.invalid
+            ],
         )
 
     def _worker_status(self, state: Any, cfg: Any) -> dict[str, WorkerReadiness]:
@@ -501,4 +543,5 @@ class ReadinessCollector:
 __all__ = [
     "ReadinessCollector",
     "ReadinessStatus",
+    "SkillReadiness",
 ]

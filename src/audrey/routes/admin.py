@@ -15,6 +15,7 @@ Endpoints:
   GET  /v1/admin/auth/status         — cache size visibility.
   GET  /v1/admin/repair-status       — aggregate durable repair counts.
   GET  /v1/admin/readiness           — components, queues, workers, pressure.
+  POST /v1/admin/skills/rediscover   — atomically reload local skill bundles.
   POST /v1/admin/repair              — wake local repair owners and run one
                                        bounded sidecar repair pass.
   POST /v1/admin/chat_archive/rebuild-canonical
@@ -102,6 +103,21 @@ class ChatProjectionRebuildResponse(BaseModel):
     pending: int
 
 
+class SkillRediscoverIssue(BaseModel):
+    skill_id: str
+    code: str
+
+
+class SkillRediscoverResponse(BaseModel):
+    enabled: bool
+    status: Literal["disabled", "ready", "degraded", "unavailable"]
+    loaded_count: int
+    available_count: int
+    degraded_count: int
+    invalid_count: int
+    invalid: list[SkillRediscoverIssue]
+
+
 def _repair_queue(
     value: dict | None = None,
     *,
@@ -179,6 +195,44 @@ async def readiness_status(
     if snapshot.status == "unready":
         response.status_code = 503
     return snapshot
+
+
+@router.post("/skills/rediscover", response_model=SkillRediscoverResponse)
+async def skills_rediscover(
+    request: Request,
+    me: AuthedUser = Depends(require_admin),
+) -> SkillRediscoverResponse:
+    """Atomically reload bundles and return sanitized diagnostics."""
+
+    registry = getattr(request.app.state, "skills", None)
+    if registry is None:
+        raise HTTPException(status_code=503, detail="skill_registry_unavailable")
+    tools = getattr(request.app.state, "tools", None)
+    available_tools = frozenset(tools.names()) if tools is not None else frozenset()
+    snapshot = registry.rediscover(available_tools=available_tools)
+    collector = getattr(request.app.state, "readiness", None)
+    if collector is not None:
+        await collector.collect(force=True)
+    log.warning(
+        "admin: skills rediscovered by %s; status=%s loaded=%d degraded=%d invalid=%d",
+        me.email,
+        snapshot.status,
+        snapshot.loaded_count,
+        snapshot.degraded_count,
+        snapshot.invalid_count,
+    )
+    return SkillRediscoverResponse(
+        enabled=snapshot.enabled,
+        status=snapshot.status,
+        loaded_count=snapshot.loaded_count,
+        available_count=snapshot.available_count,
+        degraded_count=snapshot.degraded_count,
+        invalid_count=snapshot.invalid_count,
+        invalid=[
+            SkillRediscoverIssue(skill_id=issue.skill_id, code=issue.code)
+            for issue in snapshot.invalid
+        ],
+    )
 
 
 @router.get("/repair-status", response_model=UserDataRepairStatus)

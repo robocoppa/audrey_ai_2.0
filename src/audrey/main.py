@@ -50,7 +50,8 @@ from audrey.routes.openai import VIRTUAL_MODELS
 from audrey.routes.openai import router as openai_router
 from audrey.routes.upload_ui import router as upload_ui_router
 from audrey.routes.user_data import router as user_data_router
-from audrey.tools.discovery import ToolRegistry, discover_all
+from audrey.skills import SkillRegistry
+from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, discover_all
 from audrey.tools.dispatch import audit_user_scoping
 from audrey.user_data_purge import UserDataPurgeCoordinator
 
@@ -132,6 +133,21 @@ async def lifespan(app: FastAPI):
         tool_registry = ToolRegistry()
         log.info("tools: disabled or no servers configured")
 
+    skill_registry = SkillRegistry.from_config(
+        cfg.skills,
+        known_tools=frozenset(TOOL_DECLARATIONS),
+        available_tools=frozenset(tool_registry.names()),
+    )
+    skill_snapshot = skill_registry.snapshot()
+    log.info(
+        "skills: status=%s loaded=%d available=%d degraded=%d invalid=%d",
+        skill_snapshot.status,
+        skill_snapshot.loaded_count,
+        skill_snapshot.available_count,
+        skill_snapshot.degraded_count,
+        skill_snapshot.invalid_count,
+    )
+
     # If first discovery is empty or partially degraded, custom-tools is not
     # fully ready yet. Retry in the background so the live registry can recover
     # without an Audrey restart.
@@ -150,7 +166,11 @@ async def lifespan(app: FastAPI):
         )
     ):
         tools_retry_task = asyncio.create_task(
-            _retry_tool_discovery(tool_registry, tool_servers),
+            _retry_tool_discovery(
+                tool_registry,
+                tool_servers,
+                skills=skill_registry,
+            ),
             name="audrey.tools.retry_discovery",
         )
 
@@ -253,6 +273,7 @@ async def lifespan(app: FastAPI):
     app.state.gate = gate
     app.state.inflight = inflight
     app.state.tools = tool_registry
+    app.state.skills = skill_registry
     app.state.graph = graph
     app.state.qdrant = qdrant
     app.state.uploads_db = uploads_db
@@ -401,6 +422,7 @@ async def _retry_tool_discovery(
     registry: ToolRegistry,
     tool_servers: list[str],
     *,
+    skills: SkillRegistry | None = None,
     attempts: int = 30,
     interval_s: float = 4.0,
 ) -> None:
@@ -430,6 +452,8 @@ async def _retry_tool_discovery(
         registry.by_name.clear()
         registry.by_name.update(fresh.by_name)
         audit_user_scoping(registry)
+        if skills is not None:
+            skills.refresh_availability(frozenset(registry.names()))
         unavailable = sorted(
             spec.name
             for spec in registry.policy_records()
@@ -546,6 +570,9 @@ async def rediscover_tools(
     reg.by_name.clear()
     reg.by_name.update(fresh.by_name)
     audit_user_scoping(reg)
+    skills = getattr(app.state, "skills", None)
+    if skills is not None:
+        skills.refresh_availability(frozenset(reg.names()))
     log.info(
         "tools: rediscover -> %d/%d available: %s",
         len(reg.names()), len(reg.by_name), reg.names(),

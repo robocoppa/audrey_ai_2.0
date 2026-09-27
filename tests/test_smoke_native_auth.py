@@ -24,8 +24,12 @@ _SCRIPTS = (
     "smoke_native_preferences",
     "smoke_native_tool_events",
     "smoke_native_modes",
+    "smoke_skills_foundation",
 )
-_STREAMING_SCRIPTS = frozenset(_SCRIPTS) - {"smoke_native_auth_cutover"}
+_STREAMING_SCRIPTS = frozenset(_SCRIPTS) - {
+    "smoke_native_auth_cutover",
+    "smoke_skills_foundation",
+}
 
 
 def test_access_assertions_are_authoritative_and_secrets_stay_out_of_repr(monkeypatch):

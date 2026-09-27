@@ -162,9 +162,12 @@ def test_bind_mounts_match_the_non_root_cache_and_read_only_dataset_contract():
     volumes = compose["services"]["audrey"]["volumes"]
     assert "/mnt/user/appdata/clip-cache:/home/audrey/.cache/clip" in volumes
     assert "/mnt/user/knowledge:/datasets:ro" in volumes
+    assert "./skills:/app/skills:ro" in volumes
+    assert (ROOT / "skills" / ".gitignore").read_text() == "*\n!.gitignore\n"
 
     config = yaml.safe_load(CONFIG.read_text())
     assert config["kb"]["image_cache_folder"] == "/home/audrey/.cache/clip"
+    assert config["skills"]["roots"] == ["/app/skills"]
 
 
 def test_root_only_clip_cache_path_is_gone_from_runtime_files():

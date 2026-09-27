@@ -14,9 +14,11 @@ from audrey.kb.uploads_db import UploadsDB
 from audrey.metrics import (
     readiness_component_available,
     readiness_queue_depth,
+    readiness_skills,
     readiness_state,
 )
 from audrey.readiness import ReadinessCollector
+from audrey.skills.models import SkillIssue, SkillRegistrySnapshot
 from audrey.tools.discovery import TOOL_DECLARATIONS, ToolRegistry, ToolSpec
 
 
@@ -242,6 +244,57 @@ async def test_required_qdrant_failure_makes_snapshot_unready():
 
 
 @pytest.mark.asyncio
+async def test_invalid_optional_skills_degrade_with_sanitized_diagnostics():
+    app = _app()
+    app.state.skills = SimpleNamespace(
+        snapshot=lambda: SkillRegistrySnapshot(
+            enabled=True,
+            status="unavailable",
+            loaded_count=0,
+            available_count=0,
+            degraded_count=0,
+            invalid_count=1,
+            invalid=(SkillIssue(skill_id="bundle-0-0", code="invalid_yaml"),),
+        )
+    )
+
+    result = await ReadinessCollector(app, cache_ttl_s=0).collect(force=True)
+
+    assert result.status == "degraded"
+    assert result.components["skills"].status == "unavailable"
+    assert result.skills.status == "unavailable"
+    assert result.skills.invalid[0].model_dump() == {
+        "skill_id": "bundle-0-0",
+        "code": "invalid_yaml",
+    }
+    assert "tmp" not in result.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_required_skill_failure_makes_snapshot_unready():
+    app = _app()
+    app.state.skills = SimpleNamespace(
+        snapshot=lambda: SkillRegistrySnapshot(
+            enabled=True,
+            status="degraded",
+            loaded_count=1,
+            available_count=0,
+            degraded_count=1,
+            invalid_count=0,
+        )
+    )
+
+    result = await ReadinessCollector(
+        app,
+        required_components={"skills"},
+        cache_ttl_s=0,
+    ).collect(force=True)
+
+    assert result.status == "unready"
+    assert result.components["skills"].required is True
+
+
+@pytest.mark.asyncio
 async def test_metrics_mirror_the_same_snapshot_values():
     collector = ReadinessCollector(
         _app(qdrant_error=ConnectionError("down")),
@@ -253,6 +306,7 @@ async def test_metrics_mirror_the_same_snapshot_values():
     assert readiness_state.labels(state=result.status)._value.get() == 1
     assert readiness_component_available.labels(component="qdrant")._value.get() == 0
     assert readiness_queue_depth.labels(queue="archive_delivery")._value.get() == 2
+    assert readiness_skills.labels(kind="loaded")._value.get() == 0
 
 
 @pytest.mark.asyncio

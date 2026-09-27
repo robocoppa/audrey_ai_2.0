@@ -310,6 +310,12 @@ readiness_tools = Gauge(
     labelnames=("kind",),
 )
 
+readiness_skills = Gauge(
+    "audrey_readiness_skills",
+    "Skill registry load and availability counts.",
+    labelnames=("kind",),
+)
+
 readiness_capability_available = Gauge(
     "audrey_readiness_capability_available",
     "Whether a declared tool capability is currently available.",
@@ -406,6 +412,10 @@ def publish_readiness(snapshot: Any) -> None:
     readiness_tools.labels(kind="policy").set(snapshot.tools.policy_count)
     readiness_tools.labels(kind="discovered").set(snapshot.tools.discovered_count)
     readiness_tools.labels(kind="available").set(snapshot.tools.available_count)
+    readiness_skills.labels(kind="loaded").set(snapshot.skills.loaded_count)
+    readiness_skills.labels(kind="available").set(snapshot.skills.available_count)
+    readiness_skills.labels(kind="degraded").set(snapshot.skills.degraded_count)
+    readiness_skills.labels(kind="invalid").set(snapshot.skills.invalid_count)
     for capability in snapshot.tools.capabilities:
         readiness_capability_available.labels(capability=capability.name).set(
             int(capability.available)
@@ -470,6 +480,7 @@ __all__ = [
     "readiness_component_required",
     "readiness_component_enabled",
     "readiness_tools",
+    "readiness_skills",
     "readiness_capability_available",
     "readiness_queue_depth",
     "readiness_queue_active",

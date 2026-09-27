@@ -29,12 +29,16 @@ class CapabilitiesResponse(BaseModel):
 
 class SkillSummary(BaseModel):
     id: str
-    label: str
+    name: str
     description: str
+    version: int
+    supported_modes: list[Literal["auto", "fast", "deep"]]
+    availability: Literal["available", "degraded"]
 
 
 class SkillsResponse(BaseModel):
     enabled: bool = False
+    status: Literal["disabled", "ready", "degraded", "unavailable"] = "disabled"
     items: list[SkillSummary] = Field(default_factory=list)
 
 
@@ -67,9 +71,21 @@ def capability_response(snapshot: ReadinessStatus) -> CapabilitiesResponse:
         else "degraded" if tools == "degraded"
         else "available"
     )
+    skill_snapshot = getattr(snapshot, "skills", None)
+    skill_status = getattr(skill_snapshot, "status", "disabled")
+    skills = {
+        "ready": "available",
+        "degraded": "degraded",
+        "unavailable": "unavailable",
+        "disabled": "disabled",
+    }.get(skill_status, "unavailable")
     status: Literal["ready", "degraded", "unavailable"] = (
         "unavailable" if chat == "unavailable"
-        else "degraded" if tools in {"degraded", "unavailable"} or knowledge != "available"
+        else "degraded" if (
+            tools in {"degraded", "unavailable"}
+            or knowledge != "available"
+            or skills in {"degraded", "unavailable"}
+        )
         else "ready"
     )
     return CapabilitiesResponse(
@@ -78,7 +94,7 @@ def capability_response(snapshot: ReadinessStatus) -> CapabilitiesResponse:
         chat=CapabilityState(status=chat),
         tools=CapabilityState(status=tools),
         knowledge=CapabilityState(status=knowledge),
-        skills=CapabilityState(status="disabled"),
+        skills=CapabilityState(status=skills),
     )
 
 
@@ -95,11 +111,30 @@ async def application_capabilities(
 
 @router.get("/skills", response_model=SkillsResponse)
 async def application_skills(
+    request: Request,
     _: Principal = Depends(require_principal),
 ) -> SkillsResponse:
-    """Phase 3 owns skill registration, selection, and execution."""
+    """Return safe registry metadata without instructions or filesystem paths."""
 
-    return SkillsResponse()
+    registry = getattr(request.app.state, "skills", None)
+    if registry is None:
+        return SkillsResponse()
+    snapshot = registry.snapshot()
+    return SkillsResponse(
+        enabled=snapshot.enabled,
+        status=snapshot.status,
+        items=[
+            SkillSummary(
+                id=item.id,
+                name=item.name,
+                description=item.description,
+                version=item.version,
+                supported_modes=list(item.supported_modes),
+                availability=item.availability,
+            )
+            for item in registry.catalog()
+        ],
+    )
 
 
 __all__ = ["CapabilitiesResponse", "SkillsResponse", "capability_response", "router"]

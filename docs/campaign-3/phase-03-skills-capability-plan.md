@@ -1,6 +1,8 @@
 # Campaign 3 Phase 3 — reusable skills
 
-**Status:** Planned and gated on Campaign 3 Phase 2.
+**Status:** The off-by-default 3A.1 registry foundation is laptop-complete.
+Video byte-parity extraction remains 3A.2; explicit selection and tool
+restriction remain gated on the outstanding Campaign 3 Phase 2 proof.
 
 ## Goal
 
@@ -209,7 +211,7 @@ MVP rules:
 - passthrough plus `skill` is rejected explicitly rather than ignored;
 - only one string is accepted, not a list.
 
-Add an authenticated `GET /v1/skills` catalog containing safe metadata only:
+Add an authenticated `GET /api/skills` catalog containing safe metadata only:
 id, name, description, version, supported modes, and availability. It does not
 return instruction bodies or internal file paths.
 

@@ -31,17 +31,21 @@ export interface CapabilityHealth {
   chat: { status: "available" | "unavailable" };
   tools: { status: "available" | "degraded" | "unavailable" | "disabled" };
   knowledge: { status: "available" | "degraded" | "unavailable" };
-  skills: { status: "disabled" };
+  skills: { status: "available" | "degraded" | "unavailable" | "disabled" };
 }
 
 export interface SkillSummary {
   id: string;
-  label: string;
+  name: string;
   description: string;
+  version: number;
+  supported_modes: ("auto" | "fast" | "deep")[];
+  availability: "available" | "degraded";
 }
 
 export interface SkillsCatalog {
   enabled: boolean;
+  status: "disabled" | "ready" | "degraded" | "unavailable";
   items: SkillSummary[];
 }
 

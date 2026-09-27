@@ -109,7 +109,25 @@ environment when the command exits. Success is exit code zero, JSON ending in
 `"status": "passed"`, `"legacy_bearer_rejected_locally": true`, and no
 `cleanup_error`.
 
-## Run a full native UI smoke on Tower
+## Run the 3A.1 skills-foundation smoke from the laptop
+
+This is an API-only smoke. It checks only the disabled catalog, capability
+projection, admin readiness, and admin rediscovery added by 3A.1. It creates no
+user data, conversations, tokens, files, or model calls. Use Tailscale first:
+
+```bash
+cd /home/bart/Documents/github/audrey_ai_2.0
+(
+  set -a
+  source .env.smoke.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://100.113.157.98:8000 .venv/bin/python scripts/smoke_skills_foundation.py
+)
+```
+
+Use `http://192.168.1.11:8000` only as the WARP fallback. Success is exit code
+zero and JSON ending in `"status": "passed"`, with catalog, capabilities,
+readiness, and rediscovery all reporting skills `disabled`.
 
 This path is for scripts that must exercise the standalone proxy. Use the
 checked wrapper so malformed or legacy env-file entries fail with a useful

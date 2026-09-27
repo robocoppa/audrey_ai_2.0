@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import Mock, call
+
 from audrey import main as main_module
 from audrey.tools.discovery import ToolRegistry, ToolSpec
 
@@ -32,6 +35,7 @@ async def test_bounded_retry_waits_for_partial_capability_recovery(monkeypatch):
         "kb_search": _spec("kb_search", available=True),
     })
     discoveries = [partial, recovered]
+    skills = SimpleNamespace(refresh_availability=Mock())
 
     async def fake_discover_all(_servers):
         return discoveries.pop(0)
@@ -41,6 +45,7 @@ async def test_bounded_retry_waits_for_partial_capability_recovery(monkeypatch):
     await main_module._retry_tool_discovery(
         live,
         ["http://custom-tools:8001"],
+        skills=skills,
         attempts=2,
         interval_s=0,
     )
@@ -48,3 +53,7 @@ async def test_bounded_retry_waits_for_partial_capability_recovery(monkeypatch):
     assert discoveries == []
     assert live.names() == ["kb_search", "web_search"]
     assert live.get("kb_search") is not None
+    assert skills.refresh_availability.call_args_list == [
+        call(frozenset({"web_search"})),
+        call(frozenset({"kb_search", "web_search"})),
+    ]

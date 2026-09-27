@@ -257,6 +257,10 @@ class Config:
         return self._merged.get("tools", {})
 
     @property
+    def skills(self) -> dict[str, Any]:
+        return self._merged.get("skills", {})
+
+    @property
     def thinking(self) -> dict[str, Any]:
         """Deep-panel thinking policy. ⚠️ Top-level, NOT under `deep_panel` —
         `_validate_deep_panel_pools` treats every key there as a task pool."""
@@ -631,7 +635,76 @@ _READINESS_COMPONENTS = {
     "chat_archive",
     "kb_watcher",
     "kb_reconciler",
+    "skills",
 }
+
+
+_SKILLS_KEYS = {
+    "enabled",
+    "roots",
+    "auto_select",
+    "max_active",
+    "max_instruction_chars",
+    "max_resource_chars",
+    "max_bundle_chars",
+}
+
+
+def _validate_skills(merged: dict[str, Any]) -> None:
+    """Keep the registry-only spike strict and behaviorally inert."""
+
+    skills = merged.get("skills", {})
+    if not isinstance(skills, dict):
+        raise ValueError("Invalid skills configuration: expected a mapping")
+    if unknown := sorted(set(skills) - _SKILLS_KEYS):
+        raise ValueError("Invalid skills configuration: unknown " + ", ".join(unknown))
+    if not isinstance(skills.get("enabled", False), bool):
+        raise ValueError("Invalid skills.enabled: expected true or false")
+    roots = skills.get("roots", ["/app/skills"])
+    if (
+        not isinstance(roots, list)
+        or not roots
+        or any(
+            not isinstance(root, str)
+            or not root.strip()
+            or root != root.strip()
+            or not Path(root).is_absolute()
+            for root in roots
+        )
+        or len(set(map(Path, roots))) != len(roots)
+    ):
+        raise ValueError(
+            "Invalid skills.roots: expected unique absolute paths"
+        )
+    auto_select = skills.get("auto_select", False)
+    if not isinstance(auto_select, bool):
+        raise ValueError("Invalid skills.auto_select: expected true or false")
+    if auto_select:
+        raise ValueError("Invalid skills.auto_select: not supported in this phase")
+    max_active = skills.get("max_active", 1)
+    if (
+        isinstance(max_active, bool)
+        or not isinstance(max_active, int)
+        or max_active != 1
+    ):
+        raise ValueError("Invalid skills.max_active: expected exactly 1")
+    sizes: dict[str, int] = {}
+    for key, default in (
+        ("max_instruction_chars", 12_000),
+        ("max_resource_chars", 12_000),
+        ("max_bundle_chars", 32_000),
+    ):
+        value = skills.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError(f"Invalid skills.{key}: expected a positive integer")
+        sizes[key] = value
+    if sizes["max_bundle_chars"] < max(
+        sizes["max_instruction_chars"],
+        sizes["max_resource_chars"],
+    ):
+        raise ValueError(
+            "Invalid skills.max_bundle_chars: must cover each individual limit"
+        )
 
 
 def _validate_readiness(merged: dict[str, Any]) -> None:
@@ -679,6 +752,7 @@ def get_config() -> Config:
     _validate_upload_limits(cfg.raw)
     _validate_chat_archive(cfg.raw)
     _validate_file_deletion(cfg.raw)
+    _validate_skills(cfg.raw)
     _validate_readiness(cfg.raw)
     return cfg
 
@@ -695,6 +769,7 @@ __all__ = [
     "_validate_application",
     "_validate_native_models",
     "_validate_readiness",
+    "_validate_skills",
     "get_config",
     "reload_config",
 ]

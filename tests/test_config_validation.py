@@ -28,6 +28,7 @@ from audrey.config import (
     _validate_deep_panel_pools,
     _validate_file_deletion,
     _validate_native_models,
+    _validate_skills,
     _validate_upload_limits,
 )
 from audrey.pipeline.deep_panel import pick_panel_timeout, pool_key_for
@@ -738,6 +739,40 @@ def test_invalid_application_settings_fail_at_boot(application):
 
 def test_committed_application_settings_are_valid():
     _validate_application(_load_yaml(_REPO_ROOT / "config.yaml"))
+
+
+# ─── _validate_skills ────────────────────────────────────────────────
+
+def test_committed_skill_settings_are_valid_and_disabled():
+    raw = _load_yaml(_REPO_ROOT / "config.yaml")
+
+    _validate_skills(raw)
+
+    assert raw["skills"]["enabled"] is False
+    assert raw["skills"]["auto_select"] is False
+
+
+@pytest.mark.parametrize(
+    "skills",
+    [
+        "enabled",
+        None,
+        {"enabled": "false"},
+        {"roots": []},
+        {"roots": ["relative/path"]},
+        {"roots": ["/one", "/one"]},
+        {"roots": ["/one", "/one/"]},
+        {"auto_select": True},
+        {"max_active": 2},
+        {"max_active": 1.0},
+        {"max_instruction_chars": 0},
+        {"max_bundle_chars": 10, "max_resource_chars": 11},
+        {"unexpected": True},
+    ],
+)
+def test_invalid_skill_settings_fail_at_boot(skills):
+    with pytest.raises(ValueError, match="skills"):
+        _validate_skills({"skills": skills})
 
 
 # ─── _validate_native_models ─────────────────────────────────────────
