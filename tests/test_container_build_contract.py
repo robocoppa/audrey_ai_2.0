@@ -125,8 +125,9 @@ def test_native_ui_proxy_preserves_auth_streams_uploads_and_static_boundaries():
     assert "proxy_buffering off;" in template
     assert "proxy_request_buffering off;" in template
     assert "proxy_read_timeout 3600s;" in template
-    assert "proxy_pass ${AUDREY_UPSTREAM};" in template
-    assert "resolver 127.0.0.11" not in template
+    assert "resolver 127.0.0.11 valid=10s ipv6=off;" in template
+    assert "set $audrey_upstream ${AUDREY_UPSTREAM};" in template
+    assert template.count("proxy_pass $audrey_upstream;") == 2
     assert "client_max_body_size ${AUDREY_UI_MAX_BODY_SIZE};" in template
     assert "location ^~ /assets/" in template
     assert "try_files $uri =404;" in template

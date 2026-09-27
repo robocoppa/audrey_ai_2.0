@@ -6,10 +6,13 @@ identity, authorization, conversations, runs, files, and preferences.
 
 ## Transition boundary
 
-The transition is complete. `audrey-ui` is the sole browser surface and the
-Audrey backend serves APIs only; its embedded shell, feature flag, packaged
-assets, and Node build stage were removed in 2F.4. Open WebUI remains stopped
-and is not a rollback target.
+The code transition is complete: `audrey-ui` is the sole browser surface and
+the Audrey backend serves APIs only. The first 2F.4 live attempt exposed that
+the Cloudflare route still targeted backend port 8000. After the route moved to
+8090, the UI proxy retained Audrey's retired Docker address. Restarting the UI
+restored authentication and confirmed the diagnosis. Request-time Docker DNS is
+the permanent correction; its deployment and rendered-config/auth proof remain.
+Open WebUI remains stopped and is not a rollback target.
 
 The host-network `cloudflared` instance reaches the new UI through
 `http://127.0.0.1:8090`; host port 8088 remains assigned to SearXNG. The UI
@@ -20,11 +23,11 @@ container environment.
 
 ## Settled Phase 2E regression record
 
-The standalone UI and public Cloudflare route are live. On 2026-09-24 the user
-marked the combined browser regression and soak tested and settled. The 2F.3
-native-independence proof passed with Open WebUI stopped, and 2F.4 removed the
-backend browser fallback. The checklist remains below only as a concrete
-regression reference.
+The Phase 2E browser behavior and soak were user-settled on 2026-09-24, and
+the 2F.3 native-independence proof passed with Open WebUI stopped. Those turns
+used the identical embedded shell and therefore did not prove which origin was
+public. Removing that shell in 2F.4 exposed the still-incorrect tunnel target.
+The checklist remains below as a regression reference.
 
 ## Rename the backend and build the private origin
 
@@ -207,18 +210,19 @@ The authentication-cutover smoke, full standalone-proxy smoke, corrected
 passed. Open WebUI remained stopped for the Deep proof. These results are
 settled; do not rerun them for 2F.4.
 
-The 2F.4 live proof is intentionally limited to the affected boundary after
-rebuilding `audrey`:
+The 2F.4 corrected live proof is intentionally limited to the affected boundary:
 
-1. Confirm `audrey` and `audrey-ui` are healthy.
-2. Refresh the public Audrey URL and confirm the authenticated account label
+1. Confirm `audrey` and `audrey-ui` are healthy and UI `/healthz` returns `ok`.
+2. Confirm the Cloudflare public-hostname service targets Tower port 8090.
+3. Confirm the rendered NGINX config contains Docker's resolver and the variable
+   upstream on both proxy paths.
+4. Refresh the public Audrey URL and confirm the authenticated account label
    and existing conversation history load.
 
-That refresh covers the standalone proxy-to-API path and proves that removing
-the backend shell did not disturb canonical application state. It does not
-require a prompt, an eval, or a broad smoke suite. Leave `OWUI_AUTH_ENABLED=0`
-and Open WebUI stopped. The dormant adapter is diagnostic-only and is not the
-normal rollback path.
+That is the complete affected-boundary proof. It does not require a backend
+recreate, prompt, eval, or broad smoke suite. Leave
+`OWUI_AUTH_ENABLED=0` and Open WebUI stopped. The dormant adapter is
+diagnostic-only and is not the normal rollback path.
 
 ## Rollback
 

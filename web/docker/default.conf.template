@@ -13,6 +13,12 @@ server {
     server_name _;
     server_tokens off;
 
+    # Docker may assign Audrey a new address whenever its container is
+    # recreated. Resolve the service name at request time so this long-lived
+    # proxy does not keep sending API traffic to the retired address.
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $audrey_upstream ${AUDREY_UPSTREAM};
+
     root /usr/share/nginx/html;
     index index.html;
     client_max_body_size ${AUDREY_UI_MAX_BODY_SIZE};
@@ -47,7 +53,7 @@ server {
         proxy_request_buffering off;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
-        proxy_pass ${AUDREY_UPSTREAM};
+        proxy_pass $audrey_upstream;
     }
 
     location = /openapi.json {
@@ -55,7 +61,7 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $audrey_forwarded_proto;
         proxy_set_header Cf-Access-Jwt-Assertion $http_cf_access_jwt_assertion;
-        proxy_pass ${AUDREY_UPSTREAM};
+        proxy_pass $audrey_upstream;
     }
 
     location ^~ /assets/ {

@@ -1,10 +1,12 @@
 # Campaign 3 Phase 2 — Audrey application and web UI
 
 **Status:** In progress. Milestones 2A and 2B are complete and
-Unraid-verified. Slices 2C.1–2C.3 and 2D.1–2D.4 are also Unraid-verified, and
-the standalone browser client is the live public route. Slice 2D.5 is deployed;
-its administration, role, model-publication, exact-owner bootstrap, and
-provider-binding soak remains open.
+Unraid-verified. Slices 2C.1–2C.3 and 2D.1–2D.4 are also Unraid-verified.
+The public hostname now targets the standalone browser client. Restarting
+`audrey-ui` restored authentication and confirmed the stale-upstream diagnosis;
+the permanent DNS correction is laptop-complete with its targeted live proof
+open. Slice 2D.5 is deployed; its administration, role, model-publication,
+exact-owner bootstrap, and provider-binding soak remains open.
 
 The Milestone 2E parity build is laptop-complete. Native memory and
 files, video ingestion and inspection, source and tool summaries, image and
@@ -25,7 +27,12 @@ runs no longer apply OWUI's `### Task:` utility routing, `/v1` compatibility
 requests retain it, and the targeted native Deep proof passed with Open WebUI
 stopped. Slice 2F.4 is laptop-complete: the backend no longer builds, packages,
 configures, or serves an embedded browser shell. The standalone `audrey-ui`
-service is the sole browser surface.
+service is the sole browser surface. Its first live deploy proved the public
+tunnel was still targeting backend port 8000. After correction to 8090, the
+long-lived NGINX proxy retained the recreated backend's old Docker address and
+broke `/api/me`. Restarting `audrey-ui` restored authentication, confirming the
+diagnosis. Request-time Docker DNS is the laptop-complete permanent correction;
+its deploy and rendered-config/auth proof remain open.
 
 ## Goal
 
@@ -1225,7 +1232,10 @@ optimization and archive suppression unchanged.
 Slice 2F.4 completes the browser-runtime cutover. The Audrey backend no longer
 builds or ships the Vite application, mounts a root SPA router, or exposes an
 environment flag for an embedded UI. The standalone `audrey-ui` image owns the
-only browser build and continues to proxy `/api` and `/v1` to Audrey.
+only browser build and continues to proxy `/api` and `/v1` to Audrey. The live
+deploy exposed that a static NGINX name resolution survives an Audrey container
+recreate with a stale IP. The proxy now resolves `audrey` through Docker DNS at
+request time, while preserving the explicit upstream setting.
 
 Laptop status: all 2,889 backend tests pass. The 2F.4 container and
 configuration boundary has 127 focused contracts passing, and its TOML/YAML

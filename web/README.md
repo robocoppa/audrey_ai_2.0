@@ -35,8 +35,10 @@ The proxy forwards the Cloudflare Access assertion, preserves AG-UI and OpenAI
 SSE without response buffering, and streams upload requests instead of making a
 second full temporary copy. `/healthz` checks only the UI container; Audrey's
 own readiness endpoints remain authoritative for backend dependencies.
-The upstream is an explicit container setting. If its address changes, update
-that setting and recreate `audrey-ui`.
+The upstream is an explicit container setting. NGINX re-resolves its Docker
+service name every ten seconds, so recreating Audrey does not strand the proxy
+on the retired container address. Changing the setting itself still requires
+recreating `audrey-ui`.
 
 Do not put an Access JWT, API key, or other user credential in this image or its
 environment. The browser presents its same-origin Cloudflare session and Audrey
@@ -50,6 +52,6 @@ preferences. Reusing it for another agent platform should add a typed platform
 adapter at that boundary. It should not copy Audrey assumptions into generic UI
 components or make the browser authoritative for identity, history, or tools.
 
-Keep the UI here through the first standalone production soak. After that gate,
-move this directory intact to its own GitHub repository and remove Audrey's
-temporary embedded-static fallback in a separate, reversible change.
+The embedded-static fallback has been removed and this container is Audrey's
+public browser surface. Moving this directory intact to its own repository
+remains an optional packaging decision.
