@@ -42,6 +42,7 @@ from audrey.pipeline.prompts import (
     WRITER_SYSTEM,
     compose_system_messages,
     prompt_from_config,
+    skill_instruction_for,
     task_role_for,
     with_task_role,
     without_task_role,
@@ -727,6 +728,36 @@ def test_task_role_for_honours_a_config_override():
         raw={"agentic": {"prompts": {"video_specialist": "CUSTOM ROLE"}}}
     )
     assert task_role_for("audrey_video", cfg) == "CUSTOM ROLE"
+def test_skill_instruction_prefers_an_available_registry_bundle():
+    record = SimpleNamespace(
+        spec=SimpleNamespace(instructions="BUNDLE ROLE"),
+    )
+    registry = SimpleNamespace(
+        resolve_virtual_model=lambda model: (
+            record if model == "audrey_specialist" else None
+        ),
+    )
+
+    assert (
+        skill_instruction_for("audrey_specialist", registry=registry)
+        == "BUNDLE ROLE"
+    )
+
+
+def test_prompt_override_still_wins_over_the_registry_bundle():
+    cfg = SimpleNamespace(
+        raw={"agentic": {"prompts": {"video_specialist": "CUSTOM ROLE"}}}
+    )
+    record = SimpleNamespace(
+        spec=SimpleNamespace(instructions="BUNDLE ROLE"),
+    )
+    registry = SimpleNamespace(resolve_virtual_model=lambda _model: record)
+
+    assert (
+        skill_instruction_for("audrey_video", cfg, registry) == "CUSTOM ROLE"
+    )
+
+
 
 
 def test_video_specialist_does_not_restate_tool_description_guidance():

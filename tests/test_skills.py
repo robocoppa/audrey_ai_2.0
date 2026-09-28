@@ -7,9 +7,12 @@ from pathlib import Path
 import pytest
 import yaml
 
+from audrey.pipeline.prompts import VIDEO_SPECIALIST_SYSTEM
 from audrey.skills import SkillLimits, SkillLoadError, SkillRegistry, load_skill_bundle
+from audrey.tools.discovery import TOOL_DECLARATIONS
 
 KNOWN_TOOLS = frozenset({"kb_search", "list_my_files"})
+_REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _write_bundle(
@@ -73,6 +76,18 @@ def test_valid_bundle_preserves_instructions_and_hashes_resources(tmp_path):
     assert first.resources[0].path == "references/rules.md"
     assert first.digest == second.digest
     assert len(first.digest) == 64
+
+
+def test_tracked_video_bundle_matches_rollback_prompt_byte_for_byte():
+    spec = load_skill_bundle(
+        _REPO_ROOT / "skills" / "video-analysis",
+        limits=SkillLimits(),
+        known_tools=frozenset(TOOL_DECLARATIONS),
+    )
+
+    assert spec.id == "video-analysis"
+    assert spec.instructions == VIDEO_SPECIALIST_SYSTEM
+    assert spec.resources == ()
 
 
 @pytest.mark.parametrize(
@@ -352,3 +367,46 @@ def test_catalog_never_exposes_instructions_resources_or_paths(tmp_path):
     assert "private instructions" not in catalog
     assert "private template" not in catalog
     assert "templates/private.md" not in catalog
+
+
+def test_virtual_model_mapping_resolves_only_an_available_bundle(tmp_path):
+    _write_bundle(
+        tmp_path,
+        "video-analysis",
+        allowed_tools=["kb_search"],
+        instructions="Use the tracked workflow.",
+    )
+    registry = SkillRegistry(
+        enabled=True,
+        roots=(tmp_path,),
+        limits=SkillLimits(),
+        known_tools=KNOWN_TOOLS,
+        available_tools=frozenset({"kb_search"}),
+        virtual_models={"audrey_video": "video-analysis"},
+    )
+
+    record = registry.resolve_virtual_model("audrey_video")
+    assert record is not None
+    assert record.spec.instructions == "Use the tracked workflow."
+    assert registry.resolve_virtual_model("audrey_auto") is None
+
+    registry.refresh_availability(frozenset())
+    assert registry.resolve_virtual_model("audrey_video") is None
+    assert registry.snapshot().status == "degraded"
+
+
+def test_missing_mapped_bundle_is_reported_as_unavailable(tmp_path):
+    registry = SkillRegistry(
+        enabled=True,
+        roots=(tmp_path,),
+        limits=SkillLimits(),
+        known_tools=KNOWN_TOOLS,
+        available_tools=KNOWN_TOOLS,
+        virtual_models={"audrey_video": "video-analysis"},
+    )
+
+    snapshot = registry.snapshot()
+    assert snapshot.status == "unavailable"
+    assert snapshot.invalid_count == 1
+    assert snapshot.invalid[0].skill_id == "video-analysis"
+    assert snapshot.invalid[0].code == "mapped_skill_unavailable"

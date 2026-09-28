@@ -743,12 +743,15 @@ def test_committed_application_settings_are_valid():
 
 # ─── _validate_skills ────────────────────────────────────────────────
 
-def test_committed_skill_settings_are_valid_and_disabled():
+def test_committed_skill_settings_enable_only_the_video_mapping():
     raw = _load_yaml(_REPO_ROOT / "config.yaml")
 
     _validate_skills(raw)
 
-    assert raw["skills"]["enabled"] is False
+    assert raw["skills"]["enabled"] is True
+    assert raw["skills"]["virtual_models"] == {
+        "audrey_video": "video-analysis",
+    }
     assert raw["skills"]["auto_select"] is False
 
 
@@ -762,6 +765,9 @@ def test_committed_skill_settings_are_valid_and_disabled():
         {"roots": ["relative/path"]},
         {"roots": ["/one", "/one"]},
         {"roots": ["/one", "/one/"]},
+        {"virtual_models": []},
+        {"virtual_models": {"video": "video-analysis"}},
+        {"virtual_models": {"audrey_video": ""}},
         {"auto_select": True},
         {"max_active": 2},
         {"max_active": 1.0},

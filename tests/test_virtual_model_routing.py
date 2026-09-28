@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from audrey.pipeline.prompts import task_role_for
+from audrey.pipeline.prompts import skill_instruction_for
 from audrey.routes.openai.routes import VIRTUAL_MODELS
 
 _SRC = Path(__file__).resolve().parents[1] / "src" / "audrey"
@@ -76,10 +76,10 @@ def test_audrey_video_is_exposed():
     assert "audrey_video" in VIRTUAL_MODELS
 
 
-def test_exactly_one_virtual_model_carries_a_task_role():
+def test_exactly_one_virtual_model_carries_a_skill_instruction():
     """Two hand-coded specialists is the documented signal to build the
     config-driven `specialists:` block instead of adding a third by hand."""
-    with_role = [vm for vm in VIRTUAL_MODELS if task_role_for(vm) is not None]
+    with_role = [vm for vm in VIRTUAL_MODELS if skill_instruction_for(vm) is not None]
     assert with_role == ["audrey_video"]
 
 
@@ -90,8 +90,8 @@ _GATE_CALL = re.compile(r"is_complex\(\s*(\w+)\s*,\s*threshold=")
 
 
 @pytest.mark.parametrize("path", [_GRAPH, _STREAM], ids=["graph", "streaming"])
-def test_the_deep_gate_excludes_the_injected_task_role(path):
-    """Both gates must feed `is_complex` a task-role-stripped message list.
+def test_the_deep_gate_excludes_the_injected_skill_instruction(path):
+    """Both gates must feed `is_complex` a skill-instruction-stripped list.
 
     The bug this pins (2026-08-09, caught only from on-box logs): the task role
     is injected at the route, `count_tokens` sums system messages too, and so a
@@ -109,11 +109,15 @@ def test_the_deep_gate_excludes_the_injected_task_role(path):
     m = _GATE_CALL.search(src)
     assert m, f"no is_complex(...) gate call found in {path.name} — did it move?"
     assert m.group(1) == "gate_messages", (
-        f"{path.name} gates on {m.group(1)!r}, not the task-role-stripped list"
+        f"{path.name} gates on {m.group(1)!r}, not the skill-stripped list"
     )
-    assert "without_task_role(" in src, (
-        f"{path.name} never strips the task role before gating"
+    assert "without_skill_instruction(" in src, (
+        f"{path.name} never strips the skill instruction before gating"
     )
+    if path == _GRAPH:
+        assert 'state.get("skill_instruction")' in src
+    else:
+        assert "decision_messages, skill_instruction" in src
 
 
 def test_every_model_that_can_route_deep_has_a_panel_pool():

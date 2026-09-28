@@ -1,4 +1,4 @@
-"""The 3A.1 smoke is narrow, non-mutating, and contract-focused."""
+"""The 3A.2 video-skill smoke is narrow and contract-focused."""
 
 from __future__ import annotations
 
@@ -8,18 +8,29 @@ from typing import Any
 from scripts import smoke_skills_foundation as smoke
 
 
-def _disabled_counts() -> dict[str, Any]:
+def _ready_counts() -> dict[str, Any]:
     return {
-        "enabled": False,
-        "status": "disabled",
-        "loaded_count": 0,
-        "available_count": 0,
+        "enabled": True,
+        "status": "ready",
+        "loaded_count": 1,
+        "available_count": 1,
         "degraded_count": 0,
         "invalid_count": 0,
     }
 
 
-def test_smoke_checks_only_the_registry_foundation(monkeypatch, capsys):
+def _catalog_item() -> dict[str, Any]:
+    return {
+        "id": "video-analysis",
+        "name": "Video analysis",
+        "description": ("Analyze uploaded videos and documents from the user's own evidence."),
+        "version": 1,
+        "supported_modes": ["auto", "deep", "fast"],
+        "availability": "available",
+    }
+
+
+def test_smoke_checks_only_the_video_skill_registry(monkeypatch, capsys):
     calls: list[tuple[str, str, str]] = []
 
     def fake_json_request(
@@ -31,18 +42,22 @@ def test_smoke_checks_only_the_registry_foundation(monkeypatch, capsys):
     ) -> tuple[int, dict[str, Any]]:
         calls.append((method, path, token))
         if path == "/api/skills":
-            return 200, {"enabled": False, "status": "disabled", "items": []}
+            return 200, {
+                "enabled": True,
+                "status": "ready",
+                "items": [_catalog_item()],
+            }
         if path == "/api/capabilities":
-            return 200, {"skills": {"status": "disabled"}}
+            return 200, {"skills": {"status": "available"}}
         if path == "/v1/admin/readiness":
             assert expected == frozenset({200, 503})
             return 200, {
-                "skills": _disabled_counts(),
-                "components": {"skills": {"status": "disabled"}},
+                "skills": _ready_counts(),
+                "components": {"skills": {"status": "available"}},
             }
         if path == "/v1/admin/skills/rediscover":
             assert method == "POST"
-            return 200, {**_disabled_counts(), "invalid": []}
+            return 200, {**_ready_counts(), "invalid": []}
         raise AssertionError(f"unexpected request: {method} {path}")
 
     monkeypatch.setattr(smoke, "USER_TOKEN", "user-evidence")
@@ -53,6 +68,7 @@ def test_smoke_checks_only_the_registry_foundation(monkeypatch, capsys):
 
     result = json.loads(capsys.readouterr().out)
     assert result["status"] == "passed"
+    assert result["catalog"]["items"] == ["video-analysis"]
     assert calls == [
         ("GET", "/api/skills", "user-evidence"),
         ("GET", "/api/capabilities", "user-evidence"),
@@ -61,7 +77,7 @@ def test_smoke_checks_only_the_registry_foundation(monkeypatch, capsys):
     ]
 
 
-def test_smoke_fails_on_enabled_or_nonempty_catalog(monkeypatch, capsys):
+def test_smoke_fails_on_the_wrong_catalog(monkeypatch, capsys):
     monkeypatch.setattr(smoke, "USER_TOKEN", "user-evidence")
     monkeypatch.setattr(smoke, "ADMIN_TOKEN", "admin-evidence")
     monkeypatch.setattr(
@@ -75,4 +91,4 @@ def test_smoke_fails_on_enabled_or_nonempty_catalog(monkeypatch, capsys):
 
     assert smoke.main() == 1
 
-    assert "catalog was not disabled and empty" in capsys.readouterr().err
+    assert "video catalog mismatch" in capsys.readouterr().err

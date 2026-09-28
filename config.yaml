@@ -1307,12 +1307,14 @@ tools:
     - "http://custom-tools:8001"
   max_rounds: 5
 
-# Declarative local skill bundles. The registry foundation is deliberately
-# off until selection, request binding, and prompt assembly land together.
+# Declarative local skill bundles. Explicit request selection and automatic
+# selection remain off; the video alias uses its tracked built-in bundle.
 skills:
-  enabled: false
+  enabled: true
   roots:
     - "/app/skills"
+  virtual_models:
+    audrey_video: video-analysis
   auto_select: false
   max_active: 1
   max_instruction_chars: 12000

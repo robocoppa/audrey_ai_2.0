@@ -649,28 +649,39 @@ def compose_system_messages(
 # that overrides each. `audrey_auto` and friends deliberately have no entry:
 # a general model gets no role prompt, which is what makes the specialist a
 # measurable difference rather than a rename.
-_TASK_ROLE_BY_VIRTUAL_MODEL: dict[str, tuple[str, str]] = {
+_SKILL_FALLBACK_BY_VIRTUAL_MODEL: dict[str, tuple[str, str]] = {
     "audrey_video": ("video_specialist", VIDEO_SPECIALIST_SYSTEM),
 }
 
 
-def task_role_for(virtual_model: str, cfg: Any = None) -> str | None:
-    """Return the task-role prompt for a virtual model, or None.
+def skill_instruction_for(
+    virtual_model: str,
+    cfg: Any = None,
+    registry: Any = None,
+) -> str | None:
+    """Resolve one registry instruction, retaining the video rollback prompt.
 
-    None means "no role prompt" and is the normal case — only specialists
-    have an entry in `_TASK_ROLE_BY_VIRTUAL_MODEL`.
+    The existing video config override still wins. A registry mapping can add
+    another instruction without adding another hard-coded fallback.
     """
-    entry = _TASK_ROLE_BY_VIRTUAL_MODEL.get(virtual_model)
+    resolve = getattr(registry, "resolve_virtual_model", None)
+    record = resolve(virtual_model) if callable(resolve) else None
+    entry = _SKILL_FALLBACK_BY_VIRTUAL_MODEL.get(virtual_model)
+    if record is not None:
+        instruction = record.spec.instructions
+        if entry is None:
+            return instruction
+        return prompt_from_config(cfg, entry[0], instruction)
     if entry is None:
         return None
-    key, default = entry
-    return prompt_from_config(cfg, key, default)
+    key, fallback = entry
+    return prompt_from_config(cfg, key, fallback)
 
 
-def without_task_role(
-    messages: list[dict[str, Any]], role_prompt: str | None
+def without_skill_instruction(
+    messages: list[dict[str, Any]], instruction: str | None
 ) -> list[dict[str, Any]]:
-    """The inverse of `with_task_role`, for the deep-vs-fast token gate ONLY.
+    """The inverse of `with_skill_instruction`, for the deep-vs-fast token gate ONLY.
 
     ⚠️ **Why this exists** (found 2026-08-09, from on-box logs):
     `complexity.count_tokens` sums every message, system ones included — and the
@@ -694,16 +705,16 @@ def without_task_role(
 
     Returns a new list; `messages` is never mutated.
     """
-    if not role_prompt:
+    if not instruction:
         return messages
     return [
         m for m in messages
-        if not (m.get("role") == "system" and m.get("content") == role_prompt)
+        if not (m.get("role") == "system" and m.get("content") == instruction)
     ]
 
 
-def with_task_role(
-    messages: list[dict[str, Any]], role_prompt: str | None
+def with_skill_instruction(
+    messages: list[dict[str, Any]], instruction: str | None
 ) -> list[dict[str, Any]]:
     """Insert a task-role system message AFTER any leading system messages.
 
@@ -727,7 +738,7 @@ def with_task_role(
 
     Returns a new list; `messages` is never mutated.
     """
-    if not role_prompt:
+    if not instruction:
         return messages
     idx = 0
     for m in messages:
@@ -736,9 +747,15 @@ def with_task_role(
         idx += 1
     return [
         *messages[:idx],
-        {"role": "system", "content": role_prompt},
+        {"role": "system", "content": instruction},
         *messages[idx:],
     ]
+
+
+# Compatibility names stay until the fallback constant is removed after soak.
+task_role_for = skill_instruction_for
+with_task_role = with_skill_instruction
+without_task_role = without_skill_instruction
 
 
 __all__ = [
@@ -759,4 +776,7 @@ __all__ = [
     "task_role_for",
     "with_task_role",
     "without_task_role",
+    "skill_instruction_for",
+    "with_skill_instruction",
+    "without_skill_instruction",
 ]

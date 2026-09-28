@@ -39,12 +39,14 @@ class SkillRegistry:
         limits: SkillLimits,
         known_tools: frozenset[str],
         available_tools: frozenset[str],
+        virtual_models: Mapping[str, str] | None = None,
     ) -> None:
         self.enabled = enabled
         self._roots = roots
         self._limits = limits
         self._known_tools = known_tools
         self._available_tools = available_tools
+        self._virtual_models = MappingProxyType(dict(virtual_models or {}))
         self._state = _EMPTY_STATE
         if enabled:
             self.rediscover()
@@ -69,6 +71,7 @@ class SkillRegistry:
             ),
             known_tools=known_tools,
             available_tools=available_tools,
+            virtual_models=config.get("virtual_models", {}),
         )
 
     def rediscover(
@@ -129,6 +132,16 @@ class SkillRegistry:
                     unavailable_tools=spec.allowed_tools - current_tools,
                 )
 
+        issue_ids = {issue.skill_id for issue in issues}
+        for skill_id in sorted(set(self._virtual_models.values()) - set(records)):
+            if skill_id not in issue_ids:
+                issues.append(
+                    SkillIssue(
+                        skill_id=skill_id,
+                        code="mapped_skill_unavailable",
+                    )
+                )
+
         self._state = _RegistryState(
             records=MappingProxyType(records),
             issues=tuple(sorted(issues, key=lambda item: (item.skill_id, item.code))),
@@ -137,6 +150,17 @@ class SkillRegistry:
 
     def get(self, skill_id: str) -> SkillRecord | None:
         return self._state.records.get(skill_id)
+
+    def resolve_virtual_model(self, virtual_model: str) -> SkillRecord | None:
+        """Return one usable mapped bundle; unavailable mappings fail closed."""
+
+        if not self.enabled:
+            return None
+        skill_id = self._virtual_models.get(virtual_model)
+        record = self._state.records.get(skill_id) if skill_id else None
+        if record is None or record.unavailable_tools:
+            return None
+        return record
 
     def refresh_availability(
         self,

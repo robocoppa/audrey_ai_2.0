@@ -78,8 +78,7 @@ from audrey.pipeline.messages import has_image_part, last_user_text
 from audrey.pipeline.planner import plan as planner_plan
 from audrey.pipeline.prompts import (
     compose_system_messages,
-    task_role_for,
-    without_task_role,
+    without_skill_instruction,
 )
 from audrey.pipeline.reflect import reflect as reflect_fn
 from audrey.pipeline.state import PipelineState
@@ -330,13 +329,12 @@ def build_graph(
     async def node_complexity(state: PipelineState) -> dict[str, Any]:
         vm = state.get("virtual_model")
         routing_messages = state.get("routing_messages") or state["messages"]
-        # Gate on the request, not on Audrey's own scaffolding. The task role is
-        # injected at the route, so without this a specialist's prompt counts
-        # toward the threshold that decides whether the request is big enough to
-        # deserve the panel — see `without_task_role`. Mirrored in the streaming
-        # gate; `tests/test_virtual_model_routing.py` pins the two together.
-        gate_messages = without_task_role(
-            routing_messages, task_role_for(str(vm or ""), cfg)
+        # Gate on the request, not on Audrey's own scaffolding. The skill
+        # instruction is injected at the route; the exact carried text must be
+        # removed even if registry rediscovery happens during the request.
+        # The streaming gate mirrors this behavior.
+        gate_messages = without_skill_instruction(
+            routing_messages, state.get("skill_instruction")
         )
         complex_, n = is_complex(gate_messages, threshold=complexity_threshold)
         deep_intent = has_deep_intent(routing_messages, deep_intent_phrases)

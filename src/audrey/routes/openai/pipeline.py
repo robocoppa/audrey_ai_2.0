@@ -75,8 +75,7 @@ from audrey.pipeline.messages import has_image_part, last_user_text
 from audrey.pipeline.planner import plan as planner_plan
 from audrey.pipeline.prompts import (
     compose_system_messages,
-    task_role_for,
-    without_task_role,
+    without_skill_instruction,
 )
 from audrey.pipeline.run_events import RunEventContext
 from audrey.pipeline.run_observations import RunEventToolObserver
@@ -136,12 +135,14 @@ async def _run_graph_with_metrics(graph, state: dict[str, Any]) -> dict[str, Any
 async def _generate_via_pipeline(
     app, payload: ChatCompletionRequest, messages, options,
     *, user_id: str, conversation_id: str, user_turn_text: str,
+    skill_instruction: str | None = None,
 ):
     """Non-streaming path: invoke the compiled LangGraph and format the result."""
     graph = app.state.graph
     inflight = app.state.inflight
     state = {
         "virtual_model": payload.model,
+        "skill_instruction": skill_instruction,
         "messages": messages,
         "temperature": payload.temperature,
         "top_p": payload.top_p,
@@ -239,6 +240,7 @@ async def _stream_via_pipeline(
     *, user_id: str, conversation_id: str, user_turn_text: str,
     event_context: RunEventContext | None = None,
     routing_messages: list[dict[str, Any]] | None = None,
+    skill_instruction: str | None = None,
 ):
     """Streaming path.
 
@@ -290,11 +292,10 @@ async def _stream_via_pipeline(
             # classification, so the user sees an ack immediately instead of
             # staring at nothing while the router model runs under GPU load.
             complexity_cfg = cfg.raw.get("complexity", {}) or {}
-            # Gate on the request, not on Audrey's own scaffolding — the task
-            # role was injected at the route, upstream of here. Mirrors
-            # `node_complexity`; see `without_task_role` for what this cost.
-            gate_messages = without_task_role(
-                decision_messages, task_role_for(payload.model, cfg)
+            # Gate on the request, not Audrey's own injected instruction. Use
+            # the exact carried text so rediscovery cannot change this request.
+            gate_messages = without_skill_instruction(
+                decision_messages, skill_instruction
             )
             complex_, n = is_complex(gate_messages, threshold=int(complexity_cfg.get("token_threshold", 500)))
             deep_intent = has_deep_intent(decision_messages, complexity_cfg.get("deep_intent_phrases") or [])
@@ -437,6 +438,7 @@ async def _stream_via_pipeline(
                 graph = app.state.graph
                 state = {
                     "virtual_model": payload.model,
+                    "skill_instruction": skill_instruction,
                     "messages": messages,
                     "routing_messages": decision_messages,
                     "temperature": payload.temperature,

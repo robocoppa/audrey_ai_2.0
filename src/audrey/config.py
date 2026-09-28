@@ -642,6 +642,7 @@ _READINESS_COMPONENTS = {
 _SKILLS_KEYS = {
     "enabled",
     "roots",
+    "virtual_models",
     "auto_select",
     "max_active",
     "max_instruction_chars",
@@ -651,7 +652,7 @@ _SKILLS_KEYS = {
 
 
 def _validate_skills(merged: dict[str, Any]) -> None:
-    """Keep the registry-only spike strict and behaviorally inert."""
+    """Keep declarative skill settings strict and selection explicit."""
 
     skills = merged.get("skills", {})
     if not isinstance(skills, dict):
@@ -675,6 +676,22 @@ def _validate_skills(merged: dict[str, Any]) -> None:
     ):
         raise ValueError(
             "Invalid skills.roots: expected unique absolute paths"
+        )
+    virtual_models = skills.get("virtual_models", {})
+    if (
+        not isinstance(virtual_models, dict)
+        or any(
+            not isinstance(model, str)
+            or model != model.strip()
+            or not model.startswith("audrey_")
+            or not isinstance(skill_id, str)
+            or skill_id != skill_id.strip()
+            or not skill_id
+            for model, skill_id in virtual_models.items()
+        )
+    ):
+        raise ValueError(
+            "Invalid skills.virtual_models: expected model-to-skill mapping"
         )
     auto_select = skills.get("auto_select", False)
     if not isinstance(auto_select, bool):

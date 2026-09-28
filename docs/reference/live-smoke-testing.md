@@ -112,10 +112,11 @@ environment when the command exits. Success is exit code zero, JSON ending in
 `"status": "passed"`, `"legacy_bearer_rejected_locally": true`, and no
 `cleanup_error`.
 
-## Run the 3A.1 skills-foundation smoke from the laptop
+## Run the current built-in video-skill smoke from the laptop
 
-This is an API-only smoke. It checks only the disabled catalog, capability
-projection, admin readiness, and admin rediscovery added by 3A.1. It creates no
+This is the targeted API-only deploy proof for 3A.2. It checks that the tracked
+`video-analysis` bundle is the one available catalog entry, skill readiness is
+healthy, and admin rediscovery reloads it without diagnostics. It creates no
 user data, conversations, tokens, files, or model calls. Use Tailscale first:
 
 ```bash
@@ -129,8 +130,10 @@ cd /home/bart/Documents/github/audrey_ai_2.0
 ```
 
 Use `http://192.168.1.11:8000` only as the WARP fallback. Success is exit code
-zero and JSON ending in `"status": "passed"`, with catalog, capabilities,
-readiness, and rediscovery all reporting skills `disabled`.
+zero and JSON ending in `"status": "passed"`, with catalog and readiness
+`ready`, capabilities `available`, one `video-analysis` item, and zero
+rediscovery diagnostics. The earlier all-`disabled` output remains the
+recorded live proof for 3A.1; do not expect that result after deploying 3A.2.
 
 This path is for scripts that must exercise the standalone proxy. Use the
 checked wrapper so malformed or legacy env-file entries fail with a useful

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Verify the deployed, disabled-by-default skill registry foundation.
+"""Verify the deployed built-in video skill and registry health.
 
 This targeted smoke performs read-only catalog/readiness requests plus one
-admin rediscovery while the registry is disabled. It creates no user data,
-conversations, tokens, files, or model calls.
+admin rediscovery. It creates no user data, conversations, tokens, files, or
+model calls.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ ADMIN_TOKEN = _CREDENTIALS.admin
 
 
 class SmokeError(RuntimeError):
-    """The deployed registry foundation violated its disabled contract."""
+    """The deployed video skill violated its registry contract."""
 
 
 def _auth_headers(token: str) -> dict[str, str]:
@@ -92,22 +92,24 @@ def _json_request(
     return status, payload
 
 
-def _expect_disabled_registry(payload: dict[str, Any], *, source: str) -> None:
+def _expect_ready_video_registry(
+    payload: dict[str, Any],
+    *,
+    source: str,
+) -> None:
     expected = {
-        "enabled": False,
-        "status": "disabled",
-        "loaded_count": 0,
-        "available_count": 0,
+        "enabled": True,
+        "status": "ready",
+        "loaded_count": 1,
+        "available_count": 1,
         "degraded_count": 0,
         "invalid_count": 0,
     }
     mismatches = {
-        key: payload.get(key)
-        for key, value in expected.items()
-        if payload.get(key) != value
+        key: payload.get(key) for key, value in expected.items() if payload.get(key) != value
     }
     if mismatches:
-        raise SmokeError(f"{source}: disabled registry mismatch: {mismatches}")
+        raise SmokeError(f"{source}: video registry mismatch: {mismatches}")
 
 
 def main() -> int:
@@ -117,43 +119,68 @@ def main() -> int:
 
     try:
         _, catalog = _json_request("/api/skills", token=USER_TOKEN)
-        if catalog != {"enabled": False, "status": "disabled", "items": []}:
-            raise SmokeError(f"catalog was not disabled and empty: {catalog}")
+        expected_item = {
+            "id": "video-analysis",
+            "name": "Video analysis",
+            "description": ("Analyze uploaded videos and documents from the user's own evidence."),
+            "version": 1,
+            "supported_modes": ["auto", "deep", "fast"],
+            "availability": "available",
+        }
+        if catalog != {
+            "enabled": True,
+            "status": "ready",
+            "items": [expected_item],
+        }:
+            raise SmokeError(f"video catalog mismatch: {catalog}")
 
         _, capabilities = _json_request("/api/capabilities", token=USER_TOKEN)
-        if (capabilities.get("skills") or {}).get("status") != "disabled":
-            raise SmokeError("public capabilities did not report skills disabled")
+        if (capabilities.get("skills") or {}).get("status") != "available":
+            raise SmokeError("public capabilities did not report skills available")
 
         readiness_http, readiness = _json_request(
             "/v1/admin/readiness",
             token=ADMIN_TOKEN,
             expected=frozenset({200, 503}),
         )
-        _expect_disabled_registry(readiness.get("skills") or {}, source="readiness")
+        _expect_ready_video_registry(
+            readiness.get("skills") or {},
+            source="readiness",
+        )
         skill_component = (readiness.get("components") or {}).get("skills") or {}
-        if skill_component.get("status") != "disabled":
-            raise SmokeError("admin readiness component did not report skills disabled")
+        if skill_component.get("status") != "available":
+            raise SmokeError("admin readiness did not report skills available")
 
         _, rediscovery = _json_request(
             "/v1/admin/skills/rediscover",
             token=ADMIN_TOKEN,
             method="POST",
         )
-        _expect_disabled_registry(rediscovery, source="rediscovery")
+        _expect_ready_video_registry(rediscovery, source="rediscovery")
         if rediscovery.get("invalid") != []:
-            raise SmokeError("disabled rediscovery returned invalid bundle diagnostics")
+            raise SmokeError("video rediscovery returned invalid bundle diagnostics")
     except (OSError, SmokeError) as exc:
         print(f"skills foundation smoke failed: {exc}", file=sys.stderr)
         return 1
 
-    print(json.dumps({
-        "schema": 1,
-        "catalog": {"enabled": False, "status": "disabled", "items": 0},
-        "capabilities": {"skills": "disabled"},
-        "readiness": {"http": readiness_http, "skills": "disabled"},
-        "rediscovery": {"status": "disabled", "invalid_count": 0},
-        "status": "passed",
-    }, indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "schema": 1,
+                "catalog": {
+                    "enabled": True,
+                    "status": "ready",
+                    "items": ["video-analysis"],
+                },
+                "capabilities": {"skills": "available"},
+                "readiness": {"http": readiness_http, "skills": "ready"},
+                "rediscovery": {"status": "ready", "invalid_count": 0},
+                "status": "passed",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0
 
 

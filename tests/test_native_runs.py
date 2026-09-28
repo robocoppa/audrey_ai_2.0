@@ -23,6 +23,7 @@ from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.messages import conversation_has_image, has_image_part
+from audrey.pipeline.prompts import VIDEO_SPECIALIST_SYSTEM
 from audrey.pipeline.run_events import RunEventContext, RunEventEmitter, RunFinishedEvent
 from audrey.routes import files as upload_routes
 from audrey.routes.app import files as native_files
@@ -870,10 +871,14 @@ def test_native_run_keeps_saved_persona_out_of_the_routing_transcript(tmp_path):
 
 def test_http_agent_video_mode_launches_the_published_video_model(tmp_path):
     launched_models: list[str] = []
+    captured: dict[str, Any] = {}
 
     async def capture_model(*args, **kwargs):
         payload = args[1]
         launched_models.append(payload.model)
+        captured["messages"] = args[2]
+        captured["routing_messages"] = kwargs["routing_messages"]
+        captured["skill_instruction"] = kwargs["skill_instruction"]
         async for chunk in _successful_stream(*args, **kwargs):
             yield chunk
 
@@ -908,6 +913,16 @@ def test_http_agent_video_mode_launches_the_published_video_model(tmp_path):
             run = client.get(f"/api/runs/{response.headers['x-audrey-run-id']}").json()
             assert run["mode"] == "video"
             assert launched_models == ["audrey_video"]
+            assert captured["skill_instruction"] == VIDEO_SPECIALIST_SYSTEM
+            model_messages = captured["messages"]
+            routing_messages = captured["routing_messages"]
+            assert model_messages[0]["name"] == "audrey_user_preferences"
+            assert model_messages[1] == {
+                "role": "system",
+                "content": VIDEO_SPECIALIST_SYSTEM,
+            }
+            assert routing_messages[0] == model_messages[1]
+            assert model_messages.count(model_messages[1]) == 1
     finally:
         store.close()
 

@@ -42,6 +42,7 @@ from audrey.pipeline.agui import (
 )
 from audrey.pipeline.context import user_preferences_system_message
 from audrey.pipeline.passthrough import passthrough_stream
+from audrey.pipeline.prompts import skill_instruction_for, with_skill_instruction
 from audrey.pipeline.run_events import (
     RunEvent,
     RunEventContext,
@@ -264,6 +265,7 @@ async def _stream_via_selected_model(
     event_context: RunEventContext | None = None,
     routing_messages: list[dict[str, Any]] | None = None,
     selected_model: ServedModel | None = None,
+    skill_instruction: str | None = None,
 ):
     """Dispatch native workflows normally and direct entries straight to Ollama."""
 
@@ -278,6 +280,7 @@ async def _stream_via_selected_model(
             user_turn_text=user_turn_text,
             event_context=event_context,
             routing_messages=routing_messages,
+            skill_instruction=skill_instruction,
         ):
             yield frame
         return
@@ -420,6 +423,7 @@ class NativeRunManager:
         options: dict[str, Any],
         routing_messages: list[dict[str, Any]] | None = None,
         selected_model: ServedModel | None = None,
+        skill_instruction: str | None = None,
     ) -> None:
         live: _LiveRun
         live = _LiveRun(
@@ -450,6 +454,7 @@ class NativeRunManager:
                     options,
                     messages if routing_messages is None else routing_messages,
                     selected_model,
+                    skill_instruction,
                 ),
                 name=f"audrey.native_run.{started.run.run_id}",
             )
@@ -462,6 +467,7 @@ class NativeRunManager:
         options: dict[str, Any],
         routing_messages: list[dict[str, Any]],
         selected_model: ServedModel | None,
+        skill_instruction: str | None,
     ) -> None:
         context = RunEventContext(
             run_id=live.started.run.run_id,
@@ -483,6 +489,7 @@ class NativeRunManager:
                 event_context=context,
                 routing_messages=routing_messages,
                 selected_model=selected_model,
+                skill_instruction=skill_instruction,
             ):
                 # A pipeline can have post-answer cleanup after its terminal
                 # frame. Persist the canonical answer before that cleanup so a
@@ -955,6 +962,22 @@ async def create_run(
         user_preferences_system_message(preferences),
         *routing_messages,
     ]
+    skill_instruction = skill_instruction_for(
+        selected_model.protocol_model,
+        request.app.state.cfg,
+        getattr(request.app.state, "skills", None),
+    )
+    if skill_instruction:
+        messages = with_skill_instruction(messages, skill_instruction)
+        routing_messages = with_skill_instruction(
+            routing_messages,
+            skill_instruction,
+        )
+        log.info(
+            "skill_instruction: %s (%d chars)",
+            selected_model.protocol_model,
+            len(skill_instruction),
+        )
     pipeline_payload = ChatCompletionRequest(
         model=selected_model.protocol_model,
         messages=messages,
@@ -971,6 +994,7 @@ async def create_run(
         options=_options_from_request(pipeline_payload),
         routing_messages=routing_messages,
         selected_model=selected_model,
+        skill_instruction=skill_instruction,
     )
     base = _run_response(started.run).model_dump()
     return RunCreateResponse(
