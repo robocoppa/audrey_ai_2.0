@@ -187,6 +187,11 @@ def build_graph(
     tool_http: httpx.AsyncClient,
 ):
     """Compile the LangGraph StateGraph for this process."""
+
+    def _model_tools(state: PipelineState) -> ToolRegistry:
+        candidate = state.get("model_tools")
+        return candidate if isinstance(candidate, ToolRegistry) else tools
+
     router_cfg = cfg.router
     complexity_cfg = cfg.raw.get("complexity", {}) or {}
     complexity_threshold = int(complexity_cfg.get("token_threshold", 500))
@@ -283,7 +288,8 @@ def build_graph(
             tools, http=tool_http, user_id=user_id, messages=state["messages"],
             top_k=memory_top_k, timeout_s=memory_timeout_s,
         )
-        include_store_hint = tools is not None and MEMORY_STORE_TOOL in tools.by_name
+        visible_tools = _model_tools(state)
+        include_store_hint = MEMORY_STORE_TOOL in visible_tools.by_name
         sys_msg = memory_system_message(
             hits, user_id=user_id, include_store_hint=include_store_hint, cfg=cfg,
         )
@@ -291,7 +297,7 @@ def build_graph(
         # has the tool — telling a model how to use a tool it can't
         # dispatch is wasted tokens. Composer enforces the canonical
         # order: memory message first, chat-history guidance after.
-        chat_history_available = tools is not None and "chat_history_search" in tools.by_name
+        chat_history_available = "chat_history_search" in visible_tools.by_name
         composed = compose_system_messages(
             memory_hint=sys_msg,
             chat_history_guidance=chat_history_available,
@@ -321,7 +327,7 @@ def build_graph(
             messages=routing_messages,
             router_cfg=router_cfg,
             cfg=cfg,
-            registry=tools,
+            registry=_model_tools(state),
         )
         log.info("classify: %s (%s, conf=%.2f)", task, reason, conf)
         return {"task_type": task, "classify_reason": reason, "classify_confidence": conf}
@@ -414,7 +420,7 @@ def build_graph(
             messages=state["messages"],
             options=options,
             timeout_s=fast_timeout,
-            tools=tools,
+            tools=_model_tools(state),
             tool_capable_models=tool_capable_models,
             react_max_rounds=react_max_rounds,
             react_compress_after=react_compress_after,
@@ -470,7 +476,7 @@ def build_graph(
             options=options,
             timeout_s=timeout_s,
             max_workers_cloud=max_workers_cloud,
-            tools=tools,
+            tools=_model_tools(state),
             tool_capable_models=tool_capable_models,
             react_max_rounds=deep_react_max_rounds,
             react_compress_after=deep_react_compress_after,
@@ -528,7 +534,7 @@ def build_graph(
             options=options,
             timeout_s=timeout_s,
             max_researchers_cloud=max_researchers_cloud,
-            tools=tools,
+            tools=_model_tools(state),
             tool_capable_models=tool_capable_models,
             user_id=(state.get("user_id") or None),
             tool_observer=state.get("tool_observer"),

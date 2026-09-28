@@ -147,6 +147,10 @@ async def test_terminal_finalization_records_one_metric_and_partial_archive():
         "partial": True,
         "virtual_model": "audrey_deep",
         "concrete_model": "writer",
+        "skill_id": "",
+        "skill_version": 0,
+        "skill_digest": "",
+        "skill_reason": "",
     }]
 
     with pytest.raises(RuntimeError, match="already finalized"):

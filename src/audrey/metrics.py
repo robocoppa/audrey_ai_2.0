@@ -68,6 +68,23 @@ pipeline_total = Counter(
     labelnames=("mode", "task_type", "outcome"),
 )
 
+# ─── Skill selection ─────────────────────────────────────────────────
+
+_SKILL_SELECTION_BUCKETS = (0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01)
+
+skill_requests_total = Counter(
+    "audrey_skill_requests_total",
+    "Skill selections by bounded registry id, reason, and outcome.",
+    labelnames=("skill", "reason", "outcome"),
+)
+
+skill_selection_seconds = Histogram(
+    "audrey_skill_selection_seconds",
+    "Wall-clock time to resolve an immutable skill selection.",
+    labelnames=("reason",),
+    buckets=_SKILL_SELECTION_BUCKETS,
+)
+
 # ─── Dispatch ─────────────────────────────────────────────────────────
 
 dispatch_total = Counter(
@@ -454,6 +471,8 @@ __all__ = [
     "render",
     "pipeline_seconds",
     "pipeline_total",
+    "skill_requests_total",
+    "skill_selection_seconds",
     "dispatch_total",
     "model_seconds",
     "gpu_gate_wait_seconds",

@@ -102,6 +102,10 @@ class RunRecord:
     concrete_model: str
     prompt_tokens: int
     completion_tokens: int
+    skill_id: str = ""
+    skill_version: int = 0
+    skill_digest: str = ""
+    skill_reason: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +141,10 @@ class ChatProjectionRecord:
     concrete_model: str
     prompt_tokens: int
     completion_tokens: int
+    skill_id: str
+    skill_version: int
+    skill_digest: str
+    skill_reason: str
     created_at: str
     attempts: int
 

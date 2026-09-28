@@ -303,6 +303,7 @@ class CaseResult:
     # container log line, and `docker logs` is empty after the next recreate —
     # which on 2026-08-19 made two completed model sweeps unattributable.
     think_requested: bool | None = None
+    skill: str = ""
 
 
 @dataclass
@@ -362,7 +363,9 @@ def _connection_setup_error(base_url: str, api_key: str) -> str:
     return ""
 
 
-def _request_body(model: str, prompt: str, think: bool | None) -> dict:
+def _request_body(
+    model: str, prompt: str, think: bool | None, skill: str = "",
+) -> dict:
     """The chat-completions body for one case.
 
     `think` is Audrey's vendor extension, omitted entirely when None so the
@@ -379,11 +382,14 @@ def _request_body(model: str, prompt: str, think: bool | None) -> dict:
     }
     if think is not None:
         body["think"] = think
+    if skill:
+        body["skill"] = skill
     return body
 
 
 def _post_stream(base_url: str, api_key: str, model: str, prompt: str,
                  timeout_s: float, think: bool | None = None,
+                 skill: str = "",
                  ) -> tuple[str, list[str], str, StreamTiming]:
     """Stream a chat completion. Returns (full_content, banner_words, error, timing).
 
@@ -400,7 +406,7 @@ def _post_stream(base_url: str, api_key: str, model: str, prompt: str,
     without turning a genuinely-down stack into a hung run.
     """
     for attempt in (1, 2):
-        out = _post_stream_once(base_url, api_key, model, prompt, timeout_s, think)
+        out = _post_stream_once(base_url, api_key, model, prompt, timeout_s, think, skill)
         if attempt == 1 and out[2].startswith("ConnectError"):
             print(f"    connection refused; retrying once in {_CONNECT_RETRY_DELAY_S:.0f}s...")
             time.sleep(_CONNECT_RETRY_DELAY_S)
@@ -411,10 +417,11 @@ def _post_stream(base_url: str, api_key: str, model: str, prompt: str,
 
 def _post_stream_once(base_url: str, api_key: str, model: str, prompt: str,
                       timeout_s: float, think: bool | None = None,
+                      skill: str = "",
                       ) -> tuple[str, list[str], str, StreamTiming]:
     url = base_url.rstrip("/") + "/chat/completions"
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    body = _request_body(model, prompt, think)
+    body = _request_body(model, prompt, think, skill)
     content_parts: list[str] = []
     timing = StreamTiming()
     t0 = time.monotonic()
@@ -1687,8 +1694,9 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
              timeout_s: float, think: bool | None = None) -> CaseResult:
     model = case.get("model") or default_model
     name = case.get("name") or case["prompt"][:48]
+    skill = str(case.get("skill") or "")
     content, banners, err, timing = _post_stream(
-        base_url, api_key, model, case["prompt"], timeout_s, think)
+        base_url, api_key, model, case["prompt"], timeout_s, think, skill)
     route = infer_route(banners)
 
     checks: dict[str, bool | None] = {}
@@ -1696,7 +1704,7 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
         return CaseResult(name=name, model=model, ok=False, checks={"reachable": False},
                           answer="", banners_seen=banners, error=err, route=route,
                           ttft_s=timing.ttft_s, total_s=timing.total_s,
-                          think_requested=think)
+                          think_requested=think, skill=skill)
 
     checks["reachable"] = True
     answer = _answer_body(content)
@@ -1922,7 +1930,7 @@ def run_case(base_url: str, api_key: str, case: dict, default_model: str,
                       fiction_detail="; ".join(fictions),
                       context_detail=degraded,
                       ungrounded_detail=ungrounded or "",
-                      think_requested=think)
+                      think_requested=think, skill=skill)
 
 
 def _fmt_check(v: bool | None) -> str:
@@ -2004,7 +2012,8 @@ def save_results(results: list[CaseResult], save_file: Path) -> None:
         section = (
             f"---\n\n## {r.name}\n\n"
             f"- model: `{r.model}`\n"
-            f"- status: {'PASS' if r.ok else 'FAIL'}\n"
+            + (f"- skill: `{r.skill}`\n" if r.skill else "")
+            + f"- status: {'PASS' if r.ok else 'FAIL'}\n"
             f"- route: {r.route}\n"
             f"- latency: {_fmt_latency(r)}\n"
             f"- banners: {' → '.join(r.banners_seen) or '(none)'}\n"

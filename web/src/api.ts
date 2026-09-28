@@ -134,6 +134,10 @@ export interface ChatExportMessage {
   concrete_model: string;
   prompt_tokens: number;
   completion_tokens: number;
+  skill_id: string;
+  skill_version: number;
+  skill_digest: string;
+  skill_reason: string;
 }
 
 export interface ChatHistoryExport {
@@ -709,6 +713,10 @@ export interface AudreyRun {
   id: string;
   conversation_id: string;
   status: "running" | "succeeded" | "cancelled" | "failed";
+  skill_id: string;
+  skill_version: number;
+  skill_digest: string;
+  skill_reason: string;
 }
 
 export function getRun(runId: string): Promise<AudreyRun> {

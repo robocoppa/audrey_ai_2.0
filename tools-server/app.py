@@ -479,6 +479,10 @@ class ChatExportMessageResponse(BaseModel):
     concrete_model: str
     prompt_tokens: int
     completion_tokens: int
+    skill_id: str
+    skill_version: int
+    skill_digest: str
+    skill_reason: str
 
     @classmethod
     def from_entry(cls, entry: ChatExportMessage) -> ChatExportMessageResponse:
@@ -1409,6 +1413,10 @@ class ArchiveTurnRequest(BaseModel):
     user_content: str
     assistant_content: str
     partial: bool = False
+    skill_id: Annotated[str, Field(max_length=200)] = ""
+    skill_version: int = 0
+    skill_digest: Annotated[str, Field(max_length=64)] = ""
+    skill_reason: Annotated[str, Field(max_length=32)] = ""
     virtual_model: str = ""
     concrete_model: str = ""
     prompt_tokens: int = 0
@@ -1428,6 +1436,10 @@ async def chat_history_archive(req: ArchiveTurnRequest) -> dict[str, Any]:
         concrete_model=req.concrete_model,
         prompt_tokens=req.prompt_tokens,
         completion_tokens=req.completion_tokens,
+        skill_id=req.skill_id,
+        skill_version=req.skill_version,
+        skill_digest=req.skill_digest,
+        skill_reason=req.skill_reason,
         archive_id=req.archive_id,
         created_at=req.created_at,
     )

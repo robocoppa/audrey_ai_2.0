@@ -359,6 +359,36 @@ async def test_chat_export_pages_one_user_and_hides_pending_deletion(tmp_path: P
         await store.aclose()
 
 
+async def test_chat_export_preserves_skill_provenance(tmp_path: Path):
+    store = await _archive_store(tmp_path / "archive.db")
+    try:
+        await store.archive_turn(
+            user="alice@example.com",
+            conversation_id="skill-chat",
+            user_content="analyze the video",
+            assistant_content="analysis",
+            skill_id="video-analysis",
+            skill_version=3,
+            skill_digest="c" * 64,
+            skill_reason="request",
+            created_at="2026-09-28T12:00:00+00:00",
+        )
+
+        items, cursor = await store.export_user_messages(
+            user="alice@example.com",
+        )
+
+        assert cursor is None
+        assert len(items) == 2
+        assert {item.role for item in items} == {"user", "assistant"}
+        assert all(item.skill_id == "video-analysis" for item in items)
+        assert all(item.skill_version == 3 for item in items)
+        assert all(item.skill_digest == "c" * 64 for item in items)
+        assert all(item.skill_reason == "request" for item in items)
+    finally:
+        await store.aclose()
+
+
 async def test_chat_delete_is_owned_hidden_immediately_and_blocks_late_delivery(
     tmp_path: Path,
 ):

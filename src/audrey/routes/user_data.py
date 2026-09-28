@@ -78,6 +78,10 @@ class ChatExportMessage(BaseModel):
     concrete_model: str
     prompt_tokens: int
     completion_tokens: int
+    skill_id: str
+    skill_version: int
+    skill_digest: str
+    skill_reason: str
 
 
 class ChatExportPage(BaseModel):

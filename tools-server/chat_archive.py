@@ -71,6 +71,10 @@ class ArchiveMessage:
     concrete_model: str = ""
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    skill_id: str = ""
+    skill_version: int = 0
+    skill_digest: str = ""
+    skill_reason: str = ""
 
 
 @dataclass(slots=True, frozen=True)
@@ -90,6 +94,10 @@ class ChatExportMessage:
     concrete_model: str
     prompt_tokens: int
     completion_tokens: int
+    skill_id: str
+    skill_version: int
+    skill_digest: str
+    skill_reason: str
 
 
 @dataclass(slots=True, frozen=True)
@@ -329,7 +337,11 @@ CREATE TABLE IF NOT EXISTS messages (
     virtual_model     TEXT,
     concrete_model    TEXT,
     prompt_tokens     INTEGER DEFAULT 0,
-    completion_tokens INTEGER DEFAULT 0
+    completion_tokens INTEGER DEFAULT 0,
+    skill_id          TEXT NOT NULL DEFAULT '',
+    skill_version     INTEGER NOT NULL DEFAULT 0,
+    skill_digest      TEXT NOT NULL DEFAULT '',
+    skill_reason      TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS archive_chunks (
     chunk_id         TEXT PRIMARY KEY,
@@ -510,6 +522,19 @@ class ChatArchiveStore:
             if name not in columns:
                 await self._db.execute(statement)
 
+        cursor = await self._db.execute("PRAGMA table_info(messages)")
+        message_columns = {str(row[1]) for row in await cursor.fetchall()}
+        await cursor.close()
+        message_additions = {
+            "skill_id": "ALTER TABLE messages ADD COLUMN skill_id TEXT NOT NULL DEFAULT ''",
+            "skill_version": "ALTER TABLE messages ADD COLUMN skill_version INTEGER NOT NULL DEFAULT 0",
+            "skill_digest": "ALTER TABLE messages ADD COLUMN skill_digest TEXT NOT NULL DEFAULT ''",
+            "skill_reason": "ALTER TABLE messages ADD COLUMN skill_reason TEXT NOT NULL DEFAULT ''",
+        }
+        for name, statement in message_additions.items():
+            if name not in message_columns:
+                await self._db.execute(statement)
+
     async def aclose(self) -> None:
         if self._db is not None:
             await self._db.close()
@@ -564,6 +589,10 @@ class ChatArchiveStore:
         concrete_model: str = "",
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
+        skill_id: str = "",
+        skill_version: int = 0,
+        skill_digest: str = "",
+        skill_reason: str = "",
         archive_id: str = "",
         created_at: str = "",
     ) -> dict[str, Any]:
@@ -640,18 +669,19 @@ class ChatArchiveStore:
             msg_rows = [
                 (user_msg_id, conversation_id, user, "user", user_content,
                  now, archived_at, 0, virtual_model, concrete_model,
-                 prompt_tokens, completion_tokens),
+                 prompt_tokens, completion_tokens, skill_id, skill_version, skill_digest, skill_reason),
                 (asst_msg_id, conversation_id, user, "assistant", assistant_content,
                  now, archived_at, 1 if partial else 0, virtual_model, concrete_model,
-                 prompt_tokens, completion_tokens),
+                 prompt_tokens, completion_tokens, skill_id, skill_version, skill_digest, skill_reason),
             ]
             await self._db.executemany(
                 """
                 INSERT OR IGNORE INTO messages
                 (message_id, conversation_id, user, role, content,
                  created_at, archived_at, partial,
-                 virtual_model, concrete_model, prompt_tokens, completion_tokens)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 virtual_model, concrete_model, prompt_tokens, completion_tokens,
+                 skill_id, skill_version, skill_digest, skill_reason)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 msg_rows,
             )
@@ -987,6 +1017,7 @@ class ChatArchiveStore:
             SELECT m.message_id, m.conversation_id, m.role, m.content,
                    m.created_at, m.archived_at, m.partial, m.virtual_model,
                    m.concrete_model, m.prompt_tokens, m.completion_tokens,
+                   m.skill_id, m.skill_version, m.skill_digest, m.skill_reason,
                    c.title, c.created_at, c.updated_at
             FROM messages AS m
             LEFT JOIN conversations AS c
@@ -1042,9 +1073,13 @@ class ChatArchiveStore:
                 concrete_model=str(row[8] or ""),
                 prompt_tokens=int(row[9] or 0),
                 completion_tokens=int(row[10] or 0),
-                conversation_title=str(row[11] or ""),
-                conversation_created_at=str(row[12] or ""),
-                conversation_updated_at=str(row[13] or ""),
+                skill_id=str(row[11] or ""),
+                skill_version=int(row[12] or 0),
+                skill_digest=str(row[13] or ""),
+                skill_reason=str(row[14] or ""),
+                conversation_title=str(row[15] or ""),
+                conversation_created_at=str(row[16] or ""),
+                conversation_updated_at=str(row[17] or ""),
             )
             for row in page_rows
         ]

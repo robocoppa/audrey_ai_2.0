@@ -137,6 +137,10 @@ class ChatProjectionPromoter:
                 concrete_model=row.concrete_model,
                 prompt_tokens=row.prompt_tokens,
                 completion_tokens=row.completion_tokens,
+                skill_id=row.skill_id,
+                skill_version=row.skill_version,
+                skill_digest=row.skill_digest,
+                skill_reason=row.skill_reason,
                 archive_id=row.projection_id,
                 created_at=row.created_at,
             )

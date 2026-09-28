@@ -548,6 +548,10 @@ class ConversationsRepository:
         model_id: str | None = None,
         automatic_title: str | None = None,
         attachments: Sequence[AttachmentSnapshot] = (),
+        skill_id: str = "",
+        skill_version: int = 0,
+        skill_digest: str = "",
+        skill_reason: str = "",
     ) -> StartedRun | None:
         """Create run plus user/assistant messages in one write transaction."""
 
@@ -560,6 +564,10 @@ class ConversationsRepository:
             model_id,
             automatic_title,
             attachments,
+            skill_id,
+            skill_version,
+            skill_digest,
+            skill_reason,
         )
 
     def _begin_run_sync(
@@ -571,6 +579,10 @@ class ConversationsRepository:
         model_id: str | None,
         automatic_title: str | None,
         attachments: Sequence[AttachmentSnapshot],
+        skill_id: str,
+        skill_version: int,
+        skill_digest: str,
+        skill_reason: str,
     ) -> StartedRun | None:
         user_id = _required(user_id, "user id")
         conversation_id = _required(conversation_id, "conversation id")
@@ -632,9 +644,11 @@ class ConversationsRepository:
                     "(run_id, conversation_id, user_id, mode, requested_model_id, "
                     "status, started_at, "
                     "completed_at, finish_reason, error_code, virtual_model, "
-                    "concrete_model, prompt_tokens, completion_tokens) "
-                    "VALUES (?, ?, ?, ?, ?, 'running', ?, NULL, '', '', '', '', 0, 0)",
-                    (run_id, conversation_id, user_id, selected_mode, selected_model_id, now),
+                    "concrete_model, prompt_tokens, completion_tokens, skill_id, "
+                    "skill_version, skill_digest, skill_reason) "
+                    "VALUES (?, ?, ?, ?, ?, 'running', ?, NULL, '', '', '', '', 0, 0, ?, ?, ?, ?)",
+                    (run_id, conversation_id, user_id, selected_mode, selected_model_id,
+                     now, skill_id, skill_version, skill_digest, skill_reason),
                 )
                 self._conn.execute(
                     "INSERT INTO app_messages "
@@ -977,7 +991,8 @@ class ConversationsRepository:
             INSERT OR IGNORE INTO app_chat_projections
               (projection_id, user_id, conversation_id, user_message_id,
                assistant_message_id, partial, virtual_model, concrete_model,
-               prompt_tokens, completion_tokens, created_at, enqueued_at,
+               prompt_tokens, completion_tokens, skill_id, skill_version,
+               skill_digest, skill_reason, created_at, enqueued_at,
                attempts, last_attempt_at, last_error, next_attempt_at)
             SELECT
               'native:' || r.run_id,
@@ -990,6 +1005,10 @@ class ConversationsRepository:
               r.concrete_model,
               r.prompt_tokens,
               r.completion_tokens,
+              r.skill_id,
+              r.skill_version,
+              r.skill_digest,
+              r.skill_reason,
               r.started_at,
               NULL,
               0,
@@ -1025,7 +1044,8 @@ class ConversationsRepository:
             "SELECT run_id, conversation_id, user_id, mode, requested_model_id, "
             "status, started_at, "
             "completed_at, finish_reason, error_code, virtual_model, concrete_model, "
-            "prompt_tokens, completion_tokens FROM app_runs "
+            "prompt_tokens, completion_tokens, skill_id, skill_version, "
+            "skill_digest, skill_reason FROM app_runs "
             "WHERE user_id = ? AND run_id = ?",
             (user_id, run_id),
         ).fetchone()
@@ -1061,7 +1081,8 @@ class ChatProjectionsRepository:
                        p.conversation_id, COALESCE(user_message.content, ''),
                        COALESCE(assistant_message.content, ''), p.partial,
                        p.virtual_model, p.concrete_model, p.prompt_tokens,
-                       p.completion_tokens, p.created_at, p.attempts
+                       p.completion_tokens, p.skill_id, p.skill_version, p.skill_digest, p.skill_reason,
+                       p.created_at, p.attempts
                 FROM app_chat_projections AS p
                 JOIN app_users AS u ON u.user_id = p.user_id
                 LEFT JOIN app_messages AS user_message
@@ -1652,6 +1673,10 @@ def _run_from_row(row: sqlite3.Row) -> RunRecord:
         concrete_model=str(row["concrete_model"]),
         prompt_tokens=int(row["prompt_tokens"]),
         completion_tokens=int(row["completion_tokens"]),
+        skill_id=str(row["skill_id"]),
+        skill_version=int(row["skill_version"]),
+        skill_digest=str(row["skill_digest"]),
+        skill_reason=str(row["skill_reason"]),
     )
 
 
@@ -1668,8 +1693,12 @@ def _chat_projection_from_row(row: sqlite3.Row) -> ChatProjectionRecord:
         concrete_model=str(row[8]),
         prompt_tokens=int(row[9]),
         completion_tokens=int(row[10]),
-        created_at=str(row[11]),
-        attempts=int(row[12]),
+        skill_id=str(row[11]),
+        skill_version=int(row[12]),
+        skill_digest=str(row[13]),
+        skill_reason=str(row[14]),
+        created_at=str(row[15]),
+        attempts=int(row[16]),
     )
 
 

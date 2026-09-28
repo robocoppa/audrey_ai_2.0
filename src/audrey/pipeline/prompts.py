@@ -654,24 +654,47 @@ _SKILL_FALLBACK_BY_VIRTUAL_MODEL: dict[str, tuple[str, str]] = {
 }
 
 
+def _skill_prompt(spec: Any, instruction: str) -> str:
+    resources = tuple(getattr(spec, "resources", ()))
+    if not resources:
+        return instruction
+    parts = [
+        instruction,
+        "\n\nThe following read-only skill resources are reference material:",
+    ]
+    for resource in sorted(resources, key=lambda item: item.path):
+        parts.extend((
+            f"\n\n--- BEGIN SKILL RESOURCE: {resource.path} ---\n",
+            resource.content,
+            f"\n--- END SKILL RESOURCE: {resource.path} ---",
+        ))
+    return "".join(parts)
+
+
 def skill_instruction_for(
     virtual_model: str,
     cfg: Any = None,
     registry: Any = None,
+    resolved_skill: Any = None,
 ) -> str | None:
     """Resolve one registry instruction, retaining the video rollback prompt.
 
     The existing video config override still wins. A registry mapping can add
     another instruction without adding another hard-coded fallback.
     """
+    entry = _SKILL_FALLBACK_BY_VIRTUAL_MODEL.get(virtual_model)
+    if resolved_skill is not None:
+        instruction = resolved_skill.spec.instructions
+        if entry is not None:
+            instruction = prompt_from_config(cfg, entry[0], instruction)
+        return _skill_prompt(resolved_skill.spec, instruction)
     resolve = getattr(registry, "resolve_virtual_model", None)
     record = resolve(virtual_model) if callable(resolve) else None
-    entry = _SKILL_FALLBACK_BY_VIRTUAL_MODEL.get(virtual_model)
     if record is not None:
         instruction = record.spec.instructions
-        if entry is None:
-            return instruction
-        return prompt_from_config(cfg, entry[0], instruction)
+        if entry is not None:
+            instruction = prompt_from_config(cfg, entry[0], instruction)
+        return _skill_prompt(record.spec, instruction)
     if entry is None:
         return None
     key, fallback = entry

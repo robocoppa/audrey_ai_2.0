@@ -29,6 +29,7 @@ from audrey.routes.openai.passthrough import (
 from audrey.routes.openai.pipeline import _generate_via_pipeline, _stream_via_pipeline
 from audrey.routes.openai.responses import _options_from_request
 from audrey.routes.openai.schemas import ChatCompletionRequest
+from audrey.skills import SkillSelectionError, skill_mode_for_virtual_model
 
 log = logging.getLogger(__name__)
 
@@ -95,6 +96,14 @@ async def chat_completions(
     # scheduling layers still fire so passthrough traffic competes for
     # the GPU on the same terms as pipeline traffic.
     if _is_passthrough(payload.model):
+        if payload.skill is not None:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "skill_passthrough_unsupported",
+                    "message": "Skills cannot be combined with passthrough models.",
+                },
+            )
         return await _handle_passthrough(app, request, payload, me)
 
     if payload.model not in VIRTUAL_MODELS:
@@ -124,6 +133,50 @@ async def chat_completions(
         for message in payload.messages
     ]
 
+    skill_registry = getattr(app.state, "skills", None)
+    if payload.skill is not None and skill_registry is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "skills_unavailable",
+                "message": "The skill registry is unavailable.",
+            },
+        )
+    try:
+        resolved_skill = (
+            skill_registry.resolve(
+                explicit_skill=payload.skill,
+                virtual_model=payload.model,
+                mode=skill_mode_for_virtual_model(payload.model),
+            )
+            if skill_registry is not None
+            else None
+        )
+    except SkillSelectionError as exc:
+        status_code = (
+            503
+            if exc.code in {"skills_disabled", "skill_unavailable"}
+            else 400
+        )
+        raise HTTPException(status_code=status_code, detail=exc.detail()) from exc
+    model_tools = (
+        app.state.tools.restrict(resolved_skill.spec.allowed_tools)
+        if resolved_skill is not None
+        else app.state.tools
+    )
+    if resolved_skill is not None:
+        log.info(
+            "skill.selected id=%s version=%d digest=%s reason=%s tools=%s "
+            "instruction_chars=%d resource_chars=%d",
+            resolved_skill.spec.id,
+            resolved_skill.spec.version,
+            resolved_skill.spec.digest[:12],
+            resolved_skill.reason,
+            model_tools.names(),
+            len(resolved_skill.spec.instructions),
+            sum(len(resource.content) for resource in resolved_skill.spec.resources),
+        )
+
     # Resolve and inject once so streaming and non-streaming see the same
     # immutable instruction even if registry rediscovery happens mid-request.
     # Injection here also does not depend on memory or identity nodes running.
@@ -131,6 +184,7 @@ async def chat_completions(
         payload.model,
         app.state.cfg,
         getattr(app.state, "skills", None),
+        resolved_skill,
     )
     if skill_instruction:
         messages = with_skill_instruction(messages, skill_instruction)
@@ -174,6 +228,8 @@ async def chat_completions(
                 conversation_id=conversation_id,
                 user_turn_text=user_turn_text,
                 skill_instruction=skill_instruction,
+                resolved_skill=resolved_skill,
+                model_tools=model_tools,
             ),
             media_type="text/event-stream",
         )
@@ -184,4 +240,6 @@ async def chat_completions(
         conversation_id=conversation_id,
         user_turn_text=user_turn_text,
         skill_instruction=skill_instruction,
+        resolved_skill=resolved_skill,
+        model_tools=model_tools,
     )

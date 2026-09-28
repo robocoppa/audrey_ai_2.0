@@ -31,10 +31,15 @@ serves an embedded browser shell. `audrey-ui` is the sole browser surface.
 The first live deploy exposed that Cloudflare still targeted backend port 8000;
 after switching to 8090, the long-lived UI proxy retained the recreated
 backend's old Docker address. Restarting `audrey-ui` restored authentication,
-confirming the diagnosis. The request-time Docker DNS correction is
-laptop-complete; its targeted deploy and rendered-config/auth proof remain open.
+confirming the diagnosis. The request-time Docker DNS correction is live-settled; its rendered
+resolver,
+variable upstream, and both variable proxy directives passed the deploy proof.
 The already-passed auth, proxy, routing, and eval checks are not repeated.
 Historical chat import is optional and runs only after a new explicit request.
+
+Phase 3 is now in progress. Milestones 3A.1 and 3A.2 are live-settled, and
+3B explicit selection/tool restriction is implementation-complete with Python
+contracts laptop-verified; the native UI build and targeted Unraid smoke remain.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,
@@ -46,8 +51,8 @@ and finally adds the first general skills layer on that owned surface.
 | Phase | Plan | Outcome | Entry gate | Status |
 |---|---|---|---|---|
 | 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | Complete |
-| 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (2A–2B, 2C.1–2C.3, and 2D.1–2D.4 verified; 2D.5 deployed; 2E settled; 2F.3 live-passed; 2F.4 recovery confirmed; permanent DNS correction laptop-complete) |
-| 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | Planned |
+| 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (2A–2B, 2C.1–2C.3, and 2D.1–2D.4 verified; 2D.5 deployed; 2E settled; 2F.3 live-passed; 2F.4 and permanent DNS correction live-settled) |
+| 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | In progress (3A live-settled; 3B implemented, UI build/deploy proof open) |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1,
 Campaign 3 Phase 2, and Campaign 3 Phase 3, or use the topic filenames.

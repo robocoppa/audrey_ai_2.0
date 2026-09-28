@@ -673,6 +673,19 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           ON app_message_tool_calls(user_id, conversation_id, message_id, position);
         """,
     ),
+    (
+        15,
+        """
+        ALTER TABLE app_runs ADD COLUMN skill_id TEXT NOT NULL DEFAULT '';
+        ALTER TABLE app_runs ADD COLUMN skill_version INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE app_runs ADD COLUMN skill_digest TEXT NOT NULL DEFAULT '';
+        ALTER TABLE app_runs ADD COLUMN skill_reason TEXT NOT NULL DEFAULT '';
+        ALTER TABLE app_chat_projections ADD COLUMN skill_id TEXT NOT NULL DEFAULT '';
+        ALTER TABLE app_chat_projections ADD COLUMN skill_version INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE app_chat_projections ADD COLUMN skill_digest TEXT NOT NULL DEFAULT '';
+        ALTER TABLE app_chat_projections ADD COLUMN skill_reason TEXT NOT NULL DEFAULT '';
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS"]

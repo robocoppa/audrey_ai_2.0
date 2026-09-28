@@ -86,6 +86,10 @@ class StreamArchiveTarget:
     conversation_id: str
     user_content: str
     virtual_model: str
+    skill_id: str = ""
+    skill_version: int = 0
+    skill_digest: str = ""
+    skill_reason: str = ""
 
     async def write(
         self,
@@ -106,6 +110,10 @@ class StreamArchiveTarget:
             partial=partial,
             virtual_model=self.virtual_model,
             concrete_model=concrete_model,
+            skill_id=self.skill_id,
+            skill_version=self.skill_version,
+            skill_digest=self.skill_digest,
+            skill_reason=self.skill_reason,
         )
 
 

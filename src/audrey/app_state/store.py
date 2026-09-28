@@ -49,6 +49,18 @@ _ALLOWED_MODEL_AUDIENCES = frozenset({"users", "testers", "admins"})
 _TOKEN_RE = re.compile(r"\Aaud_(pat_[0-9a-f]{32})\.([A-Za-z0-9_-]{32,})\Z")
 _LAST_USED_WRITE_INTERVAL = dt.timedelta(minutes=5)
 _FOREIGN_KEYS_OFF_MIGRATIONS = frozenset({5, 7, 8})
+_ADDITIVE_COLUMN_MIGRATIONS = {
+    15: {
+        "app_runs": ("skill_id", "skill_version", "skill_digest", "skill_reason"),
+        "app_chat_projections": (
+            "skill_id",
+            "skill_version",
+            "skill_digest",
+            "skill_reason",
+        ),
+    },
+}
+
 
 class InvalidIdentityError(ValueError):
     """Authentication evidence is incomplete or outside Audrey policy."""
@@ -98,6 +110,9 @@ class ApplicationStore:
             if version in applied:
                 continue
             stamp = _utc_now()
+            if version in _ADDITIVE_COLUMN_MIGRATIONS:
+                self._apply_additive_column_migration_locked(version, stamp)
+                continue
             if version in _FOREIGN_KEYS_OFF_MIGRATIONS:
                 self._apply_table_rebuild_migration_locked(version, sql, stamp)
                 continue
@@ -142,6 +157,43 @@ class ApplicationStore:
         finally:
             self._conn.execute("PRAGMA legacy_alter_table = OFF")
             self._conn.execute("PRAGMA foreign_keys = ON")
+
+    def _apply_additive_column_migration_locked(
+        self,
+        version: int,
+        stamp: str,
+    ) -> None:
+        """Add only missing columns when a partial database is replayed."""
+
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            for table, columns in _ADDITIVE_COLUMN_MIGRATIONS[version].items():
+                existing = {
+                    str(row["name"])
+                    for row in self._conn.execute(
+                        f"PRAGMA table_info({table})"
+                    ).fetchall()
+                }
+                for column in columns:
+                    if column in existing:
+                        continue
+                    definition = (
+                        "INTEGER NOT NULL DEFAULT 0"
+                        if column == "skill_version"
+                        else "TEXT NOT NULL DEFAULT " + repr("")
+                    )
+                    self._conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+                    )
+            self._conn.execute(
+                "INSERT INTO app_schema_migrations(version, applied_at) VALUES (?, ?)",
+                (version, stamp),
+            )
+            self._conn.commit()
+        except BaseException:
+            if self._conn.in_transaction:
+                self._conn.rollback()
+            raise
 
     @property
     def schema_version(self) -> int:

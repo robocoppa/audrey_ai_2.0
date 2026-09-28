@@ -206,6 +206,17 @@ class ToolRegistry:
             return None
         return spec
 
+    def restrict(self, allowed_names: frozenset[str]) -> ToolRegistry:
+        """Return a new model-visible registry limited to one skill contract."""
+
+        return ToolRegistry(
+            by_name={
+                name: spec
+                for name in sorted(allowed_names)
+                if (spec := self.get(name)) is not None
+            }
+        )
+
 
 # ─── OpenAPI → Ollama-tool conversion ─────────────────────────────────
 

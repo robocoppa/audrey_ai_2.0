@@ -10,6 +10,8 @@ from __future__ import annotations
 from typing import Any, Literal, TypedDict
 
 from audrey.pipeline.run_observations import RunEventToolObserver
+from audrey.skills.models import ResolvedSkill
+from audrey.tools.discovery import ToolRegistry
 
 TaskType = Literal["code", "reasoning", "general", "vl"]
 PipelineMode = Literal["fast", "deep"]
@@ -47,6 +49,8 @@ class PipelineState(TypedDict, total=False):
     virtual_model: str               # audrey_deep | audrey_cloud | audrey_local | audrey_auto | audrey_fast
     messages: list[dict]             # OpenAI-shaped chat messages
     skill_instruction: str | None    # exact Audrey-owned text injected at the route
+    resolved_skill: ResolvedSkill | None  # immutable selection + provenance
+    model_tools: ToolRegistry        # request-scoped model-visible tools
     routing_messages: list[dict]     # optional native transcript without server-owned preference context
     temperature: float | None
     top_p: float | None

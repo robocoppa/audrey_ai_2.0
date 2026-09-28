@@ -28,10 +28,23 @@ const DEFAULT_MODELS = [
   },
 ] as const;
 
+const DEFAULT_SKILLS = [
+  {
+    id: "video-analysis",
+    name: "Video analysis",
+    description: "Analyze uploaded videos and documents from the user evidence.",
+    version: 1,
+    supported_modes: ["auto", "fast", "deep"],
+    availability: "available",
+  },
+] as const;
+
 function collectionPayload(path: string) {
-  return path === "/api/models"
-    ? { items: DEFAULT_MODELS }
-    : { items: [], next_cursor: null };
+  if (path === "/api/models") return { items: DEFAULT_MODELS };
+  if (path === "/api/skills") {
+    return { enabled: true, status: "ready", items: DEFAULT_SKILLS };
+  }
+  return { items: [], next_cursor: null };
 }
 
 describe("App", () => {
@@ -143,6 +156,10 @@ describe("App", () => {
     render(<App />);
 
     const identity = await screen.findByLabelText("Signed in user");
+    expect(
+      await screen.findByRole("combobox", { name: "Audrey skill" }),
+    ).toHaveValue("");
+    expect(screen.getByRole("option", { name: "Video analysis" })).toBeEnabled();
     expect(screen.getByRole("link", { name: "Audrey home" })).toContainElement(
       document.querySelector(".brand-wordmark img"),
     );

@@ -212,6 +212,13 @@ class ChatCompletionRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     model: str
+    skill: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        description="Optional Audrey skill id for this request.",
+    )
     messages: list[ChatMessage] = Field(min_length=1)
     stream: bool = False
     # Client-owned conversation identity extensions. They are accepted and

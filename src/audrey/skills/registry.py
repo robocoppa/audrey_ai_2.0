@@ -3,18 +3,23 @@
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from audrey.metrics import skill_requests_total, skill_selection_seconds
 from audrey.skills.loader import SkillLimits, SkillLoadError, load_skill_bundle
 from audrey.skills.models import (
+    ResolvedSkill,
     SkillCatalogEntry,
     SkillIssue,
+    SkillMode,
     SkillRecord,
     SkillRegistrySnapshot,
+    SkillSelectionReason,
 )
 
 
@@ -26,6 +31,44 @@ class _RegistryState:
 
 _EMPTY_STATE = _RegistryState(records=MappingProxyType({}), issues=())
 _SAFE_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+class SkillSelectionError(ValueError):
+    """Safe, structured failure raised before a skill reaches a model."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        skill_id: str = "",
+        unavailable_tools: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.skill_id = skill_id
+        self.unavailable_tools = unavailable_tools
+
+    def detail(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"error": self.code, "message": str(self)}
+        if self.skill_id:
+            out["skill"] = self.skill_id
+        if self.unavailable_tools:
+            out["unavailable_tools"] = list(self.unavailable_tools)
+        return out
+
+
+def skill_mode_for_virtual_model(virtual_model: str) -> SkillMode:
+    if virtual_model == "audrey_fast":
+        return "fast"
+    if virtual_model in {
+        "audrey_deep",
+        "audrey_cloud",
+        "audrey_local",
+        "audrey_research",
+    }:
+        return "deep"
+    return "auto"
 
 
 class SkillRegistry:
@@ -151,6 +194,106 @@ class SkillRegistry:
     def get(self, skill_id: str) -> SkillRecord | None:
         return self._state.records.get(skill_id)
 
+    def resolve(
+        self,
+        *,
+        explicit_skill: str | None,
+        virtual_model: str,
+        mode: SkillMode,
+    ) -> ResolvedSkill | None:
+        """Resolve and publish bounded selection telemetry."""
+
+        reason = "request" if explicit_skill else (
+            "virtual_model" if virtual_model in self._virtual_models else "none"
+        )
+        started = time.perf_counter()
+        try:
+            resolved = self._resolve(
+                explicit_skill=explicit_skill,
+                virtual_model=virtual_model,
+                mode=mode,
+            )
+        except SkillSelectionError as exc:
+            label = exc.skill_id if exc.skill_id in self._state.records else "unknown"
+            skill_requests_total.labels(
+                skill=label, reason=reason, outcome=exc.code,
+            ).inc()
+            raise
+        else:
+            skill_requests_total.labels(
+                skill=resolved.spec.id if resolved is not None else "none",
+                reason=resolved.reason if resolved is not None else reason,
+                outcome="selected" if resolved is not None else "none",
+            ).inc()
+            return resolved
+        finally:
+            skill_selection_seconds.labels(reason=reason).observe(
+                time.perf_counter() - started
+            )
+
+    def _resolve(
+        self,
+        *,
+        explicit_skill: str | None,
+        virtual_model: str,
+        mode: SkillMode,
+    ) -> ResolvedSkill | None:
+        """Resolve one request against one immutable registry snapshot."""
+
+        state = self._state
+        mapped_id = self._virtual_models.get(virtual_model)
+        if explicit_skill and mapped_id and explicit_skill != mapped_id:
+            raise SkillSelectionError(
+                "skill_conflict",
+                f"Skill {explicit_skill!r} conflicts with virtual model "
+                f"{virtual_model!r}, which selects {mapped_id!r}.",
+                skill_id=explicit_skill,
+            )
+        skill_id = explicit_skill or mapped_id
+        if not skill_id:
+            return None
+        reason: SkillSelectionReason = (
+            "request" if explicit_skill else "virtual_model"
+        )
+        if not self.enabled:
+            if explicit_skill:
+                raise SkillSelectionError(
+                    "skills_disabled",
+                    "Explicit skill selection is disabled on this deployment.",
+                    skill_id=skill_id,
+                )
+            return None
+        record = state.records.get(skill_id)
+        if record is None:
+            if explicit_skill:
+                available = sorted(state.records)
+                suffix = f" Available skills: {available}." if available else ""
+                raise SkillSelectionError(
+                    "unknown_skill",
+                    f"Unknown skill {skill_id!r}.{suffix}",
+                    skill_id=skill_id,
+                )
+            return None
+        if record.unavailable_tools:
+            if explicit_skill:
+                raise SkillSelectionError(
+                    "skill_unavailable",
+                    f"Skill {skill_id!r} is unavailable because required "
+                    "tools are missing.",
+                    skill_id=skill_id,
+                    unavailable_tools=tuple(sorted(record.unavailable_tools)),
+                )
+            return None
+        if mode not in record.spec.supported_modes:
+            if explicit_skill:
+                raise SkillSelectionError(
+                    "skill_mode_unsupported",
+                    f"Skill {skill_id!r} does not support {mode!r} mode.",
+                    skill_id=skill_id,
+                )
+            return None
+        return ResolvedSkill(spec=record.spec, reason=reason)
+
     def resolve_virtual_model(self, virtual_model: str) -> SkillRecord | None:
         """Return one usable mapped bundle; unavailable mappings fail closed."""
 
@@ -226,4 +369,8 @@ class SkillRegistry:
         )
 
 
-__all__ = ["SkillRegistry"]
+__all__ = [
+    "SkillRegistry",
+    "SkillSelectionError",
+    "skill_mode_for_virtual_model",
+]

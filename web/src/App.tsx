@@ -10,9 +10,11 @@ import {
   getCurrentUser,
   getCurrentUserPreferences,
   listModels,
+  listSkills,
   type AudreyModel,
   type CapabilityHealth,
   type CurrentUser,
+  type SkillSummary,
   type UserPreferences,
 } from "./api";
 
@@ -27,6 +29,7 @@ type SessionState =
       user: CurrentUser;
       preferences: UserPreferences;
       models: AudreyModel[];
+      skills: SkillSummary[];
     }
   | { status: "restricted"; user: CurrentUser }
   | { status: "unauthenticated" }
@@ -93,12 +96,19 @@ export function App() {
             if (active) setSession({ status: "restricted", user });
             return;
           }
-          const [preferences, catalog] = await Promise.all([
+          const [preferences, catalog, skillsCatalog] = await Promise.all([
             getCurrentUserPreferences(),
             listModels(),
+            listSkills(),
           ]);
           if (active) {
-            setSession({ status: "ready", user, preferences, models: catalog.items });
+            setSession({
+              status: "ready",
+              user,
+              preferences,
+              models: catalog.items,
+              skills: skillsCatalog.items,
+            });
           }
           return;
         } catch (error) {
@@ -219,9 +229,20 @@ export function App() {
           }}
           onDataPurgeAttempted={() => {
             setWorkspaceRevision((current) => current + 1);
-            void Promise.all([getCurrentUser(), getCurrentUserPreferences(), listModels()])
-              .then(([user, preferences, catalog]) => {
-                setSession({ status: "ready", user, preferences, models: catalog.items });
+            void Promise.all([
+              getCurrentUser(),
+              getCurrentUserPreferences(),
+              listModels(),
+              listSkills(),
+            ])
+              .then(([user, preferences, catalog, skillsCatalog]) => {
+                setSession({
+                  status: "ready",
+                  user,
+                  preferences,
+                  models: catalog.items,
+                  skills: skillsCatalog.items,
+                });
               })
               .catch(() => undefined);
           }}
@@ -242,6 +263,7 @@ export function App() {
             user={session.user}
             preferences={session.preferences}
             models={session.models}
+            skills={session.skills}
           />
         </Suspense>
       </main>

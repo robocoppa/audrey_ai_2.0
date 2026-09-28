@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 SkillMode = Literal["auto", "fast", "deep"]
+SkillSelectionReason = Literal["request", "virtual_model"]
 SkillAvailability = Literal["available", "degraded"]
 SkillRegistryStatus = Literal["disabled", "ready", "degraded", "unavailable"]
 
@@ -27,6 +28,14 @@ class SkillSpec:
     allowed_tools: frozenset[str]
     supported_modes: frozenset[SkillMode]
     resources: tuple[SkillResource, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedSkill:
+    """One immutable skill decision carried for the lifetime of a request."""
+
+    spec: SkillSpec
+    reason: SkillSelectionReason
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +80,8 @@ __all__ = [
     "SkillCatalogEntry",
     "SkillIssue",
     "SkillMode",
+    "SkillSelectionReason",
+    "ResolvedSkill",
     "SkillRecord",
     "SkillRegistrySnapshot",
     "SkillRegistryStatus",

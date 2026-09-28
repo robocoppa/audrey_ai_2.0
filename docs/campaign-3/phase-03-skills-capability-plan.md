@@ -1,8 +1,9 @@
 # Campaign 3 Phase 3 — reusable skills
 
-**Status:** The off-by-default 3A.1 registry foundation is laptop-complete.
-Video byte-parity extraction remains 3A.2; explicit selection and tool
-restriction remain gated on the outstanding Campaign 3 Phase 2 proof.
+**Status:** Milestones 3A.1 and 3A.2 are live-settled. Milestone 3B explicit
+selection and enforced tool restriction is implementation-complete with its Python
+contracts laptop-verified; the native UI
+build and one-turn Unraid smoke are the current deploy gate.
 
 ## Goal
 
@@ -428,6 +429,10 @@ Gate:
 
 ## Milestone 3B — explicit selection and enforced tool restriction
 
+**Status:** Implementation-complete on 2026-09-28. Python contracts are
+laptop-verified; the native UI build, deployment, and targeted explicit-
+selection smoke remain open.
+
 1. Add the `skill` request extension and authenticated catalog route.
 2. Carry `ResolvedSkill` metadata through graph and streaming state.
 3. Add non-mutating model-visible registry restriction.
@@ -603,5 +608,6 @@ Phase 3 is complete when:
   ship, revise, or reject decision;
 - automatic selection is either proven and shipped behind its switch or remains
   explicitly deferred;
-- full hermetic tests, changed-file ruff, lesson-link checks, user-run Unraid
+- full hermetic tests, changed-file ruff, any user-requested lesson-link checks,
+  user-run Unraid
   smoke, and relevant live evals pass.

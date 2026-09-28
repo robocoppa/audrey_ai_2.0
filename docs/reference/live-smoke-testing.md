@@ -135,6 +135,30 @@ zero and JSON ending in `"status": "passed"`, with catalog and readiness
 rediscovery diagnostics. The earlier all-`disabled` output remains the
 recorded live proof for 3A.1; do not expect that result after deploying 3A.2.
 
+## Run the explicit skill-selection smoke from the laptop
+
+This is the targeted 3B deploy proof. It makes one short Fast model call with
+`video-analysis` selected explicitly through the native AG-UI route, verifies
+the streamed answer and persisted id/version/digest/reason, then deletes the
+temporary canonical conversation and archive projection. Use Tailscale first:
+
+```bash
+cd /home/bart/Documents/github/audrey_ai_2.0
+(
+  set -a
+  source .env.test.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://100.113.157.98:8000 .venv/bin/python scripts/smoke_skill_selection.py
+)
+```
+
+If Tailscale cannot reach the backend, change only the base URL to the WARP
+fallback `http://192.168.1.11:8000`. Success is exit code zero, JSON ending in
+`"status": "passed"`, selection showing `video-analysis` version 1 with reason
+`request`, a 64-character digest, and cleanup showing repair status `ready`.
+This smoke mutates live data only for its temporary conversation and removes it
+before returning.
+
 This path is for scripts that must exercise the standalone proxy. Use the
 checked wrapper so malformed or legacy env-file entries fail with a useful
 message before Docker starts:

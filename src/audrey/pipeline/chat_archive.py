@@ -238,6 +238,10 @@ class ArchiveJob:
     concrete_model: str = ""
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    skill_id: str = ""
+    skill_version: int = 0
+    skill_digest: str = ""
+    skill_reason: str = ""
 
     @classmethod
     def create(
@@ -252,6 +256,10 @@ class ArchiveJob:
         concrete_model: str = "",
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
+        skill_id: str = "",
+        skill_version: int = 0,
+        skill_digest: str = "",
+        skill_reason: str = "",
         archive_id: str = "",
         created_at: str = "",
     ) -> ArchiveJob:
@@ -267,6 +275,10 @@ class ArchiveJob:
             concrete_model=concrete_model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
+            skill_id=skill_id,
+            skill_version=skill_version,
+            skill_digest=skill_digest,
+            skill_reason=skill_reason,
         )
 
     def payload(self) -> dict[str, Any]:
@@ -282,6 +294,10 @@ class ArchiveJob:
             "concrete_model": self.concrete_model,
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
+            "skill_id": self.skill_id,
+            "skill_version": self.skill_version,
+            "skill_digest": self.skill_digest,
+            "skill_reason": self.skill_reason,
         }
 
 
@@ -496,6 +512,10 @@ class ChatArchiveClient:
         concrete_model: str = "",
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
+        skill_id: str = "",
+        skill_version: int = 0,
+        skill_digest: str = "",
+        skill_reason: str = "",
         archive_id: str = "",
         created_at: str = "",
     ) -> None:
@@ -513,6 +533,10 @@ class ChatArchiveClient:
             concrete_model=concrete_model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
+            skill_id=skill_id,
+            skill_version=skill_version,
+            skill_digest=skill_digest,
+            skill_reason=skill_reason,
             archive_id=archive_id,
             created_at=created_at,
         )
@@ -693,6 +717,10 @@ class ChatArchiveQueue:
         concrete_model: str = "",
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
+        skill_id: str = "",
+        skill_version: int = 0,
+        skill_digest: str = "",
+        skill_reason: str = "",
         archive_id: str = "",
         created_at: str = "",
     ) -> bool:
@@ -716,6 +744,10 @@ class ChatArchiveQueue:
             concrete_model=concrete_model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
+            skill_id=skill_id,
+            skill_version=skill_version,
+            skill_digest=skill_digest,
+            skill_reason=skill_reason,
             archive_id=archive_id,
             created_at=created_at,
         )

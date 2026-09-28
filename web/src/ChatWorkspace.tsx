@@ -60,6 +60,7 @@ import {
   type MessageAttachment,
   type MessageSource,
   type MessageToolCall,
+  type SkillSummary,
   type CurrentUser,
   type UserPreferences,
 } from "./api";
@@ -125,10 +126,12 @@ export function ChatWorkspace({
   user,
   preferences,
   models,
+  skills,
 }: {
   user: CurrentUser;
   preferences: UserPreferences;
   models: AudreyModel[];
+  skills: SkillSummary[];
 }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [openedConversations, setOpenedConversations] = useState<Conversation[]>([]);
@@ -485,6 +488,7 @@ export function ChatWorkspace({
             <ConversationThread
               conversation={opened}
               models={models}
+              skills={skills}
               canBrowseDirectModels={canBrowseDirectModels}
               showProgress={preferences.show_progress}
               onConversationChange={replaceConversation}
@@ -504,6 +508,7 @@ export function ChatWorkspace({
 function ConversationThread({
   conversation,
   models,
+  skills,
   canBrowseDirectModels,
   showProgress,
   onConversationChange,
@@ -511,6 +516,7 @@ function ConversationThread({
 }: {
   conversation: Conversation;
   models: AudreyModel[];
+  skills: SkillSummary[];
   canBrowseDirectModels: boolean;
   showProgress: boolean;
   onConversationChange: (conversation: Conversation) => void;
@@ -803,6 +809,7 @@ function ConversationThread({
           key={threadRevision}
           conversationId={conversation.id}
           models={models}
+          skills={skills}
           canBrowseDirectModels={canBrowseDirectModels}
           modelId={selectedModelId}
           showProgress={showProgress}
@@ -822,6 +829,7 @@ function ConversationThread({
 function AudreyThread({
   conversationId,
   models,
+  skills,
   canBrowseDirectModels,
   modelId,
   showProgress,
@@ -836,6 +844,7 @@ function AudreyThread({
   conversationId: string;
   canBrowseDirectModels: boolean;
   models: AudreyModel[];
+  skills: SkillSummary[];
   modelId: string;
   showProgress: boolean;
   initialMessages: ConversationMessage[];
@@ -847,6 +856,7 @@ function AudreyThread({
   onRunStarted: () => void;
 }) {
   const [runError, setRunError] = useState("");
+  const [skillId, setSkillId] = useState("");
   const [activity, setActivity] = useState<RunActivity>(IDLE_ACTIVITY);
   const restoredIncomplete = initialMessages.filter(({ role }) => role === "assistant").at(-1)?.status === "incomplete";
   const [lastAttempt, setLastAttempt] = useState<LastAttempt | null>(() => {
@@ -886,7 +896,23 @@ function AudreyThread({
   const submissionBlocked = modeDisabled || attachmentBusy || retrying || Boolean(uploadIssue);
   const selectedImageCount = selectedAttachments.filter(({ kind }) => kind === "image").length;
   const selectedModel = modelDetails(models, modelId);
+  const selectedSkillMode = skillModeForModel(selectedModel);
+  const compatibleSkills = skills.filter((skill) =>
+    selectedSkillMode !== null && skill.supported_modes.includes(selectedSkillMode),
+  );
   const supportsFiles = selectedModel.capabilities.includes("files");
+  useEffect(() => {
+    if (!skillId) return;
+    const selectedSkill = skills.find((skill) => skill.id === skillId);
+    if (
+      !selectedSkill
+      || selectedSkill.availability !== "available"
+      || selectedSkillMode === null
+      || !selectedSkill.supported_modes.includes(selectedSkillMode)
+    ) {
+      setSkillId("");
+    }
+  }, [selectedSkillMode, skillId, skills]);
   const attachmentIds = useMemo(
     () => selectedAttachments.map(({ id }) => id),
     [selectedAttachments],
@@ -936,7 +962,9 @@ function AudreyThread({
   const agent = useMemo(
     () =>
       new HttpAgent({
-        url: `/api/agent?model=${encodeURIComponent(modelId)}`,
+        url: `/api/agent?model=${encodeURIComponent(modelId)}${
+          skillId ? `&skill=${encodeURIComponent(skillId)}` : ""
+        }`,
         threadId: conversationId,
         fetch: (url, init) => latestActionFetch(
           url,
@@ -945,12 +973,20 @@ function AudreyThread({
           setActiveRunId,
         ),
       }),
-    [attachmentIds, conversationId, modelId],
+    [attachmentIds, conversationId, modelId, skillId],
   );
   async function changeModel(nextModelId: string) {
     if (attachmentBusy || retrying) return;
     await onModelChange(nextModelId);
     const nextModel = modelDetails(models, nextModelId);
+    const nextSkillMode = skillModeForModel(nextModel);
+    const selectedSkill = skills.find((skill) => skill.id === skillId);
+    if (
+      selectedSkill
+      && (nextSkillMode === null || !selectedSkill.supported_modes.includes(nextSkillMode))
+    ) {
+      setSkillId("");
+    }
     if (!nextModel.capabilities.includes("files")) {
       void runtime.thread.composer.clearAttachments();
       setAttachmentPickerOpen(false);
@@ -1545,6 +1581,28 @@ function AudreyThread({
                       onChange={changeModel}
                     />
                   </ThreadPrimitive.If>
+                  {skills.length > 0 ? (
+                    <label className="compact-skill-picker">
+                      <select
+                        aria-label="Audrey skill"
+                        value={skillId}
+                        disabled={submissionBlocked || selectedSkillMode === null}
+                        onChange={(event) => setSkillId(event.target.value)}
+                        title="Apply a skill to this run"
+                      >
+                        <option value="">Model default</option>
+                        {compatibleSkills.map((skill) => (
+                          <option
+                            key={skill.id}
+                            value={skill.id}
+                            disabled={skill.availability !== "available"}
+                          >
+                            {skill.name}{skill.availability === "available" ? "" : " (unavailable)"}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                   <button
                     ref={attachButtonRef}
                     className="attach-button"
@@ -1817,6 +1875,13 @@ function AnswerCopyAction() {
       </button>
     </div>
   );
+}
+
+function skillModeForModel(model: AudreyModel): "auto" | "fast" | "deep" | null {
+  if (model.kind === "direct" || model.mode === "direct") return null;
+  if (model.mode === "fast") return "fast";
+  if (["deep", "research", "local", "cloud"].includes(model.mode)) return "deep";
+  return "auto";
 }
 
 function ComposerModelPicker({

@@ -37,6 +37,8 @@ from audrey.routes.app.runs import (
 from audrey.routes.inflight import UserInflightRegistry
 from audrey.routes.openai import VIRTUAL_MODELS
 from audrey.routes.openai.schemas import ChatCompletionRequest
+from audrey.skills.models import ResolvedSkill, SkillSpec
+from audrey.tools.discovery import ToolRegistry, ToolSpec
 
 
 async def _resolve(
@@ -1534,4 +1536,77 @@ async def test_native_manager_terminalizes_pipeline_failure(tmp_path):
         assert messages[-1].content == "partial before failure"
     finally:
         await manager.stop()
+        store.close()
+
+
+def test_native_agent_carries_explicit_skill_and_restricted_tools(tmp_path):
+    resolved = ResolvedSkill(
+        spec=SkillSpec(
+            id="video-analysis",
+            name="Video analysis",
+            description="Inspect evidence.",
+            version=3,
+            digest="b" * 64,
+            instructions="Use the native selected skill.",
+            allowed_tools=frozenset({"kb_search"}),
+            supported_modes=frozenset({"auto", "fast", "deep"}),
+            resources=(),
+        ),
+        reason="request",
+    )
+
+    class Skills:
+        def resolve(self, **_kwargs):
+            return resolved
+
+    captured: dict[str, Any] = {}
+
+    async def capture_stream(app, payload, messages, options, **kwargs):
+        captured["messages"] = messages
+        captured.update(kwargs)
+        async for chunk in _successful_stream(app, payload, messages, options, **kwargs):
+            yield chunk
+
+    app, store, owner, _manager = _native_app(
+        tmp_path, stream_factory=capture_stream,
+    )
+    app.state.skills = Skills()
+    app.state.tools = ToolRegistry(by_name={
+        name: ToolSpec(
+            name=name, description=name, parameters={"type": "object"},
+            server_url="http://tools", path=f"/{name}",
+        )
+        for name in ("kb_search", "web_search")
+    })
+    conversation = asyncio.run(
+        store.conversations.create(user_id=owner.user_id, default_mode="fast")
+    )
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/agent?model=fast&skill=video-analysis",
+                json={
+                    "threadId": conversation.conversation_id,
+                    "runId": "browser-skill-run",
+                    "messages": [
+                        {"id": "user-skill", "role": "user", "content": "Inspect it."}
+                    ],
+                },
+            )
+            assert response.status_code == 200
+            run = client.get(
+                f"/api/runs/{response.headers['X-Audrey-Run-ID']}"
+            ).json()
+
+        assert captured["resolved_skill"] is resolved
+        assert captured["model_tools"].names() == ["kb_search"]
+        assert app.state.tools.names() == ["kb_search", "web_search"]
+        assert captured["messages"][1] == {
+            "role": "system", "content": resolved.spec.instructions,
+        }
+        assert run["skill_id"] == "video-analysis"
+        assert run["skill_version"] == 3
+        assert run["skill_digest"] == "b" * 64
+        assert run["skill_reason"] == "request"
+    finally:
         store.close()

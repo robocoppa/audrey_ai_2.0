@@ -390,6 +390,31 @@ async def test_dispatch_one_unknown_tool():
     assert "not_a_tool" not in result.content
 
 
+async def test_restricted_registry_blocks_disallowed_tool_without_network():
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"unexpected": True})
+
+    platform = _registry([_spec("web_search"), _spec("kb_search")])
+    restricted = platform.restrict(frozenset({"kb_search"}))
+    async with _client(handler) as http:
+        result = await dispatch_one(
+            http, restricted, _call("web_search", {"q": "blocked"}),
+            max_result_chars=2000, timeout_s=5.0,
+        )
+
+    assert result.is_error is True
+    assert json.loads(result.content) == {
+        "error": "unknown_tool",
+        "available": ["kb_search"],
+    }
+    assert calls == 0
+    assert platform.names() == ["kb_search", "web_search"]
+
+
 async def test_dispatch_one_timeout_returns_error_result():
     def handler(_request: httpx.Request) -> httpx.Response:
         raise httpx.TimeoutException("slow")

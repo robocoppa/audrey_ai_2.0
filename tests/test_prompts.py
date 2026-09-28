@@ -744,6 +744,50 @@ def test_skill_instruction_prefers_an_available_registry_bundle():
     )
 
 
+def test_explicit_skill_snapshot_wins_over_later_registry_state():
+    selected = SimpleNamespace(
+        spec=SimpleNamespace(instructions="SELECTED ROLE"),
+    )
+    replacement = SimpleNamespace(
+        spec=SimpleNamespace(instructions="REPLACEMENT ROLE"),
+    )
+    registry = SimpleNamespace(resolve_virtual_model=lambda _model: replacement)
+
+    assert (
+        skill_instruction_for(
+            "audrey_specialist",
+            registry=registry,
+            resolved_skill=selected,
+        )
+        == "SELECTED ROLE"
+    )
+
+
+def test_selected_skill_resources_are_assembled_once_in_path_order():
+    selected = SimpleNamespace(
+        spec=SimpleNamespace(
+            instructions="Follow the workflow.",
+            resources=(
+                SimpleNamespace(path="references/b.md", content="Second reference."),
+                SimpleNamespace(path="references/a.md", content="First reference."),
+            ),
+        ),
+    )
+
+    assert skill_instruction_for(
+        "audrey_auto", resolved_skill=selected,
+    ) == (
+        "Follow the workflow.\n\n"
+        "The following read-only skill resources are reference material:\n\n"
+        "--- BEGIN SKILL RESOURCE: references/a.md ---\n"
+        "First reference.\n"
+        "--- END SKILL RESOURCE: references/a.md ---\n\n"
+        "--- BEGIN SKILL RESOURCE: references/b.md ---\n"
+        "Second reference.\n"
+        "--- END SKILL RESOURCE: references/b.md ---"
+    )
+
+
 def test_prompt_override_still_wins_over_the_registry_bundle():
     cfg = SimpleNamespace(
         raw={"agentic": {"prompts": {"video_specialist": "CUSTOM ROLE"}}}

@@ -91,8 +91,26 @@ from audrey.routes.openai.streaming import (
     OpenAIStreamSession,
     StreamOutcome,
 )
+from audrey.skills.models import ResolvedSkill
+from audrey.tools.discovery import ToolRegistry
 
 log = logging.getLogger(__name__)
+
+
+def _skill_provenance(resolved: ResolvedSkill | None) -> dict[str, Any]:
+    if resolved is None:
+        return {
+            "skill_id": "",
+            "skill_version": 0,
+            "skill_digest": "",
+            "skill_reason": "",
+        }
+    return {
+        "skill_id": resolved.spec.id,
+        "skill_version": resolved.spec.version,
+        "skill_digest": resolved.spec.digest,
+        "skill_reason": resolved.reason,
+    }
 
 
 def _event_session_kwargs(context: RunEventContext | None) -> dict[str, Any]:
@@ -136,13 +154,18 @@ async def _generate_via_pipeline(
     app, payload: ChatCompletionRequest, messages, options,
     *, user_id: str, conversation_id: str, user_turn_text: str,
     skill_instruction: str | None = None,
+    resolved_skill: ResolvedSkill | None = None,
+    model_tools: ToolRegistry | None = None,
 ):
     """Non-streaming path: invoke the compiled LangGraph and format the result."""
     graph = app.state.graph
     inflight = app.state.inflight
+    model_tools = model_tools or app.state.tools
     state = {
         "virtual_model": payload.model,
         "skill_instruction": skill_instruction,
+        "resolved_skill": resolved_skill,
+        "model_tools": model_tools,
         "messages": messages,
         "temperature": payload.temperature,
         "top_p": payload.top_p,
@@ -175,6 +198,7 @@ async def _generate_via_pipeline(
             concrete_model=str(final.get("concrete_model", "?")),
             prompt_tokens=int(final.get("prompt_eval_count", 0)),
             completion_tokens=int(final.get("eval_count", 0)),
+            **_skill_provenance(resolved_skill),
         )
 
     extra = ""
@@ -241,6 +265,8 @@ async def _stream_via_pipeline(
     event_context: RunEventContext | None = None,
     routing_messages: list[dict[str, Any]] | None = None,
     skill_instruction: str | None = None,
+    resolved_skill: ResolvedSkill | None = None,
+    model_tools: ToolRegistry | None = None,
 ):
     """Streaming path.
 
@@ -267,6 +293,7 @@ async def _stream_via_pipeline(
     health: HealthTracker = app.state.health
     inflight = app.state.inflight
     router_cfg = cfg.router
+    model_tools = model_tools or app.state.tools
 
     # Native runs persist one canonical projection receipt with terminal state.
     # Reusing the compatibility hook here would index the same turn twice.
@@ -343,7 +370,7 @@ async def _stream_via_pipeline(
                 # classify here and hand the task type down.
                 task, reason, conf = await classify_with_registry(
                     ollama, user_text=user_text, messages=decision_messages, router_cfg=router_cfg,
-                    cfg=cfg, registry=app.state.tools,
+                    cfg=cfg, registry=model_tools,
                 )
                 log.info(
                     "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=deep%s%s",
@@ -363,6 +390,8 @@ async def _stream_via_pipeline(
                         conversation_id=conversation_id, user_turn_text=user_turn_text,
                         event_context=event_context,
                         routing_messages=decision_messages,
+                        resolved_skill=resolved_skill,
+                        model_tools=model_tools,
                     ):
                         yield frame
                     return
@@ -371,6 +400,8 @@ async def _stream_via_pipeline(
                     conversation_id=conversation_id, user_turn_text=user_turn_text,
                     event_context=event_context,
                     routing_messages=decision_messages,
+                    resolved_skill=resolved_skill,
+                    model_tools=model_tools,
                 ):
                     yield frame
                 return
@@ -404,7 +435,7 @@ async def _stream_via_pipeline(
             else:
                 task, reason, conf = await classify_with_registry(
                     ollama, user_text=user_text, messages=decision_messages, router_cfg=router_cfg,
-                    cfg=cfg, registry=app.state.tools,
+                    cfg=cfg, registry=model_tools,
                 )
             log.info(
                 "chat.completions (stream) model=%s task=%s(%s, conf=%.2f) tokens=%d mode=fast%s%s",
@@ -428,7 +459,7 @@ async def _stream_via_pipeline(
             # the loop completes, rather than streaming tokens during ReAct rounds.
             tool_capable = set(cfg.raw.get("fast_path", {}).get("tool_capable_models", []) or [])
             tools_active = (
-                spec is not None and bool(app.state.tools.by_name) and spec.name in tool_capable
+                spec is not None and bool(model_tools.by_name) and spec.name in tool_capable
             )
             if tools_active:
                 # Tool-capable path can take 1-3s on a `kb_search` round, so
@@ -439,6 +470,8 @@ async def _stream_via_pipeline(
                 state = {
                     "virtual_model": payload.model,
                     "skill_instruction": skill_instruction,
+                    "resolved_skill": resolved_skill,
+                    "model_tools": model_tools,
                     "messages": messages,
                     "routing_messages": decision_messages,
                     "temperature": payload.temperature,
@@ -672,6 +705,7 @@ async def _stream_via_pipeline(
                 partial=collector.partial,
                 virtual_model=payload.model,
                 concrete_model=chosen_concrete,
+                **_skill_provenance(resolved_skill),
             )
 
 
@@ -683,6 +717,8 @@ async def _stream_deep_with_banners(
     user_turn_text: str = "",
     event_context: RunEventContext | None = None,
     routing_messages: list[dict[str, Any]] | None = None,
+    resolved_skill: ResolvedSkill | None = None,
+    model_tools: ToolRegistry | None = None,
 ):
     """Streaming deep path with progress banners.
 
@@ -705,7 +741,8 @@ async def _stream_deep_with_banners(
     registry: ModelRegistry = app.state.registry
     health: HealthTracker = app.state.health
     gate = app.state.gate
-    tools = app.state.tools
+    platform_tools = app.state.tools
+    tools = model_tools or platform_tools
     router_cfg = cfg.router
     agentic = cfg.raw.get("agentic", {}) or {}
 
@@ -719,11 +756,12 @@ async def _stream_deep_with_banners(
                 if event_context is not None
                 else getattr(app.state, "archive_client", None)
             ),
-            registry=tools,
+            registry=platform_tools,
             user_id=user_id,
             conversation_id=conversation_id,
             user_content=user_turn_text,
             virtual_model=payload.model,
+            **_skill_provenance(resolved_skill),
         ),
     )
     session = OpenAIStreamSession(
@@ -771,7 +809,8 @@ async def _stream_deep_with_banners(
         async with PhaseTicker(BANNER_PLANNING, emit):
             think_task = runner.own(
                 _phase_thinking(
-                    ollama=ollama, tools=tools, http=app.state.archive_http,
+                    ollama=ollama, tools=platform_tools, http=app.state.archive_http,
+                    model_tools=tools,
                     user_id=user_id, messages=messages,
                     memory_enabled=memory_enabled, memory_top_k=memory_top_k,
                     memory_timeout_s=memory_timeout_s,
@@ -1066,6 +1105,8 @@ async def _stream_research_with_banners(
     user_turn_text: str = "",
     event_context: RunEventContext | None = None,
     routing_messages: list[dict[str, Any]] | None = None,
+    resolved_skill: ResolvedSkill | None = None,
+    model_tools: ToolRegistry | None = None,
 ):
     """Streaming `audrey_research` path: Planning → Researching → Verifying → Writing.
 
@@ -1081,7 +1122,8 @@ async def _stream_research_with_banners(
     registry: ModelRegistry = app.state.registry
     health: HealthTracker = app.state.health
     gate = app.state.gate
-    tools = app.state.tools
+    platform_tools = app.state.tools
+    tools = model_tools or platform_tools
     router_cfg = cfg.router
     agentic = cfg.raw.get("agentic", {}) or {}
 
@@ -1095,11 +1137,12 @@ async def _stream_research_with_banners(
                 if event_context is not None
                 else getattr(app.state, "archive_client", None)
             ),
-            registry=tools,
+            registry=platform_tools,
             user_id=user_id,
             conversation_id=conversation_id,
             user_content=user_turn_text,
             virtual_model=payload.model,
+            **_skill_provenance(resolved_skill),
         ),
     )
     session = OpenAIStreamSession(
@@ -1138,7 +1181,8 @@ async def _stream_research_with_banners(
         async with PhaseTicker(BANNER_PLANNING, emit):
             think_task = runner.own(
                 _phase_thinking(
-                    ollama=ollama, tools=tools, http=app.state.archive_http,
+                    ollama=ollama, tools=platform_tools, http=app.state.archive_http,
+                    model_tools=tools,
                     user_id=user_id, messages=messages,
                     memory_enabled=memory_enabled,
                     memory_top_k=int(memory_cfg.get("top_k", 3)),
@@ -1465,7 +1509,7 @@ async def _drain_q_now(
 
 
 async def _phase_thinking(
-    *, ollama, tools, http, user_id: str, messages,
+    *, ollama, tools, http, model_tools, user_id: str, messages,
     memory_enabled, memory_top_k, memory_timeout_s,
     planning_enabled, planning_min_tokens, planning_max_subtasks,
     prompt_tokens, router_cfg, cfg=None,
@@ -1490,11 +1534,11 @@ async def _phase_thinking(
             tools, http=http, user_id=user_id, messages=messages,
             top_k=memory_top_k, timeout_s=memory_timeout_s,
         )
-        include_store_hint = tools is not None and MEMORY_STORE_TOOL in tools.by_name
+        include_store_hint = MEMORY_STORE_TOOL in model_tools.by_name
         sys_msg = memory_system_message(
             hits, user_id=user_id, include_store_hint=include_store_hint, cfg=cfg,
         )
-        chat_history_available = tools is not None and "chat_history_search" in tools.by_name
+        chat_history_available = "chat_history_search" in model_tools.by_name
         composed = compose_system_messages(
             memory_hint=sys_msg,
             chat_history_guidance=chat_history_available,

@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+import audrey.routes.openai.routes as openai_routes
 from audrey.routes.openai import (
     PASSTHROUGH_BARE,
     PASSTHROUGH_PREFIX,
@@ -21,6 +22,9 @@ from audrey.routes.openai import (
     _resolve_passthrough_model,
     list_models,
 )
+from audrey.routes.openai.schemas import ChatCompletionRequest
+from audrey.skills.models import ResolvedSkill, SkillSpec
+from audrey.tools.discovery import ToolRegistry, ToolSpec
 
 # ─── _is_passthrough / _passthrough_concrete ───────────────────────────
 
@@ -249,3 +253,85 @@ async def test_list_models_handles_empty_allowed_list():
     resp = await list_models(request)
     ids = {entry["id"] for entry in resp["data"]}
     assert not any(i.startswith(PASSTHROUGH_PREFIX) for i in ids)
+
+
+@pytest.mark.asyncio
+async def test_chat_completions_rejects_skill_on_passthrough_before_dispatch():
+    payload = ChatCompletionRequest(
+        model="audrey_passthrough/qwen-test",
+        skill="video-analysis",
+        messages=[{"role": "user", "content": "Inspect this."}],
+    )
+
+    with pytest.raises(HTTPException) as caught:
+        await openai_routes.chat_completions(
+            payload,
+            SimpleNamespace(app=SimpleNamespace()),
+            SimpleNamespace(email="alice@example.com"),
+        )
+
+    assert caught.value.status_code == 400
+    assert caught.value.detail["error"] == "skill_passthrough_unsupported"
+
+
+@pytest.mark.asyncio
+async def test_chat_completions_injects_explicit_skill_and_restricts_tools(monkeypatch):
+    skill = ResolvedSkill(
+        spec=SkillSpec(
+            id="video-analysis",
+            name="Video analysis",
+            description="Inspect user evidence.",
+            version=7,
+            digest="a" * 64,
+            instructions="Use only the selected evidence workflow.",
+            allowed_tools=frozenset({"kb_search"}),
+            supported_modes=frozenset({"auto", "fast", "deep"}),
+            resources=(),
+        ),
+        reason="request",
+    )
+
+    class Skills:
+        def resolve(self, **_kwargs):
+            return skill
+
+    tools = ToolRegistry(by_name={
+        name: ToolSpec(
+            name=name, description=name, parameters={"type": "object"},
+            server_url="http://tools", path=f"/{name}",
+        )
+        for name in ("kb_search", "web_search")
+    })
+    captured = {}
+
+    async def generate(_app, _payload, messages, _options, **kwargs):
+        captured["messages"] = messages
+        captured.update(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(openai_routes, "_generate_via_pipeline", generate)
+    app = SimpleNamespace(state=SimpleNamespace(
+        cfg=SimpleNamespace(raw={}),
+        skills=Skills(),
+        tools=tools,
+    ))
+    payload = ChatCompletionRequest(
+        model="audrey_auto",
+        skill="video-analysis",
+        messages=[{"role": "user", "content": "Inspect this."}],
+    )
+
+    response = await openai_routes.chat_completions(
+        payload,
+        SimpleNamespace(app=app),
+        SimpleNamespace(email="alice@example.com"),
+    )
+
+    assert response == {"ok": True}
+    assert captured["resolved_skill"] is skill
+    assert captured["model_tools"].names() == ["kb_search"]
+    assert tools.names() == ["kb_search", "web_search"]
+    assert captured["messages"][0] == {
+        "role": "system",
+        "content": skill.spec.instructions,
+    }

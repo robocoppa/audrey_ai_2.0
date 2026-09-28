@@ -66,6 +66,9 @@ from audrey.routes.openai.pipeline import _stream_via_pipeline
 from audrey.routes.openai.responses import _options_from_request
 from audrey.routes.openai.schemas import ChatCompletionRequest
 from audrey.routes.openai.streaming import OpenAIStreamSession, StreamOutcome
+from audrey.skills import SkillSelectionError, skill_mode_for_virtual_model
+from audrey.skills.models import ResolvedSkill
+from audrey.tools.discovery import ToolRegistry
 
 log = logging.getLogger(__name__)
 
@@ -103,6 +106,12 @@ class RunCreateRequest(BaseModel):
     content: str = Field(min_length=1, max_length=1_000_000)
     mode: _Mode | None = None
     model_id: str | None = Field(default=None, min_length=1, max_length=200)
+    skill: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$",
+    )
     temperature: float | None = None
     top_p: float | None = None
     max_tokens: int | None = Field(default=None, ge=1)
@@ -167,6 +176,10 @@ class RunResponse(BaseModel):
     concrete_model: str
     prompt_tokens: int
     completion_tokens: int
+    skill_id: str
+    skill_version: int
+    skill_digest: str
+    skill_reason: str
 
 
 class RunCreateResponse(RunResponse):
@@ -266,6 +279,8 @@ async def _stream_via_selected_model(
     routing_messages: list[dict[str, Any]] | None = None,
     selected_model: ServedModel | None = None,
     skill_instruction: str | None = None,
+    resolved_skill: ResolvedSkill | None = None,
+    model_tools: ToolRegistry | None = None,
 ):
     """Dispatch native workflows normally and direct entries straight to Ollama."""
 
@@ -281,6 +296,8 @@ async def _stream_via_selected_model(
             event_context=event_context,
             routing_messages=routing_messages,
             skill_instruction=skill_instruction,
+            resolved_skill=resolved_skill,
+            model_tools=model_tools,
         ):
             yield frame
         return
@@ -424,6 +441,8 @@ class NativeRunManager:
         routing_messages: list[dict[str, Any]] | None = None,
         selected_model: ServedModel | None = None,
         skill_instruction: str | None = None,
+        resolved_skill: ResolvedSkill | None = None,
+        model_tools: ToolRegistry | None = None,
     ) -> None:
         live: _LiveRun
         live = _LiveRun(
@@ -455,6 +474,8 @@ class NativeRunManager:
                     messages if routing_messages is None else routing_messages,
                     selected_model,
                     skill_instruction,
+                    resolved_skill,
+                    model_tools,
                 ),
                 name=f"audrey.native_run.{started.run.run_id}",
             )
@@ -468,6 +489,8 @@ class NativeRunManager:
         routing_messages: list[dict[str, Any]],
         selected_model: ServedModel | None,
         skill_instruction: str | None,
+        resolved_skill: ResolvedSkill | None,
+        model_tools: ToolRegistry | None,
     ) -> None:
         context = RunEventContext(
             run_id=live.started.run.run_id,
@@ -490,6 +513,8 @@ class NativeRunManager:
                 routing_messages=routing_messages,
                 selected_model=selected_model,
                 skill_instruction=skill_instruction,
+                resolved_skill=resolved_skill,
+                model_tools=model_tools,
             ):
                 # A pipeline can have post-answer cleanup after its terminal
                 # frame. Persist the canonical answer before that cleanup so a
@@ -707,6 +732,10 @@ def _run_response(record: RunRecord) -> RunResponse:
         concrete_model=record.concrete_model,
         prompt_tokens=record.prompt_tokens,
         completion_tokens=record.completion_tokens,
+        skill_id=record.skill_id,
+        skill_version=record.skill_version,
+        skill_digest=record.skill_digest,
+        skill_reason=record.skill_reason,
     )
 
 
@@ -887,6 +916,58 @@ async def create_run(
     )
     if selected_model is None:
         raise HTTPException(status_code=404, detail="Model is not available.")
+    if selected_model.kind == "direct" and payload.skill is not None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "skill_passthrough_unsupported",
+                "message": "Skills cannot be combined with direct models.",
+            },
+        )
+    skill_registry = getattr(request.app.state, "skills", None)
+    if payload.skill is not None and skill_registry is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "skills_unavailable",
+                "message": "The skill registry is unavailable.",
+            },
+        )
+    try:
+        resolved_skill = (
+            skill_registry.resolve(
+                explicit_skill=payload.skill,
+                virtual_model=selected_model.protocol_model,
+                mode=skill_mode_for_virtual_model(selected_model.protocol_model),
+            )
+            if skill_registry is not None
+            else None
+        )
+    except SkillSelectionError as exc:
+        status_code = (
+            503
+            if exc.code in {"skills_disabled", "skill_unavailable"}
+            else 400
+        )
+        raise HTTPException(status_code=status_code, detail=exc.detail()) from exc
+    platform_tools = getattr(request.app.state, "tools", ToolRegistry())
+    model_tools = (
+        platform_tools.restrict(resolved_skill.spec.allowed_tools)
+        if resolved_skill is not None
+        else platform_tools
+    )
+    if resolved_skill is not None:
+        log.info(
+            "skill.selected id=%s version=%d digest=%s reason=%s tools=%s "
+            "instruction_chars=%d resource_chars=%d",
+            resolved_skill.spec.id,
+            resolved_skill.spec.version,
+            resolved_skill.spec.digest[:12],
+            resolved_skill.reason,
+            model_tools.names(),
+            len(resolved_skill.spec.instructions),
+            sum(len(resource.content) for resource in resolved_skill.spec.resources),
+        )
     if selected_model.kind == "direct" and payload.attachment_ids:
         raise HTTPException(
             status_code=422,
@@ -937,6 +1018,10 @@ async def create_run(
             model_id=selected_model.id,
             automatic_title=automatic_title,
             attachments=attachments,
+            skill_id=resolved_skill.spec.id if resolved_skill else "",
+            skill_version=resolved_skill.spec.version if resolved_skill else 0,
+            skill_digest=resolved_skill.spec.digest if resolved_skill else "",
+            skill_reason=resolved_skill.reason if resolved_skill else "",
         )
     except (ConversationArchivedError, ConversationHasActiveRunError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -966,6 +1051,7 @@ async def create_run(
         selected_model.protocol_model,
         request.app.state.cfg,
         getattr(request.app.state, "skills", None),
+        resolved_skill,
     )
     if skill_instruction:
         messages = with_skill_instruction(messages, skill_instruction)
@@ -980,6 +1066,7 @@ async def create_run(
         )
     pipeline_payload = ChatCompletionRequest(
         model=selected_model.protocol_model,
+        skill=payload.skill,
         messages=messages,
         stream=True,
         temperature=payload.temperature,
@@ -995,6 +1082,8 @@ async def create_run(
         routing_messages=routing_messages,
         selected_model=selected_model,
         skill_instruction=skill_instruction,
+        resolved_skill=resolved_skill,
+        model_tools=model_tools,
     )
     base = _run_response(started.run).model_dump()
     return RunCreateResponse(
@@ -1013,6 +1102,7 @@ async def run_agui_agent(
     request: Request,
     mode: Annotated[_Mode | None, Query()] = None,
     model: Annotated[str | None, Query(min_length=1, max_length=200)] = None,
+    skill: Annotated[str | None, Query(min_length=1, max_length=200)] = None,
     principal: Principal = Depends(_run_access),
 ) -> StreamingResponse:
     """Start and stream one standard AG-UI turn for the native browser.
@@ -1030,6 +1120,7 @@ async def run_agui_agent(
             content=_agui_user_content(payload),
             mode=mode,
             model_id=model,
+            skill=skill,
             attachment_ids=payload.attachment_ids,
         ),
         request=request,

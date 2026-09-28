@@ -410,3 +410,98 @@ def test_missing_mapped_bundle_is_reported_as_unavailable(tmp_path):
     assert snapshot.invalid_count == 1
     assert snapshot.invalid[0].skill_id == "video-analysis"
     assert snapshot.invalid[0].code == "mapped_skill_unavailable"
+
+
+def test_explicit_selection_resolves_supported_modes_and_stays_immutable(tmp_path):
+    bundle = _write_bundle(tmp_path, "video-analysis", version=1)
+    registry = SkillRegistry(
+        enabled=True, roots=(tmp_path,), limits=SkillLimits(),
+        known_tools=KNOWN_TOOLS, available_tools=KNOWN_TOOLS,
+        virtual_models={"audrey_video": "video-analysis"},
+    )
+
+    for virtual_model, mode in (("audrey_auto", "auto"), ("audrey_fast", "fast"), ("audrey_deep", "deep")):
+        resolved = registry.resolve(
+            explicit_skill="video-analysis",
+            virtual_model=virtual_model,
+            mode=mode,
+        )
+        assert resolved is not None
+        assert resolved.reason == "request"
+        assert resolved.spec.version == 1
+
+    held = registry.resolve(
+        explicit_skill=None, virtual_model="audrey_video", mode="auto",
+    )
+    text = (bundle / "SKILL.md").read_text(encoding="utf-8")
+    (bundle / "SKILL.md").write_text(
+        text.replace("version: 1", "version: 2"), encoding="utf-8",
+    )
+    registry.rediscover()
+
+    assert held is not None
+    assert held.reason == "virtual_model"
+    assert held.spec.version == 1
+    assert registry.get("video-analysis").spec.version == 2
+
+
+def test_explicit_selection_rejects_unknown_conflicting_and_unavailable(tmp_path):
+    _write_bundle(tmp_path, "video-analysis", allowed_tools=["kb_search"])
+    registry = SkillRegistry(
+        enabled=True, roots=(tmp_path,), limits=SkillLimits(),
+        known_tools=KNOWN_TOOLS, available_tools=frozenset(),
+        virtual_models={"audrey_video": "video-analysis"},
+    )
+
+    with pytest.raises(ValueError, match="Unknown skill") as unknown:
+        registry.resolve(
+            explicit_skill="missing-skill", virtual_model="audrey_auto", mode="auto",
+        )
+    assert unknown.value.code == "unknown_skill"
+
+    with pytest.raises(ValueError, match="conflicts") as conflict:
+        registry.resolve(
+            explicit_skill="missing-skill", virtual_model="audrey_video", mode="auto",
+        )
+    assert conflict.value.code == "skill_conflict"
+
+    with pytest.raises(ValueError, match="unavailable") as unavailable:
+        registry.resolve(
+            explicit_skill="video-analysis", virtual_model="audrey_auto", mode="auto",
+        )
+    assert unavailable.value.code == "skill_unavailable"
+    assert unavailable.value.unavailable_tools == ("kb_search",)
+
+
+def test_explicit_selection_rejects_disabled_and_unsupported_modes(tmp_path):
+    _write_bundle(
+        tmp_path, "fast-only", extra={"supported_modes": ["fast"]},
+    )
+    enabled = SkillRegistry(
+        enabled=True, roots=(tmp_path,), limits=SkillLimits(),
+        known_tools=KNOWN_TOOLS, available_tools=KNOWN_TOOLS,
+    )
+    with pytest.raises(ValueError, match="does not support") as unsupported:
+        enabled.resolve(
+            explicit_skill="fast-only", virtual_model="audrey_deep", mode="deep",
+        )
+    assert unsupported.value.code == "skill_mode_unsupported"
+
+    implicit = SkillRegistry(
+        enabled=True, roots=(tmp_path,), limits=SkillLimits(),
+        known_tools=KNOWN_TOOLS, available_tools=KNOWN_TOOLS,
+        virtual_models={"audrey_video": "fast-only"},
+    )
+    assert implicit.resolve(
+        explicit_skill=None, virtual_model="audrey_video", mode="auto",
+    ) is None
+
+    disabled = SkillRegistry(
+        enabled=False, roots=(tmp_path,), limits=SkillLimits(),
+        known_tools=KNOWN_TOOLS, available_tools=KNOWN_TOOLS,
+    )
+    with pytest.raises(ValueError, match="disabled") as error:
+        disabled.resolve(
+            explicit_skill="fast-only", virtual_model="audrey_fast", mode="fast",
+        )
+    assert error.value.code == "skills_disabled"
