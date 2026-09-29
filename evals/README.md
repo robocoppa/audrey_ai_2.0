@@ -268,25 +268,27 @@ omit `model` entirely — `--models` supplies it.
 ## Files / layout
 
 ```
-scripts/
+evals/
+  README.md                     # this file — how to use the suite
   eval_research.py              # the one harness — auth, streaming, checks, sweep, save
   eval_compare.py               # case × model comparison table from --save-json results
   run_all_evals.sh              # one-command runner: research + deep + fast (code/code-hard/topics opt-in), dated
-  eval_prompts.json             # quick 6-case smoke set (the harness default)
-  eval_prompts_protocol.json    # research protocol (~10 cases)
-  eval_prompts_deep.json        # deep protocol (~18 cases, incl. 2 coding anchors)
-  eval_prompts_fast.json        # fast + auto protocol (~12 cases)
-  eval_prompts_code.json        # easy/regression coding tier on audrey_deep (~10 cases)
-  eval_prompts_code_hard.json   # discriminating coding tier for lineup optimization (~5 cases)
-  eval_prompts_code_models.json # easy sweep set (~6 cases, no model field) — liveness/latency only
-  eval_prompts_code_hard_models.json # discriminating sweep set (~5 cases, no model field) — the lineup-decision one
-  eval_prompts_topics.json      # reasoning/science/writing/gk domains (~13 cases)
-evals/results/
-  README.md                     # this file — how to use the suite
-  <date>-<protocol>-answers.md  # machine-written: every answer from one run
-  <date>-<protocol>-report.md   # hand-written: the quality read for that run
-  <date>-<desc>-results.json    # machine-written: per-case checks/latency (--save-json)
-  <date>-<desc>-compare.md      # eval_compare.py: case × model matrix for a sweep
+  cases/
+    eval_prompts.json           # quick 6-case smoke set (the harness default)
+    eval_prompts_protocol.json  # research protocol (~10 cases)
+    eval_prompts_deep.json      # deep protocol (~18 cases, incl. 2 coding anchors)
+    eval_prompts_fast.json      # fast + auto protocol (~12 cases)
+    eval_prompts_code.json      # easy/regression coding tier on audrey_deep (~10 cases)
+    eval_prompts_code_hard.json # discriminating coding tier for lineup optimization (~5 cases)
+    eval_prompts_code_models.json      # easy sweep set (~6 cases, no model field) — liveness/latency only
+    eval_prompts_code_hard_models.json # discriminating sweep set (~5 cases) — the lineup-decision one
+    eval_prompts_topics.json    # reasoning/science/writing/gk domains (~13 cases)
+  fixtures/                     # source documents used by grounded eval cases
+  results/
+    <date>-<protocol>-answers.md # machine-written: every answer from one run
+    <date>-<protocol>-report.md  # hand-written: the quality read for that run
+    <date>-<desc>-results.json   # machine-written: per-case checks/latency (--save-json)
+    <date>-<desc>-compare.md     # eval_compare.py: case × model matrix for a sweep
 docs/plans/
   PLAN-mode-test-suite.md       # design rationale + case taxonomy
 ```
