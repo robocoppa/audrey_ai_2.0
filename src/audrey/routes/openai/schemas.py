@@ -296,3 +296,50 @@ class ChatCompletionRequest(BaseModel):
                     )
                 answered.add(message.tool_call_id)
         return self
+
+
+class ResponseInputMessage(BaseModel):
+    """Text-only input item accepted by Audrey's first Responses slice."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["system", "developer", "user", "assistant"]
+    content: str = Field(min_length=1)
+
+
+class ResponseCreateRequest(BaseModel):
+    """Supported subset of the OpenAI POST /v1/responses request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = Field(min_length=1)
+    input: str | list[ResponseInputMessage]
+    instructions: str | None = None
+    stream: bool = False
+    background: bool = False
+    store: bool | None = None
+    previous_response_id: str | None = None
+    conversation: str | dict[str, Any] | None = None
+    tools: list[dict[str, Any]] | None = None
+    text: dict[str, Any] | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    max_output_tokens: int | None = Field(default=None, gt=0)
+    metadata: dict[str, Any] | None = None
+    user: str | None = None
+    skill: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$",
+        description="Optional Audrey skill id for this request.",
+    )
+
+    @model_validator(mode="after")
+    def require_nonempty_input(self) -> ResponseCreateRequest:
+        if isinstance(self.input, str):
+            if not self.input.strip():
+                raise ValueError("input must contain text")
+        elif not self.input:
+            raise ValueError("input must contain at least one message")
+        return self

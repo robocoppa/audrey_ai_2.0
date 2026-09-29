@@ -124,6 +124,20 @@ Function tools are the supported tool type. Assistant call/result relationships
 round-trip through passthrough in streaming and non-streaming mode; custom and
 legacy function-call message forms are not implemented.
 
+## Responses compatibility
+
+`POST /v1/responses` supports completed plain-text generation from either
+a string or a text-only message list. `instructions`, sampling controls,
+token limits, metadata, authenticated identity, Audrey virtual and passthrough
+models, and explicit skills reuse the Chat Completions implementation. The
+response uses typed `output` items and `output_text` with
+Responses-style token usage.
+
+The first slice rejects streaming, background execution, response storage and
+chaining, client tools, structured output configuration, multimodal parts, and
+unknown fields instead of ignoring them. See
+`docs/campaign-3/phase-05-responses-api.md` for the exact boundary.
+
 ## Pipeline shape
 
 ```

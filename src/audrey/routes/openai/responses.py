@@ -1,9 +1,9 @@
 """OpenAI response formatting — pure helpers, no I/O.
 
-Builds the OpenAI chat-completion response shape from pipeline output:
-request → Ollama `options`, the final non-streaming response envelope, and
-Ollama→OpenAI tool_call conversion. Leaf module — depends only on the schemas
-and stdlib.
+Builds OpenAI-shaped responses from pipeline output: request to Ollama
+options, Chat Completions envelopes, the completed Responses API adapter, and
+Ollama-to-OpenAI tool-call conversion. Leaf module - depends only on the
+schemas and stdlib.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import uuid
 from typing import Any
 
 from audrey import __version__
-from audrey.routes.openai.schemas import ChatCompletionRequest
+from audrey.routes.openai.schemas import ChatCompletionRequest, ResponseCreateRequest
 
 
 def _options_from_request(req: ChatCompletionRequest) -> dict[str, Any]:
@@ -66,6 +66,71 @@ def _to_openai_response(
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "total_tokens": prompt_tokens + completion_tokens,
+        },
+    }
+
+
+def _to_responses_api_response(
+    chat_response: dict[str, Any],
+    request: ResponseCreateRequest,
+) -> dict[str, Any]:
+    """Translate Audrey's completed chat envelope into a Responses object."""
+
+    choices = chat_response.get("choices") or []
+    if len(choices) != 1:
+        raise ValueError("generation returned no single completed choice")
+    message = choices[0].get("message") or {}
+    if message.get("tool_calls"):
+        raise ValueError("generation returned unsupported client tool calls")
+    content = message.get("content")
+    if not isinstance(content, str):
+        raise ValueError("generation returned no text content")
+
+    usage = chat_response.get("usage") or {}
+    input_tokens = int(usage.get("prompt_tokens", 0) or 0)
+    output_tokens = int(usage.get("completion_tokens", 0) or 0)
+    created_at = int(chat_response.get("created") or time.time())
+    return {
+        "id": f"resp_{uuid.uuid4().hex}",
+        "object": "response",
+        "created_at": created_at,
+        "completed_at": int(time.time()),
+        "status": "completed",
+        "error": None,
+        "incomplete_details": None,
+        "instructions": request.instructions,
+        "max_output_tokens": request.max_output_tokens,
+        "metadata": request.metadata or {},
+        "model": request.model,
+        "output": [
+            {
+                "id": f"msg_{uuid.uuid4().hex}",
+                "type": "message",
+                "status": "completed",
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": content,
+                        "annotations": [],
+                        "logprobs": [],
+                    }
+                ],
+            }
+        ],
+        "output_text": content,
+        "parallel_tool_calls": True,
+        "previous_response_id": None,
+        "text": {"format": {"type": "text"}},
+        "tool_choice": "auto",
+        "tools": [],
+        "truncation": "disabled",
+        "usage": {
+            "input_tokens": input_tokens,
+            "input_tokens_details": {"cached_tokens": 0},
+            "output_tokens": output_tokens,
+            "output_tokens_details": {"reasoning_tokens": 0},
+            "total_tokens": input_tokens + output_tokens,
         },
     }
 

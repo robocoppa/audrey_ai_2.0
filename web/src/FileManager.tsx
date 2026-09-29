@@ -616,7 +616,7 @@ function ArtifactPage({ file, artifact }: { file: AudreyFile; artifact?: AudreyF
 
   const fallbackSummary = artifact === "summary" && page?.total_chars === 0 && file.summary;
   const visibleText = fallbackSummary ? file.summary : page?.text;
-  const downloadLabel = artifact && page && page.total_chars > 0
+  const downloadLabel = artifact && artifact !== "summary" && page && page.total_chars > 0
     ? artifactLabel(artifact)
     : "";
 

@@ -1,11 +1,11 @@
 # Campaign 3 — correctness foundations, Audrey UI, and reusable skills
 
-**Status:** Campaign 3 Phases 1 and 3 are complete. Phase 2's native
+**Status:** Campaign 3 Phases 1, 3, and 4 are complete. Phase 2's native
 product cutover is live-settled, while its legacy 2D.5 administration, role,
 model-publication, exact-owner bootstrap, and provider-binding soak remains
-open. Phase 4 is in progress: slice 4A original-file download is
-live-settled, and slice 4B's derived-artifact backend smoke passed all three
-artifact types; its final native browser download check remains open.
+open. Phase 5 has started; Slice 5A's completed plain-text
+`POST /v1/responses` adapter is laptop-complete and awaits its targeted
+live smoke.
 
 The Milestone 2E parity build is laptop-complete across native memory
 settings, owner-bound file and video upload and inspection, source and answer
@@ -44,11 +44,17 @@ and human review accepted all answers. It ships as an explicit opt-in skill.
 Automatic selection remains deferred because selector precision and false
 activation were outside this evaluation.
 
-Phase 4 started on 2026-09-29. Slice 4A's owner-scoped, ranged
-original-file downloads are live-settled. Slice 4B adds downloads for existing
-transcript, visual, and summary sidecars, including after original-media
-reclamation. Its read-only backend smoke passed all three artifact types; the
-native browser download action remains to be checked.
+Phase 4 completed on 2026-09-29. Slice 4A's owner-scoped, ranged
+original-file downloads are live-settled. Slice 4B's read-only backend smoke
+passed all three derived artifact types. The final native browser check passed
+after Summary downloads were removed: summary text begins without the old
+action row, while Transcript and Visual notes retain download actions.
+
+Phase 5 started on 2026-09-29. Slice 5A adds completed plain-text
+`POST /v1/responses` generation by adapting onto Audrey's existing
+authenticated Chat Completions path. Streaming, background work, stored
+response chaining, client tools, structured output, and multimodal input remain
+explicit later slices.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,
@@ -62,11 +68,11 @@ and finally adds the first general skills layer on that owned surface.
 | 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | Complete |
 | 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (2A–2B, 2C.1–2C.3, and 2D.1–2D.4 verified; 2D.5 deployed; 2E settled; 2F.3 live-passed; 2F.4 and permanent DNS correction live-settled) |
 | 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | Complete (3A–3C live-settled; explicit grounded-document pilot ships; automatic selection deferred) |
-| 04 | [File and artifact downloads](phase-04-file-downloads.md) | Owner-scoped recovery of stored originals and useful derived artifacts from the native Files surface | Phase 03 explicit-skill ship decision | In progress (4A live-settled; 4B backend live-passed with native browser check open) |
+| 04 | [File and artifact downloads](phase-04-file-downloads.md) | Owner-scoped recovery of stored originals and useful derived artifacts from the native Files surface | Phase 03 explicit-skill ship decision | Complete |
+| 05 | [Responses API compatibility](phase-05-responses-api.md) | OpenAI Responses clients use Audrey's existing authenticated generation and policy boundaries | Phase 04 completion | In progress (5A laptop-complete) |
 
-Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1,
-Campaign 3 Phase 2, Campaign 3 Phase 3, and Campaign 3 Phase 4, or use the
-topic filenames.
+Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1
+through Campaign 3 Phase 5, or use the topic filenames.
 
 ## Campaign rules
 
@@ -88,8 +94,5 @@ topic filenames.
 
 ## What comes after these plans
 
-The remaining product backlog—OCR, broader audio/media ingestion,
-ordinary-answer provenance, and `/v1/responses`—stays available for later
-Campaign 3 phases. It is
-intentionally not interleaved with the safety foundations or the first skills
-rollout.
+The remaining product backlog - OCR, broader audio/media ingestion, and
+ordinary-answer provenance - stays available for later Campaign 3 phases.

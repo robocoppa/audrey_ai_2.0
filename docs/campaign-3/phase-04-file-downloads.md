@@ -1,8 +1,8 @@
 # Campaign 3 Phase 4 — file and artifact downloads
 
-**Status:** Slice 4A is live-settled on 2026-09-29. Slice 4B's backend
-live smoke passed all three derived artifacts on 2026-09-29; its one native
-browser download check remains open.
+**Status:** Complete and live-settled on 2026-09-29. Slice 4A's original
+downloads, Slice 4B's three derived-artifact backend checks, and the revised
+native viewer all passed.
 
 ## Goal
 
@@ -105,9 +105,10 @@ Download names are derived from the original video basename:
 | Visual descriptions | `<video>.visual-notes.txt` |
 | Summary | `<video>.summary.txt` |
 
-The Files viewer shows a download action only after the selected artifact page
-reports real content. A legacy row summary without a summary sidecar remains
-visible as a fallback, but it does not claim a downloadable artifact.
+The Files viewer shows download actions for non-empty transcripts and visual
+notes. Summary text is already short and copyable, so its tab has no download
+action and begins directly below the tabs. A legacy row summary without a
+summary sidecar remains visible as a fallback.
 
 Laptop coverage proves exact UTF-8 bytes, all three filenames, private response
 headers, owner scoping, absent and empty sidecars, authentication, and derived
@@ -116,9 +117,10 @@ downloads after the original video was reclaimed. The current full suite passes
 
 ## Slice 4B targeted live gate
 
-**Backend result:** Passed on 2026-09-29 against a fetched video. Summary,
-transcript, and visual-notes downloads each returned HTTP 200 with the expected
-stable filename. The native browser download action remains the final check.
+**Result:** Passed on 2026-09-29. Summary, transcript, and visual-notes
+downloads each returned HTTP 200 with the expected stable filename. The native
+browser then passed with no Summary download or blank action row, while
+Transcript and Visual notes retained their download actions.
 
 After deploying the backend and native UI, run the read-only smoke from the
 laptop checkout:
@@ -147,18 +149,19 @@ nothing.
 
 Success is exit code zero, `"status": "passed"`, and
 `"available_count"` of at least one. Use the filename from the output's
-`"file"` block for the browser check. Under **Files → View text**, a non-empty
-tab should show its download action and an empty tab should not. The saved name
-must use the suffix in the table.
+`"file"` block for the browser check. Under **Files → View text**, Summary must
+show no download action and its text must begin directly below the tabs. A
+non-empty Transcript or Visual notes tab should show a download action; an
+empty tab should not. One downloaded transcript or visual-notes filename must
+use the suffix in the table.
 
-Phase 4 completes after the remaining native browser download check passes.
+Phase 4 completed after the native browser check passed on 2026-09-29.
 
 During this smoke, the downloaded summary exposed a separate generation-quality
 bug: the GLM cloud model repeated its writing assignment instead of describing
-the video. Rejecting that text worked, but a live re-upload proved a retry
-against the same model also failed and left the video without a summary. The
-revised generator uses local qwen3.8 as primary and local ornith-1.5:35b as an
-independent fallback. Both passed the production prompt against identical
-synthetic video material with thinking disabled. The generator keeps up to
-three sentences within an 80-word safety cap. This does not alter the artifact
-download contract.
+the video. A same-model retry also failed and left a re-upload without a
+summary. The revised generator uses local qwen3.8 as primary and local
+ornith-1.5:35b as an independent fallback. The deployed path produced a natural
+two-sentence Kimura summary that the user accepted on 2026-09-29. The generator
+keeps up to three sentences within an 80-word safety cap. This does not alter
+the artifact download contract.

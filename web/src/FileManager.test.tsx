@@ -74,7 +74,7 @@ it("offers original downloads only while the stored source exists", async () => 
 });
 
 
-it("offers downloads only for video artifacts that actually exist", async () => {
+it("offers downloads for transcript and visual notes but not summaries", async () => {
   const file = {
     id: "video / ready",
     filename: "recording.mp4",
@@ -108,26 +108,26 @@ it("offers downloads only for video artifacts that actually exist", async () => 
       max_images_per_turn: 4,
     },
   };
+  const artifactText = {
+    summary: "A useful summary of the recording.",
+    transcript: "Transcript text.",
+    visual: "Visual notes text.",
+  };
   const fetchMock = vi.fn().mockImplementation((path: string) => {
+    const kind = path.includes("/artifacts/transcript?")
+      ? "transcript"
+      : path.includes("/artifacts/visual?") ? "visual" : "summary";
+    const text = artifactText[kind];
     const payload = path === "/api/files"
       ? listing
-      : path.includes("/artifacts/transcript?")
-        ? {
-            id: file.id,
-            artifact: "transcript",
-            text: "Transcript text.",
-            offset: 0,
-            next_offset: null,
-            total_chars: 16,
-          }
-        : {
-            id: file.id,
-            artifact: path.includes("/artifacts/visual?") ? "visual" : "summary",
-            text: "",
-            offset: 0,
-            next_offset: null,
-            total_chars: 0,
-          };
+      : {
+          id: file.id,
+          artifact: kind,
+          text,
+          offset: 0,
+          next_offset: null,
+          total_chars: text.length,
+        };
     return Promise.resolve(new Response(JSON.stringify(payload), {
       headers: { "Content-Type": "application/json" },
     }));
@@ -137,7 +137,7 @@ it("offers downloads only for video artifacts that actually exist", async () => 
   render(<FileManager onClose={() => undefined} />);
 
   fireEvent.click(await screen.findByRole("button", { name: "View video text for recording.mp4" }));
-  expect(await screen.findByText("Only the brief listing summary is available for this video.")).toBeVisible();
+  expect(await screen.findByText("A useful summary of the recording.")).toBeVisible();
   expect(
     screen.queryByRole("link", { name: "Download summary for recording.mp4" }),
   ).not.toBeInTheDocument();
@@ -153,8 +153,11 @@ it("offers downloads only for video artifacts that actually exist", async () => 
   expect(download).toHaveAttribute("download", "");
 
   fireEvent.click(screen.getByRole("button", { name: "Visual notes" }));
-  expect(await screen.findByText("No visual notes are available for this video.")).toBeVisible();
-  expect(
-    screen.queryByRole("link", { name: "Download visual notes for recording.mp4" }),
-  ).not.toBeInTheDocument();
+  const visualDownload = await screen.findByRole("link", {
+    name: "Download visual notes for recording.mp4",
+  });
+  expect(visualDownload).toHaveAttribute(
+    "href",
+    "/api/files/video%20%2F%20ready/artifacts/visual/download",
+  );
 });

@@ -1,7 +1,8 @@
 """OpenAI-compatible routes (package).
 
 Exposes the virtual models declared by VIRTUAL_MODELS plus
-/v1/chat/completions. /v1/models is the authoritative runtime inventory.
+/v1/chat/completions and /v1/responses. /v1/models is the authoritative
+runtime inventory.
 
 Plus an opt-in passthrough family selected via a model-string prefix:
   audrey_passthrough/<concrete>  — forward straight to Ollama, no
@@ -13,8 +14,8 @@ Plus an opt-in passthrough family selected via a model-string prefix:
 Pipeline requests go through:
   classify → complexity gate → fast path | deep panel + synth.
 
-Response shape is the OpenAI chat-completion contract so Open WebUI and
-any other client can consume it unchanged.
+Supported Chat Completions and Responses requests keep their respective
+OpenAI wire shapes while sharing Audrey's generation path.
 
 This was a single 1497-line module; it's now a package split by
 responsibility (`schemas`, `responses`, `passthrough`, `pipeline`,
@@ -34,8 +35,13 @@ from audrey.routes.openai.passthrough import (
     _passthrough_concrete,
     _resolve_passthrough_model,
 )
-from audrey.routes.openai.routes import VIRTUAL_MODELS, list_models, router
-from audrey.routes.openai.schemas import ChatCompletionRequest, ChatMessage
+from audrey.routes.openai.routes import VIRTUAL_MODELS, create_response, list_models, router
+from audrey.routes.openai.schemas import (
+    ChatCompletionRequest,
+    ChatMessage,
+    ResponseCreateRequest,
+    ResponseInputMessage,
+)
 
 __all__ = [
     "router",
@@ -43,6 +49,9 @@ __all__ = [
     "list_models",
     "ChatMessage",
     "ChatCompletionRequest",
+    "ResponseCreateRequest",
+    "ResponseInputMessage",
+    "create_response",
     "PASSTHROUGH_PREFIX",
     "PASSTHROUGH_BARE",
     "_is_passthrough",

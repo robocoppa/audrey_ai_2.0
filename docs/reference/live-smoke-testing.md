@@ -258,9 +258,11 @@ Success is exit code zero and JSON with:
 - HTTP 404 for each artifact marked `"available": false`.
 
 Use the filename in the `"file"` block for the browser check. Open that video
-under **Files → View text**. A non-empty tab must show its download action and
-save a `.summary.txt`, `.transcript.txt`, or `.visual-notes.txt` file.
-An empty tab must not show a download action.
+under **Files → View text**. Summary must have no download action or blank
+action row. A non-empty Transcript or Visual notes tab must show its download
+action and save a `.transcript.txt` or `.visual-notes.txt` file. An
+empty tab must not show a download action. This browser check passed on
+2026-09-29.
 
 Set `AUDREY_ARTIFACT_SMOKE_FILE_ID` only when a particular owned video must be
 tested. Normally the automatic scan is sufficient.
@@ -275,6 +277,32 @@ bash scripts/smoke-native-onbox.sh smoke_native_ui.py
 ```
 
 Success is exit code zero, `"status": "passed"`, and no `cleanup_error`.
+
+## Run the 5A Responses API smoke from the laptop
+
+This targeted backend proof makes one short `audrey_fast` model call through
+`POST /v1/responses`, validates the completed typed output and token usage,
+then proves `stream: true` fails explicitly before generation. The model
+prompt uses Audrey's compatibility utility form, so the call is excluded from
+chat history. It uploads and deletes nothing.
+
+The laptop's `.env.test.local` already contains the required
+`AUDREY_EVAL_API_KEY`. Use the working LAN/WARP route:
+
+```bash
+cd /home/bart/Documents/github/audrey_ai_2.0
+(
+  set -a
+  source .env.test.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python scripts/smoke_responses_api.py
+)
+```
+
+Success is exit code zero and JSON ending in `"status": "passed"`. The
+`completed` block must report HTTP 200, model `audrey_fast`, output
+type `output_text`, and `"sentinel": true`. The `unsupported`
+block must report HTTP 400 and `responses_feature_unsupported`.
 
 ## Before handing over any smoke command
 

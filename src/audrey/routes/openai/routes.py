@@ -1,4 +1,4 @@
-"""Route handlers — `/v1/models` and `/v1/chat/completions`.
+"""Route handlers — `/v1/models`, `/v1/chat/completions`, and `/v1/responses`.
 
 The thin orchestration layer: validates the request, forks passthrough vs
 pipeline, and wires streaming vs non-streaming. The heavy lifting lives in
@@ -27,8 +27,8 @@ from audrey.routes.openai.passthrough import (
     _is_passthrough,
 )
 from audrey.routes.openai.pipeline import _generate_via_pipeline, _stream_via_pipeline
-from audrey.routes.openai.responses import _options_from_request
-from audrey.routes.openai.schemas import ChatCompletionRequest
+from audrey.routes.openai.responses import _options_from_request, _to_responses_api_response
+from audrey.routes.openai.schemas import ChatCompletionRequest, ResponseCreateRequest
 from audrey.skills import SkillSelectionError, skill_mode_for_virtual_model
 
 log = logging.getLogger(__name__)
@@ -243,3 +243,67 @@ async def chat_completions(
         resolved_skill=resolved_skill,
         model_tools=model_tools,
     )
+
+
+# --- /v1/responses ----------------------------------------------------
+
+@router.post("/responses")
+async def create_response(
+    payload: ResponseCreateRequest,
+    request: Request,
+    me: AuthedUser = Depends(require_user),
+) -> dict[str, Any]:
+    """Generate one completed text response through Audrey's shared pipeline."""
+
+    unsupported = [
+        name
+        for name, active in (
+            ("stream", payload.stream),
+            ("background", payload.background),
+            ("store", payload.store is not None),
+            ("previous_response_id", payload.previous_response_id is not None),
+            ("conversation", payload.conversation is not None),
+            ("tools", payload.tools is not None),
+            ("text", payload.text is not None),
+        )
+        if active
+    ]
+    if unsupported:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "responses_feature_unsupported",
+                "message": (
+                    "This Audrey Responses slice supports completed plain-text "
+                    f"generation only; unsupported fields: {', '.join(unsupported)}."
+                ),
+            },
+        )
+
+    input_messages = (
+        [{"role": "user", "content": payload.input}]
+        if isinstance(payload.input, str)
+        else [item.model_dump() for item in payload.input]
+    )
+    messages: list[dict[str, Any]] = []
+    if payload.instructions:
+        messages.append({"role": "developer", "content": payload.instructions})
+    messages.extend(input_messages)
+    chat_payload = ChatCompletionRequest(
+        model=payload.model,
+        skill=payload.skill,
+        messages=messages,
+        stream=False,
+        temperature=payload.temperature,
+        top_p=payload.top_p,
+        max_tokens=payload.max_output_tokens,
+        metadata=payload.metadata,
+        user=payload.user,
+    )
+    chat_response = await chat_completions(chat_payload, request, me)
+    if not isinstance(chat_response, dict):
+        raise HTTPException(status_code=502, detail="Generation returned an invalid response.")
+    try:
+        return _to_responses_api_response(chat_response, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
