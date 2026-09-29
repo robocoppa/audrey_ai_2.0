@@ -1,9 +1,8 @@
 # Campaign 3 Phase 3 — reusable skills
 
-**Status:** Milestones 3A.1 and 3A.2 are live-settled. Milestone 3B explicit
-selection and enforced tool restriction is implementation-complete with its Python
-contracts laptop-verified; the native UI
-build and one-turn Unraid smoke are the current deploy gate.
+**Status:** Milestones 3A.1, 3A.2, and 3B are live-settled. Milestone 3C
+grounded document analysis is the current build priority; automatic selection
+remains deferred.
 
 ## Goal
 
@@ -429,9 +428,9 @@ Gate:
 
 ## Milestone 3B — explicit selection and enforced tool restriction
 
-**Status:** Implementation-complete on 2026-09-28. Python contracts are
-laptop-verified; the native UI build, deployment, and targeted explicit-
-selection smoke remain open.
+**Status:** Live-settled on 2026-09-28. The targeted native Fast run
+selected `video-analysis` v1 by request, persisted its digest and provenance,
+and completed canonical/archive cleanup with repair ready.
 
 1. Add the `skill` request extension and authenticated catalog route.
 2. Carry `ResolvedSkill` metadata through graph and streaming state.

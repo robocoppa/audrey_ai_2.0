@@ -8,8 +8,8 @@ happens in the laptop checkout; Tower is the Docker-only deployment host.
 | Test | Runner | Target | Credentials |
 |---|---|---|---|
 | Hermetic pytest, lint, or build | Laptop | Local checkout | None |
-| API-only live smoke, including `smoke_native_auth_cutover.py` | Laptop over Tailscale; WARP fallback | Tower backend port `8000` | Credential required by that script |
-| Eval harness | Laptop over Tailscale; WARP fallback | Tower backend `/v1` on port `8000` | Audrey PAT with `compat:full` |
+| API-only live smoke, including `smoke_native_auth_cutover.py` | Laptop over LAN/WARP | Tower backend port `8000` | Credential required by that script |
+| Eval harness | Laptop over LAN/WARP | Tower backend `/v1` on port `8000` | Audrey PAT with `compat:full` |
 | Full native UI/proxy smoke | Disposable container on Tower, or laptop through an explicit SSH tunnel | `http://audrey-ui:8080` inside `ollama-net`, or tunneled loopback port `8090` | Native smoke user/admin assertions |
 
 Choose the smallest proof that exercises the changed functionality and its
@@ -20,10 +20,13 @@ the targeted check fails, the change crosses additional boundaries, or the
 user explicitly asks for broader coverage. Hermetic laptop verification is a
 separate required gate for code changes; it does not substitute for live proof.
 
-Current VPN addresses:
+Current backend addresses:
 
-- Primary — Tailscale: `http://100.113.157.98:8000`
-- Fallback — WARP: `http://192.168.1.11:8000`
+- Working laptop route — LAN/WARP: `http://192.168.1.11:8000`
+- Currently unreachable from the laptop — Tailscale: `http://100.113.157.98:8000`
+
+Use the working `192.168.1.11` route in handed-off laptop smoke commands until
+Tailscale reachability is explicitly re-established.
 
 Tower does not have host Python, `uv`, or a repository `.venv`. Never hand the
 user any of those commands at a Tower prompt. Conversely, do not move an
@@ -42,14 +45,14 @@ the first-party personal token, and the two Cloudflare Access application
 assertions:
 
 ```text
-AUDREY_EVAL_BASE_URL=http://100.113.157.98:8000/v1
+AUDREY_EVAL_BASE_URL=http://192.168.1.11:8000/v1
 AUDREY_EVAL_API_KEY=aud_pat_...
 AUDREY_USER_JWT=eyJ...
 AUDREY_ADMIN_JWT=eyJ...
 ```
 
-Use `http://192.168.1.11:8000/v1` only when falling back to WARP. Create the
-personal token in native Audrey Settings with `compat:full` scope. Native smoke
+Use the working `http://192.168.1.11:8000/v1` route for laptop evals. Create
+the personal token in native Audrey Settings with `compat:full` scope. Native smoke
 commands source this file; the eval harness reads only its `AUDREY_EVAL_*`
 entries. Keep it mode `600`. The variable entries are permanent, but expired
 Access JWT values still need to be refreshed in place.
@@ -82,20 +85,8 @@ private and mode `600`.
 
 ## Run the 2F.1 authentication smoke from the laptop
 
-Use Tailscale. This consumes the credential already stored in
-`.env.test.local`; do not prompt for it again:
-
-```bash
-cd /home/bart/Documents/github/audrey_ai_2.0
-(
-  set -a
-  source .env.test.local
-  set +a
-  AUDREY_SMOKE_BASE_URL=http://100.113.157.98:8000 .venv/bin/python scripts/smoke_native_auth_cutover.py
-)
-```
-
-If Tailscale is unavailable, use the complete WARP fallback:
+Use the working LAN/WARP route. This consumes the credential already stored
+in `.env.test.local`; do not prompt for it again:
 
 ```bash
 cd /home/bart/Documents/github/audrey_ai_2.0
@@ -117,7 +108,7 @@ environment when the command exits. Success is exit code zero, JSON ending in
 This is the targeted API-only deploy proof for 3A.2. It checks that the tracked
 `video-analysis` bundle is the one available catalog entry, skill readiness is
 healthy, and admin rediscovery reloads it without diagnostics. It creates no
-user data, conversations, tokens, files, or model calls. Use Tailscale first:
+user data, conversations, tokens, files, or model calls. Use the working LAN/WARP route:
 
 ```bash
 cd /home/bart/Documents/github/audrey_ai_2.0
@@ -125,12 +116,12 @@ cd /home/bart/Documents/github/audrey_ai_2.0
   set -a
   source .env.test.local
   set +a
-  AUDREY_SMOKE_BASE_URL=http://100.113.157.98:8000 .venv/bin/python scripts/smoke_skills_foundation.py
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python scripts/smoke_skills_foundation.py
 )
 ```
 
-Use `http://192.168.1.11:8000` only as the WARP fallback. Success is exit code
-zero and JSON ending in `"status": "passed"`, with catalog and readiness
+Success is exit code zero and JSON ending in `"status": "passed"`, with
+catalog and readiness
 `ready`, capabilities `available`, one `video-analysis` item, and zero
 rediscovery diagnostics. The earlier all-`disabled` output remains the
 recorded live proof for 3A.1; do not expect that result after deploying 3A.2.
@@ -140,7 +131,7 @@ recorded live proof for 3A.1; do not expect that result after deploying 3A.2.
 This is the targeted 3B deploy proof. It makes one short Fast model call with
 `video-analysis` selected explicitly through the native AG-UI route, verifies
 the streamed answer and persisted id/version/digest/reason, then deletes the
-temporary canonical conversation and archive projection. Use Tailscale first:
+temporary canonical conversation and archive projection. Use the working LAN/WARP route:
 
 ```bash
 cd /home/bart/Documents/github/audrey_ai_2.0
@@ -148,12 +139,11 @@ cd /home/bart/Documents/github/audrey_ai_2.0
   set -a
   source .env.test.local
   set +a
-  AUDREY_SMOKE_BASE_URL=http://100.113.157.98:8000 .venv/bin/python scripts/smoke_skill_selection.py
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python scripts/smoke_skill_selection.py
 )
 ```
 
-If Tailscale cannot reach the backend, change only the base URL to the WARP
-fallback `http://192.168.1.11:8000`. Success is exit code zero, JSON ending in
+Success is exit code zero, JSON ending in
 `"status": "passed"`, selection showing `video-analysis` version 1 with reason
 `request`, a 64-character digest, and cleanup showing repair status `ready`.
 This smoke mutates live data only for its temporary conversation and removes it
