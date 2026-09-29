@@ -129,10 +129,11 @@ deploying the enabled registry.
 
 ## Run the 3C grounded-document product evaluation from the laptop
 
-The initial repeated comparison is settled: all nine controls passed and six
-of nine skill samples passed. The three failures exposed the document-reading
-contract repaired after that run. Keep the controls as evidence; after
-deploying both `audrey` and `custom-tools`, rerun only the skill arm.
+This gate is settled. The initial controls passed 9/9. After the
+document-reading repair, the repeated skill arm also passed 9/9 and human review
+accepted all nine answers. Do not repeat it unless a later change touches the
+document reader, file tools, skill prompt, or selection path. If one does, keep
+the settled controls as evidence and rerun only the skill arm below.
 
 The account still needs both files from
 `scripts/fixtures/grounded-document-analysis/` in Ready state:
@@ -160,8 +161,7 @@ attributed to the correct file, and do not treat a read failure as evidence of
 absence. The JSON record must show `grounded-document-analysis` for every
 sample. This evaluation creates compatibility chat-history entries and leaves
 the two uploaded fixtures in the account; remove them manually after preserving
-the artifacts. Do not tune the prompt or open automatic selection until the
-repaired answers have been judged.
+the artifacts. The accepted 2026-09-28 run is the baseline for later changes.
 
 ## Run the explicit skill-selection smoke from the laptop
 
@@ -185,6 +185,29 @@ Success is exit code zero, JSON ending in
 `request`, a 64-character digest, and cleanup showing repair status `ready`.
 This smoke mutates live data only for its temporary conversation and removes it
 before returning.
+
+## Run the 4A original-file download smoke from the laptop
+
+This targeted API proof uploads one small text file through the native endpoint,
+downloads its exact bytes, exercises a byte range, verifies another Audrey
+account receives the same 404 as an unknown file, and deletes the upload. It requires
+the distinct user and admin assertions already stored in `.env.test.local`:
+
+```bash
+cd /home/bart/Documents/github/audrey_ai_2.0
+(
+  set -a
+  source .env.test.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python scripts/smoke_file_download.py
+)
+```
+
+Success is exit code zero and JSON ending in `"status": "passed"`, with full
+HTTP 200, range HTTP 206, cross-owner HTTP 404, and cleanup repair status
+`ready`. This smoke mutates live data only for its temporary upload and removes
+it before returning. After rebuilding `audrey-ui`, one manual Files-dialog
+download confirms that the built browser action reaches the proven endpoint.
 
 This path is for scripts that must exercise the standalone proxy. Use the
 checked wrapper so malformed or legacy env-file entries fail with a useful

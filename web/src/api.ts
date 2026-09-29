@@ -797,6 +797,10 @@ export function getFileImageUrl(fileId: string): string {
   return `/api/files/${encodeURIComponent(fileId)}/image`;
 }
 
+export function getFileDownloadUrl(fileId: string): string {
+  return `/api/files/${encodeURIComponent(fileId)}/download`;
+}
+
 export function fetchVideoFromUrl(url: string): Promise<AudreyFileUpload> {
   return apiJson<AudreyFileUpload>("/api/files/from-url", {
     method: "POST",

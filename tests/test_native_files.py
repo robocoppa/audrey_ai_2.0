@@ -169,6 +169,64 @@ def test_native_get_returns_only_a_file_in_the_owner_listing(monkeypatch):
     assert missing.json() == {"detail": "File not found."}
 
 
+def test_native_original_download_is_owner_bound_attachment_with_ranges(monkeypatch, tmp_path):
+    listing = _listing()
+    listing.files[0].filename = "field notes ü.txt"
+    content = b"private original bytes"
+    owner_dir = tmp_path / upload_routes.sanitize_user("private-storage-123")
+    owner_dir.mkdir()
+    (owner_dir / "file_123.txt").write_bytes(content)
+
+    async def fake_list(request, me):
+        assert me.email == "private-storage-123"
+        return listing
+
+    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
+    client = TestClient(_app())
+
+    response = client.get("/api/files/file_123/download")
+    assert response.status_code == 200
+    assert response.content == content
+    assert response.headers["content-type"] == "text/plain; charset=utf-8"
+    assert response.headers["content-disposition"].startswith("attachment;")
+    assert (
+        "filename*=utf-8''field%20notes%20%C3%BC.txt"
+        in response.headers["content-disposition"]
+    )
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+    partial = client.get("/api/files/file_123/download", headers={"Range": "bytes=8-15"})
+    assert partial.status_code == 206
+    assert partial.content == content[8:16]
+    assert partial.headers["content-range"] == f"bytes 8-15/{len(content)}"
+
+    foreign = client.get("/api/files/another-users-file/download")
+    assert foreign.status_code == 404
+    assert foreign.json() == {"detail": "File not found."}
+
+
+def test_native_original_download_reports_reclaimed_or_missing_source(monkeypatch, tmp_path):
+    listing = _listing()
+
+    async def fake_list(request, me):
+        return listing
+
+    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
+    client = TestClient(_app())
+
+    missing = client.get("/api/files/file_123/download")
+    assert missing.status_code == 410
+    assert missing.json() == {"detail": "Stored original is unavailable."}
+
+    listing.files[0].source_freed_at = "2026-09-01T00:00:00+00:00"
+    reclaimed = client.get("/api/files/file_123/download")
+    assert reclaimed.status_code == 410
+    assert reclaimed.json() == {"detail": "Stored original is unavailable."}
+
+
 def test_native_document_text_is_owner_bound_and_paged_without_gaps(monkeypatch, tmp_path):
     listing = _listing()
     content = "A" * 3999 + "é" + "B" * 17
@@ -504,4 +562,5 @@ def test_native_files_require_authentication():
 
     client = TestClient(app)
     assert client.get("/api/files").status_code == 401
+    assert client.get("/api/files/file_123/download").status_code == 401
     assert client.post("/api/files/from-url", json={"url": "https://example.com/video"}).status_code == 401

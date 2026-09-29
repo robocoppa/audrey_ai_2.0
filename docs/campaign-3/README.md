@@ -1,11 +1,10 @@
 # Campaign 3 — correctness foundations, Audrey UI, and reusable skills
 
-**Status:** Campaign 3 Phase 1 is complete. Campaign 3 Phase 2 is in
-progress. Milestones 2A and 2B, slices 2C.1–2C.3, and slices 2D.1–2D.4 are
-complete and Unraid-verified. The standalone Audrey UI and public Cloudflare
-route are live. Slice 2D.5 is deployed, while its full administration, role,
+**Status:** Campaign 3 Phases 1 and 3 are complete. Phase 2's native
+product cutover is live-settled, while its legacy 2D.5 administration, role,
 model-publication, exact-owner bootstrap, and provider-binding soak remains
-open.
+open. Phase 4 has started; slice 4A original-file download is laptop-complete
+and awaits deployment and its targeted live smoke.
 
 The Milestone 2E parity build is laptop-complete across native memory
 settings, owner-bound file and video upload and inspection, source and answer
@@ -36,14 +35,18 @@ live-settled; its rendered resolver, variable upstream, and both variable proxy 
 The already-passed auth, proxy, routing, and eval checks are not repeated.
 Historical chat import is optional and runs only after a new explicit request.
 
-Phase 3 is now in progress. Milestones 3A.1, 3A.2, and 3B are
+Phase 3 completed on 2026-09-28. Milestones 3A.1, 3A.2, and 3B are
 live-settled. The targeted 3B native Fast run selected and persisted
-`video-analysis` v1 successfully and completed cleanup. The first 3C
-grounded-document pilot's first repeated evaluation produced a 9/9 control
-arm and a 6/9 skill arm. The failures exposed that `get_file_text` could not
-read ready text uploads. The shared-contract repair is laptop-complete and
-tested; deploying both application services and rerunning the nine skill
-samples remain open.
+`video-analysis` v1 successfully and completed cleanup. For 3C, controls
+passed 9/9; the repaired `grounded-document-analysis` skill then passed 9/9,
+and human review accepted all answers. It ships as an explicit opt-in skill.
+Automatic selection remains deferred because selector precision and false
+activation were outside this evaluation.
+
+Phase 4 started on 2026-09-29. Slice 4A adds owner-scoped, ranged original-file
+downloads to the native API and Files dialog. It is laptop-complete; deployment
+and the targeted live smoke remain open. Derived transcript, visual, and
+summary downloads follow in slice 4B.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,
@@ -56,10 +59,12 @@ and finally adds the first general skills layer on that owned surface.
 |---|---|---|---|---|
 | 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | Complete |
 | 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (2A–2B, 2C.1–2C.3, and 2D.1–2D.4 verified; 2D.5 deployed; 2E settled; 2F.3 live-passed; 2F.4 and permanent DNS correction live-settled) |
-| 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | In progress (3A–3B live-settled; 3C document-reader repair awaits deploy and skill-only rerun) |
+| 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | Complete (3A–3C live-settled; explicit grounded-document pilot ships; automatic selection deferred) |
+| 04 | [File and artifact downloads](phase-04-file-downloads.md) | Owner-scoped recovery of stored originals and useful derived artifacts from the native Files surface | Phase 03 explicit-skill ship decision | In progress (4A laptop-complete; deploy/live smoke open) |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1,
-Campaign 3 Phase 2, and Campaign 3 Phase 3, or use the topic filenames.
+Campaign 3 Phase 2, Campaign 3 Phase 3, and Campaign 3 Phase 4, or use the
+topic filenames.
 
 ## Campaign rules
 
@@ -82,6 +87,7 @@ Campaign 3 Phase 2, and Campaign 3 Phase 3, or use the topic filenames.
 ## What comes after these plans
 
 The remaining product backlog—OCR, broader audio/media ingestion,
-ordinary-answer provenance, artifact download, and `/v1/responses`—stays
-available for later Campaign 3 phases. It is intentionally not interleaved with
-the safety foundations or the first skills rollout.
+ordinary-answer provenance, derived-artifact download after slice 4A, and
+`/v1/responses`—stays available for later Campaign 3 phases. It is
+intentionally not interleaved with the safety foundations or the first skills
+rollout.

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
+from fastapi.responses import FileResponse
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel
 
@@ -276,6 +277,35 @@ async def get_file(
     principal: Principal = Depends(_files_access),
 ) -> NativeFileRecord:
     return _file_record(await _owned_row(request, principal, file_id))
+
+
+@router.get("/files/{file_id}/download", response_class=FileResponse)
+async def download_file(
+    file_id: str,
+    request: Request,
+    principal: Principal = Depends(_files_access),
+) -> FileResponse:
+    """Download the owned original as an attachment without buffering it."""
+
+    row = await _owned_row(request, principal, file_id)
+    path = _source_path(request, principal, row)
+    if row.source_freed_at or not await asyncio.to_thread(path.is_file):
+        raise HTTPException(status_code=410, detail="Stored original is unavailable.")
+    try:
+        stat_result = await asyncio.to_thread(path.stat)
+    except OSError as exc:
+        raise HTTPException(status_code=410, detail="Stored original is unavailable.") from exc
+    return FileResponse(
+        path,
+        filename=row.filename,
+        media_type=row.mime or "application/octet-stream",
+        stat_result=stat_result,
+        content_disposition_type="attachment",
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/files/{file_id}/text", response_model=NativeFileTextResponse)

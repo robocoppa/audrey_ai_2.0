@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createConversation,
   fetchVideoFromUrl,
+  getFileDownloadUrl,
   resetAdminModelPolicy,
   updateAdminModel,
   updateConversationModel,
@@ -23,6 +24,10 @@ const LIMITS: AudreyFileLimits = {
 describe("native file uploads", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("builds an encoded same-origin original download URL", () => {
+    expect(getFileDownloadUrl("file / 123")).toBe("/api/files/file%20%2F%20123/download");
   });
 
   it("queues a trimmed video URL through the same-origin native API", async () => {

@@ -3801,10 +3801,13 @@ a:focus-visible {
 .file-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 0.4rem;
 }
 
 .file-view,
+.file-download,
 .file-remove {
   padding: 0.4rem 0.55rem;
   border: 1px solid var(--border);
@@ -3812,9 +3815,11 @@ a:focus-visible {
   background: transparent;
   color: var(--muted);
   font-size: 0.7rem;
+  text-decoration: none;
 }
 
-.file-view:hover {
+.file-view:hover,
+.file-download:hover {
   border-color: var(--border-strong);
   color: var(--accent);
 }

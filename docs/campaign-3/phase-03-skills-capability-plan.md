@@ -1,10 +1,10 @@
 # Campaign 3 Phase 3 — reusable skills
 
-**Status:** Milestones 3A.1, 3A.2, and 3B are live-settled. The first
-Milestone 3C repeated comparison produced a 9/9 control arm and a 6/9 skill arm,
-exposing a shared document-reader gap. Its laptop repair is complete; deployment
-and a nine-sample skill-only rerun remain open. Automatic selection remains
-deferred.
+**Status:** Complete on 2026-09-28. Milestones 3A.1, 3A.2, and 3B are
+live-settled. Milestone 3C's control arm passed 9/9; after repairing the shared
+document reader, its skill arm passed 9/9 and human review accepted the answers.
+The explicit `grounded-document-analysis` v1 pilot ships. Milestone 3D
+automatic selection remains explicitly deferred.
 
 ## Goal
 
@@ -454,17 +454,18 @@ Gate:
 
 ## Milestone 3C — first new skill and product evaluation
 
-**Status:** The first repeated evaluation completed on 2026-09-28. Its
-control arm passed 9/9 and its skill arm passed 6/9. The three skill failures
-shared one cause: `get_file_text` could read video artifacts but not the
-Markdown sources that `list_my_files` returned. One absence sample also passed
-for the wrong reason after retrieving no text. The laptop repair extends the
-shared contract: ready text uploads advertise a `document` artifact,
-`artifact: auto` reads document source text or a video transcript, and the
-absence case now requires a fixture-specific evidence phrase. Focused tests
-pass 98 and the full suite passes 2,964. Scoped Ruff and diff hygiene are clean.
-The live registry smoke remains settled; deploying `audrey` plus
-`custom-tools` and rerunning the nine skill samples remain open.
+**Status:** Complete on 2026-09-28. The initial control arm passed 9/9 and
+the skill arm passed 6/9, exposing that `get_file_text` could read video
+artifacts but not Markdown sources. After the shared reader repair was deployed,
+the repeated skill-only arm passed 9/9. Human review confirmed correct facts,
+file separation, and absence handling in every answer. Seven samples used
+full-document reads and two used scoped KB search. Median latency was 6.4s for
+the skill and 5.4s for controls; mean latency was 9.1s and 9.4s respectively.
+One answer's ancillary order-of-magnitude wording was high by about one order,
+without changing its requested facts or conclusion. The decision is to ship
+`grounded-document-analysis` v1 as an explicit opt-in. Automatic selection
+remains deferred. The full suite passes 2,964; scoped Ruff and diff hygiene are
+clean.
 
 Pilot a `grounded-document-analysis` skill using only the existing file/KB
 capabilities it needs, for example:
@@ -498,6 +499,10 @@ choice only if it is measurably useful or clearly improves workflow
 consistency at acceptable cost.
 
 ## Milestone 3D — optional automatic selection
+
+**Status:** Deferred. Explicit selection is stable, but the 3C comparison does
+not measure selector precision or false activation. Opening this milestone
+requires a separate precision and abstention evaluation.
 
 Open only after explicit selection has stable evidence.
 
@@ -605,6 +610,9 @@ No rollback changes stored user data because MVP skills are read-only bundles
 and request metadata.
 
 ## Phase 3 completion gate
+
+**Result:** Passed on 2026-09-28. Explicit skills and the new pilot are
+live-settled; automatic selection is explicitly deferred.
 
 Phase 3 is complete when:
 

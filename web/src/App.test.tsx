@@ -130,7 +130,7 @@ describe("App", () => {
   });
 
   it("loads the current same-origin Audrey identity", async () => {
-    const fetchMock = vi.fn().mockImplementation((path: string) => {
+    const fetchMock = vi.fn().mockImplementation((path: string, request?: RequestInit) => {
       const payload = path === "/api/me"
         ? {
             id: "usr_example",
@@ -143,7 +143,18 @@ describe("App", () => {
           }
         : path === "/api/me/preferences"
           ? DEFAULT_PREFERENCES
-          : collectionPayload(path);
+          : path === "/api/conversations" && request?.method === "POST"
+            ? {
+                id: "con_new",
+                title: "New conversation",
+                default_mode: "auto",
+                default_model_id: "auto",
+                created_at: "2026-09-01T00:00:00+00:00",
+                updated_at: "2026-09-01T00:00:00+00:00",
+                last_message_at: null,
+                archived_at: null,
+              }
+            : collectionPayload(path);
       return Promise.resolve(
         new Response(JSON.stringify(payload), {
           status: 200,

@@ -4,6 +4,7 @@ import {
   deleteFile,
   fetchVideoFromUrl,
   getFileArtifact,
+  getFileDownloadUrl,
   getFileImageUrl,
   getFileText,
   listFiles,
@@ -447,6 +448,14 @@ export function FileManager({ onClose }: { onClose: () => void }) {
                   ) : null}
                 </div>
                 <div className="file-actions">
+                  {!file.source_freed_at && !["fetch_pending", "fetching"].includes(file.status) ? (
+                    <a
+                      className="file-download"
+                      href={getFileDownloadUrl(file.id)}
+                      download={file.filename}
+                      aria-label={`Download original ${file.filename}`}
+                    >Download</a>
+                  ) : null}
                   {file.status === "ready" ? (
                     <button
                       className="file-view"
