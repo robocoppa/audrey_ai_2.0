@@ -90,12 +90,35 @@ async def _ready_video(db: UploadsDB, tmp_path: Path, *, sidecars=("transcript",
         (root / f"{file_id}.{name}.txt").write_text(bodies[name], "utf-8")
 
 
+async def _ready_document(db: UploadsDB, tmp_path: Path, *,
+                          filename="operations.md", file_id=FID,
+                          text="# Operations\n\nStaging p95 was 840 ms.\n") -> None:
+    await db.record_upload(
+        file_id=file_id, user=ME, filename=filename, mime="text/markdown",
+        bytes_=len(text.encode()), kind="text", collection="c", chunks=2,
+        uploaded_at="2026-08-01T00:00:00+00:00", status="ready",
+    )
+    root = tmp_path / "uploads" / "a_b_c"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / f"{file_id}.md").write_text(text, "utf-8")
+
+
 def _read(client: TestClient, **kw):
     body = {"user": ME, "filename": "jason retirement.mp4", **kw}
     return client.post("/v1/files/artifact", headers=SVC, json=body)
 
 
 class TestReading:
+    async def test_auto_reads_a_text_documents_original_source(
+            self, client, db, tmp_path):
+        await _ready_document(db, tmp_path)
+        r = client.post("/v1/files/artifact", headers=SVC,
+                        json={"user": ME, "filename": "operations.md"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["artifact"] == "document"
+        assert body["text"] == "# Operations\n\nStaging p95 was 840 ms.\n"
+
     async def test_a_short_transcript_comes_back_whole(self, client, db, tmp_path):
         await _ready_video(db, tmp_path)
         r = _read(client, limit=100_000)
@@ -220,12 +243,30 @@ class TestMissingArtifacts:
         assert "processing" in body["note"]
         assert "yet" in body["note"]
 
-    async def test_a_text_file_says_transcripts_are_video_only(
+    async def test_an_unavailable_ready_document_is_unknown_not_absent(
+            self, client, db, tmp_path):
+        await _ready_document(db, tmp_path)
+        source = tmp_path / "uploads" / "a_b_c" / f"{FID}.md"
+        source.unlink()
+
+        body = client.post(
+            "/v1/files/artifact", headers=SVC,
+            json={"user": ME, "filename": "operations.md"},
+        ).json()
+
+        assert body["text"] == ""
+        assert body["note"].startswith("UNAVAILABLE:")
+        assert "UNKNOWN" in body["note"]
+        assert "could not be read" in body["note"]
+        assert "requested fact is absent" in body["note"]
+
+    async def test_an_explicit_transcript_on_a_text_file_says_video_only(
             self, client, db, tmp_path):
         await _ready_video(db, tmp_path, sidecars=(), kind="text",
                            filename="notes.pdf")
         r = client.post("/v1/files/artifact", headers=SVC,
-                        json={"user": ME, "filename": "notes.pdf"})
+                        json={"user": ME, "filename": "notes.pdf",
+                              "artifact": "transcript"})
         assert r.status_code == 200
         assert r.json()["text"] == ""
         assert "only for video" in r.json()["note"]
@@ -328,6 +369,10 @@ class TestArtifactsAreDeclaredUpFront:
     async def test_a_transcript_only_video_says_so(self, client, db, tmp_path):
         await _ready_video(db, tmp_path, sidecars=("transcript",))
         assert self._list(client)["files"][0]["artifacts"] == ["transcript"]
+
+    async def test_a_ready_document_declares_its_text(self, client, db, tmp_path):
+        await _ready_document(db, tmp_path)
+        assert self._list(client)["files"][0]["artifacts"] == ["document"]
 
     async def test_a_silent_video_declares_nothing(self, client, db, tmp_path):
         await _ready_video(db, tmp_path, sidecars=())

@@ -1,8 +1,9 @@
 # Campaign 3 Phase 3 — reusable skills
 
 **Status:** Milestones 3A.1, 3A.2, and 3B are live-settled. The first
-Milestone 3C grounded-document pilot slice is laptop-complete; deployment and
-the repeated control comparison remain open. Automatic selection remains
+Milestone 3C repeated comparison produced a 9/9 control arm and a 6/9 skill arm,
+exposing a shared document-reader gap. Its laptop repair is complete; deployment
+and a nine-sample skill-only rerun remain open. Automatic selection remains
 deferred.
 
 ## Goal
@@ -453,13 +454,17 @@ Gate:
 
 ## Milestone 3C — first new skill and product evaluation
 
-**Status:** First pilot slice laptop-complete on 2026-09-28. The
-`grounded-document-analysis` v1 bundle uses the four existing file/KB tools.
-Two controlled fixture documents and three interleaved, identical
-`audrey_auto` control/skill pairs cover cross-file comparison, single-file
-fact extraction, and absent evidence. The eval harness records the selected
-skill arm in saved Markdown and JSON. Focused tests pass 227 and the full suite
-passes 2,959; deployment and repeated live human evaluation remain open.
+**Status:** The first repeated evaluation completed on 2026-09-28. Its
+control arm passed 9/9 and its skill arm passed 6/9. The three skill failures
+shared one cause: `get_file_text` could read video artifacts but not the
+Markdown sources that `list_my_files` returned. One absence sample also passed
+for the wrong reason after retrieving no text. The laptop repair extends the
+shared contract: ready text uploads advertise a `document` artifact,
+`artifact: auto` reads document source text or a video transcript, and the
+absence case now requires a fixture-specific evidence phrase. Focused tests
+pass 98 and the full suite passes 2,964. Scoped Ruff and diff hygiene are clean.
+The live registry smoke remains settled; deploying `audrey` plus
+`custom-tools` and rerunning the nine skill samples remain open.
 
 Pilot a `grounded-document-analysis` skill using only the existing file/KB
 capabilities it needs, for example:

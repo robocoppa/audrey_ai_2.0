@@ -86,6 +86,9 @@
     "expect_names_files": [
       "c3-grounded-operations.md",
       "c3-grounded-support.md"
+    ],
+    "answer_contains": [
+      "customer sentiment"
     ]
   },
   {
@@ -102,6 +105,9 @@
       "c3-grounded-operations.md",
       "c3-grounded-support.md"
     ],
-    "skill": "grounded-document-analysis"
+    "skill": "grounded-document-analysis",
+    "answer_contains": [
+      "customer sentiment"
+    ]
   }
 ]

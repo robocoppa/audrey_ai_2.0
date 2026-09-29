@@ -129,36 +129,39 @@ deploying the enabled registry.
 
 ## Run the 3C grounded-document product evaluation from the laptop
 
-Run this only after deploying the 3C bundle and passing the built-in registry
-smoke above. In the native browser, upload both files from
-`scripts/fixtures/grounded-document-analysis/` and wait until each one is
-Ready:
+The initial repeated comparison is settled: all nine controls passed and six
+of nine skill samples passed. The three failures exposed the document-reading
+contract repaired after that run. Keep the controls as evidence; after
+deploying both `audrey` and `custom-tools`, rerun only the skill arm.
+
+The account still needs both files from
+`scripts/fixtures/grounded-document-analysis/` in Ready state:
 
 - `c3-grounded-operations.md`
 - `c3-grounded-support.md`
 
-The case list alternates an ordinary `audrey_auto` control with an identical
-request selecting `grounded-document-analysis`. Three whole passes provide
-three samples per arm without running the same prompt twice in a row:
+If they were removed after the first run, upload them again in the native
+browser. Three whole passes produce nine repaired skill samples:
 
 ```bash
 cd /home/bart/Documents/github/audrey_ai_2.0
 .venv/bin/python scripts/eval_research.py \
   --base-url http://192.168.1.11:8000/v1 \
   --cases scripts/eval_prompts_grounded_documents.json \
+  --only skill \
   --repeat 3 \
-  --save-file docs/testing/2026-09-28-grounded-documents-answers.md \
-  --save-json docs/testing/2026-09-28-grounded-documents-results.json
+  --save-file docs/testing/2026-09-28-grounded-documents-reader-fix-answers.md \
+  --save-json docs/testing/2026-09-28-grounded-documents-reader-fix-results.json
 ```
 
-The structural gate is all 18 cases completing without failed checks. Then read
-each control/skill answer pair and compare file attribution, evidence gaps,
-tool traces, route, and latency. The JSON record must show an empty `skill`
-for each control and `grounded-document-analysis` for each skill arm. This
-evaluation creates compatibility chat-history entries and leaves the two
-uploaded fixtures in the account; remove them manually after preserving the
-artifacts. Do not tune the prompt or open automatic selection until the paired
-answers have been judged.
+The structural gate is all nine cases completing without failed checks. Read
+all nine answers and confirm they use the document contents, keep facts
+attributed to the correct file, and do not treat a read failure as evidence of
+absence. The JSON record must show `grounded-document-analysis` for every
+sample. This evaluation creates compatibility chat-history entries and leaves
+the two uploaded fixtures in the account; remove them manually after preserving
+the artifacts. Do not tune the prompt or open automatic selection until the
+repaired answers have been judged.
 
 ## Run the explicit skill-selection smoke from the laptop
 

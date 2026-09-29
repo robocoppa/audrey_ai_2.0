@@ -39,9 +39,11 @@ Historical chat import is optional and runs only after a new explicit request.
 Phase 3 is now in progress. Milestones 3A.1, 3A.2, and 3B are
 live-settled. The targeted 3B native Fast run selected and persisted
 `video-analysis` v1 successfully and completed cleanup. The first 3C
-grounded-document pilot slice is laptop-complete with a versioned bundle,
-controlled fixtures, and paired control/skill cases; its repeated live product
-evaluation remains open.
+grounded-document pilot's first repeated evaluation produced a 9/9 control
+arm and a 6/9 skill arm. The failures exposed that `get_file_text` could not
+read ready text uploads. The shared-contract repair is laptop-complete and
+tested; deploying both application services and rerunning the nine skill
+samples remain open.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,
@@ -54,7 +56,7 @@ and finally adds the first general skills layer on that owned surface.
 |---|---|---|---|---|
 | 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | Complete |
 | 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (2A–2B, 2C.1–2C.3, and 2D.1–2D.4 verified; 2D.5 deployed; 2E settled; 2F.3 live-passed; 2F.4 and permanent DNS correction live-settled) |
-| 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | In progress (3A–3B live-settled; 3C pilot laptop-complete, live evaluation open) |
+| 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | In progress (3A–3B live-settled; 3C document-reader repair awaits deploy and skill-only rerun) |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1,
 Campaign 3 Phase 2, and Campaign 3 Phase 3, or use the topic filenames.

@@ -2130,6 +2130,11 @@ def _expand_repeats(cases: list[dict], repeats: int) -> list[dict]:
     return out
 
 
+def _option_was_supplied(argv: list[str], option: str) -> bool:
+    """Whether an argparse option was explicit rather than only its default."""
+    return any(arg == option or arg.startswith(f"{option}=") for arg in argv)
+
+
 def main() -> int:
     # Load the gitignored .env.test.local first, so the env-var defaults below
     # see AUDREY_EVAL_*. A real export or an explicit --flag still overrides it.
@@ -2176,6 +2181,7 @@ def main() -> int:
                         "as JSON — the input for scripts/eval_compare.py, e.g. "
                         "docs/testing/2026-07-10-code-sweep-results.json")
     args = p.parse_args()
+    model_was_explicit = _option_was_supplied(sys.argv[1:], "--model")
 
     if not args.base_url or not args.api_key:
         print("error: set --base-url and --api-key (or AUDREY_EVAL_BASE_URL / "
@@ -2210,7 +2216,7 @@ def main() -> int:
     # the deep panel and labels the output `cloud` — a whole run spent on the
     # wrong panel, discoverable only by reading the per-case header afterwards.
     # The unpinned `*_models.json` variants exist for exactly this.
-    if args.model:
+    if model_was_explicit:
         overridden = sorted({str(c["model"]) for c in cases
                              if c.get("model") and c["model"] != args.model})
         if overridden:

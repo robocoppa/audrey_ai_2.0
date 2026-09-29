@@ -81,6 +81,7 @@ class TestTheProxy:
         # model-supplied limit could not respect a cap it cannot see.
         assert sent["limit"] == settings.file_text_page_chars
         assert "limit" not in tools_app.GetFileTextRequest.model_fields
+        assert sent["artifact"] == "auto"
 
     async def test_the_offset_and_artifact_are_passed_through(self):
         sent = {}
@@ -137,6 +138,8 @@ class TestTheDescription:
         # The observed failure was reaching for kb_search to get a transcript.
         assert "kb_search" in desc
         assert "transcript" in desc
+        assert "document" in desc
+        assert "auto" in desc
 
     def test_it_explains_how_to_page(self):
         desc = _tool_description()

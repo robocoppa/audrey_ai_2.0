@@ -439,3 +439,18 @@ class TestTheCasesFilesAgreeWithHowModelSelectionWorks:
             "every code cases file pins a model — nothing can exercise "
             "deep_panel_cloud or deep_panel_local"
         )
+
+
+class TestExplicitOptions:
+    def test_default_model_is_not_treated_as_an_explicit_override(self):
+        assert not eval_research._option_was_supplied(
+            ["--cases", "cases.json"], "--model",
+        )
+
+    def test_model_is_detected_in_both_argparse_forms(self):
+        assert eval_research._option_was_supplied(
+            ["--model", "audrey_cloud"], "--model",
+        )
+        assert eval_research._option_was_supplied(
+            ["--model=audrey_cloud"], "--model",
+        )

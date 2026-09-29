@@ -1021,8 +1021,9 @@ class ListMyFilesResponse(BaseModel):
         "empty, and use waiting_for_s (seconds so far, and only meaningful "
         "for those two statuses) if asked how long it has been going. A "
         "'failed' file carries the reason. "
-        "Each file lists `unread_artifacts`: which of 'transcript', 'visual' "
-        "and 'summary' exist on disk and have NOT been read. They are names, "
+        "Each file lists `unread_artifacts`: 'document' for readable text "
+        "uploads, or the video texts 'transcript', 'visual' and 'summary', "
+        "that exist on disk and have NOT been read. They are names, "
         "not contents — seeing 'summary' listed tells you a summary is "
         "available to fetch, never what it says. To use one, call "
         "get_file_text with that artifact; until you do, you have not read "
@@ -1054,7 +1055,7 @@ async def list_my_files(req: ListMyFilesRequest) -> ListMyFilesResponse:
 class GetFileTextRequest(BaseModel):
     user: Annotated[str, Field(min_length=1, max_length=200, description="User scope. Filled in automatically by Audrey — you don't need to supply it. Files are per-user.")]
     filename: Annotated[str, Field(min_length=1, max_length=500, description="The file's exact filename, as returned by list_my_files.")]
-    artifact: Annotated[str, Field(description="Which text to read: 'transcript' for what was said, 'visual' for what was on screen, 'summary' for the one-paragraph overview.")] = "transcript"
+    artifact: Annotated[str, Field(description="Which text to read: 'auto' chooses document text for a text file and transcript for a video; 'document' reads a text upload; 'transcript' reads speech; 'visual' reads on-screen text and scene descriptions; 'summary' reads the video overview.")] = "auto"
     offset: Annotated[int, Field(ge=0, description="Character position to start from. Use 0 for the beginning, then the next_offset from the previous response.")] = 0
 
 
@@ -1073,7 +1074,7 @@ class GetFileTextResponse(BaseModel):
     operation_id="get_file_text",
     response_model=GetFileTextResponse,
     tags=["tools"],
-    summary="Read a video's transcript, on-screen text, or summary",
+    summary="Read a document or a video's transcript, on-screen text, or summary",
     description=(
         "Read ONE named file's text in order, front to back. Use this only "
         "when the user asked for the document itself — 'give me the "
@@ -1090,8 +1091,10 @@ class GetFileTextResponse(BaseModel):
         "cover something, read the file here first. A search miss is not "
         "evidence of absence, and saying a file lacks content it actually has "
         "is a worse answer than spending the extra round. "
-        "Set artifact to 'transcript' for speech, 'visual' for on-screen text "
-        "and scene descriptions, or 'summary' for the short overview. "
+        "Leave artifact as 'auto' to read document text from a text file or "
+        "the transcript from a video. Set it explicitly to 'document' for a "
+        "text upload, 'transcript' for speech, 'visual' for on-screen text and "
+        "scene descriptions, or 'summary' for the short video overview. "
         "Long documents come back one page at a time: if next_offset is not "
         "null there is more, and you get it by calling again with offset set "
         "to that number. total_chars is the size of the whole document, so say "
@@ -1103,9 +1106,11 @@ class GetFileTextResponse(BaseModel):
         "some other way — to download the file, run transcription software, or "
         "use another tool — and never call the remaining pages a technical "
         "limit. The document is already here; more of it is one more call. "
-        "If this returns an error saying a file has no transcript, that file's "
-        "content is UNKNOWN: say it has none, and never describe it from "
-        "another file, from its summary, or from what you expect it to contain."
+        "If this returns empty text, follow its note exactly. An unavailable "
+        "document means its contents are UNKNOWN, so report the read failure "
+        "and do not infer absence. A video note may instead establish that a "
+        "specific artifact is empty. Never describe either from another file, "
+        "a summary, or what you expect it to contain."
     ),
 )
 async def get_file_text(req: GetFileTextRequest) -> GetFileTextResponse:

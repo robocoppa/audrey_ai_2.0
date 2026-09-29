@@ -83,6 +83,7 @@ from audrey.kb.extract import (
     ALLOWED_MIMES,
     EmptyExtractionError,
     UnsupportedMimeError,
+    extract_text,
     is_image_mime,
     is_text_mime,
     is_video_mime,
@@ -326,8 +327,9 @@ class ModelFileRow(BaseModel):
     # asks in chat, and date arithmetic against an unstated now is exactly
     # what a language model should not be doing.
     waiting_for_s: float = 0.0
-    # Which of `transcript` / `visual` / `summary` can actually be read back
-    # with `get_file_text`, checked against the sidecars on disk (2026-08-06).
+    # Which text can actually be read back with `get_file_text`: `document`
+    # for a ready text upload, or `transcript` / `visual` / `summary` for a
+    # video. Checked against the source or sidecars on disk.
     #
     # **An empty list is the point.** Every other field here expresses absence
     # as a blank — `summary: ""`, `duration_s: 0.0` — and blanks read as
@@ -432,14 +434,15 @@ def _waiting_for_s(row: dict, *, now: _dt.datetime) -> float:
 
 
 def _available_artifacts(user_dir: Path, rows: list[dict]) -> dict[str, list[str]]:
-    """Which sidecars exist on disk, per file_id. Sync — the caller threads it.
+    """Which readable texts exist on disk, per file_id. Sync — caller threads it.
 
     Checked against the filesystem rather than inferred from the row, because
-    the row cannot answer it. `chunks > 0` is true for a video with a
-    transcript AND for one with only frame descriptions; `summary != ''` says
-    the summary is on the row but not whether the sidecar was written. The
-    files are the thing `get_file_text` will actually read, so they are the
-    thing to ask.
+    the row cannot answer it. A text document's source is the readable
+    `document`; video texts live in sidecars. `chunks > 0` is true for a video
+    with a transcript AND for one with only frame descriptions; `summary !=
+    ''` says the summary is on the row but not whether its sidecar was written.
+    The files are what `get_file_text` will actually read, so they are what to
+    ask.
 
     Missing directory, unreadable directory, anything else — every file gets an
     empty list. This decorates a listing that must not fail: a stat error here
@@ -450,6 +453,13 @@ def _available_artifacts(user_dir: Path, rows: list[dict]) -> dict[str, list[str
     for row in rows:
         file_id = str(row["file_id"])
         found = []
+        if str(row["kind"]) == "text" and str(row["status"]) == "ready":
+            ext = Path(str(row["filename"])).suffix.lower()
+            try:
+                if (user_dir / f"{file_id}{ext}").is_file():
+                    found.append("document")
+            except OSError:
+                pass
         for name, suffix in _ARTIFACT_SIDECARS.items():
             try:
                 if (user_dir / f"{file_id}.{suffix}").is_file():
@@ -2633,7 +2643,7 @@ _ARTIFACT_SIDECARS: dict[str, str] = {
 class ArtifactRequest(BaseModel):
     user: str
     filename: str
-    artifact: str = "transcript"
+    artifact: str = "auto"
     offset: int = 0
     limit: int = 4000
 
@@ -2658,7 +2668,7 @@ async def read_artifact(
     request: Request,
     _: None = Depends(require_service),
 ) -> ArtifactResponse:
-    """SERVICE: one page of a file's transcript, visual descriptions or summary.
+    """SERVICE: one page of a document or video text artifact.
 
     `require_service` and a user named in the body, exactly like
     `POST /v1/files/list` — and with exactly the same second half: the
@@ -2676,13 +2686,14 @@ async def read_artifact(
     if not user:
         raise HTTPException(status_code=422, detail="user is required.")
 
-    artifact = body.artifact.strip().lower() or "transcript"
-    if artifact not in _ARTIFACT_SIDECARS:
+    requested_artifact = body.artifact.strip().lower() or "auto"
+    allowed_artifacts = {"auto", "document", *_ARTIFACT_SIDECARS}
+    if requested_artifact not in allowed_artifacts:
         raise HTTPException(
             status_code=422,
             detail=(
-                f"Unknown artifact {artifact!r}. Available: "
-                f"{', '.join(sorted(_ARTIFACT_SIDECARS))}."
+                f"Unknown artifact {requested_artifact!r}. Available: "
+                f"{', '.join(sorted(allowed_artifacts))}."
             ),
         )
 
@@ -2709,6 +2720,9 @@ async def read_artifact(
     # in `note`, because silently picking one of two identically named files is
     # how a confident answer comes from the wrong source.
     row = rows[0]
+    artifact = requested_artifact
+    if artifact == "auto":
+        artifact = "document" if str(row["kind"]) == "text" else "transcript"
     note = ""
     if len(rows) > 1:
         note = (
@@ -2716,13 +2730,20 @@ async def read_artifact(
             f"recent, uploaded {row['uploaded_at']}. "
         )
 
+    user_dir = _upload_root(request) / sanitize_user(user)
     path = (
-        _upload_root(request) / sanitize_user(user)
-        / f"{row['file_id']}.{_ARTIFACT_SIDECARS[artifact]}"
+        user_dir / f"{row['file_id']}{Path(str(row['filename'])).suffix.lower()}"
+        if artifact == "document"
+        else user_dir / f"{row['file_id']}.{_ARTIFACT_SIDECARS[artifact]}"
     )
     try:
-        text = await asyncio.to_thread(path.read_text, "utf-8")
-    except OSError:
+        if artifact == "document":
+            if str(row["kind"]) != "text":
+                raise OSError("document text exists only for text files")
+            text = await asyncio.to_thread(extract_text, path)
+        else:
+            text = await asyncio.to_thread(path.read_text, "utf-8")
+    except (EmptyExtractionError, OSError):
         # ── A missing artifact is DATA, not an error ──────────────────
         #
         # This used to raise 404, and the wording went through two rounds of
@@ -2750,24 +2771,39 @@ async def read_artifact(
         status = str(row["status"])
         if status != "ready":
             reason = f"is still {status}, so its {artifact} does not exist yet"
-        elif str(row["kind"]) != "video":
+        elif artifact == "document" and str(row["kind"]) != "text":
+            reason = (
+                f"is a {row['kind']} file, and document text exists only for text files"
+            )
+        elif artifact != "document" and str(row["kind"]) != "video":
             reason = f"is a {row['kind']} file, and {artifact} exists only for video"
+        elif artifact == "document":
+            reason = "finished processing but its document text is unavailable"
         else:
             reason = f"finished processing and produced no {artifact}"
         log.info(
             "files: artifact read user=%s file=%r artifact=%s -> absent (%s)",
             user, row["filename"], artifact, status,
         )
-        return ArtifactResponse(
-            filename=str(row["filename"]), artifact=artifact, text="",
-            offset=0, next_offset=None, total_chars=0,
-            note=(
+        if artifact == "document" and status == "ready":
+            empty_note = (
+                f"{note}UNAVAILABLE: {row['filename']!r} {reason}. The "
+                "document's contents are UNKNOWN because its source text could "
+                "not be read. Report that read failure; do not claim the "
+                "requested fact is absent, describe the document, or carry "
+                "over anything from another file."
+            )
+        else:
+            empty_note = (
                 f"{note}EMPTY: {row['filename']!r} {reason}. This file's "
                 f"{artifact} is not missing from your view — it does not "
                 f"exist. Nothing whatsoever is known about what this file "
                 f"contains. Say it has no {artifact}; do not describe it, and "
                 "do not carry over anything from another file."
-            ).strip(),
+            )
+        return ArtifactResponse(
+            filename=str(row["filename"]), artifact=artifact, text="",
+            offset=0, next_offset=None, total_chars=0, note=empty_note.strip(),
         )
 
     total = len(text)
