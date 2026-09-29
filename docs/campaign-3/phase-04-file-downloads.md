@@ -1,8 +1,8 @@
 # Campaign 3 Phase 4 — file and artifact downloads
 
-**Status:** Slice 4A is laptop-complete on 2026-09-29. Deployment and the
-targeted live smoke remain open. Later slices will add downloads for derived
-transcripts, visual descriptions, and summaries.
+**Status:** Slice 4A is live-settled on 2026-09-29. Slice 4B derived
+artifact downloads are laptop-complete and await deployment plus their targeted
+live smoke.
 
 ## Goal
 
@@ -57,6 +57,9 @@ Laptop coverage proves:
 
 ## Targeted live gate
 
+**Result:** Passed on 2026-09-29. Exact bytes, byte ranges, attachment headers,
+cross-owner 404, and cleanup all passed against the deployed stack.
+
 Deploy both the backend and native UI, then run the download smoke from the
 laptop checkout. It creates one small text upload, verifies a full download and
 a ranged download, checks that a second Audrey account receives 404, deletes
@@ -77,17 +80,66 @@ block must report HTTP 200 and 206, the identity block must report cross-owner
 HTTP 404, and cleanup must report `repair_status: "ready"`.
 
 In the native browser, open **Files** and download one existing file whose
-original is still stored. The browser should save it under its original name, and its bytes should
-match the uploaded file. This one manual click covers the built UI action; the
-script covers the backend contract and cleanup.
+original is still stored. The browser should save it under its original name,
+and its bytes should match the uploaded file. This one manual click covers the
+built UI action; the script covers the backend contract and cleanup.
 
 ## Slice 4B — derived artifacts
 
-Add explicit download representations for available transcript, visual, and
-summary text. Define stable filenames and plain-text formats, expose only
-artifacts that exist for the owned file, and keep original-source reclamation
-independent from derived-artifact availability.
+The native backend exposes:
 
-The 4B live gate should use one already-processed video and verify only the
-artifact types it actually owns. It should not repeat 4A's original-byte,
-range, or cross-owner proof unless 4B changes the shared authorization path.
+```text
+GET /api/files/{file_id}/artifacts/{artifact}/download
+```
+
+Here, `artifact` is `transcript`, `visual`, or `summary`. The route reuses
+the exact owner and sidecar resolution used by the paged artifact reader. It
+returns 404 when the selected sidecar is missing or empty and 422 for a
+non-video file. Original-source reclamation does not affect these downloads.
+
+Download names are derived from the original video basename:
+
+| Artifact | Filename |
+|---|---|
+| Transcript | `<video>.transcript.txt` |
+| Visual descriptions | `<video>.visual-notes.txt` |
+| Summary | `<video>.summary.txt` |
+
+The Files viewer shows a download action only after the selected artifact page
+reports real content. A legacy row summary without a summary sidecar remains
+visible as a fallback, but it does not claim a downloadable artifact.
+
+Laptop coverage proves exact UTF-8 bytes, all three filenames, private response
+headers, owner scoping, absent and empty sidecars, authentication, and derived
+downloads after the original video was reclaimed. The full suite passes 2,967
+Python tests and 29 frontend tests.
+
+## Slice 4B targeted live gate
+
+After deploying the backend and native UI, run the read-only smoke from the
+laptop checkout:
+
+```bash
+cd /home/bart/Documents/github/audrey_ai_2.0
+(
+  set -a
+  source .env.test.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python scripts/smoke_artifact_download.py
+)
+```
+
+The script selects a ready video, preferring one whose original was reclaimed.
+Set `AUDREY_ARTIFACT_SMOKE_FILE_ID` before the command only when a particular
+video must be checked. It pages each artifact through the existing reader,
+compares every available download byte-for-byte, validates its filename and
+private headers, and expects HTTP 404 for missing artifacts. It creates or
+deletes nothing.
+
+Success is exit code zero, `"status": "passed"`, and
+`"available_count"` of at least one. In the native browser, open **Files**,
+choose **View text** for that video, and click one available artifact download.
+The saved name should use the suffix in the table, while empty artifact tabs
+show no download action.
+
+Phase 4 completes after this live gate passes.

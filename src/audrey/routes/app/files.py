@@ -192,6 +192,35 @@ def _source_path(
     )
 
 
+_ARTIFACT_DOWNLOAD_SUFFIXES = {
+    "transcript": "transcript",
+    "visual": "visual-notes",
+    "summary": "summary",
+}
+
+
+def _artifact_path(
+    request: Request,
+    principal: Principal,
+    row: upload_routes.FileRow,
+    artifact: Literal["transcript", "visual", "summary"],
+) -> Path:
+    return (
+        upload_routes._upload_root(request)
+        / upload_routes.sanitize_user(principal.storage_namespace)
+        / f"{row.file_id}.{upload_routes._ARTIFACT_SIDECARS[artifact]}"
+    )
+
+
+def _artifact_download_filename(
+    row: upload_routes.FileRow,
+    artifact: Literal["transcript", "visual", "summary"],
+) -> str:
+    original_name = Path(row.filename).name
+    stem = Path(original_name).stem or "video"
+    return f"{stem}.{_ARTIFACT_DOWNLOAD_SUFFIXES[artifact]}.txt"
+
+
 def _image_preview(path: Path) -> bytes:
     """Render one bounded frame; do not send untrusted original metadata to the browser."""
 
@@ -393,11 +422,7 @@ async def get_file_artifact(
     if _kind(row.mime) != "video":
         raise HTTPException(status_code=422, detail="Artifacts are available for videos only.")
 
-    path = (
-        upload_routes._upload_root(request)
-        / upload_routes.sanitize_user(principal.storage_namespace)
-        / f"{row.file_id}.{upload_routes._ARTIFACT_SIDECARS[artifact]}"
-    )
+    path = _artifact_path(request, principal, row, artifact)
     try:
         text = await asyncio.to_thread(path.read_text, "utf-8")
     except OSError:
@@ -416,6 +441,45 @@ async def get_file_artifact(
         offset=start,
         next_offset=end if end < total else None,
         total_chars=total,
+    )
+
+
+@router.get(
+    "/files/{file_id}/artifacts/{artifact}/download",
+    response_class=FileResponse,
+)
+async def download_file_artifact(
+    file_id: str,
+    artifact: Literal["transcript", "visual", "summary"],
+    request: Request,
+    principal: Principal = Depends(_files_access),
+) -> FileResponse:
+    """Download one existing derived video text as a private attachment."""
+
+    row = await _owned_row(request, principal, file_id)
+    if _kind(row.mime) != "video":
+        raise HTTPException(status_code=422, detail="Artifacts are available for videos only.")
+
+    path = _artifact_path(request, principal, row, artifact)
+    if not await asyncio.to_thread(path.is_file):
+        raise HTTPException(status_code=404, detail="Artifact is unavailable.")
+    try:
+        stat_result = await asyncio.to_thread(path.stat)
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="Artifact is unavailable.") from exc
+    if stat_result.st_size == 0:
+        raise HTTPException(status_code=404, detail="Artifact is unavailable.")
+
+    return FileResponse(
+        path,
+        filename=_artifact_download_filename(row, artifact),
+        media_type="text/plain",
+        stat_result=stat_result,
+        content_disposition_type="attachment",
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createConversation,
   fetchVideoFromUrl,
+  getFileArtifactDownloadUrl,
   getFileDownloadUrl,
   resetAdminModelPolicy,
   updateAdminModel,
@@ -28,6 +29,12 @@ describe("native file uploads", () => {
 
   it("builds an encoded same-origin original download URL", () => {
     expect(getFileDownloadUrl("file / 123")).toBe("/api/files/file%20%2F%20123/download");
+  });
+
+  it("builds an encoded same-origin artifact download URL", () => {
+    expect(getFileArtifactDownloadUrl("file / 123", "visual")).toBe(
+      "/api/files/file%20%2F%20123/artifacts/visual/download",
+    );
   });
 
   it("queues a trimmed video URL through the same-origin native API", async () => {

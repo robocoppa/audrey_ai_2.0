@@ -359,6 +359,63 @@ def test_native_video_artifact_uses_exact_owned_id_and_pages_on_lines(monkeypatc
     assert foreign.json() == {"detail": "File not found."}
 
 
+def test_native_video_artifact_downloads_existing_sidecars_after_source_reclamation(
+    monkeypatch, tmp_path,
+):
+    listing = _listing()
+    listing.files[0].filename = "field notes ü.mp4"
+    listing.files[0].mime = "video/mp4"
+    listing.files[0].source_freed_at = "2026-09-01T00:00:00+00:00"
+
+    async def fake_list(request, me):
+        assert me.email == "private-storage-123"
+        return listing
+
+    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
+    owner_dir = tmp_path / upload_routes.sanitize_user("private-storage-123")
+    owner_dir.mkdir()
+    artifacts = {
+        "transcript": ("transcript", "What was said."),
+        "visual": ("visual-notes", "What was shown."),
+        "summary": ("summary", "What the video covers."),
+    }
+    for artifact, text_content in {
+        "transcript.txt": artifacts["transcript"][1],
+        "frames.txt": artifacts["visual"][1],
+        "summary.txt": artifacts["summary"][1],
+    }.items():
+        (owner_dir / f"file_123.{artifact}").write_text(text_content, encoding="utf-8")
+
+    client = TestClient(_app())
+    for artifact, (suffix, expected_text) in artifacts.items():
+        response = client.get(f"/api/files/file_123/artifacts/{artifact}/download")
+        assert response.status_code == 200
+        assert response.content == expected_text.encode()
+        assert response.headers["content-type"] == "text/plain; charset=utf-8"
+        assert response.headers["content-disposition"].startswith("attachment;")
+        assert (
+            f"filename*=utf-8''field%20notes%20%C3%BC.{suffix}.txt"
+            in response.headers["content-disposition"]
+        )
+        assert response.headers["cache-control"] == "private, no-store"
+        assert response.headers["x-content-type-options"] == "nosniff"
+
+    foreign = client.get("/api/files/file_foreign/artifacts/transcript/download")
+    assert foreign.status_code == 404
+    assert foreign.json() == {"detail": "File not found."}
+
+    (owner_dir / "file_123.summary.txt").unlink()
+    unavailable = client.get("/api/files/file_123/artifacts/summary/download")
+    assert unavailable.status_code == 404
+    assert unavailable.json() == {"detail": "Artifact is unavailable."}
+
+    (owner_dir / "file_123.transcript.txt").write_text("", encoding="utf-8")
+    empty = client.get("/api/files/file_123/artifacts/transcript/download")
+    assert empty.status_code == 404
+    assert empty.json() == {"detail": "Artifact is unavailable."}
+
+
 def test_native_video_artifact_absence_and_validation(monkeypatch, tmp_path):
     listing = _listing()
     listing.files[0].mime = "video/mp4"
@@ -384,6 +441,7 @@ def test_native_video_artifact_absence_and_validation(monkeypatch, tmp_path):
     assert client.get("/api/files/file_123/artifacts/transcript?offset=-1").status_code == 422
     listing.files[0].mime = "text/plain"
     assert client.get("/api/files/file_123/artifacts/transcript").status_code == 422
+    assert client.get("/api/files/file_123/artifacts/transcript/download").status_code == 422
 
 
 async def test_attachment_resolution_is_ready_owner_bound_and_indistinguishable(
@@ -563,4 +621,5 @@ def test_native_files_require_authentication():
     client = TestClient(app)
     assert client.get("/api/files").status_code == 401
     assert client.get("/api/files/file_123/download").status_code == 401
+    assert client.get("/api/files/file_123/artifacts/transcript/download").status_code == 401
     assert client.post("/api/files/from-url", json={"url": "https://example.com/video"}).status_code == 401

@@ -190,8 +190,9 @@ before returning.
 
 This targeted API proof uploads one small text file through the native endpoint,
 downloads its exact bytes, exercises a byte range, verifies another Audrey
-account receives the same 404 as an unknown file, and deletes the upload. It requires
-the distinct user and admin assertions already stored in `.env.test.local`:
+account receives the same 404 as an unknown file, and deletes the upload.
+It requires the distinct user and admin assertions already stored in
+`.env.test.local`:
 
 ```bash
 cd /home/bart/Documents/github/audrey_ai_2.0
@@ -208,6 +209,30 @@ HTTP 200, range HTTP 206, cross-owner HTTP 404, and cleanup repair status
 `ready`. This smoke mutates live data only for its temporary upload and removes
 it before returning. After rebuilding `audrey-ui`, one manual Files-dialog
 download confirms that the built browser action reaches the proven endpoint.
+
+## Run the 4B artifact-download smoke from the laptop
+
+This read-only proof selects a ready video, preferring one whose original media
+was reclaimed. It pages all three derived-text readers, compares each available
+download byte-for-byte, checks its stable filename and private headers, and
+expects HTTP 404 for missing artifacts. It requires only `AUDREY_USER_JWT`:
+
+```bash
+cd /home/bart/Documents/github/audrey_ai_2.0
+(
+  set -a
+  source .env.test.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python scripts/smoke_artifact_download.py
+)
+```
+
+Success is exit code zero, JSON ending in `"status": "passed"`, and
+`"available_count"` of at least one. If the automatic selection has no
+suitable video, set `AUDREY_ARTIFACT_SMOKE_FILE_ID` to an owned processed
+video id and rerun. The script creates or deletes nothing. After rebuilding
+`audrey-ui`, open that video's **View text** screen and confirm that a
+non-empty artifact has a download action while an empty tab does not.
 
 This path is for scripts that must exercise the standalone proxy. Use the
 checked wrapper so malformed or legacy env-file entries fail with a useful

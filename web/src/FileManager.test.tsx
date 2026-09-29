@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { FileManager } from "./FileManager";
@@ -70,5 +70,91 @@ it("offers original downloads only while the stored source exists", async () => 
   expect(download).toHaveAttribute("download", "notes.txt");
   expect(
     screen.queryByRole("link", { name: "Download original old-video.mp4" }),
+  ).not.toBeInTheDocument();
+});
+
+
+it("offers downloads only for video artifacts that actually exist", async () => {
+  const file = {
+    id: "video / ready",
+    filename: "recording.mp4",
+    mime: "video/mp4",
+    bytes: 42,
+    uploaded_at: "2026-09-28T00:00:00+00:00",
+    kind: "video",
+    chunks: 2,
+    status: "ready",
+    failure_reason: "",
+    duration_s: 10,
+    summary: "A legacy listing summary remains visible.",
+    source_freed_at: "2026-09-28T00:00:00+00:00",
+    leased_at: "",
+    source_url: "",
+    transcript_source: "whisper",
+    fetch_downloaded_bytes: 0,
+    fetch_total_bytes: 0,
+  };
+  const listing = {
+    items: [file],
+    total_bytes: 0,
+    server_time: "2026-09-28T00:01:00+00:00",
+    limits: {
+      max_upload_bytes: 50_000_000,
+      max_user_bytes: 1_000_000_000,
+      allowed_extensions: [".mp4"],
+      chunked_max_bytes: 2_000_000_000,
+      part_size: 8_000_000,
+      fetch_hosts: [],
+      max_images_per_turn: 4,
+    },
+  };
+  const fetchMock = vi.fn().mockImplementation((path: string) => {
+    const payload = path === "/api/files"
+      ? listing
+      : path.includes("/artifacts/transcript?")
+        ? {
+            id: file.id,
+            artifact: "transcript",
+            text: "Transcript text.",
+            offset: 0,
+            next_offset: null,
+            total_chars: 16,
+          }
+        : {
+            id: file.id,
+            artifact: path.includes("/artifacts/visual?") ? "visual" : "summary",
+            text: "",
+            offset: 0,
+            next_offset: null,
+            total_chars: 0,
+          };
+    return Promise.resolve(new Response(JSON.stringify(payload), {
+      headers: { "Content-Type": "application/json" },
+    }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<FileManager onClose={() => undefined} />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "View video text for recording.mp4" }));
+  expect(await screen.findByText("Only the brief listing summary is available for this video.")).toBeVisible();
+  expect(
+    screen.queryByRole("link", { name: "Download summary for recording.mp4" }),
+  ).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Transcript" }));
+  const download = await screen.findByRole("link", {
+    name: "Download transcript for recording.mp4",
+  });
+  expect(download).toHaveAttribute(
+    "href",
+    "/api/files/video%20%2F%20ready/artifacts/transcript/download",
+  );
+  expect(download).toHaveAttribute("download", "");
+
+  fireEvent.click(screen.getByRole("button", { name: "Visual notes" }));
+  expect(await screen.findByText("No visual notes are available for this video.")).toBeVisible();
+  expect(
+    screen.queryByRole("link", { name: "Download visual notes for recording.mp4" }),
   ).not.toBeInTheDocument();
 });

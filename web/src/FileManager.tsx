@@ -4,6 +4,7 @@ import {
   deleteFile,
   fetchVideoFromUrl,
   getFileArtifact,
+  getFileArtifactDownloadUrl,
   getFileDownloadUrl,
   getFileImageUrl,
   getFileText,
@@ -499,6 +500,11 @@ export function FileManager({ onClose }: { onClose: () => void }) {
 
 const artifactKinds: AudreyFileArtifactKind[] = ["summary", "transcript", "visual"];
 
+function artifactLabel(artifact: AudreyFileArtifactKind): string {
+  if (artifact === "visual") return "Visual notes";
+  return artifact[0].toUpperCase() + artifact.slice(1);
+}
+
 function DocumentTextViewer({ file, onBack }: { file: AudreyFile; onBack: () => void }) {
   return (
     <div className="file-artifact-viewer">
@@ -560,7 +566,7 @@ function VideoArtifactViewer({ file, onBack }: { file: AudreyFile; onBack: () =>
             type="button"
             aria-pressed={artifact === kind}
             onClick={() => setArtifact(kind)}
-          >{kind === "visual" ? "Visual notes" : kind[0].toUpperCase() + kind.slice(1)}</button>
+          >{artifactLabel(kind)}</button>
         ))}
       </div>
       <ArtifactPage key={file.id + ":" + artifact} file={file} artifact={artifact} />
@@ -610,11 +616,22 @@ function ArtifactPage({ file, artifact }: { file: AudreyFile; artifact?: AudreyF
 
   const fallbackSummary = artifact === "summary" && page?.total_chars === 0 && file.summary;
   const visibleText = fallbackSummary ? file.summary : page?.text;
+  const downloadLabel = artifact && page && page.total_chars > 0
+    ? artifactLabel(artifact)
+    : "";
 
   return (
     <div className="file-artifact-body" aria-live="polite">
       {loading && !page ? <p role="status">Loading {artifact ?? "document text"}…</p> : null}
       {error ? <p className="file-manager-error" role="alert">{error}</p> : null}
+      {artifact && downloadLabel ? (
+        <a
+          className="file-artifact-download"
+          href={getFileArtifactDownloadUrl(file.id, artifact)}
+          download
+          aria-label={`Download ${downloadLabel.toLowerCase()} for ${file.filename}`}
+        >Download {downloadLabel}</a>
+      ) : null}
       {visibleText ? <div className="file-artifact-text">{visibleText}</div> : null}
       {!loading && !error && !visibleText ? (
         <p>{artifact === "visual"

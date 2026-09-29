@@ -3844,13 +3844,23 @@ a:focus-visible {
 }
 
 .file-artifact-heading > button,
-.file-artifact-body > button {
+.file-artifact-body > button,
+.file-artifact-download {
   flex: none;
   padding: 0.45rem 0.7rem;
   border: 1px solid var(--border);
   border-radius: 0.5rem;
   background: var(--input-surface);
   color: var(--accent);
+}
+
+.file-artifact-download {
+  align-self: flex-end;
+  text-decoration: none;
+}
+
+.file-artifact-download:hover {
+  border-color: var(--border-strong);
 }
 
 .file-artifact-heading > div {

@@ -787,6 +787,13 @@ export function getFileArtifact(
   );
 }
 
+export function getFileArtifactDownloadUrl(
+  fileId: string,
+  artifact: AudreyFileArtifactKind,
+): string {
+  return `/api/files/${encodeURIComponent(fileId)}/artifacts/${artifact}/download`;
+}
+
 export function getFileText(fileId: string, offset = 0): Promise<AudreyFileText> {
   return apiJson<AudreyFileText>(
     `/api/files/${encodeURIComponent(fileId)}/text?offset=${offset}`,
