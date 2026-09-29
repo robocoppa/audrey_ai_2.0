@@ -170,7 +170,7 @@ Hermetic:
 ```
 .venv/bin/pytest tests/ -q          # 432 passing (28 new)
 .venv/bin/ruff check .              # clean on touched files
-.venv/bin/python scripts/check-lesson-links.py src/audrey/routes/openai.py
+.venv/bin/python scripts/lessons/check-lesson-links.py src/audrey/routes/openai.py
                                     # zero confident drift
 ```
 

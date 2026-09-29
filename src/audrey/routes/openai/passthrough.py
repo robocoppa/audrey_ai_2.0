@@ -110,7 +110,7 @@ async def _passthrough_think(
     no thinking knob, so every passthrough turn ran in Ollama's `omitted`
     state — whatever each model's template decides. That is defensible for
     serving and useless for comparing: the local bake-off
-    (`scripts/eval_prompts_local_models.json`) reaches its models only through
+    (`evals/cases/eval_prompts_local_models.json`) reaches its models only through
     this route, and on 2026-08-12 all three of its candidates declared
     `thinking`, so their scores were being compared at three different and
     unchosen reasoning budgets.

@@ -207,7 +207,7 @@ def _failure_disclosure(n_failed: int, names: list[str]) -> str:
 # A standalone horizontal-rule line (---, ----, …) inside a draft. Replaced
 # before rendering so a draft's own hr can't reproduce the banner/answer
 # separator ("\n\n---\n\n"). Defence-in-depth: the eval now splits the answer
-# body on the FIRST separator (see `_answer_body` in scripts/eval_research.py),
+# body on the FIRST separator (see `_answer_body` in evals/eval_research.py),
 # which is already immune to in-prose rules — but neutralizing hr lines here
 # keeps the debug block self-contained (a stray draft rule won't render as a
 # page-wide divider) and holds even if a consumer splits differently. Table

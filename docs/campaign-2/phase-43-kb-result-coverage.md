@@ -138,7 +138,7 @@ load-bearing rather than an optimisation.
 
 ### Stage 2 — verify
 
-Add a bleed case to `scripts/eval_prompts_video.json` that asserts on
+Add a bleed case to `evals/cases/eval_prompts_video.json` that asserts on
 **attribution, not coverage**. The run-3 failure produced correct headings with
 wrong contents, so a case checking only "mentions both files" passes it
 cleanly — which is exactly how it survived. The case has to be readable as

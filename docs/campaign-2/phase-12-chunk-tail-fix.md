@@ -9,7 +9,7 @@ tail chunks that waste an embed call + a Qdrant point.
 ## Measurement → fix → re-measurement loop
 
 The Tier 2 measurement work shipped 2026-05-26
-(`scripts/measure_chunk_tails.py`) ran against the production
+(`scripts/probes/measure_chunk_tails.py`) ran against the production
 `/datasets` corpus:
 
   - 5640 files scanned, 1717 multi-chunk (tail-eligible).
@@ -118,7 +118,7 @@ Same command as the original measurement (still needs `docker cp`
 since `scripts/` isn't copied into the image):
 
 ```bash
-docker cp scripts/measure_chunk_tails.py audrey-ai:/tmp/measure_chunk_tails.py
+docker cp scripts/probes/measure_chunk_tails.py audrey-ai:/tmp/measure_chunk_tails.py
 docker exec audrey-ai python /tmp/measure_chunk_tails.py /datasets
 ```
 
@@ -177,6 +177,6 @@ correctness reasons.
 
 One Tier 2 measurement item remains: synth-draft size analysis
 (the one-line `log.info` instrumentation shipped 2026-05-26 in
-`pipeline/synthesize.py` + `scripts/analyze_draft_sizes.py`).
+`pipeline/synthesize.py` + `scripts/analysis/analyze_draft_sizes.py`).
 Needs production traffic to accumulate before the analyze script
 has signal. Re-evaluate in a week or so.

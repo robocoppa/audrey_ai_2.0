@@ -94,7 +94,7 @@ rewrite. Run, in commit 2:
 
 ```
 DOCS_GLOB="docs/lesson-ai/lesson-*.md" \
-  .venv/bin/python scripts/check-lesson-links.py
+  .venv/bin/python scripts/lessons/check-lesson-links.py
 ```
 
 Apply the corrected lines for identifier-labelled cites (the checker prints

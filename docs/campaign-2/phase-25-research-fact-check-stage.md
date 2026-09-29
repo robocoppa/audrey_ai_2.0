@@ -12,7 +12,7 @@ research (fan-out) → verify → FACT-CHECK (web lookups) → write
 ```
 
 > Follow-on to Phase 24 (`audrey_research`). Motivated by the 2026-06-26 eval
-> (`docs/testing/2026-06-26-accuracy-stress-*`): the mode produced good answers
+> (`evals/results/2026-06-26-accuracy-stress-*`): the mode produced good answers
 > but shipped subtle dated errors fluently (e.g. DeepSeek-R1 "Jan 26" vs. the
 > official Jan 20; "async-std deprecated in 2024" vs. the 2025 visibility push).
 > The just-stabilized verifier was **left untouched** — this is an additive
@@ -94,9 +94,9 @@ docker compose logs -f audrey-ai
 This is judged by the testing protocol, not by eye. VPN'd into the LAN:
 
 ```bash
-.venv/bin/python scripts/eval_research.py \
-    --cases scripts/eval_prompts_protocol.json \
-    --save-file docs/testing/$(date +%F)-factcheck-stage-answers.md
+.venv/bin/python evals/eval_research.py \
+    --cases evals/cases/eval_prompts_protocol.json \
+    --save-file evals/results/$(date +%F)-factcheck-stage-answers.md
 ```
 
 Then **diff against the 2026-06-26 baseline** and check the specific claims the

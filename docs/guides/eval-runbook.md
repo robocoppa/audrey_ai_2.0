@@ -35,7 +35,7 @@ n=1 cannot resolve this suite's ±5 swing.
 ```bash
 MODEL=audrey_auto CASES=eval_prompts_video.json LABEL=paging \
   ARGS='--only video-long-transcript-paging --repeat 5' \
-  nohup scripts/eval-onbox.sh > testing-out/paging.log 2>&1 &
+  nohup evals/eval-onbox.sh > testing-out/paging.log 2>&1 &
 ```
 
 ### Suites, and roughly how long
@@ -67,48 +67,48 @@ with `0 executed` measures shape, not accuracy.
 ```bash
 # video
 nohup env MODEL=audrey_auto CASES=eval_prompts_video.json LABEL=video \
-  scripts/eval-onbox.sh > testing-out/last-video-run.log 2>&1 &
+  evals/eval-onbox.sh > testing-out/last-video-run.log 2>&1 &
 
 # coding — plumbing gate, then the tier that actually discriminates
 nohup env MODEL=audrey_deep CASES=eval_prompts_code.json LABEL=code \
-  scripts/eval-onbox.sh > testing-out/last-code-run.log 2>&1 &
+  evals/eval-onbox.sh > testing-out/last-code-run.log 2>&1 &
 nohup env MODEL=audrey_deep CASES=eval_prompts_code_hard.json LABEL=code-hard \
-  scripts/eval-onbox.sh > testing-out/last-code-hard-run.log 2>&1 &
+  evals/eval-onbox.sh > testing-out/last-code-hard-run.log 2>&1 &
 
 # topics (reasoning / science / writing / general knowledge)
 nohup env MODEL=audrey_deep CASES=eval_prompts_topics.json LABEL=topics \
-  scripts/eval-onbox.sh > testing-out/last-topics-run.log 2>&1 &
+  evals/eval-onbox.sh > testing-out/last-topics-run.log 2>&1 &
 
 # research protocol (the default)
 nohup env MODEL=audrey_research CASES=eval_prompts_protocol.json LABEL=protocol \
-  scripts/eval-onbox.sh > testing-out/last-research-run.log 2>&1 &
+  evals/eval-onbox.sh > testing-out/last-research-run.log 2>&1 &
 ```
 
 ### Per-model sweeps
 
 `MODELS=` runs **every case once per model** and writes a results JSON beside
-the answers file — feed that to `scripts/eval_compare.py`.
+the answers file — feed that to `evals/eval_compare.py`.
 
 ```bash
 # local bake-off
 nohup env CASES=eval_prompts_local_models.json LABEL=local-bakeoff \
   MODELS='audrey_passthrough/nemotron-3.5-lightning:latest,audrey_passthrough/muse-glimmer:latest,audrey_passthrough/qwen3.8:latest' \
-  scripts/eval-onbox.sh > testing-out/last-run.log 2>&1 &
+  evals/eval-onbox.sh > testing-out/last-run.log 2>&1 &
 
 # coding lineup
 nohup env CASES=eval_prompts_code_models.json LABEL=code-sweep \
   MODELS='audrey_passthrough/qwen3.8:latest,audrey_passthrough/nemotron-3.5-lightning:latest,audrey_passthrough/kimi-k2.7-code:cloud,audrey_passthrough/deepseek-v4-pro:cloud' \
-  scripts/eval-onbox.sh > testing-out/last-code-sweep.log 2>&1 &
+  evals/eval-onbox.sh > testing-out/last-code-sweep.log 2>&1 &
 
 # general lineup A-B
 nohup env CASES=eval_prompts_models_ab.json LABEL=models-ab \
   MODELS='audrey_passthrough/qwen3.8:latest,audrey_passthrough/muse-glimmer:latest,audrey_passthrough/deepseek-v4-pro:cloud,audrey_passthrough/kimi-k2.6:cloud,audrey_passthrough/glm-5.2:cloud' \
-  scripts/eval-onbox.sh > testing-out/last-models-ab-run.log 2>&1 &
+  evals/eval-onbox.sh > testing-out/last-models-ab-run.log 2>&1 &
 
 # virtual-model A-B (task role on vs off)
 nohup env MODEL=audrey_video CASES=eval_prompts_video.json LABEL=video-ab \
   MODELS='audrey_video,audrey_auto' \
-  scripts/eval-onbox.sh > testing-out/last-video-ab-run.log 2>&1 &
+  evals/eval-onbox.sh > testing-out/last-video-ab-run.log 2>&1 &
 ```
 
 ⚠️ A sweep multiplies cloud spend by the model count. Cloud credits are a hard
@@ -132,19 +132,19 @@ M=audrey_passthrough/<model>:latest
 # 5 cases, ALL executed — LRU-with-TTL, async debugging, a tokenizer,
 # topological sort, duration parsing. The tier that discriminates.
 nohup env CASES=eval_prompts_code_hard_models.json LABEL=cap-hard \
-  MODELS="$M" scripts/eval-onbox.sh > testing-out/cap-hard.log 2>&1 &
+  MODELS="$M" evals/eval-onbox.sh > testing-out/cap-hard.log 2>&1 &
 
 # 6 cases, ALL executed — LRU cache, merge intervals, two debugging cases,
 # word frequency, flatten. Broader and easier; separates "cannot code" from
 # "cannot do the hard ones".
 nohup env CASES=eval_prompts_code_models.json LABEL=cap-code \
-  MODELS="$M" scripts/eval-onbox.sh > testing-out/cap-code.log 2>&1 &
+  MODELS="$M" evals/eval-onbox.sh > testing-out/cap-code.log 2>&1 &
 
 # 9 cases — reasoning, science explanation, writing, general knowledge.
 # Only 1 executed, so the score is a floor: it catches wandering and
 # fabrication, not weak prose. ▶ READ THE ANSWERS FILE for these.
 nohup env CASES=eval_prompts_models_ab.json LABEL=cap-ab \
-  MODELS="$M" scripts/eval-onbox.sh > testing-out/cap-ab.log 2>&1 &
+  MODELS="$M" evals/eval-onbox.sh > testing-out/cap-ab.log 2>&1 &
 ```
 
 Then the same three against whatever the candidate would displace — a score
@@ -154,7 +154,7 @@ sweep:
 ```bash
 nohup env CASES=eval_prompts_code_hard_models.json LABEL=cap-hard-base \
   MODELS='audrey_passthrough/qwen3.8:latest,audrey_passthrough/nemotron-3.5-lightning:latest' \
-  scripts/eval-onbox.sh > testing-out/cap-hard-base.log 2>&1 &
+  evals/eval-onbox.sh > testing-out/cap-hard-base.log 2>&1 &
 ```
 
 ⚠️ **A model that cannot be resident gets its OWN run, never a sweep.**
@@ -183,11 +183,11 @@ co-reside with either — it gets its own run, per the rule above.
 nohup bash -c '
   CASES=eval_prompts_code_hard_models.json LABEL=quant-mtp ARGS="--repeat 5" \
     MODELS="audrey_passthrough/qwen3.8:latest,audrey_passthrough/qwen3.8:27b-mtp-q4_K_M" \
-    scripts/eval-onbox.sh
+    evals/eval-onbox.sh
 
   CASES=eval_prompts_code_hard_models.json LABEL=quant-q8 ARGS="--repeat 5" \
     MODELS="audrey_passthrough/qwen3.8:27b-mtp-q8_0" \
-    scripts/eval-onbox.sh
+    evals/eval-onbox.sh
 ' > testing-out/quant-bakeoff.log 2>&1 &
 ```
 
@@ -291,12 +291,12 @@ setsid nohup bash -c '
   THINK=off CASES=eval_prompts_code_hard_models.json LABEL=q4-thinkoff \
     ARGS="--repeat 5" \
     MODELS="audrey_passthrough/qwen3.8:latest,audrey_passthrough/qwen3.8:27b-mtp-q4_K_M" \
-    scripts/eval-onbox.sh
+    evals/eval-onbox.sh
 
   THINK=off CASES=eval_prompts_code_hard_models.json LABEL=q8-thinkoff \
     ARGS="--repeat 5" \
     MODELS="audrey_passthrough/qwen3.8:27b-mtp-q8_0" \
-    scripts/eval-onbox.sh
+    evals/eval-onbox.sh
 ' > testing-out/thinkoff-bakeoff.log 2>&1 < /dev/null &
 ```
 
@@ -330,7 +330,7 @@ fails identically:
 1. `passthrough.allowed_models` in `config.yaml` — the only gate
    (`routes/openai/passthrough.py`). No `model_registry` entry is needed until
    it earns a production role.
-2. `scripts/pull-models.sh` — pinned by
+2. `scripts/ops/pull-models.sh` — pinned by
    `test_every_model_the_config_names_is_pulled_by_the_script`, so a rebuilt box
    cannot come up missing a name the config mentions.
 3. **`docker restart open-webui`** after `up -d --build audrey`. OWUI reads
@@ -430,7 +430,7 @@ not built`. Plain `docker image prune -f` (dangling only) is safe.
 docker compose --profile eval build audrey-eval   # only when the IMAGE changes
 ```
 
-The harness and case files are **mounted from `./scripts` at run time** — edit
+The harness and case files are **mounted from `./evals` at run time** — edit
 or `git pull` them and the next run picks them up, no rebuild. But that also
 means a harness change on the laptop does nothing until it is **committed,
 pushed and pulled** on the box.
@@ -561,7 +561,7 @@ to `python3`.
 On the LAPTOP, against results you have pulled down:
 
 ```bash
-uv run scripts/eval_compare.py testing-out/<a>-results.json testing-out/<b>-results.json
+uv run evals/eval_compare.py testing-out/<a>-results.json testing-out/<b>-results.json
 ```
 
 ⚠️ **On the BOX there is no `python3`**, so it has to run inside a container.
@@ -570,7 +570,7 @@ The eval image has Python and both directories are already bind-mountable:
 ```bash
 docker run --rm --entrypoint sh \
   -v /mnt/user/appdata/audrey_ai_2.0/testing-out:/out \
-  -v /mnt/user/appdata/audrey_ai_2.0/scripts:/eval:ro \
+  -v /mnt/user/appdata/audrey_ai_2.0/evals:/eval:ro \
   audrey-eval:latest -c \
   'python /eval/eval_compare.py /out/*-lag-s-hard-*-results.json /out/*-base-hard-*-results.json'
 ```

@@ -1,4 +1,4 @@
-"""Hermetic tests for the pure helpers in scripts/eval_research.py.
+"""Hermetic tests for the pure helpers in evals/eval_research.py.
 
 The eval script talks to a live stack, so most of it can't be unit-tested
 offline. But its classification logic — route inference from the banner family,
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "eval_research.py"
+_SCRIPT = Path(__file__).resolve().parent.parent / "evals" / "eval_research.py"
 _spec = importlib.util.spec_from_file_location("eval_research", _SCRIPT)
 assert _spec and _spec.loader
 eval_research = importlib.util.module_from_spec(_spec)
@@ -411,7 +411,7 @@ class TestTheCasesFilesAgreeWithHowModelSelectionWorks:
     that contract so the two families cannot quietly converge.
     """
 
-    _SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+    _SCRIPTS = Path(__file__).resolve().parent.parent / "evals" / "cases"
 
     def _cases(self, name):
         import json
@@ -420,7 +420,7 @@ class TestTheCasesFilesAgreeWithHowModelSelectionWorks:
 
     @pytest.mark.parametrize("name", [
         p.name for p in sorted(
-            (Path(__file__).resolve().parent.parent / "scripts").glob("eval_prompts_*_models.json"))
+            (Path(__file__).resolve().parent.parent / "evals" / "cases").glob("eval_prompts_*_models.json"))
     ])
     def test_a_models_variant_pins_no_model(self, name):
         pinned = [c.get("name") for c in self._cases(name) if c.get("model")]

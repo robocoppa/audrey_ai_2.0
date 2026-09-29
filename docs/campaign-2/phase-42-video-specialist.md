@@ -250,7 +250,7 @@ than sequential A-B-A here: it runs both models per case back to back, so
 stack drift is controlled *within* each case rather than across runs. Run the
 sweep twice anyway to size the noise.
 
-**Cases: `scripts/eval_prompts_video.json`** (8, added 2026-08-08, rewritten
+**Cases: `evals/cases/eval_prompts_video.json`** (8, added 2026-08-08, rewritten
 the same day against the real corpus). Four regression guards, four feature
 tests — that ratio is deliberate, because the realistic failure of this phase
 is the specialist making a working baseline worse, not failing to improve it.
@@ -303,7 +303,7 @@ docker compose up -d --build && docker compose --profile eval build audrey-eval 
 
 nohup env MODEL=audrey_video CASES=eval_prompts_video.json LABEL=video-ab \
   MODELS='audrey_video,audrey_auto' \
-  scripts/eval-onbox.sh \
+  evals/eval-onbox.sh \
   >/mnt/user/appdata/audrey_ai_2.0/testing-out/last-video-ab-run.log 2>&1 &
 ```
 

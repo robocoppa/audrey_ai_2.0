@@ -87,12 +87,12 @@ HTTP 400 with `responses_feature_unsupported`.
 
 Rebuild the Audrey backend, then run from the laptop checkout:
 
-    cd /home/bart/Documents/github/audrey_ai_2.0
+    cd /home/bart/Documents/github/audrey/audrey_ai_2.0
     (
       set -a
       source .env.test.local
       set +a
-      AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python scripts/smoke_responses_api.py
+      AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_responses_api.py
     )
 
 The smoke uses `AUDREY_EVAL_API_KEY` from `.env.test.local`. It makes

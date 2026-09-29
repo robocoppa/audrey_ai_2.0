@@ -34,7 +34,7 @@ artifact people quote from verbatim.
 ## The measurements that prompted this
 
 All taken 2026-08-03 against `nomic-embed-text` on the box, via
-[`scripts/embed_prefix_probe.py`](../../scripts/embed_prefix_probe.py). The
+[`scripts/probes/embed_prefix_probe.py`](../../scripts/probes/embed_prefix_probe.py). The
 query is a six-word phrase that appears **verbatim** in every passage below.
 
 | passage | length | cosine | vs `kb.min_score` 0.53 |
@@ -107,7 +107,7 @@ server accepts the call. It does not:
 ```
 
 Qdrant 1.18.3, confirmed 2026-08-03 by
-[`scripts/bm25_probe.py`](../../scripts/bm25_probe.py). That call only edits
+[`scripts/probes/bm25_probe.py`](../../scripts/probes/bm25_probe.py). That call only edits
 the params of a sparse vector that already exists. qdrant-client's local mode
 refuses identically, for the same reason, so no amount of hermetic testing
 would have caught it either — this needed a real server.
@@ -276,7 +276,7 @@ documents exist is a worse problem than the one being fixed.
   `ingest_transcript_segments`).
 - **[`routes/kb.py`](../../src/audrey/routes/kb.py)** — the hybrid query path,
   RRF merge, and the junk rule that replaces `min_score`.
-- **[`scripts/migrate_bm25.py`](../../scripts/migrate_bm25.py)** — the
+- **[`scripts/ops/migrate_bm25.py`](../../scripts/ops/migrate_bm25.py)** — the
   collection rebuild, since sparse vectors cannot be added in place. Per
   collection: build a scratch collection with sparse config, copy every point
   into it (dense verbatim, sparse computed, payload byte for byte), **verify
@@ -352,8 +352,8 @@ config and never need migrating.
 lists what would be rebuilt and stops.
 
 ```
-.venv/bin/python scripts/migrate_bm25.py --host 192.168.1.11 --dry-run
-.venv/bin/python scripts/migrate_bm25.py --host 192.168.1.11
+.venv/bin/python scripts/ops/migrate_bm25.py --host 192.168.1.11 --dry-run
+.venv/bin/python scripts/ops/migrate_bm25.py --host 192.168.1.11
 ```
 
 **3.** Set `kb.hybrid.enabled: true` in `config.yaml`, push, pull, and

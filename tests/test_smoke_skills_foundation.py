@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
 from typing import Any
 
-from scripts import smoke_skills_foundation as smoke
+_SMOKE_DIR = Path(__file__).resolve().parent / "smoke"
+if str(_SMOKE_DIR) not in sys.path:
+    sys.path.insert(0, str(_SMOKE_DIR))
+
+import smoke_skills_foundation as smoke  # noqa: E402
 
 
 def _ready_counts() -> dict[str, Any]:

@@ -13,7 +13,11 @@ from urllib.request import Request
 
 import pytest
 
-from scripts.smoke_native_auth import SmokeCredentials
+_SMOKE_DIR = Path(__file__).resolve().parent / "smoke"
+if str(_SMOKE_DIR) not in sys.path:
+    sys.path.insert(0, str(_SMOKE_DIR))
+
+from smoke_native_auth import SmokeCredentials  # noqa: E402
 
 _SCRIPTS = (
     "smoke_native_auth_cutover",
@@ -91,7 +95,7 @@ def test_every_native_smoke_uses_access_for_requests(
     monkeypatch,
     module_name,
 ):
-    smoke = importlib.import_module(f"scripts.{module_name}")
+    smoke = importlib.import_module(module_name)
     credentials = SmokeCredentials("user-jwt", "admin-jwt", True, True)
     monkeypatch.setattr(smoke, "_CREDENTIALS", credentials)
     monkeypatch.setattr(smoke, "USER_TOKEN", credentials.user)
@@ -133,7 +137,7 @@ def test_direct_script_execution_still_resolves_helper(tmp_path):
         env.pop(key, None)
     root = Path(__file__).resolve().parent.parent
     result = subprocess.run(
-        [sys.executable, str(root / "scripts" / "smoke_native_ui.py")],
+        [sys.executable, str(root / "tests" / "smoke" / "smoke_native_ui.py")],
         cwd=root,
         env=env,
         text=True,
@@ -154,7 +158,7 @@ def test_every_native_smoke_refuses_legacy_owui_credentials(module_name):
     root = Path(__file__).resolve().parent.parent
 
     result = subprocess.run(
-        [sys.executable, str(root / "scripts" / f"{module_name}.py")],
+        [sys.executable, str(root / "tests" / "smoke" / f"{module_name}.py")],
         cwd=root,
         env=env,
         text=True,

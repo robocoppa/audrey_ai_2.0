@@ -1,4 +1,4 @@
-"""Smoke tests for scripts/check-lesson-links.py.
+"""Smoke tests for scripts/lessons/check-lesson-links.py.
 
 Builds synthetic lesson/source fixtures in `tmp_path` and runs the
 checker via subprocess. Each test pins one behavior end-to-end:
@@ -16,7 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "check-lesson-links.py"
+SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "lessons" / "check-lesson-links.py"
 
 
 # ─── Fixture helpers ──────────────────────────────────────────────────

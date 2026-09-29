@@ -233,7 +233,7 @@ transcript, and until this change it was absent from the artifact completely.
 ### The prompt sweep — `KEYFRAME_SYSTEM` is the right prompt (2026-08-04)
 
 Seven prompt variants, the pipeline's four real keyframes, two samples each.
-`scripts/vision_probe.py` runs it. Totals across all four frames, against five
+`scripts/probes/vision_probe.py` runs it. Totals across all four frames, against five
 known on-screen strings taken from the ingest's own `frames.txt`:
 
 | variant | tokens | coverage | |

@@ -171,7 +171,7 @@ async def router_classify(
 
     `response_format` forwards Ollama's structured-output field (pass
     `ROUTER_SCHEMA`). ⚠️ **Defaults to None, so production behaviour is
-    unchanged** — this exists so `scripts/router_probe.py` can measure a
+    unchanged** — this exists so `scripts/probes/router_probe.py` can measure a
     candidate WITH and WITHOUT schema pinning on the same model before anyone
     puts it on the hot path.
 

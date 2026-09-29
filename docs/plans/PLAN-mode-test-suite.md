@@ -2,7 +2,7 @@
 
 Goal: extend the research-mode eval protocol into a **full testing suite for
 all Audrey modes**. We already have a working, diffable harness
-(`scripts/eval_research.py` + a case JSON + paired `answers.md`/`report.md`).
+(`evals/eval_research.py` + a case JSON + paired `answers.md`/`report.md`).
 This plan adds **deep-mode** and **fast-path** protocols in the same shape, plus
 the small script additions the new metrics need.
 
@@ -12,7 +12,7 @@ This is a **plan for approval** — no case files or script edits are written ye
 
 ## 1. What we already have (and reuse unchanged)
 
-- `scripts/eval_research.py` — streams cases against the live stack over OWUI,
+- `evals/eval_research.py` — streams cases against the live stack over OWUI,
   runs structural checks, prints + saves answers, exits non-zero on any failure.
   It is **already mode-agnostic**: `_BANNER_SETS` wires `audrey_deep` /
   `audrey_cloud` / `audrey_local` to the deep banners
@@ -136,7 +136,7 @@ which path `audrey_auto` actually took.
 
 ## 4. Script additions (the only code in this plan)
 
-Modest, additive edits to `scripts/eval_research.py` — they don't change
+Modest, additive edits to `evals/eval_research.py` — they don't change
 existing behavior (the new fields are opt-in per case):
 
 1. **Latency + TTFT capture.** `_post_stream` already iterates the SSE stream;
@@ -175,7 +175,7 @@ scripts/
   eval_prompts_protocol.json    # research (exists)
   eval_prompts_deep.json        # NEW — deep cases
   eval_prompts_fast.json        # NEW — fast + auto cases
-docs/testing/
+evals/results/
   <date>-research-*.md          # exists (the runs we just did)
   <date>-deep-answers.md / -report.md      # per deep run
   <date>-fast-answers.md  / -report.md      # per fast run
@@ -187,16 +187,16 @@ docs/testing/
 **Run commands** (after build):
 ```
 # deep
-.venv/bin/python scripts/eval_research.py --model audrey_deep \
-  --cases scripts/eval_prompts_deep.json \
-  --save-file docs/testing/<date>-deep-answers.md
+.venv/bin/python evals/eval_research.py --model audrey_deep \
+  --cases evals/cases/eval_prompts_deep.json \
+  --save-file evals/results/<date>-deep-answers.md
 # fast + auto
-.venv/bin/python scripts/eval_research.py --model audrey_fast \
-  --cases scripts/eval_prompts_fast.json \
-  --save-file docs/testing/<date>-fast-answers.md
+.venv/bin/python evals/eval_research.py --model audrey_fast \
+  --cases evals/cases/eval_prompts_fast.json \
+  --save-file evals/results/<date>-fast-answers.md
 ```
 
-A future `scripts/run_all_evals.sh` could chain research+deep+fast into a dated
+A future `evals/run_all_evals.sh` could chain research+deep+fast into a dated
 suite directory — offered, not in this plan's scope.
 
 ---
@@ -219,7 +219,7 @@ suite directory — offered, not in this plan's scope.
    extend the hermetic unit tests for the new pure helpers.
 2. `eval_prompts_deep.json` (§2 taxonomy, cross-mode anchors reused verbatim).
 3. `eval_prompts_fast.json` (§3 taxonomy).
-4. `docs/testing/README.md` index.
+4. `evals/README.md` index.
 5. First real runs of each → establish the deep + fast **baselines** (the files
    every future run diffs against), one report each.
 

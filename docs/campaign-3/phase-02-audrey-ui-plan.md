@@ -313,7 +313,7 @@ tools with balanced lifecycle events, mapped the terminal to native
 through unchanged `/v1`, found no typed-event leakage, deleted its archive and
 canonical test state, and returned every repair queue to `ready`.
 
-The final live gate is packaged in `scripts/smoke_native_tool_events.py`
+The final live gate is packaged in `tests/smoke/smoke_native_tool_events.py`
 instead of a transient shell sequence. It creates one disposable test-owned
 conversation, cancels a native Deep run after observing a real active tool,
 checks balanced native and AG-UI cancellation events, proves an unchanged
@@ -348,7 +348,7 @@ historical import/migration in Milestone 2E owns that older-data boundary.
 
 The full hermetic suite is 2,738 passing tests with the existing FastAPI
 deprecation warning. Changed-file ruff, compilation, and diff checks are clean.
-`scripts/smoke_native_chat_projection.py` packages the live gate: It creates
+`tests/smoke/smoke_native_chat_projection.py` packages the live gate: It creates
 one disposable test-owned native turn, verifies the two projected messages,
 replays all canonical receipts without duplication, deletes only that native
 conversation, verifies its projection disappears, and waits for repair to
@@ -698,7 +698,7 @@ expiry. All 2,745 hermetic backend tests pass; scoped ruff and compilation are
 clean. Generated assets are explicit Hatch wheel artifacts despite their
 gitignored build directory, production source maps are disabled, and the image
 build asserts that the installed package contains the native shell.
-`scripts/smoke_native_ui.py` packages the two-user Unraid gate. The deployed
+`tests/smoke/smoke_native_ui.py` packages the two-user Unraid gate. The deployed
 gate served the 449-byte shell and hashed entry asset with CSP, resolved two
 different Audrey users, returned `404` for both cross-owner read and run,
 completed one real Fast AG-UI turn with two matching canonical messages, then
@@ -719,7 +719,7 @@ and six Chromium paths covering the original run/auth behavior plus complete
 conversation lifecycle, pagination, and durable mode switching. Typecheck,
 lint, scoped ruff, compilation, production build, wheel contents, lockfile, and
 diff checks are clean; the lesson scan has zero broken links. The extended
-`scripts/smoke_native_ui.py` also passed on Unraid: the deployed native asset
+`tests/smoke/smoke_native_ui.py` also passed on Unraid: the deployed native asset
 and CSP checks were clean, two identities remained isolated, a real Fast run
 persisted its canonical messages, rename and literal `%_` title search worked,
 archive/restore completed, and deletion cleanup returned repair to `ready`.
@@ -735,7 +735,7 @@ enforcement, and recreates the immutable-terminal trigger. Native Video now
 launches `audrey_video`, and the browser lists it alongside the other modes.
 
 A permanent invariant requires the native mode map to cover every published
-virtual model. `scripts/smoke_native_modes.py` is the repeatable Unraid gate: it
+virtual model. `tests/smoke/smoke_native_modes.py` is the repeatable Unraid gate: it
 creates one disposable conversation per mode, runs all seven through the same
 native AG-UI boundary used by the browser, verifies durable mode/model/message
 state, then deletes canonical and archive records and drains repair once. The
@@ -926,7 +926,7 @@ the composer outside the initial browser viewport. All 2,767 backend tests,
 eight Vitest contracts, and twelve production-preview Chromium workflows pass;
 typecheck, lint, scoped ruff, compilation, production build, and diff checks are
 clean. The lesson scan has zero broken links; its existing drift backlog remains
-deferred by user direction. `scripts/smoke_native_files.py` packages the live
+deferred by user direction. `tests/smoke/smoke_native_files.py` packages the live
 gate with disposable randomized data: It proves two-owner isolation, upload and
 safe listing, a tool-grounded attached turn, exact canonical text and metadata,
 snapshot survival after source deletion, and repair cleanup. Deployment and
@@ -955,7 +955,7 @@ letting the selected model see it. All 2,773 backend tests, nine Vitest
 contracts, and fourteen production-preview Chromium workflows pass; scoped
 ruff, compilation, typecheck, lint, and production build are clean. The lesson
 scan has zero broken links; its deferred 99 hard and 162 advisory drifts remain
-out of scope by user direction. `scripts/smoke_native_preferences.py` packages
+out of scope by user direction. `tests/smoke/smoke_native_preferences.py` packages
 the two-owner live gate, including invalid-timezone atomicity, model-context
 retrieval, canonical persistence, owner isolation, exact preference restoration,
 and repair cleanup.
@@ -1078,7 +1078,7 @@ tester-visible direct model through native AG-UI, verify ordinary-user hiding,
 restore the prior policies/groups, and confirm restart persistence. Slice 2D.5
 is laptop-complete, not yet Unraid-verified.
 
-`scripts/smoke_native_access_models.py` packages the repeatable portion of that
+`tests/smoke/smoke_native_access_models.py` packages the repeatable portion of that
 gate through the standalone proxy. It rejects an admin-owned personal token,
 checks self-disable/demotion safeguards, moves the disposable ordinary account
 through users-only and tester visibility, executes one direct Qwen AG-UI turn,
@@ -1184,7 +1184,7 @@ boundaries. The setting is startup-bound,
 so both cutover and rollback require recreating Audrey, and the effective state
 is named in the startup log.
 
-`scripts/smoke_native_auth_cutover.py` packages the focused live gate. It
+`tests/smoke/smoke_native_auth_cutover.py` packages the focused live gate. It
 requires a real Cloudflare Access application assertion, proves a random legacy
 bearer receives the cutover-specific local `401`, creates a disposable one-day
 Audrey token with both scopes, verifies the same account through `/api/me` and
@@ -1217,7 +1217,7 @@ initial on-box fast eval returned the correct `Canberra.` answer but
 false-failed only the old 20-character heuristic. After the case declared its
 `Canberra` content contract, the corrected on-box run passed 1/1 in 20.2
 seconds with both `contains` and `has_answer` green.
-`scripts/smoke-native-onbox.sh` validates native env files before Docker, and
+`tests/smoke/smoke-native-onbox.sh` validates native env files before Docker, and
 `eval-onbox.sh` prints evaluator diagnostics for nonzero results. The targeted
 public native Deep turn also passed with Open WebUI stopped, settling the 2F.3
 independence proof.

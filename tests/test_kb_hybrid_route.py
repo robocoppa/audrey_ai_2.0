@@ -277,7 +277,7 @@ class TestHybridSearch:
 
 class TestConfigWiring:
     def test_hybrid_is_off_by_default(self):
-        """It must stay off until `scripts/migrate_bm25.py` has run — an
+        """It must stay off until `scripts/ops/migrate_bm25.py` has run — an
         un-migrated collection has no lexical index to search."""
         from audrey.routes.kb import _hybrid_cfg
         request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(

@@ -25,7 +25,7 @@ from audrey.kb.qdrant import SPARSE_NAME
 
 _SPEC = importlib.util.spec_from_file_location(
     "migrate_bm25",
-    Path(__file__).resolve().parent.parent / "scripts" / "migrate_bm25.py",
+    Path(__file__).resolve().parent.parent / "scripts" / "ops" / "migrate_bm25.py",
 )
 assert _SPEC and _SPEC.loader
 migrate_bm25 = importlib.util.module_from_spec(_SPEC)

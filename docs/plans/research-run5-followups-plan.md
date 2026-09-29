@@ -13,7 +13,7 @@
 > Deploy: config picks up via `up -d --force-recreate audrey-ai`
 > (bind-mount stale-handle); S1+S2 need `up -d --build audrey-ai`.
 
-Source: [`docs/testing/2026-07-07-audrey_research-onbox-run2-report.md`](../testing/2026-07-07-audrey_research-onbox-run2-report.md)
+Source: [`evals/results/2026-07-07-audrey_research-onbox-run2-report.md`](../../evals/results/2026-07-07-audrey_research-onbox-run2-report.md)
 (and PROJECT_STATE +62). Run 5 verified the A+B linkage fixes and produced the
 best fact-check run yet; what remains are three issues with known mechanics,
 plus a user policy decision: **relax the per-worker search caps now that Brave

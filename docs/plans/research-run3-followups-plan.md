@@ -1,7 +1,7 @@
 # Plan — research-mode followups from the 2026-07-06 run-3 assessment
 
 > **STATUS (2026-07-07, post-gate):** deployed and **GATE PASSED** — run 4
-> ([report](../testing/2026-07-07-audrey_research-onbox-report.md)): 10/10,
+> ([report](../../evals/results/2026-07-07-audrey_research-onbox-report.md)): 10/10,
 > cap verified ≤4/worker on all 22 worker footers, grounding recovered (8/8
 > Sources), euclid "reportedly" 20→10 with five cases at 1–2, zero exact wall
 > dups, zero compaction refusals, no under-hedging. The two remaining
@@ -18,7 +18,7 @@
 > orphan shape appeared), and the cap→tool-pivot→compaction interaction MET
 > the S5-fallback trigger (prompt nudge to restate facts+URLs per round).
 > Next proposed: src-alias extension + S5 nudge, one gate — see
-> [run-5 report](../testing/2026-07-07-audrey_research-onbox-run2-report.md).**
+> [run-5 report](../../evals/results/2026-07-07-audrey_research-onbox-run2-report.md).**
 > **S1** box greps still pending (pythagoras + library no-verdicts this
 > run). **S4** stays deferred — post-A+B walls look like legitimate
 > uncertainty.
@@ -28,7 +28,7 @@
 > fast 3, factcheck 3 → ≈15 Brave calls/request, down from 30–45. S2/S3/S5/S6
 > shipped with it; mnemonic repair parked.)_
 
-Source: [`docs/testing/2026-07-06-audrey_research-onbox-run3-report.md`](../testing/2026-07-06-audrey_research-onbox-run3-report.md)
+Source: [`evals/results/2026-07-06-audrey_research-onbox-run3-report.md`](../../evals/results/2026-07-06-audrey_research-onbox-run3-report.md)
 (and the +53…+57 PROJECT_STATE entries). Run 3 validated the pipeline and the
 July-6 fixes; what remains are quality issues with known mechanics. This plan
 addresses them in stages, **one lever per eval run** (the +44/+45 lesson:

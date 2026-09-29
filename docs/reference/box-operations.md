@@ -171,18 +171,18 @@ indentation/quoting may differ from what a strict pattern assumes).
 
 ## 7. Evals on the box
 
-`scripts/eval-onbox.sh` runs the eval container detached, waits, and Telegram-pings
+`evals/eval-onbox.sh` runs the eval container detached, waits, and Telegram-pings
 on completion. Output lands in `/mnt/user/appdata/audrey_ai_2.0/testing-out/`.
 Secrets supplied at runtime: Audrey's direct `/v1` URL plus a `compat:full` PAT
 from `${APPDATA}/eval.env`, and Telegram credentials from
 `/mnt/user/appdata/fleet-watchdog/.env`. By default the current checkout's
-`scripts/` directory is mounted read-only into the eval container, so harness
+`evals/` directory is mounted read-only into the eval container, so harness
 and case-file edits do not require rebuilding the image. Rebuild only when the
 eval image itself changes. A nonzero run now prints its evaluator diagnostics
 before reporting the saved artifacts. Detached run pattern:
 ```bash
 nohup env MODEL=audrey_research CASES=<file>.json LABEL=<label> \
-  scripts/eval-onbox.sh \
+  evals/eval-onbox.sh \
   >/mnt/user/appdata/audrey_ai_2.0/testing-out/last-<label>-run.log 2>&1 &
 ```
 
@@ -221,7 +221,7 @@ nohup env MODEL=audrey_research CASES=<file>.json LABEL=<label> \
   `1` — it gives Audrey's gated local runs de-facto exclusivity against the
   ungated co-tenants (OpenClaw, OWUI), and KV cache is allocated per parallel
   slot at load time whether or not the slot is used.
-  - **Diagnostic:** `docker exec -i custom-tools python3 - < scripts/embed_contention_probe.py`
+  - **Diagnostic:** `docker exec -i custom-tools python3 - < scripts/probes/embed_contention_probe.py`
     samples embed latency against Ollama residency. Single hand-timed probes are
     worthless here — three identical back-to-back calls returned 1.01s, 23.82s and
     0.08s. Judge by the distribution and the over-ceiling count, not one reading.

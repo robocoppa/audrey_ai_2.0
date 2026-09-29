@@ -2,13 +2,13 @@
 
 > Authentication details below are historical. Campaign 3 slice 2F.2 moved
 > evals to Audrey's direct `/v1` endpoint with an `aud_pat_…` token. Use
-> `docs/testing/README.md` for the current setup.
+> `evals/README.md` for the current setup.
 
 One small, additive deploy: package the existing eval harness
-(`scripts/eval_research.py`) into a standalone container that runs **on the box's
+(`evals/eval_research.py`) into a standalone container that runs **on the box's
 Docker network**, so a long protocol run no longer dies when the laptop's
 internet drops. No harness code change, no `compose.yaml` change — a
-`Dockerfile.eval` + a secret-safe `docker run` recipe.
+`docker/eval.Dockerfile` + a secret-safe `docker run` recipe.
 
 ## The headline (read first)
 
@@ -42,7 +42,7 @@ just run it from *inside* the box network instead of over the laptop's link.
   hassle the `sk-…` path was chosen to avoid. A2 keeps the durable key while
   still running entirely on the box. Base-url becomes `http://open-webui:8080/api`
   — the internal equivalent of the laptop's `http://192.168.1.11:8080/api`.
-- **Packaging = B — standalone `Dockerfile.eval` + `docker run` recipe**, NOT a
+- **Packaging = B — standalone `docker/eval.Dockerfile` + `docker run` recipe**, NOT a
   `compose.yaml` service. Keeps compose scoped to `audrey-ai` + `custom-tools`
   (memory `project_compose_scope`).
 
@@ -54,17 +54,17 @@ just run it from *inside* the box network instead of over the laptop's link.
 - **Internal service names on `ollama-net`:** `audrey-ai:8000`, `open-webui:8080`
   (Audrey's default `OWUI_URL=http://open-webui:8080` confirms OWUI is
   addressable there). `ollama-net` is an external network.
-- Cases carried by the image: `scripts/eval_prompts{,_protocol,_deep,_fast}.json`.
+- Cases carried by the image: `evals/cases/eval_prompts{,_protocol,_deep,_fast}.json`.
 
 ## Files
 
-- **`Dockerfile.eval`** (NEW, repo root) — `python:3.12-slim`, `pip install
-  httpx`, copies `scripts/eval_research.py` + the prompt JSONs, entrypoint the
+- **`docker/eval.Dockerfile`** (NEW, repo root) — `python:3.12-slim`, `pip install
+  httpx`, copies `evals/eval_research.py` + the prompt JSONs, entrypoint the
   script. No secret baked in.
-- **`docs/testing/README.md`** — add an "eval on the box" section (build +
+- **`evals/README.md`** — add an "eval on the box" section (build +
   `docker run` recipe + read-from-`/out`). The resilient path for long runs; the
   laptop `.venv` path stays for quick `--only` checks.
-- **No change** to `scripts/eval_research.py`, `compose.yaml`, or any app code.
+- **No change** to `evals/eval_research.py`, `compose.yaml`, or any app code.
 
 ## Deploy
 
@@ -73,23 +73,23 @@ lives on the box; the laptop has no `docker`.
 
 ### 1. Build the image
 
-The build needs three files present on the box: `Dockerfile.eval`,
-`scripts/eval_research.py`, and the `scripts/eval_prompts*.json` cases. They
+The build needs three files present on the box: `docker/eval.Dockerfile`,
+`evals/eval_research.py`, and the `evals/cases/eval_prompts*.json` cases. They
 arrive via `git pull` — but only after they're committed on the laptop AND
 pulled onto the box. **The box's repo is separate from the laptop's; nothing
 syncs automatically.**
 
-**1a. Be in the box's repo root.** That's the directory holding `Dockerfile.eval`
-and the `scripts/` folder — currently:
+**1a. Be in the box's repo root.** That's the directory holding `docker/eval.Dockerfile`
+and the `evals/` folder — currently:
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
 ```
 The trailing `.` in the build command is the *build context* — the root Docker is
-allowed to `COPY` from. The Dockerfile's `COPY scripts/eval_research.py …` lines
+allowed to `COPY` from. The Dockerfile's `COPY evals/eval_research.py …` lines
 are written relative to this root, so you must build from the root, not from
-inside `scripts/`.
+inside `evals/`.
 
-**1b. Bring the box's repo up to date.** The `Dockerfile.eval` is committed on
+**1b. Bring the box's repo up to date.** The `docker/eval.Dockerfile` is committed on
 the laptop; the box won't have it until you pull:
 ```bash
 git status          # first: does the box have local uncommitted edits?
@@ -104,7 +104,7 @@ git status          # first: does the box have local uncommitted edits?
   box's `true` across the pull:
   ```bash
   git stash          # set the local edit aside
-  git pull           # bring in Dockerfile.eval + latest
+  git pull           # bring in docker/eval.Dockerfile + latest
   git stash pop      # reapply the hedge_policy edit (resolve a conflict on
                      # line ~239 by hand if git flags one)
   ```
@@ -112,7 +112,7 @@ git status          # first: does the box have local uncommitted edits?
 **1c. Confirm the file is actually there** before building — this catches the
 "nothing to build" failure:
 ```bash
-ls -l Dockerfile.eval          # want: a real ~2 KB file, not "No such file"
+ls -l docker/eval.Dockerfile          # want: a real ~2 KB file, not "No such file"
 ```
 > If the build errors with `failed to read dockerfile … no such file or
 > directory` and the log shows `transferring dockerfile: 2B`, the box simply
@@ -128,11 +128,11 @@ docker compose --profile eval build audrey-eval
   compose doesn't know about `audrey-eval` at all (that's the point — a bare
   `docker compose up -d --build` never touches it, so the eval image never runs
   as a phantom service or gets deleted by a service-oriented prune).
-- It builds from `Dockerfile.eval` with context `.` (both set in the compose
+- It builds from `docker/eval.Dockerfile` with context `.` (both set in the compose
   stanza) and tags the result `audrey-eval:latest` — the name step 4 runs.
 
 The old standalone form still works if you prefer it
-(`docker build -f Dockerfile.eval -t audrey-eval:latest .`) — the compose stanza
+(`docker build -f docker/eval.Dockerfile -t audrey-eval:latest .`) — the compose stanza
 just wraps the same build so "rebuild everything" is one flow:
 ```bash
 docker compose up -d --build \
@@ -196,7 +196,7 @@ docker run -d --name audrey-eval --network ollama-net \
   -v /mnt/user/appdata/audrey_ai_2.0/testing-out:/out \
   audrey-eval:latest \
     --model audrey_research \
-    --cases /eval/eval_prompts_protocol.json \
+    --cases /eval/cases/eval_prompts_protocol.json \
     --save-file /out/2026-07-01-research-onbox-answers.md
 ```
 Flag by flag:
@@ -221,7 +221,7 @@ docker wait audrey-eval                     # blocks until done; prints the exit
 ls -l /mnt/user/appdata/audrey_ai_2.0/testing-out  # the answers .md is here
 docker rm audrey-eval                       # clean up the finished container
 ```
-Copy the answers file back into the repo's `docs/testing/` (on the box, or scp to
+Copy the answers file back into the repo's `evals/results/` (on the box, or scp to
 the laptop) and write the paired report as usual.
 
 ### 5. (Optional) Notify on completion — reuse the fleet-watchdog Telegram bot
@@ -283,7 +283,7 @@ trust boundary, and the key is the real gate on top of it.
    box* — an Unraid-side control (your box login/SSH), not something the
    Dockerfile enforces. Keep box admin access restricted.
 
-**Committable safely:** `Dockerfile.eval`, the recipe, this doc — no secret.
+**Committable safely:** `docker/eval.Dockerfile`, the recipe, this doc — no secret.
 **Never committable:** the `sk-…` key / any `*.env` holding it.
 
 ## Verification
@@ -306,7 +306,7 @@ trust boundary, and the key is the real gate on top of it.
 
 1. Confirm the `open-webui` service name/port on `ollama-net` (Deploy step 3).
 2. Pick the `/out` path (proposed `/mnt/user/appdata/audrey_ai_2.0/testing-out`, or the
-   repo's `docs/testing/` if the repo is checked out on the box).
+   repo's `evals/results/` if the repo is checked out on the box).
 3. Confirm the repo is checked out on the box (so `docker build` has the files),
    else copy the two files over / build on the laptop and load the image.
 

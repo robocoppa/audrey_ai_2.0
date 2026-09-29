@@ -78,7 +78,7 @@ warm/cold cache and varying tool-call patterns.
 
 ```bash
 docker compose logs --since 1h audrey-ai > /tmp/audrey.log
-uv run python scripts/analyze_draft_sizes.py /tmp/audrey.log
+uv run python scripts/analysis/analyze_draft_sizes.py /tmp/audrey.log
 ```
 
 The script's `WHAT TO DO WITH THE OUTPUT` section names the cutoffs.

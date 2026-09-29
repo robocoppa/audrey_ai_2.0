@@ -1,0 +1,63 @@
+# docker/eval.Dockerfile — run the live eval harness ON THE BOX, not the laptop.
+#
+# See docs/campaign-2/phase-27-eval-on-box.md. The harness
+# (evals/eval_research.py) is network-config-driven; running it from a
+# container on `ollama-net` makes a long protocol run immune to the laptop's
+# internet (three runs died to laptop connectivity, 2026-07-01).
+#
+# The harness's ONLY third-party dependency is httpx; everything else is stdlib
+# (its .env loader is hand-rolled — no python-dotenv). So this image is tiny.
+#
+# NO SECRET IS BAKED IN. The Audrey `aud_pat_…` token is passed at run time via a
+# locked-down --env-file (never -e, never COPY'd). Build + run recipe and the
+# full security rationale ("only I can use it") live in the phase-27 doc.
+#
+# Build (on the box) — via the build-only compose service on the `eval` profile:
+#   docker compose --profile eval build audrey-eval
+# (equivalently, standalone: docker build -f docker/eval.Dockerfile -t audrey-eval:latest .)
+#
+# Run (detached, secret-safe — see phase-27 for the env-file setup):
+#   docker run -d --name audrey-eval --network ollama-net \
+#     --env-file /mnt/user/appdata/audrey/eval.env \
+#     -v /mnt/user/appdata/audrey/testing-out:/out \
+#     audrey-eval:latest \
+#       --model audrey_research \
+#       --cases /eval/cases/eval_prompts_protocol.json \
+#       --save-file /out/<date>-research-onbox-answers.md
+
+FROM python:3.12-slim
+
+# Pin httpx (the sole runtime dep). --no-cache-dir keeps the layer lean.
+RUN pip install --no-cache-dir httpx
+
+WORKDIR /eval
+
+# The harness + all case files. eval_research.py resolves --cases by the path
+# you pass at run time, so reference them as /eval/cases/eval_prompts_*.json —
+# the same layout as the repo's evals/, which eval-onbox.sh mounts over /eval.
+COPY evals/eval_research.py /eval/eval_research.py
+
+# ⚠️ A GLOB, deliberately. This was an explicit eleven-file list until
+# 2026-08-08, and a new protocol (`eval_prompts_video.json`) was committed,
+# pulled and rebuilt without being added to it — so the image built clean and
+# the run died on a missing `/eval/eval_prompts_video.json` after the deploy
+# looked correct. Nothing about "rebuild the eval image" prompts you to also
+# edit a COPY list, which is what makes the omission easy and the symptom
+# confusing. Add a case file to evals/cases/ and it is now simply in.
+COPY evals/cases/eval_prompts*.json /eval/cases/
+
+# ⚠️ These COPYs are the FALLBACK, not the normal path. `evals/eval-onbox.sh`
+# mounts the repo's `evals/` over `/eval` at run time (LIVE_SCRIPTS=1,
+# default), so an edited harness or case file is live on the next run with no
+# rebuild. They stay because a self-contained image is worth having — `docker
+# run audrey-eval:latest` works with no repo — and because LIVE_SCRIPTS=0
+# reproduces an old run against the image exactly as it was built.
+#
+# The bake alone was a silent failure: a pulled case file that nobody rebuilt
+# ran the OLD suite and reported a clean pass, with the new checks simply
+# absent. Rebuilt-or-not is invisible in the output; a missing mount is not.
+
+# The script IS the entrypoint; append harness flags after the image name at
+# `docker run` (--model / --cases / --save-file / --only …). Base-url + key
+# come from the mounted --env-file (AUDREY_EVAL_BASE_URL / AUDREY_EVAL_API_KEY).
+ENTRYPOINT ["python", "/eval/eval_research.py"]

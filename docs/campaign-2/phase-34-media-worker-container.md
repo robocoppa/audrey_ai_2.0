@@ -150,7 +150,7 @@ either network. `custom-tools` is untouched.
 Run in order — 0, 1 and 5 are image and topology checks that are cheaper to
 fail before a real job is in flight. You need a `pending` video; if the queue
 is empty, requeue one with
-`python scripts/stub_media_worker.py --requeue <file_id>`.
+`python tests/smoke/stub_media_worker.py --requeue <file_id>`.
 
 **0. ffmpeg is present.**
 

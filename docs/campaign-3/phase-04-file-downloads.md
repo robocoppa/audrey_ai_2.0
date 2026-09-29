@@ -66,12 +66,12 @@ a ranged download, checks that a second Audrey account receives 404, deletes
 the upload, and drains cleanup through the existing repair endpoint.
 
 ```bash
-cd /home/bart/Documents/github/audrey_ai_2.0
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
 (
   set -a
   source .env.test.local
   set +a
-  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python scripts/smoke_file_download.py
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_file_download.py
 )
 ```
 
@@ -126,12 +126,12 @@ After deploying the backend and native UI, run the read-only smoke from the
 laptop checkout:
 
 ```bash
-cd /home/bart/Documents/github/audrey_ai_2.0
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
 (
   set -a
   source .env.test.local
   set +a
-  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python scripts/smoke_artifact_download.py
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_artifact_download.py
 )
 ```
 

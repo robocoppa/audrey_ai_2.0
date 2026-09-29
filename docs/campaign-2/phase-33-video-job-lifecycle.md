@@ -130,7 +130,7 @@ still live, and the operator would have no signal that anything was left behind.
   jobs occasionally running twice.
 - **[`static/upload.html`](../../src/audrey/static/upload.html)** — show
   `processing` and `failed` in the file list, with the reason on a failure.
-- **`scripts/stub_media_worker.py`** (new) — claims a job, returns a fixed
+- **`tests/smoke/stub_media_worker.py`** (new) — claims a job, returns a fixed
   string, exits. Exists to exercise the lifecycle end to end without a
   container, and to stay useful afterwards as a way to reproduce lease bugs.
 
@@ -238,7 +238,7 @@ user collection and the global one together.
 need a pending row, and by this point the queue is empty.
 
 ```bash
-python scripts/stub_media_worker.py --endpoint $BOX --requeue $FID
+python tests/smoke/stub_media_worker.py --endpoint $BOX --requeue $FID
 ```
 
 The row returns to `pending` with `chunks: 0`, and the phrase from step 3 stops
@@ -274,7 +274,7 @@ cycle instant; the only slow part is waiting out the lease):
 
 ```bash
 export BOX=http://192.168.1.11:8000
-W="python3 scripts/stub_media_worker.py --endpoint $BOX"
+W="python3 tests/smoke/stub_media_worker.py --endpoint $BOX"
 FID=$(curl -s $BOX/v1/files -H "Authorization: Bearer $TOKEN" \
       | jq -r '.files[] | select(.filename=="silent.mp4") | .file_id')
 

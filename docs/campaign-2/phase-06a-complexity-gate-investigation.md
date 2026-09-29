@@ -60,7 +60,7 @@ config; they remain in tree for future investigations.
 
 The infrastructure built for the probe (the `log_breakdown` and
 `log_incoming_payload*` config knobs and the
-`scripts/probe_complexity_gate.py` script) remains in place for
+`scripts/probes/probe_complexity_gate.py` script) remains in place for
 future investigations.
 
 ## How the investigation actually went
@@ -88,7 +88,7 @@ option matched the data.
 
 ### Stage 2 — Offline probe runs, returns zero flips
 
-`scripts/probe_complexity_gate.py` shipped (commit `2d426cb` of
+`scripts/probes/probe_complexity_gate.py` shipped (commit `2d426cb` of
 2026-05-14) and was run against a 25-turn archive snapshot. Result:
 **Option B reported 0 flipped turns**, contradicting the live log
 evidence.
@@ -338,7 +338,7 @@ because the investigation moved the goalposts:
   crossing 500 after fixes 1 and 2 are deployed.
 - **Phase 6b deploy doc.** No separate phase needed; this doc is
   the deploy record.
-- **`scripts/probe_complexity_gate.py`** stays in the tree. Its
+- **`scripts/probes/probe_complexity_gate.py`** stays in the tree. Its
   histogram is still useful for sizing a future Option A if it
   ever becomes necessary, and the script doesn't depend on the
   config knobs.
@@ -373,7 +373,7 @@ Config:
 
 Scripts:
 
-- [`scripts/probe_complexity_gate.py`](../../scripts/probe_complexity_gate.py)
+- [`scripts/probes/probe_complexity_gate.py`](../../scripts/probes/probe_complexity_gate.py)
   — offline archive replay. Kept in tree.
 
 Docs:

@@ -255,7 +255,7 @@ part of the Phase 8 cleanup deploy. Highlights:
 ## 4. Followups
 
 - The deferred chunk-tail finding still wants measurement before any
-  fix. A `scripts/measure_chunk_tails.py` walking `/datasets` and
+  fix. A `scripts/probes/measure_chunk_tails.py` walking `/datasets` and
   counting files whose last chunk is mostly overlap would settle whether
   the redundant trailing chunk is worth changing. Cheap to write, but
   has to run on Unraid (the laptop has no `/datasets`).

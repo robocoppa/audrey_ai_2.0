@@ -32,13 +32,13 @@ from audrey.routes.openai.routes import VIRTUAL_MODELS
 
 _ROOT = Path(__file__).resolve().parent.parent
 _CONFIG = _ROOT / "config.yaml"
-_PULL_SCRIPT = _ROOT / "scripts" / "pull-models.sh"
+_PULL_SCRIPT = _ROOT / "scripts" / "ops" / "pull-models.sh"
 _MEDIA_FETCHER_DOCKERFILE = _ROOT / "docker" / "media-fetcher.Dockerfile"
 _ENV_EXAMPLE = _ROOT / ".env.example"
 _CONFIG_SOURCE = _ROOT / "src" / "audrey" / "config.py"
 _README = _ROOT / "README.md"
 
-_SCRIPTS = _ROOT / "scripts"
+_SCRIPTS = _ROOT / "scripts" / "ops"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
@@ -347,7 +347,7 @@ async def test_a_strong_keyword_route_never_escalates(cfg):
 
 # ── the eval harness must not launch into a stack that is still starting ────
 
-_EVAL_ONBOX = _PULL_SCRIPT.parent / "eval-onbox.sh"
+_EVAL_ONBOX = _ROOT / "evals" / "eval-onbox.sh"
 
 
 class TestEvalOnboxWaitsForTheStack:

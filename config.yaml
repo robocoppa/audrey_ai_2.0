@@ -12,7 +12,7 @@ router:
   # GPU_CONCURRENCY=1 a large local router does not QUEUE behind the deep
   # worker, it EVICTS it. That rules out the big general model (qwen3.8 is
   # 17 GB) however good it would be at the classification itself.
-  # ▶ Before changing this: `scripts/router_probe.py` measures parse rate,
+  # ▶ Before changing this: `scripts/probes/router_probe.py` measures parse rate,
   # accuracy, latency AND the confidence distribution on a candidate.
   # ⚠️ Confidence matters as much as accuracy here — the escalation trigger is
   # `conf < 0.95` STRICTLY, so a router that routes correctly but timidly
@@ -45,7 +45,7 @@ router:
   #
   # ⚠️ Never sent raw — `ollama.thinking_flag` omits the field for a model that
   # does not declare `thinking`, because Ollama hard-errors on it rather than
-  # ignoring it. Re-probe with `scripts/probe-onbox.sh router_probe.py` after
+  # ignoring it. Re-probe with `scripts/probes/probe-onbox.sh router_probe.py` after
   # any router model change.
   no_thinking: true
 
@@ -153,7 +153,7 @@ model_registry:
     # Measured 2026-08-19 (--repeat 5, thinking confirmed applied): 59/60 on
     # the grounding suite, best chars-per-token of any thinking model here
     # (0.53-1.90 vs muse 0.06-1.19), warm 2.6-12.6s. See
-    # docs/testing/MODEL-FACTS.md. ⛔ NOT for a code pool — see below.
+    # evals/MODEL-FACTS.md. ⛔ NOT for a code pool — see below.
     - { name: "ornith-1.5:35b",           priority:  83, speed: 86, quality: 86, location: local }
     - { name: "llama4:latest",            priority:  65, speed: 55, quality: 90, location: local }
     # Inherited from glm-5.2 with the 2026-08-29 swap; speed/quality UNMEASURED.
@@ -269,11 +269,11 @@ deep_panel:
     # LINEUP AS OF 2026-08-17: one local + TWO cloud, the house shape.
     # `nemotron-3.5-lightning:latest` is the sole local draft; `minimax-m3` is
     # OUT. The panel costs THREE cloud calls (2 workers + the cloud synth), not
-    # four. Cloud credits are a hard budget — `scripts/analyze_escalations.py`
+    # four. Cloud credits are a hard budget — `scripts/analysis/analyze_escalations.py`
     # prices what escalation multiplies that by.
     #
     # ▶ WHY minimax LEFT, and the one number that argues the other way.
-    # `scripts/analyze_draft_contribution.py` over 55 code case-runs: minimax
+    # `scripts/analysis/analyze_draft_contribution.py` over 55 code case-runs: minimax
     # won 12% of cases against `kimi-k2.7-code`'s 31% AT THE SAME code recall
     # (0.54), while being the slowest worker in the pool at 23.3s. It was the
     # weakest cloud call on every axis but one. ⚠️ It did uniquely win 4 cases,
@@ -380,8 +380,8 @@ deep_panel_cloud:
 # slow to cold-load AND generate when it ran second through the single GPU.
 # Watch for the same shape on any second worker.
 # ⛔ glm-4.7-flash:q8_0 RETIRED 2026-08-19 — dropped from `model_registry`,
-# `passthrough.allowed_models` and `scripts/pull-models.sh` as out of date.
-# Its measurements are kept in docs/testing/MODEL-FACTS.md as the reason.
+# `passthrough.allowed_models` and `scripts/ops/pull-models.sh` as out of date.
+# Its measurements are kept in evals/MODEL-FACTS.md as the reason.
 deep_panel_local:
   # ⚠️ REPAIRED 2026-08-16. All three text pools were broken, two of them
   # invisibly: `code` had collapsed to a single worker synthesising its own only
@@ -950,7 +950,7 @@ kb:
   hybrid:
     # Migration ran 2026-08-03: kb_text (15,913 points) and all three
     # kb_user_text_* rebuilt with a bm25 vector, counts verified, dense
-    # vectors carried over unchanged. `scripts/migrate_bm25.py` is idempotent
+    # vectors carried over unchanged. `scripts/ops/migrate_bm25.py` is idempotent
     # and skips anything already migrated, so a new deployment runs it once
     # before turning this on.
     enabled: true
@@ -1483,7 +1483,7 @@ vision:
   # against neighbours at 2,181 — and three later frames hit it before emitting
   # anything at all, returned empty, were 502'd and dropped.
   #
-  # 2048 next, and `scripts/vision_probe.py` showed that is still not enough:
+  # 2048 next, and `scripts/probes/vision_probe.py` showed that is still not enough:
   # on a cluttered office frame, three of six runs spent all 2,048 tokens
   # reasoning and produced ZERO characters. The reasoning is unavoidable —
   # neither `think: false` nor Qwen3's `/no_think` reduces it (93-101% of
@@ -1582,12 +1582,12 @@ passthrough:
   # Ollama's per-model default is what those calls get — the whole 262144 here.
   # Native direct entries have their own bounded `native_models` defaults.
     # Registry text-pool models (code + reasoning + general, deduped), exposed
-    # for the per-model eval sweeps (scripts/eval_research.py --models
+    # for the per-model eval sweeps (evals/eval_research.py --models
     # 'audrey_passthrough/<name>,…'): testing panel candidates in isolation is
     # how lineups get compared before editing the deep_panel* workers lists.
     # Keep in sync with model_registry when models are added/retired.
     # 2026-08-12 arrivals, added for the local bake-off
-    # (scripts/eval_prompts_local_models.json). ⚠️ Local weights: nemotron
+    # (evals/cases/eval_prompts_local_models.json). ⚠️ Local weights: nemotron
     # 25 GB + muse 18 GB + qwen3.6 23 GB was 66 GB against 48 GB of VRAM, so a
     # sweep across all three WILL swap models. `_expand_sweep` groups by model
     # so each loads once; do not reorder it into per-case grouping.
@@ -1643,7 +1643,7 @@ passthrough:
     - llama4:latest
     # ── 2026-08-18 arrivals, exposed for the local bake-off, NOT in any pool ──
     # Listing a model here makes it targetable by
-    # `scripts/eval_research.py --models audrey_passthrough/<name>` and nothing
+    # `evals/eval_research.py --models audrey_passthrough/<name>` and nothing
     # else — passthrough gates on THIS LIST ALONE
     # (`routes/openai/passthrough.py:91`); no `model_registry` entry is needed
     # until a model earns a production role.
@@ -1669,7 +1669,7 @@ passthrough:
     # `ornith-1.5:9b` was pulled as a router candidate, probed, and removed
     # 2026-08-19 — it matched qwen3.5:4b on parse, accuracy and latency but
     # answered 0.90 confidence against a 0.95 escalation floor, which would
-    # have sent ~70% of turns into a deep panel. See docs/testing/MODEL-FACTS.md.
+    # have sent ~70% of turns into a deep panel. See evals/MODEL-FACTS.md.
     - ornith-1.5:35b
     # Vision-language pool, exposed so an image-capable model can be targeted
     # directly. Batch image work (Phase 36 media-worker keyframe description)

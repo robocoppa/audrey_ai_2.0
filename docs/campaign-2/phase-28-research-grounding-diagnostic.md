@@ -186,7 +186,7 @@ not corrupt data.
 floor (added this phase in `routes/kb.py` `_search_text_merged`, applied
 before the `top_k` cut, over-fetching so a below-floor near-neighbour can't
 starve a real hit) is set to **0.53** and is **deployed + verified live**
-(2026-07-16). Its measured net effect, from `scripts/kb_score_probe.py` (22
+(2026-07-16). Its measured net effect, from `scripts/probes/kb_score_probe.py` (22
 labeled queries) + a live `/v1/kb/query` probe:
 - **Win:** genuinely-foreign queries now return EMPTY instead of nearest-junk —
   `capital of France`, `TCP vs UDP`, `sourdough`, and `how do mRNA vaccines work`
@@ -201,7 +201,7 @@ labeled queries) + a live `/v1/kb/query` probe:
 
 **Why a floor can't fully solve it, and the harness that proved it:** the initial
 0.53 came from two hand-probes that showed a clean valley (on-domain 0.57–0.59 vs
-off-domain 0.49–0.52). `scripts/kb_score_probe.py` (built to get more data) swept
+off-domain 0.49–0.52). `scripts/probes/kb_score_probe.py` (built to get more data) swept
 22 queries and found the distributions actually **OVERLAP** — real on-domain hits
 as low as 0.54, off-domain/ops hits as high as 0.69 — so no single global cosine
 floor cleanly separates them. The two-point estimate was a sampling artifact; the
@@ -215,11 +215,11 @@ floor is the cheap partial win kept in the meantime. **Decision (2026-07-16, wit
 user): keep the 0.53 floor as-is; corpus separation is the deferred proper fix.**
 
 **Harnesses shipped this phase** (both hermetic where possible):
-- `scripts/kb_score_probe.py` + `kb_probe_queries.json` — probe `/v1/kb/query` with
+- `scripts/probes/kb_score_probe.py` + `kb_probe_queries.json` — probe `/v1/kb/query` with
   labeled on/off-domain queries, report score distributions + the safe-floor
   window (or "OVERLAP — no clean cut"). Run on the box via a throwaway container
   on `ollama-net` mounting the host scripts dir (the running `audrey-ai`/
   `custom-tools` images don't carry newly-pulled scripts until rebuilt).
-- `scripts/sources_block_probe.py` — replay captured/real ledgers through the REAL
+- `scripts/probes/sources_block_probe.py` — replay captured/real ledgers through the REAL
   `_render_sources_block` to catch Sources-rendering regressions (seeds the
   attention url-less-linked shape + surrounding contracts). Fully laptop-hermetic.

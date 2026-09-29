@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
-_SCRIPTS = _ROOT / "scripts"
+_SCRIPTS = _ROOT / "scripts" / "analysis"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 

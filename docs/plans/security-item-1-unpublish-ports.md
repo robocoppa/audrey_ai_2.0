@@ -107,7 +107,7 @@ Chosen because re-verification confirmed the eval harness's **documented,
 default, repeatable** access path already goes through OWUI, not Audrey's
 `:8000`:
 
-- `docs/testing/README.md:74` and `scripts/eval_research.py:34` both document
+- `evals/README.md:74` and `evals/eval_research.py:34` both document
   `AUDREY_EVAL_BASE_URL=http://192.168.1.11:8080/api` (OWUI) as the setup.
 - `run_all_evals.sh:14` assumes `192.168.1.11:8080` (OWUI).
 - Direct-to-Audrey (`:8000/v1`) is explicitly the *non-repeatable* fallback in
@@ -131,10 +131,10 @@ has the OWUI path.
    the port is unpublished, which legitimate consumers use ollama-net DNS
    instead, and the SSH-tunnel command for laptop debugging. YAML re-validated:
    both services parse, keep `ollama-net`, and have no `ports` key.
-2. **`scripts/eval_research.py`** — updated the docstring note about direct-
+2. **`evals/eval_research.py`** — updated the docstring note about direct-
    `:8000` access to say it now requires an SSH tunnel (the OWUI `:8080/api`
    default path is unchanged and still works with no extra steps).
-3. **`scripts/kb_score_probe.py`** — updated the docstring/usage to drop the
+3. **`scripts/probes/kb_score_probe.py`** — updated the docstring/usage to drop the
    `http://192.168.1.11:8000` over-the-LAN form (now dead) and point at
    on-box / tunnelled access. Default `http://audrey-ai:8000` (container DNS)
    is unchanged.
@@ -189,7 +189,7 @@ Then verify — **expect the first two to now FAIL/refuse, the rest to PASS:**
 6. **Eval harness still runs** (from the laptop, over the LAN/VPN — uses the OWUI
    path, so unaffected):
    ```bash
-   .venv/bin/python scripts/eval_research.py --only euclid
+   .venv/bin/python evals/eval_research.py --only euclid
    # expect: reaches OWUI :8080/api and passes structural checks
    ```
 

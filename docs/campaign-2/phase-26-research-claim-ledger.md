@@ -259,7 +259,7 @@ docker exec audrey-ai grep "hedge_policy:" /app/config.yaml
    (facebook-groups, scribd, slideshare) should be pushed down or off the
    capped-at-8 list.
 6. **Full eval** — re-run the protocol into a new
-   `docs/testing/<date>-ledger-stageN-answers.md` and diff vs the prior baseline.
+   `evals/results/<date>-ledger-stageN-answers.md` and diff vs the prior baseline.
    Does a bio/history case correctly DROP/hedge a claim its sources don't support,
    while `current-2025-recent` keeps its releases — clean Sources list, no
    inline-citation clutter in the prose, authoritative sources on top?
@@ -334,7 +334,7 @@ provider per source, and that signal can't survive the prose→structuring path
 **6. The eval harness proves liveness, not truth — and quality regressions only
 show on a careful read of the saved answers.** Every quality finding this phase
 (the over-hedge, the weak-domain Sources, the worker drops) came from *reading* the
-saved `docs/testing/*-answers.md`, not from the harness's structural PASS. The
+saved `evals/results/*-answers.md`, not from the harness's structural PASS. The
 harness is the gate that the plumbing works; the human/Claude read is the gate that
 the answer is good. Keep both, and diff each run against the prior baseline.
 

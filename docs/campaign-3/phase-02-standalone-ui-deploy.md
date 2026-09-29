@@ -58,7 +58,7 @@ the already-built Audrey image. Tower has no host Python environment:
 
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
-bash scripts/smoke-native-onbox.sh smoke_native_ui.py
+bash tests/smoke/smoke-native-onbox.sh smoke_native_ui.py
 ```
 
 The result must end with `"status": "passed"`, cross-owner reads must remain
@@ -73,7 +73,7 @@ same standalone proxy:
 
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
-bash scripts/smoke-native-onbox.sh smoke_native_access_models.py
+bash tests/smoke/smoke-native-onbox.sh smoke_native_access_models.py
 ```
 
 The result must end with `"status": "passed"`. It proves provider-only admin
@@ -88,7 +88,7 @@ direct model:
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
 AUDREY_DIRECT_SMOKE_MODEL_ID=direct/example-model:latest \
-bash scripts/smoke-native-onbox.sh smoke_native_access_models.py
+bash tests/smoke/smoke-native-onbox.sh smoke_native_access_models.py
 ```
 
 Four checks remain interactive because bearer-token automation cannot reproduce

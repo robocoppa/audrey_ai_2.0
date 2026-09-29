@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
-_SCRIPT = _ROOT / "scripts" / "probe-onbox.sh"
+_SCRIPT = _ROOT / "scripts" / "probes" / "probe-onbox.sh"
 
 
 @pytest.fixture(scope="module")

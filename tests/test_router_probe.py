@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
-_SCRIPTS = _ROOT / "scripts"
+_SCRIPTS = _ROOT / "scripts" / "probes"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
@@ -225,7 +225,7 @@ class TestNoThinkingIsGuardedNotRaw:
 class TestTheLiveConfigMatchesWhatWasProbed:
     """The router settings are hot-path, so drift between config and evidence
     has to be loud. Every number in the `router:` comment block came from
-    `scripts/router_probe.py` on 2026-08-16; these assert the settings those
+    `scripts/probes/router_probe.py` on 2026-08-16; these assert the settings those
     numbers justified are still the settings in force.
     """
 
@@ -250,7 +250,7 @@ class TestTheLiveConfigMatchesWhatWasProbed:
 
     def test_the_router_is_pulled_by_pull_models(self):
         # A router that is not in the pull script is a phantom one deploy later.
-        script = (_SCRIPTS / "pull-models.sh").read_text()
+        script = (_ROOT / "scripts" / "ops" / "pull-models.sh").read_text()
         assert self._router()["model"] in script
 
 

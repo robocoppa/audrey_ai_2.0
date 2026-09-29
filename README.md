@@ -197,12 +197,20 @@ uv run audrey-ingest --source /path/to/docs --topic geology
 ```
 src/audrey/         # orchestrator package (FastAPI + LangGraph)
 tools-server/       # custom-tools FastAPI service (separate package)
+web/                # native browser client (Vite + React), its own image
+skills/             # built-in skill bundles
 tests/              # pytest suite — hermetic, no Ollama/Qdrant needed
-docker/             # Dockerfiles (audrey + custom-tools, base images pinned to digest)
+  smoke/            #   live smoke scripts against a running Audrey (not collected by pytest)
+  fixtures/         #   test media (silent.mp4)
+evals/              # live eval harness, on-box runner, cases/, fixtures/, results/
+scripts/
+  probes/           #   one-off measurements, and probe-onbox.sh to run them on the box
+  analysis/         #   read eval answers/logs and summarise them
+  ops/              #   pull-models.sh, check_model_inventory.py, migrate_bm25.py
+  lessons/          #   lesson link and convention checkers
+docker/             # Dockerfiles (audrey, custom-tools, media, eval; base images pinned to digest)
 monitoring/         # prometheus + grafana compose, scrape config, alert rules, provisioned dashboards
-docs/               # campaign histories, lessons, deploy guides
-images/             # screenshots used by docs
-scripts/            # model-pull, smoke tests, lesson-cite link checker
+docs/               # campaign histories, lessons, guides, reference, archive/
 config.yaml         # model registry, fast_path, deep_panel*, fairness, KB, reconcile
 .env.example        # BRAVE_API_KEY, GRAFANA_ADMIN_PASSWORD, etc.
 compose.yaml        # Audrey backend, standalone UI, tools, and media sidecars

@@ -7,12 +7,12 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = ROOT / "scripts" / "smoke-native-onbox.sh"
+SCRIPT = ROOT / "tests" / "smoke" / "smoke-native-onbox.sh"
 
 
 def _run(tmp_path: Path, env_text: str) -> subprocess.CompletedProcess[str]:
     appdata = tmp_path / "appdata"
-    scripts = appdata / "scripts"
+    scripts = appdata / "tests" / "smoke"
     scripts.mkdir(parents=True)
     (scripts / "smoke_native_ui.py").write_text("# fixture\n")
     env_file = appdata / ".env.smoke.local"
@@ -69,12 +69,12 @@ def test_wrapper_pins_the_tower_runtime_contract():
     assert '--network "${NETWORK}"' in text
     assert '--env-file "${ENV_FILE}"' in text
     assert "AUDREY_SMOKE_BASE_URL=${BASE_URL}" in text
-    assert "${APPDATA}/scripts:/smoke:ro" in text
+    assert "${APPDATA}/tests/smoke:/smoke:ro" in text
     assert "/opt/venv/bin/python" in text
 
 def test_valid_native_env_invokes_the_expected_container_contract(tmp_path):
     appdata = tmp_path / "appdata"
-    scripts = appdata / "scripts"
+    scripts = appdata / "tests" / "smoke"
     scripts.mkdir(parents=True)
     (scripts / "smoke_native_ui.py").write_text("# fixture\n")
     env_file = appdata / ".env.smoke.local"
@@ -121,7 +121,7 @@ def test_valid_native_env_invokes_the_expected_container_contract(tmp_path):
     assert ["--env-file", str(env_file)] == args[4:6]
     assert "AUDREY_DIRECT_SMOKE_MODEL_ID=direct/example-model:latest" in args
     assert "AUDREY_SMOKE_BASE_URL=http://audrey-ui:8080" in args
-    assert f"{appdata}/scripts:/smoke:ro" in args
+    assert f"{appdata}/tests/smoke:/smoke:ro" in args
     assert args[-3:] == [
         "test-image",
         "/opt/venv/bin/python",

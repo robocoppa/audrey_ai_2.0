@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import json
+import sys
 from email.message import Message
+from pathlib import Path
 from typing import Any
 
-from scripts import smoke_native_access_models as smoke
+_SMOKE_DIR = Path(__file__).resolve().parent / "smoke"
+if str(_SMOKE_DIR) not in sys.path:
+    sys.path.insert(0, str(_SMOKE_DIR))
+
+import smoke_native_access_models as smoke  # noqa: E402
 
 _ADMIN_EVIDENCE = "admin-provider"
 _USER_EVIDENCE = "user-provider"

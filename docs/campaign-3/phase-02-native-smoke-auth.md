@@ -25,7 +25,7 @@ remain exported afterward.
 
 Tower is Docker-only and has no host Python, `uv`, or repository `.venv`. Run
 the scripts in a disposable container from the already-built `audrey:latest`
-image. Mount the checkout's `scripts/` directory read-only at `/smoke`, pass the
+image. Mount the checkout's `tests/smoke/` directory read-only at `/smoke`, pass the
 root-owned `.env.smoke.local` with Docker's `--env-file`, join `ollama-net`, and
 set `AUDREY_SMOKE_BASE_URL=http://audrey-ui:8080`. The scripts are intentionally
 not baked into the Audrey image. This reaches the standalone proxy through
@@ -41,7 +41,7 @@ The checked Tower command is:
 
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
-bash scripts/smoke-native-onbox.sh smoke_native_ui.py
+bash tests/smoke/smoke-native-onbox.sh smoke_native_ui.py
 ```
 
 Start with the native UI smoke, then the account/model smoke. The remaining
@@ -52,7 +52,7 @@ zero exit, JSON evidence, and no `cleanup_error`. Browser sign-in and the
 Cloudflare handoff remain a separate manual gate; replaying a valid JWT to the
 origin does not prove the browser login path.
 
-The eighth script, `scripts/smoke_native_auth_cutover.py`, is the focused 2F.1
+The eighth script, `tests/smoke/smoke_native_auth_cutover.py`, is the focused 2F.1
 gate. It needs only the user
 Access assertion, creates and revokes one disposable Audrey personal token, and
 proves unknown legacy bearers are rejected locally. Run it after setting

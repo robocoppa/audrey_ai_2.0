@@ -68,7 +68,7 @@ def _format_drafts_for_synth(
     if shown == 0:
         parts.append("\n[no drafts produced usable output]")
     # Phase-12 instrumentation: emit a parseable line so
-    # `scripts/analyze_draft_sizes.py` can build the production
+    # `scripts/analysis/analyze_draft_sizes.py` can build the production
     # draft-size distribution. Used to decide whether
     # `_format_drafts_for_synth` needs a per-draft cap (see the
     # deferred Lesson 8 truncation finding in AUDIT.md). Single

@@ -15,9 +15,13 @@
   [`campaign-3/README.md`](campaign-3/README.md).
 - [`unraid-ollama.md`](guides/unraid-ollama.md) — canonical Ollama container config
   (referenced by Phase 1).
-- [`owui-prompt-suggestions.json`](owui-prompt-suggestions.json) — OWUI
+- [`archive/`](archive/) — `PROJECT_STATE-archive-<date>.md`, the closed
+  history moved out of `PROJECT_STATE.md` (gitignored, laptop-only).
+- Evals are not here: the harness, its cases and every captured run live in
+  [`../evals/`](../evals/) — start at [`../evals/README.md`](../evals/README.md).
+- [`owui-prompt-suggestions.json`](reference/owui-prompt-suggestions.json) — OWUI
   splash-screen prompt suggestion cards (Admin → Settings → Interface).
-- [`owui-prompts.json`](owui-prompts.json) — OWUI slash-command presets
+- [`owui-prompts.json`](reference/owui-prompts.json) — OWUI slash-command presets
   (Workspace → Prompts). Built on Audrey's real text triggers:
   `/deep` and `/brief` embed literal phrases from
   `complexity.deep_intent_phrases` and `reflect._BREVITY_CUES`, so they

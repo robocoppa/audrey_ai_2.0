@@ -1,4 +1,4 @@
-"""Stress test for scripts/check-lesson-links.py.
+"""Stress test for scripts/lessons/check-lesson-links.py.
 
 Generates synthetic doc+source pairs at varying scales, injects line
 shifts, and confirms the script either (a) proposes the right
@@ -17,7 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "check-lesson-links.py"
+SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "lessons" / "check-lesson-links.py"
 
 
 def _run(repo: Path, *args: str) -> subprocess.CompletedProcess:

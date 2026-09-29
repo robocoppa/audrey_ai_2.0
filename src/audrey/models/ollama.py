@@ -257,7 +257,7 @@ class OllamaClient:
         anything — measured 2026-08-04, `qwen3-vl:32b` declares the capability
         and produces the same reasoning either way. Capability is a
         precondition for the setting mattering, never evidence that it does;
-        `scripts/thinking_probe.py` is what settles the second question.
+        `scripts/probes/thinking_probe.py` is what settles the second question.
 
         ⚠️ **This runs on the REQUEST path and needs its own short deadline.**
         It inherited the client's 120s default until 2026-08-17, which is the

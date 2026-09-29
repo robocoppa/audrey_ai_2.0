@@ -156,7 +156,7 @@ state facts confident from general knowledge plainly; reserve softening for
 specific checkable claims a grounded draft failed to verify or that drafts
 disagreed on. Preserve the existing FACTUAL ANCHORING rule (don't trust a lone
 tool-free claim). Code change → wants a deep-protocol eval run
-(`scripts/run_all_evals.sh`, or `eval_research.py` against the deep cases) to
+(`evals/run_all_evals.sh`, or `eval_research.py` against the deep cases) to
 confirm it doesn't overshoot into overconfident assertion.
 
 ### Step 4 — Confirm grounding source health (box, parallel with 1–2)
@@ -420,7 +420,7 @@ we see whether tuned deep mode is enough.
     best), which is why it shows up as a footnote rather than two failed cases —
     and is itself evidence the multi-worker design earns its cost.
   - **Not yet re-tested:** the original trigger prompt. There is no World Cup /
-    current-sports case in `scripts/eval_prompts_deep.json` (16 `deep-*` cases +
+    current-sports case in `evals/cases/eval_prompts_deep.json` (16 `deep-*` cases +
     2 borrowed `code-*`); `deep-2025-recent` is the closest recency analog. A
     direct OWUI re-ask in `audrey_deep` is still the only way to close the loop
     on the reported symptom — and it will be gated by Defect C, not Defect A.
@@ -438,9 +438,9 @@ docker compose up -d --build --force-recreate audrey-ai
 docker compose logs -f audrey-ai                     # confirm clean boot
 
 # Then, from the laptop over LAN/VPN — deep-protocol eval (background; ~20-40 min):
-.venv/bin/python scripts/eval_research.py \
-    --cases scripts/eval_prompts_deep.json \
-    --save-file docs/testing/$(date +%F)-deep-hedge-answers.md
+.venv/bin/python evals/eval_research.py \
+    --cases evals/cases/eval_prompts_deep.json \
+    --save-file evals/results/$(date +%F)-deep-hedge-answers.md
 
 # And a direct re-ask of the trigger prompt in deep mode (OWUI, audrey_deep):
 #   "what were the key moments of this year's World Cup?"

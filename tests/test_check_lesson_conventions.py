@@ -1,4 +1,4 @@
-"""Smoke tests for scripts/check-lesson-conventions.py.
+"""Smoke tests for scripts/lessons/check-lesson-conventions.py.
 
 Builds synthetic lesson fixtures in `tmp_path` and runs the checker
 via subprocess. Each test pins one rule's behavior end-to-end:
@@ -16,7 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "check-lesson-conventions.py"
+SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "lessons" / "check-lesson-conventions.py"
 
 
 def _write(path: Path, content: str) -> None:

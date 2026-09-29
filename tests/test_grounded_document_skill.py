@@ -10,8 +10,8 @@ from audrey.tools.discovery import TOOL_DECLARATIONS
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILLS = ROOT / "skills"
-CASES = ROOT / "scripts" / "eval_prompts_grounded_documents.json"
-FIXTURES = ROOT / "scripts" / "fixtures" / "grounded-document-analysis"
+CASES = ROOT / "evals" / "cases" / "eval_prompts_grounded_documents.json"
+FIXTURES = ROOT / "evals" / "fixtures" / "grounded-document-analysis"
 KNOWN_TOOLS = frozenset(TOOL_DECLARATIONS)
 DOCUMENT_TOOLS = frozenset({
     "list_my_files",

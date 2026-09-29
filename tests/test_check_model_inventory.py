@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
-_SCRIPTS = _ROOT / "scripts"
+_SCRIPTS = _ROOT / "scripts" / "ops"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 

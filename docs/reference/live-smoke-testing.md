@@ -89,12 +89,12 @@ Use the working LAN/WARP route. This consumes the credential already stored
 in `.env.test.local`; do not prompt for it again:
 
 ```bash
-cd /home/bart/Documents/github/audrey_ai_2.0
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
 (
   set -a
   source .env.test.local
   set +a
-  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python scripts/smoke_native_auth_cutover.py
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_native_auth_cutover.py
 )
 ```
 
@@ -112,12 +112,12 @@ admin rediscovery reloads both without diagnostics. It creates no user data,
 conversations, tokens, files, or model calls. Use the working LAN/WARP route:
 
 ```bash
-cd /home/bart/Documents/github/audrey_ai_2.0
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
 (
   set -a
   source .env.test.local
   set +a
-  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python scripts/smoke_skills_foundation.py
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_skills_foundation.py
 )
 ```
 
@@ -136,7 +136,7 @@ document reader, file tools, skill prompt, or selection path. If one does, keep
 the settled controls as evidence and rerun only the skill arm below.
 
 The account still needs both files from
-`scripts/fixtures/grounded-document-analysis/` in Ready state:
+`evals/fixtures/grounded-document-analysis/` in Ready state:
 
 - `c3-grounded-operations.md`
 - `c3-grounded-support.md`
@@ -145,14 +145,14 @@ If they were removed after the first run, upload them again in the native
 browser. Three whole passes produce nine repaired skill samples:
 
 ```bash
-cd /home/bart/Documents/github/audrey_ai_2.0
-.venv/bin/python scripts/eval_research.py \
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
+.venv/bin/python evals/eval_research.py \
   --base-url http://192.168.1.11:8000/v1 \
-  --cases scripts/eval_prompts_grounded_documents.json \
+  --cases evals/cases/eval_prompts_grounded_documents.json \
   --only skill \
   --repeat 3 \
-  --save-file docs/testing/2026-09-28-grounded-documents-reader-fix-answers.md \
-  --save-json docs/testing/2026-09-28-grounded-documents-reader-fix-results.json
+  --save-file evals/results/2026-09-28-grounded-documents-reader-fix-answers.md \
+  --save-json evals/results/2026-09-28-grounded-documents-reader-fix-results.json
 ```
 
 The structural gate is all nine cases completing without failed checks. Read
@@ -171,12 +171,12 @@ the streamed answer and persisted id/version/digest/reason, then deletes the
 temporary canonical conversation and archive projection. Use the working LAN/WARP route:
 
 ```bash
-cd /home/bart/Documents/github/audrey_ai_2.0
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
 (
   set -a
   source .env.test.local
   set +a
-  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python scripts/smoke_skill_selection.py
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_skill_selection.py
 )
 ```
 
@@ -195,12 +195,12 @@ It requires the distinct user and admin assertions already stored in
 `.env.test.local`:
 
 ```bash
-cd /home/bart/Documents/github/audrey_ai_2.0
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
 (
   set -a
   source .env.test.local
   set +a
-  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python scripts/smoke_file_download.py
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_file_download.py
 )
 ```
 
@@ -236,12 +236,12 @@ The script scans the account's Ready videos, preferring reclaimed originals,
 and selects the first one with actual derived text:
 
 ```bash
-cd /home/bart/Documents/github/audrey_ai_2.0
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
 (
   set -a
   source .env.test.local
   set +a
-  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python scripts/smoke_artifact_download.py
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_artifact_download.py
 )
 ```
 
@@ -273,7 +273,7 @@ message before Docker starts:
 
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
-bash scripts/smoke-native-onbox.sh smoke_native_ui.py
+bash tests/smoke/smoke-native-onbox.sh smoke_native_ui.py
 ```
 
 Success is exit code zero, `"status": "passed"`, and no `cleanup_error`.
@@ -294,12 +294,12 @@ The laptop's `.env.test.local` already contains the required
 `AUDREY_EVAL_API_KEY`. Use the working LAN/WARP route:
 
 ```bash
-cd /home/bart/Documents/github/audrey_ai_2.0
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
 (
   set -a
   source .env.test.local
   set +a
-  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python scripts/smoke_responses_api.py
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_responses_api.py
 )
 ```
 

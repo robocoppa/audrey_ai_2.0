@@ -1,6 +1,6 @@
 # Campaign 2 Phase 3 - Lesson-cite drift checker
 
-Tooling-only phase. Adds `scripts/check-lesson-links.py`: a one-shot
+Tooling-only phase. Adds `scripts/lessons/check-lesson-links.py`: a one-shot
 auditor that catches stale file:line references in long-form Markdown
 docs.
 
@@ -41,7 +41,7 @@ What stays the same:
 
 What changed:
 
-- **`scripts/check-lesson-links.py`** (new) - the auditor. ~330 lines,
+- **`scripts/lessons/check-lesson-links.py`** (new) - the auditor. ~330 lines,
   three modes:
   - No args: audit every cite in every doc.
   - Filter args: only check cites whose target file is in the list.
@@ -85,10 +85,10 @@ No deploy. The script runs locally; nothing rebuilds, nothing restarts.
 git pull   # after the Phase 3 commit lands
 
 # Confirm the script is executable:
-ls -l scripts/check-lesson-links.py
+ls -l scripts/lessons/check-lesson-links.py
 
 # Sanity check: run it across all lessons.
-scripts/check-lesson-links.py | tail -5
+scripts/lessons/check-lesson-links.py | tail -5
 ```
 
 Expected:
@@ -117,7 +117,7 @@ landmark fallback, filter mode, list-only, etc.).
 ### 2.2 Run against the real lesson corpus
 
 ```bash
-scripts/check-lesson-links.py
+scripts/lessons/check-lesson-links.py
 ```
 
 Expected on a clean repo: zero `BROKEN` and zero `DRIFT` (confident
@@ -135,7 +135,7 @@ Pass a source file you recently edited. Only cites pointing at that
 file are checked.
 
 ```bash
-scripts/check-lesson-links.py src/audrey/pipeline/classify.py
+scripts/lessons/check-lesson-links.py src/audrey/pipeline/classify.py
 ```
 
 Expected: the summary line shows
@@ -146,8 +146,8 @@ Expected: the summary line shows
 Builds a tab-separated index of every cite.
 
 ```bash
-scripts/check-lesson-links.py --list-only | head -10
-scripts/check-lesson-links.py --list-only | wc -l
+scripts/lessons/check-lesson-links.py --list-only | head -10
+scripts/lessons/check-lesson-links.py --list-only | wc -l
 ```
 
 Expected: each line is `<doc-path>\t<url>\t<absolute-target>`. The
@@ -164,7 +164,7 @@ the edit. Don't commit the synthetic drift.
 ```bash
 # Make space at the top of classify.py:
 sed -i '1i\\' src/audrey/pipeline/classify.py
-scripts/check-lesson-links.py src/audrey/pipeline/classify.py
+scripts/lessons/check-lesson-links.py src/audrey/pipeline/classify.py
 # Should print several DRIFT lines with `fix: change #L<old> → #L<new>`.
 
 # Restore:

@@ -185,7 +185,7 @@ bundled script — it's a no-op on already-present models:
 
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
-./scripts/pull-models.sh
+./scripts/ops/pull-models.sh
 ```
 
 ---

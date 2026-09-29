@@ -1,4 +1,4 @@
-"""Hermetic tests for the eval harness's pure pieces (scripts/eval_research.py).
+"""Hermetic tests for the eval harness's pure pieces (evals/eval_research.py).
 
 The harness itself is a LIVE tool — it needs the box, OWUI, and a network. But
 its newest checks (code extraction + execution, answer_contains), the sweep
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-_SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+_SCRIPTS = Path(__file__).resolve().parent.parent / "evals"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
@@ -1100,7 +1100,7 @@ def test_the_suite_case_is_wired_up():
     """The helper is only worth having if a case actually opts in. Pins that
     `video-ambiguous-singular` — the case that regressed — carries it."""
     cases = json.loads(
-        (Path(er.__file__).parent / "eval_prompts_video.json").read_text())
+        (Path(er.__file__).parent / "cases" / "eval_prompts_video.json").read_text())
     by_name = {c["name"]: c for c in cases}
 
     assert by_name["video-ambiguous-singular"].get("expect_names_files")
@@ -1128,7 +1128,7 @@ def test_every_video_case_is_checked_for_something_behavioural():
     proves the stack is alive and nothing else — which is fine, but must be a
     DECISION rather than an oversight, so new ones land here on purpose."""
     cases = json.loads(
-        (Path(er.__file__).parent / "eval_prompts_video.json").read_text())
+        (Path(er.__file__).parent / "cases" / "eval_prompts_video.json").read_text())
     behavioural = ("answer_contains", "answer_not_contains", "expect_names_files",
                    "expect_continuation_offer", "expect_disclaims_absence")
     structural_only = {
@@ -1168,7 +1168,7 @@ def test_expand_sweep_crosses_and_groups_by_model():
 # sweep still prints a confident table.
 
 _LOCAL_CASES = json.loads(
-    (_SCRIPTS / "eval_prompts_local_models.json").read_text())
+    (_SCRIPTS / "cases" / "eval_prompts_local_models.json").read_text())
 
 # Every key `run_case` actually reads. A case key outside this set does nothing.
 _CASE_KEYS = {
@@ -1403,7 +1403,7 @@ def test_build_table_summary_and_missing_cells():
 
 # ── repeats: the whole point is the RATE ────────────────────────────────────
 #
-# `scripts/eval_research.py` sends no `seed` and no `temperature` (options come
+# `evals/eval_research.py` sends no `seed` and no `temperature` (options come
 # only from the request body via `_options_from_request`, and the harness sets
 # none), so every case is ONE draw from the model's default sampler. On
 # 2026-08-19 that produced 2/5 and then 5/5 for the same model on the same
@@ -1985,7 +1985,7 @@ _CONTENT_ASSERTIONS = ("answer_contains", "answer_not_contains", "code_test",
 def _load_suite(name):
     import json
     from pathlib import Path
-    return json.loads((Path(__file__).parent.parent / "scripts" / name).read_text())
+    return json.loads((Path(__file__).parent.parent / "evals" / "cases" / name).read_text())
 
 
 @pytest.mark.parametrize("suite", ["eval_prompts_models_ab.json",
