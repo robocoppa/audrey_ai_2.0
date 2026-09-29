@@ -166,6 +166,8 @@ def test_bind_mounts_match_the_non_root_cache_and_read_only_dataset_contract():
     assert (ROOT / "skills" / ".gitignore").read_text() == (
         "*\n"
         "!.gitignore\n"
+        "!grounded-document-analysis/\n"
+        "!grounded-document-analysis/SKILL.md\n"
         "!video-analysis/\n"
         "!video-analysis/SKILL.md\n"
     )

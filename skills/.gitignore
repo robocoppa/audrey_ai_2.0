@@ -1,4 +1,6 @@
 *
 !.gitignore
+!grounded-document-analysis/
+!grounded-document-analysis/SKILL.md
 !video-analysis/
 !video-analysis/SKILL.md

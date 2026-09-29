@@ -1,8 +1,9 @@
 # Campaign 3 Phase 3 — reusable skills
 
-**Status:** Milestones 3A.1, 3A.2, and 3B are live-settled. Milestone 3C
-grounded document analysis is the current build priority; automatic selection
-remains deferred.
+**Status:** Milestones 3A.1, 3A.2, and 3B are live-settled. The first
+Milestone 3C grounded-document pilot slice is laptop-complete; deployment and
+the repeated control comparison remain open. Automatic selection remains
+deferred.
 
 ## Goal
 
@@ -451,6 +452,14 @@ Gate:
 - no-skill regression suite passes.
 
 ## Milestone 3C — first new skill and product evaluation
+
+**Status:** First pilot slice laptop-complete on 2026-09-28. The
+`grounded-document-analysis` v1 bundle uses the four existing file/KB tools.
+Two controlled fixture documents and three interleaved, identical
+`audrey_auto` control/skill pairs cover cross-file comparison, single-file
+fact extraction, and absent evidence. The eval harness records the selected
+skill arm in saved Markdown and JSON. Focused tests pass 227 and the full suite
+passes 2,959; deployment and repeated live human evaluation remain open.
 
 Pilot a `grounded-document-analysis` skill using only the existing file/KB
 capabilities it needs, for example:

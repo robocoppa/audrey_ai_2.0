@@ -1340,8 +1340,8 @@ def test_save_json_round_trips(tmp_path):
         "route": "unknown", "ttft_s": 1.5, "total_s": 12.0,
         # `think_requested` joined the record 2026-08-19: the arm has to
         # ride in the artifact, because container logs do not survive a rebuild.
-        "answer_len": 40, "think_requested": None, "banners": [], "error": "",
-        "code_detail": "exit 1: AssertionError", "fiction_detail": "",
+        "answer_len": 40, "think_requested": None, "skill": "", "banners": [],
+        "error": "", "code_detail": "exit 1: AssertionError", "fiction_detail": "",
         "context_detail": "", "ungrounded_detail": "", "sources": None,
     }]
 
@@ -2032,6 +2032,13 @@ def test_request_body_omits_think_unless_asked():
     assert er._request_body("m", "p", False)["think"] is False
 
 
+def test_request_body_omits_skill_for_control_and_sends_the_selected_arm():
+    assert "skill" not in er._request_body("m", "p", None)
+    assert er._request_body(
+        "m", "p", None, "grounded-document-analysis",
+    )["skill"] == "grounded-document-analysis"
+
+
 @pytest.mark.parametrize(("url", "direct"), [
     ("http://audrey:8000/v1", True),
     ("http://audrey-ui:8080/v1", True),
@@ -2073,6 +2080,21 @@ def test_think_requested_is_written_into_the_results_json(tmp_path):
     er.save_json([er.CaseResult(name="a", model="m", ok=True, checks={},
                                 answer="hi", think_requested=True)], out)
     assert json.loads(out.read_text())[0]["think_requested"] is True
+
+
+def test_selected_skill_is_written_into_the_results_json(tmp_path):
+    import json
+
+    out = tmp_path / "r.json"
+    er.save_json([er.CaseResult(
+        name="a",
+        model="m",
+        ok=True,
+        checks={},
+        answer="hi",
+        skill="grounded-document-analysis",
+    )], out)
+    assert json.loads(out.read_text())[0]["skill"] == "grounded-document-analysis"
 
 
 # ── checks added 2026-08-19 ─────────────────────────────────────────────────

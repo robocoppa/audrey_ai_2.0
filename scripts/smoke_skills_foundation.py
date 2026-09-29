@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the deployed built-in video skill and registry health.
+"""Verify the deployed built-in skill catalog and registry health.
 
 This targeted smoke performs read-only catalog/readiness requests plus one
 admin rediscovery. It creates no user data, conversations, tokens, files, or
@@ -28,7 +28,7 @@ ADMIN_TOKEN = _CREDENTIALS.admin
 
 
 class SmokeError(RuntimeError):
-    """The deployed video skill violated its registry contract."""
+    """The deployed built-in skills violated their registry contract."""
 
 
 def _auth_headers(token: str) -> dict[str, str]:
@@ -92,7 +92,7 @@ def _json_request(
     return status, payload
 
 
-def _expect_ready_video_registry(
+def _expect_ready_skill_registry(
     payload: dict[str, Any],
     *,
     source: str,
@@ -100,8 +100,8 @@ def _expect_ready_video_registry(
     expected = {
         "enabled": True,
         "status": "ready",
-        "loaded_count": 1,
-        "available_count": 1,
+        "loaded_count": 2,
+        "available_count": 2,
         "degraded_count": 0,
         "invalid_count": 0,
     }
@@ -109,7 +109,7 @@ def _expect_ready_video_registry(
         key: payload.get(key) for key, value in expected.items() if payload.get(key) != value
     }
     if mismatches:
-        raise SmokeError(f"{source}: video registry mismatch: {mismatches}")
+        raise SmokeError(f"{source}: skill registry mismatch: {mismatches}")
 
 
 def main() -> int:
@@ -119,20 +119,35 @@ def main() -> int:
 
     try:
         _, catalog = _json_request("/api/skills", token=USER_TOKEN)
-        expected_item = {
-            "id": "video-analysis",
-            "name": "Video analysis",
-            "description": ("Analyze uploaded videos and documents from the user's own evidence."),
-            "version": 1,
-            "supported_modes": ["auto", "deep", "fast"],
-            "availability": "available",
-        }
+        expected_items = [
+            {
+                "id": "grounded-document-analysis",
+                "name": "Grounded document analysis",
+                "description": (
+                    "Read, compare, and explain the user's uploaded documents "
+                    "with explicit evidence coverage."
+                ),
+                "version": 1,
+                "supported_modes": ["auto", "deep", "fast"],
+                "availability": "available",
+            },
+            {
+                "id": "video-analysis",
+                "name": "Video analysis",
+                "description": (
+                    "Analyze uploaded videos and documents from the user's own evidence."
+                ),
+                "version": 1,
+                "supported_modes": ["auto", "deep", "fast"],
+                "availability": "available",
+            },
+        ]
         if catalog != {
             "enabled": True,
             "status": "ready",
-            "items": [expected_item],
+            "items": expected_items,
         }:
-            raise SmokeError(f"video catalog mismatch: {catalog}")
+            raise SmokeError(f"skill catalog mismatch: {catalog}")
 
         _, capabilities = _json_request("/api/capabilities", token=USER_TOKEN)
         if (capabilities.get("skills") or {}).get("status") != "available":
@@ -143,7 +158,7 @@ def main() -> int:
             token=ADMIN_TOKEN,
             expected=frozenset({200, 503}),
         )
-        _expect_ready_video_registry(
+        _expect_ready_skill_registry(
             readiness.get("skills") or {},
             source="readiness",
         )
@@ -156,9 +171,9 @@ def main() -> int:
             token=ADMIN_TOKEN,
             method="POST",
         )
-        _expect_ready_video_registry(rediscovery, source="rediscovery")
+        _expect_ready_skill_registry(rediscovery, source="rediscovery")
         if rediscovery.get("invalid") != []:
-            raise SmokeError("video rediscovery returned invalid bundle diagnostics")
+            raise SmokeError("skill rediscovery returned invalid bundle diagnostics")
     except (OSError, SmokeError) as exc:
         print(f"skills foundation smoke failed: {exc}", file=sys.stderr)
         return 1
@@ -170,7 +185,7 @@ def main() -> int:
                 "catalog": {
                     "enabled": True,
                     "status": "ready",
-                    "items": ["video-analysis"],
+                    "items": ["grounded-document-analysis", "video-analysis"],
                 },
                 "capabilities": {"skills": "available"},
                 "readiness": {"http": readiness_http, "skills": "ready"},

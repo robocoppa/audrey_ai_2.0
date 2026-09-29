@@ -103,12 +103,13 @@ environment when the command exits. Success is exit code zero, JSON ending in
 `"status": "passed"`, `"legacy_bearer_rejected_locally": true`, and no
 `cleanup_error`.
 
-## Run the current built-in video-skill smoke from the laptop
+## Run the current built-in skill-registry smoke from the laptop
 
-This is the targeted API-only deploy proof for 3A.2. It checks that the tracked
-`video-analysis` bundle is the one available catalog entry, skill readiness is
-healthy, and admin rediscovery reloads it without diagnostics. It creates no
-user data, conversations, tokens, files, or model calls. Use the working LAN/WARP route:
+This is the targeted API-only deploy proof for the 3A/3C built-in registry. It
+checks that the tracked `video-analysis` and `grounded-document-analysis`
+bundles are the two available catalog entries, skill readiness is healthy, and
+admin rediscovery reloads both without diagnostics. It creates no user data,
+conversations, tokens, files, or model calls. Use the working LAN/WARP route:
 
 ```bash
 cd /home/bart/Documents/github/audrey_ai_2.0
@@ -121,10 +122,43 @@ cd /home/bart/Documents/github/audrey_ai_2.0
 ```
 
 Success is exit code zero and JSON ending in `"status": "passed"`, with
-catalog and readiness
-`ready`, capabilities `available`, one `video-analysis` item, and zero
-rediscovery diagnostics. The earlier all-`disabled` output remains the
-recorded live proof for 3A.1; do not expect that result after deploying 3A.2.
+catalog and readiness `ready`, capabilities `available`, both built-in skill
+ids, and zero rediscovery diagnostics. The earlier all-`disabled` output
+remains the recorded live proof for 3A.1; do not expect that result after
+deploying the enabled registry.
+
+## Run the 3C grounded-document product evaluation from the laptop
+
+Run this only after deploying the 3C bundle and passing the built-in registry
+smoke above. In the native browser, upload both files from
+`scripts/fixtures/grounded-document-analysis/` and wait until each one is
+Ready:
+
+- `c3-grounded-operations.md`
+- `c3-grounded-support.md`
+
+The case list alternates an ordinary `audrey_auto` control with an identical
+request selecting `grounded-document-analysis`. Three whole passes provide
+three samples per arm without running the same prompt twice in a row:
+
+```bash
+cd /home/bart/Documents/github/audrey_ai_2.0
+.venv/bin/python scripts/eval_research.py \
+  --base-url http://192.168.1.11:8000/v1 \
+  --cases scripts/eval_prompts_grounded_documents.json \
+  --repeat 3 \
+  --save-file docs/testing/2026-09-28-grounded-documents-answers.md \
+  --save-json docs/testing/2026-09-28-grounded-documents-results.json
+```
+
+The structural gate is all 18 cases completing without failed checks. Then read
+each control/skill answer pair and compare file attribution, evidence gaps,
+tool traces, route, and latency. The JSON record must show an empty `skill`
+for each control and `grounded-document-analysis` for each skill arm. This
+evaluation creates compatibility chat-history entries and leaves the two
+uploaded fixtures in the account; remove them manually after preserving the
+artifacts. Do not tune the prompt or open automatic selection until the paired
+answers have been judged.
 
 ## Run the explicit skill-selection smoke from the laptop
 

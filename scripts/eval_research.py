@@ -29,11 +29,11 @@ Put the two values in `.env.test.local` at the repo root (gitignored via the
 `.env.*.local` rule — separate from the app's `.env`, so the key never leaves
 your laptop and can't be committed). The script auto-loads them:
 
-    AUDREY_EVAL_BASE_URL=http://100.113.157.98:8000/v1
+    AUDREY_EVAL_BASE_URL=http://192.168.1.11:8000/v1
     AUDREY_EVAL_API_KEY=aud_pat_...
 
-Use `http://192.168.1.11:8000/v1` only when falling back to WARP. Keep comments
-on their own lines; everything after `=` is part of the loaded value.
+Use the working LAN/WARP route above. Keep comments on their own lines;
+everything after `=` is part of the loaded value.
 
 Then just run `.venv/bin/python scripts/eval_research.py` — no exports needed.
 A one-off `export AUDREY_EVAL_*` or a `--flag` still overrides the file.
@@ -2059,6 +2059,7 @@ def save_json(results: list[CaseResult], save_json_file: Path) -> None:
             "total_s": r.total_s,
             "answer_len": len(r.answer),
             "think_requested": r.think_requested,
+            "skill": r.skill,
             "banners": r.banners_seen,
             "error": r.error,
             "code_detail": r.code_detail,
@@ -2136,7 +2137,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--base-url", default=os.environ.get("AUDREY_EVAL_BASE_URL", ""),
-                   help="Audrey API base, e.g. http://100.113.157.98:8000/v1 "
+                   help="Audrey API base, e.g. http://192.168.1.11:8000/v1 "
                         "(or env AUDREY_EVAL_BASE_URL)")
     p.add_argument("--api-key", default=os.environ.get("AUDREY_EVAL_API_KEY", ""),
                    help="Audrey personal token aud_pat_… (or env AUDREY_EVAL_API_KEY)")

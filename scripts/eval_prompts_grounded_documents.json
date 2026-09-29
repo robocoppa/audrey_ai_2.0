@@ -1,0 +1,107 @@
+[
+  {
+    "name": "grounded-doc-compare-control",
+    "prompt": "Compare c3-grounded-operations.md and c3-grounded-support.md. Report the staging API p95 latency from the operations note and the median first response time from the support note, then explain why those two measurements should not be treated as the same kind of metric.",
+    "model": "audrey_auto",
+    "expect_sources": false,
+    "expect_route": [
+      "fast",
+      "escalated"
+    ],
+    "answer_contains": [
+      "840",
+      "18"
+    ],
+    "expect_names_files": [
+      "c3-grounded-operations.md",
+      "c3-grounded-support.md"
+    ]
+  },
+  {
+    "name": "grounded-doc-compare-skill",
+    "prompt": "Compare c3-grounded-operations.md and c3-grounded-support.md. Report the staging API p95 latency from the operations note and the median first response time from the support note, then explain why those two measurements should not be treated as the same kind of metric.",
+    "model": "audrey_auto",
+    "expect_sources": false,
+    "expect_route": [
+      "fast",
+      "escalated"
+    ],
+    "answer_contains": [
+      "840",
+      "18"
+    ],
+    "expect_names_files": [
+      "c3-grounded-operations.md",
+      "c3-grounded-support.md"
+    ],
+    "skill": "grounded-document-analysis"
+  },
+  {
+    "name": "grounded-doc-single-control",
+    "prompt": "Using c3-grounded-operations.md, give the release codename, planned production date, and the unresolved operational risk. Attribute the facts to the file.",
+    "model": "audrey_auto",
+    "expect_sources": false,
+    "expect_route": [
+      "fast",
+      "escalated"
+    ],
+    "answer_contains": [
+      "Alder",
+      "October 14",
+      "schema lock"
+    ],
+    "expect_names_files": [
+      "c3-grounded-operations.md"
+    ]
+  },
+  {
+    "name": "grounded-doc-single-skill",
+    "prompt": "Using c3-grounded-operations.md, give the release codename, planned production date, and the unresolved operational risk. Attribute the facts to the file.",
+    "model": "audrey_auto",
+    "expect_sources": false,
+    "expect_route": [
+      "fast",
+      "escalated"
+    ],
+    "answer_contains": [
+      "Alder",
+      "October 14",
+      "schema lock"
+    ],
+    "expect_names_files": [
+      "c3-grounded-operations.md"
+    ],
+    "skill": "grounded-document-analysis"
+  },
+  {
+    "name": "grounded-doc-absence-control",
+    "prompt": "According to c3-grounded-operations.md and c3-grounded-support.md, what customer satisfaction score was recorded? Keep the two files separate and do not infer a score that is not present.",
+    "model": "audrey_auto",
+    "expect_sources": false,
+    "expect_route": [
+      "fast",
+      "escalated"
+    ],
+    "expect_disclaims_absence": true,
+    "expect_names_files": [
+      "c3-grounded-operations.md",
+      "c3-grounded-support.md"
+    ]
+  },
+  {
+    "name": "grounded-doc-absence-skill",
+    "prompt": "According to c3-grounded-operations.md and c3-grounded-support.md, what customer satisfaction score was recorded? Keep the two files separate and do not infer a score that is not present.",
+    "model": "audrey_auto",
+    "expect_sources": false,
+    "expect_route": [
+      "fast",
+      "escalated"
+    ],
+    "expect_disclaims_absence": true,
+    "expect_names_files": [
+      "c3-grounded-operations.md",
+      "c3-grounded-support.md"
+    ],
+    "skill": "grounded-document-analysis"
+  }
+]

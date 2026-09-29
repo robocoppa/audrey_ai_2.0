@@ -1,4 +1,4 @@
-"""The 3A.2 video-skill smoke is narrow and contract-focused."""
+"""The built-in skill registry smoke is narrow and contract-focused."""
 
 from __future__ import annotations
 
@@ -12,25 +12,40 @@ def _ready_counts() -> dict[str, Any]:
     return {
         "enabled": True,
         "status": "ready",
-        "loaded_count": 1,
-        "available_count": 1,
+        "loaded_count": 2,
+        "available_count": 2,
         "degraded_count": 0,
         "invalid_count": 0,
     }
 
 
-def _catalog_item() -> dict[str, Any]:
-    return {
-        "id": "video-analysis",
-        "name": "Video analysis",
-        "description": ("Analyze uploaded videos and documents from the user's own evidence."),
-        "version": 1,
-        "supported_modes": ["auto", "deep", "fast"],
-        "availability": "available",
-    }
+def _catalog_items() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "grounded-document-analysis",
+            "name": "Grounded document analysis",
+            "description": (
+                "Read, compare, and explain the user's uploaded documents "
+                "with explicit evidence coverage."
+            ),
+            "version": 1,
+            "supported_modes": ["auto", "deep", "fast"],
+            "availability": "available",
+        },
+        {
+            "id": "video-analysis",
+            "name": "Video analysis",
+            "description": (
+                "Analyze uploaded videos and documents from the user's own evidence."
+            ),
+            "version": 1,
+            "supported_modes": ["auto", "deep", "fast"],
+            "availability": "available",
+        },
+    ]
 
 
-def test_smoke_checks_only_the_video_skill_registry(monkeypatch, capsys):
+def test_smoke_checks_the_complete_builtin_skill_registry(monkeypatch, capsys):
     calls: list[tuple[str, str, str]] = []
 
     def fake_json_request(
@@ -45,7 +60,7 @@ def test_smoke_checks_only_the_video_skill_registry(monkeypatch, capsys):
             return 200, {
                 "enabled": True,
                 "status": "ready",
-                "items": [_catalog_item()],
+                "items": _catalog_items(),
             }
         if path == "/api/capabilities":
             return 200, {"skills": {"status": "available"}}
@@ -68,7 +83,10 @@ def test_smoke_checks_only_the_video_skill_registry(monkeypatch, capsys):
 
     result = json.loads(capsys.readouterr().out)
     assert result["status"] == "passed"
-    assert result["catalog"]["items"] == ["video-analysis"]
+    assert result["catalog"]["items"] == [
+        "grounded-document-analysis",
+        "video-analysis",
+    ]
     assert calls == [
         ("GET", "/api/skills", "user-evidence"),
         ("GET", "/api/capabilities", "user-evidence"),
@@ -91,4 +109,4 @@ def test_smoke_fails_on_the_wrong_catalog(monkeypatch, capsys):
 
     assert smoke.main() == 1
 
-    assert "video catalog mismatch" in capsys.readouterr().err
+    assert "skill catalog mismatch" in capsys.readouterr().err
