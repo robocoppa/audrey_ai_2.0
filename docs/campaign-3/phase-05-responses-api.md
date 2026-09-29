@@ -1,7 +1,7 @@
 # Campaign 3 Phase 5 - Responses API compatibility
 
-**Status:** Slice 5A is laptop-complete on 2026-09-29. Its targeted live
-smoke remains open.
+**Status:** Slice 5A is live-settled on 2026-09-29. Its targeted smoke
+passed over the working LAN/WARP route.
 
 ## Goal
 
@@ -79,6 +79,11 @@ unsupported streaming request and proves rejection happens before generation.
 - Changed-file Ruff and smoke-script compilation pass.
 
 ## Targeted live gate
+
+**Result:** Passed over LAN/WARP on 2026-09-29. The completed response returned
+HTTP 200 with a `resp_` id, matching typed and top-level output text, valid
+usage, and the requested sentinel. The unsupported streaming request returned
+HTTP 400 with `responses_feature_unsupported`.
 
 Rebuild the Audrey backend, then run from the laptop checkout:
 

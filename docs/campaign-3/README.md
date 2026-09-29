@@ -4,8 +4,8 @@
 product cutover is live-settled, while its legacy 2D.5 administration, role,
 model-publication, exact-owner bootstrap, and provider-binding soak remains
 open. Phase 5 has started; Slice 5A's completed plain-text
-`POST /v1/responses` adapter is laptop-complete and awaits its targeted
-live smoke.
+`POST /v1/responses` adapter is live-settled after its targeted WARP smoke
+passed.
 
 The Milestone 2E parity build is laptop-complete across native memory
 settings, owner-bound file and video upload and inspection, source and answer
@@ -69,7 +69,7 @@ and finally adds the first general skills layer on that owned surface.
 | 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (2A–2B, 2C.1–2C.3, and 2D.1–2D.4 verified; 2D.5 deployed; 2E settled; 2F.3 live-passed; 2F.4 and permanent DNS correction live-settled) |
 | 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | Complete (3A–3C live-settled; explicit grounded-document pilot ships; automatic selection deferred) |
 | 04 | [File and artifact downloads](phase-04-file-downloads.md) | Owner-scoped recovery of stored originals and useful derived artifacts from the native Files surface | Phase 03 explicit-skill ship decision | Complete |
-| 05 | [Responses API compatibility](phase-05-responses-api.md) | OpenAI Responses clients use Audrey's existing authenticated generation and policy boundaries | Phase 04 completion | In progress (5A laptop-complete) |
+| 05 | [Responses API compatibility](phase-05-responses-api.md) | OpenAI Responses clients use Audrey's existing authenticated generation and policy boundaries | Phase 04 completion | In progress (5A live-settled) |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1
 through Campaign 3 Phase 5, or use the topic filenames.

@@ -280,6 +280,10 @@ Success is exit code zero, `"status": "passed"`, and no `cleanup_error`.
 
 ## Run the 5A Responses API smoke from the laptop
 
+**Result:** Passed over LAN/WARP on 2026-09-29. Do not repeat unless a later
+change touches the Responses adapter or the shared authenticated generation
+path.
+
 This targeted backend proof makes one short `audrey_fast` model call through
 `POST /v1/responses`, validates the completed typed output and token usage,
 then proves `stream: true` fails explicitly before generation. The model
