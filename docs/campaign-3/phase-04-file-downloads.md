@@ -1,8 +1,8 @@
 # Campaign 3 Phase 4 — file and artifact downloads
 
-**Status:** Slice 4A is live-settled on 2026-09-29. Slice 4B derived
-artifact downloads are laptop-complete and await deployment plus their targeted
-live smoke.
+**Status:** Slice 4A is live-settled on 2026-09-29. Slice 4B's backend
+live smoke passed all three derived artifacts on 2026-09-29; its one native
+browser download check remains open.
 
 ## Goal
 
@@ -111,10 +111,14 @@ visible as a fallback, but it does not claim a downloadable artifact.
 
 Laptop coverage proves exact UTF-8 bytes, all three filenames, private response
 headers, owner scoping, absent and empty sidecars, authentication, and derived
-downloads after the original video was reclaimed. The full suite passes 2,967
-Python tests and 29 frontend tests.
+downloads after the original video was reclaimed. The current full suite passes
+2,969 Python tests and 29 frontend tests.
 
 ## Slice 4B targeted live gate
+
+**Backend result:** Passed on 2026-09-29 against a fetched video. Summary,
+transcript, and visual-notes downloads each returned HTTP 200 with the expected
+stable filename. The native browser download action remains the final check.
 
 After deploying the backend and native UI, run the read-only smoke from the
 laptop checkout:
@@ -129,17 +133,29 @@ cd /home/bart/Documents/github/audrey_ai_2.0
 )
 ```
 
-The script selects a ready video, preferring one whose original was reclaimed.
-Set `AUDREY_ARTIFACT_SMOKE_FILE_ID` before the command only when a particular
-video must be checked. It pages each artifact through the existing reader,
-compares every available download byte-for-byte, validates its filename and
-private headers, and expects HTTP 404 for missing artifacts. It creates or
-deletes nothing.
+No upload is needed when the smoke account already has a **Ready** video with
+text in at least one **View text** tab. Otherwise, upload or fetch a short video
+with clear speech or visible scene changes and wait for it to become Ready.
+
+The script scans Ready videos, preferring ones whose originals were reclaimed,
+and selects the first with a real summary, transcript, or visual-notes sidecar.
+Set `AUDREY_ARTIFACT_SMOKE_FILE_ID` only when a particular video must be
+checked. The script pages each artifact through the existing reader, compares
+every available download byte-for-byte, validates its filename and private
+headers, and expects HTTP 404 for missing artifacts. It creates or deletes
+nothing.
 
 Success is exit code zero, `"status": "passed"`, and
-`"available_count"` of at least one. In the native browser, open **Files**,
-choose **View text** for that video, and click one available artifact download.
-The saved name should use the suffix in the table, while empty artifact tabs
-show no download action.
+`"available_count"` of at least one. Use the filename from the output's
+`"file"` block for the browser check. Under **Files → View text**, a non-empty
+tab should show its download action and an empty tab should not. The saved name
+must use the suffix in the table.
 
-Phase 4 completes after this live gate passes.
+Phase 4 completes after the remaining native browser download check passes.
+
+During this smoke, the downloaded summary exposed a separate generation-quality
+bug: the model had repeated its writing assignment instead of describing the
+video. The followup summary generator now asks for two or three natural
+sentences, keeps up to three sentences within an 80-word safety cap, and retries
+one unusable response. That change does not alter the artifact download
+contract.

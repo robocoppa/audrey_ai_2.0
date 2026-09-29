@@ -212,10 +212,28 @@ download confirms that the built browser action reaches the proven endpoint.
 
 ## Run the 4B artifact-download smoke from the laptop
 
-This read-only proof selects a ready video, preferring one whose original media
-was reclaimed. It pages all three derived-text readers, compares each available
-download byte-for-byte, checks its stable filename and private headers, and
-expects HTTP 404 for missing artifacts. It requires only `AUDREY_USER_JWT`:
+This is a read-only backend proof. It needs one processed video with at least
+one real derived artifact: a summary, transcript, or visual notes.
+
+### Prepare the account
+
+1. Open the native Audrey browser as the same user represented by
+   `AUDREY_USER_JWT`.
+2. Open **Files** and look for a video whose status is **Ready**.
+3. Choose **View text**. If Summary, Transcript, or Visual notes contains text,
+   the account is ready and no upload is needed.
+4. If no Ready video has text, upload or fetch a short video with clear speech
+   or visible scene changes. Wait until its status becomes **Ready**, then
+   confirm that at least one **View text** tab contains text.
+
+A video that is still processing, failed before producing text, or has three
+empty artifact tabs cannot prove this slice. The original video file may already
+be reclaimed; the derived text is what this smoke reads.
+
+### Run from the laptop
+
+The script scans the account's Ready videos, preferring reclaimed originals,
+and selects the first one with actual derived text:
 
 ```bash
 cd /home/bart/Documents/github/audrey_ai_2.0
@@ -227,12 +245,25 @@ cd /home/bart/Documents/github/audrey_ai_2.0
 )
 ```
 
-Success is exit code zero, JSON ending in `"status": "passed"`, and
-`"available_count"` of at least one. If the automatic selection has no
-suitable video, set `AUDREY_ARTIFACT_SMOKE_FILE_ID` to an owned processed
-video id and rerun. The script creates or deletes nothing. After rebuilding
-`audrey-ui`, open that video's **View text** screen and confirm that a
-non-empty artifact has a download action while an empty tab does not.
+It pages all three artifact readers, compares each available download
+byte-for-byte, checks its stable filename and private headers, and expects HTTP
+404 for missing artifacts. It creates or deletes nothing.
+
+Success is exit code zero and JSON with:
+
+- `"status": "passed"`;
+- `"available_count"` of at least one;
+- `"file"` naming the selected video;
+- HTTP 200 for each artifact marked `"available": true`;
+- HTTP 404 for each artifact marked `"available": false`.
+
+Use the filename in the `"file"` block for the browser check. Open that video
+under **Files → View text**. A non-empty tab must show its download action and
+save a `.summary.txt`, `.transcript.txt`, or `.visual-notes.txt` file.
+An empty tab must not show a download action.
+
+Set `AUDREY_ARTIFACT_SMOKE_FILE_ID` only when a particular owned video must be
+tested. Normally the automatic scan is sufficient.
 
 This path is for scripts that must exercise the standalone proxy. Use the
 checked wrapper so malformed or legacy env-file entries fail with a useful

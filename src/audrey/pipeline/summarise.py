@@ -45,17 +45,19 @@ from audrey.pipeline.fair_gate import FairLocalGate
 log = logging.getLogger(__name__)
 
 SUMMARY_SYSTEM = (
-    "Write a brief library description of the video in one or two complete "
-    "sentences, at most 45 words. State its main subject, action, and useful "
-    "takeaway. Prefer the point of the video over incidental visual details. "
-    "Start directly with the subject; do not write a preamble, first-person "
-    "analysis, title, heading, bullets, or transcript/source attribution. "
-    "Use only the material below; do not invent events between excerpts."
+    "Write a natural description for someone browsing their private video "
+    "library. Use two or three concise, complete sentences. Explain the main "
+    "subject, what happens or is demonstrated, and what a viewer can learn or "
+    "take away. Use specific details from the video material and sound like a "
+    "person who watched it. Start directly with the video; do not mention the "
+    "user, the request, these instructions, sources, transcripts, frames, or "
+    "being an AI. Do not write a title, heading, or bullets. Use only the "
+    "material below; do not invent events between excerpts."
 )
 
-SUMMARY_MAX_WORDS = 45
-SUMMARY_MAX_CHARS = 320
-SUMMARY_MAX_OUTPUT_TOKENS = 160
+SUMMARY_MAX_WORDS = 80
+SUMMARY_MAX_CHARS = 560
+SUMMARY_MAX_OUTPUT_TOKENS = 240
 
 _PREAMBLE = re.compile(
     r"^(?:let me|i(?:'ll| will)) (?:analy[sz]e|summari[sz]e|review) "
@@ -65,21 +67,42 @@ _PREAMBLE = re.compile(
     re.IGNORECASE,
 )
 
+_INSTRUCTION_ECHO = re.compile(
+    r"^(?:the user (?:wants|asks|asked|requested)|"
+    r"the (?:task|request|prompt|instructions?) (?:asks?|requires?|is)|"
+    r"(?:please )?write (?:a|the)|"
+    r"(?:provide|create) (?:a|the) (?:brief|short|natural) |"
+    r"(?:a|the) (?:brief|short) library description (?:should|must))",
+    re.IGNORECASE,
+)
+
+_CORRECTIVE_SYSTEM = (
+    SUMMARY_SYSTEM
+    + " Your previous answer was not a usable description of the "
+    "video. Return only the finished video description."
+)
+
 
 def brief_video_summary(raw: str) -> str:
-    """Keep only a short answer, even when the model ignores the length request."""
+    """Keep only a short description, never an echo of the assignment."""
     result = " ".join(raw.split())
     for _ in range(3):
         trimmed = _PREAMBLE.sub("", result, count=1).strip()
         if trimmed == result:
             break
         result = trimmed
+    if _INSTRUCTION_ECHO.match(result):
+        return ""
+
     sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", result)
-    result = sentences[0]
-    if len(sentences) > 1:
-        candidate = result + " " + sentences[1]
+    kept: list[str] = []
+    for sentence in sentences[:3]:
+        candidate = " ".join([*kept, sentence])
         if len(candidate.split()) <= SUMMARY_MAX_WORDS and len(candidate) <= SUMMARY_MAX_CHARS:
-            result = candidate
+            kept.append(sentence)
+        else:
+            break
+    result = " ".join(kept) if kept else sentences[0]
     if len(result.split()) > SUMMARY_MAX_WORDS:
         result = " ".join(result.split()[:SUMMARY_MAX_WORDS]).rstrip(".,;:") + "…"
     if len(result) > SUMMARY_MAX_CHARS:
@@ -199,6 +222,7 @@ async def summarise_video(
         f"Video file: {filename}\n"
         f"Length: {minutes:.0f} minutes\n\n" if duration_s else f"Video file: {filename}\n\n"
     )
+    user_content = header + "VIDEO MATERIAL\n\n" + material + "\n\nEND VIDEO MATERIAL"
 
     think = await _think_flag(ollama, model, cfg)
 
@@ -210,13 +234,32 @@ async def summarise_video(
             model=model,
             messages=[
                 {"role": "system", "content": SUMMARY_SYSTEM},
-                {"role": "user", "content": header + material},
+                {"role": "user", "content": user_content},
             ],
             timeout_s=float(_cfg(cfg).get("summary_timeout_s", DEFAULT_TIMEOUT_S)),
             think=think,
             options={"num_predict": SUMMARY_MAX_OUTPUT_TOKENS},
         )
-    text = brief_video_summary(str((resp.get("message") or {}).get("content") or ""))
+        raw = str((resp.get("message") or {}).get("content") or "")
+        text = brief_video_summary(raw)
+        if not text and raw.strip():
+            log.warning(
+                "summarise: %s returned no usable description; retrying",
+                model,
+            )
+            resp = await ollama.chat(
+                model=model,
+                messages=[
+                    {"role": "system", "content": _CORRECTIVE_SYSTEM},
+                    {"role": "user", "content": user_content},
+                ],
+                timeout_s=float(_cfg(cfg).get("summary_timeout_s", DEFAULT_TIMEOUT_S)),
+                think=think,
+                options={"num_predict": SUMMARY_MAX_OUTPUT_TOKENS},
+            )
+            text = brief_video_summary(
+                str((resp.get("message") or {}).get("content") or "")
+            )
     if not text:
         raise SummaryUnavailableError(f"{model} returned an empty summary")
     # `think=` and `thinking=` are both here on purpose, and they are different

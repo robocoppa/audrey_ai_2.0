@@ -78,14 +78,14 @@ def _json_request(path: str) -> dict[str, Any]:
     return json.loads(content)
 
 
-def _select_video(items: list[dict[str, Any]]) -> dict[str, Any]:
+def _candidate_videos(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if FILE_ID:
         selected = next((item for item in items if item.get("id") == FILE_ID), None)
         if selected is None:
             raise SmokeError(f"AUDREY_ARTIFACT_SMOKE_FILE_ID {FILE_ID!r} was not found")
         if selected.get("kind") != "video":
             raise SmokeError(f"AUDREY_ARTIFACT_SMOKE_FILE_ID {FILE_ID!r} is not a video")
-        return selected
+        return [selected]
 
     candidates = [
         item
@@ -94,8 +94,8 @@ def _select_video(items: list[dict[str, Any]]) -> dict[str, Any]:
     ]
     if not candidates:
         raise SmokeError(
-            "no ready video exists for the smoke user; process one or set "
-            "AUDREY_ARTIFACT_SMOKE_FILE_ID"
+            "no ready video exists for the smoke user; upload or fetch a video "
+            "and wait for it to reach Ready"
         )
     candidates.sort(
         key=lambda item: (
@@ -103,7 +103,7 @@ def _select_video(items: list[dict[str, Any]]) -> dict[str, Any]:
             str(item.get("uploaded_at") or ""),
         )
     )
-    return candidates[0]
+    return candidates
 
 
 def _read_artifact(file_id: str, artifact: str) -> str:
@@ -163,16 +163,38 @@ def main() -> int:
         items = listing.get("items")
         if not isinstance(items, list):
             raise SmokeError("native file listing returned an invalid shape")
-        video = _select_video(items)
+        candidates = _candidate_videos(items)
+        video: dict[str, Any] | None = None
+        artifact_texts: dict[str, str] = {}
+        candidates_checked = 0
+        for candidate in candidates:
+            candidate_id = str(candidate.get("id") or "")
+            if not candidate_id:
+                continue
+            candidates_checked += 1
+            texts = {
+                artifact: _read_artifact(candidate_id, artifact)
+                for artifact in _ARTIFACT_SUFFIXES
+            }
+            if any(texts.values()):
+                video = candidate
+                artifact_texts = texts
+                break
+
+        if video is None:
+            selected = f" {FILE_ID!r}" if FILE_ID else ""
+            raise SmokeError(
+                f"ready video{selected} has no transcript, visual notes, or summary; "
+                "process a video with speech or visible content"
+            )
         file_id = str(video.get("id") or "")
         filename = str(video.get("filename") or "")
-        if not file_id or not filename:
-            raise SmokeError("selected video omitted its id or filename")
+        if not filename:
+            raise SmokeError("selected video omitted its filename")
 
         artifact_results: dict[str, Any] = {}
         available = 0
-        for artifact in _ARTIFACT_SUFFIXES:
-            text = _read_artifact(file_id, artifact)
+        for artifact, text in artifact_texts.items():
             path = (
                 f"/api/files/{quote(file_id, safe='')}/artifacts/{artifact}/download"
             )
@@ -223,6 +245,7 @@ def main() -> int:
         }
         result["artifacts"] = artifact_results
         result["available_count"] = available
+        result["candidates_checked"] = candidates_checked
     except Exception as exc:  # noqa: BLE001 - emit one structured smoke result
         result["error"] = f"{type(exc).__name__}: {exc}"
 

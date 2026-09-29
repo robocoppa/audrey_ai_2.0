@@ -139,6 +139,7 @@ def test_native_file_list_briefs_an_existing_verbose_video_summary(monkeypatch):
         "Let me analyze this video. "
         "A Minecraft tutorial demonstrates a way to grow trees close together. "
         "The player places saplings beside a compact structure for easier harvesting. "
+        "The method helps collect wood efficiently in a small area. "
         "The streamer is wearing earphones and a dark shirt."
     )
 
@@ -152,7 +153,8 @@ def test_native_file_list_briefs_an_existing_verbose_video_summary(monkeypatch):
     assert response.status_code == 200
     assert response.json()["items"][0]["summary"] == (
         "A Minecraft tutorial demonstrates a way to grow trees close together. "
-        "The player places saplings beside a compact structure for easier harvesting."
+        "The player places saplings beside a compact structure for easier harvesting. "
+        "The method helps collect wood efficiently in a small area."
     )
 
 

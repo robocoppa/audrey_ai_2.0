@@ -87,8 +87,16 @@ class TestBuildInput:
 
 
 class _Ollama:
-    def __init__(self, content="A retirement party for Jason.", boom=None,
-                 caps=("thinking",), caps_boom=None):
+    def __init__(
+        self,
+        content=(
+            "A retirement party celebrates Jason's career. "
+            "Friends and colleagues share memories and wish him well."
+        ),
+        boom=None,
+        caps=("thinking",),
+        caps_boom=None,
+    ):
         self.content = content
         self.boom = boom
         self.caps = list(caps)
@@ -102,8 +110,13 @@ class _Ollama:
         })
         if self.boom:
             raise self.boom
+        content = (
+            self.content[min(len(self.calls) - 1, len(self.content) - 1)]
+            if isinstance(self.content, list)
+            else self.content
+        )
         return {
-            "message": {"content": self.content, "thinking": self.thinking},
+            "message": {"content": content, "thinking": self.thinking},
             "eval_count": 1234,
         }
 
@@ -145,7 +158,10 @@ class TestSummariseVideo:
             _segments(3), _frames(2), filename="v.mp4", duration_s=565.0,
             ollama=_Ollama(), registry=_Registry(), gate=_Gate(), cfg=_cfg())
 
-        assert got == "A retirement party for Jason."
+        assert got == (
+            "A retirement party celebrates Jason's career. Friends and colleagues "
+            "share memories and wish him well."
+        )
 
     @pytest.mark.asyncio
     async def test_the_prompt_and_generation_budget_request_a_short_blurb(self):
@@ -155,8 +171,8 @@ class TestSummariseVideo:
             ollama=ollama, registry=_Registry(), gate=_Gate(), cfg=_cfg())
 
         prompt = ollama.calls[0]["messages"][0]["content"]
-        assert "at most 45 words" in prompt
-        assert "first-person" in prompt
+        assert "two or three concise, complete sentences" in prompt
+        assert "sound like a person who watched it" in prompt
         assert ollama.calls[0]["options"] == {"num_predict": SUMMARY_MAX_OUTPUT_TOKENS}
 
     @pytest.mark.asyncio
@@ -165,6 +181,7 @@ class TestSummariseVideo:
             "Let me analyze this video. Here is a summary: "
             "A Minecraft tutorial demonstrates a compact tree-growing technique. "
             "The player places saplings near a structure to make harvesting easier. "
+            "It offers a practical way to gather wood in a smaller space. "
             + " ".join(["An unrelated extra detail."] * 40)
         )
         got = await summarise_video(
@@ -173,7 +190,8 @@ class TestSummariseVideo:
 
         assert got == (
             "A Minecraft tutorial demonstrates a compact tree-growing technique. "
-            "The player places saplings near a structure to make harvesting easier."
+            "The player places saplings near a structure to make harvesting easier. "
+            "It offers a practical way to gather wood in a smaller space."
         )
         assert len(got.split()) <= SUMMARY_MAX_WORDS
         assert len(got) <= SUMMARY_MAX_CHARS
@@ -201,6 +219,42 @@ class TestSummariseVideo:
                 _segments(3), [], filename="v.mp4", duration_s=60.0,
                 ollama=_Ollama(content="Let me analyze this video."),
                 registry=_Registry(), gate=_Gate(), cfg=_cfg())
+
+    @pytest.mark.asyncio
+    async def test_an_instruction_echo_is_retried_and_never_stored(self):
+        ollama = _Ollama(content=[
+            (
+                "The user wants a brief library description of this video, one or "
+                "two complete sentences, at most 45 words."
+            ),
+            (
+                "Gordon Ryan demonstrates how to control an opponent with the "
+                "kimura in Brazilian jiu-jitsu. He breaks the position into "
+                "practical details that viewers can apply during training."
+            ),
+        ])
+
+        got = await summarise_video(
+            _segments(3), _frames(2), filename="kimura.mp4", duration_s=60.0,
+            ollama=ollama, registry=_Registry(), gate=_Gate(), cfg=_cfg())
+
+        assert len(ollama.calls) == 2
+        assert "previous answer was not a usable description" in (
+            ollama.calls[1]["messages"][0]["content"]
+        )
+        assert got.startswith("Gordon Ryan demonstrates")
+
+    @pytest.mark.asyncio
+    async def test_a_repeated_instruction_echo_is_not_saved(self):
+        echo = "The user wants a brief library description of this video."
+        ollama = _Ollama(content=echo)
+
+        with pytest.raises(SummaryUnavailableError):
+            await summarise_video(
+                _segments(3), [], filename="v.mp4", duration_s=60.0,
+                ollama=ollama, registry=_Registry(), gate=_Gate(), cfg=_cfg())
+
+        assert len(ollama.calls) == 2
 
     @pytest.mark.asyncio
     async def test_the_default_summariser_is_a_cloud_model(self):
@@ -475,7 +529,10 @@ class TestThinkingIsOffForSummaries:
             ollama=ollama, registry=_Registry(), gate=_Gate(), cfg=_cfg())
 
         # And the summary still happens — a probe failure must not cost one.
-        assert got == "A retirement party for Jason."
+        assert got == (
+            "A retirement party celebrates Jason's career. Friends and colleagues "
+            "share memories and wish him well."
+        )
         assert ollama.calls[0]["think"] is None
 
     @pytest.mark.asyncio
