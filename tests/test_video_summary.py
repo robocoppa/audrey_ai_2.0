@@ -16,6 +16,7 @@ import pytest
 
 from audrey.kb.ingest import ingest_summary
 from audrey.kb.qdrant import point_id
+from audrey.models.ollama import OllamaError
 from audrey.pipeline.summarise import (
     SUMMARY_MAX_CHARS,
     SUMMARY_MAX_OUTPUT_TOKENS,
@@ -108,8 +109,13 @@ class _Ollama:
         self.calls.append({
             "model": model, "messages": messages, "think": think, "options": options,
         })
-        if self.boom:
-            raise self.boom
+        boom = (
+            self.boom[min(len(self.calls) - 1, len(self.boom) - 1)]
+            if isinstance(self.boom, list)
+            else self.boom
+        )
+        if boom:
+            raise boom
         content = (
             self.content[min(len(self.calls) - 1, len(self.content) - 1)]
             if isinstance(self.content, list)
@@ -144,7 +150,7 @@ def _cfg(**video):
 
 
 class _Registry:
-    def __init__(self, location="cloud"):
+    def __init__(self, location="local"):
         self._location = location
 
     def location_of(self, model):
@@ -221,7 +227,7 @@ class TestSummariseVideo:
                 registry=_Registry(), gate=_Gate(), cfg=_cfg())
 
     @pytest.mark.asyncio
-    async def test_an_instruction_echo_is_retried_and_never_stored(self):
+    async def test_an_instruction_echo_falls_back_to_the_second_model(self):
         ollama = _Ollama(content=[
             (
                 "The user wants a brief library description of this video, one or "
@@ -238,11 +244,35 @@ class TestSummariseVideo:
             _segments(3), _frames(2), filename="kimura.mp4", duration_s=60.0,
             ollama=ollama, registry=_Registry(), gate=_Gate(), cfg=_cfg())
 
-        assert len(ollama.calls) == 2
-        assert "previous answer was not a usable description" in (
-            ollama.calls[1]["messages"][0]["content"]
-        )
+        assert [call["model"] for call in ollama.calls] == [
+            "qwen3.8:latest",
+            "ornith-1.5:35b",
+        ]
         assert got.startswith("Gordon Ryan demonstrates")
+
+    @pytest.mark.asyncio
+    async def test_a_primary_ollama_error_falls_back_to_the_second_model(self):
+        ollama = _Ollama(
+            content=[
+                "",
+                (
+                    "A coach demonstrates a kimura from side control. "
+                    "The lesson shows how wrist control and hip position create "
+                    "leverage for a safe finish."
+                ),
+            ],
+            boom=[OllamaError("primary unavailable"), None],
+        )
+
+        got = await summarise_video(
+            _segments(3), _frames(2), filename="kimura.mp4", duration_s=60.0,
+            ollama=ollama, registry=_Registry(), gate=_Gate(), cfg=_cfg())
+
+        assert [call["model"] for call in ollama.calls] == [
+            "qwen3.8:latest",
+            "ornith-1.5:35b",
+        ]
+        assert got.startswith("A coach demonstrates")
 
     @pytest.mark.asyncio
     async def test_a_repeated_instruction_echo_is_not_saved(self):
@@ -257,14 +287,16 @@ class TestSummariseVideo:
         assert len(ollama.calls) == 2
 
     @pytest.mark.asyncio
-    async def test_the_default_summariser_is_a_cloud_model(self):
-        """The one stage of video ingest that costs the box no GPU."""
+    async def test_the_default_summariser_is_the_probed_local_primary(self):
+        gate = _Gate()
         ollama = _Ollama()
         await summarise_video(
             _segments(3), [], filename="v.mp4", duration_s=0.0,
-            ollama=ollama, registry=_Registry(), gate=_Gate(), cfg=_cfg())
+            ollama=ollama, registry=_Registry(), gate=gate, cfg=_cfg(),
+            user_id="user-1")
 
-        assert ollama.calls[0]["model"] == "glm-5.3:cloud"
+        assert ollama.calls[0]["model"] == "qwen3.8:latest"
+        assert gate.acquired == [("qwen3.8:latest", "local", "user-1")]
 
     @pytest.mark.asyncio
     async def test_a_local_summariser_still_takes_the_gate(self):
@@ -474,27 +506,25 @@ class TestListReturnsEveryFileRowField:
 
 
 class TestConfig:
-    def test_the_shipped_summariser_is_a_cloud_model(self):
-        """A local default would put a summary in the same queue as the chat
-        turn waiting behind it, for a stage nobody is waiting on."""
+    def test_the_shipped_summariser_pair_is_local_and_distinct(self):
+        """Private video-derived text stays on the owner's Audrey machine."""
         import yaml
         cfg = yaml.safe_load(
             (Path(__file__).resolve().parent.parent / "config.yaml").read_text())
         video = cfg["kb"]["video"]
 
-        assert video["summarise_model"].endswith(":cloud")
+        assert video["summarise_model"] == "qwen3.8:latest"
+        assert video["summarise_fallback_model"] == "ornith-1.5:35b"
+        assert video["summarise_model"] != video["summarise_fallback_model"]
         assert video["summary_input_chars"] > 0
 
 
 class TestThinkingIsOffForSummaries:
-    """2026-08-06. Summarising is the clearest case in the registry of
-    reasoning that is billed and thrown away: the summary is the product, the
-    reasoning is never shown, and `summarise_model` defaults to a cloud model.
+    """Summary reasoning is discarded output and avoidable GPU work.
 
-    Measured on `glm-5.2:cloud` (the predecessor in this slot), three
-    samples per state — 8994c of thinking
-    and 2683 eval tokens with the field omitted, against 0c and 817 tokens with
-    `think=false`, for a *longer* summary. 3.3x fewer billed tokens.
+    The comparative measurement was made on the former GLM summarizer. The
+    current Qwen and Ornith production-prompt probe confirmed that think=false
+    is accepted and both returned complete summaries without thinking text.
     """
 
     @pytest.mark.asyncio

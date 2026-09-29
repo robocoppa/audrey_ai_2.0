@@ -82,6 +82,7 @@ _MODEL_SECTIONS: tuple[tuple[str, ...], ...] = (
     ("passthrough", "allowed_models"),
     ("kb", "text_embedder"),
     ("kb", "video", "summarise_model"),
+    ("kb", "video", "summarise_fallback_model"),
     ("vision", "model"),
     ("vision", "also_capable"),
 )
@@ -100,6 +101,7 @@ _SEVERITY: tuple[tuple[str, str], ...] = (
     (".synthesizer", "HIGH"),
     ("text_embedder", "HIGH"),
     ("summarise_model", "HIGH"),
+    ("summarise_fallback_model", "HIGH"),
     ("workers[", "MEDIUM"),
     ("researchers[", "MEDIUM"),
     (".fallback_synth", "MEDIUM"),

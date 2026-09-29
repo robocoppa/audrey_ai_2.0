@@ -751,6 +751,29 @@ whether the claim is in the passage. Worth a pass.
 
 ---
 
+## Video-summary role probe (2026-09-29)
+
+One synthetic BJJ transcript plus visual-description block was sent with the
+production 2-3 sentence summary prompt and a 240-token output limit. No uploaded
+video content was used. This is a single instruction-following check, not a
+general quality benchmark, and no per-model latency was recorded.
+
+| Model | Location | Result |
+|---|---|---|
+| qwen3.8:latest | Local | HTTP 200; complete natural three-sentence summary; zero thinking characters |
+| ornith-1.5:35b | Local | HTTP 200; complete natural three-sentence summary; zero thinking characters |
+| muse-glimmer:latest | Local | HTTP 200; stopped mid-sentence, so it is excluded from this role |
+| deepseek-v4-pro:cloud | Cloud | HTTP 200; complete concise three-sentence summary |
+| kimi-k2.6:cloud | Cloud | HTTP 200; complete three-sentence summary before the 80-word sanitizer |
+| qwen3.5:397b-cloud | Cloud | HTTP 410: model retired on 2026-09-25 |
+
+The shipped decision is qwen3.8 primary with ornith-1.5:35b fallback. This keeps
+private video-derived text on the Audrey host and makes an unusable primary
+response switch models instead of repeating the same failed call. The cloud
+outputs are evidence that those models followed the synthetic prompt only; they
+were not selected because changing private-data providers needs an explicit
+privacy decision.
+
 ## Not established
 
 Open questions, and what would close each.

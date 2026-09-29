@@ -110,6 +110,9 @@ class TestTheRealConfigIsFullyCovered:
         # The two roles a hand-written list missed on the first attempt.
         assert any("factchecker" in p for p in paths), "research factchecker missed"
         assert any("summarise_model" in p for p in paths), "video summariser missed"
+        assert any("summarise_fallback_model" in p for p in paths), (
+            "video summary fallback missed"
+        )
         # And the load-bearing ones.
         assert "router.model" in paths
         assert any("tool_capable_models" in p for p in paths)

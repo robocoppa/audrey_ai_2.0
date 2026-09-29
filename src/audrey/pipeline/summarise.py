@@ -1,4 +1,4 @@
-"""One-call video summary over the transcript and frame descriptions (Phase 37).
+"""Bounded video summary over the transcript and frame descriptions (Phase 37).
 
 The smallest stage of the video work and the one that makes the rest legible.
 A file list reading `jasonRetirement.mp4 · 288 MB · ready` tells you nothing
@@ -20,16 +20,18 @@ result post, to produce something the worker never looks at.
 So the worker's job ends where the artifacts end, and this runs where they
 land.
 
-## Why a cloud model is the right default
+## Why the defaults now run locally
 
-Summarising is a text task over text inputs, so it carries none of the
-image-capability risk that made the `vl` pool local-only — the failure that
-prompted that rule was a model answering an image question blind, and there is
-no image here. `FairLocalGate.acquire` is a no-op for a non-local location,
-so this is the one stage of video ingest that costs the box no GPU at all.
+The original cloud default twice returned the writing instruction instead of a
+description in live use. Rejecting that output prevented bad text from being
+stored, but a second call to the same model left the video with no summary.
 
-It should stay that way. A local default here would put a summary in the same
-queue as the chat turn waiting behind it, for a stage nobody is waiting on.
+The current primary and fallback were checked with the production prompt and
+the same synthetic video material. Both returned complete, natural
+descriptions. They run through `FairLocalGate`, so summary work queues behind
+interactive local chat rather than competing with it. That queue is accepted
+because this stage is asynchronous and keeping private video-derived text on
+the owner's machine is the safer default.
 """
 
 from __future__ import annotations
@@ -38,7 +40,7 @@ import logging
 import re
 from typing import Any
 
-from audrey.models.ollama import OllamaClient
+from audrey.models.ollama import OllamaClient, OllamaError
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
 
@@ -76,12 +78,6 @@ _INSTRUCTION_ECHO = re.compile(
     re.IGNORECASE,
 )
 
-_CORRECTIVE_SYSTEM = (
-    SUMMARY_SYSTEM
-    + " Your previous answer was not a usable description of the "
-    "video. Return only the finished video description."
-)
-
 
 def brief_video_summary(raw: str) -> str:
     """Keep only a short description, never an echo of the assignment."""
@@ -116,7 +112,8 @@ def brief_video_summary(raw: str) -> str:
 #: pool and is roughly 45 minutes of speech.
 DEFAULT_INPUT_BUDGET = 24_000
 
-DEFAULT_MODEL = "glm-5.3:cloud"
+DEFAULT_MODEL = "qwen3.8:latest"
+DEFAULT_FALLBACK_MODEL = "ornith-1.5:35b"
 DEFAULT_TIMEOUT_S = 180.0
 
 
@@ -200,84 +197,107 @@ async def summarise_video(
     cfg: Any,
     user_id: str | None = None,
 ) -> str:
-    """One model call over both artifacts. Returns the summary text.
+    """Summarise both artifacts with one configured cross-model fallback.
 
-    Raises `SummaryUnavailableError` when there is nothing to summarise or no
-    model to do it with, and lets `OllamaError` through. Both are the caller's
-    to swallow — by this point the transcript and descriptions are already
-    ingested and already useful, so a summary failure is a missing field and
-    never a failed row.
+    Raises SummaryUnavailableError when there is nothing to summarise or both
+    models return unusable text. A primary OllamaError falls through to the
+    fallback; a fallback OllamaError is left for the caller to swallow. By this
+    point the transcript and descriptions are already ingested and useful, so a
+    summary failure is a missing field and never a failed row.
     """
+    video_cfg = _cfg(cfg)
     material = build_input(
-        segments, frames,
-        budget=int(_cfg(cfg).get("summary_input_chars", DEFAULT_INPUT_BUDGET)),
+        segments,
+        frames,
+        budget=int(video_cfg.get("summary_input_chars", DEFAULT_INPUT_BUDGET)),
     )
     if not material:
         raise SummaryUnavailableError("no transcript or descriptions to summarise")
 
-    model = str(_cfg(cfg).get("summarise_model") or DEFAULT_MODEL)
-    location = registry.location_of(model)
+    primary_model = str(video_cfg.get("summarise_model") or DEFAULT_MODEL).strip()
+    fallback_model = str(
+        video_cfg.get("summarise_fallback_model") or DEFAULT_FALLBACK_MODEL
+    ).strip()
+    models = [primary_model]
+    if fallback_model and fallback_model != primary_model:
+        models.append(fallback_model)
+
     minutes = duration_s / 60.0
     header = (
         f"Video file: {filename}\n"
-        f"Length: {minutes:.0f} minutes\n\n" if duration_s else f"Video file: {filename}\n\n"
+        f"Length: {minutes:.0f} minutes\n\n"
+        if duration_s
+        else f"Video file: {filename}\n\n"
     )
-    user_content = header + "VIDEO MATERIAL\n\n" + material + "\n\nEND VIDEO MATERIAL"
+    user_content = (
+        header + "VIDEO MATERIAL\n\n" + material + "\n\nEND VIDEO MATERIAL"
+    )
+    timeout_s = float(video_cfg.get("summary_timeout_s", DEFAULT_TIMEOUT_S))
 
-    think = await _think_flag(ollama, model, cfg)
+    for attempt, model in enumerate(models):
+        location = registry.location_of(model)
+        think = await _think_flag(ollama, model, cfg)
 
-    # A no-op for a cloud location, and correct rather than redundant for a
-    # deployment that pins a local summariser: it would then queue behind chat
-    # like anything else, in the uploader's own slice.
-    async with gate.acquire(model, location=location, user_id=user_id):
-        resp = await ollama.chat(
-            model=model,
-            messages=[
-                {"role": "system", "content": SUMMARY_SYSTEM},
-                {"role": "user", "content": user_content},
-            ],
-            timeout_s=float(_cfg(cfg).get("summary_timeout_s", DEFAULT_TIMEOUT_S)),
-            think=think,
-            options={"num_predict": SUMMARY_MAX_OUTPUT_TOKENS},
-        )
+        # Both defaults are local and must queue behind interactive chat in
+        # the uploader's own fair-gate slice. A configured cloud replacement
+        # makes this acquire a no-op.
+        try:
+            async with gate.acquire(model, location=location, user_id=user_id):
+                resp = await ollama.chat(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": SUMMARY_SYSTEM},
+                        {"role": "user", "content": user_content},
+                    ],
+                    timeout_s=timeout_s,
+                    think=think,
+                    options={"num_predict": SUMMARY_MAX_OUTPUT_TOKENS},
+                )
+        except OllamaError as exc:
+            if attempt + 1 < len(models):
+                log.warning(
+                    "summarise: %s failed for %s; falling back to %s: %s",
+                    model,
+                    filename,
+                    models[attempt + 1],
+                    exc,
+                )
+                continue
+            raise
+
         raw = str((resp.get("message") or {}).get("content") or "")
         text = brief_video_summary(raw)
-        if not text and raw.strip():
-            log.warning(
-                "summarise: %s returned no usable description; retrying",
-                model,
-            )
-            resp = await ollama.chat(
-                model=model,
-                messages=[
-                    {"role": "system", "content": _CORRECTIVE_SYSTEM},
-                    {"role": "user", "content": user_content},
-                ],
-                timeout_s=float(_cfg(cfg).get("summary_timeout_s", DEFAULT_TIMEOUT_S)),
-                think=think,
-                options={"num_predict": SUMMARY_MAX_OUTPUT_TOKENS},
-            )
-            text = brief_video_summary(
-                str((resp.get("message") or {}).get("content") or "")
-            )
-    if not text:
-        raise SummaryUnavailableError(f"{model} returned an empty summary")
-    # `think=` and `thinking=` are both here on purpose, and they are different
-    # facts: the first is what we asked for, the second is what the model did.
-    # A model that declares `thinking` and ignores the flag — `qwen3-vl:32b`
-    # does exactly this — shows as `think=False thinking=8994c`, and without
-    # both numbers side by side that is indistinguishable from the flag
-    # working. `eval` is the billed total and includes reasoning tokens, which
-    # is the whole reason this setting exists.
-    thinking = str((resp.get("message") or {}).get("thinking") or "")
-    log.info(
-        "summarise: %s -> %d chars via %s (%d segments, %d descriptions) "
-        "think=%s thinking=%dc eval=%s",
-        filename, len(text), model, len(segments), len(frames),
-        "unset" if think is None else think, len(thinking),
-        resp.get("eval_count", "?"),
-    )
-    return text
+        if not text:
+            if attempt + 1 < len(models):
+                log.warning(
+                    "summarise: %s returned no usable description for %s; "
+                    "falling back to %s",
+                    model,
+                    filename,
+                    models[attempt + 1],
+                )
+                continue
+            names = " and ".join(models)
+            raise SummaryUnavailableError(names + " returned no usable summary")
+
+        # Requested and returned thinking are different facts. A model can
+        # declare the capability and still ignore the requested setting.
+        thinking = str((resp.get("message") or {}).get("thinking") or "")
+        log.info(
+            "summarise: %s -> %d chars via %s (%d segments, %d descriptions) "
+            "think=%s thinking=%dc eval=%s",
+            filename,
+            len(text),
+            model,
+            len(segments),
+            len(frames),
+            "unset" if think is None else think,
+            len(thinking),
+            resp.get("eval_count", "?"),
+        )
+        return text
+
+    raise SummaryUnavailableError("no summary model was configured")
 
 
 async def _think_flag(ollama: Any, model: str, cfg: Any) -> bool | None:
@@ -285,30 +305,27 @@ async def _think_flag(ollama: Any, model: str, cfg: Any) -> bool | None:
 
     ## Why this role turns thinking off
 
-    Summarising is the clearest case in the whole registry of **reasoning that
-    is billed and thrown away**: the summary is the product, the reasoning is
-    never shown to anyone, and `summarise_model` defaults to a cloud model.
-    Measured on `glm-5.2:cloud` 2026-08-06 (the predecessor in this slot;
-    not re-measured on 5.3), three samples per state:
+    Summarising is the clearest case in the registry of reasoning that is
+    generated and discarded: the summary is the product and the reasoning is
+    never shown. The comparative measurement was made on the former GLM cloud
+    summarizer in 2026-08-06:
 
         omitted   27.7s   8994c thinking   2192c summary   2683 eval tok
         false      9.7s*     0c            3542c summary    817 eval tok
 
-    \\* steady-state — the first `false` run was 45s on a cold cloud
-    connection, the next two 9.6s and 9.8s.
-
-    **3.3x fewer billed tokens, and a longer summary.** Quality did not suffer;
-    if anything the non-thinking replies were more complete, and this task is
-    condensation rather than analysis.
+    The current Qwen and Ornith probe did not repeat that comparison, but it
+    confirmed that think=false is accepted by both, produces no thinking text,
+    and still yields complete summaries. For local models the avoided work is
+    GPU time rather than cloud billing.
 
     ## Why it asks Ollama first
 
     ⚠️ **Sending `think` to a model that does not declare `thinking` is a hard
     error** (`OllamaClient.capabilities`), so this cannot be a flat `False`.
-    `summarise_model` is deployment-configurable and the default may be swapped
-    for a local model that cannot think — which would turn every summary into a
-    failure, and `SummaryUnavailableError` is swallowed by design, so it would
-    show up as summaries silently never appearing.
+    Either configured summary model may be swapped for one that cannot think,
+    which would turn every summary into a failure. Because the caller swallows
+    SummaryUnavailableError by design, the failure would surface as summaries
+    silently never appearing.
 
     A capability lookup that fails for any reason returns `None`: unknown means
     omit, never assume. That costs one `/api/show` per summary, against a call

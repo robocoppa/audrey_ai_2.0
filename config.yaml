@@ -1119,18 +1119,20 @@ kb:
     frame_dedup_distance: 8
 
     # ─── Summary (Phase 37) ──────────────────────────────────────────
-    # One call over the transcript and the frame descriptions, stored on the
-    # row for the file list and ingested as one chunk so chat can answer
+    # A primary call over the transcript and frame descriptions, with one
+    # cross-model fallback. The result is stored on the row and ingested as
+    # one chunk so chat can answer
     # "what is this video" without pulling 200 transcript chunks into context.
 
-    # A CLOUD model by default, and that is the point: summarising is a text
-    # task over text inputs, so it carries none of the image-capability risk
-    # that made the `vl` pool local-only, and `FairLocalGate` is a no-op for a
-    # non-local location. This is the one stage of video ingest that costs the
-    # box no GPU at all. Naming a local model here works and puts a summary in
-    # the same queue as the chat turn waiting behind it — for a stage nobody
-    # is waiting on.
-    summarise_model: "glm-5.3:cloud"
+    # Local by default after the former GLM cloud model repeated the writing
+    # instruction twice in live use and left a re-upload with no summary. Qwen
+    # and Ornith were then probed with the production prompt and identical
+    # synthetic video material on 2026-09-29; both returned complete, natural
+    # three-sentence descriptions. The FairLocalGate makes this asynchronous
+    # work queue behind interactive chat, and keeps private video-derived text
+    # on the owner's machine.
+    summarise_model: "qwen3.8:latest"
+    summarise_fallback_model: "ornith-1.5:35b"
 
     # Characters of transcript + descriptions handed to the summariser. A
     # two-hour transcript is ~100k characters; bounding it here means the cut
@@ -1144,9 +1146,9 @@ kb:
     # out leaves an empty field on a `ready` row.
     summary_timeout_s: 180
 
-    # Tell the summariser not to think. Measured on `glm-5.2:cloud` (the
-    # predecessor in this slot; not re-measured on 5.3, but the argument is
-    # about the ROLE — the reasoning is never shown to anyone)
+    # Tell each summariser not to think. Measured on the former GLM summary
+    # model; not re-measured on the current Qwen/Ornith pair, but the
+    # argument is about the role — the reasoning is never shown to anyone.
     # 2026-08-06, three samples per state:
     #
     #     omitted   27.7s   8994c thinking   2192c summary   2683 eval tok
@@ -1154,7 +1156,7 @@ kb:
     #
     # **3.3x fewer billed tokens for a longer summary.** This is the clearest
     # reasoning-is-discarded role in the registry: the summary is the product,
-    # the reasoning is never shown to anyone, and the default model is billed.
+    # and the reasoning is never shown to anyone.
     # Condensing a transcript is not a task that needs deliberation.
     #
     # ⚠️ Not a flat flag — sending `think` to a model that does not declare

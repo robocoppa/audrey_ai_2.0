@@ -112,7 +112,7 @@ visible as a fallback, but it does not claim a downloadable artifact.
 Laptop coverage proves exact UTF-8 bytes, all three filenames, private response
 headers, owner scoping, absent and empty sidecars, authentication, and derived
 downloads after the original video was reclaimed. The current full suite passes
-2,969 Python tests and 29 frontend tests.
+2,970 Python tests and 29 frontend tests.
 
 ## Slice 4B targeted live gate
 
@@ -154,8 +154,11 @@ must use the suffix in the table.
 Phase 4 completes after the remaining native browser download check passes.
 
 During this smoke, the downloaded summary exposed a separate generation-quality
-bug: the model had repeated its writing assignment instead of describing the
-video. The followup summary generator now asks for two or three natural
-sentences, keeps up to three sentences within an 80-word safety cap, and retries
-one unusable response. That change does not alter the artifact download
-contract.
+bug: the GLM cloud model repeated its writing assignment instead of describing
+the video. Rejecting that text worked, but a live re-upload proved a retry
+against the same model also failed and left the video without a summary. The
+revised generator uses local qwen3.8 as primary and local ornith-1.5:35b as an
+independent fallback. Both passed the production prompt against identical
+synthetic video material with thinking disabled. The generator keeps up to
+three sentences within an 80-word safety cap. This does not alter the artifact
+download contract.
