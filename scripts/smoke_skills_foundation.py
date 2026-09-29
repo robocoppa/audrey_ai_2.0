@@ -118,6 +118,18 @@ def main() -> int:
         return 2
 
     try:
+        # Bundles are bind-mounted read-only and can change when the host
+        # checkout is updated without recreating Audrey. Refresh first so this
+        # smoke validates the deployed files rather than the startup snapshot.
+        _, rediscovery = _json_request(
+            "/v1/admin/skills/rediscover",
+            token=ADMIN_TOKEN,
+            method="POST",
+        )
+        _expect_ready_skill_registry(rediscovery, source="rediscovery")
+        if rediscovery.get("invalid") != []:
+            raise SmokeError("skill rediscovery returned invalid bundle diagnostics")
+
         _, catalog = _json_request("/api/skills", token=USER_TOKEN)
         expected_items = [
             {
@@ -166,14 +178,6 @@ def main() -> int:
         if skill_component.get("status") != "available":
             raise SmokeError("admin readiness did not report skills available")
 
-        _, rediscovery = _json_request(
-            "/v1/admin/skills/rediscover",
-            token=ADMIN_TOKEN,
-            method="POST",
-        )
-        _expect_ready_skill_registry(rediscovery, source="rediscovery")
-        if rediscovery.get("invalid") != []:
-            raise SmokeError("skill rediscovery returned invalid bundle diagnostics")
     except (OSError, SmokeError) as exc:
         print(f"skills foundation smoke failed: {exc}", file=sys.stderr)
         return 1

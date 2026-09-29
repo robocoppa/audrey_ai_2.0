@@ -88,24 +88,28 @@ def test_smoke_checks_the_complete_builtin_skill_registry(monkeypatch, capsys):
         "video-analysis",
     ]
     assert calls == [
+        ("POST", "/v1/admin/skills/rediscover", "admin-evidence"),
         ("GET", "/api/skills", "user-evidence"),
         ("GET", "/api/capabilities", "user-evidence"),
         ("GET", "/v1/admin/readiness", "admin-evidence"),
-        ("POST", "/v1/admin/skills/rediscover", "admin-evidence"),
     ]
 
 
 def test_smoke_fails_on_the_wrong_catalog(monkeypatch, capsys):
     monkeypatch.setattr(smoke, "USER_TOKEN", "user-evidence")
     monkeypatch.setattr(smoke, "ADMIN_TOKEN", "admin-evidence")
-    monkeypatch.setattr(
-        smoke,
-        "_json_request",
-        lambda *_args, **_kwargs: (
-            200,
-            {"enabled": True, "status": "ready", "items": [{"id": "unexpected"}]},
-        ),
-    )
+    def fake_json_request(path, **_kwargs):
+        if path == "/v1/admin/skills/rediscover":
+            return 200, {**_ready_counts(), "invalid": []}
+        if path == "/api/skills":
+            return 200, {
+                "enabled": True,
+                "status": "ready",
+                "items": [{"id": "unexpected"}],
+            }
+        raise AssertionError(f"unexpected request after wrong catalog: {path}")
+
+    monkeypatch.setattr(smoke, "_json_request", fake_json_request)
 
     assert smoke.main() == 1
 
