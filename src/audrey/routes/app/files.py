@@ -19,6 +19,7 @@ from audrey.identity import Principal
 from audrey.kb.extract import (
     EmptyExtractionError,
     extract_uploaded_text,
+    is_audio_mime,
     is_image_mime,
     is_video_mime,
 )
@@ -46,7 +47,7 @@ class NativeFileRecord(BaseModel):
     mime: str
     bytes: int
     uploaded_at: str
-    kind: Literal["text", "image", "video"]
+    kind: Literal["text", "image", "video", "audio"]
     chunks: int
     status: str
     failure_reason: str
@@ -72,7 +73,7 @@ class NativeFileUploadResponse(BaseModel):
     filename: str
     mime: str
     bytes: int
-    kind: Literal["text", "image", "video"]
+    kind: Literal["text", "image", "video", "audio"]
     chunks: int
     status: str
 
@@ -123,9 +124,11 @@ def native_image_limit(cfg: object) -> int:
     return max(0, int(vision_cfg(cfg).get("max_images_per_turn", 4)))
 
 
-def _kind(mime: str) -> Literal["text", "image", "video"]:
+def _kind(mime: str) -> Literal["text", "image", "video", "audio"]:
     if is_video_mime(mime):
         return "video"
+    if is_audio_mime(mime):
+        return "audio"
     if is_image_mime(mime):
         return "image"
     return "text"
@@ -222,7 +225,7 @@ def _artifact_download_filename(
     artifact: Literal["transcript", "visual", "summary"],
 ) -> str:
     original_name = Path(row.filename).name
-    stem = Path(original_name).stem or "video"
+    stem = Path(original_name).stem or "media"
     return f"{stem}.{_ARTIFACT_DOWNLOAD_SUFFIXES[artifact]}.txt"
 
 
@@ -421,11 +424,15 @@ async def get_file_artifact(
     offset: int = Query(default=0, ge=0),
     principal: Principal = Depends(_files_access),
 ) -> NativeFileArtifactResponse:
-    """Read one page of a video sidecar by exact owner-bound file ID."""
+    """Read one page of a media sidecar by exact owner-bound file ID."""
 
     row = await _owned_row(request, principal, file_id)
-    if _kind(row.mime) != "video":
-        raise HTTPException(status_code=422, detail="Artifacts are available for videos only.")
+    kind = _kind(row.mime)
+    if kind not in {"video", "audio"} or (kind == "audio" and artifact == "visual"):
+        raise HTTPException(
+            status_code=422,
+            detail="That artifact is unavailable for this file type.",
+        )
 
     path = _artifact_path(request, principal, row, artifact)
     try:
@@ -459,11 +466,15 @@ async def download_file_artifact(
     request: Request,
     principal: Principal = Depends(_files_access),
 ) -> FileResponse:
-    """Download one existing derived video text as a private attachment."""
+    """Download one existing derived media text as a private attachment."""
 
     row = await _owned_row(request, principal, file_id)
-    if _kind(row.mime) != "video":
-        raise HTTPException(status_code=422, detail="Artifacts are available for videos only.")
+    kind = _kind(row.mime)
+    if kind not in {"video", "audio"} or (kind == "audio" and artifact == "visual"):
+        raise HTTPException(
+            status_code=422,
+            detail="That artifact is unavailable for this file type.",
+        )
 
     path = _artifact_path(request, principal, row, artifact)
     if not await asyncio.to_thread(path.is_file):

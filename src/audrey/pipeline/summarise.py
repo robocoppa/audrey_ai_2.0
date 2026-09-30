@@ -1,6 +1,6 @@
-"""Bounded video summary over the transcript and frame descriptions (Phase 37).
+"""Bounded media summary over transcripts and frame descriptions (Phase 37).
 
-The smallest stage of the video work and the one that makes the rest legible.
+The smallest stage of media processing and the one that makes the rest legible.
 A file list reading `jasonRetirement.mp4 · 288 MB · ready` tells you nothing
 you did not already know.
 
@@ -57,13 +57,24 @@ SUMMARY_SYSTEM = (
     "material below; do not invent events between excerpts."
 )
 
+AUDIO_SUMMARY_SYSTEM = (
+    "Write a natural description for someone browsing their private audio "
+    "library. Use two or three concise, complete sentences. Explain the main "
+    "subject, what is discussed or demonstrated, and what a listener can learn "
+    "or take away. Use specific details from the recording and sound like a "
+    "person who listened to it. Start directly with the recording; do not "
+    "mention the user, the request, these instructions, sources, transcripts, "
+    "or being an AI. Do not write a title, heading, or bullets. Use only the "
+    "material below; do not invent events between excerpts."
+)
+
 SUMMARY_MAX_WORDS = 80
 SUMMARY_MAX_CHARS = 560
 SUMMARY_MAX_OUTPUT_TOKENS = 240
 
 _PREAMBLE = re.compile(
     r"^(?:let me|i(?:'ll| will)) (?:analy[sz]e|summari[sz]e|review) "
-    r"(?:this|the) video[.!:]?\s*|"
+    r"(?:this|the) (?:video|recording|audio)[.!:]?\s*|"
     r"^here(?:'s| is) (?:a |the )?(?:brief )?summary[.:]?\s*|"
     r"^(?:#+\s*)?(?:\*\*)?summary(?:\*\*)?\s*:\s*",
     re.IGNORECASE,
@@ -118,17 +129,17 @@ DEFAULT_TIMEOUT_S = 180.0
 
 
 class SummaryUnavailableError(RuntimeError):
-    """No usable summariser. A missing field, never a failed video."""
+    """No usable summariser. A missing field, never a failed media file."""
 
 
 def _thin(lines: list[str], budget: int) -> tuple[list[str], bool]:
     """Reduce `lines` to fit `budget` characters, spread evenly.
 
     Evenly rather than truncating the tail, for the same reason the keyframe
-    cap spreads its losses: a video summarised from its first fifteen minutes
-    is confidently wrong about the other forty-five, and says nothing to
-    indicate it. Sampling across the whole thing keeps the summary's coverage
-    proportional to the video's.
+    cap spreads its losses: a recording summarised from its first fifteen
+    minutes is confidently wrong about the other forty-five, and says nothing
+    to indicate it. Sampling across the whole thing keeps the summary's
+    coverage proportional to the media.
 
     Returns `(lines, was_thinned)` so the caller can tell the model it is
     reading excerpts — a model that thinks it has the whole transcript will
@@ -149,6 +160,7 @@ def build_input(
     frames: list[dict],
     *,
     budget: int = DEFAULT_INPUT_BUDGET,
+    media_kind: str = "video",
 ) -> str:
     """Lay the two artifacts out for the model, labelled and bounded.
 
@@ -177,7 +189,8 @@ def build_input(
 
     parts: list[str] = []
     if spoken:
-        note = " (excerpts, evenly sampled across the video)" if spoken_cut else ""
+        subject = "recording" if media_kind == "audio" else "video"
+        note = f" (excerpts, evenly sampled across the {subject})" if spoken_cut else ""
         parts.append(f"WHAT WAS SAID{note}:\n" + "\n".join(spoken))
     if shown:
         note = " (excerpts, evenly sampled across the video)" if shown_cut else ""
@@ -196,6 +209,7 @@ async def summarise_video(
     gate: FairLocalGate,
     cfg: Any,
     user_id: str | None = None,
+    media_kind: str = "video",
 ) -> str:
     """Summarise both artifacts with one configured cross-model fallback.
 
@@ -205,11 +219,14 @@ async def summarise_video(
     point the transcript and descriptions are already ingested and useful, so a
     summary failure is a missing field and never a failed row.
     """
+    if media_kind not in {"video", "audio"}:
+        raise ValueError(f"unsupported media kind: {media_kind}")
     video_cfg = _cfg(cfg)
     material = build_input(
         segments,
         frames,
         budget=int(video_cfg.get("summary_input_chars", DEFAULT_INPUT_BUDGET)),
+        media_kind=media_kind,
     )
     if not material:
         raise SummaryUnavailableError("no transcript or descriptions to summarise")
@@ -223,14 +240,17 @@ async def summarise_video(
         models.append(fallback_model)
 
     minutes = duration_s / 60.0
+    media_label = "Audio recording" if media_kind == "audio" else "Video file"
+    material_label = "AUDIO MATERIAL" if media_kind == "audio" else "VIDEO MATERIAL"
     header = (
-        f"Video file: {filename}\n"
+        f"{media_label}: {filename}\n"
         f"Length: {minutes:.0f} minutes\n\n"
         if duration_s
-        else f"Video file: {filename}\n\n"
+        else f"{media_label}: {filename}\n\n"
     )
     user_content = (
-        header + "VIDEO MATERIAL\n\n" + material + "\n\nEND VIDEO MATERIAL"
+        header + material_label + "\n\n" + material
+        + f"\n\nEND {material_label}"
     )
     timeout_s = float(video_cfg.get("summary_timeout_s", DEFAULT_TIMEOUT_S))
 
@@ -246,7 +266,14 @@ async def summarise_video(
                 resp = await ollama.chat(
                     model=model,
                     messages=[
-                        {"role": "system", "content": SUMMARY_SYSTEM},
+                        {
+                            "role": "system",
+                            "content": (
+                                AUDIO_SUMMARY_SYSTEM
+                                if media_kind == "audio"
+                                else SUMMARY_SYSTEM
+                            ),
+                        },
                         {"role": "user", "content": user_content},
                     ],
                     timeout_s=timeout_s,
@@ -349,6 +376,7 @@ def _cfg(cfg: Any) -> dict[str, Any]:
 __all__ = [
     "DEFAULT_INPUT_BUDGET",
     "SUMMARY_SYSTEM",
+    "AUDIO_SUMMARY_SYSTEM",
     "SummaryUnavailableError",
     "brief_video_summary",
     "build_input",

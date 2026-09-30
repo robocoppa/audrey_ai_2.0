@@ -261,8 +261,8 @@ export function FileManager({ onClose }: { onClose: () => void }) {
         ) : null}
 
         {selectedFile ? (
-          selectedFile.kind === "video" ? (
-            <VideoArtifactViewer
+          ["video", "audio"].includes(selectedFile.kind) ? (
+            <MediaArtifactViewer
               key={selectedFile.id}
               file={selectedFile}
               onBack={() => setSelectedFileId(null)}
@@ -302,7 +302,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
                 ? " Files over " + formatBytes(listing.limits.max_upload_bytes) + " upload in parts."
                 : ""}
               {" Supported: " + listing.limits.allowed_extensions.join(", ") + "."}
-              {" Scanned PDFs and videos become searchable after processing."}
+              {" Scanned PDFs, audio, and videos become searchable after processing."}
             </p>
           ) : null}
           <label>
@@ -376,6 +376,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
                   <option value="text">Documents</option>
                   <option value="image">Images</option>
                   <option value="video">Videos</option>
+                  <option value="audio">Audio</option>
                 </select>
               </label>
               <label>
@@ -414,7 +415,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
         {error ? <p className="file-manager-error" role="alert">{error}</p> : null}
         {loading ? <p className="file-manager-status" role="status">Loading files…</p> : null}
         {!loading && listing?.items.length === 0 ? (
-          <p className="file-manager-empty">No files yet. Upload a document, image, or video for Audrey to use.</p>
+          <p className="file-manager-empty">No files yet. Upload a document, image, audio recording, or video for Audrey to use.</p>
         ) : null}
         {!loading && listing?.items.length && visibleFiles.length === 0 ? (
           <p className="file-manager-empty">No files match these filters.</p>
@@ -462,7 +463,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
                       className="file-view"
                       type="button"
                       onClick={() => setSelectedFileId(file.id)}
-                      aria-label={`View ${file.kind === "image" ? "image" : file.kind === "video" ? "video text" : "document text"} for ${file.filename}`}
+                      aria-label={`View ${file.kind === "image" ? "image" : file.kind === "video" ? "video text" : file.kind === "audio" ? "audio text" : "document text"} for ${file.filename}`}
                     >{file.kind === "image" ? "View image" : "View text"}</button>
                   ) : null}
                   <button
@@ -547,8 +548,12 @@ function ImagePreviewViewer({ file, onBack }: { file: AudreyFile; onBack: () => 
   );
 }
 
-function VideoArtifactViewer({ file, onBack }: { file: AudreyFile; onBack: () => void }) {
+function MediaArtifactViewer({ file, onBack }: { file: AudreyFile; onBack: () => void }) {
   const [artifact, setArtifact] = useState<AudreyFileArtifactKind>("summary");
+  const availableKinds = file.kind === "audio"
+    ? artifactKinds.filter((kind) => kind !== "visual")
+    : artifactKinds;
+  const mediaLabel = file.kind === "audio" ? "Audio" : "Video";
 
   return (
     <div className="file-artifact-viewer">
@@ -556,11 +561,11 @@ function VideoArtifactViewer({ file, onBack }: { file: AudreyFile; onBack: () =>
         <button type="button" onClick={onBack}>← All files</button>
         <div>
           <h3>{file.filename}</h3>
-          <small>Video text · {formatBytes(file.bytes)}</small>
+          <small>{mediaLabel} text · {formatBytes(file.bytes)}</small>
         </div>
       </div>
-      <div className="file-artifact-tabs" role="group" aria-label="Video text type">
-        {artifactKinds.map((kind) => (
+      <div className="file-artifact-tabs" role="group" aria-label={mediaLabel + " text type"}>
+        {availableKinds.map((kind) => (
           <button
             key={kind}
             type="button"
@@ -636,10 +641,10 @@ function ArtifactPage({ file, artifact }: { file: AudreyFile; artifact?: AudreyF
       {!loading && !error && !visibleText ? (
         <p>{artifact === "visual"
           ? "No visual notes are available for this video."
-          : artifact ? `No ${artifact} is available for this video.`
+          : artifact ? `No ${artifact} is available for this ${file.kind === "audio" ? "recording" : "video"}.`
             : "No extracted text is available for this document."}</p>
       ) : null}
-      {fallbackSummary ? <small>Only the brief listing summary is available for this video.</small> : null}
+      {fallbackSummary ? <small>Only the brief listing summary is available for this media file.</small> : null}
       {page?.next_offset != null ? (
         <button type="button" onClick={() => void loadMore()} disabled={loading}>
           {loading ? "Loading more…" : "Load more"}
@@ -655,6 +660,7 @@ function ArtifactPage({ file, artifact }: { file: AudreyFile; artifact?: AudreyF
 function kindSymbol(kind: AudreyFile["kind"]): string {
   if (kind === "image") return "◫";
   if (kind === "video") return "▶";
+  if (kind === "audio") return "♪";
   return "≡";
 }
 
@@ -671,7 +677,9 @@ function fileStatus(file: AudreyFile, serverTime: string | undefined): string {
     return "Downloading" + age;
   }
   if (file.status === "pending" || file.status === "processing") {
-    return (file.kind === "video" ? "Preparing summary" : "Processing") + age;
+    return (file.kind === "video"
+      ? "Preparing summary"
+      : file.kind === "audio" ? "Transcribing" : "Processing") + age;
   }
   return file.status.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
 }

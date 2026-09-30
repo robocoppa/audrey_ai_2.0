@@ -2990,7 +2990,11 @@ async def _scroll_user_rows(qdrant, collection: str) -> dict[str, list[dict]]:
         # them — and only some of a video's points are artifacts if the
         # summary stage ran and the visual pass did not.
         if payload.get("artifact"):
-            row["kind"] = "video"
+            row["kind"] = (
+                "audio"
+                if str(payload.get("mime") or "").startswith("audio/")
+                else "video"
+            )
     grouped: dict[str, list[dict]] = {}
     for (user, _fid), row in by_user_file.items():
         grouped.setdefault(user, []).append(row)

@@ -33,11 +33,19 @@ def db(tmp_path: Path) -> UploadsDB:
     return UploadsDB(tmp_path / "uploads.sqlite")
 
 
-async def _add(db: UploadsDB, file_id: str, *, user="a@b.c", status="pending",
-               uploaded_at="2026-08-01T00:00:00+00:00") -> None:
+async def _add(
+    db: UploadsDB,
+    file_id: str,
+    *,
+    user="a@b.c",
+    status="pending",
+    uploaded_at="2026-08-01T00:00:00+00:00",
+    kind="video",
+) -> None:
+    suffix, mime = (".mp3", "audio/mpeg") if kind == "audio" else (".mp4", "video/mp4")
     await db.record_upload(
-        file_id=file_id, user=user, filename=f"{file_id}.mp4", mime="video/mp4",
-        bytes_=1024, kind="video", collection="", chunks=0,
+        file_id=file_id, user=user, filename=f"{file_id}{suffix}", mime=mime,
+        bytes_=1024, kind=kind, collection="", chunks=0,
         uploaded_at=uploaded_at, status=status,
     )
 
@@ -478,6 +486,20 @@ class TestRouteBehaviour:
         # from the client-supplied filename.
         assert job["path"].endswith("v1.mp4")
         assert "a@b.c" not in job["path"]
+
+    @pytest.mark.asyncio
+    async def test_an_audio_claim_keeps_its_kind_and_mp3_path(
+        self, db: UploadsDB, tmp_path: Path,
+    ):
+        await _add(db, "a1", kind="audio")
+        job = TestClient(_build_app(db, tmp_path)).post(
+            "/v1/files/jobs/claim", headers={"X-Audrey-Service-Token": SECRET},
+        ).json()
+
+        assert job["kind"] == "audio"
+        assert job["mime"] == "audio/mpeg"
+        assert job["path"].endswith("a1.mp3")
+        assert job["transcript"] is None
 
     @pytest.mark.asyncio
     async def test_a_claim_hands_over_a_fetched_caption_track(

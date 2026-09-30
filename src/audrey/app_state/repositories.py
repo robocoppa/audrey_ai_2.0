@@ -1464,7 +1464,7 @@ def _normalize_attachments(
             )
         mime = _bounded_metadata(_required(value.mime, "attachment MIME"), "attachment MIME")
         kind = _required(value.kind, "attachment kind").lower()
-        if kind not in {"text", "image", "video"}:
+        if kind not in {"text", "image", "video", "audio"}:
             raise InvalidApplicationStateError("attachment kind is unsupported")
         if isinstance(value.bytes, bool) or value.bytes < 0:
             raise InvalidApplicationStateError("attachment bytes cannot be negative")

@@ -48,7 +48,7 @@ _ALLOWED_ACCOUNT_STATUSES = frozenset({"pending", "active", "disabled"})
 _ALLOWED_MODEL_AUDIENCES = frozenset({"users", "testers", "admins"})
 _TOKEN_RE = re.compile(r"\Aaud_(pat_[0-9a-f]{32})\.([A-Za-z0-9_-]{32,})\Z")
 _LAST_USED_WRITE_INTERVAL = dt.timedelta(minutes=5)
-_FOREIGN_KEYS_OFF_MIGRATIONS = frozenset({5, 7, 8})
+_FOREIGN_KEYS_OFF_MIGRATIONS = frozenset({5, 7, 8, 16})
 _ADDITIVE_COLUMN_MIGRATIONS = {
     15: {
         "app_runs": ("skill_id", "skill_version", "skill_digest", "skill_reason"),

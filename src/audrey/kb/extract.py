@@ -59,8 +59,16 @@ ALLOWED_IMAGE_MIMES: frozenset[str] = frozenset({
 ALLOWED_VIDEO_MIMES: frozenset[str] = frozenset({
     "video/mp4",
 })
+# Audio follows the same asynchronous media path as video: Audrey stores the
+# source, then the media worker transcribes it. Start with MP3 because its
+# suffix and sniffed MIME are stable across libmagic versions; more containers
+# can be added one at a time once their real sniff results are pinned.
+ALLOWED_AUDIO_MIMES: frozenset[str] = frozenset({
+    "audio/mpeg",
+})
 ALLOWED_MIMES: frozenset[str] = (
     ALLOWED_TEXT_MIMES | ALLOWED_IMAGE_MIMES | ALLOWED_VIDEO_MIMES
+    | ALLOWED_AUDIO_MIMES
 )
 
 # Suffix → mime, used both by the libmagic fallback below and to derive the
@@ -78,6 +86,7 @@ SUFFIX_MIMES: dict[str, str] = {
     ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp",
     ".tif": "image/tiff", ".tiff": "image/tiff",
     ".mp4": "video/mp4",
+    ".mp3": "audio/mpeg",
 }
 
 # Derived, never hand-maintained: adding a mime to the allowlist above
@@ -144,6 +153,10 @@ def is_video_mime(mime: str) -> bool:
     return mime in ALLOWED_VIDEO_MIMES
 
 
+def is_audio_mime(mime: str) -> bool:
+    return mime in ALLOWED_AUDIO_MIMES
+
+
 def extract_text(path: Path) -> str:
     """Run the appropriate loader for `path`. Raises EmptyExtractionError on no-op extracts.
 
@@ -164,9 +177,9 @@ def extract_text(path: Path) -> str:
 
 __all__ = [
     "ALLOWED_MIMES", "ALLOWED_TEXT_MIMES", "ALLOWED_IMAGE_MIMES",
-    "ALLOWED_VIDEO_MIMES", "ALLOWED_EXTENSIONS", "SUFFIX_MIMES",
+    "ALLOWED_VIDEO_MIMES", "ALLOWED_AUDIO_MIMES", "ALLOWED_EXTENSIONS", "SUFFIX_MIMES",
     "ExtractError", "UnsupportedMimeError", "EmptyExtractionError",
     "OCR_SIDECAR_SUFFIX", "ocr_text_path", "extract_uploaded_text",
-    "sniff_mime", "is_image_mime", "is_text_mime", "is_video_mime",
+    "sniff_mime", "is_image_mime", "is_text_mime", "is_video_mime", "is_audio_mime",
     "extract_text",
 ]

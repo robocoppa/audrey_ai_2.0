@@ -29,12 +29,14 @@ import pytest
 
 from audrey.kb import ingest as ingest_mod
 from audrey.kb.extract import (
+    ALLOWED_AUDIO_MIMES,
     ALLOWED_EXTENSIONS,
     ALLOWED_IMAGE_MIMES,
     ALLOWED_MIMES,
     ALLOWED_TEXT_MIMES,
     ALLOWED_VIDEO_MIMES,
     SUFFIX_MIMES,
+    is_audio_mime,
     is_image_mime,
     is_text_mime,
     is_video_mime,
@@ -225,6 +227,12 @@ def test_mp4_is_offered_to_the_client():
     assert SUFFIX_MIMES[".mp4"] in ALLOWED_VIDEO_MIMES
 
 
+def test_mp3_is_offered_to_the_client_as_audio():
+    assert ".mp3" in ALLOWED_EXTENSIONS
+    assert SUFFIX_MIMES[".mp3"] in ALLOWED_AUDIO_MIMES
+    assert is_audio_mime("audio/mpeg")
+
+
 def test_allowed_extensions_excludes_formats_with_no_path_at_all():
     # Only mp4 was asked for. These have neither a storage nor an extraction
     # path, so offering them would produce a 415 after a full upload.
@@ -236,10 +244,19 @@ def test_video_mimes_are_disjoint_from_text_and_image():
     # `_validate_and_ingest` dispatches on these. An overlap would route a
     # video into `load_text` (which cannot read it) or CLIP (which cannot
     # embed it), turning a 415 into a 500.
-    assert not (ALLOWED_VIDEO_MIMES & ALLOWED_TEXT_MIMES)
-    assert not (ALLOWED_VIDEO_MIMES & ALLOWED_IMAGE_MIMES)
+    media_sets = (ALLOWED_VIDEO_MIMES, ALLOWED_AUDIO_MIMES)
+    for media_mimes in media_sets:
+        assert not (media_mimes & ALLOWED_TEXT_MIMES)
+        assert not (media_mimes & ALLOWED_IMAGE_MIMES)
+    assert not (ALLOWED_VIDEO_MIMES & ALLOWED_AUDIO_MIMES)
     for mime in ALLOWED_VIDEO_MIMES:
         assert is_video_mime(mime)
+        assert not is_audio_mime(mime)
+        assert not is_text_mime(mime)
+        assert not is_image_mime(mime)
+    for mime in ALLOWED_AUDIO_MIMES:
+        assert is_audio_mime(mime)
+        assert not is_video_mime(mime)
         assert not is_text_mime(mime)
         assert not is_image_mime(mime)
 

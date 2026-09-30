@@ -1,6 +1,6 @@
 # Campaign 3 Phase 7 - scanned PDF OCR
 
-**Status:** Slice 7A is laptop-complete and awaiting its targeted Unraid smoke.
+**Status:** Complete and live-settled on 2026-09-30.
 
 ## Goal
 
@@ -117,10 +117,11 @@ still running or its rebuild failed. A row-level failure includes the bounded
 OCR reason in the script output.
 
 The first live attempt completed queueing, OCR, indexing, reading, deletion,
-and repair, but the original synthetic all-caps bitmap caused Tesseract to split
-`TOTAL FORTY TWO` across lines and missed the required word `forty`. The smoke
-fixture now uses DejaVu Sans and shorter sentence-case lines. This was a smoke
-fixture correction; it requires no Audrey or worker redeploy.
+and repair, but its synthetic all-caps bitmap caused Tesseract to split `TOTAL
+FORTY TWO` across lines. The corrected DejaVu Sans fixture then passed: the PDF
+moved from Pending to Ready in 4.619 seconds, produced one indexed chunk, the
+reader returned 101 characters with its page marker and every required word,
+and deletion plus repair completed cleanly.
 
 After the automated smoke passes, the useful browser check is one real scanned
 PDF: upload it in **Files**, watch Pending/Processing become Ready, choose
@@ -129,7 +130,6 @@ with selectable text should still become Ready immediately.
 
 ## Completion gate
 
-Slice 7A completes when the automated smoke passes on Unraid and the user
-accepts one real scanned document in the Files viewer. Broader languages,
-handwriting, OCR correction, audio-only files, and other document formats stay
-outside this slice.
+The automated Unraid smoke passed and the user accepted the result on
+2026-09-30. Broader languages, handwriting, OCR correction, audio-only files,
+and other document formats stay outside this completed slice.

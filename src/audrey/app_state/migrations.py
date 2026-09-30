@@ -686,6 +686,47 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         ALTER TABLE app_chat_projections ADD COLUMN skill_reason TEXT NOT NULL DEFAULT '';
         """,
     ),
+    (
+        16,
+        """
+        PRAGMA legacy_alter_table = ON;
+
+        ALTER TABLE app_message_attachments
+          RENAME TO app_message_attachments_before_audio;
+
+        CREATE TABLE app_message_attachments (
+          message_id      TEXT NOT NULL,
+          conversation_id TEXT NOT NULL,
+          user_id         TEXT NOT NULL,
+          position        INTEGER NOT NULL CHECK (position >= 0),
+          file_id         TEXT NOT NULL,
+          filename        TEXT NOT NULL,
+          mime            TEXT NOT NULL,
+          kind            TEXT NOT NULL
+                           CHECK (kind IN ('text', 'image', 'video', 'audio')),
+          bytes           INTEGER NOT NULL CHECK (bytes >= 0),
+          PRIMARY KEY (message_id, position),
+          UNIQUE (message_id, file_id),
+          FOREIGN KEY (message_id, conversation_id, user_id)
+            REFERENCES app_messages(message_id, conversation_id, user_id)
+            ON DELETE CASCADE
+        );
+
+        INSERT INTO app_message_attachments
+          (message_id, conversation_id, user_id, position, file_id, filename,
+           mime, kind, bytes)
+        SELECT message_id, conversation_id, user_id, position, file_id, filename,
+               mime, kind, bytes
+        FROM app_message_attachments_before_audio;
+
+        DROP TABLE app_message_attachments_before_audio;
+
+        CREATE INDEX idx_app_message_attachments_owner
+          ON app_message_attachments(user_id, conversation_id, message_id, position);
+
+        PRAGMA legacy_alter_table = OFF;
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS"]

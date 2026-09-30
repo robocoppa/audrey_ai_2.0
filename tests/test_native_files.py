@@ -386,6 +386,37 @@ def test_native_video_artifact_uses_exact_owned_id_and_pages_on_lines(monkeypatc
     assert foreign.json() == {"detail": "File not found."}
 
 
+def test_native_audio_artifacts_offer_transcript_and_summary_but_not_visual(
+    monkeypatch, tmp_path,
+):
+    listing = _listing()
+    listing.files[0].filename = "interview.mp3"
+    listing.files[0].mime = "audio/mpeg"
+    owner_dir = tmp_path / upload_routes.sanitize_user("private-storage-123")
+    owner_dir.mkdir()
+    (owner_dir / "file_123.transcript.txt").write_text("Spoken words.", encoding="utf-8")
+    (owner_dir / "file_123.summary.txt").write_text("A short interview.", encoding="utf-8")
+
+    async def fake_list(request, me):
+        return listing
+
+    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
+    client = TestClient(_app())
+
+    assert client.get("/api/files").json()["items"][0]["kind"] == "audio"
+    assert client.get("/api/files/file_123/artifacts/transcript").json()["text"] == (
+        "Spoken words."
+    )
+    assert client.get("/api/files/file_123/artifacts/summary").json()["text"] == (
+        "A short interview."
+    )
+    assert client.get("/api/files/file_123/artifacts/visual").status_code == 422
+    assert client.get(
+        "/api/files/file_123/artifacts/transcript/download"
+    ).status_code == 200
+
+
 def test_native_video_artifact_downloads_existing_sidecars_after_source_reclamation(
     monkeypatch, tmp_path,
 ):

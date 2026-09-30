@@ -77,8 +77,9 @@ async def _ready_video(db: UploadsDB, tmp_path: Path, *, sidecars=("transcript",
                        filename="jason retirement.mp4", file_id=FID,
                        uploaded_at="2026-08-01T00:00:00+00:00", kind="video",
                        status="ready") -> None:
+    mime = "audio/mpeg" if kind == "audio" else "video/mp4"
     await db.record_upload(
-        file_id=file_id, user=ME, filename=filename, mime="video/mp4",
+        file_id=file_id, user=ME, filename=filename, mime=mime,
         bytes_=1024, kind=kind, collection="c", chunks=3,
         uploaded_at=uploaded_at, status=status,
     )
@@ -129,6 +130,23 @@ class TestReading:
         # The end marker is explicit rather than something the model has to
         # derive from offset + len(text) == total_chars.
         assert body["next_offset"] is None
+
+    async def test_auto_reads_an_audio_transcript(self, client, db, tmp_path):
+        await _ready_video(
+            db,
+            tmp_path,
+            kind="audio",
+            filename="interview.mp3",
+        )
+        response = client.post(
+            "/v1/files/artifact",
+            headers=SVC,
+            json={"user": ME, "filename": "interview.mp3"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["artifact"] == "transcript"
+        assert response.json()["text"] == TRANSCRIPT
 
     async def test_the_visual_artifact_maps_to_the_frames_sidecar(
             self, client, db, tmp_path):
@@ -260,7 +278,7 @@ class TestMissingArtifacts:
         assert "could not be read" in body["note"]
         assert "requested fact is absent" in body["note"]
 
-    async def test_an_explicit_transcript_on_a_text_file_says_video_only(
+    async def test_an_explicit_transcript_on_a_text_file_says_media_only(
             self, client, db, tmp_path):
         await _ready_video(db, tmp_path, sidecars=(), kind="text",
                            filename="notes.pdf")
@@ -269,7 +287,7 @@ class TestMissingArtifacts:
                               "artifact": "transcript"})
         assert r.status_code == 200
         assert r.json()["text"] == ""
-        assert "only for video" in r.json()["note"]
+        assert "only for audio or video" in r.json()["note"]
 
     async def test_a_silent_video_reports_empty_and_forbids_describing_it(
             self, client, db, tmp_path):

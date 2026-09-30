@@ -242,7 +242,7 @@ export interface MessageAttachment {
   id: string;
   filename: string;
   mime: string;
-  kind: "text" | "image" | "video";
+  kind: "text" | "image" | "video" | "audio";
   bytes: number;
 }
 
@@ -270,7 +270,7 @@ export interface AudreyFile {
   mime: string;
   bytes: number;
   uploaded_at: string;
-  kind: "text" | "image" | "video";
+  kind: "text" | "image" | "video" | "audio";
   chunks: number;
   status: string;
   failure_reason: string;
@@ -306,7 +306,7 @@ export interface AudreyFileUpload {
   filename: string;
   mime: string;
   bytes: number;
-  kind: "text" | "image" | "video";
+  kind: "text" | "image" | "video" | "audio";
   chunks: number;
   status: string;
 }

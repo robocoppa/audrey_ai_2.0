@@ -325,6 +325,10 @@ block must report HTTP 400 and `responses_feature_unsupported`.
 
 ## Run the Phase 7A scanned-PDF OCR smoke from the laptop
 
+**Result:** Passed over LAN/WARP on 2026-09-30. Do not repeat unless a later
+change touches scanned-PDF upload, OCR worker dispatch, document indexing, or
+the native text reader.
+
 This targeted backend and worker proof generates its own one-page image-only
 PDF. No video and no prepared upload are required. It verifies that the upload
 enters `pending`, the rebuilt media worker runs Poppler and Tesseract, Audrey
@@ -355,6 +359,50 @@ uses the existing `AUDREY_USER_JWT` and `AUDREY_ADMIN_JWT` from
 After it passes, upload one real scanned PDF in the Files dialog, wait for Ready,
 and confirm **View text** matches the visible page. Also upload or reuse a
 normal selectable-text PDF and confirm it still becomes Ready immediately.
+
+## Run the Phase 8A MP3 audio-ingestion smoke from the laptop
+
+**Result:** Pending. Run once after deploying the laptop-complete Phase 8A
+changes.
+
+This targeted backend, worker, and native artifact proof creates its own spoken
+MP3 with the laptop's local ffmpeg flite source. You do not need to upload a
+video, record audio, or prepare a file. It verifies that Audrey identifies the
+upload as audio, queues it, transcribes and indexes it with the existing media
+worker, returns the known spoken words through the transcript reader, rejects a
+visual artifact for audio, and completes deletion and repair cleanup.
+
+The private .env.test.local file exists with mode 600 and contains both
+AUDREY_USER_JWT and AUDREY_ADMIN_JWT. Rebuild audrey, audrey-ui, and
+custom-tools before running the smoke. The media-worker code and packages did
+not change in this slice.
+
+Run from the laptop checkout over the working LAN/WARP route:
+
+    cd /home/bart/Documents/github/audrey/audrey_ai_2.0
+    (
+      set -a
+      source .env.test.local
+      set +a
+      AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_audio_ingest.py
+    )
+
+Success is exit code zero and JSON ending in "status": "passed". Upload must
+report kind audio and initial status pending. Processing must reach ready with
+positive chunks and duration plus transcript source whisper. Transcript must
+contain audio, blue, lantern, and ready. Summary-reader HTTP must be 200 with nonempty text,
+visual-reader HTTP must be 422, and cleanup must report deleted true with repair
+status ready.
+
+The script creates one temporary upload and deletes it. If it reports an ffmpeg
+fixture error, the failure is on the laptop and occurs before upload. If the
+row fails, the output includes the deployed worker reason. If known words are
+missing, the output includes the actual transcript.
+
+After the automated smoke passes, the browser check does require any short
+spoken MP3: upload it in Files, confirm audio and Transcribing become Ready,
+filter to Audio, verify Summary and Transcript exist without Visual notes, then
+attach it to a chat question and hard refresh the saved message.
 
 ## Before handing over any smoke command
 

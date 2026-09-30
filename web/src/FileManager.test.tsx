@@ -161,3 +161,69 @@ it("offers downloads for transcript and visual notes but not summaries", async (
     "/api/files/video%20%2F%20ready/artifacts/visual/download",
   );
 });
+
+
+it("shows audio summary and transcript without a visual-notes tab", async () => {
+  const file = {
+    id: "audio_ready",
+    filename: "interview.mp3",
+    mime: "audio/mpeg",
+    bytes: 2048,
+    uploaded_at: "2026-09-30T00:00:00+00:00",
+    kind: "audio",
+    chunks: 2,
+    status: "ready",
+    failure_reason: "",
+    duration_s: 12,
+    summary: "A short interview about the blue lantern.",
+    source_freed_at: "",
+    leased_at: "",
+    source_url: "",
+    transcript_source: "whisper",
+    fetch_downloaded_bytes: 0,
+    fetch_total_bytes: 0,
+  };
+  const listing = {
+    items: [file],
+    total_bytes: file.bytes,
+    server_time: "2026-09-30T00:01:00+00:00",
+    limits: {
+      max_upload_bytes: 50_000_000,
+      max_user_bytes: 1_000_000_000,
+      allowed_extensions: [".mp3"],
+      chunked_max_bytes: 2_000_000_000,
+      part_size: 8_000_000,
+      fetch_hosts: [],
+      max_images_per_turn: 4,
+    },
+  };
+  const fetchMock = vi.fn().mockImplementation((path: string) => {
+    const transcript = path.includes("/artifacts/transcript?");
+    const text = transcript
+      ? "The blue lantern is ready."
+      : "A short interview about the blue lantern.";
+    return Promise.resolve(new Response(JSON.stringify(path === "/api/files"
+      ? listing
+      : {
+          id: file.id,
+          artifact: transcript ? "transcript" : "summary",
+          text,
+          offset: 0,
+          next_offset: null,
+          total_chars: text.length,
+        }), { headers: { "Content-Type": "application/json" } }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<FileManager onClose={() => undefined} />);
+
+  fireEvent.click(await screen.findByRole("button", {
+    name: "View audio text for interview.mp3",
+  }));
+  expect(await screen.findByText("A short interview about the blue lantern.")).toBeVisible();
+  expect(screen.getByRole("group", { name: "Audio text type" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Visual notes" })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Transcript" }));
+  expect(await screen.findByText("The blue lantern is ready.")).toBeVisible();
+});

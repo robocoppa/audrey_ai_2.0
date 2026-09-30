@@ -85,6 +85,7 @@ from audrey.kb.extract import (
     EmptyExtractionError,
     UnsupportedMimeError,
     extract_uploaded_text,
+    is_audio_mime,
     is_image_mime,
     is_text_mime,
     is_video_mime,
@@ -132,11 +133,11 @@ class FileRow(BaseModel):
     # Only set on 'failed'. Shown to the user — a row that stops moving without
     # saying why is the failure this field exists to prevent.
     failure_reason: str = ""
-    # Seconds of audio, for video only. 0 everywhere else and for a video with
-    # no audio stream, so it is only meaningful read alongside `kind`.
+    # Seconds of media. 0 for non-media and for a video with no audio stream,
+    # so it is only meaningful read alongside `kind`.
     duration_s: float = 0.0
-    # One-paragraph summary of a processed video (Phase 37). Empty for
-    # everything else, and for a video whose summary call failed — which is a
+    # One-paragraph summary of processed audio or video. Empty for everything
+    # else, and for media whose summary call failed — which is a
     # missing field, never a failed row.
     summary: str = ""
     # When the uploaded bytes were reclaimed (Phase 38). Empty while the source
@@ -159,7 +160,7 @@ class FileRow(BaseModel):
     # What produced the transcript (Phase 41 step 4): 'subtitles' for a
     # human-authored caption track, 'auto_captions' for a machine-generated
     # one, 'whisper' when we transcribed it here. Empty for anything that is
-    # not a processed video.
+    # not processed audio or video.
     #
     # Surfaced because "the transcript is wrong" has three different answers.
     # Auto-captions mishear proper nouns and drop punctuation; whisper invents
@@ -181,7 +182,7 @@ class UploadResponse(BaseModel):
     filename: str
     mime: str
     bytes: int
-    kind: str                # "text" | "image" | "video"
+    kind: str                # "text" | "image" | "video" | "audio"
     collection: str          # empty while asynchronous processing is pending
     chunks: int              # text count; 1 for images; 0 while pending
     status: str = "ready"    # "ready" | "pending" (worker job queued)
@@ -293,10 +294,10 @@ class ModelFileRow(BaseModel):
     """
 
     filename: str
-    kind: str                # "text" | "image" | "video"
+    kind: str                # "text" | "image" | "video" | "audio"
     status: str              # "ready" | "pending" | "processing" | "failed"
     uploaded_at: str
-    # Video only, and 0 for a video with no audio stream — so it is only
+    # Audio/video only, and 0 for a video with no audio stream — so it is only
     # meaningful read alongside `kind`.
     duration_s: float = 0.0
     # ⚠️ **`summary` was here and was REMOVED 2026-08-06. Do not put it back.**
@@ -332,7 +333,7 @@ class ModelFileRow(BaseModel):
     waiting_for_s: float = 0.0
     # Which text can actually be read back with `get_file_text`: `document`
     # for a ready text upload, or `transcript` / `visual` / `summary` for a
-    # video. Checked against the source or sidecars on disk.
+    # audio/video file. Checked against the source or sidecars on disk.
     #
     # **An empty list is the point.** Every other field here expresses absence
     # as a blank — `summary: ""`, `duration_s: 0.0` — and blanks read as
@@ -714,6 +715,8 @@ async def _validate_and_ingest(
     filename = Path(filename or file_id).name[:255]
     if is_video_mime(mime):
         kind = "video"
+    elif is_audio_mime(mime):
+        kind = "audio"
     elif is_image_mime(mime):
         kind = "image"
     else:
@@ -721,12 +724,12 @@ async def _validate_and_ingest(
     # Stamp once here so the qdrant payload + sqlite row agree to the second.
     stamp = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
 
-    # Video is stored, not extracted. There is no loader that reads a video
-    # and no embedder that takes one, so it gets a row and its bytes and
+    # Audio and video are stored, not extracted. There is no document loader
+    # that reads them, so each gets a row and its bytes and
     # nothing else — `status='pending'` is the honest description, and the
     # Phase 35 media worker is what will move it to 'ready'. Returning early
     # keeps it out of the try/except below, whose whole job is ingest.
-    if kind == "video":
+    if kind in {"video", "audio"}:
         return await _store_pending_job(
             dest,
             storage=storage,
@@ -739,7 +742,7 @@ async def _validate_and_ingest(
             max_total=max_total,
             kind=kind,
             stamp=stamp,
-            purpose="video",
+            purpose=kind,
         )
 
     try:
@@ -1869,7 +1872,7 @@ async def fetch_failed(
 
 # ─── Media-processing job lifecycle (Phase 33, Campaign 3 Phase 7) ────
 #
-# Videos and scanned PDFs upload to `status='pending'`. Extraction can take
+# Audio, videos and scanned PDFs upload to `status='pending'`. Extraction can take
 # minutes of CPU or GPU work and cannot live in an upload request. These routes
 # are how the media worker takes ownership of a row and gives its result back.
 #
@@ -2335,6 +2338,11 @@ async def ingest_result(
             status_code=409,
             detail="Lease is no longer valid — this job was reclaimed.",
         )
+    if str(row["kind"]) not in {"video", "audio"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Media ingest results are accepted only for audio and video files.",
+        )
 
     user = str(row["user"])
     stamp = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
@@ -2447,6 +2455,7 @@ async def ingest_result(
                 gate=request.app.state.gate,
                 cfg=request.app.state.cfg,
                 user_id=user,
+                media_kind=str(row["kind"]),
             )
         except Exception as e:  # noqa: BLE001 — every failure here is survivable
             log.warning("files: summary failed for %s (row stays ready): %s", file_id, e)
@@ -2854,7 +2863,7 @@ async def read_artifact(
     request: Request,
     _: None = Depends(require_service),
 ) -> ArtifactResponse:
-    """SERVICE: one page of a document or video text artifact.
+    """SERVICE: one page of a document or media text artifact.
 
     `require_service` and a user named in the body, exactly like
     `POST /v1/files/list` — and with exactly the same second half: the
@@ -2961,8 +2970,14 @@ async def read_artifact(
             reason = (
                 f"is a {row['kind']} file, and document text exists only for text files"
             )
-        elif artifact != "document" and str(row["kind"]) != "video":
-            reason = f"is a {row['kind']} file, and {artifact} exists only for video"
+        elif artifact == "visual" and str(row["kind"]) != "video":
+            reason = f"is a {row['kind']} file, and visual exists only for video"
+        elif artifact in {"transcript", "summary"} and str(row["kind"]) not in {
+            "video", "audio"
+        }:
+            reason = (
+                f"is a {row['kind']} file, and {artifact} exists only for audio or video"
+            )
         elif artifact == "document":
             reason = "finished processing but its document text is unavailable"
         else:

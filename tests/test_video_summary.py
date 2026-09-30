@@ -182,6 +182,21 @@ class TestSummariseVideo:
         assert ollama.calls[0]["options"] == {"num_predict": SUMMARY_MAX_OUTPUT_TOKENS}
 
     @pytest.mark.asyncio
+    async def test_audio_uses_recording_language_and_has_no_visual_material(self):
+        ollama = _Ollama()
+        await summarise_video(
+            _segments(3), [], filename="interview.mp3", duration_s=60.0,
+            ollama=ollama, registry=_Registry(), gate=_Gate(), cfg=_cfg(),
+            media_kind="audio",
+        )
+
+        system, user = [message["content"] for message in ollama.calls[0]["messages"]]
+        assert "person who listened to it" in system
+        assert "Audio recording: interview.mp3" in user
+        assert "AUDIO MATERIAL" in user
+        assert "WHAT WAS ON SCREEN" not in user
+
+    @pytest.mark.asyncio
     async def test_verbose_model_output_is_shortened_before_storage(self):
         content = (
             "Let me analyze this video. Here is a summary: "
@@ -201,6 +216,15 @@ class TestSummariseVideo:
         )
         assert len(got.split()) <= SUMMARY_MAX_WORDS
         assert len(got) <= SUMMARY_MAX_CHARS
+
+    def test_audio_preamble_is_removed_before_storage(self):
+        raw = (
+            "Let me analyze this recording. "
+            "A short interview explains how to prepare the blue lantern."
+        )
+        assert brief_video_summary(raw) == (
+            "A short interview explains how to prepare the blue lantern."
+        )
 
     def test_an_oversized_second_sentence_does_not_leave_a_fragment(self):
         first = "A Minecraft tutorial demonstrates a compact tree-growing technique."

@@ -58,10 +58,17 @@ class _FakeQdrant:
         return list(seen.values())
 
 
-def _point(file_id: str, *, user: str = USER, kind: str = "text") -> dict:
+def _point(
+    file_id: str,
+    *,
+    user: str = USER,
+    kind: str = "text",
+    mime: str = "text/plain",
+) -> dict:
+    suffix = ".mp3" if mime == "audio/mpeg" else ".txt"
     return {
-        "user": user, "file_id": file_id, "filename": f"{file_id}.txt",
-        "mime": "text/plain", "bytes": 10, "kind": kind,
+        "user": user, "file_id": file_id, "filename": f"{file_id}{suffix}",
+        "mime": mime, "bytes": 10, "kind": kind,
         "uploaded_at": "2026-08-01T00:00:00+00:00",
     }
 
@@ -413,6 +420,24 @@ class TestVideoKindSurvivesReconcile:
             {IMAGE_COL: [_point("pic", kind="image")]}))
 
         assert (await db.get_upload("pic"))["kind"] == "image"
+
+    @pytest.mark.parametrize("artifact", ["transcript", "summary"])
+    async def test_audio_artifacts_stay_audio_after_reconcile(
+        self, db: UploadsDB, artifact: str,
+    ):
+        await db.record_upload(
+            file_id="audio", user=USER, filename="interview.mp3",
+            mime="audio/mpeg", bytes_=1024, kind="audio", collection=TEXT_COL,
+            chunks=2, uploaded_at="2026-08-01T00:00:00+00:00", status="ready",
+        )
+        point = {
+            **_point("audio", kind="text", mime="audio/mpeg"),
+            "artifact": artifact,
+        }
+
+        await reconcile_with_qdrant(db, _FakeQdrant({TEXT_COL: [point]}))
+
+        assert (await db.get_upload("audio"))["kind"] == "audio"
 
     async def test_the_repaired_kind_makes_it_reclaimable_again(self, db: UploadsDB):
         """Why this matters beyond a cosmetic label.

@@ -81,7 +81,7 @@ class MessageAttachmentResponse(BaseModel):
     id: str
     filename: str
     mime: str
-    kind: Literal["text", "image", "video"]
+    kind: Literal["text", "image", "video", "audio"]
     bytes: int
 
 

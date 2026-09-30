@@ -2169,7 +2169,7 @@ function toCreateAttachment(file: MessageAttachment | AudreyFile): CreateAttachm
 function attachmentPresentationType(file: MessageAttachment | AudreyFile) {
   return file.kind === "image"
     ? "image" as const
-    : file.kind === "video" ? "file" as const : "document" as const;
+    : ["video", "audio"].includes(file.kind) ? "file" as const : "document" as const;
 }
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

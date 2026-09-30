@@ -148,7 +148,7 @@ async def test_v6_upgrade_adds_access_groups_and_model_ids_without_data_loss(tmp
 
     store = ApplicationStore(path)
     try:
-        assert store.schema_version == 15
+        assert store.schema_version == 16
         principal = await store.resolve_external_identity(
             provider="owui",
             subject="owui-admin",
@@ -237,7 +237,7 @@ async def test_v4_upgrade_adds_video_mode_without_losing_canonical_state(tmp_pat
 
     store = ApplicationStore(path)
     try:
-        assert store.schema_version == 15
+        assert store.schema_version == 16
         existing = await store.conversations.get(
             user_id="usr_existing",
             conversation_id="con_existing",
@@ -307,7 +307,7 @@ async def test_v2_upgrade_backfills_preferences_without_changing_identity_or_tok
     try:
         after = await _resolve(upgraded)
         preferences = await upgraded.preferences.get(user_id=owner.user_id)
-        assert upgraded.schema_version == 15
+        assert upgraded.schema_version == 16
         assert after.user_id == owner.user_id
         assert preferences is not None
         assert preferences.timezone == "UTC"
@@ -462,6 +462,13 @@ async def test_message_attachments_are_atomic_ordered_persistent_and_cascaded(tm
             mime="image/png",
             kind="image",
             bytes=84,
+        ),
+        AttachmentSnapshot(
+            file_id="file_interview",
+            filename="interview.mp3",
+            mime="audio/mpeg",
+            kind="audio",
+            bytes=126,
         ),
     )
     try:
@@ -714,7 +721,7 @@ async def test_schema_v3_upgrade_does_not_duplicate_legacy_archive_writes(tmp_pa
 
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 15
+        assert upgraded.schema_version == 16
         assert await upgraded.chat_projections.due() == ()
         existing = await upgraded.conversations.get_run(
             user_id=owner.user_id,

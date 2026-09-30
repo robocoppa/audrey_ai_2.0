@@ -274,10 +274,10 @@ class KBSearchRequest(BaseModel):
     artifact: str | None = Field(
         default=None,
         description=(
-            "Optional, and only meaningful for a video. 'transcript' searches "
-            "what was said, 'visual' searches what was on screen (slides, "
-            "signs, on-screen text), 'summary' searches the one-paragraph "
-            "summary. Omit to search all three."
+            "Optional, and meaningful for audio or video. 'transcript' searches "
+            "what was said, 'visual' searches what was on screen in a video "
+            "(slides, signs, on-screen text), and 'summary' searches the short "
+            "media summary. Omit to search every available artifact."
         ),
         pattern="^(transcript|visual|summary)$",
     )
@@ -703,8 +703,8 @@ async def web_fetch(req: WebFetchRequest) -> WebFetchResponse:
         "Search Audrey's knowledge base for matching documents and image "
         "captions. Use this when the user asks about domain-specific "
         "material (e.g. geology references) or their own ingested docs, "
-        "including the transcripts and on-screen text of videos they have "
-        "uploaded. To search inside one particular file, pass its exact "
+        "including transcripts from audio and video and on-screen text from "
+        "videos they have uploaded. To search inside one particular file, pass its exact "
         "filename from list_my_files as `filename`.\n"
         "Results are POOLED across files and ordered by score, so an unscoped "
         "search of several similar documents can return hits from only one of "
@@ -1005,9 +1005,9 @@ class ListMyFilesResponse(BaseModel):
     tags=["tools"],
     summary="List the files this user has uploaded",
     description=(
-        "List the files this user has uploaded to Audrey — videos, documents "
-        "and images — returning each one's exact filename, kind, upload time, "
-        "processing status and, for a processed video, its duration. "
+        "List the files this user has uploaded to Audrey — audio recordings, "
+        "videos, documents and images — returning each one's exact filename, "
+        "kind, upload time, processing status and, for processed media, its duration. "
         "**This is a catalogue, not contents: it tells you what exists and "
         "what can be read, never what a file says.** Anything about what is "
         "in a file — what was said, what was on screen, what it is about, how "
@@ -1022,8 +1022,9 @@ class ListMyFilesResponse(BaseModel):
         "for those two statuses) if asked how long it has been going. A "
         "'failed' file carries the reason. "
         "Each file lists `unread_artifacts`: 'document' for readable text "
-        "uploads, or the video texts 'transcript', 'visual' and 'summary', "
-        "that exist on disk and have NOT been read. They are names, "
+        "uploads, or media text: audio can have 'transcript' and 'summary'; "
+        "video can also have 'visual'. These artifacts exist on disk and have "
+        "NOT been read. They are names, "
         "not contents — seeing 'summary' listed tells you a summary is "
         "available to fetch, never what it says. To use one, call "
         "get_file_text with that artifact; until you do, you have not read "
@@ -1055,7 +1056,7 @@ async def list_my_files(req: ListMyFilesRequest) -> ListMyFilesResponse:
 class GetFileTextRequest(BaseModel):
     user: Annotated[str, Field(min_length=1, max_length=200, description="User scope. Filled in automatically by Audrey — you don't need to supply it. Files are per-user.")]
     filename: Annotated[str, Field(min_length=1, max_length=500, description="The file's exact filename, as returned by list_my_files.")]
-    artifact: Annotated[str, Field(description="Which text to read: 'auto' chooses document text for a text file and transcript for a video; 'document' reads a text upload; 'transcript' reads speech; 'visual' reads on-screen text and scene descriptions; 'summary' reads the video overview.")] = "auto"
+    artifact: Annotated[str, Field(description="Which text to read: 'auto' chooses document text for a text file and transcript for audio or video; 'document' reads a text upload; 'transcript' reads speech; 'visual' reads video on-screen text and scene descriptions; 'summary' reads the media overview.")] = "auto"
     offset: Annotated[int, Field(ge=0, description="Character position to start from. Use 0 for the beginning, then the next_offset from the previous response.")] = 0
 
 
@@ -1074,7 +1075,7 @@ class GetFileTextResponse(BaseModel):
     operation_id="get_file_text",
     response_model=GetFileTextResponse,
     tags=["tools"],
-    summary="Read a document or a video's transcript, on-screen text, or summary",
+    summary="Read a document or an audio/video transcript, visual notes, or summary",
     description=(
         "Read ONE named file's text in order, front to back. Use this only "
         "when the user asked for the document itself — 'give me the "
@@ -1092,9 +1093,9 @@ class GetFileTextResponse(BaseModel):
         "evidence of absence, and saying a file lacks content it actually has "
         "is a worse answer than spending the extra round. "
         "Leave artifact as 'auto' to read document text from a text file or "
-        "the transcript from a video. Set it explicitly to 'document' for a "
-        "text upload, 'transcript' for speech, 'visual' for on-screen text and "
-        "scene descriptions, or 'summary' for the short video overview. "
+        "the transcript from audio or video. Set it explicitly to 'document' "
+        "for a text upload, 'transcript' for speech, 'visual' for video on-screen "
+        "text and scene descriptions, or 'summary' for the short media overview. "
         "Long documents come back one page at a time: if next_offset is not "
         "null there is more, and you get it by calling again with offset set "
         "to that number. total_chars is the size of the whole document, so say "
@@ -1108,8 +1109,8 @@ class GetFileTextResponse(BaseModel):
         "limit. The document is already here; more of it is one more call. "
         "If this returns empty text, follow its note exactly. An unavailable "
         "document means its contents are UNKNOWN, so report the read failure "
-        "and do not infer absence. A video note may instead establish that a "
-        "specific artifact is empty. Never describe either from another file, "
+        "and do not infer absence. An audio or video note may instead establish "
+        "that a specific artifact is empty. Never describe either from another file, "
         "a summary, or what you expect it to contain."
     ),
 )
