@@ -1,0 +1,222 @@
+{
+  "schema": 1,
+  "description": "Audrey router decisions: the original ten-case feasibility set plus twenty-six unique expansion cases.",
+  "cases": [
+    {
+      "id": "legacy-code-refactor-loop",
+      "prompt": "Refactor this function to avoid the nested loop and explain the tradeoff",
+      "expected": "code",
+      "source": "legacy"
+    },
+    {
+      "id": "legacy-code-postgres-plan",
+      "prompt": "Why does my Postgres query plan switch to a seq scan above ~10k rows?",
+      "expected": "code",
+      "source": "legacy"
+    },
+    {
+      "id": "legacy-code-retry-decorator",
+      "prompt": "Write a Python decorator that retries with exponential backoff",
+      "expected": "code",
+      "source": "legacy"
+    },
+    {
+      "id": "legacy-reasoning-rent-or-buy",
+      "prompt": "Walk me through whether it is cheaper to rent or buy given 6% rates",
+      "expected": "reasoning",
+      "source": "legacy"
+    },
+    {
+      "id": "legacy-reasoning-event-sourcing",
+      "prompt": "Compare the tradeoffs between event sourcing and CRUD for an audit trail",
+      "expected": "reasoning",
+      "source": "legacy"
+    },
+    {
+      "id": "legacy-reasoning-trains",
+      "prompt": "If a train leaves at 3pm going 60mph and another at 4pm going 80mph…",
+      "expected": "reasoning",
+      "source": "legacy"
+    },
+    {
+      "id": "legacy-general-capital",
+      "prompt": "What is the capital of Australia?",
+      "expected": "general",
+      "source": "legacy"
+    },
+    {
+      "id": "legacy-general-voyager-summary",
+      "prompt": "Summarise what happened with the Voyager 2 plasma instrument",
+      "expected": "general",
+      "source": "legacy"
+    },
+    {
+      "id": "legacy-general-packing-list",
+      "prompt": "Give me a packing list for three days of winter camping",
+      "expected": "general",
+      "source": "legacy"
+    },
+    {
+      "id": "legacy-general-decline-email",
+      "prompt": "Draft a polite email declining a meeting invitation",
+      "expected": "general",
+      "source": "legacy"
+    },
+    {
+      "id": "code-lru-cache",
+      "prompt": "Implement an LRU cache in Python with O(1) get and put operations",
+      "expected": "code",
+      "source": "expanded"
+    },
+    {
+      "id": "code-fastapi-timeout",
+      "prompt": "Debug this FastAPI endpoint: its upstream timeout is caught but clients still receive HTTP 500",
+      "expected": "code",
+      "source": "expanded"
+    },
+    {
+      "id": "code-sql-window",
+      "prompt": "Rewrite this correlated SQL subquery using a window function",
+      "expected": "code",
+      "source": "expanded"
+    },
+    {
+      "id": "code-range-response",
+      "prompt": "Add HTTP byte-range support to this file download route",
+      "expected": "code",
+      "source": "expanded"
+    },
+    {
+      "id": "code-typescript-narrowing",
+      "prompt": "Fix the TypeScript type error caused by this discriminated union narrowing",
+      "expected": "code",
+      "source": "expanded"
+    },
+    {
+      "id": "code-pytest-race",
+      "prompt": "Write a pytest regression test for two requests racing to claim the same row",
+      "expected": "code",
+      "source": "expanded"
+    },
+    {
+      "id": "code-pandas-groupby",
+      "prompt": "Optimize this pandas groupby so it does not iterate over every row in Python",
+      "expected": "code",
+      "source": "expanded"
+    },
+    {
+      "id": "code-rust-parser",
+      "prompt": "Create a Rust parser for a log line containing a timestamp, level, and message",
+      "expected": "code",
+      "source": "expanded"
+    },
+    {
+      "id": "code-pydantic-migration",
+      "prompt": "Migrate this Pydantic v1 validator to the Pydantic v2 API",
+      "expected": "code",
+      "source": "expanded"
+    },
+    {
+      "id": "reasoning-queue-choice",
+      "prompt": "Analyze whether a durable queue or an in-memory channel better fits a job that must survive restarts",
+      "expected": "reasoning",
+      "source": "expanded"
+    },
+    {
+      "id": "reasoning-api-review",
+      "prompt": "Review this API design and identify where ownership checks could be bypassed",
+      "expected": "reasoning",
+      "source": "expanded"
+    },
+    {
+      "id": "reasoning-sqrt-two",
+      "prompt": "Prove that the square root of two is irrational",
+      "expected": "reasoning",
+      "source": "expanded"
+    },
+    {
+      "id": "reasoning-database-shape",
+      "prompt": "Given frequent reads and rare writes, determine whether these records should be normalized or denormalized",
+      "expected": "reasoning",
+      "source": "expanded"
+    },
+    {
+      "id": "reasoning-incident-cause",
+      "prompt": "Evaluate these timing clues and decide which failure most likely caused the restart loop",
+      "expected": "reasoning",
+      "source": "expanded"
+    },
+    {
+      "id": "reasoning-consistency-models",
+      "prompt": "Compare eventual consistency with strong consistency for an offline-first notes application",
+      "expected": "reasoning",
+      "source": "expanded"
+    },
+    {
+      "id": "reasoning-probability",
+      "prompt": "A test is 99% sensitive and 95% specific for a condition affecting 1% of people. What is the chance a positive result is correct?",
+      "expected": "reasoning",
+      "source": "expanded"
+    },
+    {
+      "id": "reasoning-retry-storm",
+      "prompt": "Explain why synchronized retries can make a partial outage worse and assess three ways to prevent it",
+      "expected": "reasoning",
+      "source": "expanded"
+    },
+    {
+      "id": "reasoning-backup-policy",
+      "prompt": "Given a four-hour recovery target and a fifteen-minute data-loss limit, work out a practical backup schedule",
+      "expected": "reasoning",
+      "source": "expanded"
+    },
+    {
+      "id": "general-translation",
+      "prompt": "Translate 'The package will arrive tomorrow' into Spanish",
+      "expected": "general",
+      "source": "expanded"
+    },
+    {
+      "id": "general-summary",
+      "prompt": "Summarize this paragraph in one sentence for a project update",
+      "expected": "general",
+      "source": "expanded"
+    },
+    {
+      "id": "general-agenda",
+      "prompt": "Draft a short agenda for a weekly team check-in",
+      "expected": "general",
+      "source": "expanded"
+    },
+    {
+      "id": "general-author",
+      "prompt": "Who wrote The Left Hand of Darkness?",
+      "expected": "general",
+      "source": "expanded"
+    },
+    {
+      "id": "general-recipe",
+      "prompt": "Give me a simple vegetarian chili recipe for four people",
+      "expected": "general",
+      "source": "expanded"
+    },
+    {
+      "id": "general-rephrase",
+      "prompt": "Rephrase this note so it sounds friendly and concise",
+      "expected": "general",
+      "source": "expanded"
+    },
+    {
+      "id": "general-continents",
+      "prompt": "List the seven continents in alphabetical order",
+      "expected": "general",
+      "source": "expanded"
+    },
+    {
+      "id": "general-haiku",
+      "prompt": "Write a haiku about the first snow of winter",
+      "expected": "general",
+      "source": "expanded"
+    }
+  ]
+}

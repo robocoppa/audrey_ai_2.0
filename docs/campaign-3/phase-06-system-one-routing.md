@@ -1,7 +1,8 @@
 # Campaign 3 Phase 6 - System One decision routing
 
-**Status:** Planned after the Campaign 3 Phase 5 Slice 5B laptop and live gate.
-No production router or Ollama deployment change has been made.
+**Status:** In progress. Slice 6A is laptop-complete and awaits its first
+`tev1:0.8b` on-box measurement. No production router, config, or Ollama
+deployment change has been made.
 
 ## Goal
 
@@ -19,8 +20,8 @@ Official references:
 System One accepts a state plus named `choice`, `noul`, or `score` questions.
 For Audrey's first experiment, one `choice` question selects among `code`,
 `reasoning`, `general`, and `vl` and returns a probability distribution.
-Audrey will call the HTTP endpoint directly through its existing async client
-rather than add the TypeSafe SDK.
+Slice 6A calls the HTTP endpoint through a narrow probe-local async client
+rather than adding the TypeSafe SDK or changing the production Ollama client.
 
 ## Why this fits Audrey
 
@@ -65,8 +66,8 @@ deployment facts and require a user-confirmed live check.
 
 ## Slice 6A - probe-only adapter
 
-Add a narrow System One method to `OllamaClient` or a probe-local equivalent
-and extend the router probe without changing production classification.
+This slice adds a probe-local System One client and an expanded router
+comparison without changing production classification.
 
 For every candidate and the incumbent, record:
 
@@ -75,7 +76,8 @@ For every candidate and the incumbent, record:
   and System One `confidence`;
 - cold latency plus warm p50 and p95 latency;
 - transport, HTTP, and response-shape failures;
-- model size, observed residency, and whether it evicts an active worker;
+- model size and observed residency displacement; concurrent active-worker
+  eviction remains a separate ship-gate observation;
 - expensive misroutes into `reasoning`, separately from nearly free
   `general`/`code` swaps;
 - the projected number of fast-to-deep escalations under any proposed mapping.
@@ -84,6 +86,68 @@ System One defines `confidence` as distribution concentration, not the chance
 that the label is correct. Do not copy it into `classify_confidence` or reuse
 Audrey's existing 0.95 threshold. Evaluate winning probability, margin, and
 abstention behavior against labeled cases before choosing a mapping.
+
+### Slice 6A implementation
+
+`scripts/probes/systemone_router_probe.py` is intentionally probe-local. It
+uses Audrey's real `router_classify` path for `qwen3.5:4b` and calls
+`/v1/systemone` directly for candidates, so the experiment adds no production
+backend or dependency. `evals/cases/systemone_router_cases.json` preserves the
+original ten prompts and adds twenty-six unique cases, balanced at twelve each
+for `code`, `reasoning`, and `general`. `vl` remains an output option but is not
+an expected case because current attached-image turns bypass the router.
+
+For every warm sample the report retains the selected label, expected label,
+full probability distribution, winner probability, first-to-second margin,
+System One concentration, latency, and validity. It separately totals false
+routes into costly `reasoning`, missed reasoning cases, cheap code/general
+swaps, and projected fast-to-deep escalations under an explicitly provisional
+winner-and-margin rule. The incumbent projection continues to use its actual
+0.95 self-reported-confidence ceiling, so the two confidence meanings never
+share a column.
+
+The probe checks Ollama's version and exact installed tags before generation.
+It deliberately unloads each model for one cold sample, records `/api/ps`
+before and after, runs candidates first, and runs the incumbent last so Audrey's
+current router is warm when it finishes. Residency displacement is evidence
+about loading; it is not a concurrent-contention proof.
+
+### Laptop verification
+
+- 58 focused new and incumbent router-probe contract tests pass.
+- The full hermetic suite passes: 3,002 tests with one existing FastAPI
+  deprecation warning.
+- Changed-file Ruff and standalone probe compilation pass.
+- `config.yaml`, the production classifier, and `OllamaClient` are unchanged.
+
+### First on-box measurement
+
+This is an Ollama-host probe, not a browser or Audrey API smoke. It needs no
+uploaded image, video, document, login token, or manual UI step. Run it while
+Audrey is idle because cold-load measurement changes model residency.
+
+First confirm the externally managed Ollama container is version 0.35 or newer:
+
+    docker exec ollama ollama --version
+
+Install the first candidate if it is not already present:
+
+    docker exec ollama ollama pull tev1:0.8b
+
+After the new probe files reach the Unraid checkout, start the detached run:
+
+    cd /mnt/user/appdata/audrey_ai_2.0
+    scripts/probes/probe-onbox.sh systemone_router_probe.py \
+      COPY=systemone_router_cases.json CANDIDATES=tev1:0.8b
+
+The command prints a log path and returns immediately. The probe makes 74 model
+calls: one cold plus 36 warm calls for the candidate, then the same for the
+incumbent. Completion is exit code zero and a JSON report with
+`"status": "measured"`. That status means evidence collection worked; it is
+not an automatic ship decision. Review candidate versus incumbent accuracy,
+false `reasoning` routes, projected escalations, p50/p95 and cold latency, and
+residency displacement before opening Slice 6B. Record the accepted numbers in
+`evals/MODEL-FACTS.md` in the same session.
 
 ## Slice 6B - guarded production backend
 

@@ -1,13 +1,12 @@
 # Campaign 3 — correctness foundations, Audrey UI, and reusable skills
 
-**Status:** Campaign 3 Phases 1, 3, and 4 are complete. Phase 2's native
+**Status:** Campaign 3 Phases 1, 3, 4, and 5 are complete. Phase 2's native
 product cutover is live-settled, while its legacy 2D.5 administration, role,
 model-publication, exact-owner bootstrap, and provider-binding soak remains
-open. Phase 5 has started; Slice 5A's completed plain-text
-`POST /v1/responses` adapter is live-settled, and Slice 5B's typed streaming
-adapter is laptop-complete pending one targeted Unraid smoke. Phase 6 is queued
-behind that gate as a measured Ollama System One routing evaluation; it does
-not change production routing until its own gate passes.
+open. Phase 5's completed and streaming `POST /v1/responses` adapters are both
+live-settled. Phase 6 has started with a probe-only Ollama System One routing
+evaluation; production routing remains on the incumbent until that evidence
+clears its own gate.
 
 The Milestone 2E parity build is laptop-complete across native memory
 settings, owner-bound file and video upload and inspection, source and answer
@@ -52,12 +51,17 @@ passed all three derived artifact types. The final native browser check passed
 after Summary downloads were removed: summary text begins without the old
 action row, while Transcript and Visual notes retain download actions.
 
-Phase 5 started on 2026-09-29. Slice 5A adds completed plain-text
-`POST /v1/responses` generation by adapting onto Audrey's existing
-authenticated Chat Completions path. Slice 5B adds typed Responses SSE for the
-same virtual and passthrough paths; its laptop gate is green and its live gate
-is pending. Background work, stored response chaining, client tools, structured
-output, and multimodal input remain explicit later slices.
+Phase 5 completed on 2026-09-30. Slice 5A's completed plain-text
+`POST /v1/responses` adapter and Slice 5B's typed Responses SSE both passed
+their laptop and targeted live gates. Background work, stored response
+chaining, client tools, structured output, and multimodal input remain explicit
+later slices.
+
+Phase 6 has started. Slice 6A adds a probe-only `/v1/systemone` client, a
+balanced 36-case routing fixture, strict typed-response validation, incumbent
+comparison, cold and warm timing, uncertainty and cost projections, and
+residency observations. Its laptop gate is green; the first `tev1:0.8b` on-box
+measurement is pending. No production classifier or config changed.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,
@@ -72,8 +76,8 @@ and finally adds the first general skills layer on that owned surface.
 | 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | In progress (2A–2B, 2C.1–2C.3, and 2D.1–2D.4 verified; 2D.5 deployed; 2E settled; 2F.3 live-passed; 2F.4 and permanent DNS correction live-settled) |
 | 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | Complete (3A–3C live-settled; explicit grounded-document pilot ships; automatic selection deferred) |
 | 04 | [File and artifact downloads](phase-04-file-downloads.md) | Owner-scoped recovery of stored originals and useful derived artifacts from the native Files surface | Phase 03 explicit-skill ship decision | Complete |
-| 05 | [Responses API compatibility](phase-05-responses-api.md) | OpenAI Responses clients use Audrey's existing authenticated generation and policy boundaries | Phase 04 completion | In progress (5A live-settled; 5B laptop-complete, live gate pending) |
-| 06 | [System One decision routing](phase-06-system-one-routing.md) | Measure purpose-built local decision models against Audrey's incumbent router and retain a one-setting rollback | Phase 05 Slice 5B gate | Planned |
+| 05 | [Responses API compatibility](phase-05-responses-api.md) | OpenAI Responses clients use Audrey's existing authenticated generation and policy boundaries | Phase 04 completion | Complete (5A and 5B live-settled) |
+| 06 | [System One decision routing](phase-06-system-one-routing.md) | Measure purpose-built local decision models against Audrey's incumbent router and retain a one-setting rollback | Phase 05 Slice 5B gate | In progress (6A laptop-complete; first live measurement pending) |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1
 through Campaign 3 Phase 6, or use the topic filenames.

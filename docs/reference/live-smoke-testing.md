@@ -10,6 +10,7 @@ happens in the laptop checkout; Tower is the Docker-only deployment host.
 | Hermetic pytest, lint, or build | Laptop | Local checkout | None |
 | API-only live smoke, including `smoke_native_auth_cutover.py` | Laptop over LAN/WARP | Tower backend port `8000` | Credential required by that script |
 | Eval harness | Laptop over LAN/WARP | Tower backend `/v1` on port `8000` | Audrey PAT with `compat:full` |
+| Direct Ollama/model probe | `scripts/probes/probe-onbox.sh` on Tower | Ollama over `ollama-net` from the Audrey container | None |
 | Full native UI/proxy smoke | Disposable container on Tower, or laptop through an explicit SSH tunnel | `http://audrey-ui:8080` inside `ollama-net`, or tunneled loopback port `8090` | Native smoke user/admin assertions |
 
 Choose the smallest proof that exercises the changed functionality and its
@@ -36,6 +37,20 @@ and VPN route are the normal path.
 The standalone UI bind `127.0.0.1:8090` is Tower-loopback-only. A laptop cannot
 reach it at either private IP without an SSH tunnel. Do not confuse that limit
 with the published backend port `8000`.
+
+## Run direct Ollama probes on Tower
+
+A probe that needs Docker-only Ollama DNS, model residency, or GPU observations
+runs through `scripts/probes/probe-onbox.sh` on Tower. The wrapper copies the
+selected probe and any `COPY=` fixtures into the running Audrey container,
+self-detaches, keeps its log in `testing-out/probes`, and prints that log path.
+It does not require host Python or a repository mount inside the container.
+
+Campaign 3 Phase 6's System One comparison is this kind of probe. It needs no
+browser, Audrey token, upload, or laptop network route. Because it deliberately
+unloads models for cold samples, run it while Audrey is idle. Its exact version,
+model-install, runner, and success criteria are maintained in
+`docs/campaign-3/phase-06-system-one-routing.md`.
 
 ## Keep credentials private and runner-specific
 

@@ -1,7 +1,7 @@
 # Campaign 3 Phase 5 - Responses API compatibility
 
-**Status:** Slice 5A is live-settled on 2026-09-29. Slice 5B is laptop
-complete on 2026-09-30 and awaits its targeted Unraid smoke.
+**Status:** Complete. Slice 5A was live-settled on 2026-09-29 and Slice
+5B's typed streaming contract passed its targeted live gate on 2026-09-30.
 
 ## Goal
 
@@ -106,32 +106,18 @@ unsupported background request and proves rejection happens before generation.
   deprecation warning.
 - Changed-file Ruff and smoke-script compilation pass.
 
-## Targeted live gate
+## Targeted live result
 
-**Result:** Pending a backend rebuild and one API-only smoke from the laptop.
-Slice 5A's completed-response proof remains accepted and is not repeated.
+**Result:** Passed on 2026-09-30 over the working LAN/WARP route at
+`http://192.168.1.11:8000`.
 
-Rebuild the Audrey backend, then run from the laptop checkout:
+The deployed stream returned HTTP 200 with 19 typed events and 11 text deltas.
+It kept stable `resp_` and `msg_` ids, reported input and output token usage,
+included the expected sentinel, and terminated with `response.completed`.
+The separate `background: true` request returned HTTP 400 with
+`responses_feature_unsupported`, proving the deliberate boundary still rejects
+before generation.
 
-    cd /home/bart/Documents/github/audrey/audrey_ai_2.0
-    (
-      set -a
-      source .env.test.local
-      set +a
-      AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_responses_api.py
-    )
-
-The smoke makes one short `audrey_fast` streaming generation. It expects:
-
-- HTTP 200 with `text/event-stream`;
-- the ordered typed start, text-delta, item-done, and `response.completed`
-  lifecycle with contiguous sequence numbers;
-- stable `resp_` and `msg_` ids across the stream;
-- concatenated deltas containing `RESPONSES_STREAM_OK` and exactly matching
-  the completed response's `output_text`;
-- internally consistent token usage, no Chat Completions `choices`, and no
-  `[DONE]` marker;
-- HTTP 400 with `responses_feature_unsupported` for `background: true`.
-
-Success is exit code zero and JSON ending in `"status": "passed"`. No upload,
-prepared file, or manual browser check is needed.
+No upload or browser action was needed. This evidence is settled and is not
+repeated unless a later change touches Responses streaming or its shared run
+event renderer.
