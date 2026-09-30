@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -29,6 +31,7 @@ from audrey.routes.openai.passthrough import (
 from audrey.routes.openai.pipeline import _generate_via_pipeline, _stream_via_pipeline
 from audrey.routes.openai.responses import _options_from_request, _to_responses_api_response
 from audrey.routes.openai.schemas import ChatCompletionRequest, ResponseCreateRequest
+from audrey.routes.openai.streaming import OpenAIStreamSession, ResponsesStreamSession
 from audrey.skills import SkillSelectionError, skill_mode_for_virtual_model
 
 log = logging.getLogger(__name__)
@@ -90,7 +93,21 @@ async def chat_completions(
     request: Request,
     me: AuthedUser = Depends(require_user),
 ):
+    return await _create_chat_completion(payload, request, me)
+
+
+async def _create_chat_completion(
+    payload: ChatCompletionRequest,
+    request: Request,
+    me: AuthedUser,
+    *,
+    stream_session_factory: Callable[..., Any] | None = None,
+):
+    """Run the shared authenticated generation path with one wire adapter."""
+
     app = request.app
+    requested_stream_session_factory = stream_session_factory
+    stream_session_factory = stream_session_factory or OpenAIStreamSession
 
     # Passthrough branch — bypasses the pipeline entirely. Both fair-
     # scheduling layers still fire so passthrough traffic competes for
@@ -104,7 +121,13 @@ async def chat_completions(
                     "message": "Skills cannot be combined with passthrough models.",
                 },
             )
-        return await _handle_passthrough(app, request, payload, me)
+        return await _handle_passthrough(
+            app,
+            request,
+            payload,
+            me,
+            stream_session_factory=requested_stream_session_factory,
+        )
 
     if payload.model not in VIRTUAL_MODELS:
         raise HTTPException(
@@ -230,6 +253,7 @@ async def chat_completions(
                 skill_instruction=skill_instruction,
                 resolved_skill=resolved_skill,
                 model_tools=model_tools,
+                stream_session_factory=stream_session_factory,
             ),
             media_type="text/event-stream",
         )
@@ -252,13 +276,12 @@ async def create_response(
     payload: ResponseCreateRequest,
     request: Request,
     me: AuthedUser = Depends(require_user),
-) -> dict[str, Any]:
-    """Generate one completed text response through Audrey's shared pipeline."""
+):
+    """Generate one completed or streamed text response through Audrey."""
 
     unsupported = [
         name
         for name, active in (
-            ("stream", payload.stream),
             ("background", payload.background),
             ("store", payload.store is not None),
             ("previous_response_id", payload.previous_response_id is not None),
@@ -274,8 +297,8 @@ async def create_response(
             detail={
                 "error": "responses_feature_unsupported",
                 "message": (
-                    "This Audrey Responses slice supports completed plain-text "
-                    f"generation only; unsupported fields: {', '.join(unsupported)}."
+                    "This Audrey Responses slice supports plain-text generation; "
+                    f"unsupported fields: {', '.join(unsupported)}."
                 ),
             },
         )
@@ -293,13 +316,27 @@ async def create_response(
         model=payload.model,
         skill=payload.skill,
         messages=messages,
-        stream=False,
+        stream=payload.stream,
         temperature=payload.temperature,
         top_p=payload.top_p,
         max_tokens=payload.max_output_tokens,
         metadata=payload.metadata,
         user=payload.user,
     )
+    if payload.stream:
+        stream_response = await _create_chat_completion(
+            chat_payload,
+            request,
+            me,
+            stream_session_factory=partial(ResponsesStreamSession, request=payload),
+        )
+        if not isinstance(stream_response, StreamingResponse):
+            raise HTTPException(
+                status_code=502,
+                detail="Generation returned an invalid streaming response.",
+            )
+        return stream_response
+
     chat_response = await chat_completions(chat_payload, request, me)
     if not isinstance(chat_response, dict):
         raise HTTPException(status_code=502, detail="Generation returned an invalid response.")

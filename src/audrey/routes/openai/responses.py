@@ -1,7 +1,7 @@
 """OpenAI response formatting — pure helpers, no I/O.
 
 Builds OpenAI-shaped responses from pipeline output: request to Ollama
-options, Chat Completions envelopes, the completed Responses API adapter, and
+options, Chat Completions envelopes, completed and streamed Responses objects, and
 Ollama-to-OpenAI tool-call conversion. Leaf module - depends only on the
 schemas and stdlib.
 """
@@ -90,23 +90,43 @@ def _to_responses_api_response(
     input_tokens = int(usage.get("prompt_tokens", 0) or 0)
     output_tokens = int(usage.get("completion_tokens", 0) or 0)
     created_at = int(chat_response.get("created") or time.time())
-    return {
-        "id": f"resp_{uuid.uuid4().hex}",
-        "object": "response",
-        "created_at": created_at,
-        "completed_at": int(time.time()),
-        "status": "completed",
-        "error": None,
-        "incomplete_details": None,
-        "instructions": request.instructions,
-        "max_output_tokens": request.max_output_tokens,
-        "metadata": request.metadata or {},
-        "model": request.model,
-        "output": [
+    return _responses_api_response_object(
+        request=request,
+        response_id=f"resp_{uuid.uuid4().hex}",
+        message_id=f"msg_{uuid.uuid4().hex}",
+        created_at=created_at,
+        completed_at=int(time.time()),
+        status="completed",
+        content=content,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
+
+
+def _responses_api_response_object(
+    *,
+    request: ResponseCreateRequest,
+    response_id: str,
+    message_id: str,
+    created_at: int,
+    status: str,
+    content: str,
+    completed_at: int | None,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    output_started: bool = True,
+    error: dict[str, str] | None = None,
+    incomplete_details: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Build one stable Responses object for completed and streamed replies."""
+
+    output_status = "completed" if status == "completed" else "incomplete"
+    output = (
+        [
             {
-                "id": f"msg_{uuid.uuid4().hex}",
+                "id": message_id,
                 "type": "message",
-                "status": "completed",
+                "status": output_status,
                 "role": "assistant",
                 "content": [
                     {
@@ -117,7 +137,32 @@ def _to_responses_api_response(
                     }
                 ],
             }
-        ],
+        ]
+        if output_started
+        else []
+    )
+    usage = None
+    if input_tokens is not None and output_tokens is not None:
+        usage = {
+            "input_tokens": input_tokens,
+            "input_tokens_details": {"cached_tokens": 0},
+            "output_tokens": output_tokens,
+            "output_tokens_details": {"reasoning_tokens": 0},
+            "total_tokens": input_tokens + output_tokens,
+        }
+    return {
+        "id": response_id,
+        "object": "response",
+        "created_at": created_at,
+        "completed_at": completed_at,
+        "status": status,
+        "error": error,
+        "incomplete_details": incomplete_details,
+        "instructions": request.instructions,
+        "max_output_tokens": request.max_output_tokens,
+        "metadata": request.metadata or {},
+        "model": request.model,
+        "output": output,
         "output_text": content,
         "parallel_tool_calls": True,
         "previous_response_id": None,
@@ -125,13 +170,7 @@ def _to_responses_api_response(
         "tool_choice": "auto",
         "tools": [],
         "truncation": "disabled",
-        "usage": {
-            "input_tokens": input_tokens,
-            "input_tokens_details": {"cached_tokens": 0},
-            "output_tokens": output_tokens,
-            "output_tokens_details": {"reasoning_tokens": 0},
-            "total_tokens": input_tokens + output_tokens,
-        },
+        "usage": usage,
     }
 
 

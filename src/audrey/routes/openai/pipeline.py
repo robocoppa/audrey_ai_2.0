@@ -267,6 +267,7 @@ async def _stream_via_pipeline(
     skill_instruction: str | None = None,
     resolved_skill: ResolvedSkill | None = None,
     model_tools: ToolRegistry | None = None,
+    stream_session_factory: Callable[..., Any] = OpenAIStreamSession,
 ):
     """Streaming path.
 
@@ -392,6 +393,7 @@ async def _stream_via_pipeline(
                         routing_messages=decision_messages,
                         resolved_skill=resolved_skill,
                         model_tools=model_tools,
+                        stream_session_factory=stream_session_factory,
                     ):
                         yield frame
                     return
@@ -402,6 +404,7 @@ async def _stream_via_pipeline(
                     routing_messages=decision_messages,
                     resolved_skill=resolved_skill,
                     model_tools=model_tools,
+                    stream_session_factory=stream_session_factory,
                 ):
                     yield frame
                 return
@@ -414,7 +417,7 @@ async def _stream_via_pipeline(
             # paths. This is the latency fix: the ack is on the wire before
             # the (possibly slow) router call.
             fast_pipeline_started_at = time.perf_counter()
-            fast_stream = OpenAIStreamSession(
+            fast_stream = stream_session_factory(
                 virtual_model=payload.model,
                 fingerprint_model=payload.model,
                 **_event_session_kwargs(event_context),
@@ -719,6 +722,7 @@ async def _stream_deep_with_banners(
     routing_messages: list[dict[str, Any]] | None = None,
     resolved_skill: ResolvedSkill | None = None,
     model_tools: ToolRegistry | None = None,
+    stream_session_factory: Callable[..., Any] = OpenAIStreamSession,
 ):
     """Streaming deep path with progress banners.
 
@@ -764,7 +768,7 @@ async def _stream_deep_with_banners(
             **_skill_provenance(resolved_skill),
         ),
     )
-    session = OpenAIStreamSession(
+    session = stream_session_factory(
         virtual_model=payload.model,
         fingerprint_model=concrete,
         terminal=runner.terminal,
@@ -1107,6 +1111,7 @@ async def _stream_research_with_banners(
     routing_messages: list[dict[str, Any]] | None = None,
     resolved_skill: ResolvedSkill | None = None,
     model_tools: ToolRegistry | None = None,
+    stream_session_factory: Callable[..., Any] = OpenAIStreamSession,
 ):
     """Streaming `audrey_research` path: Planning → Researching → Verifying → Writing.
 
@@ -1145,7 +1150,7 @@ async def _stream_research_with_banners(
             **_skill_provenance(resolved_skill),
         ),
     )
-    session = OpenAIStreamSession(
+    session = stream_session_factory(
         virtual_model=payload.model,
         fingerprint_model=concrete,
         terminal=runner.terminal,

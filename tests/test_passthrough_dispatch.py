@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+from functools import partial
 from types import SimpleNamespace
 
 import pytest
@@ -29,7 +30,12 @@ from audrey.routes.openai import (
     ChatCompletionRequest,
     _handle_passthrough,
 )
-from audrey.routes.openai.streaming import StreamOutcome, StreamTerminal
+from audrey.routes.openai.schemas import ResponseCreateRequest
+from audrey.routes.openai.streaming import (
+    ResponsesStreamSession,
+    StreamOutcome,
+    StreamTerminal,
+)
 
 # ─── Fakes ─────────────────────────────────────────────────────────────
 
@@ -403,6 +409,54 @@ async def test_handle_passthrough_streaming_emits_openai_sse_frames():
     assert body.rstrip().endswith("data: [DONE]")
     # Gate held once across the whole stream.
     assert len(gate.acquired) == 1
+
+
+@pytest.mark.asyncio
+async def test_handle_passthrough_can_emit_responses_api_events():
+    ollama = _FakeOllama()
+    gate = _RecordingGate()
+    inflight = UserInflightRegistry(max_inflight_per_user=3)
+    app = _stub_app(ollama=ollama, gate=gate, inflight=inflight)
+    model = f"{PASSTHROUGH_PREFIX}qwen3.6:35b-64k"
+    response_request = ResponseCreateRequest(
+        model=model,
+        input="hello",
+        stream=True,
+    )
+
+    resp = await _handle_passthrough(
+        app,
+        request=SimpleNamespace(app=app),
+        payload=_payload(model=model, stream=True),
+        me=_stub_user(),
+        stream_session_factory=partial(
+            ResponsesStreamSession,
+            request=response_request,
+        ),
+    )
+    body = await _consume_response(resp)
+    events = [
+        json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: {")
+    ]
+
+    assert [event["type"] for event in events] == [
+        "response.created",
+        "response.in_progress",
+        "response.output_item.added",
+        "response.content_part.added",
+        "response.output_text.delta",
+        "response.output_text.delta",
+        "response.output_text.done",
+        "response.content_part.done",
+        "response.output_item.done",
+        "response.completed",
+    ]
+    completed = events[-1]["response"]
+    assert completed["status"] == "completed"
+    assert completed["output_text"] == "hi there"
+    assert "[DONE]" not in body
 
 
 def test_stream_terminal_is_one_shot():

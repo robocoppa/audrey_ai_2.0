@@ -1,7 +1,7 @@
 # Campaign 3 Phase 5 - Responses API compatibility
 
-**Status:** Slice 5A is live-settled on 2026-09-29. Its targeted smoke
-passed over the working LAN/WARP route.
+**Status:** Slice 5A is live-settled on 2026-09-29. Slice 5B is laptop
+complete on 2026-09-30 and awaits its targeted Unraid smoke.
 
 ## Goal
 
@@ -43,12 +43,37 @@ item containing `output_text`, a matching top-level `output_text`, and
 Responses-style token usage. It does not return a Chat Completions
 `choices` array.
 
+## Slice 5B - typed streaming responses
+
+A request with `stream: true` now returns `text/event-stream` using the
+Responses API's typed event vocabulary. The successful plain-text lifecycle is:
+
+1. `response.created` and `response.in_progress`;
+2. `response.output_item.added` and `response.content_part.added`;
+3. one or more `response.output_text.delta` events;
+4. `response.output_text.done`, `response.content_part.done`, and
+   `response.output_item.done`;
+5. `response.completed` carrying the final response object and token usage.
+
+Every event has a contiguous `sequence_number` beginning at zero. The response
+and message ids stay stable for the whole stream. Responses streams terminate
+with their typed terminal event and do not append Chat Completions' `[DONE]`
+marker. Pipeline failures use `response.failed`; an upstream stream that ends
+without its required completion marker uses `response.incomplete`.
+
+Both virtual models and permitted passthrough models use the same authenticated
+generation, policy, fair-scheduling, metrics, and token-accounting paths as
+Chat Completions. A stream-session factory selects only the outer renderer:
+Chat Completions retains its existing chunks, while Responses renders the same
+client-neutral run events as typed Responses SSE. No adapter parses another
+adapter's wire format.
+
 ## Deliberate boundary
 
 Slice 5A rejects these fields with HTTP 400 and
 `responses_feature_unsupported` before generation starts:
 
-- streaming and background execution;
+- background execution;
 - persisted response retrieval or chaining through `store`,
   `previous_response_id`, or `conversation`;
 - client-provided tools;
@@ -61,7 +86,7 @@ its own storage, event, or tool-call contract.
 ## Shared behavior
 
 The route adapts a validated Responses request to the existing
-`ChatCompletionRequest` and calls the same route function after
+`ChatCompletionRequest` and calls the same internal generation function after
 authentication. It therefore keeps model validation, passthrough role and
 allow-list gates, skill resolution, server-managed tool policy, vision
 fallbacks, inflight limits, GPU fairness, generation metrics, and archive
@@ -69,21 +94,22 @@ behavior in one implementation.
 
 The targeted live smoke uses Audrey's existing `### Task:` compatibility
 form so the one model call is excluded from chat history. It also submits one
-unsupported streaming request and proves rejection happens before generation.
+unsupported background request and proves rejection happens before generation.
 
 ## Laptop verification
 
-- 14 focused Responses contract cases pass.
-- The full hermetic backend suite passes: 2,984 tests with one existing FastAPI
+- 17 focused Responses contract cases pass, including successful, failed,
+  incomplete, and shared-generation streaming boundaries.
+- 175 broader fast, deep, research, native, archive, and passthrough stream
+  regressions pass.
+- The full hermetic backend suite passes: 2,988 tests with one existing FastAPI
   deprecation warning.
 - Changed-file Ruff and smoke-script compilation pass.
 
 ## Targeted live gate
 
-**Result:** Passed over LAN/WARP on 2026-09-29. The completed response returned
-HTTP 200 with a `resp_` id, matching typed and top-level output text, valid
-usage, and the requested sentinel. The unsupported streaming request returned
-HTTP 400 with `responses_feature_unsupported`.
+**Result:** Pending a backend rebuild and one API-only smoke from the laptop.
+Slice 5A's completed-response proof remains accepted and is not repeated.
 
 Rebuild the Audrey backend, then run from the laptop checkout:
 
@@ -95,15 +121,17 @@ Rebuild the Audrey backend, then run from the laptop checkout:
       AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_responses_api.py
     )
 
-The smoke uses `AUDREY_EVAL_API_KEY` from `.env.test.local`. It makes
-one short `audrey_fast` generation and expects:
+The smoke makes one short `audrey_fast` streaming generation. It expects:
 
-- HTTP 200, `object: "response"`, and `status: "completed"`;
-- a `resp_` id and one completed assistant `output_text` item;
-- matching top-level and item text containing `RESPONSES_OK`;
-- internally consistent token usage;
-- no Chat Completions `choices`;
-- HTTP 400 with `responses_feature_unsupported` for `stream: true`.
+- HTTP 200 with `text/event-stream`;
+- the ordered typed start, text-delta, item-done, and `response.completed`
+  lifecycle with contiguous sequence numbers;
+- stable `resp_` and `msg_` ids across the stream;
+- concatenated deltas containing `RESPONSES_STREAM_OK` and exactly matching
+  the completed response's `output_text`;
+- internally consistent token usage, no Chat Completions `choices`, and no
+  `[DONE]` marker;
+- HTTP 400 with `responses_feature_unsupported` for `background: true`.
 
-Success is exit code zero and JSON ending in `"status": "passed"`. No upload
-or manual browser check is needed.
+Success is exit code zero and JSON ending in `"status": "passed"`. No upload,
+prepared file, or manual browser check is needed.

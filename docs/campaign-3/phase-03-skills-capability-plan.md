@@ -504,6 +504,11 @@ consistency at acceptable cost.
 not measure selector precision or false activation. Opening this milestone
 requires a separate precision and abstention evaluation.
 
+Campaign 3 Phase 6 will evaluate Ollama System One for Audrey's task router.
+If a small decision model passes that gate, the same typed-choice mechanism may
+later be evaluated here with `none` as an explicit abstention outcome. That
+experiment does not enable automatic selection or relax this milestone's gate.
+
 Open only after explicit selection has stable evidence.
 
 1. Start with deterministic, high-precision rules and an abstain default.

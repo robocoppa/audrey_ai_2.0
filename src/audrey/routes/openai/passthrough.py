@@ -16,6 +16,7 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import HTTPException, Request
@@ -160,7 +161,12 @@ async def _passthrough_think(
 
 
 async def _handle_passthrough(
-    app, request: Request, payload: ChatCompletionRequest, me: AuthedUser,
+    app,
+    request: Request,
+    payload: ChatCompletionRequest,
+    me: AuthedUser,
+    *,
+    stream_session_factory: Callable[..., Any] | None = None,
 ):
     """Route a passthrough request: validate, wrap in inflight, forward.
 
@@ -206,14 +212,39 @@ async def _handle_passthrough(
             terminal = StreamTerminal()
             try:
                 async with inflight.slot(me.email):
-                    async for frame in _passthrough_stream_sse(
-                        ollama, gate,
-                        virtual=payload.model, concrete=concrete, location=location,
-                        messages=messages, options=options,
-                        user_id=me.email, tools=payload.tools, timeout_s=timeout_s,
-                        think=think,
-                        terminal=terminal,
-                    ):
+                    stream = (
+                        _passthrough_stream_sse(
+                            ollama,
+                            gate,
+                            virtual=payload.model,
+                            concrete=concrete,
+                            location=location,
+                            messages=messages,
+                            options=options,
+                            user_id=me.email,
+                            tools=payload.tools,
+                            timeout_s=timeout_s,
+                            think=think,
+                            terminal=terminal,
+                        )
+                        if stream_session_factory is None
+                        else _passthrough_stream_events(
+                            ollama,
+                            gate,
+                            virtual=payload.model,
+                            concrete=concrete,
+                            location=location,
+                            messages=messages,
+                            options=options,
+                            user_id=me.email,
+                            tools=payload.tools,
+                            timeout_s=timeout_s,
+                            think=think,
+                            terminal=terminal,
+                            stream_session_factory=stream_session_factory,
+                        )
+                    )
+                    async for frame in stream:
                         yield frame
             except asyncio.CancelledError:
                 terminal.finish_if_unset(StreamOutcome.CANCELLED)
@@ -278,6 +309,74 @@ async def _handle_passthrough(
         completion_tokens=int(resp.get("eval_count", 0) or 0),
         tool_calls=tool_calls,
     )
+
+
+async def _passthrough_stream_events(
+    ollama: OllamaClient,
+    gate: FairLocalGate,
+    *,
+    virtual: str,
+    concrete: str,
+    location: str,
+    messages: list[dict[str, Any]],
+    options: dict[str, Any],
+    user_id: str,
+    tools: list[dict[str, Any]] | None,
+    timeout_s: float | None,
+    stream_session_factory: Callable[..., Any],
+    think: bool | None = None,
+    terminal: StreamTerminal | None = None,
+):
+    """Render a raw passthrough stream through a client protocol session."""
+
+    terminal = terminal or StreamTerminal()
+    session = stream_session_factory(
+        virtual_model=virtual,
+        fingerprint_model=concrete,
+        terminal=terminal,
+    )
+    session.set_concrete_model(concrete)
+    yield session.role_frame()
+    try:
+        async for chunk in passthrough_stream(
+            ollama,
+            gate,
+            concrete=concrete,
+            location=location,
+            messages=messages,
+            options=options,
+            user_id=user_id,
+            tools=tools,
+            timeout_s=timeout_s,
+            think=think,
+        ):
+            msg = chunk.get("message", {}) or {}
+            content = msg.get("content", "") or ""
+            if content:
+                yield session.content_frame(content)
+            if chunk.get("done"):
+                session.usage_reported(
+                    prompt_tokens=int(chunk.get("prompt_eval_count", 0) or 0),
+                    completion_tokens=int(chunk.get("eval_count", 0) or 0),
+                )
+                terminal.finish(StreamOutcome.OK, finish_reason="stop")
+                yield session.terminal_frame()
+                yield session.done_frame()
+                return
+        terminal.finish(StreamOutcome.TRUNCATED, finish_reason="length")
+        yield session.terminal_frame()
+        yield session.done_frame()
+    except asyncio.CancelledError:
+        terminal.finish_if_unset(StreamOutcome.CANCELLED)
+        raise
+    except GeneratorExit:
+        terminal.finish_if_unset(StreamOutcome.CANCELLED)
+        raise
+    except OllamaError as exc:
+        terminal.finish(StreamOutcome.ERROR, finish_reason="stop")
+        yield session.content_frame(f"\n\n[error: {exc}]")
+        yield session.terminal_frame()
+        yield session.done_frame()
 
 
 async def _passthrough_stream_sse(
