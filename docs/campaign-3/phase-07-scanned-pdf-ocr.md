@@ -116,6 +116,12 @@ A failure naming a missing executable means the old `media-worker` image is
 still running or its rebuild failed. A row-level failure includes the bounded
 OCR reason in the script output.
 
+The first live attempt completed queueing, OCR, indexing, reading, deletion,
+and repair, but the original synthetic all-caps bitmap caused Tesseract to split
+`TOTAL FORTY TWO` across lines and missed the required word `forty`. The smoke
+fixture now uses DejaVu Sans and shorter sentence-case lines. This was a smoke
+fixture correction; it requires no Audrey or worker redeploy.
+
 After the automated smoke passes, the useful browser check is one real scanned
 PDF: upload it in **Files**, watch Pending/Processing become Ready, choose
 **View text**, and confirm the recognized words match the page. A normal PDF

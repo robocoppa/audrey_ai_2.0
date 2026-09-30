@@ -108,11 +108,14 @@ def _scanned_pdf() -> bytes:
     """Build a high-contrast PDF whose words exist only as image pixels."""
     image = Image.new("RGB", (1800, 1200), "white")
     draw = ImageDraw.Draw(image)
-    font = ImageFont.load_default(size=72)
+    try:
+        font = ImageFont.truetype("DejaVuSans.ttf", size=72)
+    except OSError as exc:
+        raise SmokeError("DejaVu Sans is unavailable for the OCR fixture") from exc
     lines = (
-        "AUDREY SCANNED PDF SMOKE TEST",
-        "INVOICE TOTAL FORTY TWO DOLLARS",
-        "PROCESS THIS PAGE WITH OCR",
+        "Audrey scanned document",
+        "The invoice total is forty dollars",
+        "Process this page with OCR",
     )
     for index, line in enumerate(lines):
         draw.text((120, 170 + index * 180), line, fill="black", font=font)
