@@ -172,9 +172,10 @@ services:
       start_period: 10s
       retries: 3
 
-  # Phase 34: the ffmpeg sidecar. Claims video jobs from audrey over HTTP,
-  # demuxes audio, posts the result back. No ports, no model access, no
-  # database — it is an HTTP client that happens to run ffmpeg.
+  # The isolated media sidecar. Claims video and scanned-PDF jobs from
+  # Audrey, performs bounded CPU work, and posts results back. No ports,
+  # direct model access, or database — it is an HTTP client with ffmpeg,
+  # Whisper, Poppler, and Tesseract.
   media-worker:
     build:
       context: .

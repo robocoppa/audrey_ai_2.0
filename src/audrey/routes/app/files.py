@@ -16,7 +16,12 @@ from pydantic import BaseModel
 from audrey.app_state import AttachmentSnapshot
 from audrey.auth import AuthedUser, require_scope
 from audrey.identity import Principal
-from audrey.kb.extract import EmptyExtractionError, extract_text, is_image_mime, is_video_mime
+from audrey.kb.extract import (
+    EmptyExtractionError,
+    extract_uploaded_text,
+    is_image_mime,
+    is_video_mime,
+)
 from audrey.pipeline.summarise import brief_video_summary
 from audrey.pipeline.vision import vision_cfg
 from audrey.routes import files as upload_routes
@@ -354,7 +359,7 @@ async def get_file_text(
     if row.source_freed_at or not await asyncio.to_thread(path.is_file):
         raise HTTPException(status_code=410, detail="Stored document is unavailable.")
     try:
-        content = await asyncio.to_thread(extract_text, path)
+        content = await asyncio.to_thread(extract_uploaded_text, path)
     except (EmptyExtractionError, OSError) as exc:
         raise HTTPException(status_code=409, detail="Document text is unavailable.") from exc
 

@@ -14,7 +14,8 @@
                                                 are downloaded elsewhere, later.
 
     POST   /v1/files/jobs/claim               — SERVICE: lease a pending job.
-    POST   /v1/files/{file_id}/ingest-result  — SERVICE: worker output.
+    POST   /v1/files/{file_id}/ingest-result  — SERVICE: video worker output.
+    POST   /v1/files/{file_id}/ocr-result     — SERVICE: scanned-PDF output.
     POST   /v1/files/{file_id}/ingest-failed  — SERVICE: worker gave up.
     POST   /v1/files/fetch/claim              — SERVICE: lease a download.
     POST   /v1/files/fetch/{file_id}/result   — SERVICE: download landed.
@@ -75,7 +76,7 @@ from pathlib import Path
 
 import anyio
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from audrey.auth import AuthedUser, require_service, require_user
 from audrey.kb.extract import (
@@ -83,10 +84,11 @@ from audrey.kb.extract import (
     ALLOWED_MIMES,
     EmptyExtractionError,
     UnsupportedMimeError,
-    extract_text,
+    extract_uploaded_text,
     is_image_mime,
     is_text_mime,
     is_video_mime,
+    ocr_text_path,
     sniff_mime,
 )
 from audrey.kb.file_deletion import FileDeletionWorker, FileOperationLocks
@@ -95,6 +97,7 @@ from audrey.kb.ingest import (
     ingest_summary,
     ingest_transcript_segments,
     ingest_user_image_file,
+    ingest_user_text_content,
     ingest_user_text_file,
 )
 from audrey.kb.qdrant import QdrantKB
@@ -179,9 +182,9 @@ class UploadResponse(BaseModel):
     mime: str
     bytes: int
     kind: str                # "text" | "image" | "video"
-    collection: str          # empty for video — nothing is indexed yet
-    chunks: int              # text only; 1 for images; 0 for video
-    status: str = "ready"    # "ready" | "pending" (video awaits the worker)
+    collection: str          # empty while asynchronous processing is pending
+    chunks: int              # text count; 1 for images; 0 while pending
+    status: str = "ready"    # "ready" | "pending" (worker job queued)
 
 
 class Limits(BaseModel):
@@ -612,6 +615,68 @@ async def upload_file(
         await storage.release(reservation)
 
 
+async def _store_pending_job(
+    dest: Path,
+    *,
+    storage: StorageLifecycle,
+    reservation: StorageReservation,
+    file_id: str,
+    user: str,
+    filename: str,
+    mime: str,
+    written: int,
+    max_total: int,
+    kind: str,
+    stamp: str,
+    purpose: str,
+) -> UploadResponse:
+    """Commit stored bytes for asynchronous worker processing."""
+    try:
+        await storage.commit_upload(
+            reservation,
+            file_id=file_id,
+            filename=filename,
+            mime=mime,
+            bytes_=written,
+            kind=kind,
+            collection="",
+            chunks=0,
+            uploaded_at=stamp,
+            status="pending",
+            max_user_bytes=max_total,
+        )
+    except QuotaExceededError as exc:
+        _safe_unlink(dest)
+        raise _quota_http_error(exc) from exc
+    except Exception as exc:
+        _safe_unlink(dest)
+        log.exception(
+            "files: pending reservation commit failed for %s (%s): %s",
+            filename,
+            user,
+            exc,
+        )
+        raise HTTPException(status_code=500, detail=f"Index write failed: {exc}") from exc
+    log.info(
+        "files: stored pending %s user=%s file_id=%s filename=%r bytes=%d",
+        purpose,
+        user,
+        file_id,
+        filename,
+        written,
+    )
+    return UploadResponse(
+        file_id=file_id,
+        filename=filename,
+        mime=mime,
+        bytes=written,
+        kind=kind,
+        collection="",
+        chunks=0,
+        status="pending",
+    )
+
+
 async def _validate_and_ingest(
     request: Request,
     dest: Path,
@@ -662,50 +727,50 @@ async def _validate_and_ingest(
     # Phase 35 media worker is what will move it to 'ready'. Returning early
     # keeps it out of the try/except below, whose whole job is ingest.
     if kind == "video":
-        try:
-            await storage.commit_upload(
-                reservation,
-                file_id=file_id,
-                filename=filename,
-                mime=mime,
-                bytes_=written,
-                kind=kind,
-                collection="",
-                chunks=0,
-                uploaded_at=stamp,
-                status="pending",
-                max_user_bytes=max_total,
-            )
-        except QuotaExceededError as e:
-            _safe_unlink(dest)
-            raise _quota_http_error(e) from e
-        except Exception as e:
-            _safe_unlink(dest)
-            log.exception(
-                "files: reservation commit failed for %s (%s): %s",
-                filename,
-                user,
-                e,
-            )
-            raise HTTPException(status_code=500, detail=f"Index write failed: {e}") from e
-        log.info(
-            "files: stored pending video user=%s file_id=%s filename=%r bytes=%d",
-            user, file_id, filename, written,
-        )
-        return UploadResponse(
-            file_id=file_id, filename=filename, mime=mime, bytes=written,
-            kind=kind, collection="", chunks=0, status="pending",
+        return await _store_pending_job(
+            dest,
+            storage=storage,
+            reservation=reservation,
+            file_id=file_id,
+            user=user,
+            filename=filename,
+            mime=mime,
+            written=written,
+            max_total=max_total,
+            kind=kind,
+            stamp=stamp,
+            purpose="video",
         )
 
     try:
         if kind == "text":
             if not is_text_mime(mime):
                 raise UnsupportedMimeError(f"not a text mime: {mime}")
-            n_chunks = await ingest_user_text_file(
-                dest, qdrant=qdrant, embedder=text_embedder,
-                collection=text_col, user=user, file_id=file_id,
-                filename=filename, mime=mime, uploaded_at=stamp,
-            )
+            try:
+                n_chunks = await ingest_user_text_file(
+                    dest, qdrant=qdrant, embedder=text_embedder,
+                    collection=text_col, user=user, file_id=file_id,
+                    filename=filename, mime=mime, uploaded_at=stamp,
+                )
+            except EmptyExtractionError:
+                if mime != "application/pdf" or not bool(
+                    _ocr_cfg(request).get("enabled", False)
+                ):
+                    raise
+                return await _store_pending_job(
+                    dest,
+                    storage=storage,
+                    reservation=reservation,
+                    file_id=file_id,
+                    user=user,
+                    filename=filename,
+                    mime=mime,
+                    written=written,
+                    max_total=max_total,
+                    kind=kind,
+                    stamp=stamp,
+                    purpose="scanned PDF",
+                )
             collection = text_col
         else:
             if image_embedder is None:
@@ -1802,12 +1867,11 @@ async def fetch_failed(
     return JobResultResponse(file_id=file_id, status="failed", chunks=0)
 
 
-# ─── Video job lifecycle (Phase 33) ───────────────────────────────────
+# ─── Media-processing job lifecycle (Phase 33, Campaign 3 Phase 7) ────
 #
-# A video uploads to `status='pending'` and nothing in this process will ever
-# read it — extraction is minutes of CPU and GPU and cannot live in a request.
-# These three routes are how a separate media worker takes ownership of that
-# row, and how it gives it back.
+# Videos and scanned PDFs upload to `status='pending'`. Extraction can take
+# minutes of CPU or GPU work and cannot live in an upload request. These routes
+# are how the media worker takes ownership of a row and gives its result back.
 #
 # The worker PULLS. Audrey holds no queue, no retry policy and no address for
 # a container it does not own; a worker that is down just means rows keep
@@ -1856,11 +1920,20 @@ class ClaimedTranscript(BaseModel):
     segments: list[TranscriptSegment] = []
 
 
+class OcrSettings(BaseModel):
+    language: str = Field(default="eng", min_length=1, max_length=100)
+    dpi: int = Field(default=200, ge=72, le=600)
+    max_pages: int = Field(default=100, ge=1)
+    max_chars: int = Field(default=5_000_000, ge=1, le=20_000_000)
+    timeout_s: float = Field(default=1200.0, gt=0)
+
+
 class JobClaim(BaseModel):
     file_id: str
     user: str
     filename: str
     mime: str
+    kind: str
     bytes: int
     path: str
     lease_id: str
@@ -1879,6 +1952,7 @@ class JobClaim(BaseModel):
     # again. The worker cannot read `config.yaml`, so the number comes with
     # the job.
     lease_seconds: int = 1800
+    ocr: OcrSettings = OcrSettings()
 
 
 class FrameDescription(BaseModel):
@@ -1916,9 +1990,22 @@ class IngestResultRequest(BaseModel):
     frames_planned: int | None = None
 
 
+class OcrResultRequest(BaseModel):
+    lease_id: str
+    text: str = Field(min_length=1, max_length=20_000_000)
+    pages: int = Field(ge=1)
+    language: str = Field(min_length=1, max_length=100)
+
+
 class IngestFailedRequest(BaseModel):
     lease_id: str
     reason: str
+
+
+def _ocr_cfg(request: Request) -> dict:
+    cfg = request.app.state.cfg
+    kb_cfg = cfg.raw.get("kb", {}) or {}
+    return kb_cfg.get("ocr", {}) or {}
 
 
 def _video_cfg(request: Request) -> dict:
@@ -2093,17 +2180,21 @@ async def claim_job(
         return Response(status_code=204)
 
     path = _source_path(request, row)
-    transcript = _claimed_transcript(row)
+    kind = str(row["kind"])
+    transcript = _claimed_transcript(row) if kind == "video" else None
     log.info(
-        "files: leased job file_id=%s user=%s attempt=%d transcript=%s",
-        row["file_id"], row["user"], row["attempts"],
-        f"{len(transcript.segments)} {transcript.source} segments"
-        if transcript else "none, whisper will run",
+        "files: leased job file_id=%s user=%s kind=%s attempt=%d%s",
+        row["file_id"], row["user"], kind, row["attempts"],
+        (
+            f" transcript={len(transcript.segments)} {transcript.source} segments"
+            if transcript else " transcript=none, whisper will run"
+        ) if kind == "video" else "",
     )
     video_cfg = _video_cfg(request)
+    ocr_cfg = _ocr_cfg(request)
     return JobClaim(
         file_id=str(row["file_id"]), user=str(row["user"]),
-        filename=str(row["filename"]), mime=str(row["mime"]),
+        filename=str(row["filename"]), mime=str(row["mime"]), kind=kind,
         bytes=int(row["bytes"]), path=str(path),
         lease_id=lease_id, attempts=int(row["attempts"]),
         lease_seconds=_lease_minutes(request) * 60,
@@ -2114,7 +2205,102 @@ async def claim_job(
             max_width=int(video_cfg.get("frame_max_width", 1280)),
             dedup_distance=int(video_cfg.get("frame_dedup_distance", 8)),
         ),
+        ocr=OcrSettings(
+            language=str(ocr_cfg.get("language", "eng")),
+            dpi=int(ocr_cfg.get("dpi", 200)),
+            max_pages=int(ocr_cfg.get("max_pages", 100)),
+            max_chars=int(ocr_cfg.get("max_chars", 5_000_000)),
+            timeout_s=float(ocr_cfg.get("timeout_s", 1200)),
+        ),
     )
+
+
+@router.post("/{file_id}/ocr-result", response_model=JobResultResponse)
+async def ocr_result(
+    file_id: str,
+    body: OcrResultRequest,
+    request: Request,
+    _: None = Depends(require_service),
+    _operation: None = Depends(_file_operation_guard),
+) -> JobResultResponse:
+    """Index complete OCR output while preserving Audrey as the sole DB writer."""
+    db = _get_uploads_db(request)
+    qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
+    text_embedder = getattr(request.app.state, "text_embedder", None)
+    if qdrant is None or text_embedder is None:
+        raise HTTPException(status_code=503, detail="KB is not initialized.")
+
+    row = await db.get_upload(file_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="No such file.")
+    if row["lease_id"] != body.lease_id or row["status"] != "processing":
+        raise HTTPException(
+            status_code=409,
+            detail="Lease is no longer valid — this job was reclaimed.",
+        )
+    if row["kind"] != "text" or row["mime"] != "application/pdf":
+        raise HTTPException(status_code=422, detail="OCR results are accepted only for PDFs.")
+
+    ocr_cfg = _ocr_cfg(request)
+    max_pages = int(ocr_cfg.get("max_pages", 100))
+    max_chars = int(ocr_cfg.get("max_chars", 5_000_000))
+    text_value = body.text.strip()
+    if not text_value:
+        raise HTTPException(status_code=422, detail="OCR result contains no text.")
+    if body.pages > max_pages or len(text_value) > max_chars:
+        raise HTTPException(status_code=422, detail="OCR result exceeds configured limits.")
+
+    user = str(row["user"])
+    stamp = _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+    text_col, _image_col = await ensure_user_collections(qdrant, user)
+    sidecar = ocr_text_path(_source_path(request, row))
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(sidecar.write_text, text_value, "utf-8")
+    try:
+        chunks = await ingest_user_text_content(
+            text_value,
+            source=sidecar,
+            source_bytes=int(row["bytes"]),
+            qdrant=qdrant,
+            embedder=text_embedder,
+            collection=text_col,
+            user=user,
+            file_id=file_id,
+            filename=str(row["filename"]),
+            mime=str(row["mime"]),
+            uploaded_at=stamp,
+        )
+    except Exception as exc:
+        await asyncio.to_thread(sidecar.unlink, missing_ok=True)
+        log.exception("files: OCR ingest failed for %s: %s", file_id, exc)
+        await db.fail_job(
+            file_id=file_id,
+            lease_id=body.lease_id,
+            reason=f"OCR ingest failed: {exc}",
+        )
+        raise HTTPException(status_code=500, detail=f"Ingest failed: {exc}") from exc
+
+    if not await db.complete_job(
+        file_id=file_id,
+        lease_id=body.lease_id,
+        collection=text_col,
+        chunks=chunks,
+        completed_at=stamp,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Lease expired during ingest — job was reclaimed.",
+        )
+    log.info(
+        "files: OCR complete file_id=%s user=%s pages=%d chars=%d chunks=%d language=%s",
+        file_id,
+        user,
+        body.pages,
+        len(text_value),
+        chunks,
+        body.language,
+    )
+    return JobResultResponse(file_id=file_id, status="ready", chunks=chunks)
 
 
 @router.post("/{file_id}/ingest-result", response_model=JobResultResponse)
@@ -2740,7 +2926,7 @@ async def read_artifact(
         if artifact == "document":
             if str(row["kind"]) != "text":
                 raise OSError("document text exists only for text files")
-            text = await asyncio.to_thread(extract_text, path)
+            text = await asyncio.to_thread(extract_uploaded_text, path)
         else:
             text = await asyncio.to_thread(path.read_text, "utf-8")
     except (EmptyExtractionError, OSError):

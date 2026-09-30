@@ -100,6 +100,25 @@ class EmptyExtractionError(ExtractError):
     """File parsed fine but contained no extractable text (likely a scanned PDF)."""
 
 
+OCR_SIDECAR_SUFFIX = ".ocr.txt"
+
+
+def ocr_text_path(source: Path) -> Path:
+    """Return the derived OCR text path beside one stored PDF source."""
+    return source.with_suffix(OCR_SIDECAR_SUFFIX)
+
+
+def extract_uploaded_text(path: Path) -> str:
+    """Read OCR text when present, otherwise use the ordinary document loader."""
+    sidecar = ocr_text_path(path)
+    if sidecar.is_file():
+        raw = sidecar.read_text(encoding="utf-8")
+        if raw.strip():
+            return raw
+        raise EmptyExtractionError(f"no extractable text from {path.name}; OCR output is empty")
+    return extract_text(path)
+
+
 def sniff_mime(path: Path) -> str:
     """Return the sniffed mime type. Falls back to extension-derived guess if libmagic chokes on the file."""
     try:
@@ -147,6 +166,7 @@ __all__ = [
     "ALLOWED_MIMES", "ALLOWED_TEXT_MIMES", "ALLOWED_IMAGE_MIMES",
     "ALLOWED_VIDEO_MIMES", "ALLOWED_EXTENSIONS", "SUFFIX_MIMES",
     "ExtractError", "UnsupportedMimeError", "EmptyExtractionError",
+    "OCR_SIDECAR_SUFFIX", "ocr_text_path", "extract_uploaded_text",
     "sniff_mime", "is_image_mime", "is_text_mime", "is_video_mime",
     "extract_text",
 ]

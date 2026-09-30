@@ -270,6 +270,31 @@ def test_native_document_text_is_owner_bound_and_paged_without_gaps(monkeypatch,
     assert client.get("/api/files/file_123/text").status_code == 422
 
 
+def test_native_scanned_pdf_reader_uses_derived_ocr_text(monkeypatch, tmp_path):
+    listing = _listing()
+    listing.files[0].filename = "scan.pdf"
+    listing.files[0].mime = "application/pdf"
+    owner_dir = tmp_path / upload_routes.sanitize_user("private-storage-123")
+    owner_dir.mkdir()
+    (owner_dir / "file_123.pdf").write_bytes(b"%PDF image-only fixture")
+    (owner_dir / "file_123.ocr.txt").write_text(
+        "--- Page 1 ---\nRecognized invoice total: $42",
+        encoding="utf-8",
+    )
+
+    async def fake_list(request, me):
+        assert me.email == "private-storage-123"
+        return listing
+
+    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
+
+    response = TestClient(_app()).get("/api/files/file_123/text")
+
+    assert response.status_code == 200
+    assert response.json()["text"] == "--- Page 1 ---\nRecognized invoice total: $42"
+
+
 def test_native_image_preview_is_owner_bound_resized_and_strips_metadata(
     monkeypatch, tmp_path,
 ):

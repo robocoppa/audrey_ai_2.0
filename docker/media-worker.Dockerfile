@@ -25,10 +25,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src
 
-# ffmpeg is the entire point of this image and is in no other image we build.
-# `ffmpeg` in Debian brings ffprobe with it; both are used.
+# ffmpeg provides video/audio extraction. Poppler rasterizes scanned PDF
+# pages one at a time and Tesseract recognizes their English text. Explicitly
+# install the language pack because --no-install-recommends must not decide
+# whether a rebuilt worker can process the same document.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
+        poppler-utils \
+        tesseract-ocr \
+        tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

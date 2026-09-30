@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from audrey.kb.extract import EmptyExtractionError, extract_text
+from audrey.kb.extract import EmptyExtractionError, extract_text, extract_uploaded_text
 
 
 def test_extract_text_empty_pdf_mentions_scanned_pdfs(tmp_path: Path, monkeypatch):
@@ -66,3 +66,31 @@ def test_extract_text_treats_whitespace_only_as_empty(tmp_path: Path, monkeypatc
 
     with pytest.raises(EmptyExtractionError):
         extract_text(f)
+
+
+def test_uploaded_pdf_prefers_its_nonempty_ocr_sidecar(tmp_path: Path, monkeypatch):
+    from audrey.kb import extract as extract_mod
+
+    source = tmp_path / "scan.pdf"
+    source.write_bytes(b"%PDF fixture")
+    source.with_suffix(".ocr.txt").write_text("recognized words", encoding="utf-8")
+    monkeypatch.setattr(
+        extract_mod,
+        "extract_text",
+        lambda _path: pytest.fail("the original PDF parser must not replace OCR text"),
+    )
+
+    assert extract_uploaded_text(source) == "recognized words"
+
+
+def test_uploaded_document_without_ocr_sidecar_uses_ordinary_extraction(
+    tmp_path: Path,
+    monkeypatch,
+):
+    from audrey.kb import extract as extract_mod
+
+    source = tmp_path / "notes.pdf"
+    source.write_bytes(b"%PDF fixture")
+    monkeypatch.setattr(extract_mod, "extract_text", lambda path: f"parsed {path.name}")
+
+    assert extract_uploaded_text(source) == "parsed notes.pdf"

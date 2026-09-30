@@ -1,0 +1,3014 @@
+{
+  "cases": {
+    "by_expected": {
+      "code": 12,
+      "general": 12,
+      "reasoning": 12
+    },
+    "count": 36,
+    "expanded_count": 26,
+    "legacy_count": 10
+  },
+  "config_note": null,
+  "generated_at": "2026-09-30T17:31:28.381817+00:00",
+  "interpretation": {
+    "residency": "observed_displacement_not_concurrent_contention",
+    "ship_decision": "not_automatic",
+    "systemone_confidence": "distribution_concentration_not_correctness"
+  },
+  "ollama": {
+    "base_url": "http://ollama:11434",
+    "initial_residency": [
+      {
+        "expires_at": "2026-09-30T18:39:07.315023215Z",
+        "name": "qwen3.8:32k",
+        "size_bytes": 19637647437,
+        "size_vram_bytes": 19637647437
+      }
+    ],
+    "initial_residency_error": null,
+    "minimum_systemone_version": "0.35.0",
+    "version": "0.35.0"
+  },
+  "results": [
+    {
+      "backend": "systemone",
+      "cold": {
+        "sample": {
+          "case_id": "legacy-code-refactor-loop",
+          "confidence": 0.531767,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 4.981,
+          "margin": 0.3781,
+          "probabilities": {
+            "code": 0.6865446216732106,
+            "general": 0.004502979193747509,
+            "reasoning": 0.30845520104863366,
+            "vl": 0.0004971980844082491
+          },
+          "round": 0,
+          "selected": "code",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.6865
+        },
+        "unload_succeeded": true
+      },
+      "confidence_kind": "distribution_concentration",
+      "model": "tev1:0.8b",
+      "model_metadata": {
+        "name": "tev1:0.8b",
+        "parameter_size": "752.39M",
+        "quantization_level": "Q8_0",
+        "size_bytes": 811856202
+      },
+      "residency": {
+        "after": [
+          {
+            "expires_at": "2026-09-30T18:39:07.315023215Z",
+            "name": "qwen3.8:32k",
+            "size_bytes": 19637647437,
+            "size_vram_bytes": 19637647437
+          },
+          {
+            "expires_at": "2026-09-30T17:40:36.728528005Z",
+            "name": "tev1:0.8b",
+            "size_bytes": 893869096,
+            "size_vram_bytes": 893869096
+          }
+        ],
+        "before": [
+          {
+            "expires_at": "2026-09-30T18:39:07.315023215Z",
+            "name": "qwen3.8:32k",
+            "size_bytes": 19637647437,
+            "size_vram_bytes": 19637647437
+          }
+        ],
+        "evicted_models": [],
+        "newly_loaded_models": [
+          "tev1:0.8b"
+        ],
+        "observation_errors": []
+      },
+      "samples": [
+        {
+          "case_id": "legacy-code-refactor-loop",
+          "confidence": 0.531767,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.0592,
+          "margin": 0.3781,
+          "probabilities": {
+            "code": 0.6865446216732106,
+            "general": 0.004502979193747509,
+            "reasoning": 0.30845520104863366,
+            "vl": 0.0004971980844082491
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.6865
+        },
+        {
+          "case_id": "legacy-code-postgres-plan",
+          "confidence": 0.628783,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.0887,
+          "margin": 0.798,
+          "probabilities": {
+            "code": 0.05590383136492924,
+            "general": 0.06807957829532682,
+            "reasoning": 0.8660574626658534,
+            "vl": 0.009959127673890707
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.8661
+        },
+        {
+          "case_id": "legacy-code-retry-decorator",
+          "confidence": 0.357936,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.0886,
+          "margin": 0.5657,
+          "probabilities": {
+            "code": 0.13797321564630918,
+            "general": 0.12769691540039463,
+            "reasoning": 0.7037181377768742,
+            "vl": 0.030611731176421988
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.7037
+        },
+        {
+          "case_id": "legacy-reasoning-rent-or-buy",
+          "confidence": 0.91738,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.085,
+          "margin": 0.9672,
+          "probabilities": {
+            "code": 0.005734378775797027,
+            "general": 0.012823427028279327,
+            "reasoning": 0.9800243457325392,
+            "vl": 0.001417848463384519
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.98
+        },
+        {
+          "case_id": "legacy-reasoning-event-sourcing",
+          "confidence": 0.872647,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.0869,
+          "margin": 0.9457,
+          "probabilities": {
+            "code": 0.01116314866808742,
+            "general": 0.020434033020189094,
+            "reasoning": 0.9661719722033734,
+            "vl": 0.0022308461083501885
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.9662
+        },
+        {
+          "case_id": "legacy-reasoning-trains",
+          "confidence": 0.789306,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.0863,
+          "margin": 0.8886,
+          "probabilities": {
+            "code": 0.01577135518215253,
+            "general": 0.04583026431546139,
+            "reasoning": 0.9344226958239523,
+            "vl": 0.003975684678433914
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.9344
+        },
+        {
+          "case_id": "legacy-general-capital",
+          "confidence": 0.412121,
+          "correct": false,
+          "expected": "general",
+          "latency_seconds": 0.0866,
+          "margin": 0.0187,
+          "probabilities": {
+            "code": 0.01707596898345097,
+            "general": 0.47730813364520225,
+            "reasoning": 0.49599635468962194,
+            "vl": 0.00961954268172477
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.496
+        },
+        {
+          "case_id": "legacy-general-voyager-summary",
+          "confidence": 0.380265,
+          "correct": false,
+          "expected": "general",
+          "latency_seconds": 0.0888,
+          "margin": 0.2545,
+          "probabilities": {
+            "code": 0.020922163451362292,
+            "general": 0.34728137849588187,
+            "reasoning": 0.6017538144384788,
+            "vl": 0.030042643614277074
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.6018
+        },
+        {
+          "case_id": "legacy-general-packing-list",
+          "confidence": 0.352791,
+          "correct": false,
+          "expected": "general",
+          "latency_seconds": 0.087,
+          "margin": 0.138,
+          "probabilities": {
+            "code": 0.022598807543277047,
+            "general": 0.4031180629317576,
+            "reasoning": 0.54109888161008,
+            "vl": 0.03318424791488537
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.5411
+        },
+        {
+          "case_id": "legacy-general-decline-email",
+          "confidence": 0.74884,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.0904,
+          "margin": 0.8321,
+          "probabilities": {
+            "code": 0.010170630245395957,
+            "general": 0.9095019196372855,
+            "reasoning": 0.07736437443127703,
+            "vl": 0.0029630756860414753
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.9095
+        },
+        {
+          "case_id": "code-lru-cache",
+          "confidence": 0.362779,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.0878,
+          "margin": 0.0653,
+          "probabilities": {
+            "code": 0.4416317296199202,
+            "general": 0.041319551028793144,
+            "reasoning": 0.5069556305229806,
+            "vl": 0.010093088828306035
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.507
+        },
+        {
+          "case_id": "code-fastapi-timeout",
+          "confidence": 0.425241,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.092,
+          "margin": 0.1262,
+          "probabilities": {
+            "code": 0.5493501684937806,
+            "general": 0.026305559897300403,
+            "reasoning": 0.42314034283224966,
+            "vl": 0.0012039287766694138
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.5494
+        },
+        {
+          "case_id": "code-sql-window",
+          "confidence": 0.619277,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.0867,
+          "margin": 0.7721,
+          "probabilities": {
+            "code": 0.04552729788038723,
+            "general": 0.0864154069685459,
+            "reasoning": 0.858473688073037,
+            "vl": 0.009583607078029969
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.8585
+        },
+        {
+          "case_id": "code-range-response",
+          "confidence": 0.264595,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.0898,
+          "margin": 0.3801,
+          "probabilities": {
+            "code": 0.2138655974754141,
+            "general": 0.1726738037317209,
+            "reasoning": 0.5939176009504614,
+            "vl": 0.019542997842403598
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.5939
+        },
+        {
+          "case_id": "code-typescript-narrowing",
+          "confidence": 0.286088,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.086,
+          "margin": 0.4271,
+          "probabilities": {
+            "code": 0.15333330746946178,
+            "general": 0.19809526777165667,
+            "reasoning": 0.625194553006144,
+            "vl": 0.02337687175273771
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.6252
+        },
+        {
+          "case_id": "code-pytest-race",
+          "confidence": 0.448411,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.0885,
+          "margin": 0.5301,
+          "probabilities": {
+            "code": 0.1985079126378616,
+            "general": 0.06632411209096992,
+            "reasoning": 0.7285922235933585,
+            "vl": 0.006575751677809902
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.7286
+        },
+        {
+          "case_id": "code-pandas-groupby",
+          "confidence": 0.306921,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.0843,
+          "margin": 0.1239,
+          "probabilities": {
+            "code": 0.3919428920088619,
+            "general": 0.0819266100180479,
+            "reasoning": 0.5157970187094836,
+            "vl": 0.01033347926360667
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.5158
+        },
+        {
+          "case_id": "code-rust-parser",
+          "confidence": 0.254949,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.091,
+          "margin": 0.0838,
+          "probabilities": {
+            "code": 0.3841508445434427,
+            "general": 0.14117893106385423,
+            "reasoning": 0.46795737781699814,
+            "vl": 0.006712846575704899
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.468
+        },
+        {
+          "case_id": "code-pydantic-migration",
+          "confidence": 0.496911,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.0902,
+          "margin": 0.4356,
+          "probabilities": {
+            "code": 0.7051857787865231,
+            "general": 0.023935774612904782,
+            "reasoning": 0.26962590015624277,
+            "vl": 0.0012525464443292876
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.7052
+        },
+        {
+          "case_id": "reasoning-queue-choice",
+          "confidence": 0.617634,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.088,
+          "margin": 0.7921,
+          "probabilities": {
+            "code": 0.06929398691570096,
+            "general": 0.05741781341947659,
+            "reasoning": 0.8614409940582799,
+            "vl": 0.01184720560654247
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.8614
+        },
+        {
+          "case_id": "reasoning-api-review",
+          "confidence": 0.665103,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.0869,
+          "margin": 0.823,
+          "probabilities": {
+            "code": 0.05575557393467399,
+            "general": 0.05815425418033754,
+            "reasoning": 0.8811192957980473,
+            "vl": 0.004970876086941213
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.8811
+        },
+        {
+          "case_id": "reasoning-sqrt-two",
+          "confidence": 0.87942,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.0854,
+          "margin": 0.9526,
+          "probabilities": {
+            "code": 0.01645498625875965,
+            "general": 0.011105834360922912,
+            "reasoning": 0.9690754244793663,
+            "vl": 0.0033637549009509727
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9691
+        },
+        {
+          "case_id": "reasoning-database-shape",
+          "confidence": 0.453061,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.0853,
+          "margin": 0.5234,
+          "probabilities": {
+            "code": 0.04847694934601626,
+            "general": 0.2076151004603287,
+            "reasoning": 0.7310225973590623,
+            "vl": 0.012885352834592802
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.731
+        },
+        {
+          "case_id": "reasoning-incident-cause",
+          "confidence": 0.486524,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.0895,
+          "margin": 0.6712,
+          "probabilities": {
+            "code": 0.11013094430377363,
+            "general": 0.09787479928248177,
+            "reasoning": 0.7812883190802331,
+            "vl": 0.010705937333511458
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.7813
+        },
+        {
+          "case_id": "reasoning-consistency-models",
+          "confidence": 0.880135,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.086,
+          "margin": 0.9521,
+          "probabilities": {
+            "code": 0.01100602295742603,
+            "general": 0.01702488649484968,
+            "reasoning": 0.9691030534471325,
+            "vl": 0.002866037100591958
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9691
+        },
+        {
+          "case_id": "reasoning-probability",
+          "confidence": 0.890223,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.0896,
+          "margin": 0.9568,
+          "probabilities": {
+            "code": 0.006599760733007873,
+            "general": 0.01578604933445363,
+            "reasoning": 0.9726032299400323,
+            "vl": 0.005010959992506206
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9726
+        },
+        {
+          "case_id": "reasoning-retry-storm",
+          "confidence": 0.743447,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.09,
+          "margin": 0.876,
+          "probabilities": {
+            "code": 0.029490331090454368,
+            "general": 0.0432942295400822,
+            "reasoning": 0.9192670723835669,
+            "vl": 0.007948366985896618
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9193
+        },
+        {
+          "case_id": "reasoning-backup-policy",
+          "confidence": 0.676155,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.091,
+          "margin": 0.7692,
+          "probabilities": {
+            "code": 0.01139043530600282,
+            "general": 0.1050053119826974,
+            "reasoning": 0.8742222942463005,
+            "vl": 0.009381958464999257
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.8742
+        },
+        {
+          "case_id": "general-translation",
+          "confidence": 0.836338,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.0859,
+          "margin": 0.9156,
+          "probabilities": {
+            "code": 0.0074985762012475315,
+            "general": 0.9519828278153734,
+            "reasoning": 0.0363412188871781,
+            "vl": 0.004177377096201033
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.952
+        },
+        {
+          "case_id": "general-summary",
+          "confidence": 0.314027,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.0886,
+          "margin": 0.0773,
+          "probabilities": {
+            "code": 0.059350792307854734,
+            "general": 0.49988130572528555,
+            "reasoning": 0.4226285006184762,
+            "vl": 0.018139401348383346
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.4999
+        },
+        {
+          "case_id": "general-agenda",
+          "confidence": 0.84478,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.089,
+          "margin": 0.9361,
+          "probabilities": {
+            "code": 0.008673025526881983,
+            "general": 0.9583708314342129,
+            "reasoning": 0.02223436808545478,
+            "vl": 0.01072177495345052
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9584
+        },
+        {
+          "case_id": "general-author",
+          "confidence": 0.461454,
+          "correct": false,
+          "expected": "general",
+          "latency_seconds": 0.0922,
+          "margin": 0.3485,
+          "probabilities": {
+            "code": 0.01962878352103423,
+            "general": 0.31272692067401003,
+            "reasoning": 0.6612302063904884,
+            "vl": 0.0064140894144675345
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.6612
+        },
+        {
+          "case_id": "general-recipe",
+          "confidence": 0.354675,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.0887,
+          "margin": 0.0397,
+          "probabilities": {
+            "code": 0.04007902029641198,
+            "general": 0.4930162942043516,
+            "reasoning": 0.4533293146012742,
+            "vl": 0.013575370897962158
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.493
+        },
+        {
+          "case_id": "general-rephrase",
+          "confidence": 0.482071,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.0903,
+          "margin": 0.6734,
+          "probabilities": {
+            "code": 0.07868413038622869,
+            "general": 0.7866105592073479,
+            "reasoning": 0.11321657441439292,
+            "vl": 0.02148873599203065
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.7866
+        },
+        {
+          "case_id": "general-continents",
+          "confidence": 0.434473,
+          "correct": false,
+          "expected": "general",
+          "latency_seconds": 0.0891,
+          "margin": 0.2356,
+          "probabilities": {
+            "code": 0.019640060897114897,
+            "general": 0.36887985613600655,
+            "reasoning": 0.6045024293656592,
+            "vl": 0.0069776536012194175
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.6045
+        },
+        {
+          "case_id": "general-haiku",
+          "confidence": 0.361112,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.0882,
+          "margin": 0.4752,
+          "probabilities": {
+            "code": 0.04484087222857197,
+            "general": 0.6875790349960955,
+            "reasoning": 0.2124097269444178,
+            "vl": 0.055170365830914676
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.6876
+        }
+      ],
+      "status": "measured",
+      "warm": {
+        "accuracy": 0.6111,
+        "cheap_code_general_swaps": 0,
+        "confusion": {
+          "code->code": 3,
+          "code->reasoning": 9,
+          "general->general": 7,
+          "general->reasoning": 5,
+          "reasoning->reasoning": 12
+        },
+        "correct": 22,
+        "costly_false_reasoning": 14,
+        "latency_p50_seconds": 0.0885,
+        "latency_p95_seconds": 0.092,
+        "missed_reasoning": 0,
+        "projected_fast_to_deep_escalations": 8,
+        "response_failures": 0,
+        "samples": 36,
+        "uncertainty_mapping": {
+          "kind": "winner-and-margin",
+          "minimum_margin": 0.15,
+          "minimum_winner_probability": 0.55
+        },
+        "valid": 36
+      }
+    },
+    {
+      "backend": "systemone",
+      "cold": {
+        "sample": {
+          "case_id": "legacy-code-refactor-loop",
+          "confidence": 0.646271,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 5.4333,
+          "margin": 0.6455,
+          "probabilities": {
+            "code": 0.8208492471045392,
+            "general": 0.003244919541551136,
+            "reasoning": 0.17530040019809606,
+            "vl": 0.000605433155813586
+          },
+          "round": 0,
+          "selected": "code",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.8208
+        },
+        "unload_succeeded": true
+      },
+      "confidence_kind": "distribution_concentration",
+      "model": "tev1:latest",
+      "model_metadata": {
+        "name": "tev1:latest",
+        "parameter_size": "4.2B",
+        "quantization_level": "Q8_0",
+        "size_bytes": 4482415847
+      },
+      "residency": {
+        "after": [
+          {
+            "expires_at": "2026-09-30T18:39:07.315023215Z",
+            "name": "qwen3.8:32k",
+            "size_bytes": 19637647437,
+            "size_vram_bytes": 19637647437
+          },
+          {
+            "expires_at": "2026-09-30T17:40:48.207054446Z",
+            "name": "tev1:latest",
+            "size_bytes": 4669109698,
+            "size_vram_bytes": 4669109698
+          },
+          {
+            "expires_at": "2026-09-30T17:40:36.728528005Z",
+            "name": "tev1:0.8b",
+            "size_bytes": 893869096,
+            "size_vram_bytes": 893869096
+          }
+        ],
+        "before": [
+          {
+            "expires_at": "2026-09-30T18:39:07.315023215Z",
+            "name": "qwen3.8:32k",
+            "size_bytes": 19637647437,
+            "size_vram_bytes": 19637647437
+          },
+          {
+            "expires_at": "2026-09-30T17:40:36.728528005Z",
+            "name": "tev1:0.8b",
+            "size_bytes": 893869096,
+            "size_vram_bytes": 893869096
+          }
+        ],
+        "evicted_models": [],
+        "newly_loaded_models": [
+          "tev1:latest"
+        ],
+        "observation_errors": []
+      },
+      "samples": [
+        {
+          "case_id": "legacy-code-refactor-loop",
+          "confidence": 0.646271,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1006,
+          "margin": 0.6455,
+          "probabilities": {
+            "code": 0.8208492471045392,
+            "general": 0.003244919541551136,
+            "reasoning": 0.17530040019809606,
+            "vl": 0.000605433155813586
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.8208
+        },
+        {
+          "case_id": "legacy-code-postgres-plan",
+          "confidence": 0.709261,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.173,
+          "margin": 0.8359,
+          "probabilities": {
+            "code": 0.02702922165918023,
+            "general": 0.06517997755657114,
+            "reasoning": 0.9010733624017162,
+            "vl": 0.00671743838253262
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.9011
+        },
+        {
+          "case_id": "legacy-code-retry-decorator",
+          "confidence": 0.770139,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1688,
+          "margin": 0.8627,
+          "probabilities": {
+            "code": 0.9221719025063381,
+            "general": 0.017712630735743,
+            "reasoning": 0.059489685783945666,
+            "vl": 0.0006257809739732132
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.9222
+        },
+        {
+          "case_id": "legacy-reasoning-rent-or-buy",
+          "confidence": 0.907707,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1736,
+          "margin": 0.958,
+          "probabilities": {
+            "code": 0.0007140004169976852,
+            "general": 0.01813463602011352,
+            "reasoning": 0.9761512757399866,
+            "vl": 0.005000087822902298
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.9762
+        },
+        {
+          "case_id": "legacy-reasoning-event-sourcing",
+          "confidence": 0.879454,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1708,
+          "margin": 0.9356,
+          "probabilities": {
+            "code": 0.003102338725483624,
+            "general": 0.029812737315566513,
+            "reasoning": 0.9654450220667732,
+            "vl": 0.0016399018921767236
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.9654
+        },
+        {
+          "case_id": "legacy-reasoning-trains",
+          "confidence": 0.722113,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1634,
+          "margin": 0.8147,
+          "probabilities": {
+            "code": 0.005425533499612634,
+            "general": 0.08393975925414829,
+            "reasoning": 0.8986723401151752,
+            "vl": 0.011962367131063873
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.8987
+        },
+        {
+          "case_id": "legacy-general-capital",
+          "confidence": 0.585333,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.169,
+          "margin": 0.5225,
+          "probabilities": {
+            "code": 0.000679419409444328,
+            "general": 0.7591956316564011,
+            "reasoning": 0.2366475638940931,
+            "vl": 0.0034773850400614237
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.7592
+        },
+        {
+          "case_id": "legacy-general-voyager-summary",
+          "confidence": 0.567865,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1713,
+          "margin": 0.5744,
+          "probabilities": {
+            "code": 0.00514304421312368,
+            "general": 0.7786768859115482,
+            "reasoning": 0.20428473685442955,
+            "vl": 0.01189533302089851
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.7787
+        },
+        {
+          "case_id": "legacy-general-packing-list",
+          "confidence": 0.525373,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1711,
+          "margin": 0.4517,
+          "probabilities": {
+            "code": 0.0011002412245224766,
+            "general": 0.7181928761044599,
+            "reasoning": 0.2665366976971976,
+            "vl": 0.01417018497381987
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.7182
+        },
+        {
+          "case_id": "legacy-general-decline-email",
+          "confidence": 0.697775,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1718,
+          "margin": 0.7484,
+          "probabilities": {
+            "code": 0.0020856530593250937,
+            "general": 0.870396713417269,
+            "reasoning": 0.12202053108941546,
+            "vl": 0.005497102433990482
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.8704
+        },
+        {
+          "case_id": "code-lru-cache",
+          "confidence": 0.685478,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1685,
+          "margin": 0.7844,
+          "probabilities": {
+            "code": 0.8803505404183631,
+            "general": 0.020051563698863982,
+            "reasoning": 0.09593034807611057,
+            "vl": 0.0036675478066621483
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.8804
+        },
+        {
+          "case_id": "code-fastapi-timeout",
+          "confidence": 0.428834,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1661,
+          "margin": 0.0711,
+          "probabilities": {
+            "code": 0.5234133548796941,
+            "general": 0.023302722031250347,
+            "reasoning": 0.4523513837009476,
+            "vl": 0.0009325393881079231
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.5234
+        },
+        {
+          "case_id": "code-sql-window",
+          "confidence": 0.462455,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.1663,
+          "margin": 0.6134,
+          "probabilities": {
+            "code": 0.057392647214632435,
+            "general": 0.15248151753624004,
+            "reasoning": 0.7658983088805021,
+            "vl": 0.024227526368625404
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.7659
+        },
+        {
+          "case_id": "code-range-response",
+          "confidence": 0.397125,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.1695,
+          "margin": 0.2748,
+          "probabilities": {
+            "code": 0.022654712618249077,
+            "general": 0.3402499351978387,
+            "reasoning": 0.6150187239217324,
+            "vl": 0.02207662826217972
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.615
+        },
+        {
+          "case_id": "code-typescript-narrowing",
+          "confidence": 0.149945,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.1649,
+          "margin": 0.0187,
+          "probabilities": {
+            "code": 0.193817989465035,
+            "general": 0.393172472152473,
+            "reasoning": 0.3744414504777475,
+            "vl": 0.038568087904744475
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.3932
+        },
+        {
+          "case_id": "code-pytest-race",
+          "confidence": 0.393958,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.1614,
+          "margin": 0.4361,
+          "probabilities": {
+            "code": 0.06095143054539158,
+            "general": 0.24393157323400202,
+            "reasoning": 0.6800379964154549,
+            "vl": 0.015078999805151554
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.68
+        },
+        {
+          "case_id": "code-pandas-groupby",
+          "confidence": 0.509126,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1641,
+          "margin": 0.5033,
+          "probabilities": {
+            "code": 0.7356219559142766,
+            "general": 0.03085594696001089,
+            "reasoning": 0.2322981411397563,
+            "vl": 0.0012239559859562857
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.7356
+        },
+        {
+          "case_id": "code-rust-parser",
+          "confidence": 0.76951,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1758,
+          "margin": 0.8886,
+          "probabilities": {
+            "code": 0.9277396570263364,
+            "general": 0.030048244861835258,
+            "reasoning": 0.0391341280266054,
+            "vl": 0.0030779700852228897
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9277
+        },
+        {
+          "case_id": "code-pydantic-migration",
+          "confidence": 0.200324,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.1682,
+          "margin": 0.1449,
+          "probabilities": {
+            "code": 0.18487664139548055,
+            "general": 0.4703159108755533,
+            "reasoning": 0.3254404586085918,
+            "vl": 0.019366989120374285
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.4703
+        },
+        {
+          "case_id": "reasoning-queue-choice",
+          "confidence": 0.689449,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1702,
+          "margin": 0.808,
+          "probabilities": {
+            "code": 0.013525457458914366,
+            "general": 0.08160631506360617,
+            "reasoning": 0.8896246726835576,
+            "vl": 0.015243554793921596
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.8896
+        },
+        {
+          "case_id": "reasoning-api-review",
+          "confidence": 0.3336,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1648,
+          "margin": 0.4282,
+          "probabilities": {
+            "code": 0.0780954660254556,
+            "general": 0.23057965377083123,
+            "reasoning": 0.6587874841296817,
+            "vl": 0.03253739607403153
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.6588
+        },
+        {
+          "case_id": "reasoning-sqrt-two",
+          "confidence": 0.936076,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1678,
+          "margin": 0.9755,
+          "probabilities": {
+            "code": 0.0011392298072760946,
+            "general": 0.00976560208983882,
+            "reasoning": 0.9853096856269896,
+            "vl": 0.003785482475895439
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9853
+        },
+        {
+          "case_id": "reasoning-database-shape",
+          "confidence": 0.585612,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1632,
+          "margin": 0.688,
+          "probabilities": {
+            "code": 0.024152630704150656,
+            "general": 0.1378977049031736,
+            "reasoning": 0.8258758191799395,
+            "vl": 0.012073845212736274
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.8259
+        },
+        {
+          "case_id": "reasoning-incident-cause",
+          "confidence": 0.283715,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1647,
+          "margin": 0.2993,
+          "probabilities": {
+            "code": 0.06303228687307263,
+            "general": 0.2940088104796528,
+            "reasoning": 0.5932982338620422,
+            "vl": 0.049660668785232454
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.5933
+        },
+        {
+          "case_id": "reasoning-consistency-models",
+          "confidence": 0.888672,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1653,
+          "margin": 0.9528,
+          "probabilities": {
+            "code": 0.0073447168246177814,
+            "general": 0.0185425423983195,
+            "reasoning": 0.9713860652183887,
+            "vl": 0.002726675558674147
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9714
+        },
+        {
+          "case_id": "reasoning-probability",
+          "confidence": 0.887508,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1726,
+          "margin": 0.944,
+          "probabilities": {
+            "code": 0.0015025612087457957,
+            "general": 0.02510593700095249,
+            "reasoning": 0.9691254807098365,
+            "vl": 0.0042660210804654555
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9691
+        },
+        {
+          "case_id": "reasoning-retry-storm",
+          "confidence": 0.731589,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1687,
+          "margin": 0.8231,
+          "probabilities": {
+            "code": 0.01284277002846568,
+            "general": 0.08003242685258971,
+            "reasoning": 0.9031339863494614,
+            "vl": 0.003990816769483141
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9031
+        },
+        {
+          "case_id": "reasoning-backup-policy",
+          "confidence": 0.776057,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1688,
+          "margin": 0.8538,
+          "probabilities": {
+            "code": 0.002199282419485274,
+            "general": 0.06791373187727576,
+            "reasoning": 0.9217325375154278,
+            "vl": 0.008154448187811036
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9217
+        },
+        {
+          "case_id": "general-translation",
+          "confidence": 0.937219,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.168,
+          "margin": 0.9746,
+          "probabilities": {
+            "code": 0.0006488365989331857,
+            "general": 0.9853026871921245,
+            "reasoning": 0.010660157109275861,
+            "vl": 0.003388319099666566
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9853
+        },
+        {
+          "case_id": "general-summary",
+          "confidence": 0.515781,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1708,
+          "margin": 0.6403,
+          "probabilities": {
+            "code": 0.03371724248683146,
+            "general": 0.7918998158578436,
+            "reasoning": 0.15156975851804305,
+            "vl": 0.02281318313728182
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.7919
+        },
+        {
+          "case_id": "general-agenda",
+          "confidence": 0.723934,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1709,
+          "margin": 0.8295,
+          "probabilities": {
+            "code": 0.013834364660102355,
+            "general": 0.9037781394662521,
+            "reasoning": 0.07432770391022069,
+            "vl": 0.008059791963424828
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9038
+        },
+        {
+          "case_id": "general-author",
+          "confidence": 0.571213,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.173,
+          "margin": 0.4872,
+          "probabilities": {
+            "code": 0.001052523154645315,
+            "general": 0.7415755948478361,
+            "reasoning": 0.2544075726140261,
+            "vl": 0.0029643093834924115
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.7416
+        },
+        {
+          "case_id": "general-recipe",
+          "confidence": 0.588263,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1686,
+          "margin": 0.5661,
+          "probabilities": {
+            "code": 0.0023914137588542683,
+            "general": 0.7786603013145372,
+            "reasoning": 0.2125282348312305,
+            "vl": 0.006420050095378055
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.7787
+        },
+        {
+          "case_id": "general-rephrase",
+          "confidence": 0.585028,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1694,
+          "margin": 0.741,
+          "probabilities": {
+            "code": 0.02812977372543735,
+            "general": 0.8428395638678596,
+            "reasoning": 0.10179504113384232,
+            "vl": 0.027235621272860673
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.8428
+        },
+        {
+          "case_id": "general-continents",
+          "confidence": 0.487416,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1731,
+          "margin": 0.0439,
+          "probabilities": {
+            "code": 0.0009819379366043798,
+            "general": 0.5206313974514323,
+            "reasoning": 0.47669506878026724,
+            "vl": 0.0016915958316960334
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.5206
+        },
+        {
+          "case_id": "general-haiku",
+          "confidence": 0.738697,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1708,
+          "margin": 0.8469,
+          "probabilities": {
+            "code": 0.012678986348061985,
+            "general": 0.9122799850574923,
+            "reasoning": 0.06540169114567963,
+            "vl": 0.009639337448766029
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9123
+        }
+      ],
+      "status": "measured",
+      "warm": {
+        "accuracy": 0.8333,
+        "cheap_code_general_swaps": 2,
+        "confusion": {
+          "code->code": 6,
+          "code->general": 2,
+          "code->reasoning": 4,
+          "general->general": 12,
+          "reasoning->reasoning": 12
+        },
+        "correct": 30,
+        "costly_false_reasoning": 4,
+        "latency_p50_seconds": 0.1688,
+        "latency_p95_seconds": 0.1736,
+        "missed_reasoning": 0,
+        "projected_fast_to_deep_escalations": 4,
+        "response_failures": 0,
+        "samples": 36,
+        "uncertainty_mapping": {
+          "kind": "winner-and-margin",
+          "minimum_margin": 0.15,
+          "minimum_winner_probability": 0.55
+        },
+        "valid": 36
+      }
+    },
+    {
+      "backend": "systemone",
+      "cold": {
+        "sample": {
+          "case_id": "legacy-code-refactor-loop",
+          "confidence": 0.933288,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 15.2101,
+          "margin": 0.9684,
+          "probabilities": {
+            "code": 0.9832029204715521,
+            "general": 0.0015654381990149757,
+            "reasoning": 0.014795349966248887,
+            "vl": 0.00043629136318413305
+          },
+          "round": 0,
+          "selected": "code",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.9832
+        },
+        "unload_succeeded": true
+      },
+      "confidence_kind": "distribution_concentration",
+      "model": "nimble:latest",
+      "model_metadata": {
+        "name": "nimble:latest",
+        "parameter_size": "9.0B",
+        "quantization_level": "Q8_0",
+        "size_bytes": 9527502277
+      },
+      "residency": {
+        "after": [
+          {
+            "expires_at": "2026-09-30T18:39:07.315023215Z",
+            "name": "qwen3.8:32k",
+            "size_bytes": 19637647437,
+            "size_vram_bytes": 19637647437
+          },
+          {
+            "expires_at": "2026-09-30T17:41:10.621644142Z",
+            "name": "nimble:latest",
+            "size_bytes": 8967243693,
+            "size_vram_bytes": 8967243693
+          },
+          {
+            "expires_at": "2026-09-30T17:40:36.728528005Z",
+            "name": "tev1:0.8b",
+            "size_bytes": 893869096,
+            "size_vram_bytes": 893869096
+          }
+        ],
+        "before": [
+          {
+            "expires_at": "2026-09-30T18:39:07.315023215Z",
+            "name": "qwen3.8:32k",
+            "size_bytes": 19637647437,
+            "size_vram_bytes": 19637647437
+          },
+          {
+            "expires_at": "2026-09-30T17:40:48.207054446Z",
+            "name": "tev1:latest",
+            "size_bytes": 4669109698,
+            "size_vram_bytes": 4669109698
+          },
+          {
+            "expires_at": "2026-09-30T17:40:36.728528005Z",
+            "name": "tev1:0.8b",
+            "size_bytes": 893869096,
+            "size_vram_bytes": 893869096
+          }
+        ],
+        "evicted_models": [
+          "tev1:latest"
+        ],
+        "newly_loaded_models": [
+          "nimble:latest"
+        ],
+        "observation_errors": []
+      },
+      "samples": [
+        {
+          "case_id": "legacy-code-refactor-loop",
+          "confidence": 0.933288,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1081,
+          "margin": 0.9684,
+          "probabilities": {
+            "code": 0.9832029204715521,
+            "general": 0.0015654381990149757,
+            "reasoning": 0.014795349966248887,
+            "vl": 0.00043629136318413305
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.9832
+        },
+        {
+          "case_id": "legacy-code-postgres-plan",
+          "confidence": 0.792994,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.1998,
+          "margin": 0.8944,
+          "probabilities": {
+            "code": 0.040651678762217494,
+            "general": 0.023548038202179593,
+            "reasoning": 0.9350065091504957,
+            "vl": 0.0007937738851073467
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.935
+        },
+        {
+          "case_id": "legacy-code-retry-decorator",
+          "confidence": 0.956651,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1959,
+          "margin": 0.9864,
+          "probabilities": {
+            "code": 0.9908045996807953,
+            "general": 0.004309420323520276,
+            "reasoning": 0.004450528304794356,
+            "vl": 0.0004354516908900957
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.9908
+        },
+        {
+          "case_id": "legacy-reasoning-rent-or-buy",
+          "confidence": 0.951534,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.196,
+          "margin": 0.9787,
+          "probabilities": {
+            "code": 0.0005337011130504508,
+            "general": 0.009964048459907655,
+            "reasoning": 0.9886591865783787,
+            "vl": 0.0008430638486631952
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.9887
+        },
+        {
+          "case_id": "legacy-reasoning-event-sourcing",
+          "confidence": 0.969926,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.2001,
+          "margin": 0.988,
+          "probabilities": {
+            "code": 0.0003573185208111534,
+            "general": 0.005627655912495384,
+            "reasoning": 0.9935881634043592,
+            "vl": 0.0004268621623344117
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.9936
+        },
+        {
+          "case_id": "legacy-reasoning-trains",
+          "confidence": 0.910257,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.2016,
+          "margin": 0.9546,
+          "probabilities": {
+            "code": 0.001326896240336149,
+            "general": 0.021308103362189607,
+            "reasoning": 0.9758624047224782,
+            "vl": 0.0015025956749960487
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.9759
+        },
+        {
+          "case_id": "legacy-general-capital",
+          "confidence": 0.973093,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.202,
+          "margin": 0.989,
+          "probabilities": {
+            "code": 0.00014227197803994135,
+            "general": 0.9942514618414026,
+            "reasoning": 0.005279095711330876,
+            "vl": 0.0003271704692265603
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.9943
+        },
+        {
+          "case_id": "legacy-general-voyager-summary",
+          "confidence": 0.924356,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1998,
+          "margin": 0.9612,
+          "probabilities": {
+            "code": 0.0005438022672150009,
+            "general": 0.9798626921549591,
+            "reasoning": 0.018647071805750356,
+            "vl": 0.0009464337720755801
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.9799
+        },
+        {
+          "case_id": "legacy-general-packing-list",
+          "confidence": 0.830306,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1984,
+          "margin": 0.8838,
+          "probabilities": {
+            "code": 0.0005738407764790133,
+            "general": 0.9408108737266531,
+            "reasoning": 0.05703104161867747,
+            "vl": 0.0015842438781905898
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.9408
+        },
+        {
+          "case_id": "legacy-general-decline-email",
+          "confidence": 0.983178,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1965,
+          "margin": 0.9944,
+          "probabilities": {
+            "code": 0.0002345256826838786,
+            "general": 0.9968647828730408,
+            "reasoning": 0.0024330804760623473,
+            "vl": 0.000467610968212972
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": 0.9969
+        },
+        {
+          "case_id": "code-lru-cache",
+          "confidence": 0.935533,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1962,
+          "margin": 0.9764,
+          "probabilities": {
+            "code": 0.9851575651777259,
+            "general": 0.005398707270847189,
+            "reasoning": 0.00877400507117095,
+            "vl": 0.0006697224802560325
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9852
+        },
+        {
+          "case_id": "code-fastapi-timeout",
+          "confidence": 0.897134,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.2011,
+          "margin": 0.9604,
+          "probabilities": {
+            "code": 0.9741253545788489,
+            "general": 0.010610953863956458,
+            "reasoning": 0.013723425431617716,
+            "vl": 0.0015402661255770511
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9741
+        },
+        {
+          "case_id": "code-sql-window",
+          "confidence": 0.194243,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.1977,
+          "margin": 0.0679,
+          "probabilities": {
+            "code": 0.33213188819154654,
+            "general": 0.26103363534835144,
+            "reasoning": 0.4000624444417321,
+            "vl": 0.006772032018369852
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.4001
+        },
+        {
+          "case_id": "code-range-response",
+          "confidence": 0.273749,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.202,
+          "margin": 0.2846,
+          "probabilities": {
+            "code": 0.5549079671103407,
+            "general": 0.27032913309231676,
+            "reasoning": 0.17009428050794229,
+            "vl": 0.004668619289400199
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.5549
+        },
+        {
+          "case_id": "code-typescript-narrowing",
+          "confidence": 0.45291,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.2014,
+          "margin": 0.6138,
+          "probabilities": {
+            "code": 0.7535391179359601,
+            "general": 0.13975810858330365,
+            "reasoning": 0.09747536865299766,
+            "vl": 0.00922740482773865
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.7535
+        },
+        {
+          "case_id": "code-pytest-race",
+          "confidence": 0.492058,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.2162,
+          "margin": 0.6436,
+          "probabilities": {
+            "code": 0.7730762377588128,
+            "general": 0.12946043904735025,
+            "reasoning": 0.09440504045903293,
+            "vl": 0.003058282734804089
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.7731
+        },
+        {
+          "case_id": "code-pandas-groupby",
+          "confidence": 0.941832,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.2007,
+          "margin": 0.9782,
+          "probabilities": {
+            "code": 0.9867866993036628,
+            "general": 0.003993641680236212,
+            "reasoning": 0.008608605076658574,
+            "vl": 0.0006110539394423544
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9868
+        },
+        {
+          "case_id": "code-rust-parser",
+          "confidence": 0.910749,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.2056,
+          "margin": 0.9654,
+          "probabilities": {
+            "code": 0.9780327750946092,
+            "general": 0.012670005279683873,
+            "reasoning": 0.008302728641789364,
+            "vl": 0.0009944909839175098
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.978
+        },
+        {
+          "case_id": "code-pydantic-migration",
+          "confidence": 0.958195,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.2005,
+          "margin": 0.9867,
+          "probabilities": {
+            "code": 0.9911879423510893,
+            "general": 0.004537223176316237,
+            "reasoning": 0.003851190762583934,
+            "vl": 0.00042364371001064893
+          },
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9912
+        },
+        {
+          "case_id": "reasoning-queue-choice",
+          "confidence": 0.816711,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.2065,
+          "margin": 0.8907,
+          "probabilities": {
+            "code": 0.004061041949010913,
+            "general": 0.050380164563271684,
+            "reasoning": 0.9411146101166122,
+            "vl": 0.004444183371105129
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9411
+        },
+        {
+          "case_id": "reasoning-api-review",
+          "confidence": 0.343514,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.2033,
+          "margin": 0.3386,
+          "probabilities": {
+            "code": 0.07988620659262492,
+            "general": 0.2843730812347499,
+            "reasoning": 0.6229455407758214,
+            "vl": 0.01279517139680375
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.6229
+        },
+        {
+          "case_id": "reasoning-sqrt-two",
+          "confidence": 0.980326,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1983,
+          "margin": 0.9938,
+          "probabilities": {
+            "code": 0.0007183953144858849,
+            "general": 0.0025102597574889972,
+            "reasoning": 0.9963336770723055,
+            "vl": 0.0004376678557197938
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9963
+        },
+        {
+          "case_id": "reasoning-database-shape",
+          "confidence": 0.712864,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1988,
+          "margin": 0.7672,
+          "probabilities": {
+            "code": 0.003920018611412524,
+            "general": 0.1129291386999566,
+            "reasoning": 0.8801076960581966,
+            "vl": 0.003043146630434286
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.8801
+        },
+        {
+          "case_id": "reasoning-incident-cause",
+          "confidence": 0.221057,
+          "correct": false,
+          "expected": "reasoning",
+          "latency_seconds": 0.1949,
+          "margin": 0.2167,
+          "probabilities": {
+            "code": 0.11618988451542565,
+            "general": 0.5300501584939205,
+            "reasoning": 0.3133550444868725,
+            "vl": 0.04040491250378147
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.5301
+        },
+        {
+          "case_id": "reasoning-consistency-models",
+          "confidence": 0.964683,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.2125,
+          "margin": 0.9847,
+          "probabilities": {
+            "code": 0.00021838693600052315,
+            "general": 0.007307582354761988,
+            "reasoning": 0.9920547613942641,
+            "vl": 0.0004192693149734288
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9921
+        },
+        {
+          "case_id": "reasoning-probability",
+          "confidence": 0.938753,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.2018,
+          "margin": 0.9717,
+          "probabilities": {
+            "code": 0.0007235675939114145,
+            "general": 0.013223989428130785,
+            "reasoning": 0.984946049012211,
+            "vl": 0.001106393965746782
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9849
+        },
+        {
+          "case_id": "reasoning-retry-storm",
+          "confidence": 0.953246,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1963,
+          "margin": 0.9801,
+          "probabilities": {
+            "code": 0.0008690892939593415,
+            "general": 0.009203294396126119,
+            "reasoning": 0.9892629633579653,
+            "vl": 0.000664652951949028
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9893
+        },
+        {
+          "case_id": "reasoning-backup-policy",
+          "confidence": 0.850184,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.2131,
+          "margin": 0.906,
+          "probabilities": {
+            "code": 0.0014523142899175025,
+            "general": 0.045448787710135816,
+            "reasoning": 0.9514826996707167,
+            "vl": 0.001616198329229813
+          },
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9515
+        },
+        {
+          "case_id": "general-translation",
+          "confidence": 0.995365,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1943,
+          "margin": 0.9989,
+          "probabilities": {
+            "code": 9.292905196064777e-05,
+            "general": 0.9993001838703088,
+            "reasoning": 0.0004283020060680364,
+            "vl": 0.00017858507166250765
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9993
+        },
+        {
+          "case_id": "general-summary",
+          "confidence": 0.804056,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.2119,
+          "margin": 0.903,
+          "probabilities": {
+            "code": 0.014490742235528988,
+            "general": 0.9415656925465138,
+            "reasoning": 0.03859711923927821,
+            "vl": 0.005346445978678953
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9416
+        },
+        {
+          "case_id": "general-agenda",
+          "confidence": 0.931665,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.2133,
+          "margin": 0.9715,
+          "probabilities": {
+            "code": 0.00199193750286283,
+            "general": 0.9837712498208143,
+            "reasoning": 0.012271368630710527,
+            "vl": 0.001965444045612353
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9838
+        },
+        {
+          "case_id": "general-author",
+          "confidence": 0.950531,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.195,
+          "margin": 0.9767,
+          "probabilities": {
+            "code": 0.00026682994029452004,
+            "general": 0.9879552443140992,
+            "reasoning": 0.011268425100273654,
+            "vl": 0.000509500645332684
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.988
+        },
+        {
+          "case_id": "general-recipe",
+          "confidence": 0.844442,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.2148,
+          "margin": 0.8994,
+          "probabilities": {
+            "code": 0.0006958846926975179,
+            "general": 0.9483332921401396,
+            "reasoning": 0.04892990006420569,
+            "vl": 0.0020409231029572157
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9483
+        },
+        {
+          "case_id": "general-rephrase",
+          "confidence": 0.747909,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.2019,
+          "margin": 0.87,
+          "probabilities": {
+            "code": 0.023263254757297912,
+            "general": 0.9197327101747065,
+            "reasoning": 0.04974792507216533,
+            "vl": 0.007256109995830116
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9197
+        },
+        {
+          "case_id": "general-continents",
+          "confidence": 0.800785,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1918,
+          "margin": 0.8479,
+          "probabilities": {
+            "code": 0.0003286242599207095,
+            "general": 0.9234560350783214,
+            "reasoning": 0.07555246837665662,
+            "vl": 0.0006628722851012597
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9235
+        },
+        {
+          "case_id": "general-haiku",
+          "confidence": 0.951417,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1997,
+          "margin": 0.9829,
+          "probabilities": {
+            "code": 0.0018581096881069136,
+            "general": 0.9895765836807102,
+            "reasoning": 0.006670361077875873,
+            "vl": 0.001894945553307232
+          },
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": 0.9896
+        }
+      ],
+      "status": "measured",
+      "warm": {
+        "accuracy": 0.9167,
+        "cheap_code_general_swaps": 0,
+        "confusion": {
+          "code->code": 10,
+          "code->reasoning": 2,
+          "general->general": 12,
+          "reasoning->general": 1,
+          "reasoning->reasoning": 11
+        },
+        "correct": 33,
+        "costly_false_reasoning": 2,
+        "latency_p50_seconds": 0.2003,
+        "latency_p95_seconds": 0.2148,
+        "missed_reasoning": 1,
+        "projected_fast_to_deep_escalations": 2,
+        "response_failures": 0,
+        "samples": 36,
+        "uncertainty_mapping": {
+          "kind": "winner-and-margin",
+          "minimum_margin": 0.15,
+          "minimum_winner_probability": 0.55
+        },
+        "valid": 36
+      }
+    },
+    {
+      "backend": "chat-json",
+      "cold": {
+        "sample": {
+          "case_id": "legacy-code-refactor-loop",
+          "confidence": 0.95,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 11.0563,
+          "margin": null,
+          "probabilities": null,
+          "round": 0,
+          "selected": "code",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": null
+        },
+        "unload_succeeded": true
+      },
+      "confidence_kind": "self_reported",
+      "model": "qwen3.5:4b",
+      "model_metadata": {
+        "name": "qwen3.5:4b",
+        "parameter_size": "4.7B",
+        "quantization_level": "Q4_K_M",
+        "size_bytes": 3389983735
+      },
+      "residency": {
+        "after": [
+          {
+            "expires_at": "2026-09-30T18:39:07.315023215Z",
+            "name": "qwen3.8:32k",
+            "size_bytes": 19637647437,
+            "size_vram_bytes": 19637647437
+          },
+          {
+            "expires_at": "2026-09-30T17:40:36.728528005Z",
+            "name": "tev1:0.8b",
+            "size_bytes": 893869096,
+            "size_vram_bytes": 893869096
+          },
+          {
+            "expires_at": "2026-09-30T17:36:28.378827839Z",
+            "name": "qwen3.5:4b",
+            "size_bytes": 4197596527,
+            "size_vram_bytes": 4197596527
+          }
+        ],
+        "before": [
+          {
+            "expires_at": "2026-09-30T18:39:07.315023215Z",
+            "name": "qwen3.8:32k",
+            "size_bytes": 19637647437,
+            "size_vram_bytes": 19637647437
+          },
+          {
+            "expires_at": "2026-09-30T17:41:10.621644142Z",
+            "name": "nimble:latest",
+            "size_bytes": 8967243693,
+            "size_vram_bytes": 8967243693
+          },
+          {
+            "expires_at": "2026-09-30T17:40:36.728528005Z",
+            "name": "tev1:0.8b",
+            "size_bytes": 893869096,
+            "size_vram_bytes": 893869096
+          }
+        ],
+        "evicted_models": [
+          "nimble:latest"
+        ],
+        "newly_loaded_models": [
+          "qwen3.5:4b"
+        ],
+        "observation_errors": []
+      },
+      "samples": [
+        {
+          "case_id": "legacy-code-refactor-loop",
+          "confidence": 0.95,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1746,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "code",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "legacy-code-postgres-plan",
+          "confidence": 0.95,
+          "correct": false,
+          "expected": "code",
+          "latency_seconds": 0.1909,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "legacy-code-retry-decorator",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1771,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "code",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "legacy-reasoning-rent-or-buy",
+          "confidence": 0.95,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1897,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "legacy-reasoning-event-sourcing",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1846,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "legacy-reasoning-trains",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.183,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "reasoning",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "legacy-general-capital",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1744,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "general",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "legacy-general-voyager-summary",
+          "confidence": 0.95,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1815,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "general",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "legacy-general-packing-list",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1797,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "general",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "legacy-general-decline-email",
+          "confidence": 0.9,
+          "correct": false,
+          "expected": "general",
+          "latency_seconds": 0.177,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "code",
+          "source": "legacy",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "code-lru-cache",
+          "confidence": 0.95,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1862,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "code-fastapi-timeout",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1797,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "code-sql-window",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1802,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "code-range-response",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1757,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "code-typescript-narrowing",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1783,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "code-pytest-race",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.178,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "code-pandas-groupby",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1822,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "code-rust-parser",
+          "confidence": 0.95,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.191,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "code-pydantic-migration",
+          "confidence": 0.95,
+          "correct": true,
+          "expected": "code",
+          "latency_seconds": 0.1849,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "code",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "reasoning-queue-choice",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1841,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "reasoning-api-review",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1908,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "reasoning-sqrt-two",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.187,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "reasoning-database-shape",
+          "confidence": 0.95,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1994,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "reasoning-incident-cause",
+          "confidence": 0.95,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.199,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "reasoning-consistency-models",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1921,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "reasoning-probability",
+          "confidence": 0.95,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.197,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "reasoning-retry-storm",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1959,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "reasoning-backup-policy",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "reasoning",
+          "latency_seconds": 0.1925,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "reasoning",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "general-translation",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1794,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "general-summary",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1795,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "general-agenda",
+          "confidence": 0.95,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1872,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "general-author",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1805,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "general-recipe",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1841,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "general-rephrase",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1892,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "general-continents",
+          "confidence": 1.0,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1899,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        },
+        {
+          "case_id": "general-haiku",
+          "confidence": 0.95,
+          "correct": true,
+          "expected": "general",
+          "latency_seconds": 0.1899,
+          "margin": null,
+          "probabilities": null,
+          "round": 1,
+          "selected": "general",
+          "source": "expanded",
+          "valid": true,
+          "winner_probability": null
+        }
+      ],
+      "status": "measured",
+      "warm": {
+        "accuracy": 0.9444,
+        "cheap_code_general_swaps": 1,
+        "confusion": {
+          "code->code": 11,
+          "code->reasoning": 1,
+          "general->code": 1,
+          "general->general": 11,
+          "reasoning->reasoning": 12
+        },
+        "correct": 34,
+        "costly_false_reasoning": 1,
+        "latency_p50_seconds": 0.1844,
+        "latency_p95_seconds": 0.199,
+        "missed_reasoning": 0,
+        "projected_fast_to_deep_escalations": 1,
+        "response_failures": 0,
+        "samples": 36,
+        "uncertainty_mapping": {
+          "kind": "incumbent-self-reported-confidence",
+          "minimum_confidence": 0.95
+        },
+        "valid": 36
+      }
+    }
+  ],
+  "schema": 1,
+  "settings": {
+    "base_url": "http://ollama:11434",
+    "candidates": [
+      "tev1:0.8b",
+      "tev1:latest",
+      "nimble:latest"
+    ],
+    "escalation_ceiling": 0.95,
+    "incumbent_model": "qwen3.5:4b",
+    "keep_alive": "10m",
+    "min_margin": 0.15,
+    "min_winner": 0.55,
+    "rounds": 1,
+    "timeout_s": 20.0
+  },
+  "status": "measured"
+}

@@ -302,7 +302,7 @@ export function FileManager({ onClose }: { onClose: () => void }) {
                 ? " Files over " + formatBytes(listing.limits.max_upload_bytes) + " upload in parts."
                 : ""}
               {" Supported: " + listing.limits.allowed_extensions.join(", ") + "."}
-              {" Videos become searchable after processing."}
+              {" Scanned PDFs and videos become searchable after processing."}
             </p>
           ) : null}
           <label>

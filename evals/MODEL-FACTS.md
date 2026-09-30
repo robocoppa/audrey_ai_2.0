@@ -360,6 +360,48 @@ Production router (`router.model`). Probed 10 cases × 3 rounds.
   ▶ Its quality can only be measured by adding it to that list, or via
   `router_probe.py`, which calls Ollama directly. `[ab/gap-next4, 2026-08-19]`
 
+### System One router candidates — rejected 2026-09-30
+
+Ollama 0.35.0 completed all 148 calls: one cold and 36 warm calls for each of
+`tev1:0.8b`, `tev1:latest`, `nimble:latest`, and the incumbent
+`qwen3.5:4b`. Every response was valid; there were no transport, HTTP, or shape
+failures.
+
+| Model | Correct | False reasoning | Missed reasoning | Escalations | warm p50 / p95 | cold | package / resident |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `tev1:0.8b` | 22/36 | 14 | 0 | 8 | 0.089s / 0.092s | 4.98s | 0.81 / 0.89 GB |
+| `tev1:latest` | 30/36 | 4 | 0 | 4 | 0.169s / 0.174s | 5.43s | 4.48 / 4.67 GB |
+| `nimble:latest` | 33/36 | 2 | 1 | 2 | 0.200s / 0.215s | 15.21s | 9.53 / 8.97 GB |
+| `qwen3.5:4b` | **34/36** | **1** | **0** | **1** | **0.184s / 0.199s** | **11.06s** | **3.39 / 4.20 GB** |
+
+Thirteen fixture cases never reach the production model router: nine hit a
+strong keyword gate and four hit the short-prompt rule. Restricting the result
+to the 23 model-reached cases removes those shared deterministic outcomes:
+
+| Model | Correct | False reasoning | Cheap swaps | Uncertain |
+|---|---:|---:|---:|---:|
+| `tev1:0.8b` | 13/23 | 10 | 0 | 7 |
+| `tev1:latest` | 18/23 | 3 | 2 | 3 |
+| `nimble:latest` | 22/23 | 1 | 0 | 1 |
+| `qwen3.5:4b` | **23/23** | **0** | **0** | **0** |
+
+Nimble was closest, but its SQL window-function case went to costly
+`reasoning`. The provisional winner >= 0.55 and margin >= 0.15 rule would
+abstain on that low-confidence error, which still creates an escalation that
+the incumbent avoids. Nimble was about 9% slower at warm p50, about 38% slower
+cold, and used about 2.1 times the resident memory. It displaced Tev1 4B during
+sequential loading; the incumbent later displaced Nimble. `qwen3.8:32k`
+remained resident throughout, so this records displacement rather than active
+worker contention.
+
+Two legacy expected-code cases are deterministically routed to `reasoning`
+before any model call. End to end, that leaves Nimble at 33/36 with three
+costly false-reasoning outcomes and the incumbent at 34/36 with two. No System
+One candidate clears the accuracy, escalation, and footprint gate. **Keep
+`qwen3.5:4b`; do not open the production-backend slice.** System One
+`confidence` is distribution concentration and was not treated as correctness
+probability. `[2026-09-30-systemone-router-probe-results.json, 2026-09-30]`
+
 ### `ornith-1.5:35b`
 
 - **59/60 on the grounding suite**, `--repeat 5`. One real failure; see below.
@@ -828,14 +870,6 @@ Open questions, and what would close each.
   ▶ *Closes with:* re-running the three arms with `THINK=off`. That is also the
   only version of this test whose latency numbers would inform a serving
   decision.
-- **`ornith-1.5:9b` as router.** Size (6.6 GB vs the incumbent's ~2.5 GB) is the
-  open risk, not classification skill. `classify_with_registry` takes no gate
-  argument, so `FairLocalGate` never sees the router; under `GPU_CONCURRENCY=1`
-  a large router **evicts** the deep worker rather than queueing behind it.
-  ▶ *Closes with:* `router_probe.py` in the production arm (`NOTHINK=1
-  FORMAT=1`) for parse/accuracy/confidence, **plus** a live turn with the deep
-  worker resident to see whether it gets unloaded. The probe alone cannot
-  clear it.
 - **`ornith-1.5:35b` quality**, and whether it fixes `ornith:latest`'s two
   trust defects (the `most_common` tie-break and the Berlin Wall fabrication).
   ⚠️ `ornith:latest` was deleted 2026-08-19, so a same-run A/B is no longer

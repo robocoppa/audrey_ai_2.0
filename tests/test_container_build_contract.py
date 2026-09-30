@@ -19,6 +19,7 @@ UI_INDEX = ROOT / "web" / "index.html"
 UI_FAVICON = ROOT / "web" / "src" / "assets" / "brand" / "builtryte-favicon.png"
 TOOLS_DOCKERFILE = ROOT / "docker" / "custom-tools.Dockerfile"
 FETCHER_DOCKERFILE = ROOT / "docker" / "media-fetcher.Dockerfile"
+WORKER_DOCKERFILE = ROOT / "docker" / "media-worker.Dockerfile"
 COMPOSE = ROOT / "compose.yaml"
 CONFIG = ROOT / "config.yaml"
 
@@ -155,6 +156,16 @@ def test_every_shared_writer_uses_unraids_numeric_identity():
     assert "USER audrey" in texts[0]
     assert "USER tools" in texts[1]
     assert "USER fetcher" in texts[2]
+
+
+def test_media_worker_bakes_the_scanned_pdf_ocr_runtime():
+    worker = _text(WORKER_DOCKERFILE)
+
+    assert "poppler-utils" in worker
+    assert "tesseract-ocr" in worker
+    assert "tesseract-ocr-eng" in worker
+    assert "COPY src/audrey/media" in worker
+    assert "USER worker" in worker
 
 
 def test_bind_mounts_match_the_non_root_cache_and_read_only_dataset_contract():

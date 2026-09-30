@@ -276,6 +276,67 @@ async def ingest_user_text_file(
     return len(points)
 
 
+async def ingest_user_text_content(
+    text: str,
+    *,
+    source: Path,
+    source_bytes: int,
+    qdrant: QdrantKB,
+    embedder: TextEmbedder,
+    collection: str,
+    user: str,
+    file_id: str,
+    filename: str,
+    mime: str,
+    uploaded_at: str | None = None,
+    chunk_tokens: int = 1000,
+    overlap_tokens: int = 100,
+) -> int:
+    """Ingest derived document text while preserving original-file metadata.
+
+    Scanned PDFs are read in the media worker, then handed back as text. The
+    OCR sidecar is the point source, while `bytes` remains the original PDF's
+    size so reconcile and quota accounting cannot silently shrink the row.
+    """
+    chunks = await asyncio.to_thread(
+        chunk_text,
+        text,
+        chunk_tokens=chunk_tokens,
+        overlap_tokens=overlap_tokens,
+    )
+    if not chunks:
+        return 0
+    stat = await asyncio.to_thread(source.stat)
+    stamp = uploaded_at or _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds")
+    vectors = await embedder.embed_many([chunk.text for chunk in chunks])
+
+    await qdrant.delete_by_file_id(file_id, user=user, collection=collection)
+    sparse = await qdrant.has_sparse(collection)
+    extras = {
+        "user": user,
+        "file_id": file_id,
+        "filename": filename,
+        "mime": mime,
+        "bytes": int(source_bytes),
+        "uploaded_at": stamp,
+    }
+    points: list[qmodels.PointStruct] = [
+        build_text_point(
+            source=normalize_source(source),
+            chunk_idx=chunk.idx,
+            text=chunk.text,
+            vector=vector,
+            mtime=stat.st_mtime,
+            extra=extras,
+            sparse=sparse,
+        )
+        for chunk, vector in zip(chunks, vectors, strict=True)
+    ]
+    await qdrant.upsert_text(points, collection=collection)
+    log.info("ingest: OCR document %s -> %d chunks", file_id, len(points))
+    return len(points)
+
+
 async def ingest_transcript_segments(
     segments: list[dict],
     *,
@@ -561,5 +622,5 @@ async def ingest_user_image_file(
 __all__ = [
     "IngestStats", "ingest_path", "ingest_many",
     "ingest_text_file", "ingest_image_file",
-    "ingest_user_text_file", "ingest_user_image_file",
+    "ingest_user_text_file", "ingest_user_text_content", "ingest_user_image_file",
 ]

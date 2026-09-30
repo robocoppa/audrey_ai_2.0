@@ -1047,11 +1047,25 @@ kb:
     max_upload_mb: 2048                  # whole-file ceiling for chunked uploads
     session_ttl_minutes: 120             # abandoned part dirs swept after this
 
-  # Phase 33: the media-worker job lifecycle. A video uploads to
-  # `status='pending'` and nothing in audrey will ever read it — extraction
-  # is minutes of CPU and GPU and cannot live in a request. A separate worker
-  # leases the row, does the work, and posts the result back over the service
-  # token. Audrey stays the only writer of uploads.sqlite.
+  # Campaign 3 Phase 7A: scanned PDFs with no text layer enter the same
+  # durable pending queue as video work. The media-worker renders one page at
+  # a time with Poppler, recognizes English with Tesseract, and posts complete
+  # text back for owner-scoped chunking and indexing. `enabled: false` restores
+  # the prior immediate 422 without changing normal text PDFs.
+  ocr:
+    enabled: true
+    language: "eng"
+    dpi: 200
+    max_pages: 100
+    max_chars: 5000000
+    # Whole-document wall clock. This remains below the shared 30-minute job
+    # lease, leaving time for the result upload, embedding, and row commit.
+    timeout_s: 1200
+
+  # Shared media-worker lease and retry policy, plus video processing
+  # settings. Videos and scanned PDFs both use the durable pending queue;
+  # Audrey stays the only writer of uploads.sqlite while the separate worker
+  # performs bounded processing and posts results over the service token.
   video:
     # How long a lease is good for. Longer than the slowest job expected, or a
     # worker still working gets its job stolen out from under it; short enough

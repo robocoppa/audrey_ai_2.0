@@ -1,7 +1,8 @@
-"""The media worker's claim loop (Phases 34-35).
+"""The media worker's durable video and scanned-document claim loop.
 
-Runs in its own container. Polls `POST /v1/files/jobs/claim`, demuxes the
-audio, transcribes it, posts the segments back. Phase 36 adds frames.
+Runs in its own container. Polls `POST /v1/files/jobs/claim` and dispatches
+leased videos or scanned PDFs to their bounded pipeline before posting results
+back to Audrey.
 
 Two invariants this file exists to hold:
 
@@ -15,9 +16,9 @@ the network that could reach one. Every fairness guarantee in
 it is bypassed silently and only under load — so the invariant is
 established now, while there is nothing here that would want to break it.
 
-Configured by environment, not `config.yaml`: a sidecar that parses the app's
-config file needs the file mounted and a YAML parser, and gains nothing — none
-of the orchestrator's settings apply to it.
+Service connection and video runtime settings come from environment. Settings
+owned by Audrey, including frame and OCR limits, ride on each claim so the
+worker does not mount or parse `config.yaml`.
 
     AUDREY_ENDPOINT      default http://audrey:8000
     KB_SERVICE_TOKEN     required
@@ -43,6 +44,16 @@ from pathlib import Path
 from audrey.media.audio import FFmpegFailedError, FFmpegMissingError, extract_audio, probe
 from audrey.media.describe import DEFAULT_BUDGET_S, DescribeFailedError, describe_frames
 from audrey.media.frames import extract_frames, select_frames
+from audrey.media.ocr import (
+    DEFAULT_DPI,
+    DEFAULT_LANGUAGE,
+    DEFAULT_MAX_CHARS,
+    DEFAULT_MAX_PAGES,
+    DEFAULT_TIMEOUT_S,
+    OcrFailedError,
+    OcrUnavailableError,
+    ocr_pdf,
+)
 
 # `post` and `Stopping` moved to `service.py` in Phase 41, when media-fetcher
 # needed the same two things. Imported by name rather than by module so
@@ -99,7 +110,93 @@ def handle_job(
     budget_s: float | None = None,
     frame_budget_s: float | None = DEFAULT_BUDGET_S,
 ) -> None:
-    """Do one job and report it. Any failure is reported, never swallowed.
+    """Dispatch one leased file to its bounded worker pipeline."""
+    if job.get("kind") == "text" and job.get("mime") == "application/pdf":
+        _handle_ocr_job(
+            job,
+            endpoint=endpoint,
+            token=token,
+            work_dir=work_dir,
+        )
+        return
+    _handle_video_job(
+        job,
+        endpoint=endpoint,
+        token=token,
+        work_dir=work_dir,
+        model_size=model_size,
+        budget_s=budget_s,
+        frame_budget_s=frame_budget_s,
+    )
+
+
+def _handle_ocr_job(
+    job: dict,
+    *,
+    endpoint: str,
+    token: str,
+    work_dir: Path,
+) -> None:
+    """OCR one scanned PDF and report its complete text to Audrey."""
+    file_id = job["file_id"]
+    source = Path(job["path"])
+    lease_id = job["lease_id"]
+    if not source.exists():
+        _report_failure(
+            endpoint,
+            token,
+            file_id,
+            lease_id,
+            f"source not readable at {source} — check the media-worker mount",
+        )
+        return
+
+    settings = job.get("ocr") or {}
+    try:
+        result = ocr_pdf(
+            source,
+            work_dir / f"{file_id}.ocr",
+            language=str(settings.get("language") or DEFAULT_LANGUAGE),
+            dpi=int(settings.get("dpi") or DEFAULT_DPI),
+            max_pages=int(settings.get("max_pages") or DEFAULT_MAX_PAGES),
+            max_chars=int(settings.get("max_chars") or DEFAULT_MAX_CHARS),
+            timeout_s=float(settings.get("timeout_s") or DEFAULT_TIMEOUT_S),
+        )
+    except OcrUnavailableError:
+        # A missing executable breaks the image, not this PDF. Let the lease
+        # expire so every queued document survives while the image is rebuilt.
+        raise
+    except OcrFailedError as exc:
+        _report_failure(endpoint, token, file_id, lease_id, str(exc))
+        return
+
+    status, body = post(
+        endpoint,
+        f"/v1/files/{file_id}/ocr-result",
+        token,
+        {
+            "lease_id": lease_id,
+            "text": result.text,
+            "pages": result.pages,
+            "language": result.language,
+        },
+        timeout=RESULT_TIMEOUT_S,
+    )
+    if status != 200:
+        log.warning("worker: OCR result rejected for %s (%s): %s", file_id, status, body)
+
+
+def _handle_video_job(
+    job: dict,
+    *,
+    endpoint: str,
+    token: str,
+    work_dir: Path,
+    model_size: str,
+    budget_s: float | None,
+    frame_budget_s: float | None,
+) -> None:
+    """Process one video job and report it. Any failure is reported.
 
     A worker that dies without reporting leaves the row in `processing` until
     the lease expires. That recovers, but it costs a full lease period and
@@ -353,7 +450,7 @@ def run(
     stopping.install()
     work_dir.mkdir(parents=True, exist_ok=True)
     log.info(
-        "worker: polling %s every %ds (whisper=%s, budget=%s)",
+        "worker: polling %s every %ds (whisper=%s, budget=%s, OCR=enabled)",
         endpoint, poll_seconds, model_size,
         f"{budget_s:.0f}s" if budget_s else "none",
     )

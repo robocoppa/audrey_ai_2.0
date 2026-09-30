@@ -323,6 +323,39 @@ Success is exit code zero and JSON ending in `"status": "passed"`. The
 type `output_text`, and `"sentinel": true`. The `unsupported`
 block must report HTTP 400 and `responses_feature_unsupported`.
 
+## Run the Phase 7A scanned-PDF OCR smoke from the laptop
+
+This targeted backend and worker proof generates its own one-page image-only
+PDF. No video and no prepared upload are required. It verifies that the upload
+enters `pending`, the rebuilt media worker runs Poppler and Tesseract, Audrey
+commits a Ready indexed document, and the native reader returns recognized text
+with a page marker. It then deletes the temporary file and drains cleanup.
+
+Rebuild `audrey`, `media-worker`, and `audrey-ui` before running it. The worker
+rebuild is required because the OCR executables are installed in its image.
+Use the working LAN/WARP route:
+
+```bash
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
+(
+  set -a
+  source .env.test.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_scanned_pdf_ocr.py
+)
+```
+
+Success is exit code zero and JSON ending in `"status": "passed"`. The upload
+must report `initial_status: "pending"`; processing must finish `"ready"` with
+a positive chunk count; the reader must report HTTP 200 and `page_marker: true`;
+and cleanup must report `deleted: true` and repair status `ready`. The script
+uses the existing `AUDREY_USER_JWT` and `AUDREY_ADMIN_JWT` from
+`.env.test.local`, creates one temporary upload, and removes it.
+
+After it passes, upload one real scanned PDF in the Files dialog, wait for Ready,
+and confirm **View text** matches the visible page. Also upload or reuse a
+normal selectable-text PDF and confirm it still becomes Ready immediately.
+
 ## Before handing over any smoke command
 
 1. Name the machine: laptop or Tower.
