@@ -210,6 +210,7 @@ class _LiveRun:
     observed_sources: list[SourceSnapshot] = field(default_factory=list)
     observed_tool_calls: dict[str, ToolCallSnapshot] = field(default_factory=dict)
     observed_models: dict[str, int] = field(default_factory=dict)
+    model_order: list[str] = field(default_factory=list)
     pending_model_events: list[str] = field(default_factory=list)
     observed_model_call_count: int = 0
 
@@ -218,6 +219,10 @@ class _LiveRun:
         if not model or self.emitter.is_finished or self.observed_model_call_count >= 500:
             return
         self.observed_model_call_count += 1
+        if model not in self.model_order:
+            if len(self.model_order) >= 50:
+                return
+            self.model_order.append(model)
         if not self.emitter.is_started:
             self.pending_model_events.append(model)
             return
@@ -236,8 +241,9 @@ class _LiveRun:
         for model in self.pending_model_events:
             aggregated[model] = aggregated.get(model, 0) + 1
         return tuple(
-            ModelUsageSnapshot(model=model, calls=calls)
-            for model, calls in aggregated.items()
+            ModelUsageSnapshot(model=model, calls=aggregated[model])
+            for model in self.model_order
+            if model in aggregated
         )
 
     def publish(self, event: RunEvent) -> None:
@@ -249,9 +255,12 @@ class _LiveRun:
         elif isinstance(event, UsageReportedEvent):
             self.latest_usage = event
         elif isinstance(event, ModelUsedEvent):
-            if event.model in self.observed_models:
-                self.observed_models[event.model] += 1
-            elif len(self.observed_models) < 50:
+            if event.model in self.model_order:
+                self.observed_models[event.model] = (
+                    self.observed_models.get(event.model, 0) + 1
+                )
+            elif len(self.model_order) < 50:
+                self.model_order.append(event.model)
                 self.observed_models[event.model] = 1
         elif isinstance(event, SourceObservedEvent):
             if len(self.observed_sources) < 50 and not any(

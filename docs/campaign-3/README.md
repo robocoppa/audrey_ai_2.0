@@ -12,7 +12,9 @@ settings, owner-bound file and video upload and inspection, source and answer
 presentation, image and direct chat attachments, safe retry, reload recovery,
 empty-draft cleanup, saved source and tool summaries, durable attachment
 presentation, answer and code copying, attachment-picker dismissal, and
-contextual startup and recovered-run presentation.
+contextual startup and recovered-run presentation. A follow-up model activity
+disclosure is laptop-complete: new native answers show every concrete generation
+model and call count immediately left of Tool calls, with refresh persistence.
 Selected corrections passed live checks, and on 2026-09-24 the user marked the
 combined 2E regression gate and normal-use soak tested and settled. Milestone
 2F has therefore started. Slice 2F.1's focused authentication smoke passed on

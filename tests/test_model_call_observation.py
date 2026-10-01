@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
@@ -79,8 +80,6 @@ async def test_concurrent_observation_contexts_do_not_mix_model_calls():
         return seen
 
     try:
-        import asyncio
-
         left, right = await asyncio.gather(
             observed_call("left:latest"),
             observed_call("right:latest"),

@@ -307,6 +307,7 @@ def test_preview_does_not_migrate_v11_and_apply_migrates_after_backup(
     db_path = store.path
     store.close()
     with sqlite3.connect(db_path) as connection:
+        connection.execute("DROP TABLE app_message_models")
         connection.execute("DROP TABLE app_message_tool_calls")
         connection.execute("DROP TABLE app_message_sources")
         connection.execute("DROP TRIGGER trg_app_history_import_conversation_deleted")

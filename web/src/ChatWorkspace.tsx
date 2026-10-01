@@ -1251,6 +1251,7 @@ function AudreyThread({
         label: "Retrying",
         detail: "Starting another run",
         sources: [],
+        models: [],
         tools: [],
       });
       try {
