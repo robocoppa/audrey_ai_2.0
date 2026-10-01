@@ -16,10 +16,33 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
+import wave
+from pathlib import Path
 
 MODEL = os.environ.get("WHISPER_BAKE", "small")
 COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE_TYPE", "int8")
 ROOT = os.environ.get("WHISPER_DOWNLOAD_ROOT", "/opt/whisper")
+
+
+def verify_audio_decoder() -> None:
+    """Exercise the exact file decoder the worker uses before baking weights."""
+    from faster_whisper.audio import decode_audio
+
+    sample_count = 1600
+    with tempfile.TemporaryDirectory(prefix="whisper-decoder-") as temp_dir:
+        wav = Path(temp_dir) / "probe.wav"
+        with wave.open(str(wav), "wb") as writer:
+            writer.setnchannels(1)
+            writer.setsampwidth(2)
+            writer.setframerate(16000)
+            writer.writeframes(b"\x00\x00" * sample_count)
+        audio = decode_audio(str(wav))
+
+    if getattr(audio, "ndim", None) != 1 or getattr(audio, "size", 0) != sample_count:
+        raise RuntimeError(
+            f"decoded probe has unexpected shape {getattr(audio, 'shape', None)!r}",
+        )
 
 
 def main() -> int:
@@ -42,6 +65,17 @@ def main() -> int:
             f"  missing module: {getattr(e, 'name', 'unknown')!r}\n"
             "  if that is not 'faster_whisper' itself, it is an undeclared\n"
             "  transitive dependency — add it to the pip line explicitly.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        verify_audio_decoder()
+    except Exception as e:  # noqa: BLE001 - image build gate reports exact dependency break
+        print(
+            f"FATAL: faster-whisper audio decoder is incompatible: "
+            f"{type(e).__name__}: {e}\n"
+            "  check the faster-whisper and PyAV pins before rebuilding.",
             file=sys.stderr,
         )
         return 1

@@ -278,6 +278,28 @@ class TestMissingArtifacts:
         assert "could not be read" in body["note"]
         assert "requested fact is absent" in body["note"]
 
+    async def test_an_explicit_summary_reads_a_document_sidecar(
+            self, client, db, tmp_path):
+        await _ready_document(db, tmp_path, filename="inspection.pdf")
+        root = tmp_path / "uploads" / "a_b_c"
+        (root / f"{FID}.summary.txt").write_text(
+            "The inspection recommends replacing the western seal.",
+            encoding="utf-8",
+        )
+
+        response = client.post(
+            "/v1/files/artifact",
+            headers=SVC,
+            json={
+                "user": ME,
+                "filename": "inspection.pdf",
+                "artifact": "summary",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["text"].startswith("The inspection recommends")
+
     async def test_an_explicit_transcript_on_a_text_file_says_media_only(
             self, client, db, tmp_path):
         await _ready_video(db, tmp_path, sidecars=(), kind="text",

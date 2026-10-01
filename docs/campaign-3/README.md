@@ -1,9 +1,10 @@
 # Campaign 3 — correctness foundations, Audrey UI, and reusable skills
 
-**Status:** Campaign 3 Phases 1, 3, 4, 5, 6, and 7 are complete. Phase
-8A's MP3 audio-ingestion slice is laptop-complete and awaiting its targeted
-Unraid smoke. Phase 2's native product cutover is live-settled, while its
-legacy 2D.5
+**Status:** Campaign 3 Phases 1, 3, 4, 5, and 6 are complete. Phase 7 OCR
+is live-settled; its PDF Summary/Transcript follow-up and Phase 8A's MP3 audio
+slice are laptop-complete and awaiting manual native-browser checks after
+deployment. Phase 2's native product cutover is live-settled, while its legacy
+2D.5
 administration, role, model-publication, exact-owner bootstrap, and
 provider-binding soak remains open.
 
@@ -64,17 +65,22 @@ route and escalation, loaded more slowly, and used over twice the resident
 memory. No candidate cleared the gate, Slice 6B was not opened, and no
 production classifier or config changed.
 
-Phase 7 completed on 2026-09-30. Slice 7A adds bounded English OCR for
+Phase 7 OCR completed on 2026-09-30. Slice 7A adds bounded English OCR for
 image-only PDFs through the durable media-worker queue. The corrected live
 fixture moved from Pending to Ready in 4.619 seconds, produced one indexed
-chunk, returned page-marked recognized text, and cleaned up successfully.
+chunk, returned page-marked recognized text, and cleaned up successfully. The
+user also accepted real PDF upload, native reading, and grounded chat. A
+laptop-complete presentation follow-up adds generated PDF summaries and
+separate Summary and Transcript tabs for newly processed PDFs.
 
 Phase 8 started on 2026-09-30. Slice 8A adds MP3 uploads as a first-class
 audio kind while reusing the durable media queue, Whisper transcript path,
 owner-scoped indexing, and fail-soft summaries. The native Files viewer offers
 audio filtering plus Summary and Transcript tabs, and canonical chat
-attachments persist audio through schema migration 16. Laptop verification is
-complete and the targeted live smoke is pending.
+attachments persist audio through schema migration 16. The first synthetic
+live attempt exposed a faster-whisper/PyAV decoder mismatch; the worker now
+pins the compatible PyAV major and verifies WAV decoding during its image
+build. Laptop verification is complete and a real MP3 browser check is pending.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,
@@ -91,8 +97,8 @@ and finally adds the first general skills layer on that owned surface.
 | 04 | [File and artifact downloads](phase-04-file-downloads.md) | Owner-scoped recovery of stored originals and useful derived artifacts from the native Files surface | Phase 03 explicit-skill ship decision | Complete |
 | 05 | [Responses API compatibility](phase-05-responses-api.md) | OpenAI Responses clients use Audrey's existing authenticated generation and policy boundaries | Phase 04 completion | Complete (5A and 5B live-settled) |
 | 06 | [System One decision routing](phase-06-system-one-routing.md) | Measure purpose-built local decision models against Audrey's incumbent router and retain a one-setting rollback | Phase 05 Slice 5B gate | Complete (6A measured; incumbent retained; 6B not opened) |
-| 07 | [Scanned PDF OCR](phase-07-scanned-pdf-ocr.md) | Queue image-only PDFs for bounded owner-scoped OCR, indexing, and native reading | Phase 06 decision | Complete (7A live-settled) |
-| 08 | [MP3 audio ingestion](phase-08-audio-ingestion.md) | Transcribe, summarize, search, inspect, and attach spoken MP3 files as first-class audio | Phase 07 completion | In progress (8A laptop-complete; live smoke pending) |
+| 07 | [Scanned PDF OCR](phase-07-scanned-pdf-ocr.md) | Queue image-only PDFs for bounded owner-scoped OCR, indexing, and native reading | Phase 06 decision | OCR complete; PDF Summary/Transcript follow-up awaiting manual check |
+| 08 | [MP3 audio ingestion](phase-08-audio-ingestion.md) | Transcribe, summarize, search, inspect, and attach spoken MP3 files as first-class audio | Phase 07 completion | In progress (8A laptop-complete; manual browser check pending) |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1
 through Campaign 3 Phase 8, or use the topic filenames.

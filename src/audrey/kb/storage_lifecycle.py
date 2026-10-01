@@ -185,6 +185,7 @@ class StorageLifecycle:
         uploaded_at: str,
         status: str,
         max_user_bytes: int,
+        summary: str = "",
     ) -> None:
         if reservation.kind == "url_fetch":
             raise ValueError("URL reservations commit through complete_fetch")
@@ -202,6 +203,7 @@ class StorageLifecycle:
             uploaded_at=uploaded_at,
             status=status,
             max_user_bytes=max_user_bytes,
+            summary=summary,
         )
         self._require(decision)
 

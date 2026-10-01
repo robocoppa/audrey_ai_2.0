@@ -507,6 +507,8 @@ function artifactLabel(artifact: AudreyFileArtifactKind): string {
 }
 
 function DocumentTextViewer({ file, onBack }: { file: AudreyFile; onBack: () => void }) {
+  const [view, setView] = useState<"summary" | "transcript">("summary");
+
   return (
     <div className="file-artifact-viewer">
       <div className="file-artifact-heading">
@@ -516,7 +518,23 @@ function DocumentTextViewer({ file, onBack }: { file: AudreyFile; onBack: () => 
           <small>Document text · {formatBytes(file.bytes)}</small>
         </div>
       </div>
-      <ArtifactPage file={file} />
+      <div className="file-artifact-tabs" role="group" aria-label="Document text type">
+        <button
+          type="button"
+          aria-pressed={view === "summary"}
+          onClick={() => setView("summary")}
+        >Summary</button>
+        <button
+          type="button"
+          aria-pressed={view === "transcript"}
+          onClick={() => setView("transcript")}
+        >Transcript</button>
+      </div>
+      <ArtifactPage
+        key={file.id + ":" + view}
+        file={file}
+        artifact={view === "summary" ? "summary" : undefined}
+      />
     </div>
   );
 }
@@ -641,10 +659,14 @@ function ArtifactPage({ file, artifact }: { file: AudreyFile; artifact?: AudreyF
       {!loading && !error && !visibleText ? (
         <p>{artifact === "visual"
           ? "No visual notes are available for this video."
-          : artifact ? `No ${artifact} is available for this ${file.kind === "audio" ? "recording" : "video"}.`
-            : "No extracted text is available for this document."}</p>
+          : artifact === "summary" && file.kind === "text"
+            ? "No summary is available for this document."
+            : artifact
+              ? "No " + artifact + " is available for this "
+                + (file.kind === "audio" ? "recording." : "video.")
+              : "No extracted text is available for this document."}</p>
       ) : null}
-      {fallbackSummary ? <small>Only the brief listing summary is available for this media file.</small> : null}
+      {fallbackSummary ? <small>Only the stored listing summary is available for this file.</small> : null}
       {page?.next_offset != null ? (
         <button type="button" onClick={() => void loadMore()} disabled={loading}>
           {loading ? "Loading more…" : "Load more"}

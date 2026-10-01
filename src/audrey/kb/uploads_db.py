@@ -89,11 +89,9 @@ CREATE TABLE IF NOT EXISTS uploads (
   -- that is not a video, and for a video with no audio stream — those are
   -- the same number for different reasons, so read it with `kind`.
   duration_s     REAL NOT NULL DEFAULT 0,
-  -- One-paragraph summary of a processed video (Phase 37), shown in the file
-  -- list. Empty for everything else, and empty for a video whose summary call
-  -- failed — that is a missing field, never a failed row, because by the time
-  -- it is written the transcript and descriptions are already ingested and
-  -- already useful.
+  -- Short generated description of a processed audio/video file or PDF.
+  -- Empty when summary generation fails — that is a missing field, never a
+  -- failed row, because the extracted text is already ingested and useful.
   summary        TEXT NOT NULL DEFAULT '',
   -- When `ingest_result` finished with this row (Phase 38). Empty until then.
   -- Source reclamation measures its retention window from HERE and not from
@@ -527,6 +525,7 @@ class UploadsDB:
         uploaded_at: str,
         status: str,
         max_user_bytes: int,
+        summary: str = "",
     ) -> QuotaDecision:
         return await asyncio.to_thread(
             self._commit_reserved_upload_sync,
@@ -543,6 +542,7 @@ class UploadsDB:
             uploaded_at,
             status,
             max_user_bytes,
+            summary,
         )
 
     def _commit_reserved_upload_sync(
@@ -560,6 +560,7 @@ class UploadsDB:
         uploaded_at: str,
         status: str,
         max_user_bytes: int,
+        summary: str,
     ) -> QuotaDecision:
         with self._lock, self._transaction_locked():
             committed = self._conn.execute(
@@ -610,6 +611,11 @@ class UploadsDB:
                 uploaded_at,
                 status,
             )
+            if summary:
+                self._conn.execute(
+                    "UPDATE uploads SET summary = ? WHERE file_id = ? AND user = ?",
+                    (summary, file_id, user),
+                )
             if reservation_kind == "single_shot":
                 self._conn.execute(
                     "DELETE FROM storage_reservations WHERE reservation_id = ?",
@@ -2962,11 +2968,12 @@ async def _scroll_user_rows(qdrant, collection: str) -> dict[str, list[dict]]:
     trusts `kind`: `list_my_files` told the model a video was a text file, and
     `reclaimable_sources` filters on `kind = 'video'`.
 
-    **`artifact` is the reliable signal.** Only the three video stages set it
-    (`transcript`, `visual`, `summary`); an ordinary text or image upload never
-    does. Deriving from it repairs existing rows on the next boot with no
-    migration, because reconcile rewrites `kind` anyway — the same mechanism
-    that broke them fixes them once it is computing the right answer.
+    **MIME plus `artifact` is the reliable signal.** Audio and video text
+    stages set an artifact while preserving the source MIME, so reconciliation
+    restores their file kind from MIME. Document summaries also carry an
+    artifact now, but their application/pdf MIME deliberately retains the
+    payload's text kind. Deriving this way repairs existing media rows on the
+    next boot without turning a summarized PDF into media.
     """
     by_user_file: dict[tuple[str, str], dict] = {}
     for _point_id, payload in await qdrant.scroll_collection(collection):
@@ -2987,14 +2994,16 @@ async def _scroll_user_rows(qdrant, collection: str) -> dict[str, list[dict]]:
         row["chunks"] += 1
         # Checked per point rather than only on the first: a file's points are
         # not ordered, so the one that created the row above may be any of
-        # them — and only some of a video's points are artifacts if the
-        # summary stage ran and the visual pass did not.
+        # them — and only some points are artifacts. MIME distinguishes media
+        # artifacts from the summary attached to a PDF text collection.
         if payload.get("artifact"):
-            row["kind"] = (
-                "audio"
-                if str(payload.get("mime") or "").startswith("audio/")
-                else "video"
-            )
+            artifact_mime = str(payload.get("mime") or "")
+            if artifact_mime.startswith("audio/"):
+                row["kind"] = "audio"
+            elif artifact_mime.startswith("video/"):
+                row["kind"] = "video"
+            else:
+                row["kind"] = str(payload.get("kind") or "text")
     grouped: dict[str, list[dict]] = {}
     for (user, _fid), row in by_user_file.items():
         grouped.setdefault(user, []).append(row)

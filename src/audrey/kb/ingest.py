@@ -440,12 +440,12 @@ async def ingest_summary(
     source_bytes: int,
     uploaded_at: str | None = None,
 ) -> int:
-    """Ingest a video's summary as one searchable chunk (Phase 37).
+    """Ingest a file summary as one searchable chunk (Phase 37).
 
-    Stored on the row, it answers "what is this video" in the file list.
+    Stored on the row, it supplies the short description in the file list.
     Ingested here, it answers the same question in chat without pulling two
-    hundred transcript chunks into context. One extra chunk per video is a
-    rounding error against the transcript it summarises.
+    hundred source chunks into context. One extra chunk per file is a rounding
+    error against the material it summarises.
 
     Deliberately **not** chunked. A summary that needed splitting would no
     longer be a summary, and its value in retrieval is that the whole thing

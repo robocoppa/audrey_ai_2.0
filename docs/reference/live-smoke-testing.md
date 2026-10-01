@@ -21,6 +21,11 @@ the targeted check fails, the change crosses additional boundaries, or the
 user explicitly asks for broader coverage. Hermetic laptop verification is a
 separate required gate for code changes; it does not substitute for live proof.
 
+For user-facing upload, Files, and chat workflows, acceptance is manual-first:
+use a real file in the native browser and inspect the visible state and result.
+A script is appropriate for a protocol boundary or diagnosis, but it does not
+replace the browser flow the user actually relies on.
+
 Current backend addresses:
 
 - Working laptop route — LAN/WARP: `http://192.168.1.11:8000`
@@ -323,21 +328,51 @@ Success is exit code zero and JSON ending in `"status": "passed"`. The
 type `output_text`, and `"sentinel": true`. The `unsupported`
 block must report HTTP 400 and `responses_feature_unsupported`.
 
-## Run the Phase 7A scanned-PDF OCR smoke from the laptop
+## Phase 7 PDF acceptance and diagnostic
 
-**Result:** Passed over LAN/WARP on 2026-09-30. Do not repeat unless a later
-change touches scanned-PDF upload, OCR worker dispatch, document indexing, or
-the native text reader.
+**Result:** The OCR boundary and the original PDF upload/chat experience passed
+on 2026-09-30. Do not repeat them unless a later change touches OCR dispatch,
+document indexing, the reader, or chat grounding.
 
-This targeted backend and worker proof generates its own one-page image-only
-PDF. No video and no prepared upload are required. It verifies that the upload
-enters `pending`, the rebuilt media worker runs Poppler and Tesseract, Audrey
-commits a Ready indexed document, and the native reader returns recognized text
-with a page marker. It then deletes the temporary file and drains cleanup.
+The corrected synthetic proof moved an image-only PDF from Pending to Ready in
+4.619 seconds, returned page-marked recognized text, and cleaned up. The user
+then uploaded a real PDF in the native browser, confirmed the document was
+readable, and received a grounded answer about an uploaded document in chat.
 
-Rebuild `audrey`, `media-worker`, and `audrey-ui` before running it. The worker
-rebuild is required because the OCR executables are installed in its image.
-Use the working LAN/WARP route:
+A later presentation follow-up adds a generated PDF Summary and a Transcript
+tab containing all extracted or OCR text. After rebuilding `audrey` and
+`audrey-ui`, its remaining check is manual:
+
+1. Upload one new real PDF. Existing Ready PDFs are not backfilled.
+2. Wait for Ready, open **View text**, and confirm **Summary** opens first with a
+   natural two or three sentence description.
+3. Open **Transcript** and confirm it contains the document's full text.
+4. Ask one question answered by that document and confirm Audrey grounds its
+   answer in the file.
+
+The already-passed `tests/smoke/smoke_scanned_pdf_ocr.py` remains an optional
+worker diagnostic. It should not be rerun for this presentation-only follow-up.
+
+## Phase 8A MP3 manual acceptance and optional diagnostic
+
+**Result:** Pending after deployment. The first scripted attempt correctly
+reached the worker, where it exposed a faster-whisper/PyAV decoder mismatch.
+The worker now pins `av<19` and decodes a real WAV during its image build.
+
+Rebuild `audrey`, `audrey-ui`, `custom-tools`, and `media-worker`. Then perform
+the primary acceptance check in the native browser with a short spoken MP3:
+
+1. Upload the MP3 in **Files** and confirm **Audio** plus **Transcribing** become
+   **Ready**.
+2. Filter to **Audio** and open **View text**. Confirm Summary and Transcript
+   exist, the transcript matches the recording, and Visual notes is absent.
+3. Confirm the summary is a natural two or three sentence description.
+4. Attach the Ready MP3 to chat, ask about one distinctive spoken fact, and
+   confirm Audrey answers from it.
+5. Hard refresh and confirm the saved message retains the attachment.
+
+If that flow fails and the failing boundary is unclear, run the optional
+synthetic diagnostic from the laptop checkout over LAN/WARP:
 
 ```bash
 cd /home/bart/Documents/github/audrey/audrey_ai_2.0
@@ -345,64 +380,14 @@ cd /home/bart/Documents/github/audrey/audrey_ai_2.0
   set -a
   source .env.test.local
   set +a
-  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_scanned_pdf_ocr.py
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_audio_ingest.py
 )
 ```
 
-Success is exit code zero and JSON ending in `"status": "passed"`. The upload
-must report `initial_status: "pending"`; processing must finish `"ready"` with
-a positive chunk count; the reader must report HTTP 200 and `page_marker: true`;
-and cleanup must report `deleted: true` and repair status `ready`. The script
-uses the existing `AUDREY_USER_JWT` and `AUDREY_ADMIN_JWT` from
-`.env.test.local`, creates one temporary upload, and removes it.
-
-After it passes, upload one real scanned PDF in the Files dialog, wait for Ready,
-and confirm **View text** matches the visible page. Also upload or reuse a
-normal selectable-text PDF and confirm it still becomes Ready immediately.
-
-## Run the Phase 8A MP3 audio-ingestion smoke from the laptop
-
-**Result:** Pending. Run once after deploying the laptop-complete Phase 8A
-changes.
-
-This targeted backend, worker, and native artifact proof creates its own spoken
-MP3 with the laptop's local ffmpeg flite source. You do not need to upload a
-video, record audio, or prepare a file. It verifies that Audrey identifies the
-upload as audio, queues it, transcribes and indexes it with the existing media
-worker, returns the known spoken words through the transcript reader, rejects a
-visual artifact for audio, and completes deletion and repair cleanup.
-
-The private .env.test.local file exists with mode 600 and contains both
-AUDREY_USER_JWT and AUDREY_ADMIN_JWT. Rebuild audrey, audrey-ui, and
-custom-tools before running the smoke. The media-worker code and packages did
-not change in this slice.
-
-Run from the laptop checkout over the working LAN/WARP route:
-
-    cd /home/bart/Documents/github/audrey/audrey_ai_2.0
-    (
-      set -a
-      source .env.test.local
-      set +a
-      AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_audio_ingest.py
-    )
-
-Success is exit code zero and JSON ending in "status": "passed". Upload must
-report kind audio and initial status pending. Processing must reach ready with
-positive chunks and duration plus transcript source whisper. Transcript must
-contain audio, blue, lantern, and ready. Summary-reader HTTP must be 200 with nonempty text,
-visual-reader HTTP must be 422, and cleanup must report deleted true with repair
-status ready.
-
-The script creates one temporary upload and deletes it. If it reports an ffmpeg
-fixture error, the failure is on the laptop and occurs before upload. If the
-row fails, the output includes the deployed worker reason. If known words are
-missing, the output includes the actual transcript.
-
-After the automated smoke passes, the browser check does require any short
-spoken MP3: upload it in Files, confirm audio and Transcribing become Ready,
-filter to Audio, verify Summary and Transcript exist without Visual notes, then
-attach it to a chat question and hard refresh the saved message.
+It creates and removes its own MP3. Success is exit code zero and JSON ending
+in `"status": "passed"`: kind audio, Pending to Ready, positive chunks and
+duration, Whisper transcript containing its known words, a nonempty summary,
+HTTP 422 for a visual artifact, and clean deletion/repair.
 
 ## Before handing over any smoke command
 

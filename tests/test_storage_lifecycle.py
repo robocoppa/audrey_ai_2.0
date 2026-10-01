@@ -172,12 +172,16 @@ async def test_single_reservation_converts_to_committed_bytes_atomically(
         uploaded_at=NOW,
         status="ready",
         max_user_bytes=100,
+        summary="The notes explain the maintenance schedule.",
     )
 
     usage = await db.quota_usage(USER)
     assert usage.stored_bytes == 25
     assert usage.single_shot_bytes == 0
     assert usage.total_bytes == 25
+    assert (await db.get_upload("single-1"))["summary"] == (
+        "The notes explain the maintenance schedule."
+    )
     await storage.release(reservation)  # repeated cleanup is a no-op
     assert (await db.quota_usage(USER)).total_bytes == 25
     db.close()

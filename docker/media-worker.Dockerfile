@@ -53,7 +53,16 @@ WORKDIR /app
 # sampled frames on CPU to decide which of them are worth a GPU call — the
 # frames themselves are produced by ffmpeg, so this is a few hundred KB of
 # image decoding, not an imaging stack.
-RUN pip install --no-cache-dir faster-whisper==1.1.1 "requests>=2.31" "pillow>=10.0"
+# faster-whisper 1.1.1 still passes metadata_errors to av.open. PyAV 19
+# removed that argument, so an unconstrained rebuild accepts an incompatible
+# decoder and every Whisper job fails only after it has been claimed. Keep the
+# major version below that break; bake_whisper.py also opens a real WAV during
+# the image build so a future incompatible resolver result cannot ship.
+RUN pip install --no-cache-dir \
+        faster-whisper==1.1.1 \
+        "av<19" \
+        "requests>=2.31" \
+        "pillow>=10.0"
 
 # Bake the weights. The worker's network is `internal: true`, so it cannot
 # download them at runtime — and even with egress this would be wrong: a

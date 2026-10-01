@@ -24,6 +24,7 @@ from audrey.pipeline.summarise import (
     SummaryUnavailableError,
     brief_video_summary,
     build_input,
+    summarise_document,
     summarise_video,
 )
 
@@ -85,6 +86,15 @@ class TestBuildInput:
 
     def test_an_uncut_input_does_not_claim_to_be_excerpts(self):
         assert "excerpts" not in build_input(_segments(3), _frames(2))
+
+    def test_document_text_is_not_presented_as_speech(self):
+        out = build_input(
+            [{"text": "Quarterly revenue increased."}],
+            [],
+            media_kind="document",
+        )
+        assert "DOCUMENT TEXT" in out
+        assert "WHAT WAS SAID" not in out
 
 
 class _Ollama:
@@ -371,6 +381,71 @@ class TestSummariseVideo:
                 _segments(3), [], filename="v.mp4", duration_s=0.0,
                 ollama=_Ollama(boom=RuntimeError("upstream is down")),
                 registry=_Registry(), gate=_Gate(), cfg=_cfg())
+
+
+class TestSummariseDocument:
+    @pytest.mark.asyncio
+    async def test_it_uses_document_language_and_the_document_filename(self):
+        ollama = _Ollama(
+            content=(
+                "The report explains why the bridge needs repair. "
+                "Its inspection found corrosion near the western support."
+            ),
+        )
+        got = await summarise_document(
+            "Inspection findings show corrosion near the western support.",
+            filename="bridge-report.pdf",
+            ollama=ollama,
+            registry=_Registry(),
+            gate=_Gate(),
+            cfg=_cfg(),
+        )
+
+        system, user = [message["content"] for message in ollama.calls[0]["messages"]]
+        assert "person who read it" in system
+        assert "Document: bridge-report.pdf" in user
+        assert "DOCUMENT MATERIAL" in user
+        assert "DOCUMENT TEXT" in user
+        assert got.startswith("The report explains")
+
+    @pytest.mark.asyncio
+    async def test_long_documents_are_bounded_and_sampled_across_the_file(self):
+        text = " ".join(f"section-{i} detail" for i in range(3000))
+        ollama = _Ollama()
+        await summarise_document(
+            text,
+            filename="long.pdf",
+            ollama=ollama,
+            registry=_Registry(),
+            gate=_Gate(),
+            cfg=_cfg(summary_input_chars=1800),
+        )
+
+        user = ollama.calls[0]["messages"][1]["content"]
+        assert "excerpts, evenly sampled across the document" in user
+        assert "section-0" in user
+        assert any(f"section-{i}" in user for i in range(2400, 3000))
+
+    @pytest.mark.asyncio
+    async def test_an_unbroken_extracted_token_cannot_bypass_the_input_budget(self):
+        ollama = _Ollama()
+        await summarise_document(
+            "x" * 50_000,
+            filename="machine-output.pdf",
+            ollama=ollama,
+            registry=_Registry(),
+            gate=_Gate(),
+            cfg=_cfg(summary_input_chars=1800),
+        )
+
+        user = ollama.calls[0]["messages"][1]["content"]
+        assert len(user) < 3000
+        assert "excerpts, evenly sampled across the document" in user
+
+    def test_document_preamble_is_removed_before_storage(self):
+        assert brief_video_summary(
+            "Let me summarize this document. The report recommends replacing the seal.",
+        ) == "The report recommends replacing the seal."
 
 
 class _Qdrant:

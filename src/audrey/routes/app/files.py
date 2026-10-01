@@ -424,11 +424,15 @@ async def get_file_artifact(
     offset: int = Query(default=0, ge=0),
     principal: Principal = Depends(_files_access),
 ) -> NativeFileArtifactResponse:
-    """Read one page of a media sidecar by exact owner-bound file ID."""
+    """Read one page of a derived summary or media text by owner-bound ID."""
 
     row = await _owned_row(request, principal, file_id)
     kind = _kind(row.mime)
-    if kind not in {"video", "audio"} or (kind == "audio" and artifact == "visual"):
+    media_artifact = kind in {"video", "audio"} and not (
+        kind == "audio" and artifact == "visual"
+    )
+    document_summary = kind == "text" and artifact == "summary"
+    if not media_artifact and not document_summary:
         raise HTTPException(
             status_code=422,
             detail="That artifact is unavailable for this file type.",
@@ -466,11 +470,15 @@ async def download_file_artifact(
     request: Request,
     principal: Principal = Depends(_files_access),
 ) -> FileResponse:
-    """Download one existing derived media text as a private attachment."""
+    """Download one existing derived summary or media text privately."""
 
     row = await _owned_row(request, principal, file_id)
     kind = _kind(row.mime)
-    if kind not in {"video", "audio"} or (kind == "audio" and artifact == "visual"):
+    media_artifact = kind in {"video", "audio"} and not (
+        kind == "audio" and artifact == "visual"
+    )
+    document_summary = kind == "text" and artifact == "summary"
+    if not media_artifact and not document_summary:
         raise HTTPException(
             status_code=422,
             detail="That artifact is unavailable for this file type.",

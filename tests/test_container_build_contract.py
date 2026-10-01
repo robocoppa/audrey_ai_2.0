@@ -20,6 +20,7 @@ UI_FAVICON = ROOT / "web" / "src" / "assets" / "brand" / "builtryte-favicon.png"
 TOOLS_DOCKERFILE = ROOT / "docker" / "custom-tools.Dockerfile"
 FETCHER_DOCKERFILE = ROOT / "docker" / "media-fetcher.Dockerfile"
 WORKER_DOCKERFILE = ROOT / "docker" / "media-worker.Dockerfile"
+WHISPER_BAKE_SCRIPT = ROOT / "docker" / "bake_whisper.py"
 COMPOSE = ROOT / "compose.yaml"
 CONFIG = ROOT / "config.yaml"
 
@@ -166,6 +167,15 @@ def test_media_worker_bakes_the_scanned_pdf_ocr_runtime():
     assert "tesseract-ocr-eng" in worker
     assert "COPY src/audrey/media" in worker
     assert "USER worker" in worker
+
+
+def test_media_worker_rejects_an_incompatible_whisper_decoder_during_build():
+    worker = _text(WORKER_DOCKERFILE)
+    bake = _text(WHISPER_BAKE_SCRIPT)
+
+    assert '"av<19"' in worker
+    assert "verify_audio_decoder()" in bake
+    assert "decode_audio(str(wav))" in bake
 
 
 def test_bind_mounts_match_the_non_root_cache_and_read_only_dataset_contract():

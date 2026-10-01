@@ -227,3 +227,82 @@ it("shows audio summary and transcript without a visual-notes tab", async () => 
   fireEvent.click(screen.getByRole("button", { name: "Transcript" }));
   expect(await screen.findByText("The blue lantern is ready.")).toBeVisible();
 });
+
+
+it("shows a PDF summary first and its extracted text under Transcript", async () => {
+  const file = {
+    id: "pdf_ready",
+    filename: "inspection.pdf",
+    mime: "application/pdf",
+    bytes: 4096,
+    uploaded_at: "2026-09-30T00:00:00+00:00",
+    kind: "text",
+    chunks: 3,
+    status: "ready",
+    failure_reason: "",
+    duration_s: 0,
+    summary: "The inspection found corrosion and recommends replacing the western seal.",
+    source_freed_at: "",
+    leased_at: "",
+    source_url: "",
+    transcript_source: "",
+    fetch_downloaded_bytes: 0,
+    fetch_total_bytes: 0,
+  };
+  const listing = {
+    items: [file],
+    total_bytes: file.bytes,
+    server_time: "2026-09-30T00:01:00+00:00",
+    limits: {
+      max_upload_bytes: 50_000_000,
+      max_user_bytes: 1_000_000_000,
+      allowed_extensions: [".pdf"],
+      chunked_max_bytes: 2_000_000_000,
+      part_size: 8_000_000,
+      fetch_hosts: [],
+      max_images_per_turn: 4,
+    },
+  };
+  const fetchMock = vi.fn().mockImplementation((path: string) => {
+    if (path === "/api/files") {
+      return Promise.resolve(new Response(JSON.stringify(listing), {
+        headers: { "Content-Type": "application/json" },
+      }));
+    }
+    const summary = path.includes("/artifacts/summary?");
+    const body = summary
+      ? {
+          id: file.id,
+          artifact: "summary",
+          text: file.summary,
+          offset: 0,
+          next_offset: null,
+          total_chars: file.summary.length,
+        }
+      : {
+          id: file.id,
+          text: "Full extracted inspection text.",
+          offset: 0,
+          next_offset: null,
+          total_chars: 31,
+        };
+    return Promise.resolve(new Response(JSON.stringify(body), {
+      headers: { "Content-Type": "application/json" },
+    }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<FileManager onClose={() => undefined} />);
+
+  fireEvent.click(await screen.findByRole("button", {
+    name: "View document text for inspection.pdf",
+  }));
+  expect(screen.getByRole("group", { name: "Document text type" })).toBeVisible();
+  expect(await screen.findByText(file.summary)).toBeVisible();
+
+  fireEvent.click(screen.getByRole("button", { name: "Transcript" }));
+  expect(await screen.findByText("Full extracted inspection text.")).toBeVisible();
+  expect(fetchMock).toHaveBeenCalledWith("/api/files/pdf_ready/text?offset=0", {
+    credentials: "include",
+  });
+});

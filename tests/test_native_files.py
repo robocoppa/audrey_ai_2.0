@@ -417,6 +417,32 @@ def test_native_audio_artifacts_offer_transcript_and_summary_but_not_visual(
     ).status_code == 200
 
 
+def test_native_pdf_offers_summary_as_an_artifact(monkeypatch, tmp_path):
+    listing = _listing()
+    listing.files[0].filename = "inspection.pdf"
+    listing.files[0].mime = "application/pdf"
+    listing.files[0].summary = "The inspection recommends replacing the western seal."
+    owner_dir = tmp_path / upload_routes.sanitize_user("private-storage-123")
+    owner_dir.mkdir()
+    (owner_dir / "file_123.summary.txt").write_text(
+        listing.files[0].summary,
+        encoding="utf-8",
+    )
+
+    async def fake_list(request, me):
+        return listing
+
+    monkeypatch.setattr(native_files.upload_routes, "list_files", fake_list)
+    monkeypatch.setattr(native_files.upload_routes, "_upload_root", lambda request: tmp_path)
+    client = TestClient(_app())
+
+    summary = client.get("/api/files/file_123/artifacts/summary")
+    assert summary.status_code == 200
+    assert summary.json()["text"] == listing.files[0].summary
+    assert client.get("/api/files/file_123/artifacts/transcript").status_code == 422
+    assert client.get("/api/files/file_123/artifacts/visual").status_code == 422
+
+
 def test_native_video_artifact_downloads_existing_sidecars_after_source_reclamation(
     monkeypatch, tmp_path,
 ):

@@ -113,7 +113,7 @@ from audrey.kb.user_store import (
     sanitize_user,
     user_text_collection,
 )
-from audrey.pipeline.summarise import summarise_video
+from audrey.pipeline.summarise import summarise_document, summarise_video
 
 log = logging.getLogger(__name__)
 
@@ -136,9 +136,8 @@ class FileRow(BaseModel):
     # Seconds of media. 0 for non-media and for a video with no audio stream,
     # so it is only meaningful read alongside `kind`.
     duration_s: float = 0.0
-    # One-paragraph summary of processed audio or video. Empty for everything
-    # else, and for media whose summary call failed — which is a
-    # missing field, never a failed row.
+    # Short generated summary of a processed audio/video file or PDF. Empty
+    # when its summary call failed — a missing field, never a failed row.
     summary: str = ""
     # When the uploaded bytes were reclaimed (Phase 38). Empty while the source
     # is still on disk. Surfaced rather than kept internal because `bytes` goes
@@ -332,8 +331,8 @@ class ModelFileRow(BaseModel):
     # what a language model should not be doing.
     waiting_for_s: float = 0.0
     # Which text can actually be read back with `get_file_text`: `document`
-    # for a ready text upload, or `transcript` / `visual` / `summary` for a
-    # audio/video file. Checked against the source or sidecars on disk.
+    # for a ready text upload, `summary` for a summarized PDF, or transcript /
+    # visual / summary for audio and video. Checked against source or sidecars.
     #
     # **An empty list is the point.** Every other field here expresses absence
     # as a blank — `summary: ""`, `duration_s: 0.0` — and blanks read as
@@ -442,7 +441,8 @@ def _available_artifacts(user_dir: Path, rows: list[dict]) -> dict[str, list[str
 
     Checked against the filesystem rather than inferred from the row, because
     the row cannot answer it. A text document's source is the readable
-    `document`; video texts live in sidecars. `chunks > 0` is true for a video
+    `document`, and its optional summary is a sidecar; media texts also live in
+    sidecars. `chunks > 0` is true for a video
     with a transcript AND for one with only frame descriptions; `summary !=
     ''` says the summary is on the row but not whether its sidecar was written.
     The files are what `get_file_text` will actually read, so they are what to
@@ -678,6 +678,57 @@ async def _store_pending_job(
     )
 
 
+async def _store_document_summary(
+    request: Request,
+    text: str,
+    *,
+    user: str,
+    file_id: str,
+    filename: str,
+    mime: str,
+    source_bytes: int,
+    collection: str,
+    stamp: str,
+    qdrant: QdrantKB,
+    text_embedder,
+) -> tuple[str, int]:
+    """Create and index a fail-soft PDF summary beside its complete text."""
+    try:
+        summary = await summarise_document(
+            text,
+            filename=filename,
+            ollama=request.app.state.ollama,
+            registry=request.app.state.registry,
+            gate=request.app.state.gate,
+            cfg=request.app.state.cfg,
+            user_id=user,
+        )
+    except Exception as exc:  # noqa: BLE001 - document text remains useful without it
+        log.warning("files: document summary failed for %s (file stays ready): %s", file_id, exc)
+        return "", 0
+
+    try:
+        added = await ingest_summary(
+            summary,
+            sidecar=(
+                _upload_root(request) / sanitize_user(user) / f"{file_id}.summary.txt"
+            ),
+            qdrant=qdrant,
+            embedder=text_embedder,
+            collection=collection,
+            user=user,
+            file_id=file_id,
+            filename=filename,
+            mime=mime,
+            source_bytes=source_bytes,
+            uploaded_at=stamp,
+        )
+    except Exception as exc:  # noqa: BLE001 - keep the useful row summary
+        log.warning("files: document summary ingest failed for %s: %s", file_id, exc)
+        return summary, 0
+    return summary, added
+
+
 async def _validate_and_ingest(
     request: Request,
     dest: Path,
@@ -745,6 +796,8 @@ async def _validate_and_ingest(
             purpose=kind,
         )
 
+    summary = ""
+    summary_sidecar: Path | None = None
     try:
         if kind == "text":
             if not is_text_mime(mime):
@@ -775,6 +828,32 @@ async def _validate_and_ingest(
                     purpose="scanned PDF",
                 )
             collection = text_col
+            if mime == "application/pdf":
+                try:
+                    document_text = await asyncio.to_thread(extract_uploaded_text, dest)
+                except Exception as exc:  # noqa: BLE001 - ingestion already proved the file useful
+                    log.warning("files: could not reopen %s for summary: %s", file_id, exc)
+                else:
+                    summary, summary_chunks = await _store_document_summary(
+                        request,
+                        document_text,
+                        user=user,
+                        file_id=file_id,
+                        filename=filename,
+                        mime=mime,
+                        source_bytes=written,
+                        collection=text_col,
+                        stamp=stamp,
+                        qdrant=qdrant,
+                        text_embedder=text_embedder,
+                    )
+                    n_chunks += summary_chunks
+                    if summary:
+                        summary_sidecar = (
+                            _upload_root(request)
+                            / sanitize_user(user)
+                            / f"{file_id}.summary.txt"
+                        )
         else:
             if image_embedder is None:
                 raise HTTPException(status_code=503, detail="Image embedder not initialized.")
@@ -821,6 +900,7 @@ async def _validate_and_ingest(
             uploaded_at=stamp,
             status="ready",
             max_user_bytes=max_total,
+            summary=summary,
         )
     except Exception as e:
         log.exception(
@@ -843,6 +923,8 @@ async def _validate_and_ingest(
                 rollback_err,
             )
         _safe_unlink(dest)
+        if summary_sidecar is not None:
+            _safe_unlink(summary_sidecar)
         if isinstance(e, QuotaExceededError):
             raise _quota_http_error(e) from e
         raise HTTPException(status_code=500, detail=f"Index write failed: {e}") from e
@@ -2283,11 +2365,27 @@ async def ocr_result(
         )
         raise HTTPException(status_code=500, detail=f"Ingest failed: {exc}") from exc
 
+    summary, summary_chunks = await _store_document_summary(
+        request,
+        text_value,
+        user=user,
+        file_id=file_id,
+        filename=str(row["filename"]),
+        mime=str(row["mime"]),
+        source_bytes=int(row["bytes"]),
+        collection=text_col,
+        stamp=stamp,
+        qdrant=qdrant,
+        text_embedder=text_embedder,
+    )
+    chunks += summary_chunks
+
     if not await db.complete_job(
         file_id=file_id,
         lease_id=body.lease_id,
         collection=text_col,
         chunks=chunks,
+        summary=summary,
         completed_at=stamp,
     ):
         raise HTTPException(
@@ -2972,11 +3070,16 @@ async def read_artifact(
             )
         elif artifact == "visual" and str(row["kind"]) != "video":
             reason = f"is a {row['kind']} file, and visual exists only for video"
-        elif artifact in {"transcript", "summary"} and str(row["kind"]) not in {
-            "video", "audio"
+        elif artifact == "transcript" and str(row["kind"]) not in {"video", "audio"}:
+            reason = (
+                f"is a {row['kind']} file, and transcript exists only for audio or video"
+            )
+        elif artifact == "summary" and str(row["kind"]) not in {
+            "text", "video", "audio"
         }:
             reason = (
-                f"is a {row['kind']} file, and {artifact} exists only for audio or video"
+                f"is a {row['kind']} file, and summary exists only for documents, "
+                "audio, or video"
             )
         elif artifact == "document":
             reason = "finished processing but its document text is unavailable"

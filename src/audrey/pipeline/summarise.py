@@ -68,13 +68,24 @@ AUDIO_SUMMARY_SYSTEM = (
     "material below; do not invent events between excerpts."
 )
 
+DOCUMENT_SUMMARY_SYSTEM = (
+    "Write a natural description for someone browsing their private document "
+    "library. Use two or three concise, complete sentences. Explain the main "
+    "subject, purpose or findings, and the most useful takeaway. Use specific "
+    "details from the document and sound like a person who read it. Start "
+    "directly with the document; do not mention the user, the request, these "
+    "instructions, extraction, excerpts, source text, or being an AI. Do not "
+    "write a title, heading, or bullets. Use only the material below; do not "
+    "invent details that are not present."
+)
+
 SUMMARY_MAX_WORDS = 80
 SUMMARY_MAX_CHARS = 560
 SUMMARY_MAX_OUTPUT_TOKENS = 240
 
 _PREAMBLE = re.compile(
     r"^(?:let me|i(?:'ll| will)) (?:analy[sz]e|summari[sz]e|review) "
-    r"(?:this|the) (?:video|recording|audio)[.!:]?\s*|"
+    r"(?:this|the) (?:video|recording|audio|document|pdf)[.!:]?\s*|"
     r"^here(?:'s| is) (?:a |the )?(?:brief )?summary[.:]?\s*|"
     r"^(?:#+\s*)?(?:\*\*)?summary(?:\*\*)?\s*:\s*",
     re.IGNORECASE,
@@ -91,7 +102,7 @@ _INSTRUCTION_ECHO = re.compile(
 
 
 def brief_video_summary(raw: str) -> str:
-    """Keep only a short description, never an echo of the assignment."""
+    """Keep only a short file description, never an echo of the assignment."""
     result = " ".join(raw.split())
     for _ in range(3):
         trimmed = _PREAMBLE.sub("", result, count=1).strip()
@@ -150,8 +161,10 @@ def _thin(lines: list[str], budget: int) -> tuple[list[str], bool]:
         return lines, False
 
     keep = max(1, int(len(lines) * budget / total))
-    step = len(lines) / keep
-    picked = [lines[min(len(lines) - 1, int(i * step))] for i in range(keep)]
+    if keep == 1:
+        return [lines[0]], True
+    step = (len(lines) - 1) / (keep - 1)
+    picked = [lines[round(i * step)] for i in range(keep)]
     return picked, True
 
 
@@ -189,9 +202,13 @@ def build_input(
 
     parts: list[str] = []
     if spoken:
-        subject = "recording" if media_kind == "audio" else "video"
-        note = f" (excerpts, evenly sampled across the {subject})" if spoken_cut else ""
-        parts.append(f"WHAT WAS SAID{note}:\n" + "\n".join(spoken))
+        if media_kind == "document":
+            note = " (excerpts, evenly sampled across the document)" if spoken_cut else ""
+            parts.append(f"DOCUMENT TEXT{note}:\n" + "\n".join(spoken))
+        else:
+            subject = "recording" if media_kind == "audio" else "video"
+            note = f" (excerpts, evenly sampled across the {subject})" if spoken_cut else ""
+            parts.append(f"WHAT WAS SAID{note}:\n" + "\n".join(spoken))
     if shown:
         note = " (excerpts, evenly sampled across the video)" if shown_cut else ""
         parts.append(f"WHAT WAS ON SCREEN{note}:\n\n" + "\n\n".join(shown))
@@ -219,8 +236,8 @@ async def summarise_video(
     point the transcript and descriptions are already ingested and useful, so a
     summary failure is a missing field and never a failed row.
     """
-    if media_kind not in {"video", "audio"}:
-        raise ValueError(f"unsupported media kind: {media_kind}")
+    if media_kind not in {"video", "audio", "document"}:
+        raise ValueError(f"unsupported summary kind: {media_kind}")
     video_cfg = _cfg(cfg)
     material = build_input(
         segments,
@@ -240,8 +257,16 @@ async def summarise_video(
         models.append(fallback_model)
 
     minutes = duration_s / 60.0
-    media_label = "Audio recording" if media_kind == "audio" else "Video file"
-    material_label = "AUDIO MATERIAL" if media_kind == "audio" else "VIDEO MATERIAL"
+    media_label = {
+        "audio": "Audio recording",
+        "document": "Document",
+        "video": "Video file",
+    }[media_kind]
+    material_label = {
+        "audio": "AUDIO MATERIAL",
+        "document": "DOCUMENT MATERIAL",
+        "video": "VIDEO MATERIAL",
+    }[media_kind]
     header = (
         f"{media_label}: {filename}\n"
         f"Length: {minutes:.0f} minutes\n\n"
@@ -271,6 +296,8 @@ async def summarise_video(
                             "content": (
                                 AUDIO_SUMMARY_SYSTEM
                                 if media_kind == "audio"
+                                else DOCUMENT_SUMMARY_SYSTEM
+                                if media_kind == "document"
                                 else SUMMARY_SYSTEM
                             ),
                         },
@@ -327,6 +354,48 @@ async def summarise_video(
     raise SummaryUnavailableError("no summary model was configured")
 
 
+def _document_units(text: str, *, max_chars: int = 600) -> list[str]:
+    """Split extracted prose into bounded units before even sampling it."""
+    remaining = " ".join(text.split())
+    units: list[str] = []
+    while remaining:
+        if len(remaining) <= max_chars:
+            units.append(remaining)
+            break
+        split_at = remaining.rfind(" ", 0, max_chars + 1)
+        if split_at <= 0:
+            split_at = max_chars
+        units.append(remaining[:split_at])
+        remaining = remaining[split_at:].lstrip()
+    return units
+
+
+async def summarise_document(
+    text: str,
+    *,
+    filename: str,
+    ollama: OllamaClient,
+    registry: ModelRegistry,
+    gate: FairLocalGate,
+    cfg: Any,
+    user_id: str | None = None,
+) -> str:
+    """Summarise extracted document text through the bounded summary path."""
+    segments = [{"text": unit} for unit in _document_units(text)]
+    return await summarise_video(
+        segments,
+        [],
+        filename=filename,
+        duration_s=0.0,
+        ollama=ollama,
+        registry=registry,
+        gate=gate,
+        cfg=cfg,
+        user_id=user_id,
+        media_kind="document",
+    )
+
+
 async def _think_flag(ollama: Any, model: str, cfg: Any) -> bool | None:
     """Whether to send `think`, and what. `None` means do not send the field.
 
@@ -377,8 +446,10 @@ __all__ = [
     "DEFAULT_INPUT_BUDGET",
     "SUMMARY_SYSTEM",
     "AUDIO_SUMMARY_SYSTEM",
+    "DOCUMENT_SUMMARY_SYSTEM",
     "SummaryUnavailableError",
     "brief_video_summary",
     "build_input",
+    "summarise_document",
     "summarise_video",
 ]

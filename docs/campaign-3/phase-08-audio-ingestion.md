@@ -1,6 +1,6 @@
 # Campaign 3 Phase 8 - MP3 audio ingestion
 
-**Status:** Slice 8A is laptop-complete and awaiting its targeted Unraid smoke.
+**Status:** Slice 8A is laptop-complete and awaits deployment plus its manual native-browser check.
 
 ## Goal
 
@@ -84,68 +84,49 @@ summary does not fail the audio row.
   new audio attachment under schema 16.
 - The generated smoke fixture is a real MP3 with audio and no video stream.
 - Focused backend checks pass: 259 tests.
-- The full hermetic backend suite passes: 3,033 tests with one existing FastAPI
+- The full hermetic backend suite passes: 3,043 tests with one existing FastAPI
   deprecation warning.
 - Changed-file Ruff, Python compilation, and diff checks pass.
 - Frontend packages are present, but this shell has no Node or npm executable,
   so the Vitest and TypeScript build commands cannot run here. The deployment
   build is the remaining compile proof for the UI changes.
 
-## Deploy and targeted live smoke
+## Decoder compatibility repair
 
-Rebuild audrey, audrey-ui, and custom-tools. The existing media-worker image
-already handles audio-only ffmpeg input, and this slice does not change worker
-code or packages.
+The first synthetic live attempt reached the worker but failed before Whisper
+could read its WAV: faster-whisper 1.1.1 passed `metadata_errors` to `av.open`,
+while a fresh dependency resolution had installed PyAV 19 after that argument
+was removed. The worker now pins `av<19`. Its image build also decodes a real
+16 kHz mono WAV before baking model weights, so the same incompatibility fails
+the build instead of the first queued recording.
 
-Run the targeted smoke from the laptop checkout over the working LAN/WARP
-route. **You do not upload anything first.** The script uses the laptop's local
-ffmpeg flite source to create a short spoken MP3, uploads it, waits for the
-deployed worker, reads known words from its transcript, confirms audio has no
-visual artifact, deletes the upload, and drains cleanup.
+## Deploy and manual live check
 
-    cd /home/bart/Documents/github/audrey/audrey_ai_2.0
-    (
-      set -a
-      source .env.test.local
-      set +a
-      AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_audio_ingest.py
-    )
+Rebuild `audrey`, `audrey-ui`, `custom-tools`, and `media-worker`. The worker
+rebuild is required for the PyAV pin and decoder build gate. It can take longer
+than the application build because it bakes the Whisper model.
 
-Success is exit code zero and JSON ending in "status": "passed" with:
+Use the actual native Files and Chat surfaces for acceptance:
 
-- upload HTTP 200, kind audio, and initial_status pending;
-- processing final_status ready, a positive chunk count, a positive duration,
-  and transcript source whisper;
-- transcript HTTP 200 with all four required words: audio, blue, lantern, and
-  ready;
-- summary reader HTTP 200 with a nonempty library description;
-- visual reader HTTP 422;
-- cleanup deleted true and repair status ready.
-
-A failure that says ffmpeg cannot generate the fixture is a laptop prerequisite
-failure and happens before upload. A row-level failure includes the worker's
-bounded reason. A transcript-word failure prints the recognized text so the
-fixture or transcription can be corrected without guessing.
-
-## Browser check
-
-After the automated smoke passes, use any short spoken MP3 for the visible UI
-check:
-
-1. Open **Files** and upload the MP3. No video is needed.
-2. Confirm the row says **audio**, shows the music-note icon, and changes from
+1. Choose a short spoken MP3 with one clear, distinctive fact.
+2. Upload it in **Files**. Confirm it is labeled **Audio** and moves from
    **Transcribing** to **Ready**.
-3. Filter Type to **Audio**, open **View text**, and confirm only **Summary** and
-   **Transcript** tabs exist. Read the transcript and make sure it matches the
+3. Filter Type to **Audio** and choose **View text**. Confirm **Summary** opens
+   first, **Transcript** contains the spoken words, and there is no **Visual
+   notes** tab.
+4. Confirm the summary is a natural two or three sentence description of the
    recording.
-4. Attach the Ready MP3 to a new chat message and ask one specific question
-   answered in the recording. Confirm Audrey answers from its contents and the
-   saved message still shows the attachment after a hard refresh.
+5. Attach that Ready MP3 to a new chat and ask about the distinctive fact.
+   Confirm Audrey answers from the recording.
+6. Hard refresh and confirm the saved message still shows the audio attachment.
+
+The synthetic `tests/smoke/smoke_audio_ingest.py` remains available as an
+optional protocol diagnostic. It creates and removes its own MP3, which is
+useful for separating API, worker, and speech-recognition failures, but it is
+not the product acceptance gate.
 
 ## Completion gate
 
-Slice 8A completes when the targeted automated smoke passes on Unraid and the
-browser check confirms audio filtering, artifact tabs, and one saved chat
-attachment. WAV, M4A, FLAC, music analysis, diarization, and speaker labels
-remain later work.
-
+Slice 8A completes when the rebuilt worker passes the manual browser flow above.
+WAV, M4A, FLAC, music analysis, diarization, and speaker labels remain later
+work.

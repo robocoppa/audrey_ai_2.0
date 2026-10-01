@@ -1,6 +1,6 @@
 # Campaign 3 Phase 7 - scanned PDF OCR
 
-**Status:** Complete and live-settled on 2026-09-30.
+**Status:** OCR is complete and live-settled; the PDF Summary/Transcript follow-up is laptop-complete and awaiting deployment.
 
 ## Goal
 
@@ -30,8 +30,9 @@ The upload flow is:
    the Files viewer, and retrieval see the same derived text.
 
 The original PDF remains the quota and download object. The derived
-`<file_id>.ocr.txt` sidecar supplies text but does not replace the original byte
-count or become a video-style artifact.
+`<file_id>.ocr.txt` sidecar supplies the complete Transcript text without
+replacing the original byte count. A separate owner-scoped summary sidecar
+holds the generated document description.
 
 The worker image now includes `poppler-utils`, `tesseract-ocr`, and the explicit
 English language pack. The command contracts follow the official
@@ -77,59 +78,44 @@ uses the existing tombstone and repair lifecycle.
   owner-scoped text collection without being mislabeled as a video artifact.
 - The generated live fixture is verified as a one-page image PDF with no text
   layer.
-- The full hermetic backend suite passes: 3,022 tests with one existing FastAPI
-  deprecation warning. Changed-file Ruff, Python compilation, YAML parsing, and
-  diff checks pass.
+- The full hermetic backend suite passes: 3,043 tests with one existing FastAPI
+  deprecation warning. Changed-file Ruff, Python compilation, and diff checks
+  pass.
 - Frontend packages are present in this checkout, but its shell has no Node or
   npm executable. The browser test/build command could not run locally. The
   frontend change is the upload help sentence only.
 
-## Deploy and targeted live smoke
+## Live evidence and PDF presentation follow-up
 
-Rebuild `audrey`, `media-worker`, and `audrey-ui`. Rebuilding the worker is
-required because Poppler and Tesseract are image packages; restarting the old
-image cannot add them.
-
-Run the targeted smoke from the laptop checkout over the working LAN/WARP
-route. **You do not need to upload a PDF first.** The script generates a
-high-contrast image-only PDF, uploads it, waits for the deployed worker, reads
-back the recognized text, deletes the temporary upload, and drains cleanup.
-
-```bash
-cd /home/bart/Documents/github/audrey/audrey_ai_2.0
-(
-  set -a
-  source .env.test.local
-  set +a
-  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_scanned_pdf_ocr.py
-)
-```
-
-Success is exit code zero and JSON ending in `"status": "passed"` with:
-
-- upload `initial_status: "pending"`;
-- processing `final_status: "ready"` and a positive chunk count;
-- reader HTTP 200, `page_marker: true`, and all required words;
-- cleanup `deleted: true` and `repair_status: "ready"`.
-
-A failure naming a missing executable means the old `media-worker` image is
-still running or its rebuild failed. A row-level failure includes the bounded
-OCR reason in the script output.
-
-The first live attempt completed queueing, OCR, indexing, reading, deletion,
-and repair, but its synthetic all-caps bitmap caused Tesseract to split `TOTAL
-FORTY TWO` across lines. The corrected DejaVu Sans fixture then passed: the PDF
+The corrected synthetic OCR proof passed on 2026-09-30: the image-only PDF
 moved from Pending to Ready in 4.619 seconds, produced one indexed chunk, the
 reader returned 101 characters with its page marker and every required word,
-and deletion plus repair completed cleanly.
+and deletion plus repair completed cleanly. The user then manually uploaded a
+PDF through Files, confirmed the document was readable, attached a document in
+chat, and received an answer grounded in its contents. That upload/chat path is
+settled and should not be repeated for the OCR slice.
 
-After the automated smoke passes, the useful browser check is one real scanned
-PDF: upload it in **Files**, watch Pending/Processing become Ready, choose
-**View text**, and confirm the recognized words match the page. A normal PDF
-with selectable text should still become Ready immediately.
+The follow-up adds a generated two or three sentence summary for every newly
+processed PDF. **View text** now opens on **Summary**; **Transcript** shows the
+complete selectable or OCR text. Summary generation is fail-soft, so a useful
+indexed document remains Ready if its summary model is unavailable.
+
+After deploying `audrey` and `audrey-ui`, test this presentation with one real
+PDF in the native browser:
+
+1. Upload a new PDF. Existing Ready PDFs are not backfilled by this slice.
+2. Wait for **Ready**, choose **View text**, and confirm **Summary** opens first
+   with a natural two or three sentence description.
+3. Choose **Transcript** and confirm the complete document text appears.
+4. Ask Audrey one question whose answer is in that PDF and confirm the answer is
+   grounded in the document.
+
+This one manual flow is the remaining acceptance check for the follow-up. The
+already-passed synthetic OCR script remains diagnostic evidence and does not
+need to be rerun.
 
 ## Completion gate
 
-The automated Unraid smoke passed and the user accepted the result on
-2026-09-30. Broader languages, handwriting, OCR correction, audio-only files,
-and other document formats stay outside this completed slice.
+OCR remains complete. The presentation follow-up completes when a newly
+uploaded PDF shows both Summary and Transcript in the deployed Files page and
+answers one grounded chat question.

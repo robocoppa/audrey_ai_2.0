@@ -89,6 +89,57 @@ async def test_image_only_pdf_becomes_a_pending_text_job(
 
 
 @pytest.mark.asyncio
+async def test_text_layer_pdf_commits_its_summary_with_the_ready_row(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    dest = tmp_path / "report.pdf"
+    dest.write_bytes(b"%PDF text fixture")
+    storage = _Storage()
+    reservation = StorageReservation("r1", "alice@example.com", "single_shot", 17)
+
+    monkeypatch.setattr(files_routes, "sniff_mime", lambda _path: "application/pdf")
+
+    async def ingest_text(*args, **kwargs):
+        return 2
+
+    async def store_summary(*args, **kwargs):
+        assert args[1] == "Extracted report text."
+        return "The report identifies the maintenance priorities.", 1
+
+    monkeypatch.setattr(files_routes, "ingest_user_text_file", ingest_text)
+    monkeypatch.setattr(
+        files_routes,
+        "extract_uploaded_text",
+        lambda _path: "Extracted report text.",
+    )
+    monkeypatch.setattr(files_routes, "_store_document_summary", store_summary)
+
+    response = await _validate_and_ingest(
+        _request(tmp_path),
+        dest,
+        user="alice@example.com",
+        file_id="doc1",
+        filename="report.pdf",
+        written=17,
+        max_total=1000,
+        qdrant=object(),
+        text_embedder=object(),
+        image_embedder=None,
+        storage=storage,
+        reservation=reservation,
+        text_col="kb_user_text",
+        image_col="kb_user_images",
+    )
+
+    assert response.status == "ready"
+    assert response.chunks == 3
+    assert storage.commits[0]["summary"] == (
+        "The report identifies the maintenance priorities."
+    )
+
+
+@pytest.mark.asyncio
 async def test_ocr_kill_switch_restores_the_immediate_empty_pdf_rejection(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -248,8 +299,13 @@ async def test_claim_and_result_complete_a_scanned_pdf_job(
         assert kwargs["source"].read_text(encoding="utf-8") == text
         return 2
 
+    async def store_summary(*args, **kwargs):
+        assert args[1].startswith("--- Page 1 ---")
+        return "The invoice records a total of forty-two dollars.", 1
+
     monkeypatch.setattr(files_routes, "ensure_user_collections", collections)
     monkeypatch.setattr(files_routes, "ingest_user_text_content", ingest)
+    monkeypatch.setattr(files_routes, "_store_document_summary", store_summary)
     client = TestClient(_app(db, tmp_path))
 
     claim = client.post("/v1/files/jobs/claim", headers=_headers())
@@ -279,7 +335,7 @@ async def test_claim_and_result_complete_a_scanned_pdf_job(
     )
 
     assert result.status_code == 200
-    assert result.json() == {"file_id": "doc1", "status": "ready", "chunks": 2}
+    assert result.json() == {"file_id": "doc1", "status": "ready", "chunks": 3}
     assert captured["source_bytes"] == 9876
     assert captured["user"] == "alice@example.com"
     assert captured["file_id"] == "doc1"
@@ -290,9 +346,10 @@ async def test_claim_and_result_complete_a_scanned_pdf_job(
     assert (row["status"], row["collection"], row["chunks"]) == (
         "ready",
         "kb_user_text_alice",
-        2,
+        3,
     )
     assert row["bytes"] == 9876
+    assert row["summary"] == "The invoice records a total of forty-two dollars."
     db.close()
 
 

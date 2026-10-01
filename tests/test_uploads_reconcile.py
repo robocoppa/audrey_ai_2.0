@@ -350,10 +350,20 @@ class TestBackfillPreservesJobState:
 # set it.
 
 class TestVideoKindSurvivesReconcile:
-    def _artifact_point(self, file_id: str, artifact: str) -> dict:
-        # Deliberately `kind="text"`: that IS what the deployed payloads say,
-        # and a fixture writing "video" here would test nothing.
-        return {**_point(file_id, kind="text"), "artifact": artifact}
+    def _artifact_point(
+        self,
+        file_id: str,
+        artifact: str,
+        *,
+        mime: str = "video/mp4",
+    ) -> dict:
+        # Deliberately kind=text: that is what deployed artifact payloads say,
+        # while MIME still describes the source file and distinguishes media
+        # summaries from document summaries during repair.
+        return {
+            **_point(file_id, kind="text", mime=mime),
+            "artifact": artifact,
+        }
 
     async def _completed_video(self, db: UploadsDB) -> None:
         await db.record_upload(
@@ -412,6 +422,31 @@ class TestVideoKindSurvivesReconcile:
         await reconcile_with_qdrant(db, _FakeQdrant({TEXT_COL: [_point("doc")]}))
 
         assert (await db.get_upload("doc"))["kind"] == "text"
+
+    async def test_a_document_summary_does_not_promote_the_pdf_to_video(
+        self,
+        db: UploadsDB,
+    ):
+        await db.record_upload(
+            file_id="report",
+            user=USER,
+            filename="report.pdf",
+            mime="application/pdf",
+            bytes_=2048,
+            kind="text",
+            collection=TEXT_COL,
+            chunks=3,
+            uploaded_at="2026-08-01T00:00:00+00:00",
+        )
+        point = self._artifact_point(
+            "report",
+            "summary",
+            mime="application/pdf",
+        )
+
+        await reconcile_with_qdrant(db, _FakeQdrant({TEXT_COL: [point]}))
+
+        assert (await db.get_upload("report"))["kind"] == "text"
 
     async def test_an_image_upload_is_untouched(self, db: UploadsDB):
         await _add(db, "pic", kind="image", collection=IMAGE_COL, chunks=1)
