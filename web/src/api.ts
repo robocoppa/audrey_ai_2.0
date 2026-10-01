@@ -845,10 +845,7 @@ export async function uploadFile(
     const body = new FormData();
     body.append("file", file, file.name);
     onProgress(0);
-    const result = await apiJson<AudreyFileUpload>("/api/files", {
-      method: "POST",
-      body,
-    });
+    const result = await uploadMultipart<AudreyFileUpload>("/api/files", body, onProgress);
     onProgress(1);
     return result;
   }
@@ -887,6 +884,48 @@ export async function uploadFile(
     `/api/files/upload-sessions/${encodeURIComponent(session.upload_id)}/complete`,
     { method: "POST" },
   );
+}
+
+function uploadMultipart<T>(
+  path: string,
+  body: FormData,
+  onProgress: (fraction: number) => void,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", path);
+    request.withCredentials = true;
+    request.setRequestHeader("Accept", "application/json");
+    request.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress(Math.min(1, event.loaded / event.total));
+      }
+    });
+    request.addEventListener("load", () => {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(request.responseText) as unknown;
+      } catch {
+        payload = null;
+      }
+      if (request.status >= 200 && request.status < 300 && payload !== null) {
+        resolve(payload as T);
+        return;
+      }
+      const detail = payload && typeof payload === "object" && "detail" in payload
+        && typeof payload.detail === "string" && payload.detail.trim()
+        ? payload.detail
+        : `Request failed with HTTP ${request.status}.`;
+      reject(new ApiError(request.status, detail));
+    });
+    request.addEventListener("error", () => {
+      reject(new ApiError(0, "The upload connection failed."));
+    });
+    request.addEventListener("abort", () => {
+      reject(new ApiError(0, "The upload was cancelled."));
+    });
+    request.send(body);
+  });
 }
 
 export function deleteFile(fileId: string): Promise<{

@@ -638,11 +638,16 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   expect(sourcePanelBox?.x ?? 0).toBeGreaterThanOrEqual((sourceSummaryBox?.x ?? 0) - 1);
   await sourceSummary.click();
   await modelSummary.click();
+  await expect(page.locator(".run-models")).toHaveAttribute("open", "");
   await expect(page.locator(".run-models li")).toHaveCount(2);
   await expect(page.locator(".run-models")).toContainText("qwen-router:latest1 call");
   await expect(page.locator(".run-models")).toContainText("qwen-worker:latest2 calls");
   await toolSummary.click();
+  await expect(page.locator(".run-tools")).toHaveAttribute("open", "");
+  await expect(page.locator(".run-models")).not.toHaveAttribute("open", "");
   await expect(page.locator(".run-tools li")).toContainText("web_search · complete");
+  await page.getByRole("heading", { name: "Browser smoke" }).click();
+  await expect(page.locator(".run-tools")).not.toHaveAttribute("open", "");
   await expect(page.getByText("Complete", { exact: true })).toBeVisible();
   await expect(page.locator(".composer-model-picker")).toHaveCount(0);
   await expect(page.locator(".composer .compact-model-picker")).toBeVisible();
@@ -2107,6 +2112,7 @@ test("manages owner-bound files without a browser bearer token", async ({ page }
   const dialog = page.getByRole("dialog", { name: "Your files" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("field-notes.txt")).toBeVisible();
+  await dialog.locator(".file-add-panel > summary").click();
   await dialog.getByLabel("Choose files").setInputFiles({
     name: "new-notes.txt",
     mimeType: "text/plain",
@@ -2170,25 +2176,26 @@ test("browses files by name, source link, kind, status, and sort order", async (
   const dialog = page.getByRole("dialog", { name: "Your files" });
   const names = dialog.locator(".file-list .file-details strong");
   const search = dialog.getByRole("searchbox", { name: "Search files" });
-  const type = dialog.getByRole("combobox", { name: "Type" });
+  const videoFolder = dialog.getByRole("button", { name: "Videos (1)" });
   const status = dialog.getByRole("combobox", { name: "Status" });
   const sort = dialog.getByRole("combobox", { name: "Sort by" });
 
   await expect(names).toHaveText(["clip.mp4", "photo.png", "Broken.pdf", "Alpha.txt"]);
   await expect(dialog.getByText("Downloading · 2m 03s elapsed")).toBeVisible();
+  await dialog.locator(".file-add-panel > summary").click();
   await expect(dialog.locator(".file-upload-hint")).toContainText("Up to 2.0 GB per file.");
   await expect(dialog.locator(".file-upload-hint")).toContainText("Files over 50 MB upload in parts.");
   await expect(dialog.locator(".file-upload-hint")).toContainText("Supported: .txt.");
-  const photoDetails = dialog.locator(".file-list li").filter({ hasText: "photo.png" }).locator(".file-index-meta");
-  await expect(photoDetails).toContainText("image/png · 1 indexed chunk · Uploaded");
-  await expect(photoDetails).toHaveAttribute("title", "2026-09-03T00:00:00Z");
+  const photoRow = dialog.locator(".file-list li").filter({ hasText: "photo.png" });
+  await expect(photoRow.locator(".file-row-meta")).toContainText("Image · 20 B · 1 chunk");
+  await expect(photoRow.locator("time")).toHaveAttribute("title", "2026-09-03T00:00:00Z");
   await sort.selectOption("name-asc");
   await expect(names).toHaveText(["Alpha.txt", "Broken.pdf", "clip.mp4", "photo.png"]);
   await search.fill("PHOTO");
   await expect(names).toHaveText(["photo.png"]);
   await expect(dialog.locator(".file-browser-result")).toContainText("Showing 1 of 4 files");
 
-  await type.selectOption("video");
+  await videoFolder.click();
   await expect(dialog.getByText("No files match these filters.")).toBeVisible();
   await dialog.getByRole("button", { name: "Clear filters" }).click();
   await expect(names).toHaveText(["clip.mp4", "photo.png", "Broken.pdf", "Alpha.txt"]);
@@ -2273,6 +2280,7 @@ test("uploads dropped and picked batches while isolating per-file failures", asy
   await page.goto("./");
   await page.getByRole("button", { name: "Files", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Your files" });
+  await dialog.locator(".file-add-panel > summary").click();
   await page.evaluate(() => {
     const zone = document.querySelector(".file-drop-zone");
     if (!zone) throw new Error("Missing file drop zone");
@@ -2511,6 +2519,18 @@ test("queues a video link through native files and follows its summary", async (
       });
       return;
     }
+    if (url.pathname === "/api/files/file_video/artifacts/summary") {
+      const text = "A short overview of the Audrey launch video.";
+      await json(route, {
+        id: "file_video",
+        artifact: "summary",
+        text,
+        offset: 0,
+        next_offset: null,
+        total_chars: text.length,
+      });
+      return;
+    }
     if (url.pathname === "/api/models") {
       await json(route, { items: browserModels() });
       return;
@@ -2521,12 +2541,13 @@ test("queues a video link through native files and follows its summary", async (
   await page.goto("./");
   await page.getByRole("button", { name: "Files", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Your files" });
+  await dialog.locator(".file-add-panel > summary").click();
   await dialog.getByLabel("Paste a video link").fill("  " + sourceUrl + "  ");
   await dialog.getByRole("button", { name: "Fetch video" }).click();
 
   await expect(dialog.getByText("Queued. Watch the file below for download and summarization progress.")).toBeVisible();
   await expect(dialog.getByText(/Downloading 50%/)).toBeVisible();
-  await expect(dialog.getByRole("link", { name: "Source video" })).toHaveAttribute("href", sourceUrl);
+  await expect(dialog.getByRole("link", { name: "Source" })).toHaveAttribute("href", sourceUrl);
   expect(submitted).toEqual({ url: sourceUrl });
 
   video = {
@@ -2540,9 +2561,11 @@ test("queues a video link through native files and follows its summary", async (
   };
   await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
   await expect(dialog.getByText("Audrey launch.mp4")).toBeVisible();
-  await expect(dialog.getByText("Transcript: auto-captions")).toBeVisible();
-  await dialog.locator(".file-summary summary").click();
-  await expect(dialog.locator(".file-summary p")).toHaveText("A short overview of the Audrey launch video.");
+  await expect(dialog.locator(".file-list li").filter({ hasText: "Audrey launch.mp4" }))
+    .toContainText("auto-captions");
+  await dialog.getByRole("button", { name: "View video text for Audrey launch.mp4" }).click();
+  await expect(dialog.locator(".file-artifact-text"))
+    .toHaveText("A short overview of the Audrey launch video.");
   expect(authorizationHeaders.every((value) => value === undefined)).toBe(true);
 });
 
@@ -2613,14 +2636,19 @@ test("summarizes saved tool activity without restoring transcript cards", async 
   expect(savedToolSummaryBox?.x ?? 0)
     .toBeGreaterThan((savedModelSummaryBox?.x ?? 0) + (savedModelSummaryBox?.width ?? 0));
   await savedModelSummary.click();
+  await expect(answer.locator(".saved-models")).toHaveAttribute("open", "");
   await expect(answer.locator(".saved-models")).toContainText("qwen-router:latest1 call");
   await expect(answer.locator(".saved-models")).toContainText("qwen-writer:latest2 calls");
   await expect(answer.getByText("web_search", { exact: true })).toBeHidden();
   await savedToolSummary.click();
+  await expect(answer.locator(".saved-tools")).toHaveAttribute("open", "");
+  await expect(answer.locator(".saved-models")).not.toHaveAttribute("open", "");
   await expect(answer.locator(".saved-tools li")).toHaveCount(3);
   await expect(answer.locator(".saved-tools")).toContainText("web_search × 2 · complete");
   await expect(answer.locator(".saved-tools")).toContainText("memory_store · failed");
   await expect(answer.locator(".saved-tools")).toContainText("web_fetch · incomplete");
+  await page.locator(".thread-header").click();
+  await expect(answer.locator(".saved-tools")).not.toHaveAttribute("open", "");
   await expect(answer).not.toContainText("annual report");
   await expect(answer).not.toContainText("quarterly report");
   await expect(answer).not.toContainText("private-memory-value");

@@ -1,7 +1,7 @@
 # Campaign 3 Phase 10 - ordinary-answer provenance
 
-**Status:** In progress. Slice 10A is laptop-complete and awaits its native
-browser gate.
+**Status:** Complete. Slice 10A passed its native browser gate on
+2026-10-01.
 
 ## Goal
 
@@ -86,7 +86,9 @@ clean.
 
 ## Completion gate
 
-Slice 10A closes when the grounded file answer and catalogue-only control both
-pass in the native browser after refresh. A later claim-level citation slice
-requires a deterministic claim-to-evidence link; it must not infer linkage from
-the prose answer.
+**Passed, 2026-10-01.** The user confirmed the complete native browser gate,
+including grounded private-file Sources, the catalogue-only control, compact
+Models and Tool calls presentation, and refresh persistence.
+
+A later claim-level citation slice requires a deterministic claim-to-evidence
+link; it must not infer linkage from the prose answer.

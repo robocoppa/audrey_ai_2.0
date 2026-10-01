@@ -63,17 +63,39 @@ describe("native file uploads", () => {
     expect((fetchMock.mock.calls[0][1] as RequestInit).headers).not.toHaveProperty("Authorization");
   });
 
-  it("uses multipart for a file within the single-request limit", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
-      id: "file_small",
-      filename: "small.txt",
-      mime: "text/plain",
-      bytes: 4,
-      kind: "text",
-      chunks: 1,
-      status: "ready",
-    }));
-    vi.stubGlobal("fetch", fetchMock);
+  it("reports byte progress for multipart files within the single-request limit", async () => {
+    let progressListener: ((event: ProgressEvent) => void) | undefined;
+    let loadListener: (() => void) | undefined;
+    const request = {
+      status: 200,
+      responseText: JSON.stringify({
+        id: "file_small",
+        filename: "small.txt",
+        mime: "text/plain",
+        bytes: 4,
+        kind: "text",
+        chunks: 1,
+        status: "ready",
+      }),
+      upload: {
+        addEventListener: vi.fn((name: string, listener: (event: ProgressEvent) => void) => {
+          if (name === "progress") progressListener = listener;
+        }),
+      },
+      open: vi.fn(),
+      setRequestHeader: vi.fn(),
+      addEventListener: vi.fn((name: string, listener: () => void) => {
+        if (name === "load") loadListener = listener;
+      }),
+      send: vi.fn((body: FormData) => {
+        expect(body).toBeInstanceOf(FormData);
+        progressListener?.({ lengthComputable: true, loaded: 2, total: 4 } as ProgressEvent);
+        loadListener?.();
+      }),
+      withCredentials: false,
+    };
+    const xhr = vi.fn(() => request);
+    vi.stubGlobal("XMLHttpRequest", xhr);
     const progress: number[] = [];
 
     const result = await uploadFile(
@@ -83,12 +105,11 @@ describe("native file uploads", () => {
     );
 
     expect(result.id).toBe("file_small");
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const [path, request] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(path).toBe("/api/files");
-    expect(request.method).toBe("POST");
-    expect(request.body).toBeInstanceOf(FormData);
-    expect(progress).toEqual([0, 1]);
+    expect(xhr).toHaveBeenCalledOnce();
+    expect(request.open).toHaveBeenCalledWith("POST", "/api/files");
+    expect(request.withCredentials).toBe(true);
+    expect(request.setRequestHeader).toHaveBeenCalledWith("Accept", "application/json");
+    expect(progress).toEqual([0, 0.5, 1]);
   });
 
   it("uploads larger files as bounded sequential parts", async () => {

@@ -269,10 +269,11 @@ restored.
 
 ## 6. Build the next product phase
 
-**State:** In progress. [Phase 9](phase-09-broader-audio.md) is live-closed.
-The observed workflows do not yet justify diarization or broader media
-analysis. [Phase 10](phase-10-ordinary-answer-provenance.md) is active; Slice
-10A is laptop-complete and awaits its native browser gate.
+**State:** In progress. [Phase 9](phase-09-broader-audio.md) and
+[Phase 10](phase-10-ordinary-answer-provenance.md) are live-closed. The observed
+workflows do not yet justify diarization or broader media analysis.
+[Phase 11](phase-11-native-file-explorer.md) is active; Slice 11A is implemented
+and awaits its frontend and native browser gates.
 
 - [x] Write the Phase 9 plan and choose the first deployable slice.
 - [x] Add OGG, Opus, and raw ADTS AAC admission using measured MIME/container
@@ -286,8 +287,16 @@ analysis. [Phase 10](phase-10-ordinary-answer-provenance.md) is active; Slice
   supplies a quality gate.
 - [x] Design and implement Slice 10A ordinary-answer file provenance on the
   native message model without reintroducing tool cards into chat.
-- [ ] Pass the Slice 10A grounded-file and catalogue-only browser gate after
+- [x] Pass the Slice 10A grounded-file and catalogue-only browser gate after
   refresh.
+- [x] Replace paperclip file cards and Files listing cards with compact virtual
+  folder explorers backed by the existing file-kind metadata.
+- [x] Add measured single-request chat upload progress and explicit Preparing
+  and Finishing phases.
+- [x] Make Models and Tool calls mutually exclusive and outside-dismissible for
+  live and saved answers.
+- [ ] Pass the Slice 11A frontend build, automated UI suites, and native browser
+  gate.
 
 ## 7. Expand Responses API compatibility
 

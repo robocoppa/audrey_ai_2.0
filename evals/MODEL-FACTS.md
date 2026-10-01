@@ -370,6 +370,37 @@ sample. `[check_model_inventory.py + ai-sec eval, 2026-10-01]`
   source does not state, written as fact. `[ai-sec
   eval-out/model-2026-09-30-200843, 2026-09-30]`
 
+### `gemma4:31b-it-q4_K_M` and its ai-sec tag `gemma4:31b-32k`
+
+Pulled 2026-10-01 for ai-sec's second model comparison, and kept on the box
+afterwards by the user's decision. Audrey's config names neither, so
+`check_model_inventory.py` lists both as reclaimable. Leave them unless the user
+says otherwise.
+
+- **What it is:** Gemma 4 31B, dense, 30.7B, Q4_K_M, from Google DeepMind under
+  Apache 2.0, released 2026-04-02, with configurable thinking. Ollama also
+  offers `31b-it-q8_0` (34 GB) and `31b-it-qat` (19 GB). `[Ollama library +
+  Hugging Face model card, 2026-10-01]`
+- **Built-in parameters:** `draft_num_predict 3`, `temperature 1`, `top_k 64`,
+  `top_p 0.95`. The ai-sec tag adds `num_ctx 32768` and `repeat_penalty 1`.
+  `[/api/show via ai-sec, 2026-10-01]`
+- ⚠️ **`ollama ps` under-reports it.** With a 32k window it read 3.5 GB at
+  `100% GPU`, while `nvidia-smi` showed 13,544 and 13,947 MiB in use on the two
+  cards with only `nomic-embed-text` beside it. So it spans both cards. Read
+  `nvidia-smi` for this model's footprint, not `ollama ps`. `[ollama ps +
+  nvidia-smi, 2026-10-01]`
+- **Thinking is on by default:** with no `think` field sent, its accepted
+  narratives run 0.27-0.69 characters per completion token. `[ai-sec
+  eval-out/model-2026-10-01-142858, 2026-10-01]`
+- **ai-sec eval, one draw at temperature 0:** 574/574 gates, 19/19 thresholds,
+  26 narratives, the most of the three models tried. It had none of the
+  authority-phrasing refusals qwen3.8 had (3 at Q4, 4 at Q8). But it misread an
+  absent setting as a missing protection in 4 of 18 cases. It printed
+  packet-local references such as "(4)" or "[9, 10]" in 18 of 26 narratives,
+  against 5 of 25 for qwen3.8:32k. It returned non-JSON on 2 of 3 adversarial
+  cases, at 368s and 479s. 3,871s for the 42 cases, 2.2x qwen3.8:32k. ⛔ **Not
+  adopted by ai-sec.** `[ai-sec eval-out/model-2026-10-01-142858, 2026-10-01]`
+
 ### `llama4:latest`
 
 - ⛔ **DROPPED FROM THE MODEL SWEEP 2026-08-19**, replaced by `ornith-1.5:35b`.
@@ -984,9 +1015,11 @@ Open questions, and what would close each.
   laguna-xs-2.1:latest`.
 - ⛔ **[CLOSED 2026-10-01] Whether Q8 reads ai-sec's findings better than Q4. It
   does not, measurably.** One draw each at temperature 0 on the same packets:
-  Q8 misread an absent setting as a missing protection in 2 of 18 cases against
-  Q4's 3 of 17, and only one case was wrong in both. The error moved between
-  cases rather than going away. Q8 also lost two more Windows narratives to
+  Q8 misread an absent setting as a missing protection in 3 of 18 cases against
+  Q4's 4 of 17, counting overstated theme titles (2 against 3 without them).
+  The cases differ between runs, so the error moved rather than going away.
+  Corrected the same day from "2 of 18 against 3 of 17", which left the titles
+  out. Q8 also lost two more Windows narratives to
   ai-sec's authority guard ("below benchmark", "compliance requirements"), and
   took 2,581s for the 42 cases against 1,765s. This matches the 2026-08-25
   bake-off: Q8_0 buys no measurable quality. ⚠️ Q8's determinism at temperature

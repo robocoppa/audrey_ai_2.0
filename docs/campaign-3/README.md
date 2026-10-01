@@ -1,9 +1,9 @@
 # Campaign 3 — correctness foundations, Audrey UI, and reusable skills
 
-**Status:** Campaign 3 Phases 1–9 are complete. Phase 2's native product
-cutover and final 2D.5 administration/recovery proof are live-settled. Phase 10
-has started; Slice 10A adds deterministic private-file provenance to ordinary
-tool-backed answers and awaits its native browser gate.
+**Status:** Campaign 3 Phases 1–10 are complete. Phase 2's native product
+cutover and final 2D.5 administration/recovery proof are live-settled. Phase 11
+has started; Slice 11A replaces large file cards with compact native explorers,
+adds measured chat-upload progress, and tightens Models/Tool calls dismissal.
 
 The Milestone 2E parity build is laptop-complete across native memory
 settings, owner-bound file and video upload and inspection, source and answer
@@ -120,10 +120,11 @@ and finally adds the first general skills layer on that owned surface.
 | 07 | [Scanned PDF OCR](phase-07-scanned-pdf-ocr.md) | Queue image-only PDFs for bounded owner-scoped OCR, indexing, and native reading | Phase 06 decision | Complete (OCR and PDF presentation live-settled) |
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Transcribe, summarize, search, inspect, and attach spoken audio as a first-class file kind | Phase 07 completion | Complete (8A and 8B live-passed) |
 | 09 | [Broader spoken audio](phase-09-broader-audio.md) | Admit measured OGG, Opus, and raw AAC containers before separately scoped speaker or media analysis | Phase 08 and Phase 2D.5 completion | Complete (9A live-passed) |
-| 10 | [Ordinary-answer provenance](phase-10-ordinary-answer-provenance.md) | Persist deterministic public URL and private file evidence on ordinary tool-backed answers | Phase 09 completion | In progress (10A laptop-complete) |
+| 10 | [Ordinary-answer provenance](phase-10-ordinary-answer-provenance.md) | Persist deterministic public URL and private file evidence on ordinary tool-backed answers | Phase 09 completion | Complete (10A live-passed) |
+| 11 | [Native file explorer](phase-11-native-file-explorer.md) | Browse, attach, and manage private files through compact folder-style native views | Phase 10 completion | In progress (11A implemented) |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1
-through Campaign 3 Phase 10, or use the topic filenames.
+through Campaign 3 Phase 11, or use the topic filenames.
 
 ## Campaign rules
 
@@ -147,5 +148,5 @@ through Campaign 3 Phase 10, or use the topic filenames.
 
 Items 5–10, their execution order, and pass criteria are tracked in
 [remaining-work-todo.md](remaining-work-todo.md). Item 5, legacy Phase 2D.5,
-and Phase 9 are closed. Item 6 is active with Phase 10's deterministic
-ordinary-answer provenance slice.
+and Phases 9–10 are closed. Item 6 is active with Phase 11's native file
+explorer slice.

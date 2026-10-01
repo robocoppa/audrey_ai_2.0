@@ -1381,17 +1381,39 @@ a:focus-visible {
   text-decoration: underline;
 }
 
-.attachment-upload {
+.attachment-picker-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem;
   margin-bottom: 0.55rem;
 }
 
+.attachment-picker-actions > input {
+  min-width: 0;
+  width: 100%;
+  padding: 0.48rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  outline: none;
+  background: var(--input-surface);
+  color: var(--text-soft);
+  font-size: 0.74rem;
+}
+
+.attachment-picker-actions > input:focus-visible {
+  border-color: var(--border-strong);
+  box-shadow: var(--focus-glow);
+}
+
 .attachment-upload button {
-  padding: 0.4rem 0.6rem;
+  height: 100%;
+  padding: 0.4rem 0.7rem;
   border: 1px solid var(--border-strong);
   border-radius: 0.55rem;
   background: var(--surface-raised);
   color: var(--text-soft);
   font-size: 0.74rem;
+  font-weight: 700;
 }
 
 .attachment-upload input {
@@ -1403,10 +1425,12 @@ a:focus-visible {
 }
 
 .attachment-picker {
-  max-height: min(16rem, 35vh);
+  display: flex;
+  max-height: min(26rem, 55vh);
   margin: 0 0 0.55rem;
   padding: 0.7rem;
-  overflow-y: auto;
+  overflow: hidden;
+  flex-direction: column;
   border: 1px solid var(--border-strong);
   border-radius: 0.8rem;
   background: rgb(10 24 45 / 98%);
@@ -1415,6 +1439,7 @@ a:focus-visible {
 
 .attachment-picker > header {
   display: flex;
+  flex: none;
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 0.55rem;
@@ -1469,45 +1494,137 @@ a:focus-visible {
   color: var(--danger);
 }
 
+.attachment-folders {
+  display: flex;
+  flex: none;
+  gap: 0.3rem;
+  padding-bottom: 0.5rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.attachment-folders button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  flex: 0 0 auto;
+  padding: 0.3rem 0.48rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.attachment-folders button:hover,
+.attachment-folders button[aria-pressed="true"] {
+  border-color: var(--border);
+  background: var(--surface-active);
+  color: var(--text-soft);
+}
+
+.attachment-folders button[aria-pressed="true"] > span {
+  color: var(--accent);
+}
+
+.attachment-folders small {
+  color: var(--muted-deep);
+  font-size: 0.62rem;
+}
+
+.attachment-picker-result {
+  flex: none;
+  padding: 0.12rem 0 0.42rem;
+  color: var(--muted-deep);
+  font-size: 0.65rem;
+}
+
 .attachment-options {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
-  gap: 0.4rem;
+  min-height: 0;
+  overflow-y: auto;
+  gap: 0.18rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  scrollbar-width: thin;
 }
 
 .attachment-options button {
   display: grid;
-  grid-template-columns: 1.25rem minmax(0, 1fr);
-  gap: 0.12rem 0.35rem;
-  padding: 0.48rem 0.55rem;
-  border: 1px solid var(--border);
-  border-radius: 0.55rem;
-  background: var(--surface-raised);
+  width: 100%;
+  align-items: center;
+  grid-template-columns: 1.75rem minmax(0, 1fr) 1.55rem;
+  grid-template-rows: auto auto;
+  gap: 0.04rem 0.45rem;
+  padding: 0.38rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
   color: var(--text-soft);
   text-align: left;
 }
 
-.attachment-options button[aria-pressed="true"] {
-  border-color: var(--border-strong);
-  background: var(--surface-active);
-  box-shadow: inset 0 0 0 1px rgb(99 181 255 / 12%);
+.attachment-options button:hover {
+  border-color: var(--border);
+  background: var(--surface-raised);
 }
 
-.attachment-options button > span:first-child {
+.attachment-options button[aria-pressed="true"] {
+  border-color: rgb(99 181 255 / 35%);
+  background: var(--surface-active);
+  box-shadow: inset 0 0 0 1px rgb(99 181 255 / 10%);
+}
+
+.attachment-file-kind,
+.attachment-file-selection {
+  display: grid;
   grid-row: 1 / span 2;
+  place-items: center;
   color: var(--accent);
+}
+
+.attachment-file-kind {
+  width: 1.7rem;
+  height: 1.7rem;
+  border: 1px solid rgb(99 181 255 / 20%);
+  border-radius: 0.42rem;
+  background: rgb(52 153 250 / 8%);
+  font-size: 0.72rem;
   font-weight: 800;
 }
 
-.attachment-options button > span:nth-child(2) {
+.attachment-file-selection {
+  grid-column: 3;
+  width: 1.35rem;
+  height: 1.35rem;
+  justify-self: end;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.attachment-options button[aria-pressed="true"] .attachment-file-selection {
+  border-color: var(--accent-soft);
+  background: var(--accent);
+  color: rgb(5 15 30);
+}
+
+.attachment-file-name {
   overflow: hidden;
+  font-size: 0.74rem;
+  font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .attachment-options small {
+  overflow: hidden;
   color: var(--muted-deep);
-  font-size: 0.64rem;
+  font-size: 0.63rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .compact-model-picker-shell {
@@ -3362,7 +3479,7 @@ a:focus-visible {
 
 .file-manager {
   display: flex;
-  width: min(54rem, 100%);
+  width: min(68rem, 100%);
   max-height: min(52rem, calc(100dvh - 2.5rem));
   overflow: hidden;
   flex-direction: column;
@@ -3445,12 +3562,148 @@ a:focus-visible {
   box-shadow: 0 0 1rem rgb(52 153 250 / 34%);
 }
 
+.file-add-panel {
+  flex: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-add-panel > summary {
+  display: grid;
+  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  padding: 0.72rem 1.4rem;
+  cursor: pointer;
+  color: var(--text-soft);
+  list-style: none;
+}
+
+.file-add-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.file-add-panel > summary:hover {
+  background: var(--surface-active);
+}
+
+.file-add-panel > summary > span:nth-child(2) {
+  display: grid;
+  gap: 0.08rem;
+}
+
+.file-add-panel > summary strong {
+  font-size: 0.78rem;
+}
+
+.file-add-panel > summary small {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.file-add-symbol {
+  display: grid;
+  width: 1.65rem;
+  height: 1.65rem;
+  place-items: center;
+  border: 1px solid rgb(99 181 255 / 25%);
+  border-radius: 0.5rem;
+  background: rgb(52 153 250 / 9%);
+  color: var(--accent);
+  font-size: 0.9rem;
+}
+
+.file-add-chevron {
+  color: var(--muted);
+  transition: transform 160ms ease;
+}
+
+.file-add-panel[open] .file-add-chevron {
+  transform: rotate(180deg);
+}
+
+.file-add-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(18rem, 0.8fr);
+  border-top: 1px solid var(--border);
+  background: rgb(4 11 22 / 22%);
+}
+
+.file-explorer {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 10.5rem minmax(0, 1fr);
+}
+
+.file-explorer-sidebar {
+  display: flex;
+  min-width: 0;
+  padding: 0.8rem 0.65rem;
+  flex-direction: column;
+  gap: 0.16rem;
+  border-right: 1px solid var(--border);
+  background: rgb(4 11 22 / 24%);
+}
+
+.file-explorer-sidebar > span {
+  padding: 0.2rem 0.55rem 0.5rem;
+  color: var(--muted-deep);
+  font-size: 0.62rem;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.file-explorer-sidebar button {
+  display: grid;
+  align-items: center;
+  grid-template-columns: 1.25rem minmax(0, 1fr) auto;
+  gap: 0.38rem;
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-align: left;
+}
+
+.file-explorer-sidebar button:hover,
+.file-explorer-sidebar button[aria-pressed="true"] {
+  border-color: var(--border);
+  background: var(--surface-active);
+  color: var(--text-soft);
+}
+
+.file-explorer-sidebar button[aria-pressed="true"] .file-folder-symbol {
+  color: var(--accent);
+}
+
+.file-explorer-sidebar small {
+  color: var(--muted-deep);
+  font-size: 0.64rem;
+}
+
+.file-folder-symbol {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.file-explorer-content {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+
 .file-upload {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.6rem;
   padding: 1rem 1.4rem;
-  border-bottom: 1px solid var(--border);
 }
 
 .file-drop-zone {
@@ -3562,7 +3815,7 @@ a:focus-visible {
   display: grid;
   gap: 0.45rem;
   padding: 0.95rem 1.4rem;
-  border-bottom: 1px solid var(--border);
+  border-left: 1px solid var(--border);
 }
 
 .file-url-form label {
@@ -3624,13 +3877,13 @@ a:focus-visible {
 
 .file-browser {
   flex: none;
-  padding: 0.75rem 1.4rem 0.5rem;
+  padding: 0.72rem 0.85rem 0.42rem;
   border-bottom: 1px solid var(--border);
 }
 
 .file-browser-controls {
   display: grid;
-  grid-template-columns: minmax(10rem, 2fr) repeat(3, minmax(6rem, 1fr));
+  grid-template-columns: minmax(10rem, 2fr) repeat(2, minmax(7rem, 1fr));
   gap: 0.6rem;
 }
 
@@ -3705,21 +3958,23 @@ a:focus-visible {
   display: grid;
   min-height: 0;
   overflow-y: auto;
-  gap: 0.35rem;
+  align-content: start;
+  gap: 0.14rem;
   margin: 0;
-  padding: 0.8rem 1.1rem 1.2rem;
+  padding: 0.5rem 0.55rem 0.75rem;
   list-style: none;
+  scrollbar-width: thin;
 }
 
 .file-list li {
   display: grid;
   align-items: center;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 0.8rem;
-  padding: 0.75rem;
+  gap: 0.62rem;
+  padding: 0.5rem 0.6rem;
   border: 1px solid transparent;
-  border-radius: 0.8rem;
-  background: rgb(7 16 31 / 56%);
+  border-radius: 0.58rem;
+  background: rgb(7 16 31 / 40%);
 }
 
 .file-list li:hover {
@@ -3729,11 +3984,11 @@ a:focus-visible {
 
 .file-kind {
   display: grid;
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 1.9rem;
+  height: 1.9rem;
   place-items: center;
   border: 1px solid rgb(99 181 255 / 24%);
-  border-radius: 0.65rem;
+  border-radius: 0.5rem;
   background: rgb(52 153 250 / 10%);
   color: var(--accent);
   font-weight: 800;
@@ -3743,12 +3998,6 @@ a:focus-visible {
   display: grid;
   min-width: 0;
   gap: 0.2rem;
-}
-
-.file-details a {
-  justify-self: start;
-  color: var(--accent);
-  font-size: 0.7rem;
 }
 
 .file-details .file-failure {
@@ -3787,7 +4036,33 @@ a:focus-visible {
 }
 
 .file-details strong {
-  font-size: 0.84rem;
+  font-size: 0.8rem;
+}
+
+.file-row-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.42rem;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+
+.file-row-meta > * {
+  flex: 0 0 auto;
+}
+
+.file-row-meta > span:nth-child(2) {
+  overflow: hidden;
+  flex: 0 1 auto;
+  text-overflow: ellipsis;
+}
+
+.file-row-meta time {
+  margin-left: auto;
+  color: var(--muted-deep);
 }
 
 .file-details .file-status {
@@ -3799,7 +4074,7 @@ a:focus-visible {
 .file-details span,
 .file-details small {
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: 0.68rem;
 }
 
 .file-details small {
@@ -3817,14 +4092,15 @@ a:focus-visible {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.3rem;
+  white-space: nowrap;
 }
 
 .file-view,
 .file-download,
-.file-remove {
-  padding: 0.4rem 0.55rem;
+.file-remove,
+.file-actions > a {
+  padding: 0.34rem 0.46rem;
   border: 1px solid var(--border);
   border-radius: 0.5rem;
   background: transparent;
@@ -3834,7 +4110,8 @@ a:focus-visible {
 }
 
 .file-view:hover,
-.file-download:hover {
+.file-download:hover,
+.file-actions > a:hover {
   border-color: var(--border-strong);
   color: var(--accent);
 }
@@ -4099,11 +4376,38 @@ a:focus-visible {
     border-radius: 0;
   }
 
-  .file-manager > .file-upload,
-  .file-manager > .file-url-form,
-  .file-manager > .file-browser,
-  .file-manager > .file-list {
+  .file-manager > .file-add-panel,
+  .file-manager > .file-explorer {
     flex-shrink: 0;
+  }
+
+  .file-add-content {
+    grid-template-columns: 1fr;
+  }
+
+  .file-url-form {
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
+  .file-explorer {
+    grid-template-columns: 1fr;
+  }
+
+  .file-explorer-sidebar {
+    overflow-x: auto;
+    flex-direction: row;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .file-explorer-sidebar > span {
+    display: none;
+  }
+
+  .file-explorer-sidebar button {
+    width: auto;
+    min-width: max-content;
   }
 
   .file-list {

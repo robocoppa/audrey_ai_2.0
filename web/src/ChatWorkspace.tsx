@@ -112,6 +112,19 @@ type LastAttempt = {
 };
 
 type ConversationView = "active" | "archived";
+type AttachmentKindFilter = "all" | AudreyFile["kind"];
+
+const ATTACHMENT_FOLDERS: ReadonlyArray<{
+  kind: AttachmentKindFilter;
+  label: string;
+  symbol: string;
+}> = [
+  { kind: "all", label: "All", symbol: "▦" },
+  { kind: "text", label: "Documents", symbol: "≡" },
+  { kind: "image", label: "Images", symbol: "◫" },
+  { kind: "audio", label: "Audio", symbol: "♪" },
+  { kind: "video", label: "Videos", symbol: "▶" },
+];
 
 const SavedSourcesContext = createContext<ReadonlyMap<string, MessageSource[]>>(new Map());
 const SavedModelsContext = createContext<ReadonlyMap<string, MessageModelUsage[]>>(new Map());
@@ -883,6 +896,8 @@ function AudreyThread({
   const [attachmentFiles, setAttachmentFiles] = useState<AudreyFile[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentError, setAttachmentError] = useState("");
+  const [attachmentSearch, setAttachmentSearch] = useState("");
+  const [attachmentKind, setAttachmentKind] = useState<AttachmentKindFilter>("all");
   const [selectedAttachments, setSelectedAttachments] = useState<AudreyFile[]>([]);
   const [imageLimit, setImageLimit] = useState<number | null>(null);
   const [fileLimits, setFileLimits] = useState<AudreyFileLimits | null>(null);
@@ -899,6 +914,13 @@ function AudreyThread({
   const attachmentBusy = Boolean(uploadingFile) || pendingAttachment !== null;
   const submissionBlocked = modeDisabled || attachmentBusy || retrying || Boolean(uploadIssue);
   const selectedImageCount = selectedAttachments.filter(({ kind }) => kind === "image").length;
+  const visibleAttachmentFiles = useMemo(() => {
+    const search = attachmentSearch.trim().toLocaleLowerCase();
+    return attachmentFiles.filter((file) => (
+      (attachmentKind === "all" || file.kind === attachmentKind)
+      && (!search || file.filename.toLocaleLowerCase().includes(search))
+    ));
+  }, [attachmentFiles, attachmentKind, attachmentSearch]);
   const selectedModel = modelDetails(models, modelId);
   const selectedSkillMode = skillModeForModel(selectedModel);
   const compatibleSkills = skills.filter((skill) =>
@@ -1277,6 +1299,8 @@ function AudreyThread({
       return;
     }
     setAttachmentPickerOpen(true);
+    setAttachmentSearch("");
+    setAttachmentKind("all");
     setAttachmentsLoading(true);
     setAttachmentError("");
     try {
@@ -1492,7 +1516,11 @@ function AudreyThread({
                 ) : null}
                 {uploadingFile ? (
                   <p className="attachment-status" role="status">
-                    Uploading {uploadingFile} · {Math.round(uploadProgress * 100)}%
+                    {uploadProgress <= 0
+                      ? `Preparing ${uploadingFile}…`
+                      : uploadProgress >= 1
+                        ? `Finishing ${uploadingFile}…`
+                        : `Uploading ${uploadingFile} · ${Math.max(1, Math.round(uploadProgress * 100))}%`}
                   </p>
                 ) : null}
                 {pendingAttachment ? (
@@ -1536,54 +1564,98 @@ function AudreyThread({
                         </svg>
                       </button>
                     </header>
-                    <div className="attachment-upload">
-                      <button
-                        type="button"
-                        onClick={() => uploadInputRef.current?.click()}
-                        disabled={!fileLimits || attachmentBusy || selectedAttachments.length >= 10}
-                      >Upload from device</button>
+                    <div className="attachment-picker-actions">
                       <input
-                        ref={uploadInputRef}
-                        type="file"
-                        aria-label="Choose a file from your device"
-                        tabIndex={-1}
-                        accept={fileLimits?.allowed_extensions.join(",")}
-                        onChange={(event) => {
-                          const file = event.currentTarget.files?.[0];
-                          event.currentTarget.value = "";
-                          if (file) void uploadFromChat(file);
-                        }}
+                        type="search"
+                        aria-label="Search ready files"
+                        placeholder="Search your files"
+                        value={attachmentSearch}
+                        onChange={(event) => setAttachmentSearch(event.target.value)}
                       />
+                      <div className="attachment-upload">
+                        <button
+                          type="button"
+                          onClick={() => uploadInputRef.current?.click()}
+                          disabled={!fileLimits || attachmentBusy || selectedAttachments.length >= 10}
+                        >Upload</button>
+                        <input
+                          ref={uploadInputRef}
+                          type="file"
+                          aria-label="Choose a file from your device"
+                          tabIndex={-1}
+                          accept={fileLimits?.allowed_extensions.join(",")}
+                          onChange={(event) => {
+                            const file = event.currentTarget.files?.[0];
+                            event.currentTarget.value = "";
+                            if (file) void uploadFromChat(file);
+                          }}
+                        />
+                      </div>
                     </div>
+                    {attachmentFiles.length > 0 ? (
+                      <div className="attachment-folders" role="group" aria-label="File types">
+                        {ATTACHMENT_FOLDERS.map((folder) => {
+                          const count = folder.kind === "all"
+                            ? attachmentFiles.length
+                            : attachmentFiles.filter(({ kind }) => kind === folder.kind).length;
+                          return (
+                            <button
+                              type="button"
+                              key={folder.kind}
+                              aria-pressed={attachmentKind === folder.kind}
+                              onClick={() => setAttachmentKind(folder.kind)}
+                            >
+                              <span aria-hidden="true">{folder.symbol}</span>
+                              {folder.label}
+                              <small>{count}</small>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                     {attachmentsLoading ? <p role="status">Loading files…</p> : null}
                     {attachmentError ? <p className="attachment-error" role="alert">{attachmentError}</p> : null}
                     {!attachmentsLoading && !attachmentError && attachmentFiles.length === 0 ? (
                       <p>No ready files yet. Upload one here to ask about it.</p>
                     ) : null}
-                    {attachmentFiles.length > 0 ? (
-                      <div className="attachment-options">
-                        {attachmentFiles.map((file) => {
+                    {!attachmentsLoading && attachmentFiles.length > 0 ? (
+                      <div className="attachment-picker-result" role="status">
+                        {visibleAttachmentFiles.length} of {attachmentFiles.length} ready files
+                      </div>
+                    ) : null}
+                    {!attachmentsLoading && attachmentFiles.length > 0 && visibleAttachmentFiles.length === 0 ? (
+                      <p>No files match this view.</p>
+                    ) : null}
+                    {visibleAttachmentFiles.length > 0 ? (
+                      <ul className="attachment-options">
+                        {visibleAttachmentFiles.map((file) => {
                           const selected = selectedAttachments.some(({ id }) => id === file.id);
                           return (
-                            <button
-                              type="button"
-                              key={file.id}
-                              aria-pressed={selected}
-                              onClick={() => toggleAttachment(file)}
-                              disabled={attachmentBusy || (!selected && (
-                                selectedAttachments.length >= 10
-                                || (file.kind === "image"
-                                  && imageLimit !== null
-                                  && selectedImageCount >= imageLimit)
-                              ))}
-                            >
-                              <span aria-hidden="true">{selected ? "✓" : "+"}</span>
-                              <span>{file.filename}</span>
-                              <small>{file.kind} · {formatBytes(file.bytes)}</small>
-                            </button>
+                            <li key={file.id}>
+                              <button
+                                type="button"
+                                aria-pressed={selected}
+                                onClick={() => toggleAttachment(file)}
+                                disabled={attachmentBusy || (!selected && (
+                                  selectedAttachments.length >= 10
+                                  || (file.kind === "image"
+                                    && imageLimit !== null
+                                    && selectedImageCount >= imageLimit)
+                                ))}
+                              >
+                                <span className="attachment-file-kind" aria-hidden="true">
+                                  {attachmentKindSymbol(file.kind)}
+                                </span>
+                                <span className="attachment-file-name">{file.filename}</span>
+                                <small>{attachmentKindLabel(file.kind)} · {formatBytes(file.bytes)}</small>
+                                <span className="attachment-file-selection" aria-hidden="true">
+                                  {selected ? "✓" : "+"}
+                                </span>
+                              </button>
+                            </li>
                           );
                         })}
-                      </div>
+                      </ul>
                     ) : null}
                   </section>
                 ) : null}
@@ -1727,8 +1799,7 @@ function ModelSummary({
 }) {
   const label = models.length === 1 ? "1 model" : `${models.length} models`;
   return (
-    <details className={className}>
-      <summary>{label}</summary>
+    <ExclusiveRunDetails className={className} label={label}>
       <ul>
         {models.map(({ model, calls }) => (
           <li key={model}>
@@ -1737,7 +1808,7 @@ function ModelSummary({
           </li>
         ))}
       </ul>
-    </details>
+    </ExclusiveRunDetails>
   );
 }
 
@@ -1751,8 +1822,7 @@ function ToolSummary({
   const groups = summarizeTools(tools);
   const label = tools.length === 1 ? "1 tool call" : `${tools.length} tool calls`;
   return (
-    <details className={className}>
-      <summary>{label}</summary>
+    <ExclusiveRunDetails className={className} label={label}>
       <ul>
         {groups.map(({ name, count, status }) => (
           <li key={name}>
@@ -1761,6 +1831,63 @@ function ToolSummary({
           </li>
         ))}
       </ul>
+    </ExclusiveRunDetails>
+  );
+}
+
+const RUN_DETAILS_OPEN_EVENT = "audrey:run-details-open";
+
+function ExclusiveRunDetails({
+  className,
+  label,
+  children,
+}: {
+  className: string;
+  label: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => {
+    const closeForPeer = (event: Event) => {
+      if ((event as CustomEvent<HTMLDetailsElement>).detail !== detailsRef.current) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener(RUN_DETAILS_OPEN_EVENT, closeForPeer);
+    return () => document.removeEventListener(RUN_DETAILS_OPEN_EVENT, closeForPeer);
+  }, []);
+
+  useEffect(() => {
+    if (!open || !detailsRef.current) return;
+    document.dispatchEvent(new CustomEvent(RUN_DETAILS_OPEN_EVENT, {
+      detail: detailsRef.current,
+    }));
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !detailsRef.current?.contains(target)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <details
+      ref={detailsRef}
+      className={className}
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>{label}</summary>
+      {children}
     </details>
   );
 }
@@ -2230,6 +2357,15 @@ function attachmentPresentationType(file: MessageAttachment | AudreyFile) {
     ? "image" as const
     : ["video", "audio"].includes(file.kind) ? "file" as const : "document" as const;
 }
+function attachmentKindLabel(kind: AudreyFile["kind"]): string {
+  if (kind === "text") return "Document";
+  return kind[0].toUpperCase() + kind.slice(1);
+}
+
+function attachmentKindSymbol(kind: AudreyFile["kind"]): string {
+  return ATTACHMENT_FOLDERS.find((folder) => folder.kind === kind)?.symbol ?? "≡";
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB"];

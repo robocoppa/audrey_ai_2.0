@@ -23,6 +23,17 @@ type FileStatusFilter = "all" | "ready" | "active" | "failed";
 type FileSort = "newest" | "oldest" | "name-asc" | "name-desc";
 
 const fileNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+const FILE_FOLDERS: ReadonlyArray<{
+  kind: FileKindFilter;
+  label: string;
+  symbol: string;
+}> = [
+  { kind: "all", label: "All files", symbol: "▦" },
+  { kind: "text", label: "Documents", symbol: "≡" },
+  { kind: "image", label: "Images", symbol: "◫" },
+  { kind: "audio", label: "Audio", symbol: "♪" },
+  { kind: "video", label: "Videos", symbol: "▶" },
+];
 
 export function FileManager({ onClose }: { onClose: () => void }) {
   const [listing, setListing] = useState<AudreyFileList | null>(null);
@@ -282,6 +293,16 @@ export function FileManager({ onClose }: { onClose: () => void }) {
           )
         ) : (
           <>
+        <details className="file-add-panel">
+          <summary>
+            <span className="file-add-symbol" aria-hidden="true">＋</span>
+            <span>
+              <strong>Add files</strong>
+              <small>Upload from your device or fetch a video link</small>
+            </span>
+            <span className="file-add-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div className="file-add-content">
         <form className="file-upload" onSubmit={(event) => void submitUpload(event)}>
           <div
             className={draggingFiles ? "file-drop-zone dragging" : "file-drop-zone"}
@@ -356,141 +377,154 @@ export function FileManager({ onClose }: { onClose: () => void }) {
           <small>Audrey downloads the video and prepares its summary for your private files.</small>
           {queuedUrl ? <p role="status">Queued. Watch the file below for download and summarization progress.</p> : null}
         </form>
-
-        {listing?.items.length ? (
-          <div className="file-browser">
-            <div className="file-browser-controls">
-              <label>
-                <span>Search files</span>
-                <input
-                  type="search"
-                  value={fileSearch}
-                  onChange={(event) => setFileSearch(event.target.value)}
-                  placeholder="Filename or video link"
-                />
-              </label>
-              <label>
-                <span>Type</span>
-                <select value={kindFilter} onChange={(event) => setKindFilter(event.target.value as FileKindFilter)}>
-                  <option value="all">All types</option>
-                  <option value="text">Documents</option>
-                  <option value="image">Images</option>
-                  <option value="video">Videos</option>
-                  <option value="audio">Audio</option>
-                </select>
-              </label>
-              <label>
-                <span>Status</span>
-                <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as FileStatusFilter)}>
-                  <option value="all">All statuses</option>
-                  <option value="ready">Ready</option>
-                  <option value="active">In progress</option>
-                  <option value="failed">Failed</option>
-                </select>
-              </label>
-              <label>
-                <span>Sort by</span>
-                <select value={fileSort} onChange={(event) => setFileSort(event.target.value as FileSort)}>
-                  <option value="newest">Newest</option>
-                  <option value="oldest">Oldest</option>
-                  <option value="name-asc">Name A–Z</option>
-                  <option value="name-desc">Name Z–A</option>
-                </select>
-              </label>
-            </div>
-            <div className="file-browser-result">
-              <span role="status">Showing {visibleFiles.length} of {listing.items.length} files</span>
-              {browseChanged ? (
-                <button type="button" onClick={() => {
-                  setFileSearch("");
-                  setKindFilter("all");
-                  setStatusFilter("all");
-                  setFileSort("newest");
-                }}>Clear filters</button>
-              ) : null}
-            </div>
           </div>
-        ) : null}
+        </details>
 
         {error ? <p className="file-manager-error" role="alert">{error}</p> : null}
         {loading ? <p className="file-manager-status" role="status">Loading files…</p> : null}
         {!loading && listing?.items.length === 0 ? (
           <p className="file-manager-empty">No files yet. Upload a document, image, audio recording, or video for Audrey to use.</p>
         ) : null}
-        {!loading && listing?.items.length && visibleFiles.length === 0 ? (
-          <p className="file-manager-empty">No files match these filters.</p>
-        ) : null}
-        {visibleFiles.length ? (
-          <ul className="file-list">
-            {visibleFiles.map((file) => (
-              <li key={file.id}>
-                <div className="file-kind" aria-hidden="true">{kindSymbol(file.kind)}</div>
-                <div className="file-details">
-                  <strong>{file.filename}</strong>
-                  <span className="file-meta">
-                    {file.kind} · {file.bytes || !["fetch_pending", "fetching"].includes(file.status) ? formatBytes(file.bytes) : "Size pending"}
-                  </span>
-                  <span className="file-status">{fileStatus(file, listing?.server_time)}</span>
-                  <small className="file-index-meta" title={file.uploaded_at}>
-                    {file.mime || "Type pending"} · {file.status === "ready"
-                      ? file.chunks + " indexed " + (file.chunks === 1 ? "chunk" : "chunks")
-                      : "Index pending"} · Uploaded {formatFileTime(file.uploaded_at)}
-                  </small>
-                  {file.source_url ? (
-                    <a href={file.source_url} target="_blank" rel="noopener noreferrer">Source video</a>
-                  ) : null}
-                  {file.transcript_source ? <small>Transcript: {transcriptLabel(file.transcript_source)}</small> : null}
-                  {file.failure_reason ? <small className="file-failure">{file.failure_reason}</small> : null}
-                  {file.source_freed_at ? <small>Original media reclaimed; derived text remains searchable.</small> : null}
-                  {file.summary ? (
-                    <details className="file-summary">
-                      <summary>{summaryTeaser(file.summary)}</summary>
-                      <p>{file.summary}</p>
-                    </details>
-                  ) : null}
-                </div>
-                <div className="file-actions">
-                  {!file.source_freed_at && !["fetch_pending", "fetching"].includes(file.status) ? (
-                    <a
-                      className="file-download"
-                      href={getFileDownloadUrl(file.id)}
-                      download={file.filename}
-                      aria-label={`Download original ${file.filename}`}
-                    >Download</a>
-                  ) : null}
-                  {file.status === "ready" ? (
-                    <button
-                      className="file-view"
-                      type="button"
-                      onClick={() => setSelectedFileId(file.id)}
-                      aria-label={`View ${file.kind === "image" ? "image" : file.kind === "video" ? "video text" : file.kind === "audio" ? "audio text" : "document text"} for ${file.filename}`}
-                    >{file.kind === "image" ? "View image" : "View text"}</button>
-                  ) : null}
+        {!loading && listing?.items.length ? (
+          <div className="file-explorer">
+            <aside className="file-explorer-sidebar" aria-label="File folders">
+              <span>Library</span>
+              {FILE_FOLDERS.map((folder) => {
+                const count = folder.kind === "all"
+                  ? listing.items.length
+                  : listing.items.filter(({ kind }) => kind === folder.kind).length;
+                return (
                   <button
-                    className={confirmingId === file.id ? "file-remove confirming-delete" : "file-remove"}
                     type="button"
-                    aria-label={`${confirmingId === file.id ? "Confirm delete" : "Delete"} ${file.filename}`}
-                    aria-pressed={confirmingId === file.id}
-                    title={confirmingId === file.id ? "Click again to delete" : "Delete file"}
-                    onClick={() => {
-                      if (confirmingId === file.id) {
-                        void remove(file);
-                      } else {
-                        setConfirmingId(file.id);
-                      }
-                    }}
-                    onBlur={() => setConfirmingId((current) => current === file.id ? null : current)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") setConfirmingId(null);
-                    }}
-                    disabled={uploading || deletingId !== null}
+                    key={folder.kind}
+                    aria-label={`${folder.label} (${count})`}
+                    aria-pressed={kindFilter === folder.kind}
+                    onClick={() => setKindFilter(folder.kind)}
                   >
-                    {deletingId === file.id ? "Deleting…" : confirmingId === file.id ? "✓" : "Remove"}
+                    <span className="file-folder-symbol" aria-hidden="true">{folder.symbol}</span>
+                    <span>{folder.label}</span>
+                    <small>{count}</small>
                   </button>
+                );
+              })}
+            </aside>
+            <div className="file-explorer-content">
+              <div className="file-browser">
+                <div className="file-browser-controls">
+                  <label>
+                    <span>Search files</span>
+                    <input
+                      type="search"
+                      value={fileSearch}
+                      onChange={(event) => setFileSearch(event.target.value)}
+                      placeholder="Filename or video link"
+                    />
+                  </label>
+                  <label>
+                    <span>Status</span>
+                    <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as FileStatusFilter)}>
+                      <option value="all">All statuses</option>
+                      <option value="ready">Ready</option>
+                      <option value="active">In progress</option>
+                      <option value="failed">Failed</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Sort by</span>
+                    <select value={fileSort} onChange={(event) => setFileSort(event.target.value as FileSort)}>
+                      <option value="newest">Newest</option>
+                      <option value="oldest">Oldest</option>
+                      <option value="name-asc">Name A–Z</option>
+                      <option value="name-desc">Name Z–A</option>
+                    </select>
+                  </label>
                 </div>
-              </li>
-            ))}
-          </ul>
+                <div className="file-browser-result">
+                  <span role="status">Showing {visibleFiles.length} of {listing.items.length} files</span>
+                  {browseChanged ? (
+                    <button type="button" onClick={() => {
+                      setFileSearch("");
+                      setKindFilter("all");
+                      setStatusFilter("all");
+                      setFileSort("newest");
+                    }}>Clear filters</button>
+                  ) : null}
+                </div>
+              </div>
+
+              {visibleFiles.length === 0 ? (
+                <p className="file-manager-empty">No files match these filters.</p>
+              ) : (
+                <ul className="file-list">
+                  {visibleFiles.map((file) => (
+                    <li key={file.id}>
+                      <div className="file-kind" aria-hidden="true">{kindSymbol(file.kind)}</div>
+                      <div className="file-details">
+                        <strong title={file.filename}>{file.filename}</strong>
+                        <div className="file-row-meta">
+                          <span className="file-status">{fileStatus(file, listing.server_time)}</span>
+                          <span>
+                            {kindLabel(file.kind)} · {file.bytes || !["fetch_pending", "fetching"].includes(file.status)
+                              ? formatBytes(file.bytes)
+                              : "Size pending"}
+                            {file.status === "ready" ? ` · ${file.chunks} ${file.chunks === 1 ? "chunk" : "chunks"}` : ""}
+                            {file.transcript_source ? ` · ${transcriptLabel(file.transcript_source)}` : ""}
+                          </span>
+                          <time dateTime={file.uploaded_at} title={file.uploaded_at}>
+                            {formatFileTime(file.uploaded_at)}
+                          </time>
+                        </div>
+                        {file.failure_reason ? <small className="file-failure">{file.failure_reason}</small> : null}
+                        {file.source_freed_at ? <small>Original reclaimed · derived text retained</small> : null}
+                      </div>
+                      <div className="file-actions">
+                        {file.source_url ? (
+                          <a href={file.source_url} target="_blank" rel="noopener noreferrer">Source</a>
+                        ) : null}
+                        {!file.source_freed_at && !["fetch_pending", "fetching"].includes(file.status) ? (
+                          <a
+                            className="file-download"
+                            href={getFileDownloadUrl(file.id)}
+                            download={file.filename}
+                            aria-label={`Download original ${file.filename}`}
+                          >Download</a>
+                        ) : null}
+                        {file.status === "ready" ? (
+                          <button
+                            className="file-view"
+                            type="button"
+                            onClick={() => setSelectedFileId(file.id)}
+                            aria-label={`View ${file.kind === "image" ? "image" : file.kind === "video" ? "video text" : file.kind === "audio" ? "audio text" : "document text"} for ${file.filename}`}
+                          >Open</button>
+                        ) : null}
+                        <button
+                          className={confirmingId === file.id ? "file-remove confirming-delete" : "file-remove"}
+                          type="button"
+                          aria-label={`${confirmingId === file.id ? "Confirm delete" : "Delete"} ${file.filename}`}
+                          aria-pressed={confirmingId === file.id}
+                          title={confirmingId === file.id ? "Click again to delete" : "Delete file"}
+                          onClick={() => {
+                            if (confirmingId === file.id) {
+                              void remove(file);
+                            } else {
+                              setConfirmingId(file.id);
+                            }
+                          }}
+                          onBlur={() => setConfirmingId((current) => current === file.id ? null : current)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Escape") setConfirmingId(null);
+                          }}
+                          disabled={uploading || deletingId !== null}
+                        >
+                          {deletingId === file.id ? "Deleting…" : confirmingId === file.id ? "✓" : "Delete"}
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
         ) : null}
           </>
         )}
@@ -679,6 +713,11 @@ function ArtifactPage({ file, artifact }: { file: AudreyFile; artifact?: AudreyF
   );
 }
 
+function kindLabel(kind: AudreyFile["kind"]): string {
+  if (kind === "text") return "Document";
+  return kind[0].toUpperCase() + kind.slice(1);
+}
+
 function kindSymbol(kind: AudreyFile["kind"]): string {
   if (kind === "image") return "◫";
   if (kind === "video") return "▶";
@@ -723,11 +762,6 @@ function formatElapsed(seconds: number): string {
 
 function transcriptLabel(source: string): string {
   return source === "auto_captions" ? "auto-captions" : source;
-}
-
-function summaryTeaser(summary: string): string {
-  const text = summary.replace(/\s+/g, " ").trim();
-  return text.length > 100 ? text.slice(0, 99).trimEnd() + "…" : text;
 }
 
 function formatFileTime(value: string): string {
