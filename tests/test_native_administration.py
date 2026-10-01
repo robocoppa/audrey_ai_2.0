@@ -778,6 +778,80 @@ def test_admin_model_order_persists_and_filters_for_each_user(tmp_path):
         reopened.close()
 
 
+def test_model_override_sources_report_and_reset_independently(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    admin = asyncio.run(
+        _resolve(
+            store,
+            subject="override-admin",
+            email="admin@example.com",
+            role="admin",
+        )
+    )
+    app = FastAPI()
+    app.state.application_store = store
+    app.state.cfg = _cfg()
+    app.state.ollama = _OllamaInventory(_DIRECT_MODEL)
+    app.include_router(router)
+    app.dependency_overrides[require_admin_principal] = lambda: admin
+    model_id = f"direct/{_DIRECT_MODEL}"
+    try:
+        with TestClient(app) as client:
+            initial = client.get("/api/admin/models").json()["items"]
+            original = next(item for item in initial if item["id"] == model_id)
+            assert original["policy_overridden"] is False
+            assert original["access_policy_overridden"] is False
+            assert original["publication_profile_overridden"] is False
+            assert original["profile_display_name"] == ""
+
+            access = client.patch(
+                f"/api/admin/models/{model_id}",
+                json={"enabled": False, "audience": "users"},
+            )
+            assert access.status_code == 200
+            assert access.json()["access_policy_overridden"] is True
+            assert access.json()["publication_profile_overridden"] is False
+
+            profile = client.patch(
+                f"/api/admin/model-profiles/{model_id}",
+                json={
+                    "visibility": "public",
+                    "roles": ["users"],
+                    "display_name": "Published Qwen",
+                },
+            )
+            assert profile.status_code == 200
+            assert profile.json()["access_policy_overridden"] is True
+            assert profile.json()["publication_profile_overridden"] is True
+            assert profile.json()["profile_display_name"] == "Published Qwen"
+
+            access_reset = client.delete(
+                f"/api/admin/model-access-policies/{model_id}"
+            )
+            assert access_reset.status_code == 200
+            assert access_reset.json()["policy_overridden"] is True
+            assert access_reset.json()["access_policy_overridden"] is False
+            assert access_reset.json()["publication_profile_overridden"] is True
+            assert access_reset.json()["roles"] == ["users"]
+            assert asyncio.run(store.list_model_access_policies()) == ()
+            assert len(asyncio.run(store.list_model_publication_profiles())) == 1
+
+            assert client.patch(
+                f"/api/admin/models/{model_id}",
+                json={"enabled": False, "audience": "users"},
+            ).status_code == 200
+            profile_reset = client.delete(f"/api/admin/model-profiles/{model_id}")
+            assert profile_reset.status_code == 200
+            assert profile_reset.json()["policy_overridden"] is True
+            assert profile_reset.json()["access_policy_overridden"] is True
+            assert profile_reset.json()["publication_profile_overridden"] is False
+            assert profile_reset.json()["profile_display_name"] == ""
+            assert asyncio.run(store.list_model_publication_profiles()) == ()
+            assert len(asyncio.run(store.list_model_access_policies())) == 1
+    finally:
+        store.close()
+
+
 def test_admin_routes_reject_personal_tokens_even_for_admin_account(tmp_path):
     store = ApplicationStore(tmp_path / "app.sqlite")
     admin = asyncio.run(

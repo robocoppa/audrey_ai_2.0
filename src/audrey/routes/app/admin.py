@@ -98,6 +98,9 @@ class AdminModelProfileRequest(BaseModel):
 class AdminModelResponse(ModelResponse):
     concrete_model: str
     policy_overridden: bool
+    access_policy_overridden: bool
+    publication_profile_overridden: bool
+    profile_display_name: str
 
 
 class AdminModelListResponse(BaseModel):
@@ -146,12 +149,42 @@ def _user_response(record: AdminUserRecord) -> AdminUserResponse:
     )
 
 
-def _admin_model_response(model, *, policy_overridden: bool) -> AdminModelResponse:
+def _admin_model_response(
+    model,
+    *,
+    access_policy_overridden: bool,
+    publication_profile_overridden: bool,
+    profile_display_name: str = "",
+) -> AdminModelResponse:
     base = model_response(model).model_dump()
     return AdminModelResponse(
         **base,
         concrete_model=model.concrete_model,
-        policy_overridden=policy_overridden,
+        policy_overridden=(
+            access_policy_overridden or publication_profile_overridden
+        ),
+        access_policy_overridden=access_policy_overridden,
+        publication_profile_overridden=publication_profile_overridden,
+        profile_display_name=profile_display_name,
+    )
+
+
+async def _model_override_state(
+    store,
+    model_id: str,
+) -> tuple[bool, bool, str]:
+    access_policy_ids = {
+        policy.model_id for policy in await store.list_model_access_policies()
+    }
+    profiles = {
+        profile.model_id: profile
+        for profile in await store.list_model_publication_profiles()
+    }
+    profile = profiles.get(model_id)
+    return (
+        model_id in access_policy_ids,
+        profile is not None,
+        profile.display_name if profile is not None else "",
     )
 
 
@@ -347,10 +380,12 @@ async def list_models(
     principal: Principal = Depends(require_admin_principal),
 ) -> AdminModelListResponse:
     store = application_store(request)
-    overridden = {
+    access_policy_ids = {
         policy.model_id for policy in await store.list_model_access_policies()
-    } | {
-        profile.model_id for profile in await store.list_model_publication_profiles()
+    }
+    profiles = {
+        profile.model_id: profile
+        for profile in await store.list_model_publication_profiles()
     }
     inventory = await discover_models(
         request.app.state.cfg,
@@ -367,7 +402,11 @@ async def list_models(
         items=[
             _admin_model_response(
                 model,
-                policy_overridden=model.id in overridden,
+                access_policy_overridden=model.id in access_policy_ids,
+                publication_profile_overridden=model.id in profiles,
+                profile_display_name=(
+                    profiles[model.id].display_name if model.id in profiles else ""
+                ),
             )
             for model in models
         ],
@@ -420,8 +459,9 @@ async def update_model(
     known = {model.id for model in inventory.models}
     if model_id not in known:
         raise HTTPException(status_code=404, detail="Model does not exist.")
+    store = application_store(request)
     try:
-        await application_store(request).set_model_access_policy(
+        await store.set_model_access_policy(
             actor_user_id=principal.user_id,
             model_id=model_id,
             enabled=payload.enabled,
@@ -431,13 +471,21 @@ async def update_model(
         raise _admin_error(exc) from exc
     models = await catalog_for_principal(
         request.app.state.cfg,
-        application_store(request),
+        store,
         principal,
         include_hidden=True,
         inventory=inventory.models,
     )
     updated = next(model for model in models if model.id == model_id)
-    return _admin_model_response(updated, policy_overridden=True)
+    access_overridden, profile_overridden, profile_name = await _model_override_state(
+        store, model_id
+    )
+    return _admin_model_response(
+        updated,
+        access_policy_overridden=access_overridden,
+        publication_profile_overridden=profile_overridden,
+        profile_display_name=profile_name,
+    )
 
 
 @router.patch(
@@ -469,9 +517,14 @@ async def update_model_profile(
         request.app.state.cfg, store, principal,
         include_hidden=True, inventory=inventory.models,
     )
+    access_overridden, profile_overridden, profile_name = await _model_override_state(
+        store, model_id
+    )
     return _admin_model_response(
         next(model for model in models if model.id == model_id),
-        policy_overridden=True,
+        access_policy_overridden=access_overridden,
+        publication_profile_overridden=profile_overridden,
+        profile_display_name=profile_name,
     )
 
 
@@ -519,9 +572,14 @@ async def upload_model_portrait(
         request.app.state.cfg, store, principal,
         include_hidden=True, inventory=inventory.models,
     )
+    access_overridden, profile_overridden, profile_name = await _model_override_state(
+        store, model_id
+    )
     return _admin_model_response(
         next(model for model in models if model.id == model_id),
-        policy_overridden=True,
+        access_policy_overridden=access_overridden,
+        publication_profile_overridden=profile_overridden,
+        profile_display_name=profile_name,
     )
 
 
@@ -549,9 +607,100 @@ async def remove_model_portrait(
         request.app.state.cfg, store, principal,
         include_hidden=True, inventory=inventory.models,
     )
+    access_overridden, profile_overridden, profile_name = await _model_override_state(
+        store, model_id
+    )
     return _admin_model_response(
         next(model for model in models if model.id == model_id),
-        policy_overridden=True,
+        access_policy_overridden=access_overridden,
+        publication_profile_overridden=profile_overridden,
+        profile_display_name=profile_name,
+    )
+
+
+@router.delete(
+    "/model-access-policies/{model_id:path}",
+    response_model=AdminModelResponse,
+)
+async def delete_model_access_policy(
+    model_id: str,
+    request: Request,
+    principal: Principal = Depends(require_admin_principal),
+) -> AdminModelResponse:
+    """Remove only the enabled/audience override, preserving publication data."""
+
+    inventory = await discover_models(
+        request.app.state.cfg,
+        getattr(request.app.state, "ollama", None),
+    )
+    if model_id not in {model.id for model in inventory.models}:
+        raise HTTPException(status_code=404, detail="Model does not exist.")
+    store = application_store(request)
+    try:
+        await store.delete_model_access_policy(
+            actor_user_id=principal.user_id,
+            model_id=model_id,
+        )
+    except AccountAdministrationError as exc:
+        raise _admin_error(exc) from exc
+    models = await catalog_for_principal(
+        request.app.state.cfg,
+        store,
+        principal,
+        include_hidden=True,
+        inventory=inventory.models,
+    )
+    access_overridden, profile_overridden, profile_name = await _model_override_state(
+        store, model_id
+    )
+    return _admin_model_response(
+        next(model for model in models if model.id == model_id),
+        access_policy_overridden=access_overridden,
+        publication_profile_overridden=profile_overridden,
+        profile_display_name=profile_name,
+    )
+
+
+@router.delete(
+    "/model-profiles/{model_id:path}",
+    response_model=AdminModelResponse,
+)
+async def delete_model_profile(
+    model_id: str,
+    request: Request,
+    principal: Principal = Depends(require_admin_principal),
+) -> AdminModelResponse:
+    """Remove only publication settings, preserving enabled/audience policy."""
+
+    inventory = await discover_models(
+        request.app.state.cfg,
+        getattr(request.app.state, "ollama", None),
+    )
+    if model_id not in {model.id for model in inventory.models}:
+        raise HTTPException(status_code=404, detail="Model does not exist.")
+    store = application_store(request)
+    try:
+        await store.delete_model_publication_profile(
+            actor_user_id=principal.user_id,
+            model_id=model_id,
+        )
+    except AccountAdministrationError as exc:
+        raise _admin_error(exc) from exc
+    models = await catalog_for_principal(
+        request.app.state.cfg,
+        store,
+        principal,
+        include_hidden=True,
+        inventory=inventory.models,
+    )
+    access_overridden, profile_overridden, profile_name = await _model_override_state(
+        store, model_id
+    )
+    return _admin_model_response(
+        next(model for model in models if model.id == model_id),
+        access_policy_overridden=access_overridden,
+        publication_profile_overridden=profile_overridden,
+        profile_display_name=profile_name,
     )
 
 
@@ -591,7 +740,11 @@ async def delete_model_policy(
         inventory=inventory.models,
     )
     updated = next(model for model in models if model.id == model_id)
-    return _admin_model_response(updated, policy_overridden=False)
+    return _admin_model_response(
+        updated,
+        access_policy_overridden=False,
+        publication_profile_overridden=False,
+    )
 
 
 __all__ = ["router"]

@@ -163,9 +163,38 @@ def _patch_model(
     return updated
 
 
-def _delete_model_policy(model_id: str) -> dict[str, Any]:
+def _patch_model_profile(
+    model_id: str,
+    *,
+    visibility: str,
+    roles: list[str],
+    display_name: str,
+) -> dict[str, Any]:
     _, updated = _json_request(
-        f"/api/admin/model-policies/{model_id}",
+        f"/api/admin/model-profiles/{model_id}",
+        token=ADMIN_TOKEN,
+        method="PATCH",
+        payload={
+            "visibility": visibility,
+            "roles": roles,
+            "display_name": display_name,
+        },
+    )
+    return updated
+
+
+def _delete_model_access_policy(model_id: str) -> dict[str, Any]:
+    _, updated = _json_request(
+        f"/api/admin/model-access-policies/{model_id}",
+        token=ADMIN_TOKEN,
+        method="DELETE",
+    )
+    return updated
+
+
+def _delete_model_profile(model_id: str) -> dict[str, Any]:
+    _, updated = _json_request(
+        f"/api/admin/model-profiles/{model_id}",
         token=ADMIN_TOKEN,
         method="DELETE",
     )
@@ -355,7 +384,8 @@ def main() -> int:
     original_user: dict[str, Any] | None = None
     original_model: dict[str, Any] | None = None
     user_restore_needed = False
-    model_restore_needed = False
+    model_access_restore_needed = False
+    model_profile_restore_needed = False
     pat_id = ""
     conversation_id = ""
     run_id = ""
@@ -381,8 +411,17 @@ def main() -> int:
             raise SmokeError("the admin smoke credential does not resolve to an Audrey admin")
         if original_model.get("kind") != "direct":
             raise SmokeError(f"{DIRECT_MODEL_ID} is not a direct model")
-        if not isinstance(original_model.get("policy_overridden"), bool):
-            raise SmokeError("admin model catalog omitted its policy source")
+        required_source_fields = (
+            "access_policy_overridden",
+            "publication_profile_overridden",
+        )
+        if any(
+            not isinstance(original_model.get(field), bool)
+            for field in required_source_fields
+        ) or not isinstance(original_model.get("profile_display_name"), str):
+            raise SmokeError(
+                "admin model catalog omitted separate access/profile provenance"
+            )
 
         safeguards = _assert_admin_safeguards(admin_id)
         pat_id, pat = _issue_admin_pat()
@@ -393,7 +432,7 @@ def main() -> int:
         if ordinary.get("groups") != ["users"]:
             raise SmokeError(f"ordinary group update did not round-trip: {ordinary}")
 
-        model_restore_needed = True
+        model_access_restore_needed = True
         tester_policy = _patch_model(
             DIRECT_MODEL_ID,
             enabled=True,
@@ -401,6 +440,21 @@ def main() -> int:
         )
         if not tester_policy.get("enabled") or tester_policy.get("audience") != "testers":
             raise SmokeError(f"tester model policy did not round-trip: {tester_policy}")
+
+        model_profile_restore_needed = True
+        tester_profile = _patch_model_profile(
+            DIRECT_MODEL_ID,
+            visibility="public",
+            roles=["testers"],
+            display_name=str(original_model.get("profile_display_name") or ""),
+        )
+        if (
+            tester_profile.get("visibility") != "public"
+            or tester_profile.get("roles") != ["testers"]
+        ):
+            raise SmokeError(
+                f"tester publication profile did not round-trip: {tester_profile}"
+            )
         if _catalog_model(token=USER_TOKEN, model_id=DIRECT_MODEL_ID) is not None:
             raise SmokeError("ordinary account discovered the tester-only direct model")
         ordinary_denial, _, _ = _request(
@@ -578,31 +632,76 @@ def main() -> int:
                 "repair_status",
                 _repair_until_ready,
             )
-        if model_restore_needed and original_model is not None:
+        if model_access_restore_needed and original_model is not None:
 
-            def restore_model() -> bool:
-                if original_model.get("policy_overridden"):
+            def restore_model_access() -> bool:
+                if original_model.get("access_policy_overridden"):
                     restored = _patch_model(
                         DIRECT_MODEL_ID,
                         enabled=bool(original_model.get("enabled")),
                         audience=str(original_model.get("audience") or "admins"),
                     )
                 else:
-                    restored = _delete_model_policy(DIRECT_MODEL_ID)
+                    restored = _delete_model_access_policy(DIRECT_MODEL_ID)
                 return (
                     restored.get("enabled") == original_model.get("enabled")
                     and restored.get("audience") == original_model.get("audience")
-                    and restored.get("policy_overridden") == original_model.get("policy_overridden")
+                    and restored.get("access_policy_overridden")
+                    == original_model.get("access_policy_overridden")
                 )
 
             _cleanup_step(
                 cleanup,
                 cleanup_errors,
-                "model_policy_restored",
-                restore_model,
+                "model_access_restored",
+                restore_model_access,
             )
-            if cleanup.get("model_policy_restored") is False:
-                cleanup_errors.append("model_policy_restored: effective policy differs")
+            if cleanup.get("model_access_restored") is False:
+                cleanup_errors.append("model_access_restored: access policy differs")
+        if model_profile_restore_needed and original_model is not None:
+
+            def restore_model_profile() -> bool:
+                if original_model.get("publication_profile_overridden"):
+                    restored = _patch_model_profile(
+                        DIRECT_MODEL_ID,
+                        visibility=str(original_model.get("visibility") or "private"),
+                        roles=[
+                            str(role) for role in original_model.get("roles", [])
+                        ],
+                        display_name=str(
+                            original_model.get("profile_display_name") or ""
+                        ),
+                    )
+                else:
+                    restored = _delete_model_profile(DIRECT_MODEL_ID)
+                return (
+                    restored.get("visibility") == original_model.get("visibility")
+                    and restored.get("roles") == original_model.get("roles")
+                    and restored.get("profile_display_name")
+                    == original_model.get("profile_display_name")
+                    and restored.get("publication_profile_overridden")
+                    == original_model.get("publication_profile_overridden")
+                )
+
+            _cleanup_step(
+                cleanup,
+                cleanup_errors,
+                "model_profile_restored",
+                restore_model_profile,
+            )
+            if cleanup.get("model_profile_restored") is False:
+                cleanup_errors.append(
+                    "model_profile_restored: publication profile differs"
+                )
+        if model_access_restore_needed or model_profile_restore_needed:
+            cleanup["model_policy_restored"] = (
+                cleanup.get("model_access_restored", True) is True
+                and cleanup.get("model_profile_restored", True) is True
+            )
+            if cleanup["model_policy_restored"] is False:
+                cleanup_errors.append(
+                    "model_policy_restored: one or more model sources differ"
+                )
         if user_restore_needed and original_user is not None:
 
             def restore_user() -> bool:

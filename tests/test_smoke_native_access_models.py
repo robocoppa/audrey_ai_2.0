@@ -36,8 +36,14 @@ class _FakeDeployment:
             "kind": "direct",
             "enabled": False,
             "audience": "admins",
+            "visibility": "public",
+            "roles": ["users"],
+            "label": "Live Qwen",
+            "profile_display_name": "Live Qwen",
             "concrete_model": "qwen3.8:latest",
-            "policy_overridden": False,
+            "policy_overridden": True,
+            "access_policy_overridden": False,
+            "publication_profile_overridden": True,
         }
         self.messages: list[dict[str, Any]] = []
         self.pat_revoked = False
@@ -73,26 +79,69 @@ class _FakeDeployment:
             assert payload is not None
             self.model["enabled"] = payload["enabled"]
             self.model["audience"] = payload["audience"]
+            self.model["access_policy_overridden"] = True
             self.model["policy_overridden"] = True
             return 200, self.model.copy()
         if (
-            path == f"/api/admin/model-policies/{smoke.DIRECT_MODEL_ID}"
+            path == f"/api/admin/model-profiles/{smoke.DIRECT_MODEL_ID}"
+            and method == "PATCH"
+        ):
+            assert payload is not None
+            self.model["visibility"] = payload["visibility"]
+            self.model["roles"] = sorted(payload["roles"])
+            self.model["profile_display_name"] = payload["display_name"]
+            if payload["display_name"]:
+                self.model["label"] = payload["display_name"]
+            self.model["publication_profile_overridden"] = True
+            self.model["policy_overridden"] = True
+            return 200, self.model.copy()
+        if (
+            path == f"/api/admin/model-access-policies/{smoke.DIRECT_MODEL_ID}"
             and method == "DELETE"
         ):
             self.model["enabled"] = False
             self.model["audience"] = "admins"
-            self.model["policy_overridden"] = False
+            self.model["access_policy_overridden"] = False
+            self.model["policy_overridden"] = bool(
+                self.model["publication_profile_overridden"]
+            )
+            return 200, self.model.copy()
+        if (
+            path == f"/api/admin/model-profiles/{smoke.DIRECT_MODEL_ID}"
+            and method == "DELETE"
+        ):
+            audience = (
+                self.model["audience"]
+                if self.model["access_policy_overridden"]
+                else "admins"
+            )
+            self.model["visibility"] = (
+                "private" if audience == "admins" else "public"
+            )
+            self.model["roles"] = [] if audience == "admins" else [audience]
+            self.model["label"] = "Qwen 3.8"
+            self.model["profile_display_name"] = ""
+            self.model["publication_profile_overridden"] = False
+            self.model["policy_overridden"] = bool(
+                self.model["access_policy_overridden"]
+            )
             return 200, self.model.copy()
         if path == "/api/models":
             visible = (
                 self.model["enabled"]
-                and "testers" in self.user["groups"]
-                and self.model["audience"] == "testers"
+                and self.model["visibility"] == "public"
+                and bool(set(self.model["roles"]) & set(self.user["groups"]))
             )
             model = {
                 key: value
                 for key, value in self.model.items()
-                if key not in {"concrete_model", "policy_overridden"}
+                if key not in {
+                    "concrete_model",
+                    "policy_overridden",
+                    "access_policy_overridden",
+                    "publication_profile_overridden",
+                    "profile_display_name",
+                }
             }
             return 200, {"items": [model] if visible else []}
         if path == "/api/conversations" and method == "POST":
@@ -207,3 +256,42 @@ def test_smoke_restores_state_and_removes_disposable_records(monkeypatch, capsys
     assert deployment.conversation_deleted
     assert deployment.archive_deleted
     assert deployment.pat_revoked
+
+
+def test_smoke_removes_temporary_profile_when_original_has_only_access_policy(
+    monkeypatch,
+    capsys,
+):
+    deployment = _FakeDeployment()
+    deployment.model.update(
+        {
+            "enabled": True,
+            "audience": "testers",
+            "visibility": "public",
+            "roles": ["testers"],
+            "label": "Qwen 3.8",
+            "profile_display_name": "",
+            "policy_overridden": True,
+            "access_policy_overridden": True,
+            "publication_profile_overridden": False,
+        }
+    )
+    original_user = deployment.user.copy()
+    original_user["groups"] = list(deployment.user["groups"])
+    original_model = deployment.model.copy()
+    monkeypatch.setattr(smoke, "USER_TOKEN", _USER_EVIDENCE)
+    monkeypatch.setattr(smoke, "ADMIN_TOKEN", _ADMIN_EVIDENCE)
+    monkeypatch.setattr(smoke, "_json_request", deployment.json_request)
+    monkeypatch.setattr(smoke, "_request", deployment.request)
+    monkeypatch.setattr(smoke, "_direct_agent_turn", deployment.direct_turn)
+    monkeypatch.setattr(smoke, "_repair_until_ready", lambda: "ready")
+
+    assert smoke.main() == 0
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "passed"
+    assert result["cleanup"]["model_access_restored"] is True
+    assert result["cleanup"]["model_profile_restored"] is True
+    assert result["cleanup"]["model_policy_restored"] is True
+    assert deployment.user == original_user
+    assert deployment.model == original_model

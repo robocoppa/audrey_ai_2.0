@@ -265,7 +265,12 @@ Same 27.3B weights, three builds. `eval_prompts_code_hard_models.json`,
   and the 97.4s ttft was repeat #4, NOT the cold load. Most requests are fine;
   some are catastrophic. See *Not established* for what this is.
 - **29 GB against 24 GB per card** (`ollama list`), so it cannot be resident on
-  one card and must span both. Same class of risk as `llama4:latest` below.
+  one card and must span both. ✅ **It does, entirely on GPU** (replaces "same
+  class of risk as `llama4:latest`", 2026-10-01). Served as `qwen3.8:q8-32k`
+  with a 32k window, `ollama ps` read 30 GB at **100% GPU**, and `nvidia-smi`
+  showed 15,900 and 16,777 MiB in use on the two cards, with `nomic-embed-text`
+  resident beside it. Unlike `llama4`, it is not split onto the CPU.
+  `[ollama ps + nvidia-smi during ai-sec's eval, 2026-10-01]`
 
 #### Thinking-OFF re-run — the decisive arm `[q4-thinkoff + q8-thinkoff, 2026-08-25]`
 
@@ -907,15 +912,17 @@ Open questions, and what would close each.
   VRAM, a sibling model scored 5/5 in the same window, and the harness sets no
   sampler options, which explains it without any hardware theory.
   ▶ *Closes with:* both suites at `--repeat 5`.
-- **Whether `qwen3.8:27b-mtp-q8_0`'s latency tail is memory pressure.**
+- ⛔ **[CLOSED 2026-10-01] Whether `qwen3.8:27b-mtp-q8_0`'s latency tail is memory
+  pressure.**
   ⛔ **LARGELY RETIRED 2026-08-25** by the thinking-OFF arm: warm max falls from
   100.8s to 14.3s and the cold load completes in 40.7s, so the extreme tail was
   variable reasoning length, not swapping. The residual +6-59% is a clean
   generation-rate difference consistent with 1.71x the weights to stream.
-  `ollama ps` STILL was not captured, so CPU offload is not formally excluded.
-  ▶ *Closes with:* `ollama ps` during any future run of this tag. ai-sec's Q8
-  eval, queued 2026-10-01, reads it on `qwen3.8:q8-32k`, which is the same
-  weights.
+  ✅ **`ollama ps` read 2026-10-01**, during ai-sec's eval of `qwen3.8:q8-32k`
+  (the same weights at `num_ctx 32768`): **100% GPU** across both cards, with
+  `nomic-embed-text` resident beside it. These weights fit on the GPUs even with
+  a 32k window. ⚠️ It cannot show what other models resident during the August
+  sweep did to placement then. `[ollama ps + nvidia-smi, 2026-10-01]`
   Original entry follows for the record.
 - **[superseded] Whether `qwen3.8:27b-mtp-q8_0`'s latency tail is memory pressure.** The
   bimodal shape (median fine, max 100.8s, 63s spread on one prompt) fits a

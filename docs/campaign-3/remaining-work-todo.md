@@ -25,9 +25,9 @@ primitive as `audrey-admin backup-app-state`.
   backup API, run `PRAGMA integrity_check`, and report the schema version.
 - [x] Add hermetic CLI coverage.
 - [x] Pass the full hermetic backend suite: 3,066 tests.
-- [ ] Rebuild `audrey` with the new command.
-- [ ] Create the persistent backup directory inside `/data`.
-- [ ] Create the pre-gate backup and preserve its JSON result.
+- [x] Rebuild `audrey` with the new command.
+- [x] Create the persistent backup directory inside `/data`.
+- [x] Create the pre-gate backup and preserve its JSON result.
 
 On Unraid, after pulling the slice:
 
@@ -42,14 +42,28 @@ Success is exit code zero and JSON with `status: ok`, `integrity_check: ok`, a
 positive byte count, and the current schema version. The command refuses to
 overwrite a prior backup.
 
+**Live result, 2026-10-01:** Passed. The backup at
+`/data/backups/audrey-app-before-2d5-20261001.sqlite` is 675,840 bytes,
+reported `integrity_check: ok`, and captured schema version 17.
+
 ### 5.2 Prove account and model administration
 
-- [ ] Confirm Tower's private `.env.smoke.local` contains fresh, distinct
+- [x] Confirm Tower's private `.env.smoke.local` contains accepted, distinct
   `AUDREY_USER_JWT` and `AUDREY_ADMIN_JWT` application assertions.
-- [ ] Run the account/model smoke through the standalone UI proxy.
+- [ ] Rebuild Audrey and rerun the corrected account/model smoke through the
+  standalone UI proxy.
 - [ ] Require `status: passed`, a successful direct-model run, zero tool events,
-  restored model policy, restored user access, repair `ready`, and no cleanup
-  errors.
+  restored access policy, restored publication profile, restored user access,
+  repair `ready`, and no cleanup errors.
+
+**First live attempt, 2026-10-01:** The smoke stopped before creating a
+conversation because the ordinary account could see the selected direct model.
+Cleanup passed and restored the account plus the original model state. The app
+was applying a pre-existing Public publication profile whose roles still
+included `users`; the old smoke changed only the separate enabled/audience
+policy. The corrective changes both effective layers, reports their provenance,
+and restores each source independently so an existing profile, display name,
+and portrait survive. The full hermetic backend suite passes 3,068 tests.
 
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
