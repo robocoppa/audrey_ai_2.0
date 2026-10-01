@@ -26,6 +26,10 @@ else:
     from smoke_native_auth import MISSING_CREDENTIALS, SmokeCredentials
 
 BASE_URL = os.getenv("AUDREY_SMOKE_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+BACKEND_HEALTH_URL = os.getenv(
+    "AUDREY_RESTART_HEALTH_URL",
+    "http://audrey:8000/health",
+).strip()
 SNAPSHOT_PATH = Path(
     os.getenv(
         "AUDREY_PERSISTENCE_SNAPSHOT_PATH",
@@ -58,12 +62,14 @@ def _request(
     token: str = "",
     timeout: float = 30,
     expected: frozenset[int] = frozenset({200}),
+    absolute_url: str = "",
 ) -> tuple[int, bytes, Message]:
     headers = {"Accept": "application/json"}
     if token:
         headers.update(_auth_headers(token))
-    request = Request(  # noqa: S310 - base URL is operator-controlled
-        f"{BASE_URL}{path}",
+    target = absolute_url or f"{BASE_URL}{path}"
+    request = Request(  # noqa: S310 - smoke URLs are operator-controlled
+        target,
         headers=headers,
         method="GET",
     )
@@ -78,18 +84,29 @@ def _request(
         response_headers = exc.headers
     if status not in expected:
         excerpt = content.decode(errors="replace")[:500]
-        raise SmokeError(f"GET {path}: HTTP {status}: {excerpt}")
+        raise SmokeError(f"GET {target}: HTTP {status}: {excerpt}")
     return status, content, response_headers
 
 
-def _json_request(path: str, *, token: str = "") -> dict[str, Any]:
-    _status, content, _headers = _request(path, token=token)
+def _json_request(
+    path: str,
+    *,
+    token: str = "",
+    absolute_url: str = "",
+) -> dict[str, Any]:
+    _status, content, _headers = _request(
+        path,
+        token=token,
+        absolute_url=absolute_url,
+    )
     try:
         value = json.loads(content)
     except json.JSONDecodeError as exc:
-        raise SmokeError(f"GET {path} returned invalid JSON") from exc
+        target = absolute_url or path
+        raise SmokeError(f"GET {target} returned invalid JSON") from exc
     if not isinstance(value, dict):
-        raise SmokeError(f"GET {path} returned a non-object JSON document")
+        target = absolute_url or path
+        raise SmokeError(f"GET {target} returned a non-object JSON document")
     return value
 
 
@@ -238,7 +255,10 @@ def _wait_until_ready() -> dict[str, Any]:
     last_error = ""
     while time.monotonic() < deadline:
         try:
-            health = _json_request("/health")
+            health = _json_request(
+                "",
+                absolute_url=BACKEND_HEALTH_URL,
+            )
             capabilities = _json_request("/api/capabilities", token=USER_TOKEN)
             if health.get("status") == "ok" and capabilities.get("status") == "ready":
                 return {
@@ -352,6 +372,9 @@ def verify() -> dict[str, Any]:
 def main() -> int:
     if not USER_TOKEN or not ADMIN_TOKEN:
         print(MISSING_CREDENTIALS, file=sys.stderr)
+        return 2
+    if not BACKEND_HEALTH_URL:
+        print("AUDREY_RESTART_HEALTH_URL must not be empty.", file=sys.stderr)
         return 2
     if READY_TIMEOUT_SECONDS <= 0:
         print("AUDREY_RESTART_SMOKE_TIMEOUT_SECONDS must be positive.", file=sys.stderr)

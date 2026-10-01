@@ -161,7 +161,11 @@ this slice behaved as expected.
 ### 5.4 Prove restart persistence
 
 **Implementation:** Laptop-complete. The read-only two-stage smoke and its
-Tower runner support are ready for the live restart gate.
+Tower runner support are ready for the live restart gate. The first live
+capture exposed a probe-address bug: `/health` had been requested through
+the UI origin, which returned its HTML shell. The corrected smoke calls
+`http://audrey:8000/health` directly on `ollama-net` and keeps authenticated
+state checks on the UI proxy. That failed attempt wrote no snapshot.
 
 - [ ] Record the intended owner groups, disposable account state, model policy,
   model order, and one conversation's selected model.

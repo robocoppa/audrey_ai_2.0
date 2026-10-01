@@ -125,3 +125,25 @@ def test_stable_account_rejects_non_active_state():
             },
             label="ordinary",
         )
+
+
+def test_readiness_uses_backend_health_and_ui_capabilities(monkeypatch):
+    calls = []
+
+    def fake_json_request(path, *, token="", absolute_url=""):
+        calls.append((path, token, absolute_url))
+        if absolute_url:
+            return {"status": "ok"}
+        return {"status": "ready"}
+
+    monkeypatch.setattr(smoke, "BACKEND_HEALTH_URL", "http://audrey:8000/health")
+    monkeypatch.setattr(smoke, "_json_request", fake_json_request)
+
+    assert smoke._wait_until_ready() == {
+        "health": "ok",
+        "capabilities": "ready",
+    }
+    assert calls == [
+        ("", "", "http://audrey:8000/health"),
+        ("/api/capabilities", smoke.USER_TOKEN, ""),
+    ]
