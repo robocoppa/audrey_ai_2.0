@@ -73,7 +73,8 @@ web/test-results/
 .env.local
 .env.*.local
 
-# Runtime data (regenerable, should live in Unraid appdata on deploy)
+# Runtime data and smoke evidence (regenerable; lives in Unraid appdata).
+testing-out/
 data/
 sandbox/
 *.db

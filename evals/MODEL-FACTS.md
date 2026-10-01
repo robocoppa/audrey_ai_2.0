@@ -982,10 +982,16 @@ Open questions, and what would close each.
   would need several hundred layers to reach 33.4B. That is an inference, not a
   reading. ▶ *Closes with:* the expert count in `ollama show -v
   laguna-xs-2.1:latest`.
-- **Whether Q8 reads ai-sec's findings better than Q4.** The 2026-08-25 bake-off
-  found no quality difference on code. ai-sec's question is its absent-setting
-  misreading (3 of 17 at Q4). ▶ *Closes with:* ai-sec's eval of
-  `qwen3.8:q8-32k`, queued 2026-10-01, against its Q4 baseline.
+- ⛔ **[CLOSED 2026-10-01] Whether Q8 reads ai-sec's findings better than Q4. It
+  does not, measurably.** One draw each at temperature 0 on the same packets:
+  Q8 misread an absent setting as a missing protection in 2 of 18 cases against
+  Q4's 3 of 17, and only one case was wrong in both. The error moved between
+  cases rather than going away. Q8 also lost two more Windows narratives to
+  ai-sec's authority guard ("below benchmark", "compliance requirements"), and
+  took 2,581s for the 42 cases against 1,765s. This matches the 2026-08-25
+  bake-off: Q8_0 buys no measurable quality. ⚠️ Q8's determinism at temperature
+  0 was not measured separately. `[ai-sec eval-out/model-2026-10-01-080608 vs
+  model-2026-09-30-200843, 2026-10-01]`
 - **`laguna-s-2.1` / `laguna-xs-2.1`.** Queued for removal from `config.yaml`
   and `pull-models.sh`. A 2026-08-18 thinking-on arm came back within noise of
   thinking-off, but arm delivery was unverifiable at the time (the per-request

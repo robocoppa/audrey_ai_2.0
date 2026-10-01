@@ -10,6 +10,7 @@ IMAGE="${IMAGE:-audrey:latest}"
 NETWORK="${NETWORK:-ollama-net}"
 BASE_URL="${AUDREY_SMOKE_BASE_URL:-http://audrey-ui:8080}"
 SMOKE_SCRIPT="${1:-smoke_native_ui.py}"
+SMOKE_ARGS=("${@:2}")
 
 die() {
   echo "ERROR: $*" >&2
@@ -19,7 +20,8 @@ die() {
 case "${SMOKE_SCRIPT}" in
   smoke_native_auth_cutover.py|smoke_native_ui.py|smoke_native_files.py|\
   smoke_native_chat_projection.py|smoke_native_access_models.py|\
-  smoke_native_preferences.py|smoke_native_tool_events.py|smoke_native_modes.py)
+  smoke_native_preferences.py|smoke_native_tool_events.py|smoke_native_modes.py|\
+  smoke_native_restart_persistence.py)
     ;;
   *)
     die "unsupported native smoke script: ${SMOKE_SCRIPT}"
@@ -65,8 +67,20 @@ OPTIONAL_ENV_NAMES=(
   AUDREY_FILE_SMOKE_TIMEOUT_SECONDS
   AUDREY_MODE_SMOKE_TIMEOUT_SECONDS
   AUDREY_PREFERENCES_SMOKE_TIMEOUT_SECONDS
+  AUDREY_RESTART_SMOKE_TIMEOUT_SECONDS
 )
 DOCKER_ENV_ARGS=()
+DOCKER_USER_ARGS=()
+DOCKER_VOLUME_ARGS=()
+if [[ "${SMOKE_SCRIPT}" == "smoke_native_restart_persistence.py" ]]; then
+  PERSISTENCE_STATE_DIR="${AUDREY_PERSISTENCE_STATE_DIR:-${APPDATA}/testing-out/smokes}"
+  mkdir -p -- "${PERSISTENCE_STATE_DIR}"
+  # Tower normally runs this wrapper as root, while the Audrey image uses
+  # UID 99. Root is confined to this disposable probe and its one state mount.
+  DOCKER_USER_ARGS+=(--user 0:0)
+  DOCKER_ENV_ARGS+=(--env "AUDREY_PERSISTENCE_SNAPSHOT_PATH=/state/c3-restart-persistence.json")
+  DOCKER_VOLUME_ARGS+=(--volume "${PERSISTENCE_STATE_DIR}:/state")
+fi
 for env_name in "${OPTIONAL_ENV_NAMES[@]}"; do
   env_value="${!env_name-}"
   [[ -z "${env_value}" ]] || DOCKER_ENV_ARGS+=(--env "${env_name}=${env_value}")
@@ -83,6 +97,8 @@ exec docker run --rm \
   --env-file "${ENV_FILE}" \
   --env "AUDREY_SMOKE_BASE_URL=${BASE_URL}" \
   "${DOCKER_ENV_ARGS[@]}" \
+  "${DOCKER_USER_ARGS[@]}" \
+  "${DOCKER_VOLUME_ARGS[@]}" \
   --volume "${APPDATA}/tests/smoke:/smoke:ro" \
   "${IMAGE}" \
-  /opt/venv/bin/python "/smoke/${SMOKE_SCRIPT}"
+  /opt/venv/bin/python "/smoke/${SMOKE_SCRIPT}" "${SMOKE_ARGS[@]}"

@@ -758,9 +758,13 @@ check; it does not require another identity implementation. Create the Access
 application before publishing the tunnel route so an ordering mistake never
 leaves an unprotected Audrey hostname. In Cloudflare Zero Trust, create a
 self-hosted public-hostname application for the whole Audrey hostname, with no
-path restriction, and attach an Allow policy for the intended human identities.
-Email one-time PIN is sufficient for this gate. Then add a published application
-route for the same hostname. Use `http://audrey:8000` when `cloudflared`
+path restriction. The current self-service account contract uses an Allow
+policy with **Include → Login Methods → One-time PIN**: Cloudflare verifies
+control of the submitted email, then Audrey creates the first login as Pending
+and withholds application access until an Audrey administrator approves it.
+Keep Access authentication enabled and never use Bypass for applicants. Then
+add a published application route for the same hostname. Use
+`http://audrey:8000` when `cloudflared`
 shares `ollama-net`; use `http://127.0.0.1:8000` when its container uses host
 networking. Cloudflare documents both the
 [self-hosted application flow](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)

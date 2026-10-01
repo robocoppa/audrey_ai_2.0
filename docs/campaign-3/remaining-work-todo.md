@@ -50,9 +50,9 @@ reported `integrity_check: ok`, and captured schema version 17.
 
 - [x] Confirm Tower's private `.env.smoke.local` contains accepted, distinct
   `AUDREY_USER_JWT` and `AUDREY_ADMIN_JWT` application assertions.
-- [ ] Rebuild Audrey and rerun the corrected account/model smoke through the
+- [x] Rebuild Audrey and rerun the corrected account/model smoke through the
   standalone UI proxy.
-- [ ] Require `status: passed`, a successful direct-model run, zero tool events,
+- [x] Require `status: passed`, a successful direct-model run, zero tool events,
   restored access policy, restored publication profile, restored user access,
   repair `ready`, and no cleanup errors.
 
@@ -65,6 +65,14 @@ policy. The corrective changes both effective layers, reports their provenance,
 and restores each source independently so an existing profile, display name,
 and portrait survive. The full hermetic backend suite passes 3,068 tests.
 
+**Corrected live result, 2026-10-01:** Passed. The users-only account received
+HTTP 404 for the tester model, tester access completed one 66.571-second direct
+Qwen turn with two canonical messages and zero tool events, disabled execution
+returned HTTP 404 without appending messages, and repair reached `ready`.
+Provider-only administration, PAT rejection, and self-disable/demotion
+safeguards passed. Cleanup restored the access policy, publication profile,
+user access, and removed the temporary conversation and archive projection.
+
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
 bash tests/smoke/smoke-native-onbox.sh smoke_native_access_models.py
@@ -72,28 +80,113 @@ bash tests/smoke/smoke-native-onbox.sh smoke_native_access_models.py
 
 ### 5.3 Complete the interactive browser checks
 
-- [ ] Sign in once with a genuinely new allowed Access identity and confirm it
+- [x] Sign in once with a genuinely new allowed Access identity and confirm it
   lands at the pending-account boundary.
-- [ ] Bootstrap the intended owner by exact canonical `usr_...` id with
+- [x] Bootstrap the intended owner by exact canonical `usr_...` id with
   `docker compose exec audrey audrey-admin grant-admin <usr_id>`.
-- [ ] Confirm the Admin dialog exposes Accounts and Models.
-- [ ] With a second disposable identity, prove Pending → User → Tester and
+- [x] Confirm the Admin dialog exposes Accounts and Models.
+- [x] With a second disposable identity, prove Pending → User → Tester and
   Disabled → Active transitions.
-- [ ] Confirm ordinary users cannot see tester/admin direct models.
-- [ ] Confirm testers can select an enabled tester model and complete a direct
+- [x] Confirm ordinary users cannot see tester/admin direct models.
+- [x] Confirm testers can select an enabled tester model and complete a direct
   native turn.
-- [ ] Disable the selected direct model and confirm the picker falls back to
+- [x] Disable the selected direct model and confirm the picker falls back to
   the first allowed model.
-- [ ] Use **Reset default** and confirm the Customized marker clears.
-- [ ] Restore the disposable account and model policy to their starting state.
+- [x] Use **Reset default** and confirm the Customized marker clears.
+- [x] Delete the newly created disposable account after the proof, or restore an
+  existing disposable account to its recorded starting state. Reset the test
+  model to its deployment default.
+
+**Required Cloudflare applicant policy**
+
+The current Access email allowlist rejects a new address before Audrey receives
+identity evidence, so no Pending account can be created. In Cloudflare Zero
+Trust, keep the Audrey application protected and add an **Allow** policy named
+`Audrey verified applicants` with **Include → Login Methods → One-time
+PIN**. Ensure One-time PIN is enabled for the application. This deliberately
+lets any person who proves control of an email reach Audrey's account boundary;
+Audrey still creates them as Pending and blocks its workspace, models, files,
+conversations, runs, and administration routes until approval. Do not use an
+Access Bypass policy.
+
+Cloudflare references: [Access policies](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/)
+and [One-time PIN login](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/one-time-pin/).
+
+**Browser acceptance runbook**
+
+1. Keep the administrator signed in in the normal browser. Open a separate
+   browser profile, enter a genuinely new email at Cloudflare Access, complete
+   its one-time PIN, and let the first Audrey request submit the account.
+   Confirm the page says **Approval is pending**, shows the correct email, and
+   offers **Check again**.
+2. In the administrator browser, open **Admin Panel → Accounts**. Confirm the
+   new identity is Pending, choose **Approve as user**, then use **Check again**
+   in the disposable browser. The Audrey workspace must open.
+3. In **Admin Panel → Models**, choose a currently unused direct model whose
+   badge says **Default**. `qwen3.5:4b` is a suitable small candidate if it
+   is still Default. Record its Enabled/Disabled and Public/Private starting
+   state.
+4. Change that model to **Public**, open **Edit…**, grant only **Tester**, and
+   save. In **Accounts**, change the disposable identity's Role from **User** to
+   **Tester**.
+5. Refresh the disposable browser. Open the model picker, choose **Other
+   models…**, select the test model, and send: `Reply with exactly
+   BROWSER-DIRECT-PASS.` Confirm a direct answer completes.
+6. In the administrator browser, disable the selected direct model. Refresh the
+   disposable browser. Confirm the picker falls back to **Auto** and the
+   conversation remains usable.
+7. In **Accounts**, disable the disposable identity. Refresh its browser and
+   confirm **This account is disabled**. Reactivate it, select **Check again**,
+   and confirm the workspace returns. Move it through **User** and **Tester**
+   once more to verify both role choices.
+8. In **Models**, click **Reset default** for the test model. Confirm its badge
+   changes to **Default** and its state matches step 3. Delete the newly created
+   disposable account and wait for its row to leave the Accounts list.
+
+Pass this slice when every visible state matches the steps, the direct turn
+finishes, Auto appears after disabling the selected model, and the test model
+returns to Default.
+
+**Applicant-gate live result, 2026-10-01:** Passed. One-time PIN was enabled
+for the Audrey Access application and the applicant policy was reduced to the
+single `Login Methods -> One-time PIN` Include rule. A genuinely new address
+received its code, authenticated successfully, reached Audrey as Pending, and
+completed the administrator approval flow. Cloudflare no longer rejects new
+applicants before Audrey can create their account.
+
+**Full interactive result, 2026-10-01:** Passed. The user confirmed every
+visible account, role, model-access, fallback, reset, and cleanup check in
+this slice behaved as expected.
 
 ### 5.4 Prove restart persistence
+
+**Implementation:** Laptop-complete. The read-only two-stage smoke and its
+Tower runner support are ready for the live restart gate.
 
 - [ ] Record the intended owner groups, disposable account state, model policy,
   model order, and one conversation's selected model.
 - [ ] Restart Audrey.
 - [ ] Confirm those values and the selected conversation model survive.
-- [ ] Confirm `/api/ready` returns ready after restart.
+- [ ] Confirm `/health` returns `ok` and authenticated `/api/capabilities`
+  returns `ready` after restart.
+
+The two-stage smoke records both authenticated accounts, every stable model
+policy in displayed order, and one real conversation selection. The verify
+stage waits up to three minutes for the real health and capability routes,
+then compares the post-restart values with the mode-600 snapshot. It does not
+change application state.
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+bash tests/smoke/smoke-native-onbox.sh smoke_native_restart_persistence.py capture
+docker compose restart audrey
+bash tests/smoke/smoke-native-onbox.sh smoke_native_restart_persistence.py verify
+```
+
+The ordinary smoke account must already own at least one conversation. If
+capture says none exists, sign in as that account, send one short native chat
+message, and rerun only `capture`. A pass reports all four comparisons as
+`true` and both readiness values as healthy.
 
 ### 5.5 Prove projection rebuild
 
