@@ -27,6 +27,8 @@ from audrey.pipeline.react import (
     _WEB_SEARCH_BUDGET_STUB,
     _compress_history,
     _context_census,
+    _dispatch_observed,
+    _observed_evidence,
     _retrieved_sources,
     _summarize_tool_message,
     _without_web_search,
@@ -683,3 +685,134 @@ class TestRetrievedSourcesWebFetch:
 
     def test_a_fetch_with_no_url_is_skipped(self):
         assert _retrieved_sources([_tr("web_fetch", {"text": "orphan body"})]) == []
+
+
+@pytest.mark.asyncio
+async def test_observed_dispatch_emits_private_file_evidence(monkeypatch):
+    async def fake_dispatch(*_args, **_kwargs):
+        return _tr("get_file_text", {
+            "filename": "inspection.pdf",
+            "artifact": "document",
+            "text": "private inspection contents",
+            "offset": 0,
+            "next_offset": None,
+            "total_chars": 27,
+        })
+
+    monkeypatch.setattr("audrey.pipeline.react.dispatch_one", fake_dispatch)
+    events: list[RunEvent] = []
+    emitter = RunEventEmitter(
+        run_id="run-file-evidence",
+        conversation_id="conversation-file-evidence",
+        assistant_message_id="message-file-evidence",
+        mode="fast",
+        virtual_model="audrey_fast",
+        sink=events.append,
+    )
+    emitter.run_started()
+    emitter.message_started()
+    observer = RunEventToolObserver(emitter)
+
+    await _dispatch_observed(
+        http=object(),
+        registry=object(),
+        tool_call={
+            "function": {
+                "name": "get_file_text",
+                "arguments": {"filename": "inspection.pdf", "artifact": "document"},
+            },
+        },
+        max_result_chars=6_000,
+        timeout_s=10,
+        user_id="usr_owner",
+        observer=observer,
+    )
+
+    sources = [event for event in events if event.type == "source.observed"]
+    assert len(sources) == 1
+    assert sources[0].title == "inspection.pdf · Document"
+    assert sources[0].url == ""
+    assert "private inspection contents" not in json.dumps(
+        [dump_run_event(event) for event in events]
+    )
+
+
+class TestObservedEvidence:
+    def test_kb_hits_emit_deduplicated_file_and_artifact_identities(self):
+        got = _observed_evidence([_tr("kb_search", {"results": [
+            {
+                "filename": "Retirement meeting.opus",
+                "artifact": "transcript",
+                "text": "private first passage",
+                "source": "/private/storage/file.transcript.txt",
+            },
+            {
+                "filename": "Retirement meeting.opus",
+                "artifact": "transcript",
+                "text": "private second passage",
+            },
+            {
+                "filename": "Retirement meeting.opus",
+                "artifact": "summary",
+                "text": "private summary",
+            },
+        ]})])
+
+        assert got == [
+            {
+                "title": "Retirement meeting.opus · Transcript",
+                "url": "",
+                "tool": "kb_search",
+                "identity": "file:retirement meeting.opus:transcript",
+            },
+            {
+                "title": "Retirement meeting.opus · Summary",
+                "url": "",
+                "tool": "kb_search",
+                "identity": "file:retirement meeting.opus:summary",
+            },
+        ]
+        wire = json.dumps(got)
+        assert "private first passage" not in wire
+        assert "/private/storage" not in wire
+
+    def test_file_reader_emits_the_exact_file_page_identity(self):
+        got = _observed_evidence([_tr("get_file_text", {
+            "filename": "inspection.pdf",
+            "artifact": "document",
+            "text": "private page contents",
+            "offset": 0,
+            "next_offset": None,
+            "total_chars": 21,
+        })])
+
+        assert got == [{
+            "title": "inspection.pdf · Document",
+            "url": "",
+            "tool": "get_file_text",
+            "identity": "file:inspection.pdf:document",
+        }]
+
+    def test_catalogue_rows_and_global_kb_paths_are_not_evidence(self):
+        got = _observed_evidence([
+            _tr("list_my_files", {"files": [{"filename": "not-read.txt"}]}),
+            _tr("kb_search", {"results": [{
+                "source": "/internal/global/path.md",
+                "text": "global passage without a public identity",
+            }]}),
+        ])
+
+        assert got == []
+
+    def test_web_sources_keep_the_existing_public_url_envelope(self):
+        got = _observed_evidence([_tr("web_search", {"results": [{
+            "title": "Official release",
+            "url": "https://example.org/releases/latest",
+            "snippet": "Version details",
+        }]})])
+
+        assert got == [{
+            "title": "Official release",
+            "url": "https://example.org/releases/latest",
+            "tool": "web_search",
+        }]

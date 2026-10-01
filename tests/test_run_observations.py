@@ -184,3 +184,30 @@ def test_public_sources_are_deduplicated_across_tool_calls():
     assert sources[0].title == "Coffee history"
     assert sources[0].url == "https://example.com/coffee"
     assert sources[0].source_type == "web_search"
+
+
+def test_url_less_file_evidence_is_bounded_deduplicated_and_body_free():
+    observer, events = _observer()
+    source = {
+        "title": "Retirement meeting.opus · Transcript",
+        "url": "",
+        "tool": "kb_search",
+        "identity": "file:retirement meeting.opus:transcript",
+        "text": "private transcript body must not survive",
+    }
+    first = observer.started({
+        "function": {"name": "kb_search", "arguments": {"query": "retirement"}},
+    })
+    observer.finished(first, _result("kb_search", '{"results":[]}'), sources=[source])
+    second = observer.started({
+        "function": {"name": "kb_search", "arguments": {"query": "benefits"}},
+    })
+    observer.finished(second, _result("kb_search", '{"results":[]}'), sources=[source])
+
+    sources = [event for event in events if event.type == "source.observed"]
+    assert len(sources) == 1
+    assert sources[0].source_id.startswith("src_")
+    assert sources[0].title == "Retirement meeting.opus · Transcript"
+    assert sources[0].url == ""
+    assert sources[0].source_type == "kb_search"
+    assert "private transcript body" not in json.dumps(dump_run_event(sources[0]))

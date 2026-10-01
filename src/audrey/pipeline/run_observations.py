@@ -48,7 +48,7 @@ class RunEventToolObserver:
 
     def __init__(self, emitter: RunEventEmitter) -> None:
         self._emitter = emitter
-        self._seen_source_urls: set[str] = set()
+        self._seen_source_keys: set[str] = set()
 
     def started(self, tool_call: dict[str, Any]) -> str:
         function = tool_call.get("function") or {}
@@ -102,13 +102,16 @@ class RunEventToolObserver:
     ) -> None:
         raw_url = str(source.get("url") or "").strip()[:_MAX_SOURCE_URL]
         url = str(_observable_url(raw_url))
-        if not url or url in self._seen_source_urls:
+        identity = str(source.get("identity") or "").strip()[:_MAX_SOURCE_URL]
+        source_key = url or identity
+        title = str(source.get("title") or "").strip()[:_MAX_SOURCE_TITLE]
+        if not source_key or not (title or url) or source_key in self._seen_source_keys:
             return
-        self._seen_source_urls.add(url)
-        digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:24]
+        self._seen_source_keys.add(source_key)
+        digest = hashlib.sha256(source_key.encode("utf-8")).hexdigest()[:24]
         self._emitter.source_observed(
             f"src_{digest}",
-            title=str(source.get("title") or "").strip()[:_MAX_SOURCE_TITLE],
+            title=title,
             url=url,
             source_type=str(source.get("tool") or fallback_type)[:100],
         )

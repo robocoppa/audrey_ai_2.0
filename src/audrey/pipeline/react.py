@@ -324,6 +324,13 @@ _RETRIEVAL_TOOLS: frozenset[str] = frozenset({"web_search", "kb_search"})
 # quietly punish the worker that did the most thorough job.
 _FETCH_TOOL = "web_fetch"
 
+# Private-file tools have no public URL. Their successful result bodies do,
+# however, carry the exact user-visible filename and artifact that reached the
+# model. Project that identity into native answer provenance without changing
+# the research catalogue or exposing document text and storage paths.
+_FILE_SEARCH_TOOLS: frozenset[str] = frozenset({"kb_search", "kb_image_search"})
+_FILE_READ_TOOL = "get_file_text"
+
 # Ceiling on the catalogue handed to the structuring pass. Three researchers at
 # ~6 searches each returning ~8 rows is ~150 URLs, which would crowd out the notes
 # themselves in the structurer's context. The cap is per worker.
@@ -383,6 +390,52 @@ def _retrieved_sources(results: list[ToolResult]) -> list[dict[str, str]]:
             if len(out) >= _MAX_RETRIEVED:
                 return out
     return out
+
+
+def _observed_evidence(results: list[ToolResult]) -> list[dict[str, str]]:
+    """Return safe web and private-file identities that reached model context.
+
+    Public sources retain their navigable URL. Private file evidence carries a
+    bounded display title plus a stable internal identity; neither retrieved
+    text nor an upload path enters the run event. `list_my_files` is excluded:
+    seeing a catalogue row is not evidence that the file's contents were read.
+    """
+
+    observed = list(_retrieved_sources(results))
+    seen_files: set[str] = set()
+    for result in results:
+        if result.is_error or result.name not in {*_FILE_SEARCH_TOOLS, _FILE_READ_TOOL}:
+            continue
+        try:
+            body = json.loads(result.content)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if result.name == _FILE_READ_TOOL:
+            rows = [body] if isinstance(body, dict) else []
+        else:
+            values = body.get("results") if isinstance(body, dict) else None
+            rows = values if isinstance(values, list) else []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            filename = str(row.get("filename") or "").strip()[:500]
+            artifact = str(row.get("artifact") or "").strip().lower()[:100]
+            if not filename:
+                continue
+            identity = f"file:{filename.casefold()}:{artifact}"
+            if identity in seen_files:
+                continue
+            seen_files.add(identity)
+            label = artifact.replace("_", " ").capitalize()
+            observed.append({
+                "title": f"{filename} · {label}" if label else filename,
+                "url": "",
+                "tool": result.name,
+                "identity": identity,
+            })
+            if len(observed) >= _MAX_RETRIEVED:
+                return observed
+    return observed
 
 
 def _unread_fetch(answer: str, results: list[ToolResult]) -> tuple[str, str] | None:
@@ -737,7 +790,7 @@ async def _dispatch_observed(
         observer.finished(
             event_call_id,
             result,
-            sources=_retrieved_sources([result]),
+            sources=_observed_evidence([result]),
         )
     return result
 

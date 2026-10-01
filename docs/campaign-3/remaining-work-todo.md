@@ -269,9 +269,10 @@ restored.
 
 ## 6. Build the next product phase
 
-**State:** In progress. [Phase 9](phase-09-broader-audio.md) defines broader
-spoken-audio support. Slice 9A is laptop-complete and awaits its manual native
-browser gate.
+**State:** In progress. [Phase 9](phase-09-broader-audio.md) is live-closed.
+The observed workflows do not yet justify diarization or broader media
+analysis. [Phase 10](phase-10-ordinary-answer-provenance.md) is active; Slice
+10A is laptop-complete and awaits its native browser gate.
 
 - [x] Write the Phase 9 plan and choose the first deployable slice.
 - [x] Add OGG, Opus, and raw ADTS AAC admission using measured MIME/container
@@ -279,11 +280,14 @@ browser gate.
 - [x] Reuse the existing durable audio queue, transcript, Summary, Files, and
   chat attachment boundaries.
 - [x] Keep diarization and speaker labels in a separate measured slice.
-- [ ] Pass the Slice 9A manual Files and chat gate for OGG, Opus, and AAC.
-- [ ] Define media-analysis scope from real user workflows before adding music
-  or scene-specific analysis.
-- [ ] After media work, design ordinary-answer provenance on the native message
-  model without reintroducing tool cards into chat.
+- [x] Pass the Slice 9A manual Files and chat gate for OGG, Opus, and AAC.
+- [x] Define current media-analysis scope from real user workflows and keep
+  diarization, music, event, and scene analysis parked until an unmet workflow
+  supplies a quality gate.
+- [x] Design and implement Slice 10A ordinary-answer file provenance on the
+  native message model without reintroducing tool cards into chat.
+- [ ] Pass the Slice 10A grounded-file and catalogue-only browser gate after
+  refresh.
 
 ## 7. Expand Responses API compatibility
 

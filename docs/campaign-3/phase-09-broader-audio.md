@@ -1,7 +1,7 @@
 # Campaign 3 Phase 9 - broader spoken-audio support
 
-**Status:** In progress. Slice 9A is laptop-complete and awaits its native
-browser gate.
+**Status:** Complete. Slice 9A passed its native browser gate on
+2026-10-01.
 
 ## Goal
 
@@ -67,6 +67,10 @@ The live gate is manual because it must exercise the actual product surface:
    and confirm the attachment survives a browser refresh.
 5. Delete the three disposable files and confirm they leave Files.
 
+**Live result, 2026-10-01:** Passed. Ogg Vorbis, Ogg Opus, and raw ADTS AAC
+were accepted as Audio and completed the native Files, Summary, Transcript,
+grounded chat, refresh-persistence, and cleanup gate.
+
 ## Later Phase 9 slices
 
 ### Speaker-aware transcripts
@@ -85,6 +89,7 @@ smallest model and processing path that produces a useful result.
 
 ## Completion gate
 
-Slice 9A closes when all three formats pass the native live gate. Later speaker
-and media-analysis slices open only after their user workflow and quality gate
-are explicit.
+Passed. All three formats completed the native live gate. The observed user
+workflows remain spoken-file ingestion, inspection, and grounded questions;
+they have not exposed a diarization, music, event, or scene-analysis failure.
+Those features remain parked until a concrete workflow and quality gate exist.
