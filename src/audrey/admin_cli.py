@@ -22,6 +22,7 @@ from audrey.app_state.history_import import (
     HistoryImportRepository,
     load_archive_export,
 )
+from audrey.app_state.migrations import MIGRATIONS
 from audrey.config import get_config
 
 
@@ -54,6 +55,23 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         required=True,
         help="New backup path; its parent must exist and the file must not.",
+    )
+    verify = commands.add_parser(
+        "verify-app-state-backup",
+        help="Restore and verify an application backup outside production state.",
+    )
+    verify.add_argument(
+        "--from",
+        dest="source",
+        type=Path,
+        required=True,
+        help="Existing application backup to verify.",
+    )
+    verify.add_argument(
+        "--restore-to",
+        type=Path,
+        required=True,
+        help="New disposable restore path; the file must not exist.",
     )
     importer = commands.add_parser(
         "import-owui-users",
@@ -247,6 +265,118 @@ def _backup_application_state(destination: Path) -> int:
     return 0
 
 
+def _inspect_application_database(path: Path) -> dict[str, object]:
+    """Inspect a static application database without permitting writes."""
+    if not path.is_file():
+        raise HistoryImportError(f"application backup does not exist: {path}")
+    if path.stat().st_size <= 0:
+        raise HistoryImportError("application backup is empty")
+    uri = f"file:{quote(str(path.resolve()), safe='/')}?mode=ro&immutable=1"
+    with closing(sqlite3.connect(uri, uri=True)) as connection:
+        integrity = connection.execute("PRAGMA integrity_check").fetchone()
+        if integrity is None or integrity[0] != "ok":
+            raise HistoryImportError("application backup failed integrity_check")
+        foreign_key_error = connection.execute("PRAGMA foreign_key_check").fetchone()
+        if foreign_key_error is not None:
+            raise HistoryImportError("application backup failed foreign_key_check")
+        schema = connection.execute(
+            "SELECT COALESCE(MAX(version), 0) FROM app_schema_migrations"
+        ).fetchone()
+        counts = {
+            "accounts": int(
+                connection.execute("SELECT COUNT(*) FROM app_users").fetchone()[0]
+            ),
+            "conversations": int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM app_conversations"
+                ).fetchone()[0]
+            ),
+            "messages": int(
+                connection.execute("SELECT COUNT(*) FROM app_messages").fetchone()[0]
+            ),
+            "runs": int(
+                connection.execute("SELECT COUNT(*) FROM app_runs").fetchone()[0]
+            ),
+        }
+    return {
+        "bytes": path.stat().st_size,
+        "integrity_check": "ok",
+        "foreign_key_check": "ok",
+        "schema_version": int(schema[0]) if schema is not None else 0,
+        "counts": counts,
+    }
+
+
+def _verify_application_backup(source: Path, destination: Path) -> int:
+    """Restore a backup to an isolated path and verify the restored database."""
+    cfg = get_config()
+    application = cfg.raw.get("application", {}) or {}
+    production = Path(application.get("sqlite_path", "/data/audrey_app.sqlite"))
+    restored = False
+    try:
+        source_resolved = source.resolve()
+        destination_resolved = destination.resolve()
+        production_resolved = production.resolve()
+        if source_resolved == production_resolved:
+            raise HistoryImportError(
+                "verification source must be a backup, not the production database"
+            )
+        if destination_resolved == production_resolved:
+            raise HistoryImportError(
+                "disposable restore path must differ from the production database"
+            )
+        if destination_resolved == source_resolved:
+            raise HistoryImportError(
+                "disposable restore path must differ from the source backup"
+            )
+
+        source_summary = _inspect_application_database(source)
+        expected_schema = max(version for version, _statement in MIGRATIONS)
+        if source_summary["schema_version"] != expected_schema:
+            raise HistoryImportError(
+                "application backup schema does not match this Audrey build: "
+                f"expected {expected_schema}, found {source_summary['schema_version']}"
+            )
+        source_counts = source_summary["counts"]
+        assert isinstance(source_counts, dict)
+        if source_counts["accounts"] < 1 or source_counts["conversations"] < 1:
+            raise HistoryImportError(
+                "application backup has no representative account/conversation records"
+            )
+
+        _online_application_backup(source, destination)
+        restored = True
+        restored_summary = _inspect_application_database(destination)
+        if restored_summary["schema_version"] != source_summary["schema_version"]:
+            raise HistoryImportError("restored schema does not match the source backup")
+        if restored_summary["counts"] != source_counts:
+            raise HistoryImportError("restored record counts do not match the source backup")
+        if destination.stat().st_mode & 0o777 != 0o600:
+            raise HistoryImportError("disposable restore file is not mode 600")
+    except (HistoryImportError, OSError, sqlite3.Error) as exc:
+        if restored:
+            destination.unlink(missing_ok=True)
+        print(json.dumps({"status": "failed", "detail": str(exc)}, sort_keys=True))
+        return 1
+
+    print(json.dumps({
+        "status": "ok",
+        "source_path": str(source),
+        "restore_path": str(destination),
+        "production_path": str(production),
+        "production_path_excluded": True,
+        "backup_bytes": source_summary["bytes"],
+        "restored_bytes": restored_summary["bytes"],
+        "integrity_check": restored_summary["integrity_check"],
+        "foreign_key_check": restored_summary["foreign_key_check"],
+        "schema_version": restored_summary["schema_version"],
+        "expected_schema_version": expected_schema,
+        "counts": restored_summary["counts"],
+        "source_counts_match": True,
+    }, sort_keys=True))
+    return 0
+
+
 def _import_chat_export(
     *,
     file: Path,
@@ -311,6 +441,8 @@ def main() -> None:
         raise SystemExit(asyncio.run(_grant_admin(args.user_id, email=args.email)))
     if args.command == "backup-app-state":
         raise SystemExit(_backup_application_state(args.to))
+    if args.command == "verify-app-state-backup":
+        raise SystemExit(_verify_application_backup(args.source, args.restore_to))
     if args.command == "import-owui-users":
         raise SystemExit(asyncio.run(_import_owui_users(apply=args.apply)))
     if args.command == "import-chat-export":

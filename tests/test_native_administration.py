@@ -358,6 +358,98 @@ def test_operator_cli_creates_verified_non_overwriting_backup(
     assert "already exists" in repeated["detail"]
 
 
+async def test_operator_cli_verifies_backup_through_isolated_restore(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    production = tmp_path / "production.sqlite"
+    store = ApplicationStore(production)
+    try:
+        account = await _resolve(
+            store,
+            subject="restore-proof",
+            email="restore-proof@example.com",
+        )
+        await store.conversations.create(user_id=account.user_id)
+        expected_schema = store.schema_version
+    finally:
+        store.close()
+
+    source = tmp_path / "backup.sqlite"
+    admin_cli._online_application_backup(production, source)
+    production_before = production.read_bytes()
+    destination = tmp_path / "restore.sqlite"
+    monkeypatch.setattr(
+        admin_cli,
+        "get_config",
+        lambda: SimpleNamespace(
+            raw={"application": {"sqlite_path": str(production)}}
+        ),
+    )
+
+    parsed = admin_cli._parser().parse_args([
+        "verify-app-state-backup",
+        "--from",
+        str(source),
+        "--restore-to",
+        str(destination),
+    ])
+    assert parsed.source == source
+    assert parsed.restore_to == destination
+    assert admin_cli._verify_application_backup(source, destination) == 0
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "ok"
+    assert result["production_path_excluded"] is True
+    assert result["schema_version"] == expected_schema
+    assert result["expected_schema_version"] == expected_schema
+    assert result["counts"] == {
+        "accounts": 1,
+        "conversations": 1,
+        "messages": 0,
+        "runs": 0,
+    }
+    assert result["source_counts_match"] is True
+    assert destination.stat().st_mode & 0o777 == 0o600
+    assert production.read_bytes() == production_before
+
+
+def test_operator_cli_restore_verification_excludes_production(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    production = tmp_path / "production.sqlite"
+    store = ApplicationStore(production)
+    store.close()
+    production_before = production.read_bytes()
+    destination = tmp_path / "restore.sqlite"
+    monkeypatch.setattr(
+        admin_cli,
+        "get_config",
+        lambda: SimpleNamespace(
+            raw={"application": {"sqlite_path": str(production)}}
+        ),
+    )
+
+    assert admin_cli._verify_application_backup(production, destination) == 1
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "failed"
+    assert "not the production database" in result["detail"]
+    assert not destination.exists()
+    assert production.read_bytes() == production_before
+
+    source = tmp_path / "backup.sqlite"
+    admin_cli._online_application_backup(production, source)
+    assert admin_cli._verify_application_backup(source, production) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "failed"
+    assert "restore path must differ" in result["detail"]
+    assert production.read_bytes() == production_before
+
+
 async def test_operator_email_bootstrap_refuses_ambiguous_accounts(tmp_path):
     path = tmp_path / "app.sqlite"
     store = ApplicationStore(path)

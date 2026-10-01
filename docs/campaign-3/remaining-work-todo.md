@@ -204,8 +204,8 @@ capabilities returned `ready`, and the smoke reported `status: passed`.
 **Implementation:** Ready for the live gate. The smoke now refuses a rebuild
 that reports zero reset projections.
 
-- [ ] Run the canonical chat projection smoke.
-- [ ] Require a successful native turn, a non-empty rebuild result, matching
+- [x] Run the canonical chat projection smoke.
+- [x] Require a successful native turn, a non-empty rebuild result, matching
   canonical/projected messages, deletion from both stores, repair `ready`, and
   no cleanup error.
 
@@ -214,14 +214,45 @@ cd /mnt/user/appdata/audrey_ai_2.0
 bash tests/smoke/smoke-native-onbox.sh smoke_native_chat_projection.py
 ```
 
+**Live result, 2026-10-01:** Passed. The disposable Fast turn produced two
+matching canonical/projected messages and a 20-character answer. Rebuild
+reset 11 projections and restored the disposable projection to the same two
+messages. Canonical deletion returned 204, its follow-up read returned 404,
+the projection disappeared, repair returned `ready`, and no cleanup error was
+reported.
+
 ### 5.6 Complete the isolated restore proof
 
-- [ ] Add a supported verification command that restores the backup into a
+**Implementation:** Ready for the live gate. The supported
+`verify-app-state-backup` command rejects the configured production path as
+either source or destination. It inspects the saved backup read only, restores
+it to a new mode-600 disposable file, then checks integrity, foreign keys,
+current schema, and matching account, conversation, message, and run counts.
+It removes a failed restore and leaves a successful one for inspection.
+
+- [x] Add a supported verification command that restores the backup into a
   disposable path, opens it without touching production state, checks integrity
   and schema, and verifies representative account/conversation counts.
 - [ ] Run that command against the backup from 5.1.
 - [ ] Record the backup filename, size, schema, and verification result.
 - [ ] Keep production `/data/audrey_app.sqlite` untouched during the proof.
+
+Run this on Tower after rebuilding the Audrey container with this slice:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build --force-recreate audrey
+docker compose exec audrey audrey-admin verify-app-state-backup \
+  --from /data/backups/audrey-app-before-2d5-20261001.sqlite \
+  --restore-to /tmp/audrey-app-restore-check-20261001.sqlite
+```
+
+This reads the saved backup and writes only the new file under the container's
+`/tmp`. It refuses to run if either argument resolves to
+`/data/audrey_app.sqlite`. A pass reports `status: ok`, schema 17, both
+integrity checks as `ok`, positive account and conversation counts, and
+`source_counts_match: true`. If the disposable filename already exists, use a
+new filename; the command deliberately never overwrites a prior result.
 
 **Item 5 closes when:** the backup, account/model smoke, interactive provider
 and picker checks, restart persistence, projection rebuild, and isolated restore
