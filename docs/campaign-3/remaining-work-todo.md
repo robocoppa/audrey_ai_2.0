@@ -167,11 +167,11 @@ the UI origin, which returned its HTML shell. The corrected smoke calls
 `http://audrey:8000/health` directly on `ollama-net` and keeps authenticated
 state checks on the UI proxy. That failed attempt wrote no snapshot.
 
-- [ ] Record the intended owner groups, disposable account state, model policy,
+- [x] Record the intended owner groups, disposable account state, model policy,
   model order, and one conversation's selected model.
-- [ ] Restart Audrey.
-- [ ] Confirm those values and the selected conversation model survive.
-- [ ] Confirm `/health` returns `ok` and authenticated `/api/capabilities`
+- [x] Restart Audrey.
+- [x] Confirm those values and the selected conversation model survive.
+- [x] Confirm `/health` returns `ok` and authenticated `/api/capabilities`
   returns `ready` after restart.
 
 The two-stage smoke records both authenticated accounts, every stable model
@@ -192,7 +192,17 @@ capture says none exists, sign in as that account, send one short native chat
 message, and rerun only `capture`. A pass reports all four comparisons as
 `true` and both readiness values as healthy.
 
+**Live result, 2026-10-01:** Passed. Capture recorded the distinct owner and
+ordinary accounts, seven workflow models, 34 direct models in displayed
+order, and a real conversation selected to Deep. After restarting Audrey,
+all four comparisons remained true: owner account, ordinary account, model
+policy/order, and conversation model. Backend health returned `ok`, native
+capabilities returned `ready`, and the smoke reported `status: passed`.
+
 ### 5.5 Prove projection rebuild
+
+**Implementation:** Ready for the live gate. The smoke now refuses a rebuild
+that reports zero reset projections.
 
 - [ ] Run the canonical chat projection smoke.
 - [ ] Require a successful native turn, a non-empty rebuild result, matching

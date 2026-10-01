@@ -272,11 +272,21 @@ def main() -> int:
             method="POST",
             expected=frozenset({202}),
         )
+        projections_reset = rebuild.get("projections_reset")
+        if (
+            not isinstance(projections_reset, int)
+            or isinstance(projections_reset, bool)
+            or projections_reset < 1
+        ):
+            raise SmokeError(
+                f"canonical rebuild reset no projections: {rebuild}"
+            )
         _repair_until_ready()
         rebuilt = _wait_for_projection(conversation_id, present=True)
         _assert_one_turn(rebuilt, canonical)
         result["rebuild"] = {
-            "projections_reset": rebuild.get("projections_reset"),
+            "projections_reset": projections_reset,
+            "pending_at_acceptance": rebuild.get("pending"),
             "projection_messages": len(rebuilt),
         }
 
