@@ -216,7 +216,13 @@ export interface ConversationMessage {
   updated_at: string;
   attachments: MessageAttachment[];
   sources?: MessageSource[];
+  models?: MessageModelUsage[];
   tool_calls?: MessageToolCall[];
+}
+
+export interface MessageModelUsage {
+  model: string;
+  calls: number;
 }
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | {

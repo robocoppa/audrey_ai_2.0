@@ -60,11 +60,14 @@ ALLOWED_VIDEO_MIMES: frozenset[str] = frozenset({
     "video/mp4",
 })
 # Audio follows the same asynchronous media path as video: Audrey stores the
-# source, then the media worker transcribes it. Start with MP3 because its
-# suffix and sniffed MIME are stable across libmagic versions; more containers
-# can be added one at a time once their real sniff results are pinned.
+# source, then the media worker transcribes it. These values are the MIME types
+# libmagic reports for real ffmpeg-produced fixtures on the supported Linux
+# stack; route and worker tests pin both sniffing and decoding for each one.
 ALLOWED_AUDIO_MIMES: frozenset[str] = frozenset({
-    "audio/mpeg",
+    "audio/mpeg",   # .mp3
+    "audio/x-wav",  # .wav
+    "audio/x-m4a",  # .m4a
+    "audio/flac",   # .flac
 })
 ALLOWED_MIMES: frozenset[str] = (
     ALLOWED_TEXT_MIMES | ALLOWED_IMAGE_MIMES | ALLOWED_VIDEO_MIMES
@@ -87,6 +90,9 @@ SUFFIX_MIMES: dict[str, str] = {
     ".tif": "image/tiff", ".tiff": "image/tiff",
     ".mp4": "video/mp4",
     ".mp3": "audio/mpeg",
+    ".wav": "audio/x-wav",
+    ".m4a": "audio/x-m4a",
+    ".flac": "audio/flac",
 }
 
 # Derived, never hand-maintained: adding a mime to the allowlist above

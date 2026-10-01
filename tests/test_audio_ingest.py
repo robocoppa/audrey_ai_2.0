@@ -1,4 +1,4 @@
-"""MP3 upload classification enters the durable media queue."""
+"""Supported audio uploads enter the durable media queue."""
 
 from __future__ import annotations
 
@@ -21,14 +21,28 @@ class _Storage:
 
 
 @pytest.mark.asyncio
-async def test_mp3_becomes_a_pending_audio_job(
+@pytest.mark.parametrize(
+    ("suffix", "mime"),
+    [
+        (".mp3", "audio/mpeg"),
+        (".wav", "audio/x-wav"),
+        (".m4a", "audio/x-m4a"),
+        (".flac", "audio/flac"),
+    ],
+)
+async def test_supported_audio_format_becomes_a_pending_audio_job(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    suffix: str,
+    mime: str,
 ):
-    dest = tmp_path / "interview.mp3"
-    dest.write_bytes(b"ID3 real bytes are covered by the smoke fixture")
+    dest = tmp_path / f"interview{suffix}"
+    content = b"real container bytes are covered by the decoder tests"
+    dest.write_bytes(content)
     storage = _Storage()
-    reservation = StorageReservation("r1", "alice@example.com", "single_shot", 43)
+    reservation = StorageReservation(
+        "r1", "alice@example.com", "single_shot", len(content),
+    )
     request = SimpleNamespace(
         app=SimpleNamespace(
             state=SimpleNamespace(
@@ -36,15 +50,15 @@ async def test_mp3_becomes_a_pending_audio_job(
             ),
         ),
     )
-    monkeypatch.setattr(files_routes, "sniff_mime", lambda _path: "audio/mpeg")
+    monkeypatch.setattr(files_routes, "sniff_mime", lambda _path: mime)
 
     response = await _validate_and_ingest(
         request,
         dest,
         user="alice@example.com",
         file_id="audio1",
-        filename="interview.mp3",
-        written=43,
+        filename=f"interview{suffix}",
+        written=len(content),
         max_total=1000,
         qdrant=object(),
         text_embedder=object(),
@@ -57,7 +71,7 @@ async def test_mp3_becomes_a_pending_audio_job(
 
     assert response.status == "pending"
     assert response.kind == "audio"
-    assert response.mime == "audio/mpeg"
+    assert response.mime == mime
     assert response.collection == ""
     assert response.chunks == 0
     assert dest.is_file()

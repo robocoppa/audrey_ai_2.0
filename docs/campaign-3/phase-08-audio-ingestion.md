@@ -1,17 +1,18 @@
-# Campaign 3 Phase 8 - MP3 audio ingestion
+# Campaign 3 Phase 8 - audio ingestion
 
-**Status:** Slice 8A is laptop-complete and awaits deployment plus its manual native-browser check.
+**Status:** Slice 8A is live-passed; Slice 8B is laptop-complete and awaits
+its manual native-browser check.
 
 ## Goal
 
-Let a user upload a spoken MP3, wait for the existing durable media worker,
+Let a user upload spoken audio, wait for the existing durable media worker,
 read its transcript and summary in Files, search or ask questions about its
 contents, and attach it to native chat without Audrey pretending the recording
 is a video.
 
-Slice 8A accepts audio/mpeg with the .mp3 suffix. Other audio containers remain
-outside this slice until their real libmagic and ffmpeg behavior is measured
-and pinned.
+Slice 8A established the path with MP3. Slice 8B adds WAV, M4A, and FLAC after
+measuring their real libmagic MIME values and proving each container through
+the same ffmpeg extraction boundary.
 
 ## Slice 8A - spoken MP3 files
 
@@ -36,6 +37,25 @@ was already a supported ffmpeg shape inside the worker: has_video is false, so
 frame extraction is skipped while speech still follows the normal
 transcription path.
 
+## Slice 8B - WAV, M4A, and FLAC
+
+The browser and backend now advertise and accept these measured pairs:
+
+| Suffix | Sniffed MIME |
+|---|---|
+| `.wav` | `audio/x-wav` |
+| `.m4a` | `audio/x-m4a` |
+| `.flac` | `audio/flac` |
+
+Real one-second ffmpeg fixtures produced each value through libmagic and then
+passed ffprobe plus conversion to the 16 kHz mono WAV consumed by Whisper.
+Admission remains fail-closed: a filename extension only controls the browser
+hint; the uploaded bytes must sniff as an allowed audio MIME.
+
+No new queue, database migration, Files branch, attachment kind, or summary
+prompt is needed. Once admitted, every format is the same first-class `audio`
+kind established by Slice 8A.
+
 ## Type and persistence boundaries
 
 Audio is a first-class kind across:
@@ -54,10 +74,10 @@ migration commits.
 Qdrant artifact points still carry point kind text, as video artifacts do.
 Reconciliation now derives the file kind from the artifact MIME: audio/* stays
 audio and every other media artifact retains the existing video repair. This
-prevents an MP3 from changing to video on the next Audrey restart.
+prevents an audio recording from changing to video on the next Audrey restart.
 
-Audio originals are retained in this first slice. Source reclamation remains
-limited to kind video, so a processed MP3 stays downloadable and reprocessable.
+Audio originals are retained. Source reclamation remains
+limited to kind video, so processed audio stays downloadable and reprocessable.
 
 ## Summary behavior
 
@@ -72,61 +92,47 @@ summary does not fail the audio row.
 
 ## Laptop verification
 
-- MP3 is the only new advertised suffix and maps to audio/mpeg.
-- A sniffed MP3 enters the durable queue as kind audio and pending.
-- A job claim preserves the audio kind, MIME, MP3 path, and empty fetched-video
-  caption handoff.
-- Transcript and summary readers accept audio; native visual-artifact requests
-  reject it.
-- Audio summaries use recording and listener language without visual material.
-- Reconciliation preserves audio across restarts.
-- Canonical fresh and upgraded databases preserve old attachments and accept a
-  new audio attachment under schema 16.
-- The generated smoke fixture is a real MP3 with audio and no video stream.
-- Focused backend checks pass: 259 tests.
-- The full hermetic backend suite passes: 3,043 tests with one existing FastAPI
+- MP3 remains admitted as `audio/mpeg`.
+- Real WAV, M4A, and FLAC fixtures sniff as `audio/x-wav`, `audio/x-m4a`, and
+  `audio/flac` respectively.
+- All three new containers pass ffprobe and conversion to Whisper's 16 kHz mono
+  WAV input.
+- Each suffix enters the durable queue as kind audio, and a claim preserves its
+  MIME and source extension.
+- Native Files classifies every MIME as Audio and offers Summary and Transcript
+  without Visual notes.
+- Focused format, queue, decoder, claim, and Files checks pass: 138 tests.
+- The full hermetic backend suite passes: 3,061 tests with one existing FastAPI
   deprecation warning.
 - Changed-file Ruff, Python compilation, and diff checks pass.
-- Frontend packages are present, but this shell has no Node or npm executable,
-  so the Vitest and TypeScript build commands cannot run here. The deployment
-  build is the remaining compile proof for the UI changes.
+- Frontend code does not change in Slice 8B; its file inputs already consume the
+  backend's advertised extension list.
 
-## Decoder compatibility repair
+## Live results and Slice 8B manual check
 
-The first synthetic live attempt reached the worker but failed before Whisper
-could read its WAV: faster-whisper 1.1.1 passed `metadata_errors` to `av.open`,
-while a fresh dependency resolution had installed PyAV 19 after that argument
-was removed. The worker now pins `av<19`. Its image build also decodes a real
-16 kHz mono WAV before baking model weights, so the same incompatibility fails
-the build instead of the first queued recording.
+Slice 8A passed in the native browser on 2026-09-30. The user accepted MP3
+upload and processing, Summary and Transcript presentation, grounded chat, and
+the saved attachment after refresh. The earlier decoder failure remains fixed
+by the deployed `av<19` pin and build-time WAV probe.
 
-## Deploy and manual live check
+Slice 8B changes only the Audrey backend allowlist, so rebuild `audrey`. Use one
+short spoken recording in each new format for the browser check:
 
-Rebuild `audrey`, `audrey-ui`, `custom-tools`, and `media-worker`. The worker
-rebuild is required for the PyAV pin and decoder build gate. It can take longer
-than the application build because it bakes the Whisper model.
+1. Upload `.wav`, `.m4a`, and `.flac` files in **Files**. Confirm none is
+   rejected and every row is labeled **Audio**.
+2. Confirm each recording moves from **Transcribing** to **Ready**.
+3. Open the M4A recording and confirm Summary and Transcript are available,
+   Visual notes is absent, and the transcript matches the speech.
+4. Attach the M4A recording to chat and ask about one distinctive spoken fact.
+   Confirm Audrey answers from the recording and retains the attachment after a
+   hard refresh.
 
-Use the actual native Files and Chat surfaces for acceptance:
-
-1. Choose a short spoken MP3 with one clear, distinctive fact.
-2. Upload it in **Files**. Confirm it is labeled **Audio** and moves from
-   **Transcribing** to **Ready**.
-3. Filter Type to **Audio** and choose **View text**. Confirm **Summary** opens
-   first, **Transcript** contains the spoken words, and there is no **Visual
-   notes** tab.
-4. Confirm the summary is a natural two or three sentence description of the
-   recording.
-5. Attach that Ready MP3 to a new chat and ask about the distinctive fact.
-   Confirm Audrey answers from the recording.
-6. Hard refresh and confirm the saved message still shows the audio attachment.
-
-The synthetic `tests/smoke/smoke_audio_ingest.py` remains available as an
-optional protocol diagnostic. It creates and removes its own MP3, which is
-useful for separating API, worker, and speech-recognition failures, but it is
-not the product acceptance gate.
+M4A carries the full Files/chat acceptance because it is the most common new
+container. WAV and FLAC only need admission and Ready-state checks; the real
+ffmpeg tests already exercise their identical decoder boundary.
 
 ## Completion gate
 
-Slice 8A completes when the rebuilt worker passes the manual browser flow above.
-WAV, M4A, FLAC, music analysis, diarization, and speaker labels remain later
-work.
+Slice 8B completes when WAV, M4A, and FLAC all reach Ready and the M4A
+Files/chat flow passes. OGG, Opus, AAC, music analysis, diarization, and speaker
+labels remain later work.

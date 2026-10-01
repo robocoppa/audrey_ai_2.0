@@ -95,6 +95,11 @@ class SourceObservedEvent(_RunEventBase):
     source_type: str = ""
 
 
+class ModelUsedEvent(_RunEventBase):
+    type: Literal["model.used"] = "model.used"
+    model: str = Field(min_length=1, max_length=200)
+
+
 class UsageReportedEvent(_RunEventBase):
     type: Literal["usage.reported"] = "usage.reported"
     prompt_tokens: int = Field(ge=0)
@@ -128,6 +133,7 @@ type RunEvent = Annotated[
     | ToolCallArgumentsEvent
     | ToolCallFinishedEvent
     | SourceObservedEvent
+    | ModelUsedEvent
     | UsageReportedEvent
     | AssistantMessageFinishedEvent
     | RunFinishedEvent,
@@ -371,6 +377,10 @@ class RunEventEmitter:
             url=str(url),
             source_type=str(source_type),
         )
+
+    def model_used(self, model: str) -> ModelUsedEvent:
+        self._require_active()
+        return self._event(ModelUsedEvent, model=_required(model, "model")[:200])
 
     def usage_reported(
         self,

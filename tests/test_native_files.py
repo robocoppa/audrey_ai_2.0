@@ -386,12 +386,21 @@ def test_native_video_artifact_uses_exact_owned_id_and_pages_on_lines(monkeypatc
     assert foreign.json() == {"detail": "File not found."}
 
 
+@pytest.mark.parametrize(
+    ("filename", "mime"),
+    [
+        ("interview.mp3", "audio/mpeg"),
+        ("interview.wav", "audio/x-wav"),
+        ("interview.m4a", "audio/x-m4a"),
+        ("interview.flac", "audio/flac"),
+    ],
+)
 def test_native_audio_artifacts_offer_transcript_and_summary_but_not_visual(
-    monkeypatch, tmp_path,
+    monkeypatch, tmp_path, filename, mime,
 ):
     listing = _listing()
-    listing.files[0].filename = "interview.mp3"
-    listing.files[0].mime = "audio/mpeg"
+    listing.files[0].filename = filename
+    listing.files[0].mime = mime
     owner_dir = tmp_path / upload_routes.sanitize_user("private-storage-123")
     owner_dir.mkdir()
     (owner_dir / "file_123.transcript.txt").write_text("Spoken words.", encoding="utf-8")

@@ -1163,6 +1163,7 @@ a:focus-visible {
 }
 
 .run-sources,
+.run-models,
 .run-tools {
   position: relative;
   min-width: 0;
@@ -1173,6 +1174,7 @@ a:focus-visible {
 }
 
 .run-sources summary,
+.run-models summary,
 .run-tools summary {
   overflow: hidden;
   cursor: pointer;
@@ -1181,6 +1183,7 @@ a:focus-visible {
 }
 
 .run-sources ul,
+.run-models ul,
 .run-tools ul {
   position: absolute;
   left: 0.45rem;
@@ -1202,16 +1205,19 @@ a:focus-visible {
 }
 
 .run-sources li,
+.run-models li,
 .run-tools li {
   overflow-wrap: anywhere;
   padding: 0.3rem 0;
 }
 
 .run-sources li + li,
+.run-models li + li,
 .run-tools li + li {
   border-top: 1px solid var(--border);
 }
 
+.run-models li,
 .run-tools li {
   display: flex;
   align-items: baseline;
@@ -1219,11 +1225,13 @@ a:focus-visible {
   gap: 1rem;
 }
 
+.run-models li span,
 .run-tools li span {
   color: var(--text-soft);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
+.run-models li small,
 .run-tools li small {
   color: var(--muted);
   white-space: nowrap;
@@ -1247,17 +1255,20 @@ a:focus-visible {
 }
 
 .saved-sources,
+.saved-models,
 .saved-tools {
   position: relative;
   min-width: 0;
 }
 
+.saved-models,
 .saved-tools {
   padding-left: 0.65rem;
   border-left: 1px solid var(--border);
 }
 
 .saved-sources summary,
+.saved-models summary,
 .saved-tools summary {
   width: fit-content;
   color: var(--accent);
@@ -1275,20 +1286,24 @@ a:focus-visible {
 }
 
 .saved-sources li,
+.saved-models li,
 .saved-tools li {
   margin-top: 0.3rem;
   overflow-wrap: anywhere;
 }
 
+.saved-models ul,
 .saved-tools ul {
   padding-left: 1.15rem;
 }
 
+.saved-models li span,
 .saved-tools li span {
   color: var(--text-soft);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
+.saved-models li small,
 .saved-tools li small {
   margin-left: 0.35rem;
   color: var(--muted);

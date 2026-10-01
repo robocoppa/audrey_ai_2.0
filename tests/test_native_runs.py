@@ -1049,14 +1049,36 @@ def test_native_run_routes_hide_cross_owner_and_reject_archived_or_active(tmp_pa
         store.close()
 
 
-def test_observed_sources_and_tools_survive_in_canonical_history(tmp_path):
+def test_observed_sources_tools_and_models_survive_in_canonical_history(tmp_path):
     async def source_stream(
         _app, _payload, _messages, _options, *, event_context, **_kwargs,
     ):
+        async def model_response(_request):
+            return httpx.Response(
+                200,
+                json={"message": {"role": "assistant", "content": "ok"}, "done": True},
+            )
+
+        ollama = OllamaClient(
+            "http://ollama:11434",
+            transport=httpx.MockTransport(model_response),
+        )
         emitter = event_context.emitter
         assert emitter is not None
-        emitter.run_started()
-        emitter.message_started()
+        try:
+            await ollama.chat(
+                model="qwen-router:latest",
+                messages=[{"role": "user", "content": "route"}],
+            )
+            emitter.run_started()
+            emitter.message_started()
+            for _ in range(2):
+                await ollama.chat(
+                    model="qwen-worker:latest",
+                    messages=[{"role": "user", "content": "work"}],
+                )
+        finally:
+            await ollama.aclose()
         emitter.tool_started("tool_search", name="web_search")
         emitter.tool_arguments("tool_search", arguments={"query": "annual report"})
         emitter.tool_finished(
@@ -1088,8 +1110,13 @@ def test_observed_sources_and_tools_survive_in_canonical_history(tmp_path):
             assert history.status_code == 200
             user, assistant = history.json()["items"]
             assert user["sources"] == []
+            assert user["models"] == []
             assert user["tool_calls"] == []
             assert assistant["content"] == "Answer from the report."
+            assert assistant["models"] == [
+                {"model": "qwen-router:latest", "calls": 1},
+                {"model": "qwen-worker:latest", "calls": 2},
+            ]
             assert assistant["tool_calls"] == [{
                 "id": "tool_search",
                 "name": "web_search",

@@ -33,6 +33,7 @@ def test_complete_event_vocabulary_is_ordered_and_round_trips() -> None:
 
     emitter.run_started()
     emitter.message_started()
+    emitter.model_used("router-model")
     emitter.stage_started("researching", label="Researching")
     emitter.stage_progress(".", stage="researching")
     emitter.tool_started("call_1", name="web_search")
@@ -59,6 +60,7 @@ def test_complete_event_vocabulary_is_ordered_and_round_trips() -> None:
     assert [event.type for event in events] == [
         "run.started",
         "message.started",
+        "model.used",
         "stage.started",
         "stage.progress",
         "tool.started",

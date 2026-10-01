@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from audrey.pipeline.run_events import (
     AssistantMessageFinishedEvent,
     AssistantMessageStartedEvent,
+    ModelUsedEvent,
     RunEvent,
     RunFinishedEvent,
     RunStartedEvent,
@@ -327,6 +328,14 @@ class AgUiRunEventAdapter:
                     message_id=result_message_id,
                     tool_call_id=event.tool_call_id,
                     content=content,
+                ),
+            )
+        if isinstance(event, ModelUsedEvent):
+            return (
+                AgUiCustomEvent(
+                    timestamp=timestamp,
+                    name="audrey.model.used",
+                    value={"model": event.model},
                 ),
             )
         if isinstance(event, SourceObservedEvent):

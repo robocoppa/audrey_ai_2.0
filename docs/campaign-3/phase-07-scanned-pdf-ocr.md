@@ -1,6 +1,6 @@
 # Campaign 3 Phase 7 - scanned PDF OCR
 
-**Status:** OCR is complete and live-settled; the PDF Summary/Transcript follow-up is laptop-complete and awaiting deployment.
+**Status:** Complete and live-settled on 2026-09-30, including PDF Summary and Transcript presentation.
 
 ## Goal
 
@@ -100,22 +100,15 @@ processed PDF. **View text** now opens on **Summary**; **Transcript** shows the
 complete selectable or OCR text. Summary generation is fail-soft, so a useful
 indexed document remains Ready if its summary model is unavailable.
 
-After deploying `audrey` and `audrey-ui`, test this presentation with one real
-PDF in the native browser:
+The deployed presentation follow-up also passed on 2026-09-30. A newly
+uploaded PDF opened on a natural Summary, its Transcript exposed the full
+document text, and Audrey answered a grounded question about the upload. Existing
+Ready PDFs are intentionally not backfilled.
 
-1. Upload a new PDF. Existing Ready PDFs are not backfilled by this slice.
-2. Wait for **Ready**, choose **View text**, and confirm **Summary** opens first
-   with a natural two or three sentence description.
-3. Choose **Transcript** and confirm the complete document text appears.
-4. Ask Audrey one question whose answer is in that PDF and confirm the answer is
-   grounded in the document.
-
-This one manual flow is the remaining acceptance check for the follow-up. The
-already-passed synthetic OCR script remains diagnostic evidence and does not
-need to be rerun.
+The already-passed synthetic OCR script remains diagnostic evidence and does
+not need to be rerun.
 
 ## Completion gate
 
-OCR remains complete. The presentation follow-up completes when a newly
-uploaded PDF shows both Summary and Transcript in the deployed Files page and
-answers one grounded chat question.
+Complete. OCR, PDF Summary and Transcript presentation, and grounded chat all
+passed their live checks.

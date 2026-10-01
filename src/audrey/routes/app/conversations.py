@@ -91,6 +91,11 @@ class MessageSourceResponse(BaseModel):
     url: str
 
 
+class MessageModelUsageResponse(BaseModel):
+    model: str
+    calls: int = Field(ge=1)
+
+
 class MessageToolCallResponse(BaseModel):
     id: str
     name: str
@@ -111,6 +116,7 @@ class MessageResponse(BaseModel):
     updated_at: str
     attachments: list[MessageAttachmentResponse]
     sources: list[MessageSourceResponse]
+    models: list[MessageModelUsageResponse]
     tool_calls: list[MessageToolCallResponse]
 
 
@@ -182,6 +188,10 @@ def _message_response(record: MessageRecord) -> MessageResponse:
         sources=[
             MessageSourceResponse(id=source.source_id, title=source.title, url=source.url)
             for source in record.sources
+        ],
+        models=[
+            MessageModelUsageResponse(model=model.model, calls=model.calls)
+            for model in record.models
         ],
         tool_calls=[
             MessageToolCallResponse(

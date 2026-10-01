@@ -30,6 +30,7 @@ def _events(*, terminal: str = "succeeded") -> list[RunEvent]:
     )
     emitter.run_started()
     emitter.message_started()
+    emitter.model_used("router-model")
     emitter.stage_started("researching", label="Researching")
     emitter.stage_progress("Searching", stage="researching")
     emitter.tool_started("call_1", name="web_search")
@@ -71,6 +72,7 @@ def test_adapter_maps_complete_vocabulary_to_camel_case_agui() -> None:
     assert [item["type"] for item in wire] == [
         "RUN_STARTED",
         "TEXT_MESSAGE_START",
+        "CUSTOM",
         "STEP_STARTED",
         "CUSTOM",
         "TOOL_CALL_START",
@@ -95,13 +97,19 @@ def test_adapter_maps_complete_vocabulary_to_camel_case_agui() -> None:
         "messageId": "msg_assistant",
         "role": "assistant",
     }
-    assert wire[4]["toolCallName"] == "web_search"
-    assert wire[4]["parentMessageId"] == "msg_assistant"
-    assert json.loads(wire[5]["delta"]) == {"query": "Euclid"}
-    assert json.loads(wire[7]["content"]) == {"count": 2}
-    assert wire[8]["name"] == "audrey.source.observed"
-    assert wire[8]["value"]["sourceId"] == "source_1"
-    assert wire[11]["name"] == "audrey.usage.reported"
+    assert wire[2] == {
+        "type": "CUSTOM",
+        "timestamp": wire[2]["timestamp"],
+        "name": "audrey.model.used",
+        "value": {"model": "router-model"},
+    }
+    assert wire[5]["toolCallName"] == "web_search"
+    assert wire[5]["parentMessageId"] == "msg_assistant"
+    assert json.loads(wire[6]["delta"]) == {"query": "Euclid"}
+    assert json.loads(wire[8]["content"]) == {"count": 2}
+    assert wire[9]["name"] == "audrey.source.observed"
+    assert wire[9]["value"]["sourceId"] == "source_1"
+    assert wire[12]["name"] == "audrey.usage.reported"
     assert wire[-1]["outcome"] == {"type": "success"}
     assert wire[-1]["usage"] == [
         {

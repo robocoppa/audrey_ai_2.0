@@ -20,6 +20,7 @@ from audrey.app_state.records import (
     ConversationRecord,
     FinishedRun,
     MessageRecord,
+    ModelUsageSnapshot,
     RunRecord,
     SourceSnapshot,
     StartedRun,
@@ -764,6 +765,17 @@ class ConversationsRepository:
                     url=str(row["url"]),
                 )
             )
+        model_rows = self._conn.execute(
+            "SELECT message_id, model, calls FROM app_message_models "
+            "WHERE message_id IN (SELECT value FROM json_each(?)) "
+            "ORDER BY message_id, position",
+            (json.dumps(message_ids),),
+        ).fetchall()
+        models_by_message: dict[str, list[ModelUsageSnapshot]] = {}
+        for row in model_rows:
+            models_by_message.setdefault(str(row["message_id"]), []).append(
+                ModelUsageSnapshot(model=str(row["model"]), calls=int(row["calls"]))
+            )
         tool_rows = self._conn.execute(
             "SELECT message_id, tool_call_id, name, status, arguments_json, "
             "result_json, error_code FROM app_message_tool_calls "
@@ -782,6 +794,7 @@ class ConversationsRepository:
                 attachments=tuple(by_message.get(str(row["message_id"]), ())),
                 sources=tuple(sources_by_message.get(str(row["message_id"]), ())),
                 tool_calls=tuple(tools_by_message.get(str(row["message_id"]), ())),
+                models=tuple(models_by_message.get(str(row["message_id"]), ())),
             )
             for row in rows
         )
@@ -801,6 +814,7 @@ class ConversationsRepository:
         completion_tokens: int = 0,
         sources: Sequence[SourceSnapshot] = (),
         tool_calls: Sequence[ToolCallSnapshot] = (),
+        models: Sequence[ModelUsageSnapshot] = (),
     ) -> FinishedRun | None:
         """Atomically finalize assistant content and the run's sole outcome."""
 
@@ -818,6 +832,7 @@ class ConversationsRepository:
             completion_tokens,
             tuple(sources),
             tuple(tool_calls),
+            tuple(models),
         )
 
     def _finish_run_sync(
@@ -834,6 +849,7 @@ class ConversationsRepository:
         completion_tokens: int,
         sources: tuple[SourceSnapshot, ...],
         tool_calls: tuple[ToolCallSnapshot, ...],
+        models: tuple[ModelUsageSnapshot, ...],
     ) -> FinishedRun | None:
         user_id = _required(user_id, "user id")
         run_id = _required(run_id, "run id")
@@ -849,6 +865,7 @@ class ConversationsRepository:
         assistant_content = str(assistant_content)
         normalized_sources = _normalize_sources(sources)
         normalized_tool_calls = _normalize_tool_calls(tool_calls)
+        normalized_models = _normalize_model_usage(models)
         now = _utc_now()
         message_status = "completed" if outcome == "succeeded" else "incomplete"
 
@@ -899,6 +916,20 @@ class ConversationsRepository:
                     (user_id, run_id),
                 ).fetchone()
                 assert run_row is not None and message_row is not None
+                for position, model_usage in enumerate(normalized_models):
+                    self._conn.execute(
+                        "INSERT INTO app_message_models "
+                        "(message_id, conversation_id, user_id, position, model, calls) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (
+                            str(message_row["message_id"]),
+                            str(message_row["conversation_id"]),
+                            user_id,
+                            position,
+                            model_usage.model,
+                            model_usage.calls,
+                        ),
+                    )
                 for position, source in enumerate(normalized_sources):
                     self._conn.execute(
                         "INSERT INTO app_message_sources "
@@ -945,6 +976,7 @@ class ConversationsRepository:
                 message_row,
                 sources=normalized_sources,
                 tool_calls=normalized_tool_calls,
+                models=normalized_models,
             ),
         )
 
@@ -1547,6 +1579,27 @@ def _encode_tool_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
+def _normalize_model_usage(
+    models: Sequence[ModelUsageSnapshot],
+) -> tuple[ModelUsageSnapshot, ...]:
+    aggregated: dict[str, int] = {}
+    for value in models:
+        model = str(value.model).strip()[:200]
+        try:
+            calls = int(value.calls)
+        except (TypeError, ValueError):
+            continue
+        if not model or calls <= 0:
+            continue
+        aggregated[model] = min(10_000, aggregated.get(model, 0) + calls)
+        if len(aggregated) == 50:
+            break
+    return tuple(
+        ModelUsageSnapshot(model=model, calls=calls)
+        for model, calls in aggregated.items()
+    )
+
+
 def _normalize_tool_calls(
     tool_calls: Sequence[ToolCallSnapshot],
 ) -> tuple[ToolCallSnapshot, ...]:
@@ -1639,6 +1692,7 @@ def _message_from_row(
     attachments: tuple[AttachmentSnapshot, ...] = (),
     sources: tuple[SourceSnapshot, ...] = (),
     tool_calls: tuple[ToolCallSnapshot, ...] = (),
+    models: tuple[ModelUsageSnapshot, ...] = (),
 ) -> MessageRecord:
     return MessageRecord(
         message_id=str(row["message_id"]),
@@ -1654,6 +1708,7 @@ def _message_from_row(
         attachments=attachments,
         sources=sources,
         tool_calls=tool_calls,
+        models=models,
     )
 
 

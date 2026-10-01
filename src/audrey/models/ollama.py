@@ -12,7 +12,9 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 import httpx
@@ -20,6 +22,11 @@ import httpx
 from audrey.metrics import model_seconds
 
 log = logging.getLogger(__name__)
+
+_model_call_observer: ContextVar[Callable[[str], None] | None] = ContextVar(
+    "audrey_model_call_observer",
+    default=None,
+)
 
 #: Deadline for `/api/show`, independent of the client's chat timeout.
 #: ⚠️ It is a metadata read that sits IN FRONT OF request work, so it must be
@@ -37,6 +44,23 @@ _TAGS_TIMEOUT_S = 5.0
 
 class OllamaError(Exception):
     """Raised for Ollama HTTP, transport, or response parsing failures."""
+
+
+@contextmanager
+def observe_model_calls(observer: Callable[[str], None]) -> Iterator[None]:
+    """Report generation model calls made in the current async run context."""
+
+    token = _model_call_observer.set(observer)
+    try:
+        yield
+    finally:
+        _model_call_observer.reset(token)
+
+
+def _report_model_call(model: str) -> None:
+    observer = _model_call_observer.get()
+    if observer is not None:
+        observer(str(model))
 
 
 def _data_uri_to_b64(url: str) -> str | None:
@@ -351,6 +375,7 @@ class OllamaClient:
         ~4 that prose runs at, so roughly two thirds of the generation was
         reasoning that was then discarded.
         """
+        _report_model_call(model)
         payload: dict[str, Any] = {
             "model": model,
             "messages": _to_ollama_messages(messages),
@@ -418,6 +443,7 @@ class OllamaClient:
         file. Keep the two signatures in step; `test_ollama_think_parity.py`
         now fails if they drift.
         """
+        _report_model_call(model)
         payload: dict[str, Any] = {
             "model": model,
             "messages": _to_ollama_messages(messages),
@@ -520,4 +546,4 @@ class OllamaClient:
         return body
 
 
-__all__ = ["OllamaClient", "OllamaError"]
+__all__ = ["OllamaClient", "OllamaError", "observe_model_calls"]

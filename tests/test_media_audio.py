@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from audrey.kb.extract import ALLOWED_AUDIO_MIMES, sniff_mime
 from audrey.media.audio import (
     CHANNELS,
     SAMPLE_RATE,
@@ -63,11 +64,49 @@ def silent(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return path
 
 
+@pytest.fixture(
+    scope="session",
+    params=[
+        pytest.param(("wav", ("-c:a", "pcm_s16le"), "audio/x-wav"), id="wav"),
+        pytest.param(("m4a", ("-c:a", "aac", "-b:a", "96k"), "audio/x-m4a"), id="m4a"),
+        pytest.param(("flac", ("-c:a", "flac"), "audio/flac"), id="flac"),
+    ],
+)
+def additional_audio_source(request, tmp_path_factory: pytest.TempPathFactory):
+    """One real source for every container added after MP3."""
+    suffix, codec_args, expected_mime = request.param
+    path = tmp_path_factory.mktemp(f"audio-{suffix}") / f"recording.{suffix}"
+    _ffmpeg(
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+        *codec_args, str(path),
+    )
+    return path, expected_mime
+
+
 @pytest.fixture
 def garbage(tmp_path: Path) -> Path:
     path = tmp_path / "not-a-video.mp4"
     path.write_bytes(b"this is not a container, it is a sentence")
     return path
+
+
+class TestAdditionalAudioContainers:
+    def test_libmagic_result_is_an_admitted_audio_mime(self, additional_audio_source):
+        source, expected_mime = additional_audio_source
+        assert sniff_mime(source) == expected_mime
+        assert expected_mime in ALLOWED_AUDIO_MIMES
+
+    def test_ffmpeg_extracts_the_container_for_whisper(
+        self, additional_audio_source, tmp_path: Path,
+    ):
+        source, _expected_mime = additional_audio_source
+        dest = tmp_path / "whisper.wav"
+
+        duration = extract_audio(source, dest)
+
+        assert duration == pytest.approx(1.0, abs=0.3)
+        assert dest.is_file()
+        assert probe(dest).has_audio is True
 
 
 class TestProbe:

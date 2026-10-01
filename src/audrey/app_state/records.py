@@ -39,6 +39,14 @@ class ToolCallSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class ModelUsageSnapshot:
+    """Generation model activity aggregated for one assistant message."""
+
+    model: str
+    calls: int
+
+
+@dataclass(frozen=True, slots=True)
 class UserPreferences:
     """Durable, server-owned preferences for one Audrey user."""
 
@@ -82,6 +90,7 @@ class MessageRecord:
     attachments: tuple[AttachmentSnapshot, ...] = ()
     sources: tuple[SourceSnapshot, ...] = ()
     tool_calls: tuple[ToolCallSnapshot, ...] = ()
+    models: tuple[ModelUsageSnapshot, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

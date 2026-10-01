@@ -330,64 +330,39 @@ block must report HTTP 400 and `responses_feature_unsupported`.
 
 ## Phase 7 PDF acceptance and diagnostic
 
-**Result:** The OCR boundary and the original PDF upload/chat experience passed
-on 2026-09-30. Do not repeat them unless a later change touches OCR dispatch,
-document indexing, the reader, or chat grounding.
+**Result:** Passed and settled on 2026-09-30. The synthetic OCR boundary moved
+an image-only PDF from Pending to Ready and returned recognized text. The user
+then accepted real PDF upload, generated Summary, full Transcript, and a
+grounded chat answer. Do not repeat these checks unless a later change touches
+OCR dispatch, PDF summary generation, document reading, or chat grounding.
 
-The corrected synthetic proof moved an image-only PDF from Pending to Ready in
-4.619 seconds, returned page-marked recognized text, and cleaned up. The user
-then uploaded a real PDF in the native browser, confirmed the document was
-readable, and received a grounded answer about an uploaded document in chat.
+`tests/smoke/smoke_scanned_pdf_ocr.py` remains an optional worker diagnostic;
+it is not a recurring acceptance test.
 
-A later presentation follow-up adds a generated PDF Summary and a Transcript
-tab containing all extracted or OCR text. After rebuilding `audrey` and
-`audrey-ui`, its remaining check is manual:
+## Phase 8 audio acceptance
 
-1. Upload one new real PDF. Existing Ready PDFs are not backfilled.
-2. Wait for Ready, open **View text**, and confirm **Summary** opens first with a
-   natural two or three sentence description.
-3. Open **Transcript** and confirm it contains the document's full text.
-4. Ask one question answered by that document and confirm Audrey grounds its
-   answer in the file.
+**Slice 8A result:** Passed and settled on 2026-09-30. MP3 upload and processing,
+Summary and Transcript presentation, grounded chat, and attachment persistence
+after refresh all passed in the native browser. The earlier synthetic attempt
+also exposed the faster-whisper/PyAV mismatch that is now fixed by `av<19` and
+the worker image's real-WAV decoder gate. Do not rerun the MP3 script unless a
+later failure needs that protocol diagnostic.
 
-The already-passed `tests/smoke/smoke_scanned_pdf_ocr.py` remains an optional
-worker diagnostic. It should not be rerun for this presentation-only follow-up.
+**Slice 8B result:** Pending after deploying the laptop-complete WAV, M4A, and
+FLAC allowlist. This slice changes only the Audrey backend; rebuild `audrey`.
+Use the native browser with short spoken recordings:
 
-## Phase 8A MP3 manual acceptance and optional diagnostic
-
-**Result:** Pending after deployment. The first scripted attempt correctly
-reached the worker, where it exposed a faster-whisper/PyAV decoder mismatch.
-The worker now pins `av<19` and decodes a real WAV during its image build.
-
-Rebuild `audrey`, `audrey-ui`, `custom-tools`, and `media-worker`. Then perform
-the primary acceptance check in the native browser with a short spoken MP3:
-
-1. Upload the MP3 in **Files** and confirm **Audio** plus **Transcribing** become
-   **Ready**.
-2. Filter to **Audio** and open **View text**. Confirm Summary and Transcript
-   exist, the transcript matches the recording, and Visual notes is absent.
-3. Confirm the summary is a natural two or three sentence description.
-4. Attach the Ready MP3 to chat, ask about one distinctive spoken fact, and
+1. Upload one `.wav`, one `.m4a`, and one `.flac` in **Files**. Confirm all are
+   accepted, labeled **Audio**, and move from **Transcribing** to **Ready**.
+2. Open the M4A recording. Confirm Summary and Transcript exist, Visual notes
+   is absent, and the transcript matches the speech.
+3. Attach the M4A file to chat, ask about one distinctive spoken fact, and
    confirm Audrey answers from it.
-5. Hard refresh and confirm the saved message retains the attachment.
+4. Hard refresh and confirm the saved attachment remains.
 
-If that flow fails and the failing boundary is unclear, run the optional
-synthetic diagnostic from the laptop checkout over LAN/WARP:
-
-```bash
-cd /home/bart/Documents/github/audrey/audrey_ai_2.0
-(
-  set -a
-  source .env.test.local
-  set +a
-  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_audio_ingest.py
-)
-```
-
-It creates and removes its own MP3. Success is exit code zero and JSON ending
-in `"status": "passed"`: kind audio, Pending to Ready, positive chunks and
-duration, Whisper transcript containing its known words, a nonempty summary,
-HTTP 422 for a visual artifact, and clean deletion/repair.
+WAV and FLAC need admission and Ready-state checks. M4A carries the full viewer
+and chat acceptance because all three formats join the same queue after the
+byte-sniff gate, and hermetic tests run real ffmpeg decoding for every one.
 
 ## Before handing over any smoke command
 

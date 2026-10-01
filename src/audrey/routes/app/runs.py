@@ -22,6 +22,7 @@ from audrey.app_state import (
     ConversationHasActiveRunError,
     InvalidApplicationStateError,
     MessageRecord,
+    ModelUsageSnapshot,
     RunAlreadyTerminalError,
     RunRecord,
     SourceSnapshot,
@@ -32,6 +33,7 @@ from audrey.auth import require_scope
 from audrey.conversation_titles import ConversationTitleGenerator
 from audrey.identity import Principal
 from audrey.model_catalog import ServedModel, configured_models, resolve_model
+from audrey.models.ollama import observe_model_calls
 from audrey.pipeline.agui import (
     AgUiCursor,
     AgUiCursorError,
@@ -44,6 +46,7 @@ from audrey.pipeline.context import user_preferences_system_message
 from audrey.pipeline.passthrough import passthrough_stream
 from audrey.pipeline.prompts import skill_instruction_for, with_skill_instruction
 from audrey.pipeline.run_events import (
+    ModelUsedEvent,
     RunEvent,
     RunEventContext,
     RunEventEmitter,
@@ -206,6 +209,36 @@ class _LiveRun:
     latest_usage: UsageReportedEvent | None = None
     observed_sources: list[SourceSnapshot] = field(default_factory=list)
     observed_tool_calls: dict[str, ToolCallSnapshot] = field(default_factory=dict)
+    observed_models: dict[str, int] = field(default_factory=dict)
+    pending_model_events: list[str] = field(default_factory=list)
+    observed_model_call_count: int = 0
+
+    def observe_model_call(self, raw_model: str) -> None:
+        model = str(raw_model).strip()[:200]
+        if not model or self.emitter.is_finished or self.observed_model_call_count >= 500:
+            return
+        self.observed_model_call_count += 1
+        if not self.emitter.is_started:
+            self.pending_model_events.append(model)
+            return
+        self.emitter.model_used(model)
+
+    def flush_pending_model_events(self) -> None:
+        if not self.emitter.is_started or self.emitter.is_finished:
+            return
+        pending, self.pending_model_events = self.pending_model_events, []
+        for model in pending:
+            self.emitter.model_used(model)
+
+    @property
+    def model_snapshots(self) -> tuple[ModelUsageSnapshot, ...]:
+        aggregated = dict(self.observed_models)
+        for model in self.pending_model_events:
+            aggregated[model] = aggregated.get(model, 0) + 1
+        return tuple(
+            ModelUsageSnapshot(model=model, calls=calls)
+            for model, calls in aggregated.items()
+        )
 
     def publish(self, event: RunEvent) -> None:
         expected = self.events[-1].sequence + 1 if self.events else 1
@@ -215,6 +248,11 @@ class _LiveRun:
             self.answer_parts.append(event.delta)
         elif isinstance(event, UsageReportedEvent):
             self.latest_usage = event
+        elif isinstance(event, ModelUsedEvent):
+            if event.model in self.observed_models:
+                self.observed_models[event.model] += 1
+            elif len(self.observed_models) < 50:
+                self.observed_models[event.model] = 1
         elif isinstance(event, SourceObservedEvent):
             if len(self.observed_sources) < 50 and not any(
                 source.source_id == event.source_id for source in self.observed_sources
@@ -501,27 +539,29 @@ class NativeRunManager:
             emitter=live.emitter,
         )
         try:
-            async for _frame in self._stream_factory(
-                self._app,
-                payload,
-                messages,
-                options,
-                user_id=live.storage_namespace,
-                conversation_id=live.started.conversation.conversation_id,
-                user_turn_text=live.started.user_message.content,
-                event_context=context,
-                routing_messages=routing_messages,
-                selected_model=selected_model,
-                skill_instruction=skill_instruction,
-                resolved_skill=resolved_skill,
-                model_tools=model_tools,
-            ):
-                # A pipeline can have post-answer cleanup after its terminal
-                # frame. Persist the canonical answer before that cleanup so a
-                # reloaded browser does not keep seeing a running row while
-                # the model has visibly finished.
-                if live.emitter.is_finished:
-                    await self._settle_terminal(live)
+            with observe_model_calls(live.observe_model_call):
+                async for _frame in self._stream_factory(
+                    self._app,
+                    payload,
+                    messages,
+                    options,
+                    user_id=live.storage_namespace,
+                    conversation_id=live.started.conversation.conversation_id,
+                    user_turn_text=live.started.user_message.content,
+                    event_context=context,
+                    routing_messages=routing_messages,
+                    selected_model=selected_model,
+                    skill_instruction=skill_instruction,
+                    resolved_skill=resolved_skill,
+                    model_tools=model_tools,
+                ):
+                    live.flush_pending_model_events()
+                    # A pipeline can have post-answer cleanup after its terminal
+                    # frame. Persist the canonical answer before that cleanup so a
+                    # reloaded browser does not keep seeing a running row while
+                    # the model has visibly finished.
+                    if live.emitter.is_finished:
+                        await self._settle_terminal(live)
         except asyncio.CancelledError:
             if not live.emitter.is_finished:
                 live.emitter.terminate_incomplete(
@@ -588,6 +628,7 @@ class NativeRunManager:
                 completion_tokens=usage.completion_tokens if usage is not None else 0,
                 sources=live.observed_sources,
                 tool_calls=tuple(live.observed_tool_calls.values()),
+                models=live.model_snapshots,
             )
             if finished is not None and self._archive_wake is not None:
                 self._archive_wake()

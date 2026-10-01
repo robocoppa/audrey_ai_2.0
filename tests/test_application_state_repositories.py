@@ -14,6 +14,7 @@ from audrey.app_state import (
     ConversationArchivedError,
     ConversationHasActiveRunError,
     InvalidApplicationStateError,
+    ModelUsageSnapshot,
     PersonalTokenAuthenticationError,
     RunAlreadyTerminalError,
     SourceSnapshot,
@@ -148,7 +149,7 @@ async def test_v6_upgrade_adds_access_groups_and_model_ids_without_data_loss(tmp
 
     store = ApplicationStore(path)
     try:
-        assert store.schema_version == 16
+        assert store.schema_version == 17
         principal = await store.resolve_external_identity(
             provider="owui",
             subject="owui-admin",
@@ -237,7 +238,7 @@ async def test_v4_upgrade_adds_video_mode_without_losing_canonical_state(tmp_pat
 
     store = ApplicationStore(path)
     try:
-        assert store.schema_version == 16
+        assert store.schema_version == 17
         existing = await store.conversations.get(
             user_id="usr_existing",
             conversation_id="con_existing",
@@ -293,6 +294,7 @@ async def test_v2_upgrade_backfills_preferences_without_changing_identity_or_tok
         conn.execute("PRAGMA foreign_keys = OFF")
         conn.execute("DROP TABLE app_chat_projections")
         conn.execute("DROP TABLE app_chat_projection_deletions")
+        conn.execute("DROP TABLE app_message_models")
         conn.execute("DROP TABLE app_message_tool_calls")
         conn.execute("DROP TABLE app_message_sources")
         conn.execute("DROP TABLE app_message_attachments")
@@ -307,7 +309,7 @@ async def test_v2_upgrade_backfills_preferences_without_changing_identity_or_tok
     try:
         after = await _resolve(upgraded)
         preferences = await upgraded.preferences.get(user_id=owner.user_id)
-        assert upgraded.schema_version == 16
+        assert upgraded.schema_version == 17
         assert after.user_id == owner.user_id
         assert preferences is not None
         assert preferences.timezone == "UTC"
@@ -721,7 +723,7 @@ async def test_schema_v3_upgrade_does_not_duplicate_legacy_archive_writes(tmp_pa
 
     upgraded = ApplicationStore(path)
     try:
-        assert upgraded.schema_version == 16
+        assert upgraded.schema_version == 17
         assert await upgraded.chat_projections.due() == ()
         existing = await upgraded.conversations.get_run(
             user_id=owner.user_id,
@@ -1041,6 +1043,58 @@ async def test_observed_sources_are_sanitized_and_owned_by_the_assistant_message
         )
         with sqlite3.connect(path) as connection:
             assert connection.execute("SELECT COUNT(*) FROM app_message_sources").fetchone()[0] == 0
+    finally:
+        store.close()
+
+
+async def test_model_usage_is_aggregated_persistent_and_cascaded(tmp_path):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
+    owner = await _resolve(store)
+    try:
+        conversation = await store.conversations.create(user_id=owner.user_id)
+        started = await store.conversations.begin_run(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+            user_content="Use the panel.",
+        )
+        assert started is not None
+        finished = await store.conversations.finish_run(
+            user_id=owner.user_id,
+            run_id=started.run.run_id,
+            outcome="succeeded",
+            assistant_content="Done.",
+            models=(
+                ModelUsageSnapshot("router:latest", 1),
+                ModelUsageSnapshot("worker:latest", 2),
+                ModelUsageSnapshot("worker:latest", 3),
+                ModelUsageSnapshot("", 1),
+                ModelUsageSnapshot("ignored", 0),
+            ),
+        )
+        assert finished is not None
+        expected = (
+            ModelUsageSnapshot("router:latest", 1),
+            ModelUsageSnapshot("worker:latest", 5),
+        )
+        assert finished.assistant_message.models == expected
+
+        messages = await store.conversations.list_messages(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+        )
+        assert messages is not None
+        assert messages[0].models == ()
+        assert messages[1].models == expected
+
+        assert await store.conversations.delete(
+            user_id=owner.user_id,
+            conversation_id=conversation.conversation_id,
+        )
+        with sqlite3.connect(path) as connection:
+            assert connection.execute(
+                "SELECT COUNT(*) FROM app_message_models"
+            ).fetchone()[0] == 0
     finally:
         store.close()
 

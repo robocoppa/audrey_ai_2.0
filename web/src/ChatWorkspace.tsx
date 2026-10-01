@@ -58,6 +58,7 @@ import {
   type Conversation,
   type ConversationMessage,
   type MessageAttachment,
+  type MessageModelUsage,
   type MessageSource,
   type MessageToolCall,
   type SkillSummary,
@@ -89,6 +90,7 @@ type RunActivity = {
   label: string;
   detail: string;
   sources: RunSource[];
+  models: MessageModelUsage[];
   tools: RunTool[];
 };
 
@@ -112,6 +114,7 @@ type LastAttempt = {
 type ConversationView = "active" | "archived";
 
 const SavedSourcesContext = createContext<ReadonlyMap<string, MessageSource[]>>(new Map());
+const SavedModelsContext = createContext<ReadonlyMap<string, MessageModelUsage[]>>(new Map());
 const SavedToolsContext = createContext<ReadonlyMap<string, MessageToolCall[]>>(new Map());
 
 const IDLE_ACTIVITY: RunActivity = {
@@ -119,6 +122,7 @@ const IDLE_ACTIVITY: RunActivity = {
   label: "Ready",
   detail: "",
   sources: [],
+  models: [],
   tools: [],
 };
 
@@ -921,6 +925,10 @@ function AudreyThread({
     initialMessages.filter(({ role }) => role === "assistant")
       .map(({ id, sources }) => [id, sources ?? []] as const),
   ), [initialMessages]);
+  const savedModels = useMemo(() => new Map(
+    initialMessages.filter(({ role }) => role === "assistant")
+      .map(({ id, models: messageModels }) => [id, messageModels ?? []] as const),
+  ), [initialMessages]);
   const savedTools = useMemo(() => new Map(
     initialMessages.filter(({ role }) => role === "assistant")
       .map(({ id, tool_calls: tools }) => [id, tools ?? []] as const),
@@ -1009,6 +1017,7 @@ function AudreyThread({
           label: "Starting",
           detail: "Preparing Audrey's run",
           sources: [],
+          models: [],
           tools: [],
         });
       },
@@ -1042,6 +1051,23 @@ function AudreyThread({
             label: stage ? stageLabel(stage) : current.label,
             detail: delta || current.detail,
           }));
+        }
+        if (event.name === "audrey.model.used") {
+          const model = stringOf(recordOf(event.value).model);
+          if (model) {
+            setActivity((current) => {
+              const existing = current.models.find(({ model: name }) => name === model);
+              if (!existing) {
+                return { ...current, models: [...current.models, { model, calls: 1 }] };
+              }
+              return {
+                ...current,
+                models: current.models.map((item) => (
+                  item.model === model ? { ...item, calls: item.calls + 1 } : item
+                )),
+              };
+            });
+          }
         }
         if (event.name === "audrey.source.observed") {
           const value = recordOf(event.value);
@@ -1386,6 +1412,7 @@ function AudreyThread({
 
   return (
     <SavedSourcesContext.Provider value={savedSources}>
+      <SavedModelsContext.Provider value={savedModels}>
       <SavedToolsContext.Provider value={savedTools}>
         <AssistantRuntimeProvider runtime={runtime}>
       <ThreadPrimitive.Root className="thread-root">
@@ -1649,6 +1676,7 @@ function AudreyThread({
       </ThreadPrimitive.Root>
         </AssistantRuntimeProvider>
       </SavedToolsContext.Provider>
+      </SavedModelsContext.Provider>
     </SavedSourcesContext.Provider>
   );
 }
@@ -1679,10 +1707,36 @@ function RunActivityStatus({ activity, error }: { activity: RunActivity; error: 
           </ul>
         </details>
       ) : null}
+      {activity.models.length > 0 ? (
+        <ModelSummary models={activity.models} className="run-models" />
+      ) : null}
       {activity.tools.length > 0 ? (
         <ToolSummary tools={activity.tools} className="run-tools" />
       ) : null}
     </div>
+  );
+}
+
+function ModelSummary({
+  models,
+  className,
+}: {
+  models: readonly MessageModelUsage[];
+  className: string;
+}) {
+  const label = models.length === 1 ? "1 model" : `${models.length} models`;
+  return (
+    <details className={className}>
+      <summary>{label}</summary>
+      <ul>
+        {models.map(({ model, calls }) => (
+          <li key={model}>
+            <span>{model}</span>
+            <small>{calls === 1 ? "1 call" : `${calls} calls`}</small>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -1820,6 +1874,7 @@ function ChatAttachment({ attachment }: { attachment: CompleteAttachment }) {
 function AssistantMessage() {
   const messageId = useAuiState((state) => state.message.id);
   const sources = useContext(SavedSourcesContext).get(messageId) ?? [];
+  const models = useContext(SavedModelsContext).get(messageId) ?? [];
   const tools = useContext(SavedToolsContext).get(messageId) ?? [];
   return (
     <MessagePrimitive.Root className="message message-assistant">
@@ -1827,7 +1882,7 @@ function AssistantMessage() {
       <MessagePrimitive.Parts
         components={{ Text: MarkdownText, tools: { Fallback: HiddenToolActivity } }}
       />
-      {sources.length > 0 || tools.length > 0 ? (
+      {sources.length > 0 || models.length > 0 || tools.length > 0 ? (
         <div className="saved-run-details">
           {sources.length > 0 ? (
             <details className="saved-sources">
@@ -1842,6 +1897,9 @@ function AssistantMessage() {
                 })}
               </ul>
             </details>
+          ) : null}
+          {models.length > 0 ? (
+            <ModelSummary models={models} className="saved-models" />
           ) : null}
           {tools.length > 0 ? <ToolSummary tools={tools} className="saved-tools" /> : null}
         </div>

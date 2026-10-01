@@ -41,8 +41,9 @@ async def _add(
     status="pending",
     uploaded_at="2026-08-01T00:00:00+00:00",
     kind="video",
+    audio_format=(".mp3", "audio/mpeg"),
 ) -> None:
-    suffix, mime = (".mp3", "audio/mpeg") if kind == "audio" else (".mp4", "video/mp4")
+    suffix, mime = audio_format if kind == "audio" else (".mp4", "video/mp4")
     await db.record_upload(
         file_id=file_id, user=user, filename=f"{file_id}{suffix}", mime=mime,
         bytes_=1024, kind=kind, collection="", chunks=0,
@@ -488,17 +489,26 @@ class TestRouteBehaviour:
         assert "a@b.c" not in job["path"]
 
     @pytest.mark.asyncio
-    async def test_an_audio_claim_keeps_its_kind_and_mp3_path(
-        self, db: UploadsDB, tmp_path: Path,
+    @pytest.mark.parametrize(
+        ("suffix", "mime"),
+        [
+            (".mp3", "audio/mpeg"),
+            (".wav", "audio/x-wav"),
+            (".m4a", "audio/x-m4a"),
+            (".flac", "audio/flac"),
+        ],
+    )
+    async def test_an_audio_claim_keeps_its_kind_mime_and_source_path(
+        self, db: UploadsDB, tmp_path: Path, suffix: str, mime: str,
     ):
-        await _add(db, "a1", kind="audio")
+        await _add(db, "a1", kind="audio", audio_format=(suffix, mime))
         job = TestClient(_build_app(db, tmp_path)).post(
             "/v1/files/jobs/claim", headers={"X-Audrey-Service-Token": SECRET},
         ).json()
 
         assert job["kind"] == "audio"
-        assert job["mime"] == "audio/mpeg"
-        assert job["path"].endswith("a1.mp3")
+        assert job["mime"] == mime
+        assert job["path"].endswith(f"a1{suffix}")
         assert job["transcript"] is None
 
     @pytest.mark.asyncio

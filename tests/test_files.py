@@ -227,10 +227,20 @@ def test_mp4_is_offered_to_the_client():
     assert SUFFIX_MIMES[".mp4"] in ALLOWED_VIDEO_MIMES
 
 
-def test_mp3_is_offered_to_the_client_as_audio():
-    assert ".mp3" in ALLOWED_EXTENSIONS
-    assert SUFFIX_MIMES[".mp3"] in ALLOWED_AUDIO_MIMES
-    assert is_audio_mime("audio/mpeg")
+@pytest.mark.parametrize(
+    ("extension", "mime"),
+    [
+        (".mp3", "audio/mpeg"),
+        (".wav", "audio/x-wav"),
+        (".m4a", "audio/x-m4a"),
+        (".flac", "audio/flac"),
+    ],
+)
+def test_supported_audio_formats_are_offered_to_the_client(extension, mime):
+    assert extension in ALLOWED_EXTENSIONS
+    assert SUFFIX_MIMES[extension] == mime
+    assert mime in ALLOWED_AUDIO_MIMES
+    assert is_audio_mime(mime)
 
 
 def test_allowed_extensions_excludes_formats_with_no_path_at_all():

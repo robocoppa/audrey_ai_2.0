@@ -727,6 +727,28 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         PRAGMA legacy_alter_table = OFF;
         """,
     ),
+
+    (
+        17,
+        """
+        CREATE TABLE IF NOT EXISTS app_message_models (
+          message_id      TEXT NOT NULL,
+          conversation_id TEXT NOT NULL,
+          user_id         TEXT NOT NULL,
+          position        INTEGER NOT NULL CHECK (position >= 0),
+          model           TEXT NOT NULL,
+          calls           INTEGER NOT NULL CHECK (calls > 0),
+          PRIMARY KEY (message_id, position),
+          UNIQUE (message_id, model),
+          FOREIGN KEY (message_id, conversation_id, user_id)
+            REFERENCES app_messages(message_id, conversation_id, user_id)
+            ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_app_message_models_owner
+          ON app_message_models(user_id, conversation_id, message_id, position);
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS"]

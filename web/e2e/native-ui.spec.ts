@@ -395,6 +395,24 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
         {
           type: "CUSTOM",
           timestamp: 5,
+          name: "audrey.model.used",
+          value: { model: "qwen-router:latest" },
+        },
+        {
+          type: "CUSTOM",
+          timestamp: 5,
+          name: "audrey.model.used",
+          value: { model: "qwen-worker:latest" },
+        },
+        {
+          type: "CUSTOM",
+          timestamp: 5,
+          name: "audrey.model.used",
+          value: { model: "qwen-worker:latest" },
+        },
+        {
+          type: "CUSTOM",
+          timestamp: 5,
           name: "audrey.source.observed",
           value: {
             sourceId: "source_1",
@@ -590,15 +608,21 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect(page.getByText("web_search · complete")).toBeHidden();
   await expect(page.locator(".tool-activity")).toHaveCount(0);
   const sourceSummary = page.getByText("2 sources found · Untrusted source");
+  const modelSummary = page.locator(".run-models summary");
   const toolSummary = page.locator(".run-tools summary");
   await expect(sourceSummary).toBeVisible();
+  await expect(modelSummary).toHaveText("2 models");
   await expect(toolSummary).toHaveText("1 tool call");
   const liveSourceSummaryBox = await sourceSummary.boundingBox();
+  const liveModelSummaryBox = await modelSummary.boundingBox();
   const liveToolSummaryBox = await toolSummary.boundingBox();
   expect(liveSourceSummaryBox).not.toBeNull();
+  expect(liveModelSummaryBox).not.toBeNull();
   expect(liveToolSummaryBox).not.toBeNull();
-  expect(liveToolSummaryBox?.x ?? 0)
+  expect(liveModelSummaryBox?.x ?? 0)
     .toBeGreaterThan((liveSourceSummaryBox?.x ?? 0) + (liveSourceSummaryBox?.width ?? 0));
+  expect(liveToolSummaryBox?.x ?? 0)
+    .toBeGreaterThan((liveModelSummaryBox?.x ?? 0) + (liveModelSummaryBox?.width ?? 0));
   expect(Math.abs((liveToolSummaryBox?.y ?? 0) - (liveSourceSummaryBox?.y ?? 0))).toBeLessThan(2);
   await sourceSummary.click();
   const sourceLink = page.getByRole("link", { name: "Official source" });
@@ -613,6 +637,10 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   expect(sourceSummaryBox).not.toBeNull();
   expect(sourcePanelBox?.x ?? 0).toBeGreaterThanOrEqual((sourceSummaryBox?.x ?? 0) - 1);
   await sourceSummary.click();
+  await modelSummary.click();
+  await expect(page.locator(".run-models li")).toHaveCount(2);
+  await expect(page.locator(".run-models")).toContainText("qwen-router:latest1 call");
+  await expect(page.locator(".run-models")).toContainText("qwen-worker:latest2 calls");
   await toolSummary.click();
   await expect(page.locator(".run-tools li")).toContainText("web_search · complete");
   await expect(page.getByText("Complete", { exact: true })).toBeVisible();
@@ -2539,7 +2567,10 @@ test("shows observed sources with the saved assistant answer after reload", asyn
 
 test("summarizes saved tool activity without restoring transcript cards", async ({ page }) => {
   const messages = canonicalBrowserTurn().map((message) => message.role === "assistant"
-    ? { ...message, tool_calls: [
+    ? { ...message, models: [
+      { model: "qwen-router:latest", calls: 1 },
+      { model: "qwen-writer:latest", calls: 2 },
+    ], tool_calls: [
       {
         id: "tool_search", name: "web_search", status: "succeeded",
         arguments: { query: "annual report" },
@@ -2571,8 +2602,19 @@ test("summarizes saved tool activity without restoring transcript cards", async 
   const answer = page.locator(".message-assistant");
   await expect(answer.getByText("Canonical mode answer.")).toBeVisible();
   await expect(answer.locator(".tool-activity")).toHaveCount(0);
+  const savedModelSummary = answer.locator(".saved-models summary");
   const savedToolSummary = answer.locator(".saved-tools summary");
+  await expect(savedModelSummary).toHaveText("2 models");
   await expect(savedToolSummary).toHaveText("4 tool calls");
+  const savedModelSummaryBox = await savedModelSummary.boundingBox();
+  const savedToolSummaryBox = await savedToolSummary.boundingBox();
+  expect(savedModelSummaryBox).not.toBeNull();
+  expect(savedToolSummaryBox).not.toBeNull();
+  expect(savedToolSummaryBox?.x ?? 0)
+    .toBeGreaterThan((savedModelSummaryBox?.x ?? 0) + (savedModelSummaryBox?.width ?? 0));
+  await savedModelSummary.click();
+  await expect(answer.locator(".saved-models")).toContainText("qwen-router:latest1 call");
+  await expect(answer.locator(".saved-models")).toContainText("qwen-writer:latest2 calls");
   await expect(answer.getByText("web_search", { exact: true })).toBeHidden();
   await savedToolSummary.click();
   await expect(answer.locator(".saved-tools li")).toHaveCount(3);
