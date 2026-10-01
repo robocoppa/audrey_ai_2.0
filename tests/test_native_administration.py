@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import io
+import json
 import sqlite3
 from types import SimpleNamespace
 
@@ -311,6 +312,50 @@ async def test_operator_cli_bootstraps_the_exact_pending_email(
         assert record.groups == ("admins", "users")
     finally:
         reopened.close()
+
+
+def test_operator_cli_creates_verified_non_overwriting_backup(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    path = tmp_path / "app.sqlite"
+    store = ApplicationStore(path)
+    try:
+        expected_schema = store.schema_version
+    finally:
+        store.close()
+    monkeypatch.setattr(
+        admin_cli,
+        "get_config",
+        lambda: SimpleNamespace(raw={"application": {"sqlite_path": str(path)}}),
+    )
+    destination = tmp_path / "backups" / "app-backup.sqlite"
+    destination.parent.mkdir()
+
+    parsed = admin_cli._parser().parse_args(
+        ["backup-app-state", "--to", str(destination)]
+    )
+    assert parsed.to == destination
+    assert admin_cli._backup_application_state(destination) == 0
+
+    result = json.loads(capsys.readouterr().out)
+    assert result == {
+        "backup_path": str(destination),
+        "bytes": destination.stat().st_size,
+        "integrity_check": "ok",
+        "schema_version": expected_schema,
+        "source_path": str(path),
+        "status": "ok",
+    }
+    assert destination.stat().st_mode & 0o777 == 0o600
+    with sqlite3.connect(destination) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+
+    assert admin_cli._backup_application_state(destination) == 1
+    repeated = json.loads(capsys.readouterr().out)
+    assert repeated["status"] == "failed"
+    assert "already exists" in repeated["detail"]
 
 
 async def test_operator_email_bootstrap_refuses_ambiguous_accounts(tmp_path):

@@ -45,6 +45,16 @@ def _parser() -> argparse.ArgumentParser:
         "--email",
         help="Exact account email (fails safely when more than one account matches)",
     )
+    backup = commands.add_parser(
+        "backup-app-state",
+        help="Create a verified online backup of Audrey application state.",
+    )
+    backup.add_argument(
+        "--to",
+        type=Path,
+        required=True,
+        help="New backup path; its parent must exist and the file must not.",
+    )
     importer = commands.add_parser(
         "import-owui-users",
         help="Preview or import unmatched Open WebUI users as pending accounts.",
@@ -207,6 +217,36 @@ def _online_application_backup(source: Path, destination: Path) -> None:
             destination.unlink(missing_ok=True)
         raise
 
+def _backup_application_state(destination: Path) -> int:
+    """Create and verify a non-overwriting online application-state backup."""
+    cfg = get_config()
+    application = cfg.raw.get("application", {}) or {}
+    source = Path(application.get("sqlite_path", "/data/audrey_app.sqlite"))
+    try:
+        _online_application_backup(source, destination)
+        uri = f"file:{quote(str(destination.resolve()), safe='/')}?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True)) as backup_db:
+            integrity = backup_db.execute("PRAGMA integrity_check").fetchone()
+            if integrity is None or integrity[0] != "ok":
+                raise HistoryImportError("application backup failed integrity_check")
+            schema = backup_db.execute(
+                "SELECT COALESCE(MAX(version), 0) FROM app_schema_migrations"
+            ).fetchone()
+    except (HistoryImportError, OSError, sqlite3.Error) as exc:
+        print(json.dumps({"status": "failed", "detail": str(exc)}, sort_keys=True))
+        return 1
+
+    print(json.dumps({
+        "status": "ok",
+        "source_path": str(source),
+        "backup_path": str(destination),
+        "bytes": destination.stat().st_size,
+        "integrity_check": "ok",
+        "schema_version": int(schema[0]) if schema is not None else 0,
+    }, sort_keys=True))
+    return 0
+
+
 def _import_chat_export(
     *,
     file: Path,
@@ -269,6 +309,8 @@ def main() -> None:
     args = _parser().parse_args()
     if args.command == "grant-admin":
         raise SystemExit(asyncio.run(_grant_admin(args.user_id, email=args.email)))
+    if args.command == "backup-app-state":
+        raise SystemExit(_backup_application_state(args.to))
     if args.command == "import-owui-users":
         raise SystemExit(asyncio.run(_import_owui_users(apply=args.apply)))
     if args.command == "import-chat-export":

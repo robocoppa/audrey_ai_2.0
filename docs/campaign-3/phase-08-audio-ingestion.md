@@ -1,7 +1,6 @@
 # Campaign 3 Phase 8 - audio ingestion
 
-**Status:** Slice 8A is live-passed; Slice 8B is laptop-complete and awaits
-its manual native-browser check.
+**Status:** Complete. Slice 8A and Slice 8B are live-passed.
 
 ## Goal
 
@@ -115,24 +114,13 @@ upload and processing, Summary and Transcript presentation, grounded chat, and
 the saved attachment after refresh. The earlier decoder failure remains fixed
 by the deployed `av<19` pin and build-time WAV probe.
 
-Slice 8B changes only the Audrey backend allowlist, so rebuild `audrey`. Use one
-short spoken recording in each new format for the browser check:
-
-1. Upload `.wav`, `.m4a`, and `.flac` files in **Files**. Confirm none is
-   rejected and every row is labeled **Audio**.
-2. Confirm each recording moves from **Transcribing** to **Ready**.
-3. Open the M4A recording and confirm Summary and Transcript are available,
-   Visual notes is absent, and the transcript matches the speech.
-4. Attach the M4A recording to chat and ask about one distinctive spoken fact.
-   Confirm Audrey answers from the recording and retains the attachment after a
-   hard refresh.
-
-M4A carries the full Files/chat acceptance because it is the most common new
-container. WAV and FLAC only need admission and Ready-state checks; the real
-ffmpeg tests already exercise their identical decoder boundary.
+Slice 8B passed its native-browser gate on 2026-10-01. WAV, M4A,
+and FLAC were accepted as Audio and reached Ready. The M4A recording passed the
+full Files/chat path: Summary and Transcript presentation, grounded chat, and
+attachment persistence after refresh. This closes Phase 8.
 
 ## Completion gate
 
-Slice 8B completes when WAV, M4A, and FLAC all reach Ready and the M4A
-Files/chat flow passes. OGG, Opus, AAC, music analysis, diarization, and speaker
-labels remain later work.
+The gate passed: WAV, M4A, and FLAC reached Ready and the M4A Files/chat
+flow passed. OGG, Opus, AAC, music analysis, diarization, and speaker labels
+remain later work under item 6.

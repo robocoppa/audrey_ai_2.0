@@ -1,8 +1,7 @@
 # Campaign 3 — correctness foundations, Audrey UI, and reusable skills
 
-**Status:** Campaign 3 Phases 1, 3, 4, 5, 6, and 7 are complete. Phase
-8A MP3 audio is live-passed; Slice 8B WAV/M4A/FLAC support is laptop-complete
-and awaiting its manual native-browser check. Phase 2's native product cutover
+**Status:** Campaign 3 Phases 1, 3, 4, 5, 6, 7, and 8 are complete.
+Phase 2's native product cutover
 is live-settled, while its legacy 2D.5
 administration, role, model-publication, exact-owner bootstrap, and
 provider-binding soak remains open.
@@ -39,7 +38,7 @@ live-settled; its rendered resolver, variable upstream, and both variable proxy 
 The already-passed auth, proxy, routing, and eval checks are not repeated.
 Historical chat import is optional and runs only after a new explicit request.
 The initial standalone-UI soak is complete, and the stopped
-`audrey-ai-retired` pre-cutover container is approved for deletion.
+`audrey-ai-retired` pre-cutover container has been removed.
 
 Phase 3 completed on 2026-09-28. Milestones 3A.1, 3A.2, and 3B are
 live-settled. The targeted 3B native Fast run selected and persisted
@@ -84,8 +83,9 @@ attachments persist audio through schema migration 16. The first synthetic
 live attempt exposed a faster-whisper/PyAV decoder mismatch; the worker now
 pins the compatible PyAV major and verifies WAV decoding during its image
 build. The real MP3 browser flow passed. Slice 8B adds measured WAV, M4A,
-and FLAC admission on the same pipeline; laptop verification is complete and
-its manual browser check is pending.
+and FLAC admission on the same pipeline. The user marked the WAV, M4A, and FLAC
+native gate passed on 2026-10-01, including the M4A Files/chat flow. Phase 8 is
+complete.
 
 A 2026-10-01 model-maintenance slice removes `qwen3.5:397b-cloud` after its
 confirmed HTTP 410 retirement. The tag is gone from the general registry,
@@ -98,16 +98,10 @@ pull list. The required full gate also exposed an uptime-dependent progress
 reporter bug: a fresh host could suppress media-fetcher's first update because
 `0.0` doubled as its never-sent timestamp. The reporter now uses an explicit
 unset state, so its first update is unconditional and later updates remain
-throttled. All 3,065 backend tests pass; the targeted live cloud turn is
-pending.
-
-The live gate needs no upload or scripted suite. After rebuilding `audrey`,
-start a new native conversation, choose **Cloud**, ask one short factual
-question, and expand **Models** when the answer completes. The gate passes when
-the answer completes without HTTP 410, the menu includes `glm-5.3:cloud` and
-`kimi-k2.6:cloud`, and it does not include `qwen3.5:397b-cloud`. Rebuild
-`media-fetcher` in the same deploy so the first-update correction reaches the
-URL-download worker; it needs no separate acceptance run.
+throttled. All 3,065 backend tests passed. The deployed native Cloud turn
+then completed with `glm-5.3:cloud` and `kimi-k2.6:cloud`, without the retired
+Qwen tag, and the on-box model inventory returned clean. This maintenance slice
+is live-settled.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,
@@ -125,7 +119,7 @@ and finally adds the first general skills layer on that owned surface.
 | 05 | [Responses API compatibility](phase-05-responses-api.md) | OpenAI Responses clients use Audrey's existing authenticated generation and policy boundaries | Phase 04 completion | Complete (5A and 5B live-settled) |
 | 06 | [System One decision routing](phase-06-system-one-routing.md) | Measure purpose-built local decision models against Audrey's incumbent router and retain a one-setting rollback | Phase 05 Slice 5B gate | Complete (6A measured; incumbent retained; 6B not opened) |
 | 07 | [Scanned PDF OCR](phase-07-scanned-pdf-ocr.md) | Queue image-only PDFs for bounded owner-scoped OCR, indexing, and native reading | Phase 06 decision | Complete (OCR and PDF presentation live-settled) |
-| 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Transcribe, summarize, search, inspect, and attach spoken audio as a first-class file kind | Phase 07 completion | In progress (8A live-passed; 8B laptop-complete) |
+| 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Transcribe, summarize, search, inspect, and attach spoken audio as a first-class file kind | Phase 07 completion | Complete (8A and 8B live-passed) |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1
 through Campaign 3 Phase 8, or use the topic filenames.
@@ -148,7 +142,9 @@ through Campaign 3 Phase 8, or use the topic filenames.
 - Any source/config edit runs the full hermetic suite and changed-file ruff.
   Lesson-link sweeps run only when the user explicitly requests one.
 
-## What comes after these plans
+## Remaining work
 
-The remaining product backlog - broader audio formats and media analysis,
-then ordinary-answer provenance - stays available for later Campaign 3 phases.
+Items 5–10, their execution order, and pass criteria are tracked in
+[remaining-work-todo.md](remaining-work-todo.md). Item 5 is active; broader
+media work and ordinary-answer provenance follow after the legacy Phase 2D.5
+administration and recovery proof.

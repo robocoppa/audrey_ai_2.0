@@ -13,8 +13,8 @@ the Cloudflare route still targeted backend port 8000. After the route moved to
 restored authentication and confirmed the diagnosis. Request-time Docker DNS is
 the permanent correction; its deployment and rendered-config/auth proof are
 live-settled. Open WebUI remains stopped and is not a rollback target. The
-initial cutover soak is complete, so the stopped `audrey-ai-retired` container
-is no longer retained for rollback and is approved for deletion.
+initial cutover soak is complete, and the stopped `audrey-ai-retired`
+container has been removed.
 
 The host-network `cloudflared` instance reaches the new UI through
 `http://127.0.0.1:8090`; host port 8088 remains assigned to SearXNG. The UI

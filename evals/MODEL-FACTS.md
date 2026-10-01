@@ -190,6 +190,12 @@ them are the reason it is being replaced. ⚠️ They can no longer be re-measur
 - Volunteers calibration language unprompted ("Both the date and the
   press-conference miscommunication are well-documented historical facts; I'm
   not guessing"). `[ab-next4, 2026-08-19]`
+- **What `ollama show` reports:** architecture `nemotron_h_moe`, a mixture of
+  experts, 32.9B in total, embedding length 2,688, context length 1,048,576,
+  Q4_K_M, requires Ollama 0.32.9. Capabilities completion, tools and thinking,
+  with thinking levels `false`/`true`/`medium` and default `true`. Parameters
+  `top_p 0.95`, `draft_num_predict 2`, `temperature 1`. Licence: NVIDIA Open Model
+  License Agreement, last modified October 24, 2025. `[ollama show, 2026-10-01]`
 
 ### `qwen3.8:latest`
 
@@ -300,6 +306,64 @@ the three models WITHIN this arm only.
 - ▶ **Both Q4 arms co-resided.** In the sweep, `mtp-q4` took no cold load after
   `latest` (first case ttft 0.2s), confirming 17+17 GB sits in 48 GB without
   eviction. The run-shape rule holds.
+- **What `ollama show` reports for `27b-mtp-q8_0`:** architecture `qwen35`, 27.3B,
+  Q8_0, context length 262,144, embedding length 5,120, requires Ollama 0.32.12.
+  Capabilities completion, vision (a 460.73M `clip` projector), tools and
+  thinking, with thinking levels `false`/`low`/`medium`/`xhigh` and default
+  `medium`. Apache 2.0. `[ollama show, 2026-10-01]`
+
+### `qwen3.8:32k`, `qwen3.8:16k`, `qwen3.8:q8-32k` — ai-sec's tags, not Audrey's
+
+The ai-sec project (`~/Documents/github/ai-sec`) writes its report narratives with
+these. Audrey's config names none of them, so `check_model_inventory.py` lists
+them as unreferenced and reclaimable. ⛔ **That list is a report, not a delete
+list:** removing one of these breaks ai-sec's eval. ai-sec sends temperature 0
+and both penalties 0, and at those settings these tags measured
+bit-deterministic (below), so one ai-sec draw is a measurement rather than a
+sample. `[check_model_inventory.py + ai-sec eval, 2026-10-01]`
+
+- **How they are built.** Each is its parent's weights plus one `PARAMETER
+  num_ctx` line. `qwen3.8:16k` and `qwen3.8:32k` are `FROM qwen3.8:latest`, at
+  16384 and 32768. `qwen3.8:q8-32k` is `FROM qwen3.8:27b-mtp-q8_0` at 32768,
+  created 2026-10-01. `ollama create` reused every existing layer, so a tag like
+  this costs no disk. All other parameters are the parent's: `top_p 0.95`,
+  `draft_num_predict 4`, `min_p 0`, `presence_penalty 0`, `repeat_penalty 1`,
+  `temperature 1`, `top_k 20`. `[ollama show --parameters + /api/show, 2026-09-30
+  and 2026-10-01]`
+- **The Q4 and Q8 tags share one chat template**, sha256 `b507b9c2f6ca…`, so
+  they think the same way. `[ollama show --template | sha256sum, 2026-10-01]`
+- ✅ **`qwen3.8:32k` is bit-deterministic at temperature 0 on a quiet box.** In
+  five draws of ai-sec's 42 cases, all 36 outcomes were identical in every draw
+  and identical to the run a day earlier. `qwen3.8:16k` before it: 22 narratives
+  byte-identical across five draws, and one packet byte-identical across a real
+  reload (`/api/ps` read before and after). ⚠️ That is ai-sec's request, not
+  this file's harness, which sets no temperature or seed.
+  `[ai-sec eval-out/model-2026-09-24-134656, 2026-09-24; model-2026-08-31-213302,
+  2026-08-31]`
+- **A 32k window fits on one card, 100% GPU, at no measurable cost.** The 16k
+  and 32k arms of one 38-case run finished in 1,021.94s and 1,018.84s, with
+  `num_ctx 32768` served in every case. `[ai-sec
+  eval-out/constrain-2026-09-01-160823, 2026-09-01]`
+- **Throughput on ai-sec's workload:** 42 cases in 1,765s. The slowest case took
+  92s for 7,956 completion tokens. Counting each case's whole span from file
+  timestamps, which includes the non-model steps, that comes to about 82
+  completion tokens per second, so generation runs at least that fast. The
+  largest prompt plus reply was 18,226 tokens. `[ai-sec
+  eval-out/model-2026-09-30-200843, 2026-09-30]`
+- **Thinking was on although ai-sec never asked for it.** ai-sec sends no
+  `think` field to `/v1/chat/completions`. Its accepted narratives run 0.45-1.31
+  characters per completion token (median 0.72, n=25), against this file's
+  plain-prose baseline of ~4. So most completion tokens were reasoning, which is
+  the thinking probe's "omitted IS thinking" result on another endpoint. `[ai-sec
+  eval-out/model-2026-09-30-200843, 2026-09-30]`
+- ⚠️ **It writes an absent setting as a missing protection.** On ai-sec's
+  hardening findings where a check found a setting absent rather than wrong,
+  the model is told the host then runs a default, which may be the secure one.
+  Even so, under ai-sec's narrative contract 2.14 it described 3 of 17 such
+  absences as the host doing without the protection, down from 14 of 18 under
+  2.12. This is the same class as nemotron's invented metric: a consequence the
+  source does not state, written as fact. `[ai-sec
+  eval-out/model-2026-09-30-200843, 2026-09-30]`
 
 ### `llama4:latest`
 
@@ -441,6 +505,11 @@ probability. `[2026-09-30-systemone-router-probe-results.json, 2026-09-30]`
   change, harmless where it sits.
   ⛔ Was deliberately kept OUT of `deep_panel_local.code` — see the thinking
   instability above; that reasoning stands if it is ever reconsidered.
+- **What `ollama show` reports:** architecture `qwen35moe`, a mixture of experts,
+  35.5B in total, embedding length 2,048, context length 262,144, Q4_K_M.
+  Capabilities tools, thinking, completion and vision (a 446.57M `clip`
+  projector). ⚠️ **It prints no licence and no parameters**, so its terms of use
+  are not stated anywhere on the box. `[ollama show, 2026-10-01]`
 - ⛔ **Worst of the five on general quality with thinking OFF** — 48/65, against
   2 failures on the grounding suite in the same arm. Four defect classes, all
   absent when it thinks: answers truncated to their closing sentence
@@ -485,6 +554,17 @@ Probed head to head against the production router, 10 cases x 3 rounds,
 - Also 6.6 GB against a slot that is small on purpose: the router is not
   GPU-gated, so under `GPU_CONCURRENCY=1` it would evict the deep worker.
 - **Keep `qwen3.5:4b`.** The router question is closed.
+
+### `laguna-xs-2.1:latest`
+
+No quality facts on any suite. It is still on the box as of 2026-10-01, though
+queued for removal (see *Not established*).
+
+- **What `ollama show` reports:** architecture `laguna`, 33.4B, embedding length
+  2,048, context length 262,144, Q4_K_M, requires Ollama 0.32.3. Capabilities
+  completion, tools and thinking, with thinking levels `false`/`true` and
+  default `true`. No parameters. Licence: OpenMDW License Agreement, version 1.1.
+  `[ollama show, 2026-10-01]`
 
 ### Other installed local models
 
@@ -833,7 +913,9 @@ Open questions, and what would close each.
   variable reasoning length, not swapping. The residual +6-59% is a clean
   generation-rate difference consistent with 1.71x the weights to stream.
   `ollama ps` STILL was not captured, so CPU offload is not formally excluded.
-  ▶ *Closes with:* `ollama ps` during any future run of this tag.
+  ▶ *Closes with:* `ollama ps` during any future run of this tag. ai-sec's Q8
+  eval, queued 2026-10-01, reads it on `qwen3.8:q8-32k`, which is the same
+  weights.
   Original entry follows for the record.
 - **[superseded] Whether `qwen3.8:27b-mtp-q8_0`'s latency tail is memory pressure.** The
   bimodal shape (median fine, max 100.8s, 63s spread on one prompt) fits a
@@ -888,6 +970,15 @@ Open questions, and what would close each.
   and reload from disk, and the result is a memory-bandwidth measurement. One
   `--models` value per run for anything that large. Check `ollama ps` after the
   first prompt and read the CPU/GPU split before spending a suite on it.
+- **Whether `laguna-xs-2.1` is a mixture of experts.** Its embedding length,
+  2,048, matches `ornith-1.5:35b`, which is one, and a dense model that narrow
+  would need several hundred layers to reach 33.4B. That is an inference, not a
+  reading. ▶ *Closes with:* the expert count in `ollama show -v
+  laguna-xs-2.1:latest`.
+- **Whether Q8 reads ai-sec's findings better than Q4.** The 2026-08-25 bake-off
+  found no quality difference on code. ai-sec's question is its absent-setting
+  misreading (3 of 17 at Q4). ▶ *Closes with:* ai-sec's eval of
+  `qwen3.8:q8-32k`, queued 2026-10-01, against its Q4 baseline.
 - **`laguna-s-2.1` / `laguna-xs-2.1`.** Queued for removal from `config.yaml`
   and `pull-models.sh`. A 2026-08-18 thinking-on arm came back within noise of
   thinking-off, but arm delivery was unverifiable at the time (the per-request
