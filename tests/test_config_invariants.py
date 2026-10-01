@@ -153,6 +153,26 @@ def test_the_script_pulls_nothing_the_config_never_uses(cfg):
     )
 
 
+def test_retired_models_are_absent_from_runtime_config_and_pull_script(cfg):
+    """A provider-retired tag must not remain reachable through any role.
+
+    qwen3.5:397b-cloud returned HTTP 410 during the 2026-09-29 video-summary
+    probe while it was still a general candidate, tool-capable model, cloud
+    panel worker, passthrough option, and pull target. Checking both parsed
+    authorities prevents a partial removal from recreating that failure.
+    """
+    retired = {"qwen3.5:397b-cloud"}
+    configured = _config_model_names(cfg)
+    pulled = _pull_script_models()
+
+    assert retired.isdisjoint(configured), (
+        f"retired models remain in config.yaml: {sorted(retired & configured)}"
+    )
+    assert retired.isdisjoint(pulled), (
+        f"retired models remain in pull-models.sh: {sorted(retired & pulled)}"
+    )
+
+
 # ─── Thinking policy ───────────────────────────────────────────────────
 
 def test_every_no_thinking_model_is_one_the_config_actually_dispatches(cfg):

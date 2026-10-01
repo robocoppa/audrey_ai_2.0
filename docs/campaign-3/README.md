@@ -12,9 +12,10 @@ settings, owner-bound file and video upload and inspection, source and answer
 presentation, image and direct chat attachments, safe retry, reload recovery,
 empty-draft cleanup, saved source and tool summaries, durable attachment
 presentation, answer and code copying, attachment-picker dismissal, and
-contextual startup and recovered-run presentation. A follow-up model activity
-disclosure is laptop-complete: new native answers show every concrete generation
-model and call count immediately left of Tool calls, with refresh persistence.
+contextual startup and recovered-run presentation. The follow-up model activity
+disclosure passed live on 2026-10-01: new native answers show every concrete
+generation model and call count immediately left of Tool calls, and the menu
+survives refresh.
 Selected corrections passed live checks, and on 2026-09-24 the user marked the
 combined 2E regression gate and normal-use soak tested and settled. Milestone
 2F has therefore started. Slice 2F.1's focused authentication smoke passed on
@@ -37,6 +38,8 @@ confirming the diagnosis. The request-time Docker DNS correction is
 live-settled; its rendered resolver, variable upstream, and both variable proxy directives passed the deploy proof.
 The already-passed auth, proxy, routing, and eval checks are not repeated.
 Historical chat import is optional and runs only after a new explicit request.
+The initial standalone-UI soak is complete, and the stopped
+`audrey-ai-retired` pre-cutover container is approved for deletion.
 
 Phase 3 completed on 2026-09-28. Milestones 3A.1, 3A.2, and 3B are
 live-settled. The targeted 3B native Fast run selected and persisted
@@ -83,6 +86,28 @@ pins the compatible PyAV major and verifies WAV decoding during its image
 build. The real MP3 browser flow passed. Slice 8B adds measured WAV, M4A,
 and FLAC admission on the same pipeline; laptop verification is complete and
 its manual browser check is pending.
+
+A 2026-10-01 model-maintenance slice removes `qwen3.5:397b-cloud` after its
+confirmed HTTP 410 retirement. The tag is gone from the general registry,
+tool-capable and passthrough lists, cloud-panel workers, and the pull script.
+The already registered `kimi-k2.6:cloud` now fills its cloud-only reasoning,
+general, and vision draft slots, preserving two distinct workers and the
+separate `deepseek-v4-pro:cloud` synthesis fallback. A real-config invariant
+prevents the retired tag from returning to either runtime configuration or the
+pull list. The required full gate also exposed an uptime-dependent progress
+reporter bug: a fresh host could suppress media-fetcher's first update because
+`0.0` doubled as its never-sent timestamp. The reporter now uses an explicit
+unset state, so its first update is unconditional and later updates remain
+throttled. All 3,065 backend tests pass; the targeted live cloud turn is
+pending.
+
+The live gate needs no upload or scripted suite. After rebuilding `audrey`,
+start a new native conversation, choose **Cloud**, ask one short factual
+question, and expand **Models** when the answer completes. The gate passes when
+the answer completes without HTTP 410, the menu includes `glm-5.3:cloud` and
+`kimi-k2.6:cloud`, and it does not include `qwen3.5:397b-cloud`. Rebuild
+`media-fetcher` in the same deploy so the first-update correction reaches the
+URL-download worker; it needs no separate acceptance run.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,

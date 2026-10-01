@@ -11,8 +11,10 @@ the Audrey backend serves APIs only. The first 2F.4 live attempt exposed that
 the Cloudflare route still targeted backend port 8000. After the route moved to
 8090, the UI proxy retained Audrey's retired Docker address. Restarting the UI
 restored authentication and confirmed the diagnosis. Request-time Docker DNS is
-the permanent correction; its deployment and rendered-config/auth proof remain.
-Open WebUI remains stopped and is not a rollback target.
+the permanent correction; its deployment and rendered-config/auth proof are
+live-settled. Open WebUI remains stopped and is not a rollback target. The
+initial cutover soak is complete, so the stopped `audrey-ai-retired` container
+is no longer retained for rollback and is approved for deletion.
 
 The host-network `cloudflared` instance reaches the new UI through
 `http://127.0.0.1:8090`; host port 8088 remains assigned to SearXNG. The UI
@@ -44,10 +46,15 @@ curl --fail-with-body -sS http://127.0.0.1:8090/healthz
 ```
 
 Both services should become healthy and the final command should print `ok`.
-The UI port is bound to loopback, not the LAN. Keep the stopped
-`audrey-ai-retired` container through the initial soak; Compose may identify
-it as an orphan, which is expected. Do not use `--remove-orphans` during this
-migration.
+The UI port is bound to loopback, not the LAN. That initial soak has now
+completed. Remove the stopped pre-cutover container explicitly:
+
+```bash
+docker rm audrey-ai-retired
+```
+
+Success prints `audrey-ai-retired`. This deletes only the obsolete container;
+Audrey's current Compose services and mounted application data remain in place.
 
 The backend is reachable as `audrey` on its Docker networks. The temporary
 `audrey-ai` alias is gone; monitoring and internal clients must use

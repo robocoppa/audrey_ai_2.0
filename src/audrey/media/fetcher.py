@@ -156,7 +156,7 @@ class _ProgressReporter:
         #: How many updates yt-dlp produced, throttled or not. Distinguishes
         #: "the progress channel is broken" from "the downloader said nothing".
         self.calls = 0
-        self._last_post = 0.0
+        self._last_post: float | None = None
         self._last_done = 0
         self._last_total = 0
         self._base_done = 0
@@ -182,7 +182,7 @@ class _ProgressReporter:
         self._last_total = total or 0
 
         now = time.monotonic()
-        if now - self._last_post < self._interval:
+        if self._last_post is not None and now - self._last_post < self._interval:
             return
         self._last_post = now
         self.send(self._base_done + downloaded, self._aggregate_total(total))

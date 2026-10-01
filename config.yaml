@@ -138,7 +138,6 @@ model_registry:
     - { name: "deepseek-v4-pro:cloud",    priority:  97, speed: 80, quality: 95, location: cloud }
     - { name: "kimi-k2.6:cloud",          priority:  95, speed: 90, quality: 93, location: cloud }
     - { name: "kimi-k2.7-code:cloud",     priority:  88, speed: 90, quality: 92, location: cloud }
-    - { name: "qwen3.5:397b-cloud",       priority:  90, speed: 80, quality: 94, location: cloud }
     - { name: "deepseek-v4.1-flash:cloud",  priority:  82, speed: 92, quality: 89, location: cloud }
     # ⚠️ 2026-08-16: `olmo-3.1:32b` (70, local) REMOVED — never pulled.
     # `muse-glimmer:latest` takes the second local slot here too.
@@ -249,7 +248,6 @@ fast_path:
     - "deepseek-v4-pro:cloud"
     # Ollama lists v4.1 Flash with tools; verify the installed tag at the live gate.
     - "deepseek-v4.1-flash:cloud"
-    - "qwen3.5:397b-cloud"
     - "nemotron-3-super:cloud"
     # ✅ `ollama show glm-5.3:cloud` declares `tools` (verified against the box
     # 2026-08-29, alongside `completion` and `thinking`) — inherited from the
@@ -358,16 +356,19 @@ deep_panel_cloud:
     workers: ["glm-5.3:cloud", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud"]
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
+  # 2026-10-01: kimi-k2.6 replaces the retired qwen3.5:397b-cloud worker in
+  # the remaining pools. It already serves these roles in the mixed panel and
+  # preserves two distinct cloud drafts plus a different-vendor fallback.
   reasoning:
-    workers: ["glm-5.3:cloud", "qwen3.5:397b-cloud"]
+    workers: ["glm-5.3:cloud", "kimi-k2.6:cloud"]
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
   general:
-    workers: ["glm-5.3:cloud", "qwen3.5:397b-cloud"]
+    workers: ["glm-5.3:cloud", "kimi-k2.6:cloud"]
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
   vl:
-    workers: ["glm-5.3:cloud", "qwen3.5:397b-cloud"]
+    workers: ["glm-5.3:cloud", "kimi-k2.6:cloud"]
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
 
@@ -1653,7 +1654,6 @@ passthrough:
     - kimi-k2.6:cloud
     - deepseek-v4.1-flash:cloud
     - nemotron-3-super:cloud
-    - qwen3.5:397b-cloud
     - llama4:latest
     # ── 2026-08-18 arrivals, exposed for the local bake-off, NOT in any pool ──
     # Listing a model here makes it targetable by
