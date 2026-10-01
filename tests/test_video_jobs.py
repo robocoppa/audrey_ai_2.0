@@ -496,6 +496,9 @@ class TestRouteBehaviour:
             (".wav", "audio/x-wav"),
             (".m4a", "audio/x-m4a"),
             (".flac", "audio/flac"),
+            (".ogg", "audio/ogg"),
+            (".opus", "audio/ogg"),
+            (".aac", "audio/x-hx-aac-adts"),
         ],
     )
     async def test_an_audio_claim_keeps_its_kind_mime_and_source_path(

@@ -393,6 +393,9 @@ def test_native_video_artifact_uses_exact_owned_id_and_pages_on_lines(monkeypatc
         ("interview.wav", "audio/x-wav"),
         ("interview.m4a", "audio/x-m4a"),
         ("interview.flac", "audio/flac"),
+        ("interview.ogg", "audio/ogg"),
+        ("interview.opus", "audio/ogg"),
+        ("interview.aac", "audio/x-hx-aac-adts"),
     ],
 )
 def test_native_audio_artifacts_offer_transcript_and_summary_but_not_visual(

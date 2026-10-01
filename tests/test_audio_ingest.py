@@ -28,6 +28,9 @@ class _Storage:
         (".wav", "audio/x-wav"),
         (".m4a", "audio/x-m4a"),
         (".flac", "audio/flac"),
+        (".ogg", "audio/ogg"),
+        (".opus", "audio/ogg"),
+        (".aac", "audio/x-hx-aac-adts"),
     ],
 )
 async def test_supported_audio_format_becomes_a_pending_audio_job(

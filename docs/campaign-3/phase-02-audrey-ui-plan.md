@@ -1,12 +1,12 @@
 # Campaign 3 Phase 2 — Audrey application and web UI
 
-**Status:** In progress. Milestones 2A and 2B are complete and
-Unraid-verified. Slices 2C.1–2C.3 and 2D.1–2D.4 are also Unraid-verified.
-The public hostname now targets the standalone browser client. Restarting
-`audrey-ui` restored authentication and confirmed the stale-upstream diagnosis;
-the permanent DNS correction is laptop-complete with its targeted live proof
-open. Slice 2D.5 is deployed; its administration, role, model-publication,
-exact-owner bootstrap, and provider-binding soak remains open.
+**Status:** Complete and Unraid-verified. Milestones 2A–2F, the standalone
+native browser cutover, request-time proxy DNS correction, and the final 2D.5
+administration/recovery gate all passed. The public hostname targets the
+standalone browser client and Open WebUI remains stopped. Slice 2D.5's
+administration, role, model-publication, exact-owner bootstrap,
+provider-binding, restart, projection, and isolated restore gates passed on
+2026-10-01.
 
 The Milestone 2E parity build is laptop-complete. Native memory and
 files, video ingestion and inspection, source and tool summaries, image and
@@ -1079,8 +1079,14 @@ Unraid gate must prove a new Access identity starts pending, bootstrap one exact
 Audrey account by unique exact email (with canonical id as the ambiguity-safe
 fallback), exercise provider-only approval and group/policy changes, run a
 tester-visible direct model through native AG-UI, verify ordinary-user hiding,
-restore the prior policies/groups, and confirm restart persistence. Slice 2D.5
-is laptop-complete, not yet Unraid-verified.
+restore the prior policies/groups, and confirm restart persistence.
+
+**Live result, 2026-10-01:** Slice 2D.5 passed. The exact-owner/provider and
+interactive account/model gates passed; all 41 ordered model policies and a
+selected conversation model survived restart; projection rebuild reset 11
+projections and preserved canonical parity; and the isolated restore matched
+the 675,840-byte schema-17 backup with 5 accounts, 8 conversations, 22 messages,
+and 11 runs. Production application state was excluded from the restore path.
 
 `tests/smoke/smoke_native_access_models.py` packages the repeatable portion of that
 gate through the standalone proxy. It rejects an admin-owned personal token,
@@ -1322,5 +1328,7 @@ Phase 2 is complete when:
 - backups, migrations, export/deletion, rollback, and index rebuild are proven;
 - backend, frontend, Playwright, live-eval, and user-run Unraid gates pass.
 
-Only then does Campaign 3 Phase 3 make skills visible as a native Audrey
+**Gate result, 2026-10-01:** Passed. Phase 2 is complete.
+
+Campaign 3 Phase 3 subsequently made skills visible as a native Audrey
 capability.

@@ -234,6 +234,9 @@ def test_mp4_is_offered_to_the_client():
         (".wav", "audio/x-wav"),
         (".m4a", "audio/x-m4a"),
         (".flac", "audio/flac"),
+        (".ogg", "audio/ogg"),
+        (".opus", "audio/ogg"),
+        (".aac", "audio/x-hx-aac-adts"),
     ],
 )
 def test_supported_audio_formats_are_offered_to_the_client(extension, mime):

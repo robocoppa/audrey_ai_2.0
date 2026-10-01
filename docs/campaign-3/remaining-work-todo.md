@@ -1,7 +1,7 @@
 # Campaign 3 remaining work — items 5–10
 
-**Status:** Items 1–4 were marked live-closed on 2026-10-01. Item 5 is in
-progress. Items 6–10 remain queued in this order unless the user reprioritizes
+**Status:** Items 1–5 were marked live-closed on 2026-10-01. Item 6 is in
+progress. Items 7–10 remain queued in this order unless the user reprioritizes
 them.
 
 ## Closed prerequisites
@@ -14,9 +14,9 @@ them.
 
 ## 5. Finish Phase 2D.5 administration and recovery proof
 
-**State:** In progress. The repeatable account/model and projection smokes
-already exist. The first new slice exposes Audrey's SQLite online-backup
-primitive as `audrey-admin backup-app-state`.
+**State:** Complete and live-verified. The backup, account/model authority,
+interactive provider and picker behavior, restart persistence, projection
+rebuild, and isolated restore proof all passed.
 
 ### 5.1 Deploy and create the verified backup
 
@@ -233,9 +233,9 @@ It removes a failed restore and leaves a successful one for inspection.
 - [x] Add a supported verification command that restores the backup into a
   disposable path, opens it without touching production state, checks integrity
   and schema, and verifies representative account/conversation counts.
-- [ ] Run that command against the backup from 5.1.
-- [ ] Record the backup filename, size, schema, and verification result.
-- [ ] Keep production `/data/audrey_app.sqlite` untouched during the proof.
+- [x] Run that command against the backup from 5.1.
+- [x] Record the backup filename, size, schema, and verification result.
+- [x] Keep production `/data/audrey_app.sqlite` untouched during the proof.
 
 Run this on Tower after rebuilding the Audrey container with this slice:
 
@@ -249,22 +249,37 @@ docker compose exec audrey audrey-admin verify-app-state-backup \
 
 This reads the saved backup and writes only the new file under the container's
 `/tmp`. It refuses to run if either argument resolves to
-`/data/audrey_app.sqlite`. A pass reports `status: ok`, schema 17, both
-integrity checks as `ok`, positive account and conversation counts, and
+`/data/audrey_app.sqlite`. A pass reports `status: ok`, schema 17, the
+integrity and foreign-key checks as `ok`, positive account and conversation
+counts, and
 `source_counts_match: true`. If the disposable filename already exists, use a
 new filename; the command deliberately never overwrites a prior result.
 
-**Item 5 closes when:** the backup, account/model smoke, interactive provider
-and picker checks, restart persistence, projection rebuild, and isolated restore
-proof all pass, with temporary policy and account changes restored.
+**Live result, 2026-10-01:** Passed. The schema-17 backup and isolated
+restore were both 675,840 bytes. Integrity and foreign-key checks returned
+`ok`; the restore retained 5 accounts, 8 conversations, 22 messages, and 11
+runs; all source counts matched. The verifier excluded production
+`/data/audrey_app.sqlite` and wrote only
+`/tmp/audrey-app-restore-check-20261001.sqlite`.
+
+**Item 5 closed, 2026-10-01:** The backup, account/model smoke, interactive
+provider and picker checks, restart persistence, projection rebuild, and
+isolated restore proof all passed, with temporary policy and account changes
+restored.
 
 ## 6. Build the next product phase
 
-- [ ] Write the Phase 9 plan and choose the first deployable slice.
-- [ ] Add OGG, Opus, and AAC admission using measured MIME/container pairs.
-- [ ] Reuse the existing durable audio queue, transcript, Summary, Files, and
+**State:** In progress. [Phase 9](phase-09-broader-audio.md) defines broader
+spoken-audio support. Slice 9A is laptop-complete and awaits its manual native
+browser gate.
+
+- [x] Write the Phase 9 plan and choose the first deployable slice.
+- [x] Add OGG, Opus, and raw ADTS AAC admission using measured MIME/container
+  pairs.
+- [x] Reuse the existing durable audio queue, transcript, Summary, Files, and
   chat attachment boundaries.
-- [ ] Keep diarization and speaker labels in a separate measured slice.
+- [x] Keep diarization and speaker labels in a separate measured slice.
+- [ ] Pass the Slice 9A manual Files and chat gate for OGG, Opus, and AAC.
 - [ ] Define media-analysis scope from real user workflows before adding music
   or scene-specific analysis.
 - [ ] After media work, design ordinary-answer provenance on the native message

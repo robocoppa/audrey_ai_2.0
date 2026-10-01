@@ -66,8 +66,10 @@ ALLOWED_VIDEO_MIMES: frozenset[str] = frozenset({
 ALLOWED_AUDIO_MIMES: frozenset[str] = frozenset({
     "audio/mpeg",   # .mp3
     "audio/x-wav",  # .wav
-    "audio/x-m4a",  # .m4a
-    "audio/flac",   # .flac
+    "audio/x-m4a",          # .m4a
+    "audio/flac",           # .flac
+    "audio/ogg",            # .ogg (Vorbis), .opus (Ogg Opus)
+    "audio/x-hx-aac-adts",  # .aac (raw ADTS AAC)
 })
 ALLOWED_MIMES: frozenset[str] = (
     ALLOWED_TEXT_MIMES | ALLOWED_IMAGE_MIMES | ALLOWED_VIDEO_MIMES
@@ -93,6 +95,9 @@ SUFFIX_MIMES: dict[str, str] = {
     ".wav": "audio/x-wav",
     ".m4a": "audio/x-m4a",
     ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".aac": "audio/x-hx-aac-adts",
 }
 
 # Derived, never hand-maintained: adding a mime to the allowlist above

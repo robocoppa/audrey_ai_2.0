@@ -70,6 +70,16 @@ def silent(tmp_path_factory: pytest.TempPathFactory) -> Path:
         pytest.param(("wav", ("-c:a", "pcm_s16le"), "audio/x-wav"), id="wav"),
         pytest.param(("m4a", ("-c:a", "aac", "-b:a", "96k"), "audio/x-m4a"), id="m4a"),
         pytest.param(("flac", ("-c:a", "flac"), "audio/flac"), id="flac"),
+        pytest.param(("ogg", ("-c:a", "libvorbis"), "audio/ogg"), id="ogg"),
+        pytest.param(("opus", ("-c:a", "libopus"), "audio/ogg"), id="opus"),
+        pytest.param(
+            (
+                "aac",
+                ("-c:a", "aac", "-b:a", "96k", "-f", "adts"),
+                "audio/x-hx-aac-adts",
+            ),
+            id="aac",
+        ),
     ],
 )
 def additional_audio_source(request, tmp_path_factory: pytest.TempPathFactory):
