@@ -1652,6 +1652,11 @@ passthrough:
     # name earned a probe rather than a promotion.
     - glm-5.3-flash:cloud
     - kimi-k2.6:cloud
+    # 2026-10-01: added so the Claudette (Hermes) bot can target it. NOT a pool
+    # or registry role — kimi-k3 left every pool 2026-07-30 on cloud-credit cost.
+    # ⚠️ This list is global: any `compat:full` token can use it, whatever the
+    # Admin model access says. That access governs the native UI, not `/v1`.
+    - kimi-k3:cloud
     - deepseek-v4.1-flash:cloud
     - nemotron-3-super:cloud
     - llama4:latest
