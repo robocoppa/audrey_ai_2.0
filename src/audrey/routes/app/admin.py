@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import io
-from typing import Literal
+from typing import Literal, Self
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from PIL import Image, ImageOps, UnidentifiedImageError
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from audrey.app_state import AccessRoleRecord, AccountAdministrationError, AdminUserRecord
 from audrey.auth import clear_auth_cache_for_user_id, require_admin_principal
@@ -50,7 +50,14 @@ class AdminUserCreateRequest(BaseModel):
 class UserApprovalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    role: Literal["user", "tester", "bot"] | None = None
     tester: bool = False
+
+    @model_validator(mode="after")
+    def legacy_tester_does_not_conflict_with_role(self) -> Self:
+        if self.tester and self.role not in {None, "tester"}:
+            raise ValueError("tester conflicts with the requested role")
+        return self
 
 
 class AdminUserPatchRequest(BaseModel):
@@ -120,7 +127,7 @@ class AdminModelPatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool
-    audience: Literal["users", "testers", "admins"]
+    audience: Literal["users", "testers", "bots", "admins"]
 
 
 def _role_response(record: AccessRoleRecord) -> AdminRoleResponse:
@@ -235,7 +242,8 @@ async def approve_user(
     request: Request,
     principal: Principal = Depends(require_admin_principal),
 ) -> AdminUserResponse:
-    groups = ["users", *(["testers"] if payload.tester else [])]
+    role = payload.role or ("tester" if payload.tester else "user")
+    groups = ["users", *([f"{role}s"] if role in {"tester", "bot"} else [])]
     try:
         record = await application_store(request).admin_update_user(
             actor_user_id=principal.user_id,

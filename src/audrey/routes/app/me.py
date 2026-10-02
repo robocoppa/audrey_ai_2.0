@@ -32,7 +32,7 @@ class TokenCreateRequest(BaseModel):
         default_factory=lambda: ["compat:full"],
         min_length=1,
     )
-    expires_in_days: int = Field(default=90, ge=1, le=365)
+    expires_in_days: int = Field(default=90, ge=0, le=365)
 
 
 class TokenRecordResponse(BaseModel):
@@ -40,7 +40,7 @@ class TokenRecordResponse(BaseModel):
     name: str
     scopes: list[str]
     created_at: str
-    expires_at: str
+    expires_at: str | None
     last_used_at: str | None
     revoked_at: str | None
 
@@ -232,8 +232,12 @@ async def create_token(
     """Issue a bearer secret once; only its SHA-256 digest remains at rest."""
 
     expires_at = (
-        dt.datetime.now(dt.UTC) + dt.timedelta(days=payload.expires_in_days)
-    ).isoformat(timespec="microseconds")
+        (
+            dt.datetime.now(dt.UTC) + dt.timedelta(days=payload.expires_in_days)
+        ).isoformat(timespec="microseconds")
+        if payload.expires_in_days > 0
+        else None
+    )
     try:
         issued = await _store(request).create_personal_token(
             user_id=principal.user_id,

@@ -319,7 +319,7 @@ def test_token_lifecycle_returns_secret_only_on_create(tmp_path):
         store.close()
 
 
-def test_token_route_rejects_non_expiring_request(tmp_path):
+def test_token_route_accepts_zero_as_no_expiration(tmp_path):
     store = ApplicationStore(tmp_path / "app.sqlite")
     app = FastAPI()
     app.state.application_store = store
@@ -328,18 +328,35 @@ def test_token_route_rejects_non_expiring_request(tmp_path):
     app.dependency_overrides[require_provider_principal] = lambda: owner
 
     try:
-        response = TestClient(app).post(
-            "/api/tokens",
-            json={
-                "name": "Permanent token",
-                "scopes": ["compat:full"],
-                "expires_in_days": None,
-            },
-        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/tokens",
+                json={
+                    "name": "Permanent token",
+                    "scopes": ["compat:full"],
+                    "expires_in_days": 0,
+                },
+            )
+            assert response.status_code == 201
+            body = response.json()
+            assert body["expires_at"] is None
+            assert client.get("/api/tokens").json()["items"][0]["expires_at"] is None
+            authenticated = asyncio.run(
+                store.authenticate_personal_token(body["token"])
+            )
+            assert authenticated.user_id == owner.user_id
+
+            rejected = client.post(
+                "/api/tokens",
+                json={
+                    "name": "Invalid token",
+                    "scopes": ["compat:full"],
+                    "expires_in_days": -1,
+                },
+            )
+            assert rejected.status_code == 422
     finally:
         store.close()
-
-    assert response.status_code == 422
 
 
 def test_token_routes_do_not_cross_owner_boundary(tmp_path):

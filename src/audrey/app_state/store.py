@@ -45,10 +45,10 @@ from audrey.identity import (
 
 _ALLOWED_ROLES = frozenset({"user", "admin"})
 _ALLOWED_ACCOUNT_STATUSES = frozenset({"pending", "active", "disabled"})
-_ALLOWED_MODEL_AUDIENCES = frozenset({"users", "testers", "admins"})
+_ALLOWED_MODEL_AUDIENCES = frozenset({"users", "testers", "bots", "admins"})
 _TOKEN_RE = re.compile(r"\Aaud_(pat_[0-9a-f]{32})\.([A-Za-z0-9_-]{32,})\Z")
 _LAST_USED_WRITE_INTERVAL = dt.timedelta(minutes=5)
-_FOREIGN_KEYS_OFF_MIGRATIONS = frozenset({5, 7, 8, 16})
+_FOREIGN_KEYS_OFF_MIGRATIONS = frozenset({5, 7, 8, 16, 18})
 _ADDITIVE_COLUMN_MIGRATIONS = {
     15: {
         "app_runs": ("skill_id", "skill_version", "skill_digest", "skill_reason"),
@@ -571,7 +571,7 @@ class ApplicationStore:
         user_id: str,
         name: str,
         scopes: Iterable[str],
-        expires_at: str,
+        expires_at: str | None,
     ) -> IssuedPersonalToken:
         """Create a high-entropy bearer token and persist only its digest."""
 
@@ -588,14 +588,18 @@ class ApplicationStore:
         user_id: str,
         name: str,
         scopes: Iterable[str],
-        expires_at: str,
+        expires_at: str | None,
     ) -> IssuedPersonalToken:
         user_id = _required(user_id, "user id")
         name = _required(name, "token name")
         if len(name) > 80:
             raise InvalidIdentityError("token name must be at most 80 characters")
         normalized_scopes = _normalize_scopes(scopes)
-        normalized_expiry = _normalize_expiry(expires_at, require_future=True)
+        normalized_expiry = (
+            _normalize_expiry(expires_at, require_future=True)
+            if expires_at is not None
+            else ""
+        )
         token_id = f"pat_{uuid.uuid4().hex}"
         raw_token = f"aud_{token_id}.{secrets.token_urlsafe(32)}"
         secret_hash = _token_hash(raw_token)
@@ -733,7 +737,7 @@ class ApplicationStore:
                 last_used = _parse_utc(str(row["last_used_at"] or ""))
             except ValueError as exc:
                 raise PersonalTokenAuthenticationError("invalid personal token") from exc
-            if expiry is None or expiry <= now_dt:
+            if expiry is not None and expiry <= now_dt:
                 raise PersonalTokenAuthenticationError("invalid personal token")
             if str(row["status"]) != "active":
                 raise PersonalTokenAuthenticationError("invalid personal token")

@@ -787,6 +787,17 @@ def test_native_model_catalog_accepts_the_committed_config():
     _validate_native_models(_load_yaml(_REPO_ROOT / "config.yaml"))
 
 
+def test_native_model_catalog_accepts_the_bots_audience():
+    _validate_native_models(
+        {
+            "passthrough": {"allowed_models": ["automation:latest"]},
+            "native_models": {
+                "entries": {"automation:latest": {"audience": "bots"}},
+            },
+        }
+    )
+
+
 @pytest.mark.parametrize(
     "entry",
     [

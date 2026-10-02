@@ -59,6 +59,11 @@ chaining, client tools, and structured output remain explicit later slices.
 Phase 13 Slice 13A now adds typed text and bounded inline image input through
 the same completed and streaming generation paths.
 
+Phase 14 started on 2026-10-02. Slice 14A adds a protected Bots access group,
+Bot-targeted model policy, zero-day never-expiring personal tokens, and
+uncached administration lists so reopening the panel shows new applicants.
+The implementation and full backend gate pass; native acceptance is pending.
+
 Phase 6 completed on 2026-09-30. Slice 6A's probe-only comparison finished
 148 valid calls across Tev1 0.8B, Tev1 4B, Nimble, and the incumbent. On the 23
 cases that reach Audrey's model router, `qwen3.5:4b` scored 23/23 and Nimble
@@ -124,9 +129,10 @@ and finally adds the first general skills layer on that owned surface.
 | 11 | [Native file explorer](phase-11-native-file-explorer.md) | Browse, attach, and manage private files through compact folder-style native views | Phase 10 completion | Complete (11A user-closed) |
 | 12 | [Sidebar navigation](phase-12-sidebar-navigation.md) | Simplify primary conversation creation and move My Files into a distinct top-bar action | Phase 11 completion | Revised Slice 12A laptop-complete; native browser gate pending |
 | 13 | [Responses multimodal input](phase-13-responses-multimodal-input.md) | Accept typed text and bounded inline image parts through the shared Responses adapter | Phase 12 implementation | Slice 13A laptop-complete; targeted live gate pending |
+| 14 | [Bot accounts and token lifetimes](phase-14-bot-accounts-and-token-lifetimes.md) | Add limited automation accounts, intentional permanent PATs, and fresh admin data on every open | Phase 13 implementation | Slice 14A laptop-complete; native acceptance pending |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1
-through Campaign 3 Phase 13, or use the topic filenames.
+through Campaign 3 Phase 14, or use the topic filenames.
 
 ## Campaign rules
 
@@ -153,4 +159,5 @@ Items 5–10, their execution order, and pass criteria are tracked in
 2D.5, and Phases 9–11 are closed. The user reprioritized Phase 12's sidebar
 navigation slice ahead of Item 7. Its requested top-bar correction is ready
 for browser acceptance, and Item 7's first multimodal slice is ready for its
-targeted live gate.
+targeted live gate. Phase 14's account administration slice is also
+laptop-complete and awaits its native browser and PAT checks.

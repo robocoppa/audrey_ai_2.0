@@ -20,7 +20,7 @@ from audrey.models.ollama import OllamaError
 from audrey.models.registry import ModelRegistry
 
 ModelKind = Literal["workflow", "direct"]
-ModelAudience = Literal["users", "testers", "admins"]
+ModelAudience = Literal["users", "testers", "bots", "admins"]
 InventorySource = Literal["ollama", "configuration"]
 
 log = logging.getLogger(__name__)

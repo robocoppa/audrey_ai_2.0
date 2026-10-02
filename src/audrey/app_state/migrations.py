@@ -749,6 +749,40 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           ON app_message_models(user_id, conversation_id, message_id, position);
         """,
     ),
+    (
+        18,
+        """
+        PRAGMA legacy_alter_table = ON;
+
+        INSERT OR IGNORE INTO access_groups
+          (group_id, label, description, system, created_at)
+        VALUES
+          ('bots', 'Bots', 'Service accounts for API clients and automations.', 1,
+           strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now'));
+
+        ALTER TABLE model_access_policies
+          RENAME TO model_access_policies_before_bots;
+
+        CREATE TABLE model_access_policies (
+          model_id           TEXT PRIMARY KEY,
+          enabled            INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+          audience           TEXT NOT NULL
+                             CHECK (audience IN ('users', 'testers', 'bots', 'admins')),
+          updated_by_user_id TEXT,
+          updated_at         TEXT NOT NULL,
+          FOREIGN KEY (updated_by_user_id) REFERENCES app_users(user_id) ON DELETE SET NULL
+        );
+
+        INSERT INTO model_access_policies
+          (model_id, enabled, audience, updated_by_user_id, updated_at)
+        SELECT model_id, enabled, audience, updated_by_user_id, updated_at
+        FROM model_access_policies_before_bots;
+
+        DROP TABLE model_access_policies_before_bots;
+
+        PRAGMA legacy_alter_table = OFF;
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS"]

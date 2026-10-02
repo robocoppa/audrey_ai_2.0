@@ -161,11 +161,11 @@ export function AdminPanel({
     }
   }
 
-  async function approve(user: AdminUser, tester: boolean) {
+  async function approve(user: AdminUser, role: "user" | "tester" | "bot") {
     setBusyKey(`user:${user.id}`);
     setError("");
     try {
-      replaceUser(await approveAdminUser(user.id, tester));
+      replaceUser(await approveAdminUser(user.id, role));
     } catch (reason) {
       setError(messageOf(reason, "The account could not be approved."));
     } finally {
@@ -538,7 +538,8 @@ export function AdminPanel({
               </div>
               <p className="admin-role-guide">
                 <strong>User</strong> gets Audrey workflows. <strong>Tester</strong> can receive
-                preview models. <strong>Administrator</strong> manages accounts and model access.
+                preview models. <strong>Bot</strong> can use models assigned to automations.{" "}
+                <strong>Administrator</strong> manages accounts and model access.
               </p>
               <div className="admin-record-list">
                 {filteredUsers.map((user) => {
@@ -566,11 +567,14 @@ export function AdminPanel({
                         <p className="admin-deletion-progress" title="This account will disappear when data cleanup completes.">Purging data…</p>
                       ) : user.status === "pending" ? (
                         <div className="admin-record-actions">
-                          <button type="button" onClick={() => void approve(user, false)} disabled={rowBusy}>
+                          <button type="button" onClick={() => void approve(user, "user")} disabled={rowBusy}>
                             {rowBusy ? "Updating…" : "Approve as user"}
                           </button>
-                          <button type="button" onClick={() => void approve(user, true)} disabled={rowBusy}>
+                          <button type="button" onClick={() => void approve(user, "tester")} disabled={rowBusy}>
                             Approve as tester
+                          </button>
+                          <button type="button" onClick={() => void approve(user, "bot")} disabled={rowBusy}>
+                            Approve as bot
                           </button>
                           {denyConfirmId === user.id ? (
                             <>
@@ -600,6 +604,7 @@ export function AdminPanel({
                             >
                               <option value="user">User</option>
                               <option value="tester">Tester</option>
+                              <option value="bot">Bot</option>
                               <option value="admin">Administrator</option>
                               {roles.filter((role) => !role.system).map((role) => (
                                 <option key={role.id} value={role.id}>{role.name}</option>
@@ -987,7 +992,10 @@ export function AdminPanel({
 
 function roleForUser(user: AdminUser): AccessRole {
   if (user.groups.includes("admins") || user.role === "admin") return "admin";
-  const custom = user.groups.find((group) => !["users", "testers", "admins"].includes(group));
+  if (user.groups.includes("bots")) return "bot";
+  const custom = user.groups.find((group) =>
+    !["users", "testers", "bots", "admins"].includes(group)
+  );
   if (custom) return custom;
   if (user.groups.includes("testers")) return "tester";
   return "user";
@@ -996,6 +1004,7 @@ function roleForUser(user: AdminUser): AccessRole {
 function groupsForRole(role: AccessRole): AccessGroup[] {
   if (role === "admin") return ["admins", "users"];
   if (role === "tester") return ["testers", "users"];
+  if (role === "bot") return ["bots", "users"];
   if (role === "user") return ["users"];
   return ["users", role];
 }

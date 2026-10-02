@@ -4,7 +4,9 @@
 [Phase 12](phase-12-sidebar-navigation.md) ahead of Items 7–10. Slice 12A is
 laptop-complete with its My Files correction and awaits browser acceptance.
 Item 7 has started with laptop-complete
-[Phase 13 Slice 13A](phase-13-responses-multimodal-input.md).
+[Phase 13 Slice 13A](phase-13-responses-multimodal-input.md). The user then
+prioritized [Phase 14 Slice 14A](phase-14-bot-accounts-and-token-lifetimes.md),
+which is laptop-complete and awaits native acceptance.
 
 ## Closed prerequisites
 
@@ -315,6 +317,23 @@ do not yet justify diarization or broader media analysis.
   browser checks.
 
 Detailed scope: [phase-12-sidebar-navigation.md](phase-12-sidebar-navigation.md).
+
+## Next user-prioritized slice - Phase 14 bot accounts and token lifetimes
+
+**State:** Laptop-complete. Native acceptance is pending.
+
+- [x] Add Bots as a protected schema-backed access group.
+- [x] Allow pending approval and active role assignment as Bot.
+- [x] Let model policies and publication profiles grant Bots explicit access.
+- [x] Accept token lifetime `0`, return no expiry, and keep revocation and owner
+  status enforcement.
+- [x] Reload users, models, and roles without browser cache on every Admin Panel
+  opening.
+- [ ] Pass the refreshed applicant, Bot model visibility, permanent PAT, and
+  revocation checks on the deployed application.
+
+Detailed scope:
+[phase-14-bot-accounts-and-token-lifetimes.md](phase-14-bot-accounts-and-token-lifetimes.md).
 
 ## 7. Expand Responses API compatibility
 

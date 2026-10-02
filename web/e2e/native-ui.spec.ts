@@ -190,6 +190,14 @@ test("approves an account and changes a model policy in the admin panel", async 
     portrait_url: "",
     concrete_model: "qwen3.8:latest",
   };
+  const freshSignup = {
+    ...pending,
+    id: "usr_fresh",
+    email: "fresh@example.com",
+    display_name: "Fresh Signup",
+  };
+  let includeFreshSignup = false;
+  let adminUserLoads = 0;
   const modelPatches: unknown[] = [];
 
   await page.route("**/api/**", async (route) => {
@@ -217,7 +225,10 @@ test("approves an account and changes a model policy in the admin panel", async 
       return;
     }
     if (url.pathname === "/api/admin/users") {
-      await json(route, { items: [pending] });
+      adminUserLoads += 1;
+      await json(route, {
+        items: includeFreshSignup ? [pending, freshSignup] : [pending],
+      });
       return;
     }
     if (url.pathname === "/api/admin/users/usr_pending/approve") {
@@ -233,6 +244,7 @@ test("approves an account and changes a model policy in the admin panel", async 
       await json(route, { items: [
         { id: "users", name: "Users", description: "", system: true, user_count: 1 },
         { id: "testers", name: "Testers", description: "", system: true, user_count: 0 },
+        { id: "bots", name: "Bots", description: "", system: true, user_count: 0 },
         { id: "admins", name: "Administrators", description: "", system: true, user_count: 1 },
       ] });
       return;
@@ -286,6 +298,11 @@ test("approves an account and changes a model policy in the admin panel", async 
   await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue("auto");
   expect(modelPatches).toEqual([{ enabled: false, audience: "testers" }]);
 
+  await page.getByRole("button", { name: "Close administration" }).click();
+  includeFreshSignup = true;
+  await page.getByRole("button", { name: "Admin Panel" }).click();
+  await expect(page.getByText("Fresh Signup")).toBeVisible();
+  expect(adminUserLoads).toBe(2);
   await page.getByRole("button", { name: "Close administration" }).click();
   const modelPicker = page.getByRole("combobox", { name: "Audrey model" });
   await expect(modelPicker.getByRole("option", { name: "Qwen 3.8" })).toHaveCount(0);

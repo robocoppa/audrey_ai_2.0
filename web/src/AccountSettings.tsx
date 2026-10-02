@@ -560,8 +560,9 @@ export function AccountSettings({
           <div className="settings-section-heading">
             <h3 id="personal-token-title">Personal access tokens</h3>
             <p>
-              Create expiring credentials for API clients. Audrey shows each
-              secret once and never stores it in this browser.
+              Create credentials for API clients. Enter 0 days for a token that
+              lasts until you revoke it. Audrey shows each secret once and never
+              stores it in this browser.
             </p>
           </div>
           {!tokensOpen ? (
@@ -589,14 +590,14 @@ export function AccountSettings({
                   <input
                     aria-label="Token lifetime in days"
                     type="number"
-                    min={1}
+                    min={0}
                     max={365}
                     required
                     value={tokenExpiresInDays}
                     onChange={(event) => setTokenExpiresInDays(event.target.value)}
                     disabled={tokenCreating}
                   />
-                  <small>Choose between 1 and 365 days.</small>
+                  <small>Choose 1 to 365 days, or enter 0 for no expiration.</small>
                 </label>
                 <fieldset className="token-scope-fieldset">
                   <legend>Access</legend>
@@ -684,7 +685,11 @@ export function AccountSettings({
                         </div>
                         <div>
                           <dt>Expires</dt>
-                          <dd><time dateTime={record.expires_at}>{formatTokenTime(record.expires_at)}</time></dd>
+                          <dd>{record.expires_at ? (
+                            <time dateTime={record.expires_at}>
+                              {formatTokenTime(record.expires_at)}
+                            </time>
+                          ) : "Never"}</dd>
                         </div>
                         <div>
                           <dt>Last used</dt>
@@ -1007,16 +1012,17 @@ const ACCOUNT_PURGE_CONFIRMATION = "DELETE ALL MY AUDREY DATA";
 function accountRoleLabel(user: CurrentUser): string {
   if (user.groups.includes("admins")) return "Administrator";
   if (user.groups.includes("testers")) return "Tester";
+  if (user.groups.includes("bots")) return "Bot";
   return "User";
 }
 
 function validTokenExpiry(value: string): boolean {
   const days = Number(value);
-  return Number.isInteger(days) && days >= 1 && days <= 365;
+  return Number.isInteger(days) && days >= 0 && days <= 365;
 }
 
 function tokenExpired(record: PersonalTokenRecord): boolean {
-  return Date.parse(record.expires_at) <= Date.now();
+  return record.expires_at !== null && Date.parse(record.expires_at) <= Date.now();
 }
 
 function tokenScopeLabel(scope: PersonalTokenScope): string {

@@ -408,7 +408,7 @@ def _validate_native_models(merged: dict[str, Any]) -> None:
             "Invalid native_models configuration: defaults and entries must be objects"
         )
 
-    allowed_audiences = {"users", "testers", "admins"}
+    allowed_audiences = {"users", "testers", "bots", "admins"}
     allowed_direct_capabilities = {"text", "thinking"}
     allowed_presentations = {
         "auto",

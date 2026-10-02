@@ -610,10 +610,10 @@ def test_admin_can_manage_a_dynamically_discovered_model(tmp_path):
 
             changed = client.patch(
                 "/api/admin/models/direct/newly-pulled:latest",
-                json={"enabled": True, "audience": "testers"},
+                json={"enabled": True, "audience": "bots"},
             )
             assert changed.status_code == 200
-            assert changed.json()["audience"] == "testers"
+            assert changed.json()["audience"] == "bots"
             assert changed.json()["policy_overridden"] is True
     finally:
         store.close()
@@ -692,6 +692,68 @@ def test_admin_routes_mutate_exact_accounts_and_model_policies(tmp_path):
         ("set_model_policy", model_id),
         ("delete_model_policy", model_id),
     ]
+
+
+def test_bot_role_approval_and_model_access_are_first_class(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    admin = asyncio.run(_resolve(
+        store, subject="bot-admin", email="admin@example.com", role="admin",
+    ))
+    pending = asyncio.run(_resolve(
+        store,
+        subject="bot-pending",
+        email="automation@example.com",
+        provider="cloudflare_access",
+        initial_status="pending",
+    ))
+    app = FastAPI()
+    app.state.application_store = store
+    app.state.cfg = _cfg()
+    app.state.ollama = _OllamaInventory(_DIRECT_MODEL)
+    app.include_router(router)
+    app.dependency_overrides[require_admin_principal] = lambda: admin
+    model_id = f"direct/{_DIRECT_MODEL}"
+
+    try:
+        with TestClient(app) as client:
+            roles = client.get("/api/admin/roles")
+            assert roles.status_code == 200
+            bot_role = next(
+                role for role in roles.json()["items"] if role["id"] == "bots"
+            )
+            assert bot_role["system"] is True
+
+            approved = client.post(
+                f"/api/admin/users/{pending.user_id}/approve",
+                json={"role": "bot"},
+            )
+            assert approved.status_code == 200
+            assert approved.json()["groups"] == ["bots", "users"]
+
+            published = client.patch(
+                f"/api/admin/model-profiles/{model_id}",
+                json={
+                    "visibility": "public",
+                    "roles": ["bots"],
+                    "display_name": "Automation Qwen",
+                },
+            )
+            assert published.status_code == 200
+            assert published.json()["roles"] == ["bots"]
+
+            bot = asyncio.run(_resolve(
+                store,
+                subject="bot-pending",
+                email="automation@example.com",
+                provider="cloudflare_access",
+            ))
+            assert bot.groups == frozenset({"bots", "users"})
+            app.dependency_overrides[require_principal] = lambda: bot
+            visible = client.get("/api/models")
+            assert visible.status_code == 200
+            assert model_id in {item["id"] for item in visible.json()["items"]}
+    finally:
+        store.close()
 
 
 def test_admin_delete_route_disables_account_and_queues_purge(tmp_path):

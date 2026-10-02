@@ -104,7 +104,7 @@ export interface PersonalTokenRecord {
   name: string;
   scopes: PersonalTokenScope[];
   created_at: string;
-  expires_at: string;
+  expires_at: string | null;
   last_used_at: string | null;
   revoked_at: string | null;
 }
@@ -394,7 +394,7 @@ export function listSkills(): Promise<SkillsCatalog> {
 }
 
 export function listAdminUsers(): Promise<{ items: AdminUser[] }> {
-  return apiJson<{ items: AdminUser[] }>("/api/admin/users");
+  return apiJson<{ items: AdminUser[] }>("/api/admin/users", { cache: "no-store" });
 }
 
 export function createPendingAdminUser(
@@ -410,12 +410,12 @@ export function createPendingAdminUser(
 
 export function approveAdminUser(
   userId: string,
-  tester: boolean,
+  role: "user" | "tester" | "bot",
 ): Promise<AdminUser> {
   return apiJson<AdminUser>(`/api/admin/users/${encodeURIComponent(userId)}/approve`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tester }),
+    body: JSON.stringify({ role }),
   });
 }
 
@@ -447,7 +447,7 @@ export function deleteAdminUser(userId: string): Promise<{
 }
 
 export function listAdminRoles(): Promise<{ items: AdminRole[] }> {
-  return apiJson<{ items: AdminRole[] }>("/api/admin/roles");
+  return apiJson<{ items: AdminRole[] }>("/api/admin/roles", { cache: "no-store" });
 }
 
 export function createAdminRole(role: Pick<AdminRole, "id" | "name" | "description">): Promise<AdminRole> {
@@ -476,7 +476,7 @@ export async function deleteAdminRole(roleId: string): Promise<void> {
 }
 
 export function listAdminModels(): Promise<AdminModelCatalog> {
-  return apiJson<AdminModelCatalog>("/api/admin/models");
+  return apiJson<AdminModelCatalog>("/api/admin/models", { cache: "no-store" });
 }
 
 export function setAdminModelOrder(

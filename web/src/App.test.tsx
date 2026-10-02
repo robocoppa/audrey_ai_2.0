@@ -607,6 +607,7 @@ describe("App", () => {
       name: "CLI token",
       scopes: ["account:read", "compat:full"],
       token: "aud_pat_created.one-time-secret",
+      expires_at: null,
     };
     const fetchMock = vi.fn().mockImplementation(
       (path: string, request?: RequestInit) => {
@@ -662,7 +663,7 @@ describe("App", () => {
       target: { value: "CLI token" },
     });
     fireEvent.change(screen.getByRole("spinbutton", { name: "Token lifetime in days" }), {
-      target: { value: "30" },
+      target: { value: "0" },
     });
     fireEvent.click(screen.getByRole("checkbox", {
       name: "Read Audrey account details and preferences",
@@ -678,8 +679,9 @@ describe("App", () => {
     expect(JSON.parse(String(create?.[1].body))).toEqual({
       name: "CLI token",
       scopes: ["compat:full", "account:read"],
-      expires_in_days: 30,
+      expires_in_days: 0,
     });
+    expect(screen.getAllByText("Never").length).toBeGreaterThanOrEqual(1);
     expect(window.localStorage).toHaveLength(0);
     expect(window.sessionStorage).toHaveLength(0);
 

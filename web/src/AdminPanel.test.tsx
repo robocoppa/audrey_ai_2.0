@@ -48,6 +48,7 @@ describe("AdminPanel", () => {
           return jsonResponse({ items: [
             { id: "users", name: "Users", description: "", system: true, user_count: 1 },
             { id: "testers", name: "Testers", description: "", system: true, user_count: 0 },
+            { id: "bots", name: "Bots", description: "", system: true, user_count: 0 },
             { id: "admins", name: "Administrators", description: "", system: true, user_count: 1 },
           ] });
         }
@@ -92,24 +93,37 @@ describe("AdminPanel", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Approve as user" }));
+    const approveAsUser = await screen.findByRole("button", { name: "Approve as user" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/users",
+      expect.objectContaining({ cache: "no-store" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/models",
+      expect.objectContaining({ cache: "no-store" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/admin/roles",
+      expect.objectContaining({ cache: "no-store" }),
+    );
+    fireEvent.click(approveAsUser);
     await waitFor(() => expect(screen.getByText("active")).toBeVisible());
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/admin/users/usr_pending/approve",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ tester: false }),
+        body: JSON.stringify({ role: "user" }),
       }),
     );
 
     fireEvent.change(screen.getByRole("combobox", { name: "Role for Pending Person" }), {
-      target: { value: "tester" },
+      target: { value: "bot" },
     });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/admin/users/usr_pending",
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({ groups: ["testers", "users"] }),
+        body: JSON.stringify({ groups: ["bots", "users"] }),
       }),
     ));
 
