@@ -1,9 +1,8 @@
 # Campaign 3 — correctness foundations, Audrey UI, and reusable skills
 
-**Status:** Campaign 3 Phases 1–11 are complete. Phase 12 Slice 12A is
-laptop-complete and awaiting native browser acceptance: the simplified sidebar
-has one full-width New conversation action at the top and Files in a bottom
-utility section.
+**Status:** Campaign 3 Phases 1–11 are complete. Phase 12's revised My Files
+placement and Phase 13 Slice 13A's Responses inline-image adapter are
+laptop-complete and awaiting their targeted live gates.
 
 The Milestone 2E parity build is laptop-complete across native memory
 settings, owner-bound file and video upload and inspection, source and answer
@@ -56,8 +55,9 @@ action row, while Transcript and Visual notes retain download actions.
 Phase 5 completed on 2026-09-30. Slice 5A's completed plain-text
 `POST /v1/responses` adapter and Slice 5B's typed Responses SSE both passed
 their laptop and targeted live gates. Background work, stored response
-chaining, client tools, structured output, and multimodal input remain explicit
-later slices.
+chaining, client tools, and structured output remain explicit later slices.
+Phase 13 Slice 13A now adds typed text and bounded inline image input through
+the same completed and streaming generation paths.
 
 Phase 6 completed on 2026-09-30. Slice 6A's probe-only comparison finished
 148 valid calls across Tev1 0.8B, Tev1 4B, Nimble, and the incumbent. On the 23
@@ -122,10 +122,11 @@ and finally adds the first general skills layer on that owned surface.
 | 09 | [Broader spoken audio](phase-09-broader-audio.md) | Admit measured OGG, Opus, and raw AAC containers before separately scoped speaker or media analysis | Phase 08 and Phase 2D.5 completion | Complete (9A live-passed) |
 | 10 | [Ordinary-answer provenance](phase-10-ordinary-answer-provenance.md) | Persist deterministic public URL and private file evidence on ordinary tool-backed answers | Phase 09 completion | Complete (10A live-passed) |
 | 11 | [Native file explorer](phase-11-native-file-explorer.md) | Browse, attach, and manage private files through compact folder-style native views | Phase 10 completion | Complete (11A user-closed) |
-| 12 | [Sidebar navigation](phase-12-sidebar-navigation.md) | Simplify primary conversation creation and establish a bottom utility section for Files and later workspace actions | Phase 11 completion | Slice 12A laptop-complete; native browser gate pending |
+| 12 | [Sidebar navigation](phase-12-sidebar-navigation.md) | Simplify primary conversation creation and move My Files into a distinct top-bar action | Phase 11 completion | Revised Slice 12A laptop-complete; native browser gate pending |
+| 13 | [Responses multimodal input](phase-13-responses-multimodal-input.md) | Accept typed text and bounded inline image parts through the shared Responses adapter | Phase 12 implementation | Slice 13A laptop-complete; targeted live gate pending |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1
-through Campaign 3 Phase 12, or use the topic filenames.
+through Campaign 3 Phase 13, or use the topic filenames.
 
 ## Campaign rules
 
@@ -150,5 +151,6 @@ through Campaign 3 Phase 12, or use the topic filenames.
 Items 5–10, their execution order, and pass criteria are tracked in
 [remaining-work-todo.md](remaining-work-todo.md). Items 5–6, legacy Phase
 2D.5, and Phases 9–11 are closed. The user reprioritized Phase 12's sidebar
-navigation slice ahead of Item 7; its implementation is ready for native
-browser acceptance.
+navigation slice ahead of Item 7. Its requested top-bar correction is ready
+for browser acceptance, and Item 7's first multimodal slice is ready for its
+targeted live gate.

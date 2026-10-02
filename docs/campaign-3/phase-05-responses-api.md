@@ -2,6 +2,8 @@
 
 **Status:** Complete. Slice 5A was live-settled on 2026-09-29 and Slice
 5B's typed streaming contract passed its targeted live gate on 2026-09-30.
+Later typed multimodal expansion is tracked in
+[Phase 13](phase-13-responses-multimodal-input.md).
 
 ## Goal
 
@@ -79,9 +81,11 @@ Slice 5A rejects these fields with HTTP 400 and
 - client-provided tools;
 - structured text output configuration.
 
-Multimodal content parts and unknown top-level fields fail request validation
-rather than disappearing silently. Later slices can add each capability with
-its own storage, event, or tool-call contract.
+Phase 13 Slice 13A now accepts typed `input_text` parts and bounded inline
+`input_image` data URLs. Remote image URLs, file-id images, `input_file`,
+and unknown top-level fields still fail request validation rather than
+disappearing silently. Later slices add each remaining capability with its own
+storage, event, fetch, or tool-call contract.
 
 ## Shared behavior
 

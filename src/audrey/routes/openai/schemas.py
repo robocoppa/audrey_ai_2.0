@@ -8,11 +8,13 @@ schemas without pulling in the streaming machinery.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 log = logging.getLogger(__name__)
 
@@ -298,13 +300,90 @@ class ChatCompletionRequest(BaseModel):
         return self
 
 
+_RESPONSES_IMAGE_DATA_URL_MAX_CHARS = 8 * 1024 * 1024
+_RESPONSES_IMAGE_MIME_TYPES = frozenset({
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+})
+
+
+class ResponseInputText(BaseModel):
+    """One Responses input_text part adapted to Chat Completions text."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["input_text"]
+    text: str = Field(min_length=1)
+
+    @field_validator("text")
+    @classmethod
+    def require_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("input_text must contain text")
+        return value
+
+
+class ResponseInputImage(BaseModel):
+    """One bounded inline Responses image input."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["input_image"]
+    image_url: str = Field(min_length=1, max_length=_RESPONSES_IMAGE_DATA_URL_MAX_CHARS)
+    detail: Literal["auto", "low", "high", "original"] = "auto"
+
+    @field_validator("image_url")
+    @classmethod
+    def require_inline_supported_image(cls, value: str) -> str:
+        header, separator, payload = value.partition(",")
+        mime = header.removeprefix("data:").removesuffix(";base64")
+        if (
+            not separator
+            or not header.startswith("data:")
+            or not header.endswith(";base64")
+            or mime not in _RESPONSES_IMAGE_MIME_TYPES
+            or not payload
+        ):
+            raise ValueError(
+                "input_image image_url must be an inline base64 JPEG, PNG, or WEBP data URL"
+            )
+        try:
+            decoded = base64.b64decode(payload, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("input_image image_url contains invalid base64 data") from exc
+        if not decoded:
+            raise ValueError("input_image image_url must contain image bytes")
+        return value
+
+
+ResponseInputContentPart = Annotated[
+    ResponseInputText | ResponseInputImage,
+    Field(discriminator="type"),
+]
+
+
 class ResponseInputMessage(BaseModel):
-    """Text-only input item accepted by Audrey's first Responses slice."""
+    """Easy-input message accepted by Audrey's Responses adapter."""
 
     model_config = ConfigDict(extra="forbid")
 
     role: Literal["system", "developer", "user", "assistant"]
-    content: str = Field(min_length=1)
+    content: str | list[ResponseInputContentPart]
+
+    @model_validator(mode="after")
+    def validate_content(self) -> ResponseInputMessage:
+        if isinstance(self.content, str):
+            if not self.content.strip():
+                raise ValueError("message content must contain text")
+            return self
+        if not self.content:
+            raise ValueError("message content must contain at least one part")
+        if self.role != "user" and any(
+            isinstance(part, ResponseInputImage) for part in self.content
+        ):
+            raise ValueError("input_image parts are supported only on user messages")
+        return self
 
 
 class ResponseCreateRequest(BaseModel):

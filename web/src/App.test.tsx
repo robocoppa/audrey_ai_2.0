@@ -126,6 +126,7 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "No models available" }, { timeout: 5000 })).toBeVisible();
     expect(await screen.findByText("Status unavailable")).toBeVisible();
     expect(screen.getByRole("button", { name: "Admin Panel" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "My Files" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "New conversation" })).toBeDisabled();
   });
 
@@ -184,6 +185,7 @@ describe("App", () => {
     );
     expect(identity).toHaveTextContent("Alice");
     expect(identity).not.toHaveTextContent("Example");
+    expect(screen.getByRole("button", { name: "My Files" })).toBeVisible();
     expect(screen.queryByText("Authenticated")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Log out" })).toHaveAttribute(
       "href",

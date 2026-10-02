@@ -2,7 +2,9 @@
 
 **Status:** Items 1–6 were closed on 2026-10-01. The user reprioritized
 [Phase 12](phase-12-sidebar-navigation.md) ahead of Items 7–10. Slice 12A is
-laptop-complete and awaiting native browser acceptance; Item 7 follows it.
+laptop-complete with its My Files correction and awaits browser acceptance.
+Item 7 has started with laptop-complete
+[Phase 13 Slice 13A](phase-13-responses-multimodal-input.md).
 
 ## Closed prerequisites
 
@@ -306,7 +308,8 @@ do not yet justify diarization or broader media analysis.
 - [x] Replace the top Files and `+ New` pair with one full-width **New
   conversation** button.
 - [x] Remove the Workspace label and username from the sidebar.
-- [x] Add a bottom-left utility section and move Files into it.
+- [x] Move My Files into a distinct top-bar group separated from account
+  actions.
 - [x] Preserve the existing Files dialog and conversation history behavior.
 - [ ] Pass desktop, narrow-screen, keyboard, empty-draft, and Files-launch
   browser checks.
@@ -315,8 +318,11 @@ Detailed scope: [phase-12-sidebar-navigation.md](phase-12-sidebar-navigation.md)
 
 ## 7. Expand Responses API compatibility
 
-- [ ] Split each capability into its own storage/protocol slice.
-- [ ] Add multimodal content parts.
+- [x] Start the expansion as separate per-capability protocol slices.
+- [x] Add typed `input_text` plus bounded inline `input_image` content parts
+  for completed and streaming requests.
+- [ ] Add remote/file-id image resolution and `input_file` only with explicit
+  SSRF and owner-scoped storage contracts.
 - [ ] Add structured text output configuration.
 - [ ] Add client-provided tools with explicit policy boundaries.
 - [ ] Add stored responses and `previous_response_id`/conversation chaining.

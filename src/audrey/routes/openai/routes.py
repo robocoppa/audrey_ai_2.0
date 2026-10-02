@@ -52,6 +52,35 @@ VIRTUAL_MODELS = (
 )
 
 
+def _response_input_messages(payload: ResponseCreateRequest) -> list[dict[str, Any]]:
+    """Adapt validated Responses easy-input messages to Audrey chat messages."""
+
+    if isinstance(payload.input, str):
+        return [{"role": "user", "content": payload.input}]
+    messages: list[dict[str, Any]] = []
+    for item in payload.input:
+        if isinstance(item.content, str):
+            content: str | list[dict[str, Any]] = item.content
+        else:
+            content = []
+            for part in item.content:
+                raw = part.model_dump()
+                if raw["type"] == "input_text":
+                    content.append({"type": "text", "text": raw["text"]})
+                elif raw["type"] == "input_image":
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": raw["image_url"],
+                            "detail": raw["detail"],
+                        },
+                    })
+                else:
+                    raise ValueError(f"unsupported Responses input part: {raw['type']}")
+        messages.append({"role": item.role, "content": content})
+    return messages
+
+
 @router.get("/models")
 async def list_models(request: Request) -> dict[str, Any]:
     """List Audrey's virtual models plus any configured passthrough variants.
@@ -303,11 +332,7 @@ async def create_response(
             },
         )
 
-    input_messages = (
-        [{"role": "user", "content": payload.input}]
-        if isinstance(payload.input, str)
-        else [item.model_dump() for item in payload.input]
-    )
+    input_messages = _response_input_messages(payload)
     messages: list[dict[str, Any]] = []
     if payload.instructions:
         messages.append({"role": "developer", "content": payload.instructions})

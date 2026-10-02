@@ -66,7 +66,6 @@ import {
   type UserPreferences,
 } from "./api";
 import { latestActionFetch } from "./agentTransport";
-import { FileManager } from "./FileManager";
 
 const MODEL_PORTRAITS: Readonly<Record<string, string>> = {
   auto: autoPortrait,
@@ -161,7 +160,6 @@ export function ChatWorkspace({
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState("");
-  const [managingFiles, setManagingFiles] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const listKeyRef = useRef("");
@@ -478,19 +476,6 @@ export function ChatWorkspace({
           </button>
         ) : null}
         {error ? <p className="sidebar-error" role="alert">{error}</p> : null}
-        <section className="sidebar-utilities" aria-label="Sidebar tools">
-          <button
-            className="manage-files"
-            type="button"
-            onClick={() => setManagingFiles(true)}
-          >
-            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M3 7.5h7l2 2h9v8.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7.5Z" />
-              <path d="M3 7.5V6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1.5" />
-            </svg>
-            <span>Files</span>
-          </button>
-        </section>
       </aside>
 
       <section className="chat-column" aria-label="Audrey conversation">
@@ -520,7 +505,6 @@ export function ChatWorkspace({
           <AudreyLoader label="Opening conversation" showPortrait={false} />
         ) : null}
       </section>
-      {managingFiles ? <FileManager onClose={() => setManagingFiles(false)} /> : null}
     </div>
   );
 }

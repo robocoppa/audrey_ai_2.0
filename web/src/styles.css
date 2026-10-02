@@ -147,36 +147,6 @@ button:disabled {
   box-shadow: var(--shadow-sm);
 }
 
-.manage-files {
-  display: flex;
-  width: 100%;
-  min-height: 2.55rem;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 0.55rem;
-  padding: 0.58rem 0.72rem;
-  border: 1px solid var(--border);
-  border-radius: 0.7rem;
-  background: var(--input-surface);
-  color: var(--accent);
-  font-size: 0.75rem;
-  font-weight: 700;
-}
-
-.sidebar-utilities {
-  flex: none;
-  margin: 0.75rem -0.8rem -1.1rem;
-  padding: 0.75rem 1.2rem 1rem;
-  border-top: 1px solid var(--border);
-  background: rgb(6 15 29 / 52%);
-}
-
-.manage-files:hover {
-  border-color: var(--border-strong);
-  background: var(--surface-active);
-  box-shadow: var(--focus-glow);
-}
-
 .new-conversation:hover {
   filter: brightness(1.12);
   box-shadow: 0 7px 22px rgb(52 153 250 / 24%);
@@ -2120,7 +2090,7 @@ a:focus-visible {
 .session-controls {
   display: flex;
   align-items: center;
-  gap: 0.85rem;
+  gap: 0.65rem;
 }
 
 .topbar > .session-controls {
@@ -2130,6 +2100,44 @@ a:focus-visible {
 
 .session-controls-offline {
   gap: 0.45rem;
+}
+
+.topbar-files-action {
+  display: flex;
+  align-items: center;
+  margin-right: 0.35rem;
+  padding-right: 1.2rem;
+  border-right: 1px solid var(--border-strong);
+}
+
+.my-files-button {
+  display: inline-flex;
+  min-height: 2.35rem;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.48rem 0.85rem;
+  border: 1px solid rgb(99 181 255 / 42%);
+  border-radius: 0.75rem;
+  background: rgb(52 153 250 / 14%);
+  color: var(--text);
+  font-size: 0.76rem;
+  font-weight: 750;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+}
+
+.my-files-button:hover,
+.my-files-button:focus-visible {
+  outline: none;
+  border-color: var(--border-strong);
+  background: rgb(52 153 250 / 22%);
+  color: #fff;
+  box-shadow: var(--focus-glow);
+}
+
+.account-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
 }
 
 .capability-badge {
@@ -4472,17 +4480,37 @@ a:focus-visible {
     padding-right: 0;
   }
 
+  .session-controls {
+    gap: 0.35rem;
+  }
+
+  .topbar-files-action {
+    margin-right: 0.15rem;
+    padding-right: 0.55rem;
+  }
+
+  .my-files-button {
+    min-height: 2.1rem;
+    padding: 0.38rem 0.55rem;
+    font-size: 0.64rem;
+  }
+
+  .account-actions {
+    gap: 0.35rem;
+  }
+
   .session-badge,
   .session-retry-button,
   .session-name,
   .admin-button,
-  .logout-button {
+  .logout-button,
+  .my-files-button {
     font-size: 0.64rem;
   }
 
   .workspace {
     grid-template-columns: 1fr;
-    grid-template-rows: clamp(14rem, 32vh, 18rem) minmax(0, 1fr);
+    grid-template-rows: clamp(10rem, 26vh, 14rem) minmax(0, 1fr);
   }
 
   .sidebar {
@@ -4491,11 +4519,6 @@ a:focus-visible {
     padding-bottom: 0.65rem;
     border-right: 0;
     border-bottom: 1px solid var(--border);
-  }
-
-  .sidebar-utilities {
-    margin-bottom: -0.65rem;
-    padding-bottom: 0.65rem;
   }
 
   .conversation-list {
@@ -4561,6 +4584,19 @@ a:focus-visible {
     max-width: 30vw;
     padding-inline: 0.3rem 1rem;
     font-size: 0.72rem;
+  }
+}
+
+@media (max-width: 400px) {
+  .topbar {
+    flex-wrap: wrap;
+    row-gap: 0.45rem;
+  }
+
+  .topbar > .session-controls {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 }
 

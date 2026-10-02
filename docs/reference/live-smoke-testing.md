@@ -298,17 +298,18 @@ bash tests/smoke/smoke-native-onbox.sh smoke_native_ui.py
 
 Success is exit code zero, `"status": "passed"`, and no `cleanup_error`.
 
-## Run the 5A Responses API smoke from the laptop
+## Run the 5A/5B Responses API smoke from the laptop
 
-**Result:** Passed over LAN/WARP on 2026-09-29. Do not repeat unless a later
-change touches the Responses adapter or the shared authenticated generation
-path.
+**Result:** Completed and streaming contracts passed over LAN/WARP by
+2026-09-30. Do not repeat unless a later change touches their adapter, event
+renderer, or shared authenticated generation path.
 
-This targeted backend proof makes one short `audrey_fast` model call through
-`POST /v1/responses`, validates the completed typed output and token usage,
-then proves `stream: true` fails explicitly before generation. The model
-prompt uses Audrey's compatibility utility form, so the call is excluded from
-chat history. It uploads and deletes nothing.
+This targeted backend proof makes one short streamed `audrey_fast` model call
+through `POST /v1/responses`, validates typed events, stable ids, text deltas,
+terminal output, and token usage, then proves `background: true` fails
+explicitly before generation. The model prompt uses Audrey's compatibility
+utility form, so the call is excluded from chat history. It uploads and deletes
+nothing.
 
 The laptop's `.env.test.local` already contains the required
 `AUDREY_EVAL_API_KEY`. Use the working LAN/WARP route:
@@ -324,9 +325,34 @@ cd /home/bart/Documents/github/audrey/audrey_ai_2.0
 ```
 
 Success is exit code zero and JSON ending in `"status": "passed"`. The
-`completed` block must report HTTP 200, model `audrey_fast`, output
-type `output_text`, and `"sentinel": true`. The `unsupported`
-block must report HTTP 400 and `responses_feature_unsupported`.
+`streamed` block must report HTTP 200, a `resp_` id, a `msg_` id,
+`response.completed`, and `"sentinel": true`. The `unsupported` block
+must report HTTP 400 and `responses_feature_unsupported`.
+
+## Run the 13A Responses multimodal smoke from the laptop
+
+This targeted proof sends an in-memory red PNG as an inline `input_image`
+beside an `input_text` part. It requires a completed typed response and then
+proves a remote image URL is rejected by validation before generation. It
+uploads, stores, and deletes nothing.
+
+After rebuilding Audrey, use the working LAN/WARP route and the existing
+`AUDREY_EVAL_API_KEY`:
+
+```bash
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
+(
+  set -a
+  source .env.test.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_responses_multimodal.py
+)
+```
+
+Success is exit code zero and JSON ending in `"status": "passed"`. The
+`multimodal` block must report HTTP 200, a `resp_` id, output type
+`output_text`, and `"sentinel": true`. The `unsupported` block must
+report remote-image HTTP 422 and `"validation_error": true`.
 
 ## Phase 7 PDF acceptance and diagnostic
 

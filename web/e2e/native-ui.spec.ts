@@ -513,27 +513,24 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   await expect(page.getByRole("heading", { name: "Browser smoke" })).toBeVisible();
   const sidebar = page.getByRole("complementary", { name: "Conversations" });
   const newConversation = sidebar.getByRole("button", { name: "New conversation" });
-  const filesButton = sidebar.getByRole("button", { name: "Files", exact: true });
+  const filesButton = page.getByRole("button", { name: "My Files", exact: true });
   await expect(newConversation).toBeVisible();
   await expect(sidebar.getByText("Workspace", { exact: true })).toHaveCount(0);
   await expect(sidebar.getByText("Alice", { exact: true })).toHaveCount(0);
   await expect(filesButton).toBeVisible();
-  await expect(sidebar.locator(".sidebar-utilities")).toContainText("Files");
+  await expect(sidebar.getByRole("button", { name: "My Files", exact: true })).toHaveCount(0);
   const newConversationBox = await newConversation.boundingBox();
   const primaryActionBox = await sidebar.locator(".sidebar-primary-action").boundingBox();
   const filesBox = await filesButton.boundingBox();
-  const utilitiesBox = await sidebar.locator(".sidebar-utilities").boundingBox();
+  const accountBox = await page.getByLabel("Signed in user").boundingBox();
   expect(newConversationBox).not.toBeNull();
   expect(primaryActionBox).not.toBeNull();
   expect(filesBox).not.toBeNull();
-  expect(utilitiesBox).not.toBeNull();
+  expect(accountBox).not.toBeNull();
   expect((newConversationBox?.width ?? 0) / (primaryActionBox?.width ?? 1)).toBeGreaterThan(0.9);
-  expect((utilitiesBox?.y ?? 0)).toBeGreaterThan((newConversationBox?.y ?? 0));
-  expect((filesBox?.width ?? 0) / (utilitiesBox?.width ?? 1)).toBeGreaterThan(0.8);
-  expect(Math.abs(
-    (utilitiesBox?.y ?? 0) + (utilitiesBox?.height ?? 0)
-      - ((sidebarBox?.y ?? 0) + (sidebarBox?.height ?? 0)),
-  )).toBeLessThan(2);
+  expect((accountBox?.x ?? 0) - ((filesBox?.x ?? 0) + (filesBox?.width ?? 0))).toBeGreaterThan(15);
+  await expect(page.getByRole("group", { name: "File actions" }))
+    .toHaveCSS("border-right-style", "solid");
   await expect(page.locator(".brand-product")).toHaveText("Ask Audrey");
   await expect.poll(
     () => page.locator(".brand-product").evaluate(
@@ -714,6 +711,12 @@ test("keeps saved answer images and citations inside a mobile message", async ({
   await mockAudreyApi(page, undefined, messages);
 
   await page.goto("./");
+  const mobileFiles = page.getByRole("button", { name: "My Files", exact: true });
+  await expect(mobileFiles).toBeVisible();
+  const mobileFilesBox = await mobileFiles.boundingBox();
+  expect(mobileFilesBox).not.toBeNull();
+  expect((mobileFilesBox?.x ?? -1)).toBeGreaterThanOrEqual(0);
+  expect((mobileFilesBox?.x ?? 0) + (mobileFilesBox?.width ?? 0)).toBeLessThanOrEqual(390);
   const image = page.getByRole("img", { name: "Wide diagram" });
   await expect(image).toBeVisible();
   await expect.poll(() => image.evaluate((element) => (element as HTMLImageElement).naturalWidth))
@@ -2133,7 +2136,7 @@ test("manages owner-bound files without a browser bearer token", async ({ page }
   });
 
   await page.goto("./");
-  await page.getByRole("button", { name: "Files", exact: true }).click();
+  await page.getByRole("button", { name: "My Files", exact: true }).click();
 
   const dialog = page.getByRole("dialog", { name: "Your files" });
   await expect(dialog).toBeVisible();
@@ -2198,7 +2201,7 @@ test("browses files by name, source link, kind, status, and sort order", async (
   });
 
   await page.goto("./");
-  await page.getByRole("button", { name: "Files", exact: true }).click();
+  await page.getByRole("button", { name: "My Files", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Your files" });
   const names = dialog.locator(".file-list .file-details strong");
   const search = dialog.getByRole("searchbox", { name: "Search files" });
@@ -2304,7 +2307,7 @@ test("uploads dropped and picked batches while isolating per-file failures", asy
   });
 
   await page.goto("./");
-  await page.getByRole("button", { name: "Files", exact: true }).click();
+  await page.getByRole("button", { name: "My Files", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Your files" });
   await dialog.locator(".file-add-panel > summary").click();
   await page.evaluate(() => {
@@ -2394,7 +2397,7 @@ test("inspects owner documents and images inside Files", async ({ page }) => {
   });
 
   await page.goto("./");
-  await page.getByRole("button", { name: "Files", exact: true }).click();
+  await page.getByRole("button", { name: "My Files", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Your files" });
   await dialog.getByRole("button", { name: "View document text for notes.txt" }).click();
   await expect(dialog.locator(".file-artifact-text")).toHaveText("First ");
@@ -2472,7 +2475,7 @@ test("reads paged video text inside Files without a browser bearer token", async
   });
 
   await page.goto("./");
-  await page.getByRole("button", { name: "Files", exact: true }).click();
+  await page.getByRole("button", { name: "My Files", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Your files" });
   await dialog.getByRole("button", { name: "View video text for walkthrough.mp4" }).click();
   await expect(dialog.locator(".file-artifact-text")).toHaveText("Full stored summary.");
@@ -2565,7 +2568,7 @@ test("queues a video link through native files and follows its summary", async (
   });
 
   await page.goto("./");
-  await page.getByRole("button", { name: "Files", exact: true }).click();
+  await page.getByRole("button", { name: "My Files", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Your files" });
   await dialog.locator(".file-add-panel > summary").click();
   await dialog.getByLabel("Paste a video link").fill("  " + sourceUrl + "  ");

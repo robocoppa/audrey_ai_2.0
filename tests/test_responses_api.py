@@ -145,6 +145,91 @@ async def test_text_message_history_keeps_roles_and_order(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_typed_text_and_inline_image_parts_use_shared_vision_shape(monkeypatch):
+    captured = {}
+
+    async def generate(payload, _request, _me):
+        captured["messages"] = [
+            message.model_dump(exclude_none=True) for message in payload.messages
+        ]
+        return _chat_result(content="A red square.")
+
+    monkeypatch.setattr(openai_routes, "chat_completions", generate)
+    image_url = "data:image/png;base64,AAAA"
+    payload = ResponseCreateRequest(
+        model="audrey_fast",
+        input=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "What is in this image?"},
+                    {
+                        "type": "input_image",
+                        "image_url": image_url,
+                        "detail": "high",
+                    },
+                ],
+            }
+        ],
+    )
+
+    result = await create_response(payload, _request(), _user())
+
+    assert captured["messages"] == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What is in this image?"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": image_url, "detail": "high"},
+                },
+            ],
+        }
+    ]
+    assert result["output_text"] == "A red square."
+
+
+@pytest.mark.asyncio
+async def test_typed_text_parts_keep_message_roles_and_order(monkeypatch):
+    captured = {}
+
+    async def generate(payload, _request, _me):
+        captured["messages"] = [
+            message.model_dump(exclude_none=True) for message in payload.messages
+        ]
+        return _chat_result(content="Concise.")
+
+    monkeypatch.setattr(openai_routes, "chat_completions", generate)
+    payload = ResponseCreateRequest(
+        model="audrey_fast",
+        input=[
+            {
+                "role": "developer",
+                "content": [{"type": "input_text", "text": "Be concise."}],
+            },
+            {
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Explain this."}],
+            },
+        ],
+    )
+
+    await create_response(payload, _request(), _user())
+
+    assert captured["messages"] == [
+        {
+            "role": "developer",
+            "content": [{"type": "text", "text": "Be concise."}],
+        },
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "Explain this."}],
+        },
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -184,17 +269,43 @@ def test_empty_input_is_rejected(input_value):
         ResponseCreateRequest(model="audrey_fast", input=input_value)
 
 
-def test_multimodal_and_unknown_fields_are_not_silently_dropped():
+@pytest.mark.parametrize(
+    "content",
+    [
+        [{"type": "input_image", "image_url": "https://example.org/image.png"}],
+        [{"type": "input_image", "image_url": "data:image/gif;base64,AAAA"}],
+        [{"type": "input_image", "image_url": "data:image/png;base64,%%%"}],
+        [{"type": "input_image", "file_id": "file_example"}],
+        [{"type": "output_text", "text": "Wrong direction."}],
+    ],
+)
+def test_unsupported_response_content_parts_are_not_silently_dropped(content):
     with pytest.raises(ValidationError):
+        ResponseCreateRequest(
+            model="audrey_fast",
+            input=[{"role": "user", "content": content}],
+        )
+
+
+def test_image_parts_are_rejected_outside_user_messages():
+    with pytest.raises(ValidationError, match="only on user messages"):
         ResponseCreateRequest(
             model="audrey_fast",
             input=[
                 {
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": "Hello."}],
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "input_image",
+                            "image_url": "data:image/png;base64,AAAA",
+                        }
+                    ],
                 }
             ],
         )
+
+
+def test_unknown_response_fields_are_not_silently_dropped():
     with pytest.raises(ValidationError):
         ResponseCreateRequest(
             model="audrey_fast",
@@ -333,9 +444,18 @@ async def test_streaming_response_uses_shared_generation_with_responses_session(
         return StreamingResponse(body(), media_type="text/event-stream")
 
     monkeypatch.setattr(openai_routes, "_create_chat_completion", generate)
+    image_url = "data:image/webp;base64,AAAA"
     payload = ResponseCreateRequest(
         model="audrey_fast",
-        input="Hello.",
+        input=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "Hello."},
+                    {"type": "input_image", "image_url": image_url},
+                ],
+            }
+        ],
         instructions="Reply briefly.",
         stream=True,
     )
@@ -345,6 +465,16 @@ async def test_streaming_response_uses_shared_generation_with_responses_session(
     assert isinstance(response, StreamingResponse)
     assert response.media_type == "text/event-stream"
     assert captured["payload"].stream is True
+    assert captured["payload"].messages[-1].model_dump(exclude_none=True) == {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Hello."},
+            {
+                "type": "image_url",
+                "image_url": {"url": image_url, "detail": "auto"},
+            },
+        ],
+    }
     assert captured["request"] is not None
     assert captured["me"].email == "alice@example.com"
     assert isinstance(captured["session"], ResponsesStreamSession)

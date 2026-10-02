@@ -4,6 +4,7 @@ import { AudreyLoader } from "./AudreyLoader";
 import { AdminPanel } from "./AdminPanel";
 import builtryteWordmark from "./assets/brand/builtryte-wordmark.png";
 import { AccountSettings } from "./AccountSettings";
+import { FileManager } from "./FileManager";
 import {
   ApiError,
   getCapabilities,
@@ -75,6 +76,7 @@ export function App() {
   const [healthUnavailable, setHealthUnavailable] = useState(false);
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const [sessionRevision, setSessionRevision] = useState(0);
+  const [filesOpen, setFilesOpen] = useState(false);
   const [showAccessHandoff, setShowAccessHandoff] = useState(hasCloudflareAccessMessage);
 
   useEffect(() => {
@@ -217,6 +219,7 @@ export function App() {
           preferences={session.preferences}
           capabilityHealth={capabilityHealth}
           healthUnavailable={healthUnavailable}
+          onOpenFiles={() => setFilesOpen(true)}
           onUserChange={(user) => {
             setSession((current) =>
               current.status === "ready" ? { ...current, user } : current,
@@ -267,6 +270,7 @@ export function App() {
           />
         </Suspense>
       </main>
+      {filesOpen ? <FileManager onClose={() => setFilesOpen(false)} /> : null}
     </div>
   );
 }
@@ -354,6 +358,7 @@ function ReadySessionControls({
   preferences,
   capabilityHealth,
   healthUnavailable,
+  onOpenFiles,
   onUserChange,
   onPreferencesChange,
   onDataPurgeAttempted,
@@ -363,6 +368,7 @@ function ReadySessionControls({
   preferences: UserPreferences;
   capabilityHealth: CapabilityHealth | null;
   healthUnavailable: boolean;
+  onOpenFiles: () => void;
   onUserChange: (user: CurrentUser) => void;
   onPreferencesChange: (preferences: UserPreferences) => void;
   onDataPurgeAttempted: () => void;
@@ -375,7 +381,7 @@ function ReadySessionControls({
     : undefined;
 
   return (
-    <div className="session-controls" aria-label="Signed in user">
+    <div className="session-controls" role="group" aria-label="Session controls">
       {capabilityHealth?.status === "unavailable" ? (
         <span className="capability-badge capability-badge-unavailable" role="status" title={healthDetails}>
           Models offline
@@ -389,27 +395,42 @@ function ReadySessionControls({
           Status unavailable
         </span>
       ) : null}
-      <button
-        className="session-name"
-        type="button"
-        aria-label="Open account settings"
-        title={`${user.display_name || user.email} · Account settings`}
-        onClick={() => setSettingsOpen(true)}
-      >
-        {firstName(user)}
-      </button>
-      {user.groups.includes("admins") ? (
+      <div className="topbar-files-action" role="group" aria-label="File actions">
         <button
-          className="admin-button"
+          className="my-files-button"
           type="button"
-          onClick={() => setAdminOpen(true)}
+          onClick={onOpenFiles}
         >
-          Admin Panel
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 7.5h7l2 2h9v8.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7.5Z" />
+            <path d="M3 7.5V6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1.5" />
+          </svg>
+          <span>My Files</span>
         </button>
-      ) : null}
-      {user.auth_provider === "cloudflare_access" ? (
-        <a className="logout-button" href="/cdn-cgi/access/logout">Log out</a>
-      ) : null}
+      </div>
+      <div className="account-actions" role="group" aria-label="Signed in user">
+        <button
+          className="session-name"
+          type="button"
+          aria-label="Open account settings"
+          title={`${user.display_name || user.email} · Account settings`}
+          onClick={() => setSettingsOpen(true)}
+        >
+          {firstName(user)}
+        </button>
+        {user.groups.includes("admins") ? (
+          <button
+            className="admin-button"
+            type="button"
+            onClick={() => setAdminOpen(true)}
+          >
+            Admin Panel
+          </button>
+        ) : null}
+        {user.auth_provider === "cloudflare_access" ? (
+          <a className="logout-button" href="/cdn-cgi/access/logout">Log out</a>
+        ) : null}
+      </div>
       {settingsOpen ? (
         <AccountSettings
           user={user}
