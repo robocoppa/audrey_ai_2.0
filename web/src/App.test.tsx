@@ -126,7 +126,7 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "No models available" }, { timeout: 5000 })).toBeVisible();
     expect(await screen.findByText("Status unavailable")).toBeVisible();
     expect(screen.getByRole("button", { name: "Admin Panel" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "+ New" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "New conversation" })).toBeDisabled();
   });
 
   it("loads the current same-origin Audrey identity", async () => {

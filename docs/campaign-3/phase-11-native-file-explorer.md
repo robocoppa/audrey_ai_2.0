@@ -1,7 +1,8 @@
 # Campaign 3 Phase 11 - native file explorer
 
-**Status:** In progress. Slice 11A is implemented and awaits its frontend build
-and native browser gate.
+**Status:** Complete by user direction on 2026-10-01. The compact file
+explorers passed visual acceptance; the Sources dismissal correction was added
+as the closeout change.
 
 ## Goal
 
@@ -57,9 +58,9 @@ move operations, and nested paths require a later storage/API slice.
 - Single-request uploads now use browser upload byte events. Chat reports
   Preparing, a measured percentage, then Finishing while waiting for Audrey's
   response. Chunked uploads retain their part-based progress.
-- Models and Tool calls use controlled expandable popovers. Opening either one
-  closes its peer; an outside click or Escape closes the open popover. This
-  applies to both live activity and saved answers after refresh.
+- Sources, Models, and Tool calls use controlled expandable popovers. Opening
+  any one closes the others; an outside click or Escape closes the open
+  popover. This applies to both live activity and saved answers after refresh.
 
 ## Automated contracts
 
@@ -70,8 +71,8 @@ move operations, and nested paths require a later storage/API slice.
   filtering, sorting, artifact viewing, and mobile tests are retained.
 - Browser contracts now use the explorer folders, collapsed Add files panel,
   compact row metadata, and Open action.
-- Live and saved Models/Tool calls contracts require mutual exclusion and
-  outside-click dismissal.
+- Live and saved Sources, Models, and Tool calls contracts require mutual
+  exclusion and outside-click dismissal.
 
 The laptop has the installed frontend dependency tree but no Node runtime, so
 the TypeScript, Vitest, build, and Playwright commands must run in the normal
@@ -101,5 +102,8 @@ there is no changed-file Ruff target.
 
 ## Completion gate
 
-Slice 11A closes when the frontend build and automated UI suites pass and the
-seven browser checks above pass on the deployed native UI.
+**Closed, 2026-10-01.** The user accepted the compact paperclip picker and Files
+explorer in the deployed native UI and directed the slice closed. The closeout
+correction moves Sources into the same mutually exclusive, outside-dismissible
+popover group as Models and Tool calls. The laptop still lacks a Node runtime,
+so no unreported frontend-suite result is implied by this closeout.

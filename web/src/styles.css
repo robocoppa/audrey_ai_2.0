@@ -94,22 +94,6 @@ a {
   background: rgb(9 20 37 / 88%);
 }
 
-.sidebar-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.45rem 0.4rem 1rem;
-}
-
-.sidebar-heading div,
-.sidebar-heading span,
-.sidebar-heading strong {
-  display: block;
-  min-width: 0;
-}
-
-.sidebar-heading span,
 .thread-header > div > span,
 .thread-empty > span {
   color: var(--muted);
@@ -119,19 +103,9 @@ a {
   text-transform: uppercase;
 }
 
-.sidebar-heading strong {
-  overflow: hidden;
-  margin-top: 0.2rem;
-  font-size: 0.82rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-heading .sidebar-heading-actions {
-  display: flex;
+.sidebar-primary-action {
   flex: none;
-  align-items: center;
-  gap: 0.35rem;
+  padding: 0.15rem 0.4rem 0.85rem;
 }
 
 button,
@@ -157,7 +131,13 @@ button:disabled {
 }
 
 .new-conversation {
-  padding: 0.5rem 0.7rem;
+  display: flex;
+  width: 100%;
+  min-height: 2.65rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.65rem 0.85rem;
   border: 0;
   border-radius: 0.75rem;
   background: var(--brand-gradient);
@@ -168,13 +148,27 @@ button:disabled {
 }
 
 .manage-files {
-  padding: 0.46rem 0.62rem;
+  display: flex;
+  width: 100%;
+  min-height: 2.55rem;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.55rem;
+  padding: 0.58rem 0.72rem;
   border: 1px solid var(--border);
   border-radius: 0.7rem;
   background: var(--input-surface);
   color: var(--accent);
   font-size: 0.75rem;
   font-weight: 700;
+}
+
+.sidebar-utilities {
+  flex: none;
+  margin: 0.75rem -0.8rem -1.1rem;
+  padding: 0.75rem 1.2rem 1rem;
+  border-top: 1px solid var(--border);
+  background: rgb(6 15 29 / 52%);
 }
 
 .manage-files:hover {
@@ -4488,14 +4482,20 @@ a:focus-visible {
 
   .workspace {
     grid-template-columns: 1fr;
-    grid-template-rows: clamp(10rem, 26vh, 14rem) minmax(0, 1fr);
+    grid-template-rows: clamp(14rem, 32vh, 18rem) minmax(0, 1fr);
   }
 
   .sidebar {
     min-height: auto;
     max-height: none;
+    padding-bottom: 0.65rem;
     border-right: 0;
     border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar-utilities {
+    margin-bottom: -0.65rem;
+    padding-bottom: 0.65rem;
   }
 
   .conversation-list {

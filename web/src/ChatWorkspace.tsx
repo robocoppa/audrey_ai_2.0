@@ -364,28 +364,18 @@ export function ChatWorkspace({
   return (
     <div className="workspace">
       <aside className="sidebar" aria-label="Conversations">
-        <div className="sidebar-heading">
-          <div>
-            <span>Workspace</span>
-            <strong>{user.display_name || user.email}</strong>
-          </div>
-          <div className="sidebar-heading-actions">
-            <button
-              className="manage-files"
-              type="button"
-              onClick={() => setManagingFiles(true)}
-            >
-              Files
-            </button>
-            <button
-              className="new-conversation"
-              type="button"
-              onClick={startConversation}
-              disabled={creating || loading || catalogUnavailable}
-            >
-              {creating ? "Creating…" : "+ New"}
-            </button>
-          </div>
+        <div className="sidebar-primary-action">
+          <button
+            className="new-conversation"
+            type="button"
+            onClick={startConversation}
+            disabled={creating || loading || catalogUnavailable}
+          >
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            <span>{creating ? "Creating…" : "New conversation"}</span>
+          </button>
         </div>
 
         <label className="conversation-search">
@@ -488,6 +478,19 @@ export function ChatWorkspace({
           </button>
         ) : null}
         {error ? <p className="sidebar-error" role="alert">{error}</p> : null}
+        <section className="sidebar-utilities" aria-label="Sidebar tools">
+          <button
+            className="manage-files"
+            type="button"
+            onClick={() => setManagingFiles(true)}
+          >
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 7.5h7l2 2h9v8.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7.5Z" />
+              <path d="M3 7.5V6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1.5" />
+            </svg>
+            <span>Files</span>
+          </button>
+        </section>
       </aside>
 
       <section className="chat-column" aria-label="Audrey conversation">
@@ -1765,8 +1768,10 @@ function RunActivityStatus({ activity, error }: { activity: RunActivity; error: 
       <strong>{activity.label}</strong>
       {error || activity.detail ? <span>{error || activity.detail}</span> : null}
       {sourceCount > 0 ? (
-        <details className="run-sources">
-          <summary>{sourceLabel}{latestSource ? " · " + latestSource : ""}</summary>
+        <ExclusiveRunDetails
+          className="run-sources"
+          label={sourceLabel + (latestSource ? " · " + latestSource : "")}
+        >
           <ul>
             {activity.sources.map(({ id, title, url }, index) => (
               <li key={id}>
@@ -1778,7 +1783,7 @@ function RunActivityStatus({ activity, error }: { activity: RunActivity; error: 
               </li>
             ))}
           </ul>
-        </details>
+        </ExclusiveRunDetails>
       ) : null}
       {activity.models.length > 0 ? (
         <ModelSummary models={activity.models} className="run-models" />
@@ -2013,8 +2018,10 @@ function AssistantMessage() {
       {sources.length > 0 || models.length > 0 || tools.length > 0 ? (
         <div className="saved-run-details">
           {sources.length > 0 ? (
-            <details className="saved-sources">
-              <summary>{sources.length === 1 ? "1 source found" : `${sources.length} sources found`}</summary>
+            <ExclusiveRunDetails
+              className="saved-sources"
+              label={sources.length === 1 ? "1 source found" : `${sources.length} sources found`}
+            >
               <p>Observed during this run; the answer may cite a different set.</p>
               <ul>
                 {sources.map(({ id, title, url }) => {
@@ -2024,7 +2031,7 @@ function AssistantMessage() {
                   ) : (title || "Source")}</li>;
                 })}
               </ul>
-            </details>
+            </ExclusiveRunDetails>
           ) : null}
           {models.length > 0 ? (
             <ModelSummary models={models} className="saved-models" />

@@ -1,9 +1,9 @@
 # Campaign 3 — correctness foundations, Audrey UI, and reusable skills
 
-**Status:** Campaign 3 Phases 1–10 are complete. Phase 2's native product
-cutover and final 2D.5 administration/recovery proof are live-settled. Phase 11
-has started; Slice 11A replaces large file cards with compact native explorers,
-adds measured chat-upload progress, and tightens Models/Tool calls dismissal.
+**Status:** Campaign 3 Phases 1–11 are complete. Phase 12 Slice 12A is
+laptop-complete and awaiting native browser acceptance: the simplified sidebar
+has one full-width New conversation action at the top and Files in a bottom
+utility section.
 
 The Milestone 2E parity build is laptop-complete across native memory
 settings, owner-bound file and video upload and inspection, source and answer
@@ -121,10 +121,11 @@ and finally adds the first general skills layer on that owned surface.
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Transcribe, summarize, search, inspect, and attach spoken audio as a first-class file kind | Phase 07 completion | Complete (8A and 8B live-passed) |
 | 09 | [Broader spoken audio](phase-09-broader-audio.md) | Admit measured OGG, Opus, and raw AAC containers before separately scoped speaker or media analysis | Phase 08 and Phase 2D.5 completion | Complete (9A live-passed) |
 | 10 | [Ordinary-answer provenance](phase-10-ordinary-answer-provenance.md) | Persist deterministic public URL and private file evidence on ordinary tool-backed answers | Phase 09 completion | Complete (10A live-passed) |
-| 11 | [Native file explorer](phase-11-native-file-explorer.md) | Browse, attach, and manage private files through compact folder-style native views | Phase 10 completion | In progress (11A implemented) |
+| 11 | [Native file explorer](phase-11-native-file-explorer.md) | Browse, attach, and manage private files through compact folder-style native views | Phase 10 completion | Complete (11A user-closed) |
+| 12 | [Sidebar navigation](phase-12-sidebar-navigation.md) | Simplify primary conversation creation and establish a bottom utility section for Files and later workspace actions | Phase 11 completion | Slice 12A laptop-complete; native browser gate pending |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1
-through Campaign 3 Phase 11, or use the topic filenames.
+through Campaign 3 Phase 12, or use the topic filenames.
 
 ## Campaign rules
 
@@ -147,6 +148,7 @@ through Campaign 3 Phase 11, or use the topic filenames.
 ## Remaining work
 
 Items 5–10, their execution order, and pass criteria are tracked in
-[remaining-work-todo.md](remaining-work-todo.md). Item 5, legacy Phase 2D.5,
-and Phases 9–10 are closed. Item 6 is active with Phase 11's native file
-explorer slice.
+[remaining-work-todo.md](remaining-work-todo.md). Items 5–6, legacy Phase
+2D.5, and Phases 9–11 are closed. The user reprioritized Phase 12's sidebar
+navigation slice ahead of Item 7; its implementation is ready for native
+browser acceptance.

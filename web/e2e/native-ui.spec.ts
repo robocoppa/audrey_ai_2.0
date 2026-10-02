@@ -511,6 +511,29 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
     /builtryte-favicon/u,
   );
   await expect(page.getByRole("heading", { name: "Browser smoke" })).toBeVisible();
+  const sidebar = page.getByRole("complementary", { name: "Conversations" });
+  const newConversation = sidebar.getByRole("button", { name: "New conversation" });
+  const filesButton = sidebar.getByRole("button", { name: "Files", exact: true });
+  await expect(newConversation).toBeVisible();
+  await expect(sidebar.getByText("Workspace", { exact: true })).toHaveCount(0);
+  await expect(sidebar.getByText("Alice", { exact: true })).toHaveCount(0);
+  await expect(filesButton).toBeVisible();
+  await expect(sidebar.locator(".sidebar-utilities")).toContainText("Files");
+  const newConversationBox = await newConversation.boundingBox();
+  const primaryActionBox = await sidebar.locator(".sidebar-primary-action").boundingBox();
+  const filesBox = await filesButton.boundingBox();
+  const utilitiesBox = await sidebar.locator(".sidebar-utilities").boundingBox();
+  expect(newConversationBox).not.toBeNull();
+  expect(primaryActionBox).not.toBeNull();
+  expect(filesBox).not.toBeNull();
+  expect(utilitiesBox).not.toBeNull();
+  expect((newConversationBox?.width ?? 0) / (primaryActionBox?.width ?? 1)).toBeGreaterThan(0.9);
+  expect((utilitiesBox?.y ?? 0)).toBeGreaterThan((newConversationBox?.y ?? 0));
+  expect((filesBox?.width ?? 0) / (utilitiesBox?.width ?? 1)).toBeGreaterThan(0.8);
+  expect(Math.abs(
+    (utilitiesBox?.y ?? 0) + (utilitiesBox?.height ?? 0)
+      - ((sidebarBox?.y ?? 0) + (sidebarBox?.height ?? 0)),
+  )).toBeLessThan(2);
   await expect(page.locator(".brand-product")).toHaveText("Ask Audrey");
   await expect.poll(
     () => page.locator(".brand-product").evaluate(
@@ -636,8 +659,11 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   expect(sourcePanelBox).not.toBeNull();
   expect(sourceSummaryBox).not.toBeNull();
   expect(sourcePanelBox?.x ?? 0).toBeGreaterThanOrEqual((sourceSummaryBox?.x ?? 0) - 1);
+  await page.getByRole("heading", { name: "Browser smoke" }).click();
+  await expect(page.locator(".run-sources")).not.toHaveAttribute("open", "");
   await sourceSummary.click();
   await modelSummary.click();
+  await expect(page.locator(".run-sources")).not.toHaveAttribute("open", "");
   await expect(page.locator(".run-models")).toHaveAttribute("open", "");
   await expect(page.locator(".run-models li")).toHaveCount(2);
   await expect(page.locator(".run-models")).toContainText("qwen-router:latest1 call");
@@ -1235,7 +1261,7 @@ test("sets and retains the current user's profile name", async ({ page }) => {
   await page.getByRole("button", { name: "Save profile" }).click();
 
   await expect(profileButton).toHaveText("Alice");
-  await expect(page.locator(".sidebar-heading strong")).toHaveText("Alice Builder");
+  await expect(page.getByRole("complementary", { name: "Conversations" })).not.toContainText("Alice Builder");
   expect(profilePatches).toEqual([{ display_name: "Alice Builder" }]);
 
   await page.reload();
@@ -2586,6 +2612,8 @@ test("shows observed sources with the saved assistant answer after reload", asyn
     .toHaveAttribute("href", "https://example.org/report");
   await expect(answer.getByText("Knowledge note")).toBeVisible();
   await expect(answer.getByRole("link")).toHaveCount(1);
+  await page.locator(".thread-header").click();
+  await expect(answer.locator(".saved-sources")).not.toHaveAttribute("open", "");
 });
 
 test("summarizes saved tool activity without restoring transcript cards", async ({ page }) => {
@@ -2922,9 +2950,9 @@ test("discards abandoned empty conversations from history", async ({ page }) => 
   });
   await page.goto("./");
   await expect(page.getByRole("heading", { name: "New conversation" })).toBeVisible();
-  await page.getByRole("button", { name: "+ New" }).click();
+  await page.getByRole("button", { name: "New conversation" }).click();
   await expect.poll(() => discarded.length).toBe(1);
-  await page.getByRole("button", { name: "+ New" }).click();
+  await page.getByRole("button", { name: "New conversation" }).click();
   await expect.poll(() => discarded.length).toBe(2);
   expect(drafts).toHaveLength(1);
   await expect(page.getByRole("navigation", { name: "Conversation history" }).locator(".conversation-row")).toHaveCount(0);

@@ -1,8 +1,8 @@
 # Campaign 3 remaining work — items 5–10
 
-**Status:** Items 1–5 were marked live-closed on 2026-10-01. Item 6 is in
-progress. Items 7–10 remain queued in this order unless the user reprioritizes
-them.
+**Status:** Items 1–6 were closed on 2026-10-01. The user reprioritized
+[Phase 12](phase-12-sidebar-navigation.md) ahead of Items 7–10. Slice 12A is
+laptop-complete and awaiting native browser acceptance; Item 7 follows it.
 
 ## Closed prerequisites
 
@@ -269,11 +269,10 @@ restored.
 
 ## 6. Build the next product phase
 
-**State:** In progress. [Phase 9](phase-09-broader-audio.md) and
-[Phase 10](phase-10-ordinary-answer-provenance.md) are live-closed. The observed
-workflows do not yet justify diarization or broader media analysis.
-[Phase 11](phase-11-native-file-explorer.md) is active; Slice 11A is implemented
-and awaits its frontend and native browser gates.
+**State:** Complete. [Phase 9](phase-09-broader-audio.md),
+[Phase 10](phase-10-ordinary-answer-provenance.md), and
+[Phase 11](phase-11-native-file-explorer.md) are closed. The observed workflows
+do not yet justify diarization or broader media analysis.
 
 - [x] Write the Phase 9 plan and choose the first deployable slice.
 - [x] Add OGG, Opus, and raw ADTS AAC admission using measured MIME/container
@@ -295,8 +294,24 @@ and awaits its frontend and native browser gates.
   and Finishing phases.
 - [x] Make Models and Tool calls mutually exclusive and outside-dismissible for
   live and saved answers.
-- [ ] Pass the Slice 11A frontend build, automated UI suites, and native browser
-  gate.
+- [x] Close Slice 11A after deployed visual acceptance, with Sources added to
+  the Models/Tool calls mutual-exclusion and outside-dismissal behavior. The
+  laptop has no Node runtime, so its frontend automated suites were not reported
+  as passed.
+
+## Next user-prioritized slice — Phase 12 sidebar navigation
+
+**State:** Laptop-complete. Native browser acceptance is pending.
+
+- [x] Replace the top Files and `+ New` pair with one full-width **New
+  conversation** button.
+- [x] Remove the Workspace label and username from the sidebar.
+- [x] Add a bottom-left utility section and move Files into it.
+- [x] Preserve the existing Files dialog and conversation history behavior.
+- [ ] Pass desktop, narrow-screen, keyboard, empty-draft, and Files-launch
+  browser checks.
+
+Detailed scope: [phase-12-sidebar-navigation.md](phase-12-sidebar-navigation.md).
 
 ## 7. Expand Responses API compatibility
 
