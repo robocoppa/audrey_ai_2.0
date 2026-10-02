@@ -168,10 +168,24 @@ describe("App", () => {
     render(<App />);
 
     const identity = await screen.findByLabelText("Signed in user");
+    const toolsAndSkills = await screen.findByRole("button", {
+      name: "Tools and skills: Automatic",
+    });
+    fireEvent.click(toolsAndSkills);
+    const skillPicker = screen.getByRole("dialog", {
+      name: "Choose how Audrey uses tools",
+    });
+    expect(skillPicker).toHaveTextContent(
+      "Audrey chooses the available tools when they are useful.",
+    );
+    const videoSkill = screen.getByRole("button", {
+      name: /Video analysis Analyze uploaded videos/u,
+    });
+    expect(videoSkill).toBeEnabled();
+    fireEvent.click(videoSkill);
     expect(
-      await screen.findByRole("combobox", { name: "Audrey skill" }),
-    ).toHaveValue("");
-    expect(screen.getByRole("option", { name: "Video analysis" })).toBeEnabled();
+      screen.getByRole("button", { name: "Tools and skills: Video analysis" }),
+    ).toBeVisible();
     expect(screen.getByRole("link", { name: "Audrey home" })).toContainElement(
       document.querySelector(".brand-wordmark img"),
     );

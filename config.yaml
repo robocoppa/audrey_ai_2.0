@@ -157,6 +157,12 @@ model_registry:
     - { name: "llama4:latest",            priority:  65, speed: 55, quality: 90, location: local }
     # Inherited from glm-5.2 with the 2026-08-29 swap; speed/quality UNMEASURED.
     - { name: "glm-5.3:cloud",            priority:  62, speed: 90, quality: 88, location: cloud }
+    # 2026-10-02: Kimi K3 leads every deep/research panel that uses cloud
+    # workers. Keep its registry priority below every ordinary-chat candidate:
+    # registration makes it a valid production panel worker, while the panel
+    # lists below choose its lead position without putting paid inference on
+    # the normal fast path. Speed/quality are routing hints, not measurements.
+    - { name: "kimi-k3:cloud",             priority:  60, speed: 90, quality: 90, location: cloud }
 
   vl:
     # Vision-language pool — image turns on the chat path route here.
@@ -262,9 +268,13 @@ fast_path:
 # near-free on wall-clock and gives the synthesizer a third, independent take.
 # The two cloud models are deliberately different vendors for draft diversity.
 # VRAM on the host fits one local model at a time (GPU_CONCURRENCY=1).
+# 2026-10-02 user decision: Kimi K3 is the first worker in every panel that
+# contains cloud workers. It replaces the older Kimi 2.x worker in each lineup;
+# worker counts and cloud concurrency stay unchanged.
 deep_panel:
   code:
-    # LINEUP AS OF 2026-08-17: one local + TWO cloud, the house shape.
+    # LINEUP AS OF 2026-10-02: Kimi K3 first, then one local and one other-vendor
+    # cloud worker. The three-worker house shape and call count are unchanged.
     # `nemotron-3.5-lightning:latest` is the sole local draft; `minimax-m3` is
     # OUT. The panel costs THREE cloud calls (2 workers + the cloud synth), not
     # four. Cloud credits are a hard budget — `scripts/analysis/analyze_escalations.py`
@@ -294,7 +304,7 @@ deep_panel:
     # with empty content, read that here first** — `done_reason == "length"`
     # with empty content is the signature, and with one local worker there is
     # no second local draft to cover for it.
-    workers: ["nemotron-3.5-lightning:latest", "kimi-k2.7-code:cloud",
+    workers: ["kimi-k3:cloud", "nemotron-3.5-lightning:latest",
               "deepseek-v4-pro:cloud"]
     # glm-5.3 (cloud) primary synth: skips the local cold-load a LOCAL synth
     # incurs (synth can't co-reside in VRAM with a local worker under
@@ -305,11 +315,11 @@ deep_panel:
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "qwen3.8:latest"
   reasoning:
-    workers: ["qwen3.8:latest", "kimi-k2.6:cloud", "deepseek-v4-pro:cloud"]
+    workers: ["kimi-k3:cloud", "qwen3.8:latest", "deepseek-v4-pro:cloud"]
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "qwen3.8:latest"
   general:
-    workers: ["qwen3.8:latest", "kimi-k2.6:cloud", "deepseek-v4-pro:cloud"]
+    workers: ["kimi-k3:cloud", "qwen3.8:latest", "deepseek-v4-pro:cloud"]
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "qwen3.8:latest"
   # vl stays one local + one cloud: the deep path rebuilds prompts text-only,
@@ -317,20 +327,19 @@ deep_panel:
   # path anyway (the local qwen3-vl is the real worker). A second cloud draft
   # here would merge a blind text take, so it isn't worth the call.
   vl:
-    workers: ["qwen3-vl:32b", "kimi-k2.6:cloud"]
+    workers: ["kimi-k3:cloud", "qwen3-vl:32b"]
     synthesizer: "qwen3.8:latest"
     fallback_synth: "glm-5.3:cloud"
 
 # ─── Deep panel: cloud-only (audrey_cloud) ─────────────────────────────
-# Both workers run in parallel (Ollama Pro caps at 3 concurrent cloud).
-# glm leads and synthesizes (glm-5.2 from 2026-07-30; glm-5.3 took the slot
-# unchanged on 2026-08-29). Each task keeps its existing
-# second worker for vendor diversity, and deepseek-v4-pro — which held both
-# slots before — becomes the degrade target, so a glm outage falls onto a
-# different vendor rather than a second glm call.
+# Workers run in parallel (Ollama Pro caps at 3 concurrent cloud).
+# Kimi K3 leads every worker list. GLM still synthesizes, and DeepSeek remains
+# the different-vendor degrade target so a GLM outage does not fall onto a
+# second GLM call.
 deep_panel_cloud:
   code:
-    # 2026-08-17: `kimi-k2.7-code` REPLACES `minimax-m3`, which is off the box.
+    # 2026-10-02: Kimi K3 replaces Kimi 2.7 and leads this three-worker list.
+    # The 2026-08-17 Kimi 2.7 measurement below remains the history of the slot.
     # ⚠️ This was a forced swap, not a free one — dropping minimax without a
     # replacement would have left ONE worker synthesised by ITSELF (glm
     # holds both slots), which drafts once and then "merges" its own only draft:
@@ -353,22 +362,21 @@ deep_panel_cloud:
     # code in four of five cases, `glm-5.2` in one. ⚠️ That run measured 5.2,
     # which no longer holds this slot — it is the reason the slot exists, not
     # evidence about `glm-5.3`.
-    workers: ["glm-5.3:cloud", "kimi-k2.7-code:cloud", "deepseek-v4-pro:cloud"]
+    workers: ["kimi-k3:cloud", "glm-5.3:cloud", "deepseek-v4-pro:cloud"]
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
-  # 2026-10-01: kimi-k2.6 replaces the retired qwen3.5:397b-cloud worker in
-  # the remaining pools. It already serves these roles in the mixed panel and
-  # preserves two distinct cloud drafts plus a different-vendor fallback.
+  # 2026-10-02: Kimi K3 replaces Kimi 2.6 in the remaining pools and leads
+  # each list. GLM preserves the second distinct cloud draft.
   reasoning:
-    workers: ["glm-5.3:cloud", "kimi-k2.6:cloud"]
+    workers: ["kimi-k3:cloud", "glm-5.3:cloud"]
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
   general:
-    workers: ["glm-5.3:cloud", "kimi-k2.6:cloud"]
+    workers: ["kimi-k3:cloud", "glm-5.3:cloud"]
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
   vl:
-    workers: ["glm-5.3:cloud", "kimi-k2.6:cloud"]
+    workers: ["kimi-k3:cloud", "glm-5.3:cloud"]
     synthesizer: "glm-5.3:cloud"
     fallback_synth: "deepseek-v4-pro:cloud"
 
@@ -476,9 +484,12 @@ deep_panel_local:
 #   fallback_synth — degrade target if the write stage fails.
 # Validated by `_validate_deep_panel_pools` (staged branch). Opt-in only:
 # selecting `audrey_research` is the signal — there is no auto-routing into it.
+# Kimi K3 leads every researcher list. Replacing GLM in Stage 1 also avoids
+# making a researcher failure disqualify the verifier and writer that follow.
 #
 # glm took `verifier` on 2026-07-30 (it already held researcher + writer);
-# `glm-5.3` inherited all three unchanged on 2026-08-29.
+# `glm-5.3` inherited all three on 2026-08-29. Kimi K3 replaced it only in
+# the researcher lists on 2026-10-02; GLM remains verifier and writer.
 # `factchecker` is the deliberate hold-out on deepseek-v4-pro: that stage runs a
 # constrained-decoding pass pinned to the `FactCheckResult` schema, and
 # `ledger.py:203-207` records glm-5.2 as one of the models that returned
@@ -521,21 +532,21 @@ deep_panel_local:
 # only way to learn the primary is failing.
 deep_panel_research:
   code:
-    researchers: ["deepseek-v4-pro:cloud", "glm-5.3:cloud", "qwen3.8:latest"]
+    researchers: ["kimi-k3:cloud", "deepseek-v4-pro:cloud", "qwen3.8:latest"]
     verifier: "glm-5.3:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     fallback_factcheck: "kimi-k2.6:cloud"
     writer: "glm-5.3:cloud"
     fallback_synth: "glm-5.3:cloud"
   reasoning:
-    researchers: ["deepseek-v4-pro:cloud", "glm-5.3:cloud", "qwen3.8:latest"]
+    researchers: ["kimi-k3:cloud", "deepseek-v4-pro:cloud", "qwen3.8:latest"]
     verifier: "glm-5.3:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     fallback_factcheck: "kimi-k2.6:cloud"
     writer: "glm-5.3:cloud"
     fallback_synth: "glm-5.3:cloud"
   general:
-    researchers: ["deepseek-v4-pro:cloud", "glm-5.3:cloud", "qwen3.8:latest"]
+    researchers: ["kimi-k3:cloud", "deepseek-v4-pro:cloud", "qwen3.8:latest"]
     verifier: "glm-5.3:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     fallback_factcheck: "kimi-k2.6:cloud"
@@ -545,7 +556,7 @@ deep_panel_research:
   # anyway. Kept here so the pool resolves for every task type, with a
   # text-only researcher set (the deep path rebuilds prompts text-only).
   vl:
-    researchers: ["deepseek-v4-pro:cloud", "glm-5.3:cloud"]
+    researchers: ["kimi-k3:cloud", "deepseek-v4-pro:cloud"]
     verifier: "glm-5.3:cloud"
     factchecker: "deepseek-v4-pro:cloud"
     fallback_factcheck: "kimi-k2.6:cloud"
@@ -1652,8 +1663,9 @@ passthrough:
     # name earned a probe rather than a promotion.
     - glm-5.3-flash:cloud
     - kimi-k2.6:cloud
-    # 2026-10-01: added so the Claudette (Hermes) bot can target it. NOT a pool
-    # or registry role — kimi-k3 left every pool 2026-07-30 on cloud-credit cost.
+    # 2026-10-01: added so the Claudette (Hermes) bot can target it.
+    # 2026-10-02: restored as the lead worker in every cloud-bearing panel by
+    # user decision. Its registry priority remains below fast-path candidates.
     # ⚠️ This list is global: any `compat:full` token can use it, whatever the
     # Admin model access says. That access governs the native UI, not `/v1`.
     - kimi-k3:cloud

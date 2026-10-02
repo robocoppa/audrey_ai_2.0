@@ -880,6 +880,7 @@ function AudreyThread({
   } | null>(null);
   const dispatchedRetryRef = useRef<object | null>(null);
   const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
+  const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [attachmentFiles, setAttachmentFiles] = useState<AudreyFile[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentError, setAttachmentError] = useState("");
@@ -895,6 +896,9 @@ function AudreyThread({
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const attachmentPickerRef = useRef<HTMLElement>(null);
   const attachButtonRef = useRef<HTMLButtonElement>(null);
+  const skillPickerRef = useRef<HTMLElement>(null);
+  const skillButtonRef = useRef<HTMLButtonElement>(null);
+  const firstSkillOptionRef = useRef<HTMLButtonElement>(null);
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const userRequestedCancelRef = useRef(false);
@@ -913,6 +917,9 @@ function AudreyThread({
   const compatibleSkills = skills.filter((skill) =>
     selectedSkillMode !== null && skill.supported_modes.includes(selectedSkillMode),
   );
+  const selectedSkill = skills.find((skill) => skill.id === skillId);
+  const skillControlValue = selectedSkill?.name
+    ?? (selectedSkillMode === null ? "Not available" : "Automatic");
   const supportsFiles = selectedModel.capabilities.includes("files");
   useEffect(() => {
     if (!skillId) return;
@@ -943,20 +950,28 @@ function AudreyThread({
       .map(({ id, tool_calls: tools }) => [id, tools ?? []] as const),
   ), [initialMessages]);
   useEffect(() => {
-    if (!attachmentPickerOpen) return;
+    if (!attachmentPickerOpen && !skillPickerOpen) return;
+    if (skillPickerOpen) firstSkillOptionRef.current?.focus();
     const closeOnOutsideClick = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
       if (
         attachmentPickerRef.current?.contains(target)
         || attachButtonRef.current?.contains(target)
+        || skillPickerRef.current?.contains(target)
+        || skillButtonRef.current?.contains(target)
       ) return;
       setAttachmentPickerOpen(false);
+      setSkillPickerOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      const focusTarget = attachmentPickerOpen
+        ? attachButtonRef.current
+        : skillButtonRef.current;
       setAttachmentPickerOpen(false);
-      attachButtonRef.current?.focus();
+      setSkillPickerOpen(false);
+      focusTarget?.focus();
     };
     document.addEventListener("pointerdown", closeOnOutsideClick);
     document.addEventListener("keydown", closeOnEscape);
@@ -964,7 +979,7 @@ function AudreyThread({
       document.removeEventListener("pointerdown", closeOnOutsideClick);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [attachmentPickerOpen]);
+  }, [attachmentPickerOpen, skillPickerOpen]);
   const history = useMemo<ThreadHistoryAdapter>(
     () => ({
       load: () => Promise.resolve(
@@ -994,6 +1009,8 @@ function AudreyThread({
   );
   async function changeModel(nextModelId: string) {
     if (attachmentBusy || retrying) return;
+    setAttachmentPickerOpen(false);
+    setSkillPickerOpen(false);
     await onModelChange(nextModelId);
     const nextModel = modelDetails(models, nextModelId);
     const nextSkillMode = skillModeForModel(nextModel);
@@ -1285,6 +1302,7 @@ function AudreyThread({
       setAttachmentPickerOpen(false);
       return;
     }
+    setSkillPickerOpen(false);
     setAttachmentPickerOpen(true);
     setAttachmentSearch("");
     setAttachmentKind("all");
@@ -1302,6 +1320,15 @@ function AudreyThread({
     } finally {
       setAttachmentsLoading(false);
     }
+  }
+
+  function toggleSkillPicker() {
+    if (skillPickerOpen) {
+      setSkillPickerOpen(false);
+      return;
+    }
+    setAttachmentPickerOpen(false);
+    setSkillPickerOpen(true);
   }
 
   function toggleAttachment(file: AudreyFile) {
@@ -1531,11 +1558,12 @@ function AudreyThread({
                   >
                     <header>
                       <div>
-                        <strong>Attach your files</strong>
-                        <span>
+                        <strong>Add files to this message</strong>
+                        <span>Upload a new file or choose ready files from My Files.</span>
+                        <small>
                           {selectedAttachments.length}/10 files
                           {imageLimit === null ? "" : " · " + selectedImageCount + "/" + imageLimit + " images"}
-                        </span>
+                        </small>
                       </div>
                       <button
                         type="button"
@@ -1646,6 +1674,69 @@ function AudreyThread({
                     ) : null}
                   </section>
                 ) : null}
+                {skillPickerOpen ? (
+                  <section
+                    ref={skillPickerRef}
+                    className="skill-picker"
+                    role="dialog"
+                    aria-label="Choose how Audrey uses tools"
+                  >
+                    <header>
+                      <div>
+                        <strong>Choose how Audrey uses tools</strong>
+                        <span>
+                          Skills give Audrey focused instructions and may narrow the tools available for this message.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="attachment-picker-close"
+                        aria-label="Hide tools and skills picker"
+                        onClick={() => {
+                          setSkillPickerOpen(false);
+                          skillButtonRef.current?.focus();
+                        }}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="m6.5 9 5.5 5.5L17.5 9" />
+                        </svg>
+                      </button>
+                    </header>
+                    <div className="skill-options" role="group" aria-label="Tools and skills choices">
+                      <button
+                        ref={firstSkillOptionRef}
+                        type="button"
+                        aria-pressed={!skillId}
+                        onClick={() => {
+                          setSkillId("");
+                          setSkillPickerOpen(false);
+                          skillButtonRef.current?.focus();
+                        }}
+                      >
+                        <strong>Automatic</strong>
+                        <span>Audrey chooses the available tools when they are useful.</span>
+                      </button>
+                      {compatibleSkills.map((skill) => (
+                        <button
+                          type="button"
+                          key={skill.id}
+                          aria-pressed={skillId === skill.id}
+                          disabled={skill.availability !== "available"}
+                          onClick={() => {
+                            setSkillId(skill.id);
+                            setSkillPickerOpen(false);
+                            skillButtonRef.current?.focus();
+                          }}
+                        >
+                          <strong>
+                            {skill.name}{skill.availability === "available" ? "" : " (unavailable)"}
+                          </strong>
+                          <span>{skill.description}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
                 <ComposerPrimitive.Root
                   className="composer"
                   onSubmitCapture={(event) => {
@@ -1658,7 +1749,33 @@ function AudreyThread({
                     if (text) setLastAttempt({ text, attachmentIds: selectedAttachments.map(({ id }) => id) });
                   }}
                 >
-                  <ThreadPrimitive.If empty={false}>
+                  <div className="composer-input-row">
+                    <ComposerPrimitive.Input
+                      ref={composerInputRef}
+                      className="composer-input"
+                      aria-label="Ask Audrey"
+                      placeholder="Ask Audrey…"
+                      rows={1}
+                    />
+                    <div className="composer-actions">
+                      {!recoveredRunActive ? (
+                        <ComposerPrimitive.Cancel
+                          className="cancel-button"
+                          onClick={() => { userRequestedCancelRef.current = true; }}
+                        >Stop</ComposerPrimitive.Cancel>
+                      ) : null}
+                      <ComposerPrimitive.Send
+                        className="send-button"
+                        aria-label="Send message"
+                        disabled={submissionBlocked}
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M12 19V5M6.5 10.5 12 5l5.5 5.5" />
+                        </svg>
+                      </ComposerPrimitive.Send>
+                    </div>
+                  </div>
+                  <div className="composer-control-rail" aria-label="Message options">
                     <ComposerModelPicker
                       compact
                       models={models}
@@ -1667,66 +1784,40 @@ function AudreyThread({
                       disabled={modeDisabled || attachmentBusy || retrying}
                       onChange={changeModel}
                     />
-                  </ThreadPrimitive.If>
-                  {skills.length > 0 ? (
-                    <label className="compact-skill-picker">
-                      <select
-                        aria-label="Audrey skill"
-                        value={skillId}
-                        disabled={submissionBlocked || selectedSkillMode === null}
-                        onChange={(event) => setSkillId(event.target.value)}
-                        title="Apply a skill to this run"
-                      >
-                        <option value="">Model default</option>
-                        {compatibleSkills.map((skill) => (
-                          <option
-                            key={skill.id}
-                            value={skill.id}
-                            disabled={skill.availability !== "available"}
-                          >
-                            {skill.name}{skill.availability === "available" ? "" : " (unavailable)"}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
-                  <button
-                    ref={attachButtonRef}
-                    className="attach-button"
-                    type="button"
-                    onClick={() => void toggleAttachmentPicker()}
-                    disabled={modeDisabled || retrying || !supportsFiles}
-                    title={supportsFiles ? "Attach files" : `${selectedModel.label} accepts text only`}
-                    aria-label={attachmentPickerOpen ? "Close attachment picker" : "Attach files"}
-                    aria-expanded={attachmentPickerOpen}
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="m9.5 12.5 5.4-5.4a3 3 0 0 1 4.2 4.2l-7.5 7.5a5 5 0 0 1-7.1-7.1l7.2-7.2" />
-                    </svg>
-                  </button>
-                  <ComposerPrimitive.Input
-                    ref={composerInputRef}
-                    className="composer-input"
-                    aria-label="Ask Audrey"
-                    placeholder="Ask Audrey…"
-                    rows={1}
-                  />
-                  <div className="composer-actions">
-                    {!recoveredRunActive ? (
-                      <ComposerPrimitive.Cancel
-                        className="cancel-button"
-                        onClick={() => { userRequestedCancelRef.current = true; }}
-                      >Stop</ComposerPrimitive.Cancel>
-                    ) : null}
-                    <ComposerPrimitive.Send
-                      className="send-button"
-                      aria-label="Send message"
-                      disabled={submissionBlocked}
+                    <button
+                      ref={attachButtonRef}
+                      className="composer-rail-control attach-button"
+                      type="button"
+                      onClick={() => void toggleAttachmentPicker()}
+                      disabled={modeDisabled || retrying || !supportsFiles}
+                      title={supportsFiles
+                        ? "Upload a new file or choose ready files from My Files"
+                        : `${selectedModel.label} accepts text only`}
+                      aria-label={attachmentPickerOpen ? "Close file picker" : "Add files"}
+                      aria-expanded={attachmentPickerOpen}
                     >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M12 19V5M6.5 10.5 12 5l5.5 5.5" />
-                      </svg>
-                    </ComposerPrimitive.Send>
+                      <span className="composer-control-label">Files</span>
+                      <strong>
+                        {selectedAttachments.length > 0
+                          ? `${selectedAttachments.length} selected`
+                          : "Add files"}
+                      </strong>
+                    </button>
+                    <button
+                      ref={skillButtonRef}
+                      className="composer-rail-control skill-button"
+                      type="button"
+                      onClick={toggleSkillPicker}
+                      disabled={submissionBlocked || selectedSkillMode === null}
+                      title={selectedSkillMode === null
+                        ? `${selectedModel.label} does not support Audrey skills`
+                        : "Choose automatic tool use or a focused Audrey skill"}
+                      aria-label={`Tools and skills: ${skillControlValue}`}
+                      aria-expanded={skillPickerOpen}
+                    >
+                      <span className="composer-control-label">Tools &amp; skills</span>
+                      <strong>{skillControlValue}</strong>
+                    </button>
                   </div>
                 </ComposerPrimitive.Root>
               </>
@@ -2145,6 +2236,7 @@ function ComposerModelPicker({
   const control = (
     <div className="model-picker-menu-anchor" ref={anchorRef}>
       <label className={compact ? "compact-model-picker" : "model-picker-control"}>
+        {compact ? <span className="composer-control-label">Model</span> : null}
         {select}
       </label>
       {directMenuVisible ? (
@@ -2193,7 +2285,6 @@ function ComposerModelPicker({
   return (
     <div className="composer-model-picker">
       <img src={selected.portrait} alt="" aria-hidden="true" />
-      {control}
       <span className="model-description" aria-live="polite">
         {selected.description}
       </span>

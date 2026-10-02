@@ -96,6 +96,32 @@ def test_reasoning_is_the_only_fast_path_pool_that_leads_with_cloud(cfg):
     )
 
 
+def test_kimi_k3_leads_every_panel_with_cloud_workers(cfg):
+    """Kimi K3 is the first draft/research worker whenever a panel uses cloud."""
+    locations = {
+        str(spec["name"]): str(spec.get("location", "local"))
+        for specs in (cfg.get("model_registry") or {}).values()
+        for spec in specs
+        if spec.get("name")
+    }
+    for pool_name, pool in cfg.items():
+        if not str(pool_name).startswith("deep_panel") or not isinstance(pool, dict):
+            continue
+        for task, body in pool.items():
+            if not isinstance(body, dict):
+                continue
+            workers = list(body.get("researchers") or body.get("workers") or [])
+            has_cloud = any(
+                locations.get(str(model)) == "cloud" or str(model).endswith(":cloud")
+                for model in workers
+            )
+            if has_cloud:
+                assert workers[0] == "kimi-k3:cloud", (
+                    f"{pool_name}/{task}: Kimi K3 must lead cloud-bearing panels; "
+                    f"got {workers}"
+                )
+
+
 # ─── The two model authorities ─────────────────────────────────────────
 # Replaces the manual chore in `pull-models.sh`'s own header: "▶
 # `check_model_inventory.py` compares CONFIG to the box; it cannot see this

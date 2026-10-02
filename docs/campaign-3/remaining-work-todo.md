@@ -6,7 +6,10 @@ laptop-complete with its My Files correction and awaits browser acceptance.
 Item 7 has started with laptop-complete
 [Phase 13 Slice 13A](phase-13-responses-multimodal-input.md). The user then
 prioritized [Phase 14 Slice 14A](phase-14-bot-accounts-and-token-lifetimes.md),
-which is laptop-complete and awaits native acceptance.
+which is laptop-complete and awaits native acceptance. The next build is
+[Phase 15](phase-15-composer-and-projects.md). Slice 15A's composer control
+rail is implementation-complete and awaits its deployed browser gate, followed
+by owner-scoped Projects.
 
 ## Closed prerequisites
 
@@ -334,6 +337,27 @@ Detailed scope: [phase-12-sidebar-navigation.md](phase-12-sidebar-navigation.md)
 
 Detailed scope:
 [phase-14-bot-accounts-and-token-lifetimes.md](phase-14-bot-accounts-and-token-lifetimes.md).
+
+## Next build - Phase 15 composer controls and Projects
+
+**State:** Slice 15A is implementation-complete. Frontend and browser
+acceptance is pending.
+
+- [x] Build Slice 15A: narrow and center the composer; move Model, Add files,
+  and Tools & skills into a labeled, symmetric rail below the message field.
+- [ ] Pass the Slice 15A desktop, narrow-screen, keyboard, picker-dismissal,
+  upload, send/stop, and retry browser checks.
+- [ ] Build Slice 15B: schema 19 Projects storage, owner-scoped APIs, project
+  file references, and nullable conversation membership.
+- [ ] Build Slice 15C: compact Projects navigation, project home, reusable My
+  Files selection, new project conversations, and move/remove actions.
+- [ ] Build Slice 15D: server-resolved project instructions and bounded
+  selected-file retrieval with persisted private-file provenance.
+- [ ] Pass the final two-document context, refresh, isolation, mutation
+  snapshot, project deletion, and restart-persistence gates.
+
+Detailed scope:
+[phase-15-composer-and-projects.md](phase-15-composer-and-projects.md).
 
 ## 7. Expand Responses API compatibility
 

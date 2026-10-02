@@ -816,7 +816,7 @@ a:focus-visible {
   position: sticky;
   z-index: 4;
   bottom: 0;
-  width: min(100%, 64rem);
+  width: min(100%, 56rem);
   margin: 1rem auto 0;
   padding: 0.5rem 0 max(1rem, env(safe-area-inset-bottom));
   background: linear-gradient(
@@ -881,8 +881,7 @@ a:focus-visible {
 }
 
 .model-picker-control select:focus-visible,
-.compact-model-picker select:focus-visible,
-.compact-skill-picker select:focus-visible {
+.compact-model-picker select:focus-visible {
   border-color: var(--border-strong);
   background: var(--surface-active);
   box-shadow: var(--focus-glow);
@@ -1279,14 +1278,30 @@ a:focus-visible {
 }
 
 .composer {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.75rem;
-  padding: 0.65rem;
+  display: grid;
+  gap: 0;
+  padding: 0.55rem;
   border: 1px solid var(--border);
   border-radius: 1rem;
   background: var(--surface);
   box-shadow: 0 1.2rem 4rem rgb(0 0 0 / 30%);
+}
+
+.composer-input-row {
+  display: flex;
+  min-width: 0;
+  align-items: flex-end;
+  gap: 0.55rem;
+  padding: 0.1rem 0.1rem 0.5rem;
+}
+
+.composer-control-rail {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
 }
 
 .selected-attachments {
@@ -1388,7 +1403,8 @@ a:focus-visible {
   pointer-events: none;
 }
 
-.attachment-picker {
+.attachment-picker,
+.skill-picker {
   display: flex;
   max-height: min(26rem, 55vh);
   margin: 0 0 0.55rem;
@@ -1401,7 +1417,8 @@ a:focus-visible {
   box-shadow: var(--shadow-md);
 }
 
-.attachment-picker > header {
+.attachment-picker > header,
+.skill-picker > header {
   display: flex;
   flex: none;
   justify-content: space-between;
@@ -1411,14 +1428,23 @@ a:focus-visible {
   font-size: 0.76rem;
 }
 
-.attachment-picker > header > div {
+.attachment-picker > header > div,
+.skill-picker > header > div {
   display: grid;
   gap: 0.15rem;
 }
 
 .attachment-picker > header span,
-.attachment-picker > p {
+.attachment-picker > header small,
+.attachment-picker > p,
+.skill-picker > header span {
   color: var(--muted);
+}
+
+.attachment-picker > header small {
+  margin-top: 0.12rem;
+  color: var(--muted-deep);
+  font-size: 0.66rem;
 }
 
 .attachment-picker-close {
@@ -1591,24 +1617,71 @@ a:focus-visible {
   white-space: nowrap;
 }
 
+.skill-picker {
+  max-height: min(24rem, 52vh);
+}
+
+.skill-options {
+  display: grid;
+  min-height: 0;
+  gap: 0.35rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.skill-options button {
+  display: grid;
+  width: 100%;
+  gap: 0.2rem;
+  padding: 0.65rem 0.72rem;
+  border: 1px solid var(--border);
+  border-radius: 0.62rem;
+  background: transparent;
+  color: var(--text-soft);
+  text-align: left;
+}
+
+.skill-options button:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-raised);
+}
+
+.skill-options button[aria-pressed="true"] {
+  border-color: rgb(99 181 255 / 42%);
+  background: var(--surface-active);
+  box-shadow: inset 0 0 0 1px rgb(99 181 255 / 10%);
+}
+
+.skill-options button strong {
+  color: var(--text);
+  font-size: 0.78rem;
+}
+
+.skill-options button span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
 .compact-model-picker-shell {
-  display: flex;
-  align-items: center;
-  align-self: stretch;
-  flex: 0 0 auto;
+  min-width: 0;
 }
 
 .compact-model-picker {
-  display: flex;
-  align-items: center;
-  align-self: stretch;
-  padding-right: 0.65rem;
-  border-right: 1px solid var(--border);
+  display: grid;
+  min-width: 0;
+  min-height: 3.15rem;
+  align-content: center;
+  gap: 0.08rem;
+  padding: 0.38rem 0.58rem;
+  border: 1px solid var(--border);
+  border-radius: 0.62rem;
+  background: rgb(255 255 255 / 1.5%);
 }
 
 .compact-model-picker-shell .model-picker-menu-anchor {
-  display: flex;
-  align-self: stretch;
+  display: block;
+  width: 100%;
 }
 
 .compact-model-picker-shell .direct-model-menu {
@@ -1619,37 +1692,77 @@ a:focus-visible {
 }
 
 .compact-model-picker select {
-  width: 12rem;
-  max-width: 28vw;
-  padding: 0.48rem 1.45rem 0.48rem 0.52rem;
-  border: 1px solid transparent;
-  border-radius: 0.48rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0 1.2rem 0 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
   outline: none;
   background: transparent;
   color: var(--accent);
-  font-size: 0.82rem;
+  font-size: 0.88rem;
   font-weight: 700;
+  text-overflow: ellipsis;
 }
 
-.compact-skill-picker {
-  display: flex;
-  align-items: center;
-  align-self: stretch;
-  padding-right: 0.5rem;
-  border-right: 1px solid var(--border);
+.compact-model-picker:focus-within {
+  border-color: var(--border-strong);
+  background: var(--surface-active);
+  box-shadow: var(--focus-glow);
 }
 
-.compact-skill-picker select {
-  width: 10rem;
-  max-width: 24vw;
-  padding: 0.48rem 1.35rem 0.48rem 0.52rem;
-  border: 1px solid transparent;
-  border-radius: 0.48rem;
-  outline: none;
-  background: transparent;
+.composer-control-label {
+  display: block;
+  overflow: hidden;
+  color: var(--muted-deep);
+  font-size: 0.58rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.composer-rail-control {
+  display: grid;
+  min-width: 0;
+  min-height: 3.15rem;
+  align-content: center;
+  gap: 0.08rem;
+  padding: 0.38rem 0.58rem;
+  border: 1px solid var(--border);
+  border-radius: 0.62rem;
+  background: rgb(255 255 255 / 1.5%);
   color: var(--text-soft);
-  font-size: 0.8rem;
-  font-weight: 650;
+  text-align: left;
+}
+
+.composer-rail-control strong {
+  overflow: hidden;
+  font-size: 0.78rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-rail-control:hover,
+.composer-rail-control[aria-expanded="true"] {
+  border-color: var(--border-strong);
+  background: var(--surface-active);
+  color: var(--accent);
+}
+
+.composer-rail-control:focus-visible {
+  border-color: var(--border-strong);
+  outline: none;
+  box-shadow: var(--focus-glow);
+}
+
+.composer-rail-control:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .composer:focus-within {
@@ -1661,6 +1774,7 @@ a:focus-visible {
 .composer-input {
   min-height: 2.5rem;
   max-height: 10rem;
+  min-width: 0;
   flex: 1;
   resize: none;
   padding: 0.55rem 0.65rem;
@@ -1679,34 +1793,6 @@ a:focus-visible {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-}
-
-.attach-button {
-  display: grid;
-  width: 2.35rem;
-  height: 2.35rem;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
-}
-
-.attach-button:hover,
-.attach-button[aria-expanded="true"] {
-  background: var(--surface-active);
-  color: var(--accent);
-}
-
-.attach-button svg {
-  width: 1.2rem;
-  height: 1.2rem;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.9;
 }
 
 .send-button,
@@ -4564,26 +4650,12 @@ a:focus-visible {
     min-width: 7.25rem;
   }
 
-  .compact-model-picker {
-    padding-right: 0.4rem;
+  .composer-control-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .compact-model-picker select {
-    width: 8rem;
-    max-width: 34vw;
-    padding-inline: 0.35rem 1.15rem;
-    font-size: 0.74rem;
-  }
-
-  .compact-skill-picker {
-    padding-right: 0.35rem;
-  }
-
-  .compact-skill-picker select {
-    width: 7.5rem;
-    max-width: 30vw;
-    padding-inline: 0.3rem 1rem;
-    font-size: 0.72rem;
+  .compact-model-picker-shell {
+    grid-column: 1 / -1;
   }
 }
 
@@ -4597,6 +4669,14 @@ a:focus-visible {
     width: 100%;
     flex-wrap: wrap;
     justify-content: flex-end;
+  }
+
+  .composer-control-rail {
+    grid-template-columns: 1fr;
+  }
+
+  .compact-model-picker-shell {
+    grid-column: auto;
   }
 }
 

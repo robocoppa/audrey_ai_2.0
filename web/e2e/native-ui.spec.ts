@@ -603,10 +603,9 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
   expect(threadViewportBox).not.toBeNull();
   expect(viewport).not.toBeNull();
   expect(portraitBox?.width ?? 0).toBeGreaterThanOrEqual(200);
-  expect((pickerBox?.y ?? 0) - ((portraitBox?.y ?? 0) + (portraitBox?.height ?? 0)))
-    .toBeGreaterThanOrEqual(18);
-  expect((pickerBox?.y ?? 0) - ((portraitBox?.y ?? 0) + (portraitBox?.height ?? 0)))
-    .toBeLessThanOrEqual(22);
+  expect(pickerBox?.y ?? 0)
+    .toBeGreaterThan((portraitBox?.y ?? 0) + (portraitBox?.height ?? 0));
+  expect(composerBox?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(896);
   await expect.poll(
     () => portrait.evaluate((element) => Number.parseFloat(getComputedStyle(element).opacity)),
   ).toBe(0.8);
@@ -615,7 +614,21 @@ test("runs a native turn with typed stage, tool, and source activity", async ({ 
     () => portrait.evaluate((element) => Number.parseFloat(getComputedStyle(element).opacity)),
   ).toBe(1);
   await expect(page.locator(".composer-model-picker")).toHaveCSS("isolation", "isolate");
-  await expect(page.locator(".model-picker-control")).toHaveCSS("z-index", "1");
+  await expect(page.locator(".composer-control-rail")).toBeVisible();
+  await expect(page.locator(".compact-model-picker")).toContainText("Model");
+  const railControlBoxes = await page.locator(".composer-control-rail > *").evaluateAll(
+    (controls) => controls.map((control) => {
+      const box = control.getBoundingClientRect();
+      return { x: box.x, y: box.y, width: box.width, height: box.height };
+    }),
+  );
+  expect(railControlBoxes).toHaveLength(3);
+  expect(Math.max(...railControlBoxes.map(({ width }) => width))
+    - Math.min(...railControlBoxes.map(({ width }) => width))).toBeLessThan(2);
+  expect(Math.max(...railControlBoxes.map(({ height }) => height))
+    - Math.min(...railControlBoxes.map(({ height }) => height))).toBeLessThan(2);
+  expect(Math.max(...railControlBoxes.map(({ y }) => y))
+    - Math.min(...railControlBoxes.map(({ y }) => y))).toBeLessThan(2);
   expect((composerBox?.y ?? 0) + (composerBox?.height ?? 0)).toBeLessThanOrEqual(viewport?.height ?? 0);
   expect(Math.abs(
     (portraitBox?.x ?? 0) + (portraitBox?.width ?? 0) / 2
@@ -1230,7 +1243,7 @@ test("keeps canonical messages when changing model", async ({ page }) => {
   await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue(
     "direct/qwen3.8:latest",
   );
-  await expect(page.getByRole("button", { name: "Attach files" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Add files" })).toBeDisabled();
   await page.getByRole("textbox", { name: "Ask Audrey" }).fill("Use direct Qwen");
   await page.getByRole("textbox", { name: "Ask Audrey" }).press("Enter");
   await expect.poll(() => agentModels).toEqual(["fast", "direct/qwen3.8:latest"]);
@@ -1827,14 +1840,29 @@ test("keeps the server-owned run alive when the browser reloads", async ({ page 
   expect(await page.evaluate(() => sessionStorage.getItem("__testRunCancelObserved"))).toBeNull();
 });
 
-test("closes the attachment picker with its arrow and an outside click", async ({ page }) => {
+test("explains and dismisses the mutually exclusive file and tools pickers", async ({ page }) => {
   await mockAudreyApi(page);
   await page.route("**/api/files**", (route) => json(route, browserFileListing([])));
   await page.goto("./");
 
-  const attachButton = page.getByRole("button", { name: "Attach files" });
+  const attachButton = page.getByRole("button", { name: "Add files" });
+  const toolsButton = page.getByRole("button", { name: "Tools and skills: Automatic" });
   const picker = page.getByRole("region", { name: "Choose attachments" });
+  const skillPicker = page.getByRole("dialog", { name: "Choose how Audrey uses tools" });
   await attachButton.click();
+  await expect(picker).toBeVisible();
+  await expect(picker).toContainText("Upload a new file or choose ready files from My Files.");
+  await toolsButton.click();
+  await expect(picker).toHaveCount(0);
+  await expect(skillPicker).toBeVisible();
+  await expect(skillPicker).toContainText(
+    "Audrey chooses the available tools when they are useful.",
+  );
+  await expect(skillPicker).toContainText(
+    "Analyze uploaded videos and documents from your own evidence.",
+  );
+  await attachButton.click();
+  await expect(skillPicker).toHaveCount(0);
   await expect(picker).toBeVisible();
   await picker.getByRole("button", { name: "Hide attachment picker" }).click();
   await expect(picker).toHaveCount(0);
@@ -1842,9 +1870,40 @@ test("closes the attachment picker with its arrow and an outside click", async (
 
   await attachButton.click();
   await expect(picker).toBeVisible();
-  await page.getByRole("heading", { name: "Browser smoke" }).click();
+  await page.keyboard.press("Escape");
   await expect(picker).toHaveCount(0);
-  await expect(attachButton).toHaveAttribute("aria-expanded", "false");
+  await expect(attachButton).toBeFocused();
+
+  await toolsButton.click();
+  await expect(skillPicker).toBeVisible();
+  await page.getByRole("heading", { name: "Browser smoke" }).click();
+  await expect(skillPicker).toHaveCount(0);
+  await expect(toolsButton).toHaveAttribute("aria-expanded", "false");
+});
+
+test("stacks the composer controls without narrow-screen overflow", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockAudreyApi(page);
+  await page.goto("./");
+
+  const composerBox = await page.locator(".composer").boundingBox();
+  const controlBoxes = await page.locator(".composer-control-rail > *").evaluateAll(
+    (controls) => controls.map((control) => {
+      const box = control.getBoundingClientRect();
+      return { x: box.x, y: box.y, width: box.width, right: box.right };
+    }),
+  );
+  expect(composerBox).not.toBeNull();
+  expect(controlBoxes).toHaveLength(3);
+  const controlYs = controlBoxes.map(({ y }) => y);
+  expect(controlYs).toEqual([...controlYs].sort((left, right) => left - right));
+  expect(new Set(controlYs).size).toBe(3);
+  for (const box of controlBoxes) {
+    expect(box.x).toBeGreaterThanOrEqual((composerBox?.x ?? 0) - 1);
+    expect(box.right).toBeLessThanOrEqual(
+      (composerBox?.x ?? 0) + (composerBox?.width ?? 0) + 1,
+    );
+  }
 });
 
 test("uploads an image and a document in chat, then sends both with the question", async ({ page }) => {
@@ -1903,11 +1962,11 @@ test("uploads an image and a document in chat, then sends both with the question
   });
 
   await page.goto("./");
-  await page.getByRole("button", { name: "Attach files" }).click();
+  await page.getByRole("button", { name: "Add files" }).click();
   const input = page.getByLabel("Choose a file from your device");
   await input.setInputFiles({ name: "diagram.png", mimeType: "image/png", buffer: Buffer.from("image") });
   await expect(page.getByRole("button", { name: "Remove attachment diagram.png" })).toBeVisible();
-  await page.getByRole("button", { name: "Attach files" }).click();
+  await page.getByRole("button", { name: "Add files" }).click();
   await input.setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("notes") });
   await expect(page.getByRole("button", { name: "Remove attachment notes.txt" })).toBeVisible();
 
@@ -1963,7 +2022,7 @@ test("keeps a video question drafted until the chat upload is ready", async ({ p
   });
 
   await page.goto("./");
-  await page.getByRole("button", { name: "Attach files" }).click();
+  await page.getByRole("button", { name: "Add files" }).click();
   await page.getByLabel("Choose a file from your device")
     .setInputFiles({ name: "clip.mp4", mimeType: "video/mp4", buffer: Buffer.from("video") });
   await expect(page.getByText(/clip.mp4 is processing/)).toBeVisible();
@@ -2078,7 +2137,7 @@ test("attaches an owner file through the minimized AG-UI request", async ({ page
   const savedQuestion = page.locator(".message-user").first();
   await expect(savedQuestion.getByLabel("Attached file field-notes.txt")).toBeVisible();
   await expect(savedQuestion.getByRole("img", { name: "saved-diagram.png" })).toBeVisible();
-  await page.getByRole("button", { name: "Attach files" }).click();
+  await page.getByRole("button", { name: "Add files" }).click();
   const picker = page.getByRole("region", { name: "Choose attachments" });
   await picker.getByRole("button", { name: /field-notes\.txt/ }).click();
   await picker.getByRole("button", { name: /portrait-one\.png/ }).click();
@@ -2787,7 +2846,7 @@ test("retries a failed attached question as a fresh owner-bound turn", async ({ 
   });
 
   await page.goto("./");
-  await page.getByRole("button", { name: "Attach files" }).click();
+  await page.getByRole("button", { name: "Add files" }).click();
   await page.getByRole("region", { name: "Choose attachments" })
     .getByRole("button", { name: /retry-notes\.txt/ }).click();
   const composer = page.getByRole("textbox", { name: "Ask Audrey" });
@@ -3051,6 +3110,10 @@ async function mockAudreyApi(
       await json(route, { items: models });
       return;
     }
+    if (url.pathname === "/api/skills") {
+      await json(route, { enabled: true, status: "ready", items: browserSkills() });
+      return;
+    }
     await route.abort("failed");
   });
 }
@@ -3080,6 +3143,19 @@ function browserTester() {
     ...browserUser(),
     groups: ["testers", "users"],
   };
+}
+
+function browserSkills() {
+  return [
+    {
+      id: "video-analysis",
+      name: "Video analysis",
+      description: "Analyze uploaded videos and documents from your own evidence.",
+      version: 1,
+      supported_modes: ["auto", "fast", "deep"],
+      availability: "available",
+    },
+  ];
 }
 
 function browserModels() {
