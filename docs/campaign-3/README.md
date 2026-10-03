@@ -2,8 +2,9 @@
 
 **Status:** Campaign 3 Phases 1–11 are complete. Phases 12–14 are
 laptop-complete and awaiting their targeted live gates. Phase 15 Slices 15A and
-15B are live-passed; Slice 15C is laptop-complete and awaits native browser
-acceptance.
+15B are live-passed; Slices 15C and 15D are laptop-complete and await their
+combined native browser gate. Phase 16 native document tools is approved and
+queued after Phase 15.
 
 The Milestone 2E parity build is laptop-complete across native memory
 settings, owner-bound file and video upload and inspection, source and answer
@@ -74,8 +75,15 @@ membership APIs, conversation grouping, deletion cleanup, and backup/restart
 coverage. Its 3,113-test laptop gate and targeted restart smoke both pass. Slice
 15C adds compact sidebar project navigation, project home management, Ready-file
 selection, project conversation creation, breadcrumbs, and conversation
-move/ungroup controls; its native browser gate is pending. Slice 15D will add
-bounded reusable instructions and selected-file context.
+move/ungroup controls. Slice 15D adds server-resolved project snapshots, bounded
+selected-file retrieval, prompt-injection boundaries, and persisted private-file
+sources. The full hermetic backend suite passes 3,135 tests; their combined
+native browser gate is pending.
+
+Phase 16 was approved on 2026-10-03. It adds native approval and immutable
+revision foundations, then private template-to-DOCX generation, isolated PDF
+rendering, and literal-only spreadsheet revisions. Formula execution and
+sharing remain separate later approval decisions.
 
 Phase 6 completed on 2026-09-30. Slice 6A's probe-only comparison finished
 148 valid calls across Tev1 0.8B, Tev1 4B, Nimble, and the incumbent. On the 23
@@ -83,10 +91,10 @@ cases that reach Audrey's model router, `qwen3.5:4b` scored 23/23 and Nimble
 22/23; both Tev1 sizes trailed further. Nimble also added a costly reasoning
 route and escalation, loaded more slowly, and used over twice the resident
 memory. No candidate cleared the gate, Slice 6B was not opened, and no
-production classifier or config changed. A 2026-10-03 probe-only follow-up is
-prepared for Clef 27B and Clef Flash 9B. It repeats the same router comparison
-and adds a broad typed-decision benchmark; live results are pending and the
-incumbent remains unchanged.
+production classifier or config changed. The 2026-10-03 Clef follow-up is
+also complete: full Clef matched all 69 repeated production-reached samples but
+failed the 20-second cold-load and residency gates; Clef Flash returned two
+reached cold-load timeouts. The incumbent remains unchanged.
 
 Phase 7 OCR completed on 2026-09-30. Slice 7A adds bounded English OCR for
 image-only PDFs through the durable media-worker queue. The corrected live
@@ -145,7 +153,7 @@ and finally adds the first general skills layer on that owned surface.
 | 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | Complete (3A–3C live-settled; explicit grounded-document pilot ships; automatic selection deferred) |
 | 04 | [File and artifact downloads](phase-04-file-downloads.md) | Owner-scoped recovery of stored originals and useful derived artifacts from the native Files surface | Phase 03 explicit-skill ship decision | Complete |
 | 05 | [Responses API compatibility](phase-05-responses-api.md) | OpenAI Responses clients use Audrey's existing authenticated generation and policy boundaries | Phase 04 completion | Complete (5A and 5B live-settled) |
-| 06 | [System One decision routing](phase-06-system-one-routing.md) | Measure purpose-built local decision models against Audrey's incumbent router and retain a one-setting rollback | Phase 05 Slice 5B gate | Original comparison complete; Clef follow-up awaiting live measurement |
+| 06 | [System One decision routing](phase-06-system-one-routing.md) | Measure purpose-built local decision models against Audrey's incumbent router and retain a one-setting rollback | Phase 05 Slice 5B gate | Complete (all candidates measured; incumbent retained) |
 | 07 | [Scanned PDF OCR](phase-07-scanned-pdf-ocr.md) | Queue image-only PDFs for bounded owner-scoped OCR, indexing, and native reading | Phase 06 decision | Complete (OCR and PDF presentation live-settled) |
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Transcribe, summarize, search, inspect, and attach spoken audio as a first-class file kind | Phase 07 completion | Complete (8A and 8B live-passed) |
 | 09 | [Broader spoken audio](phase-09-broader-audio.md) | Admit measured OGG, Opus, and raw AAC containers before separately scoped speaker or media analysis | Phase 08 and Phase 2D.5 completion | Complete (9A live-passed) |
@@ -154,10 +162,11 @@ and finally adds the first general skills layer on that owned surface.
 | 12 | [Sidebar navigation](phase-12-sidebar-navigation.md) | Simplify primary conversation creation and move My Files into a distinct top-bar action | Phase 11 completion | Revised Slice 12A laptop-complete; native browser gate pending |
 | 13 | [Responses multimodal input](phase-13-responses-multimodal-input.md) | Accept typed text and bounded inline image parts through the shared Responses adapter | Phase 12 implementation | Slice 13A laptop-complete; targeted live gate pending |
 | 14 | [Bot accounts and token lifetimes](phase-14-bot-accounts-and-token-lifetimes.md) | Add limited automation accounts, intentional permanent PATs, and fresh admin data on every open | Phase 13 implementation | Slice 14A laptop-complete; native acceptance pending |
-| 15 | [Composer controls and Projects](phase-15-composer-and-projects.md) | Clarify and rebalance the composer, then group conversations with reusable instructions and selected-file context | Phase 14 implementation | Slices 15A–15B live-passed; Slice 15C laptop-complete, browser gate pending |
+| 15 | [Composer controls and Projects](phase-15-composer-and-projects.md) | Clarify and rebalance the composer, then group conversations with reusable instructions and selected-file context | Phase 14 implementation | Slices 15A–15B live-passed; Slices 15C–15D laptop-complete, combined browser gate pending |
+| 16 | [Native document tools](phase-16-native-document-tools.md) | Add approved, private, verified document generation and revision through native approval and isolated workers | Phase 15 acceptance | Approved; Slice 16A queued |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1
-through Campaign 3 Phase 15, or use the topic filenames.
+through Campaign 3 Phase 16, or use the topic filenames.
 
 ## Campaign rules
 
@@ -186,5 +195,6 @@ navigation slice ahead of Item 7. Its requested top-bar correction is ready
 for browser acceptance, and Item 7's first multimodal slice is ready for its
 targeted live gate. Phase 14's account administration slice is also
 laptop-complete and awaits its native browser and PAT checks. Phase 15 Slices
-15A and 15B are live-passed. Slice 15C's Projects navigation and management UI
-is laptop-complete and awaits native browser acceptance.
+15A and 15B are live-passed. Slices 15C and 15D are laptop-complete and await
+their combined native browser acceptance. Approved Phase 16 starts with the
+approval and immutable revision foundation after that gate.

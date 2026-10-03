@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import audrey.routes.app.runs as app_runs
-from audrey.app_state import ApplicationStore, AttachmentSnapshot
+from audrey.app_state import ApplicationStore, AttachmentSnapshot, SourceSnapshot
 from audrey.auth import require_principal
 from audrey.identity import Principal
 from audrey.models.ollama import OllamaClient
@@ -25,6 +25,11 @@ from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.messages import conversation_has_image, has_image_part
 from audrey.pipeline.prompts import VIDEO_SPECIALIST_SYSTEM
 from audrey.pipeline.run_events import RunEventContext, RunEventEmitter, RunFinishedEvent
+from audrey.project_context import (
+    ProjectContextSnapshot,
+    ProjectFileSnapshot,
+    ProjectPassage,
+)
 from audrey.routes import files as upload_routes
 from audrey.routes.app import files as native_files
 from audrey.routes.app import router
@@ -1635,5 +1640,119 @@ def test_native_agent_carries_explicit_skill_and_restricted_tools(tmp_path):
         assert run["skill_version"] == 3
         assert run["skill_digest"] == "b" * 64
         assert run["skill_reason"] == "request"
+    finally:
+        store.close()
+
+
+def test_project_context_is_model_only_and_persists_private_file_sources(
+    tmp_path,
+    monkeypatch,
+):
+    captured: dict[str, Any] = {}
+
+    async def capture_stream(app, payload, messages, options, **kwargs):
+        captured["messages"] = messages
+        captured["routing_messages"] = kwargs["routing_messages"]
+        emitter = kwargs["event_context"].emitter
+        assert emitter is not None
+        emitter.run_started()
+        yield "opened"
+        emitter.message_started()
+        emitter.text_delta("grounded answer")
+        emitter.usage_reported(prompt_tokens=20, completion_tokens=4)
+        emitter.message_finished(status="completed")
+        emitter.run_finished(
+            status="succeeded",
+            finish_reason="stop",
+            concrete_model="qwen-test",
+        )
+        yield "closed"
+
+    app, store, owner, _manager = _native_app(
+        tmp_path,
+        stream_factory=capture_stream,
+    )
+    project = asyncio.run(
+        store.projects.create(
+            user_id=owner.user_id,
+            name="Reference",
+            instructions="Use a short comparison.",
+        )
+    )
+    conversation = asyncio.run(
+        store.conversations.create(
+            user_id=owner.user_id,
+            default_mode="fast",
+            project_id=project.project_id,
+        )
+    )
+    source = SourceSnapshot(
+        source_id="src_project_alpha",
+        title="alpha.txt",
+        url="",
+    )
+    snapshot = ProjectContextSnapshot(
+        project_id=project.project_id,
+        name=project.name,
+        instructions=project.instructions,
+        files=(
+            ProjectFileSnapshot(
+                file_id="file_alpha",
+                filename="alpha.txt",
+                mime="text/plain",
+                kind="text",
+            ),
+        ),
+        passages=(
+            ProjectPassage(
+                file_id="file_alpha",
+                filename="alpha.txt",
+                kind="text",
+                artifact="document",
+                chunk_idx=0,
+                text="The alpha fact is 42.",
+            ),
+        ),
+        sources=(source,),
+    )
+
+    async def fake_context(_request, **kwargs):
+        assert kwargs["conversation"].project_id == project.project_id
+        assert kwargs["query"] == "What is the alpha fact?"
+        return snapshot
+
+    monkeypatch.setattr(app_runs, "resolve_project_context", fake_context)
+    try:
+        with TestClient(app) as client:
+            created = client.post(
+                f"/api/conversations/{conversation.conversation_id}/runs",
+                json={"content": "What is the alpha fact?"},
+            )
+            assert created.status_code == 202
+            events = _sse_events(client.get(created.json()["events_url"]).text)
+            observed = [event for event in events if event["type"] == "source.observed"]
+            assert [(event["title"], event["source_type"]) for event in observed] == [
+                ("alpha.txt", "project_file"),
+            ]
+            saved = client.get(
+                f"/api/conversations/{conversation.conversation_id}/messages"
+            ).json()["items"]
+            assert saved[-1]["sources"] == [{
+                "id": "src_project_alpha",
+                "title": "alpha.txt",
+                "url": "",
+            }]
+
+        prompt = captured["messages"]
+        assert [message.get("name") for message in prompt[:2]] == [
+            "audrey_user_preferences",
+            "audrey_project_context",
+        ]
+        assert "Use a short comparison." in prompt[1]["content"]
+        assert "The alpha fact is 42." in prompt[1]["content"]
+        assert all(
+            message.get("name") != "audrey_project_context"
+            for message in captured["routing_messages"]
+        )
     finally:
         store.close()

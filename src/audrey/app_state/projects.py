@@ -87,6 +87,47 @@ class ProjectsRepository:
             row = self._project_row_locked(user_id, project_id)
         return _project_from_row(row) if row is not None else None
 
+    async def snapshot_for_conversation(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+    ) -> tuple[ProjectRecord, tuple[ProjectFileRecord, ...]] | None:
+        """Read one conversation's project and file relations under one lock."""
+
+        return await asyncio.to_thread(
+            self._snapshot_for_conversation_sync,
+            user_id,
+            conversation_id,
+        )
+
+    def _snapshot_for_conversation_sync(
+        self,
+        user_id: str,
+        conversation_id: str,
+    ) -> tuple[ProjectRecord, tuple[ProjectFileRecord, ...]] | None:
+        user_id = _required(user_id, "user id")
+        conversation_id = _required(conversation_id, "conversation id")
+        with self._lock:
+            project_row = self._conn.execute(
+                "SELECT p.project_id, p.user_id, p.name, p.instructions, "
+                "p.created_at, p.updated_at FROM app_conversations AS c "
+                "JOIN app_projects AS p ON p.project_id = c.project_id "
+                "WHERE c.user_id = ? AND c.conversation_id = ? AND p.user_id = ?",
+                (user_id, conversation_id, user_id),
+            ).fetchone()
+            if project_row is None:
+                return None
+            file_rows = self._conn.execute(
+                "SELECT project_id, file_id, added_at FROM app_project_files "
+                "WHERE project_id = ? ORDER BY added_at DESC, file_id",
+                (str(project_row["project_id"]),),
+            ).fetchall()
+        return (
+            _project_from_row(project_row),
+            tuple(_project_file_from_row(row) for row in file_rows),
+        )
+
     async def list_page(
         self,
         *,

@@ -49,6 +49,10 @@ class ConversationHasActiveRunError(RuntimeError):
     """A destructive conversation mutation raced an active generation."""
 
 
+class ConversationProjectChangedError(RuntimeError):
+    """Project membership changed while native run context was being prepared."""
+
+
 class ConversationArchivedError(RuntimeError):
     """A caller attempted to start a run in an archived conversation."""
 
@@ -596,6 +600,8 @@ class ConversationsRepository:
         skill_version: int = 0,
         skill_digest: str = "",
         skill_reason: str = "",
+        expected_project_id: str | None = None,
+        enforce_project_id: bool = False,
     ) -> StartedRun | None:
         """Create run plus user/assistant messages in one write transaction."""
 
@@ -612,6 +618,8 @@ class ConversationsRepository:
             skill_version,
             skill_digest,
             skill_reason,
+            expected_project_id,
+            enforce_project_id,
         )
 
     def _begin_run_sync(
@@ -627,6 +635,8 @@ class ConversationsRepository:
         skill_version: int,
         skill_digest: str,
         skill_reason: str,
+        expected_project_id: str | None,
+        enforce_project_id: bool,
     ) -> StartedRun | None:
         user_id = _required(user_id, "user id")
         conversation_id = _required(conversation_id, "conversation id")
@@ -646,6 +656,15 @@ class ConversationsRepository:
                 if conversation_row is None:
                     self._conn.rollback()
                     return None
+                actual_project_id = (
+                    str(conversation_row["project_id"])
+                    if conversation_row["project_id"] is not None
+                    else None
+                )
+                if enforce_project_id and actual_project_id != expected_project_id:
+                    raise ConversationProjectChangedError(
+                        "conversation project changed while the run was starting"
+                    )
                 active_owner = self._conn.execute(
                     "SELECT 1 FROM app_users WHERE user_id = ? AND status = 'active'",
                     (user_id,),

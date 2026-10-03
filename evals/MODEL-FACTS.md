@@ -1,9 +1,115 @@
-# Model facts — what we have actually measured
+# Audrey model evaluation report and evidence ledger
 
-A running ledger of what is **definitively known** about each model on this box.
-Started 2026-08-19.
+**Last updated:** October 3, 2026
 
-## The entry bar
+This document records measured model behavior on Audrey's hardware. The public
+report below summarizes decisions that affect the product. The detailed ledger
+that follows preserves the evidence, limitations, and unresolved questions used
+to reach those decisions. Vendor specifications are identified separately from
+Audrey measurements.
+
+## Public report: local decision models for Audrey routing
+
+### Executive summary
+
+Audrey currently uses `qwen3.5:4b` for task routing. Five purpose-built local
+decision models or variants have been evaluated as possible replacements. Full
+Clef produced the strongest raw classification result, but its 55-second cold
+start and 32.48 GB runtime footprint make it unsuitable for a latency-sensitive,
+always-available router. Clef Flash approached the incumbent's warm latency but
+failed multiple requests while loading. The smaller Tev and Nimble candidates
+were fast enough but introduced routing errors or additional deep-panel
+escalations. Audrey therefore retains `qwen3.5:4b`.
+
+### Question and method
+
+The primary question was whether a typed decision model could replace Audrey's
+generative JSON router while preserving routing quality, latency, reliability,
+and GPU headroom. The tracked fixture contains 36 balanced prompts: 12 code,
+12 reasoning, and 12 general. Audrey's deterministic keyword and short-prompt
+gates resolve 13 prompts before model inference, leaving 23 prompts that
+represent the production router's actual work.
+
+The September comparison used one warm pass per model on Ollama 0.35.0. The
+October Clef follow-up used three warm passes per model on Ollama 0.35.1.
+Results with different repeat counts are reported with their actual
+denominators rather than pooled. Cold requests deliberately begin with the
+model unloaded. Residency is sequentially observed through Ollama and does not
+claim concurrent workload performance.
+
+### Routing results
+
+| Model | Production-reached result | Warm p50 | Cold request | Observed residency | Decision |
+|---|---:|---:|---:|---:|---|
+| `tev1:0.8b` | 13/23 | 0.089s | 4.98s | 0.89 GB | Rejected: ten costly false-reasoning routes |
+| `tev1:latest` | 18/23 | 0.169s | 5.43s | 4.67 GB | Rejected: three costly false-reasoning routes |
+| `nimble:latest` | 22/23 | 0.200s | 15.21s | 8.97 GB | Rejected: one costly error and one added escalation |
+| `clef:latest` | **69/69** | 0.341s | >20s; 55.13s in broad probe | 32.48 GB | Rejected: cold latency and footprint |
+| `clef-flash:latest` | 67/69 | 0.204s | >20s | 12.78 GB | Rejected: two reached-case load timeouts |
+| `qwen3.5:4b` | **23/23 and 69/69** | 0.184s and 0.197s | 11.06s and 10.29s | 4.20 GB | **Retained** |
+
+Full Clef matched the incumbent on every production-reached sample and made no
+costly false-reasoning error. Its observed residency was 7.7 times the
+incumbent's. Combined with the 19.64 GB `qwen3.8:32k` residency observed in the
+September run, it would require about 52.1 GB, beyond the host's 48 GB GPU
+capacity. Clef Flash returned correct decisions once responsive, but its cold
+request and the next four sequential requests each reached Audrey's 20-second
+timeout.
+
+### Broader Clef decision benchmark
+
+Clef was also measured on 12 cases containing 29 typed questions across text,
+structured JSON, and a generated image. Three warm rounds produced 36 requests
+and 87 scored answers.
+
+| Measure | Result |
+|---|---:|
+| Valid requests | 36/36 |
+| Correct questions | 84/87 |
+| Exact cases | 33/36 |
+| Choice | 30/33 |
+| Yes/no | 36/36 |
+| Score | 18/18 |
+| Structured JSON exact cases | 9/9 |
+| Image exact cases | 3/3 |
+| Warm p50 / p95 | 0.381s / 0.457s |
+
+The single repeated error labeled a legitimate password-change notification as
+phishing in all three rounds. This result establishes strong typed-decision
+performance over the tested cases. It does not measure conversational writing,
+long-form reasoning, or general answer quality because System One is a decision
+endpoint.
+
+### Decision and retained router
+
+`qwen3.5:4b` remains the production router, and no additional router swap is
+scheduled. No smaller Qwen 3.8 parameter model is currently published on
+Ollama's official Qwen 3.8 page; its published tags are 27B variants. The
+related Qwen 3.5 family publishes `qwen3.5:2b` at 2.7 GB and
+`qwen3.5:0.8b` at 1.0 GB, but Audrey has not measured either and does not need
+a smaller replacement for the current 4B router. These remain documented
+alternatives rather than active candidates.
+
+Official model pages:
+
+- [Qwen 3.8 on Ollama](https://ollama.com/library/qwen3.8)
+- [Qwen 3.5 on Ollama](https://ollama.com/library/qwen3.5)
+
+### Limitations and reproducibility
+
+- The routing set is Audrey-specific and intentionally small; it is not a
+  general benchmark or a claim about every classification workload.
+- The September candidates have one warm pass, while the Clef candidates have
+  three. Denominators are retained so repeat depth remains visible.
+- Residency observations are sequential. Only arithmetic establishes that full
+  Clef and the previously resident 32K Qwen model cannot fit together in 48 GB.
+- The broad Clef suite contains one image and three structured states. It is a
+  capability check, not comprehensive vision or structured-data coverage.
+- Complete machine-readable reports: [September router comparison](results/2026-09-30-systemone-router-probe-results.json), [Clef router comparison](results/2026-10-03-clef-systemone-router-results.json), and [broad Clef decisions](results/2026-10-03-clef-systemone-decision-results.json).
+
+---
+
+## Evidence standards
 
 A line goes in the per-model sections **only** if it is:
 
@@ -502,24 +608,39 @@ One candidate clears the accuracy, escalation, and footprint gate. **Keep
 `confidence` is distribution concentration and was not treated as correctness
 probability. `[2026-09-30-systemone-router-probe-results.json, 2026-09-30]`
 
-### Clef System One follow-up — awaiting live measurement 2026-10-03
+### Clef System One follow-up — rejected 2026-10-03
 
-Ollama publishes `clef:latest` as a 27B, approximately 18 GB multimodal
-decision model and `clef-flash:latest` as a latency-focused 9B, approximately
-11 GB decision model. Both require Ollama 0.35.1 or later and use the typed
-`/v1/systemone` choice, yes/no, and score contract. Clef supports image input.
-These are vendor facts, not Audrey measurements.
-`[https://ollama.com/library/clef; https://ollama.com/library/clef-flash;
-https://docs.ollama.com/api/systemone, checked 2026-10-03]`
+Ollama 0.35.1 measured `clef:latest` (27B Q4_K_M, 17.99 GB package) and
+`clef-flash:latest` (9.1B Q8_0, 10.93 GB package) on the 36-case router fixture
+for three warm rounds. Full Clef returned 108/108 correct warm samples with no
+failures, no costly false-reasoning route, 0.341s/0.347s p50/p95, and 32.48 GB
+resident. Clef Flash returned 104/108 successful and correct samples with four
+20-second timeouts, 0.204s/0.215s p50/p95, and 12.78 GB resident. The incumbent
+returned 102/108 raw-fixture correct with no failures, 0.197s/0.210s p50/p95,
+and 4.20 GB resident.
 
-The follow-up keeps the production router unchanged while it collects two
-separate reports. The router report compares both tags with `qwen3.5:4b` on the
-existing 36 cases and retains the prior model-reached accuracy and costly-route
-gate. The broad Clef report covers 12 cases and 29 choice, yes/no, and score
-questions over text, structured JSON, and image input, with accuracy,
-calibration, latency, token, and residency measurements. Because System One is
-a decision endpoint, this does not measure conversational answer quality.
-`[systemone_router_probe.py; systemone_decision_probe.py; prepared 2026-10-03]`
+After Audrey's deterministic gates, full Clef and the incumbent were both
+69/69 across the 23 production-reached cases repeated three times. Clef Flash
+was 67/69 because two reached cases timed out during cold loading; it made no
+wrong selection after becoming responsive. Both Clef models exceeded the
+router's 20-second cold timeout. The broad probe measured full Clef's cold
+request at 55.13s. Clef Flash then timed out on the cold request and first four
+warm requests before responding.
+
+Full Clef's separate broad benchmark completed 36/36 warm requests and scored
+84/87 questions, 33/36 exact cases, choice 30/33, yes/no 36/36, and score 18/18.
+JSON was 9/9 exact and image input 3/3. It consistently labeled a legitimate
+password-change notification as phishing. Warm p50/p95 was 0.381s/0.457s;
+yes/no Brier mean 0.000614, choice expected-label log loss 0.262787, and score
+out-of-range distance zero.
+
+**Keep `qwen3.5:4b`.** Full Clef passes routing quality but fails cold latency
+and footprint: its observed residency is 7.7 times the incumbent's and would
+exceed 48 GB beside the 19.64 GB `qwen3.8:32k` residency seen in the original
+run. Clef Flash fails cold-start reliability at Audrey's production timeout.
+No production implementation slice opens.
+`[2026-10-03-clef-systemone-router-results.json;
+2026-10-03-clef-systemone-decision-results.json, 2026-10-03]`
 
 ### `ornith-1.5:35b`
 
@@ -954,6 +1075,15 @@ privacy decision.
 ## Not established
 
 Open questions, and what would close each.
+
+- **Smaller Qwen router alternatives.** Ollama's official Qwen 3.8 page
+  publishes only 27B variants, so there is no smaller Qwen 3.8 parameter model.
+  The related Qwen 3.5 family publishes `qwen3.5:2b` at 2.7 GB and
+  `qwen3.5:0.8b` at 1.0 GB; neither has been measured on Audrey. The user
+  retained `qwen3.5:4b` on 2026-10-03, so no smaller-router evaluation is
+  scheduled. `[official Ollama model pages, checked 2026-10-03]`
+  ▶ *If reopened:* require repeated production-arm parse, accuracy, confidence,
+  latency, cold-load, residency, and 23 model-reached-case evidence.
 
 - **`nemotron-3.5-lightning` quality.** Scored 2/5 and then 5/5 on the hard
   suite in the same window. ⚠️ Both are **n=1 arms with no seed**, so they

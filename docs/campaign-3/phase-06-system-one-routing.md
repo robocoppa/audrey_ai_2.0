@@ -1,8 +1,8 @@
 # Campaign 3 Phase 6 - System One decision routing
 
-**Status:** The original comparison completed on 2026-09-30 and retained
-`qwen3.5:4b`. A probe-only Clef and Clef Flash follow-up is prepared and awaits
-live measurement; production routing remains unchanged.
+**Status:** Complete. The original comparison and the 2026-10-03 Clef
+follow-up are measured. No candidate cleared the complete ship gate, so Audrey
+retains `qwen3.5:4b`; Slice 6B remains unopened.
 
 ## Goal
 
@@ -167,35 +167,62 @@ accuracy, escalation behavior, and footprint. A concurrent worker-contention
 test would not rescue a candidate that already failed the earlier accuracy and
 cost gates, so no further live smoke is required for the original candidates.
 
-## Clef follow-up evaluation — prepared 2026-10-03
+## Clef follow-up measurement — completed 2026-10-03
 
-Ollama now publishes the 27B `clef:latest` and latency-focused 9B
-`clef-flash:latest` decision models. Both use `/v1/systemone`, require Ollama
-0.35.1 or later, and are evaluated as decision models rather than ordinary chat
-generators. This follow-up is measurement only: it does not register either
-model, edit `config.yaml`, or open Slice 6B.
+Ollama 0.35.1 measured the 27B `clef:latest` and 9B
+`clef-flash:latest` against the same 36 routing cases and Audrey's real
+`qwen3.5:4b` path for three warm rounds. Complete reports:
 
-The Audrey router comparison reuses the same 36-case fixture and the real
-incumbent path. Both Clef tags run before `qwen3.5:4b`, and the probe records
-the original accuracy, costly false-reasoning, uncertainty, latency, token,
-package-size, and residency fields. Clef or Clef Flash must match the
-incumbent's 23/23 model-reached accuracy without adding a costly reasoning
-route or escalation before footprint or speed can justify a production trial.
+- [`2026-10-03-clef-systemone-router-results.json`](../../evals/results/2026-10-03-clef-systemone-router-results.json)
+- [`2026-10-03-clef-systemone-decision-results.json`](../../evals/results/2026-10-03-clef-systemone-decision-results.json)
 
-`scripts/probes/systemone_decision_probe.py` adds a separate broad System One
-measurement for Clef. Its tracked fixture contains 12 cases and 29 questions:
-11 choice, 12 yes/no, and 6 score decisions across eight text inputs, three
-structured JSON states, and one generated image. It reports exact-case and
-per-question accuracy, calibration signals, score-range error, input/output
-tokens, cold and warm latency, package metadata, and residency. This benchmark
-tests Clef's wider decision contract; it does not claim conversational answer
-quality because the endpoint does not generate chat answers.
+Raw router results across 108 warm samples per model:
 
-Run the broad Clef probe first and the router comparison second using the exact
-Tower commands in `docs/reference/live-smoke-testing.md`. The broad probe
-unloads Clef after measurement; the router probe runs the incumbent last so
-Audrey's current router is warm at the end. Live results remain pending and no
-ship decision should be recorded until both logs have been reviewed.
+| Model | Correct / all samples | Response failures | Costly false reasoning | Projected escalations | Warm p50 / p95 | Cold | Resident |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `clef:latest` | **108/108** | 0 | **0** | 3 | 0.341s / 0.347s | >20s router timeout | 32.48 GB |
+| `clef-flash:latest` | 104/108 | 4 | **0** | 7 | 0.204s / 0.215s | >20s router timeout | 12.78 GB |
+| `qwen3.5:4b` | 102/108 | 0 | 3 | 3 | **0.197s / 0.210s** | **10.29s** | **4.20 GB** |
+
+The raw incumbent mistakes repeat two legacy cases that production resolves
+before the model. Applying Audrey's current strong-keyword and short-prompt
+gates leaves 23 model-reached cases per round:
+
+| Model | Correct / reached samples | Response failures | Uncertain |
+|---|---:|---:|---:|
+| `clef:latest` | **69/69** | **0** | **0** |
+| `clef-flash:latest` | 67/69 | 2 | 0 |
+| `qwen3.5:4b` | **69/69** | **0** | **0** |
+
+Full Clef therefore matched the incumbent's production-reached routing quality
+and exceeded its raw fixture accuracy. It still fails the runtime gate. Its
+router cold request exceeded Audrey's 20-second timeout; the separate broad
+probe measured a 55.13-second cold request. Its 32.48 GB observed residency is
+7.7 times the incumbent's and would total about 52.1 GB alongside the 19.64 GB
+`qwen3.8:32k` residency observed in the original run, beyond the box's 48 GB
+VRAM. Warm routing was also about 73% slower at p50.
+
+Clef Flash was close to incumbent warm speed and every valid answer was
+correct. Its cold request and the first four warm requests each timed out after
+20 seconds. Two of those failures were among cases production sends to the
+model, leaving 67/69 successful and correct reached samples. A router that can
+stall through several production timeout windows does not clear the reliability
+or cold-latency gate, even if its eventual classifications are accurate.
+
+The broad Clef benchmark completed all 36 warm requests without response
+failure. It scored 84/87 questions and 33/36 exact cases: choice 30/33, yes/no
+36/36, and score 18/18. Structured JSON cases were 9/9 exact and the generated
+image case was 3/3 exact. The only repeated error classified a legitimate
+password-change notification as phishing in all three rounds. Warm p50/p95 was
+0.381s/0.457s; the yes/no Brier mean was 0.000614, choice expected-label log
+loss was 0.262787, and score out-of-range distance was zero. This establishes
+strong broad decision behavior, not conversational answer quality.
+
+**Decision:** retain `qwen3.5:4b`. Full Clef clears the routing-quality gate but
+fails cold latency and residency. Clef Flash fails cold-start response
+reliability. No classifier, model registry, timeout, or production config
+changed, and no repeat smoke is required unless a later Ollama or model release
+materially changes those runtime characteristics.
 
 ## Slice 6B - not opened
 
@@ -225,9 +252,9 @@ A candidate must demonstrate:
 - clean failure fallback when System One is unavailable or malformed;
 - full hermetic tests and changed-file Ruff before the live gate.
 
-The 2026-09-30 run rejected all three candidates. Audrey retains
-`qwen3.5:4b`, and the measured rejection closes this phase without a production
-backend change.
+The 2026-09-30 and 2026-10-03 runs rejected every candidate on the
+complete gate. Audrey retains `qwen3.5:4b`, and the measured rejection closes
+this phase without a production backend change.
 
 ## Later skill-selection experiment
 

@@ -190,6 +190,8 @@ class TestEvidenceSummary:
         )
         assert summary["valid"] == 2
         assert summary["accuracy"] == 0.5
+        assert summary["end_to_end_accuracy"] == pytest.approx(1 / 3, abs=0.0001)
+        assert summary["response_failures"] == 1
         assert summary["costly_false_reasoning"] == 1
         assert summary["projected_fast_to_deep_escalations"] == 2
         assert summary["latency_p50_seconds"] == 0.4

@@ -1,0 +1,1876 @@
+{
+  "cases": {
+    "by_input_kind": {
+      "image": 1,
+      "json": 3,
+      "text": 8
+    },
+    "by_question_type": {
+      "choice": 11,
+      "noul": 12,
+      "score": 6
+    },
+    "count": 12,
+    "questions": 29
+  },
+  "generated_at": "2026-10-03T18:26:21.345488+00:00",
+  "interpretation": {
+    "confidence": "distribution_concentration_not_correctness",
+    "decision_only": true,
+    "noul_threshold": 0.5,
+    "residency": "sequential_loading_not_concurrent_contention",
+    "score": "probability_weighted_zero_based_level",
+    "ship_decision": "not_automatic"
+  },
+  "ollama": {
+    "base_url": "http://ollama:11434",
+    "final_residency": [],
+    "final_residency_error": null,
+    "initial_residency": [],
+    "initial_residency_error": null,
+    "minimum_clef_version": "0.35.1",
+    "version": "0.35.1"
+  },
+  "results": [
+    {
+      "cold": {
+        "sample": {
+          "case_exact": true,
+          "case_id": "support-billing-refund",
+          "input_kind": "text",
+          "latency_seconds": 55.130461,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9725570816609272,
+              "correct": true,
+              "expected": "billing",
+              "expected_probability": 0.9957737794825697,
+              "name": "team",
+              "probabilities": {
+                "billing": 0.9957737794825697,
+                "sales": 0.001655350779612833,
+                "technical": 0.002570869737817322
+              },
+              "selected": "billing",
+              "type": "choice"
+            },
+            {
+              "brier": 7.064366967498877e-05,
+              "correct": true,
+              "expected": true,
+              "name": "refund_requested",
+              "predicted": true,
+              "probability_true": 0.9915950211377429,
+              "type": "noul"
+            },
+            {
+              "confidence": 0.7714726897692876,
+              "correct": true,
+              "expected_maximum": 1.6,
+              "expected_minimum": 0.25,
+              "name": "urgency",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.047865548694545984,
+                "1": 0.9413864396006295,
+                "2": 0.01074801170482447
+              },
+              "score": 0.9628824630102785,
+              "type": "score"
+            }
+          ],
+          "questions_correct": 3,
+          "questions_total": 3,
+          "round": 0,
+          "usage": {
+            "input_tokens": 359,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        "unload_succeeded": true
+      },
+      "model": "clef:latest",
+      "model_metadata": {
+        "name": "clef:latest",
+        "parameter_size": "27.0B",
+        "quantization_level": "Q4_K_M",
+        "size_bytes": 17987253552
+      },
+      "residency": {
+        "after": [
+          {
+            "expires_at": "2026-10-03T18:36:19.918216438Z",
+            "name": "clef:latest",
+            "size_bytes": 32483091412,
+            "size_vram_bytes": 32483091412
+          }
+        ],
+        "before": [],
+        "cleanup_unload_succeeded": true,
+        "evicted_models": [],
+        "newly_loaded_models": [
+          "clef:latest"
+        ],
+        "observation_errors": []
+      },
+      "samples": [
+        {
+          "case_exact": true,
+          "case_id": "support-billing-refund",
+          "input_kind": "text",
+          "latency_seconds": 0.413257,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9725570816609272,
+              "correct": true,
+              "expected": "billing",
+              "expected_probability": 0.9957737794825697,
+              "name": "team",
+              "probabilities": {
+                "billing": 0.9957737794825697,
+                "sales": 0.001655350779612833,
+                "technical": 0.002570869737817322
+              },
+              "selected": "billing",
+              "type": "choice"
+            },
+            {
+              "brier": 7.064366967498877e-05,
+              "correct": true,
+              "expected": true,
+              "name": "refund_requested",
+              "predicted": true,
+              "probability_true": 0.9915950211377429,
+              "type": "noul"
+            },
+            {
+              "confidence": 0.7714726897692876,
+              "correct": true,
+              "expected_maximum": 1.6,
+              "expected_minimum": 0.25,
+              "name": "urgency",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.047865548694545984,
+                "1": 0.9413864396006295,
+                "2": 0.01074801170482447
+              },
+              "score": 0.9628824630102785,
+              "type": "score"
+            }
+          ],
+          "questions_correct": 3,
+          "questions_total": 3,
+          "round": 1,
+          "usage": {
+            "input_tokens": 359,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "support-technical-outage",
+          "input_kind": "text",
+          "latency_seconds": 0.411233,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.6688011336491815,
+              "correct": true,
+              "expected": "technical",
+              "expected_probability": 0.9071099055656284,
+              "name": "team",
+              "probabilities": {
+                "billing": 0.06729350691356183,
+                "sales": 0.025596587520809747,
+                "technical": 0.9071099055656284
+              },
+              "selected": "technical",
+              "type": "choice"
+            },
+            {
+              "brier": 0.00020740247911869129,
+              "correct": true,
+              "expected": true,
+              "name": "widespread",
+              "predicted": true,
+              "probability_true": 0.9855985251061327,
+              "type": "noul"
+            },
+            {
+              "confidence": 0.7878414094289925,
+              "correct": true,
+              "expected_maximum": 3.0,
+              "expected_minimum": 2.25,
+              "name": "severity",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.005308933434631197,
+                "1": 0.006335050252343906,
+                "2": 0.058698389533496986,
+                "3": 0.9296576267795278
+              },
+              "score": 2.9127047096579215,
+              "type": "score"
+            }
+          ],
+          "questions_correct": 3,
+          "questions_total": 3,
+          "round": 1,
+          "usage": {
+            "input_tokens": 368,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "support-sales-upgrade",
+          "input_kind": "text",
+          "latency_seconds": 0.332333,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9564000345641535,
+              "correct": true,
+              "expected": "sales",
+              "expected_probability": 0.9927458867227921,
+              "name": "team",
+              "probabilities": {
+                "billing": 0.0030519828652815733,
+                "sales": 0.9927458867227921,
+                "technical": 0.004202130411926363
+              },
+              "selected": "sales",
+              "type": "choice"
+            },
+            {
+              "brier": 2.136852362712256e-05,
+              "correct": true,
+              "expected": false,
+              "name": "refund_requested",
+              "predicted": false,
+              "probability_true": 0.004622610044890501,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 1,
+          "usage": {
+            "input_tokens": 264,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "tool-read-only",
+          "input_kind": "text",
+          "latency_seconds": 0.33922,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9230380317268079,
+              "correct": true,
+              "expected": "read_only",
+              "expected_probability": 0.9857584683686611,
+              "name": "operation",
+              "probabilities": {
+                "destructive": 0.007373092838714609,
+                "read_only": 0.9857584683686611,
+                "write": 0.0068684387926243075
+              },
+              "selected": "read_only",
+              "type": "choice"
+            },
+            {
+              "brier": 6.444080290862755e-05,
+              "correct": true,
+              "expected": false,
+              "name": "harm",
+              "predicted": false,
+              "probability_true": 0.008027502906173722,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 1,
+          "usage": {
+            "input_tokens": 264,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "tool-high-blast-radius",
+          "input_kind": "text",
+          "latency_seconds": 0.451301,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.7219733340787844,
+              "correct": true,
+              "expected": "destructive",
+              "expected_probability": 0.9227087789889452,
+              "name": "operation",
+              "probabilities": {
+                "destructive": 0.9227087789889452,
+                "read_only": 0.011983529333360814,
+                "write": 0.06530769167769408
+              },
+              "selected": "destructive",
+              "type": "choice"
+            },
+            {
+              "brier": 0.005397679353336836,
+              "correct": true,
+              "expected": true,
+              "name": "harm",
+              "predicted": true,
+              "probability_true": 0.9265310994138551,
+              "type": "noul"
+            },
+            {
+              "confidence": 0.8126798805601211,
+              "correct": true,
+              "expected_maximum": 3.0,
+              "expected_minimum": 2.25,
+              "name": "blast_radius",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.009908643298348289,
+                "1": 0.010173880883616225,
+                "2": 0.033916276155716095,
+                "3": 0.9460011996623194
+              },
+              "score": 2.916010032182007,
+              "type": "score"
+            }
+          ],
+          "questions_correct": 3,
+          "questions_total": 3,
+          "round": 1,
+          "usage": {
+            "input_tokens": 389,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "message-phishing",
+          "input_kind": "text",
+          "latency_seconds": 0.363558,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9242670099774427,
+              "correct": true,
+              "expected": "phishing",
+              "expected_probability": 0.9829355771741695,
+              "name": "message_type",
+              "probabilities": {
+                "internal": 0.006648132883050861,
+                "marketing": 0.005558774274840342,
+                "phishing": 0.9829355771741695,
+                "transactional": 0.004857515667939487
+              },
+              "selected": "phishing",
+              "type": "choice"
+            },
+            {
+              "brier": 6.834259680883296e-05,
+              "correct": true,
+              "expected": true,
+              "name": "requests_secret",
+              "predicted": true,
+              "probability_true": 0.9917330418648191,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 1,
+          "usage": {
+            "input_tokens": 289,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": false,
+          "case_id": "message-transactional",
+          "input_kind": "text",
+          "latency_seconds": 0.356416,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.6629976489911393,
+              "correct": false,
+              "expected": "transactional",
+              "expected_probability": 0.07657386890780947,
+              "name": "message_type",
+              "probabilities": {
+                "internal": 0.024328325502377485,
+                "marketing": 0.01702347130716043,
+                "phishing": 0.8820743342826526,
+                "transactional": 0.07657386890780947
+              },
+              "selected": "phishing",
+              "type": "choice"
+            },
+            {
+              "brier": 0.0010244266523460697,
+              "correct": true,
+              "expected": false,
+              "name": "requests_secret",
+              "predicted": false,
+              "probability_true": 0.032006665748654135,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 1,
+          "questions_total": 2,
+          "round": 1,
+          "usage": {
+            "input_tokens": 294,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "invoice-structured",
+          "input_kind": "json",
+          "latency_seconds": 0.450887,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.8881498607975672,
+              "correct": true,
+              "expected": "approve",
+              "expected_probability": 0.9775184319598129,
+              "name": "action",
+              "probabilities": {
+                "approve": 0.9775184319598129,
+                "manual_review": 0.012910458115811619,
+                "reject": 0.009571109924375385
+              },
+              "selected": "approve",
+              "type": "choice"
+            },
+            {
+              "brier": 3.6165833475022123e-05,
+              "correct": true,
+              "expected": false,
+              "name": "known_duplicate",
+              "predicted": false,
+              "probability_true": 0.006013803578021328,
+              "type": "noul"
+            },
+            {
+              "confidence": 0.8537409616452731,
+              "correct": true,
+              "expected_maximum": 0.8,
+              "expected_minimum": 0.0,
+              "name": "risk",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.9680949046840596,
+                "1": 0.022463152122361683,
+                "2": 0.009441943193578807
+              },
+              "score": 0.0413470385095193,
+              "type": "score"
+            }
+          ],
+          "questions_correct": 3,
+          "questions_total": 3,
+          "round": 1,
+          "usage": {
+            "input_tokens": 389,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "deployment-structured",
+          "input_kind": "json",
+          "latency_seconds": 0.456822,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9066963204900045,
+              "correct": true,
+              "expected": "rollback",
+              "expected_probability": 0.9820259342975121,
+              "name": "action",
+              "probabilities": {
+                "continue": 0.008935926303682028,
+                "observe": 0.009038139398805933,
+                "rollback": 0.9820259342975121
+              },
+              "selected": "rollback",
+              "type": "choice"
+            },
+            {
+              "brier": 0.0001710991550289511,
+              "correct": true,
+              "expected": true,
+              "name": "critical",
+              "predicted": true,
+              "probability_true": 0.986919512431528,
+              "type": "noul"
+            },
+            {
+              "confidence": 0.8734660925135869,
+              "correct": true,
+              "expected_maximum": 3.0,
+              "expected_minimum": 2.4,
+              "name": "severity",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.004130105491191203,
+                "1": 0.004869106617559528,
+                "2": 0.025322786647141115,
+                "3": 0.9656780012441082
+              },
+              "score": 2.952548683644166,
+              "type": "score"
+            }
+          ],
+          "questions_correct": 3,
+          "questions_total": 3,
+          "round": 1,
+          "usage": {
+            "input_tokens": 393,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "routine-priority",
+          "input_kind": "text",
+          "latency_seconds": 0.338614,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.7101581856707906,
+              "correct": true,
+              "expected_maximum": 0.75,
+              "expected_minimum": 0.0,
+              "name": "priority",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.8968643904099242,
+                "1": 0.08024685880726415,
+                "2": 0.013990686169039937,
+                "3": 0.008898064613771685
+              },
+              "score": 0.13492242498665907,
+              "type": "score"
+            },
+            {
+              "brier": 2.88156238278559e-05,
+              "correct": true,
+              "expected": false,
+              "name": "blocking",
+              "predicted": false,
+              "probability_true": 0.005368018612845516,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 1,
+          "usage": {
+            "input_tokens": 257,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "policy-structured",
+          "input_kind": "json",
+          "latency_seconds": 0.345785,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.7958581125033339,
+              "correct": true,
+              "expected": "deny",
+              "expected_probability": 0.949881770013637,
+              "name": "decision",
+              "probabilities": {
+                "allow": 0.010264489907022074,
+                "deny": 0.949881770013637,
+                "review": 0.03985374007934087
+              },
+              "selected": "deny",
+              "type": "choice"
+            },
+            {
+              "brier": 0.00023870793746260516,
+              "correct": true,
+              "expected": true,
+              "name": "sensitive",
+              "predicted": true,
+              "probability_true": 0.9845498240313385,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 1,
+          "usage": {
+            "input_tokens": 274,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "vision-red-swatch",
+          "input_kind": "image",
+          "latency_seconds": 2.598672,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9607974643170082,
+              "correct": true,
+              "expected": "red",
+              "expected_probability": 0.9921709545300074,
+              "name": "dominant_color",
+              "probabilities": {
+                "blue": 0.0027355734799059156,
+                "grayscale": 0.0027656031796386834,
+                "green": 0.002327868810448121,
+                "red": 0.9921709545300074
+              },
+              "selected": "red",
+              "type": "choice"
+            },
+            {
+              "brier": 3.764019710226104e-05,
+              "correct": true,
+              "expected": true,
+              "name": "mostly_red",
+              "predicted": true,
+              "probability_true": 0.9938648392765747,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 1,
+          "usage": {
+            "input_tokens": 314,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "support-billing-refund",
+          "input_kind": "text",
+          "latency_seconds": 0.405072,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9725570816609272,
+              "correct": true,
+              "expected": "billing",
+              "expected_probability": 0.9957737794825697,
+              "name": "team",
+              "probabilities": {
+                "billing": 0.9957737794825697,
+                "sales": 0.001655350779612833,
+                "technical": 0.002570869737817322
+              },
+              "selected": "billing",
+              "type": "choice"
+            },
+            {
+              "brier": 7.064366967498877e-05,
+              "correct": true,
+              "expected": true,
+              "name": "refund_requested",
+              "predicted": true,
+              "probability_true": 0.9915950211377429,
+              "type": "noul"
+            },
+            {
+              "confidence": 0.7714726897692876,
+              "correct": true,
+              "expected_maximum": 1.6,
+              "expected_minimum": 0.25,
+              "name": "urgency",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.047865548694545984,
+                "1": 0.9413864396006295,
+                "2": 0.01074801170482447
+              },
+              "score": 0.9628824630102785,
+              "type": "score"
+            }
+          ],
+          "questions_correct": 3,
+          "questions_total": 3,
+          "round": 2,
+          "usage": {
+            "input_tokens": 359,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "support-technical-outage",
+          "input_kind": "text",
+          "latency_seconds": 0.401242,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.6688011336491815,
+              "correct": true,
+              "expected": "technical",
+              "expected_probability": 0.9071099055656284,
+              "name": "team",
+              "probabilities": {
+                "billing": 0.06729350691356183,
+                "sales": 0.025596587520809747,
+                "technical": 0.9071099055656284
+              },
+              "selected": "technical",
+              "type": "choice"
+            },
+            {
+              "brier": 0.00020740247911869129,
+              "correct": true,
+              "expected": true,
+              "name": "widespread",
+              "predicted": true,
+              "probability_true": 0.9855985251061327,
+              "type": "noul"
+            },
+            {
+              "confidence": 0.7878414094289925,
+              "correct": true,
+              "expected_maximum": 3.0,
+              "expected_minimum": 2.25,
+              "name": "severity",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.005308933434631197,
+                "1": 0.006335050252343906,
+                "2": 0.058698389533496986,
+                "3": 0.9296576267795278
+              },
+              "score": 2.9127047096579215,
+              "type": "score"
+            }
+          ],
+          "questions_correct": 3,
+          "questions_total": 3,
+          "round": 2,
+          "usage": {
+            "input_tokens": 368,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "support-sales-upgrade",
+          "input_kind": "text",
+          "latency_seconds": 0.334013,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9564000345641535,
+              "correct": true,
+              "expected": "sales",
+              "expected_probability": 0.9927458867227921,
+              "name": "team",
+              "probabilities": {
+                "billing": 0.0030519828652815733,
+                "sales": 0.9927458867227921,
+                "technical": 0.004202130411926363
+              },
+              "selected": "sales",
+              "type": "choice"
+            },
+            {
+              "brier": 2.136852362712256e-05,
+              "correct": true,
+              "expected": false,
+              "name": "refund_requested",
+              "predicted": false,
+              "probability_true": 0.004622610044890501,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 2,
+          "usage": {
+            "input_tokens": 264,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "tool-read-only",
+          "input_kind": "text",
+          "latency_seconds": 0.3295,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9230380317268079,
+              "correct": true,
+              "expected": "read_only",
+              "expected_probability": 0.9857584683686611,
+              "name": "operation",
+              "probabilities": {
+                "destructive": 0.007373092838714609,
+                "read_only": 0.9857584683686611,
+                "write": 0.0068684387926243075
+              },
+              "selected": "read_only",
+              "type": "choice"
+            },
+            {
+              "brier": 6.444080290862755e-05,
+              "correct": true,
+              "expected": false,
+              "name": "harm",
+              "predicted": false,
+              "probability_true": 0.008027502906173722,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 2,
+          "usage": {
+            "input_tokens": 264,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "tool-high-blast-radius",
+          "input_kind": "text",
+          "latency_seconds": 0.438698,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.7219733340787844,
+              "correct": true,
+              "expected": "destructive",
+              "expected_probability": 0.9227087789889452,
+              "name": "operation",
+              "probabilities": {
+                "destructive": 0.9227087789889452,
+                "read_only": 0.011983529333360814,
+                "write": 0.06530769167769408
+              },
+              "selected": "destructive",
+              "type": "choice"
+            },
+            {
+              "brier": 0.005397679353336836,
+              "correct": true,
+              "expected": true,
+              "name": "harm",
+              "predicted": true,
+              "probability_true": 0.9265310994138551,
+              "type": "noul"
+            },
+            {
+              "confidence": 0.8126798805601211,
+              "correct": true,
+              "expected_maximum": 3.0,
+              "expected_minimum": 2.25,
+              "name": "blast_radius",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.009908643298348289,
+                "1": 0.010173880883616225,
+                "2": 0.033916276155716095,
+                "3": 0.9460011996623194
+              },
+              "score": 2.916010032182007,
+              "type": "score"
+            }
+          ],
+          "questions_correct": 3,
+          "questions_total": 3,
+          "round": 2,
+          "usage": {
+            "input_tokens": 389,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "message-phishing",
+          "input_kind": "text",
+          "latency_seconds": 0.358618,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9242670099774427,
+              "correct": true,
+              "expected": "phishing",
+              "expected_probability": 0.9829355771741695,
+              "name": "message_type",
+              "probabilities": {
+                "internal": 0.006648132883050861,
+                "marketing": 0.005558774274840342,
+                "phishing": 0.9829355771741695,
+                "transactional": 0.004857515667939487
+              },
+              "selected": "phishing",
+              "type": "choice"
+            },
+            {
+              "brier": 6.834259680883296e-05,
+              "correct": true,
+              "expected": true,
+              "name": "requests_secret",
+              "predicted": true,
+              "probability_true": 0.9917330418648191,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 2,
+          "usage": {
+            "input_tokens": 289,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": false,
+          "case_id": "message-transactional",
+          "input_kind": "text",
+          "latency_seconds": 0.354217,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.6629976489911393,
+              "correct": false,
+              "expected": "transactional",
+              "expected_probability": 0.07657386890780947,
+              "name": "message_type",
+              "probabilities": {
+                "internal": 0.024328325502377485,
+                "marketing": 0.01702347130716043,
+                "phishing": 0.8820743342826526,
+                "transactional": 0.07657386890780947
+              },
+              "selected": "phishing",
+              "type": "choice"
+            },
+            {
+              "brier": 0.0010244266523460697,
+              "correct": true,
+              "expected": false,
+              "name": "requests_secret",
+              "predicted": false,
+              "probability_true": 0.032006665748654135,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 1,
+          "questions_total": 2,
+          "round": 2,
+          "usage": {
+            "input_tokens": 294,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "invoice-structured",
+          "input_kind": "json",
+          "latency_seconds": 0.434379,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.8881498607975672,
+              "correct": true,
+              "expected": "approve",
+              "expected_probability": 0.9775184319598129,
+              "name": "action",
+              "probabilities": {
+                "approve": 0.9775184319598129,
+                "manual_review": 0.012910458115811619,
+                "reject": 0.009571109924375385
+              },
+              "selected": "approve",
+              "type": "choice"
+            },
+            {
+              "brier": 3.6165833475022123e-05,
+              "correct": true,
+              "expected": false,
+              "name": "known_duplicate",
+              "predicted": false,
+              "probability_true": 0.006013803578021328,
+              "type": "noul"
+            },
+            {
+              "confidence": 0.8537409616452731,
+              "correct": true,
+              "expected_maximum": 0.8,
+              "expected_minimum": 0.0,
+              "name": "risk",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.9680949046840596,
+                "1": 0.022463152122361683,
+                "2": 0.009441943193578807
+              },
+              "score": 0.0413470385095193,
+              "type": "score"
+            }
+          ],
+          "questions_correct": 3,
+          "questions_total": 3,
+          "round": 2,
+          "usage": {
+            "input_tokens": 389,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "deployment-structured",
+          "input_kind": "json",
+          "latency_seconds": 0.438711,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9066963204900045,
+              "correct": true,
+              "expected": "rollback",
+              "expected_probability": 0.9820259342975121,
+              "name": "action",
+              "probabilities": {
+                "continue": 0.008935926303682028,
+                "observe": 0.009038139398805933,
+                "rollback": 0.9820259342975121
+              },
+              "selected": "rollback",
+              "type": "choice"
+            },
+            {
+              "brier": 0.0001710991550289511,
+              "correct": true,
+              "expected": true,
+              "name": "critical",
+              "predicted": true,
+              "probability_true": 0.986919512431528,
+              "type": "noul"
+            },
+            {
+              "confidence": 0.8734660925135869,
+              "correct": true,
+              "expected_maximum": 3.0,
+              "expected_minimum": 2.4,
+              "name": "severity",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.004130105491191203,
+                "1": 0.004869106617559528,
+                "2": 0.025322786647141115,
+                "3": 0.9656780012441082
+              },
+              "score": 2.952548683644166,
+              "type": "score"
+            }
+          ],
+          "questions_correct": 3,
+          "questions_total": 3,
+          "round": 2,
+          "usage": {
+            "input_tokens": 393,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "routine-priority",
+          "input_kind": "text",
+          "latency_seconds": 0.329186,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.7101581856707906,
+              "correct": true,
+              "expected_maximum": 0.75,
+              "expected_minimum": 0.0,
+              "name": "priority",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.8968643904099242,
+                "1": 0.08024685880726415,
+                "2": 0.013990686169039937,
+                "3": 0.008898064613771685
+              },
+              "score": 0.13492242498665907,
+              "type": "score"
+            },
+            {
+              "brier": 2.88156238278559e-05,
+              "correct": true,
+              "expected": false,
+              "name": "blocking",
+              "predicted": false,
+              "probability_true": 0.005368018612845516,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 2,
+          "usage": {
+            "input_tokens": 257,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "policy-structured",
+          "input_kind": "json",
+          "latency_seconds": 0.334013,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.7958581125033339,
+              "correct": true,
+              "expected": "deny",
+              "expected_probability": 0.949881770013637,
+              "name": "decision",
+              "probabilities": {
+                "allow": 0.010264489907022074,
+                "deny": 0.949881770013637,
+                "review": 0.03985374007934087
+              },
+              "selected": "deny",
+              "type": "choice"
+            },
+            {
+              "brier": 0.00023870793746260516,
+              "correct": true,
+              "expected": true,
+              "name": "sensitive",
+              "predicted": true,
+              "probability_true": 0.9845498240313385,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 2,
+          "usage": {
+            "input_tokens": 274,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "vision-red-swatch",
+          "input_kind": "image",
+          "latency_seconds": 0.418903,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9607974643170082,
+              "correct": true,
+              "expected": "red",
+              "expected_probability": 0.9921709545300074,
+              "name": "dominant_color",
+              "probabilities": {
+                "blue": 0.0027355734799059156,
+                "grayscale": 0.0027656031796386834,
+                "green": 0.002327868810448121,
+                "red": 0.9921709545300074
+              },
+              "selected": "red",
+              "type": "choice"
+            },
+            {
+              "brier": 3.764019710226104e-05,
+              "correct": true,
+              "expected": true,
+              "name": "mostly_red",
+              "predicted": true,
+              "probability_true": 0.9938648392765747,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 2,
+          "usage": {
+            "input_tokens": 314,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "support-billing-refund",
+          "input_kind": "text",
+          "latency_seconds": 0.397745,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9725570816609272,
+              "correct": true,
+              "expected": "billing",
+              "expected_probability": 0.9957737794825697,
+              "name": "team",
+              "probabilities": {
+                "billing": 0.9957737794825697,
+                "sales": 0.001655350779612833,
+                "technical": 0.002570869737817322
+              },
+              "selected": "billing",
+              "type": "choice"
+            },
+            {
+              "brier": 7.064366967498877e-05,
+              "correct": true,
+              "expected": true,
+              "name": "refund_requested",
+              "predicted": true,
+              "probability_true": 0.9915950211377429,
+              "type": "noul"
+            },
+            {
+              "confidence": 0.7714726897692876,
+              "correct": true,
+              "expected_maximum": 1.6,
+              "expected_minimum": 0.25,
+              "name": "urgency",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.047865548694545984,
+                "1": 0.9413864396006295,
+                "2": 0.01074801170482447
+              },
+              "score": 0.9628824630102785,
+              "type": "score"
+            }
+          ],
+          "questions_correct": 3,
+          "questions_total": 3,
+          "round": 3,
+          "usage": {
+            "input_tokens": 359,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "support-technical-outage",
+          "input_kind": "text",
+          "latency_seconds": 0.398574,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.6688011336491815,
+              "correct": true,
+              "expected": "technical",
+              "expected_probability": 0.9071099055656284,
+              "name": "team",
+              "probabilities": {
+                "billing": 0.06729350691356183,
+                "sales": 0.025596587520809747,
+                "technical": 0.9071099055656284
+              },
+              "selected": "technical",
+              "type": "choice"
+            },
+            {
+              "brier": 0.00020740247911869129,
+              "correct": true,
+              "expected": true,
+              "name": "widespread",
+              "predicted": true,
+              "probability_true": 0.9855985251061327,
+              "type": "noul"
+            },
+            {
+              "confidence": 0.7878414094289925,
+              "correct": true,
+              "expected_maximum": 3.0,
+              "expected_minimum": 2.25,
+              "name": "severity",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.005308933434631197,
+                "1": 0.006335050252343906,
+                "2": 0.058698389533496986,
+                "3": 0.9296576267795278
+              },
+              "score": 2.9127047096579215,
+              "type": "score"
+            }
+          ],
+          "questions_correct": 3,
+          "questions_total": 3,
+          "round": 3,
+          "usage": {
+            "input_tokens": 368,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "support-sales-upgrade",
+          "input_kind": "text",
+          "latency_seconds": 0.33231,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9564000345641535,
+              "correct": true,
+              "expected": "sales",
+              "expected_probability": 0.9927458867227921,
+              "name": "team",
+              "probabilities": {
+                "billing": 0.0030519828652815733,
+                "sales": 0.9927458867227921,
+                "technical": 0.004202130411926363
+              },
+              "selected": "sales",
+              "type": "choice"
+            },
+            {
+              "brier": 2.136852362712256e-05,
+              "correct": true,
+              "expected": false,
+              "name": "refund_requested",
+              "predicted": false,
+              "probability_true": 0.004622610044890501,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 3,
+          "usage": {
+            "input_tokens": 264,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "tool-read-only",
+          "input_kind": "text",
+          "latency_seconds": 0.328978,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9230380317268079,
+              "correct": true,
+              "expected": "read_only",
+              "expected_probability": 0.9857584683686611,
+              "name": "operation",
+              "probabilities": {
+                "destructive": 0.007373092838714609,
+                "read_only": 0.9857584683686611,
+                "write": 0.0068684387926243075
+              },
+              "selected": "read_only",
+              "type": "choice"
+            },
+            {
+              "brier": 6.444080290862755e-05,
+              "correct": true,
+              "expected": false,
+              "name": "harm",
+              "predicted": false,
+              "probability_true": 0.008027502906173722,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 3,
+          "usage": {
+            "input_tokens": 264,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "tool-high-blast-radius",
+          "input_kind": "text",
+          "latency_seconds": 0.440085,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.7219733340787844,
+              "correct": true,
+              "expected": "destructive",
+              "expected_probability": 0.9227087789889452,
+              "name": "operation",
+              "probabilities": {
+                "destructive": 0.9227087789889452,
+                "read_only": 0.011983529333360814,
+                "write": 0.06530769167769408
+              },
+              "selected": "destructive",
+              "type": "choice"
+            },
+            {
+              "brier": 0.005397679353336836,
+              "correct": true,
+              "expected": true,
+              "name": "harm",
+              "predicted": true,
+              "probability_true": 0.9265310994138551,
+              "type": "noul"
+            },
+            {
+              "confidence": 0.8126798805601211,
+              "correct": true,
+              "expected_maximum": 3.0,
+              "expected_minimum": 2.25,
+              "name": "blast_radius",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.009908643298348289,
+                "1": 0.010173880883616225,
+                "2": 0.033916276155716095,
+                "3": 0.9460011996623194
+              },
+              "score": 2.916010032182007,
+              "type": "score"
+            }
+          ],
+          "questions_correct": 3,
+          "questions_total": 3,
+          "round": 3,
+          "usage": {
+            "input_tokens": 389,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "message-phishing",
+          "input_kind": "text",
+          "latency_seconds": 0.357528,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9242670099774427,
+              "correct": true,
+              "expected": "phishing",
+              "expected_probability": 0.9829355771741695,
+              "name": "message_type",
+              "probabilities": {
+                "internal": 0.006648132883050861,
+                "marketing": 0.005558774274840342,
+                "phishing": 0.9829355771741695,
+                "transactional": 0.004857515667939487
+              },
+              "selected": "phishing",
+              "type": "choice"
+            },
+            {
+              "brier": 6.834259680883296e-05,
+              "correct": true,
+              "expected": true,
+              "name": "requests_secret",
+              "predicted": true,
+              "probability_true": 0.9917330418648191,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 3,
+          "usage": {
+            "input_tokens": 289,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": false,
+          "case_id": "message-transactional",
+          "input_kind": "text",
+          "latency_seconds": 0.353386,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.6629976489911393,
+              "correct": false,
+              "expected": "transactional",
+              "expected_probability": 0.07657386890780947,
+              "name": "message_type",
+              "probabilities": {
+                "internal": 0.024328325502377485,
+                "marketing": 0.01702347130716043,
+                "phishing": 0.8820743342826526,
+                "transactional": 0.07657386890780947
+              },
+              "selected": "phishing",
+              "type": "choice"
+            },
+            {
+              "brier": 0.0010244266523460697,
+              "correct": true,
+              "expected": false,
+              "name": "requests_secret",
+              "predicted": false,
+              "probability_true": 0.032006665748654135,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 1,
+          "questions_total": 2,
+          "round": 3,
+          "usage": {
+            "input_tokens": 294,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "invoice-structured",
+          "input_kind": "json",
+          "latency_seconds": 0.437127,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.8881498607975672,
+              "correct": true,
+              "expected": "approve",
+              "expected_probability": 0.9775184319598129,
+              "name": "action",
+              "probabilities": {
+                "approve": 0.9775184319598129,
+                "manual_review": 0.012910458115811619,
+                "reject": 0.009571109924375385
+              },
+              "selected": "approve",
+              "type": "choice"
+            },
+            {
+              "brier": 3.6165833475022123e-05,
+              "correct": true,
+              "expected": false,
+              "name": "known_duplicate",
+              "predicted": false,
+              "probability_true": 0.006013803578021328,
+              "type": "noul"
+            },
+            {
+              "confidence": 0.8537409616452731,
+              "correct": true,
+              "expected_maximum": 0.8,
+              "expected_minimum": 0.0,
+              "name": "risk",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.9680949046840596,
+                "1": 0.022463152122361683,
+                "2": 0.009441943193578807
+              },
+              "score": 0.0413470385095193,
+              "type": "score"
+            }
+          ],
+          "questions_correct": 3,
+          "questions_total": 3,
+          "round": 3,
+          "usage": {
+            "input_tokens": 389,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "deployment-structured",
+          "input_kind": "json",
+          "latency_seconds": 0.44233,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9066963204900045,
+              "correct": true,
+              "expected": "rollback",
+              "expected_probability": 0.9820259342975121,
+              "name": "action",
+              "probabilities": {
+                "continue": 0.008935926303682028,
+                "observe": 0.009038139398805933,
+                "rollback": 0.9820259342975121
+              },
+              "selected": "rollback",
+              "type": "choice"
+            },
+            {
+              "brier": 0.0001710991550289511,
+              "correct": true,
+              "expected": true,
+              "name": "critical",
+              "predicted": true,
+              "probability_true": 0.986919512431528,
+              "type": "noul"
+            },
+            {
+              "confidence": 0.8734660925135869,
+              "correct": true,
+              "expected_maximum": 3.0,
+              "expected_minimum": 2.4,
+              "name": "severity",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.004130105491191203,
+                "1": 0.004869106617559528,
+                "2": 0.025322786647141115,
+                "3": 0.9656780012441082
+              },
+              "score": 2.952548683644166,
+              "type": "score"
+            }
+          ],
+          "questions_correct": 3,
+          "questions_total": 3,
+          "round": 3,
+          "usage": {
+            "input_tokens": 393,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "routine-priority",
+          "input_kind": "text",
+          "latency_seconds": 0.32882,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.7101581856707906,
+              "correct": true,
+              "expected_maximum": 0.75,
+              "expected_minimum": 0.0,
+              "name": "priority",
+              "out_of_range_distance": 0.0,
+              "probabilities": {
+                "0": 0.8968643904099242,
+                "1": 0.08024685880726415,
+                "2": 0.013990686169039937,
+                "3": 0.008898064613771685
+              },
+              "score": 0.13492242498665907,
+              "type": "score"
+            },
+            {
+              "brier": 2.88156238278559e-05,
+              "correct": true,
+              "expected": false,
+              "name": "blocking",
+              "predicted": false,
+              "probability_true": 0.005368018612845516,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 3,
+          "usage": {
+            "input_tokens": 257,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "policy-structured",
+          "input_kind": "json",
+          "latency_seconds": 0.334277,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.7958581125033339,
+              "correct": true,
+              "expected": "deny",
+              "expected_probability": 0.949881770013637,
+              "name": "decision",
+              "probabilities": {
+                "allow": 0.010264489907022074,
+                "deny": 0.949881770013637,
+                "review": 0.03985374007934087
+              },
+              "selected": "deny",
+              "type": "choice"
+            },
+            {
+              "brier": 0.00023870793746260516,
+              "correct": true,
+              "expected": true,
+              "name": "sensitive",
+              "predicted": true,
+              "probability_true": 0.9845498240313385,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 3,
+          "usage": {
+            "input_tokens": 274,
+            "output_tokens": 0
+          },
+          "valid": true
+        },
+        {
+          "case_exact": true,
+          "case_id": "vision-red-swatch",
+          "input_kind": "image",
+          "latency_seconds": 0.42117,
+          "model": "clef:latest",
+          "questions": [
+            {
+              "confidence": 0.9607974643170082,
+              "correct": true,
+              "expected": "red",
+              "expected_probability": 0.9921709545300074,
+              "name": "dominant_color",
+              "probabilities": {
+                "blue": 0.0027355734799059156,
+                "grayscale": 0.0027656031796386834,
+                "green": 0.002327868810448121,
+                "red": 0.9921709545300074
+              },
+              "selected": "red",
+              "type": "choice"
+            },
+            {
+              "brier": 3.764019710226104e-05,
+              "correct": true,
+              "expected": true,
+              "name": "mostly_red",
+              "predicted": true,
+              "probability_true": 0.9938648392765747,
+              "type": "noul"
+            }
+          ],
+          "questions_correct": 2,
+          "questions_total": 2,
+          "round": 3,
+          "usage": {
+            "input_tokens": 314,
+            "output_tokens": 0
+          },
+          "valid": true
+        }
+      ],
+      "status": "measured",
+      "warm": {
+        "by_input_kind": {
+          "image": {
+            "cases": 3,
+            "exact": 3,
+            "exact_rate": 1.0
+          },
+          "json": {
+            "cases": 9,
+            "exact": 9,
+            "exact_rate": 1.0
+          },
+          "text": {
+            "cases": 24,
+            "exact": 21,
+            "exact_rate": 0.875
+          }
+        },
+        "by_type": {
+          "choice": {
+            "accuracy": 0.909091,
+            "correct": 30,
+            "questions": 33
+          },
+          "noul": {
+            "accuracy": 1.0,
+            "correct": 36,
+            "questions": 36
+          },
+          "score": {
+            "accuracy": 1.0,
+            "correct": 18,
+            "questions": 18
+          }
+        },
+        "case_exact_rate": 0.916667,
+        "cases_exact": 33,
+        "choice_expected_log_loss_mean": 0.262787,
+        "input_tokens_p50": 304.0,
+        "input_tokens_total": 11562,
+        "latency_p50_seconds": 0.380652,
+        "latency_p95_seconds": 0.456822,
+        "noul_brier_mean": 0.000614,
+        "output_tokens_total": 0,
+        "question_accuracy": 0.965517,
+        "questions": 87,
+        "questions_correct": 84,
+        "questions_per_second": 5.435129,
+        "requests": 36,
+        "response_failures": 0,
+        "score_out_of_range_distance_mean": 0.0,
+        "valid_requests": 36
+      }
+    }
+  ],
+  "schema": 1,
+  "settings": {
+    "base_url": "http://ollama:11434",
+    "keep_alive": "10m",
+    "models": [
+      "clef:latest"
+    ],
+    "rounds": 3,
+    "timeout_s": 120.0
+  },
+  "status": "measured"
+}

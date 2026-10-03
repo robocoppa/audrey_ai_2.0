@@ -20,6 +20,7 @@ from audrey.app_state import (
     AttachmentSnapshot,
     ConversationArchivedError,
     ConversationHasActiveRunError,
+    ConversationProjectChangedError,
     InvalidApplicationStateError,
     MessageRecord,
     ModelUsageSnapshot,
@@ -58,6 +59,11 @@ from audrey.pipeline.run_events import (
     ToolCallStartedEvent,
     UsageReportedEvent,
     dump_run_event,
+)
+from audrey.project_context import (
+    ProjectContextUnavailableError,
+    resolve_project_context,
+    with_project_context,
 )
 from audrey.routes.app.files import (
     native_image_limit,
@@ -212,6 +218,7 @@ class _LiveRun:
     observed_models: dict[str, int] = field(default_factory=dict)
     model_order: list[str] = field(default_factory=list)
     pending_model_events: list[str] = field(default_factory=list)
+    pending_source_events: list[SourceSnapshot] = field(default_factory=list)
     observed_model_call_count: int = 0
 
     def observe_model_call(self, raw_model: str) -> None:
@@ -234,6 +241,18 @@ class _LiveRun:
         pending, self.pending_model_events = self.pending_model_events, []
         for model in pending:
             self.emitter.model_used(model)
+
+    def flush_pending_source_events(self) -> None:
+        if not self.emitter.is_started or self.emitter.is_finished:
+            return
+        pending, self.pending_source_events = self.pending_source_events, []
+        for source in pending:
+            self.emitter.source_observed(
+                source.source_id,
+                title=source.title,
+                url=source.url,
+                source_type="project_file",
+            )
 
     @property
     def model_snapshots(self) -> tuple[ModelUsageSnapshot, ...]:
@@ -490,6 +509,7 @@ class NativeRunManager:
         skill_instruction: str | None = None,
         resolved_skill: ResolvedSkill | None = None,
         model_tools: ToolRegistry | None = None,
+        initial_sources: tuple[SourceSnapshot, ...] = (),
     ) -> None:
         live: _LiveRun
         live = _LiveRun(
@@ -506,6 +526,8 @@ class NativeRunManager:
             events=deque(maxlen=self._max_events_per_run),
             changed=asyncio.Event(),
             settled=asyncio.Event(),
+            observed_sources=list(initial_sources),
+            pending_source_events=list(initial_sources),
         )
         live.emitter.set_sink(live.publish)
         async with self._lock:
@@ -565,6 +587,7 @@ class NativeRunManager:
                     model_tools=model_tools,
                 ):
                     live.flush_pending_model_events()
+                    live.flush_pending_source_events()
                     # A pipeline can have post-answer cleanup after its terminal
                     # frame. Persist the canonical answer before that cleanup so a
                     # reloaded browser does not keep seeing a running row while
@@ -1034,6 +1057,19 @@ async def create_run(
         principal,
         payload.attachment_ids,
     )
+    try:
+        project_context = await resolve_project_context(
+            request,
+            store=store,
+            principal=principal,
+            conversation=conversation,
+            query=payload.content,
+        )
+    except ProjectContextUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Project file context is temporarily unavailable.",
+        ) from exc
     previous_records = await store.conversations.list_messages(
         user_id=principal.user_id,
         conversation_id=conversation_id,
@@ -1072,8 +1108,18 @@ async def create_run(
             skill_version=resolved_skill.spec.version if resolved_skill else 0,
             skill_digest=resolved_skill.spec.digest if resolved_skill else "",
             skill_reason=resolved_skill.reason if resolved_skill else "",
+            expected_project_id=(
+                project_context.project_id
+                if project_context is not None
+                else conversation.project_id
+            ),
+            enforce_project_id=True,
         )
-    except (ConversationArchivedError, ConversationHasActiveRunError) as exc:
+    except (
+        ConversationArchivedError,
+        ConversationHasActiveRunError,
+        ConversationProjectChangedError,
+    ) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except InvalidApplicationStateError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1093,10 +1139,6 @@ async def create_run(
         },
     }
     routing_messages = _history_messages(started, records, image_parts)
-    messages = [
-        user_preferences_system_message(preferences),
-        *routing_messages,
-    ]
     skill_instruction = skill_instruction_for(
         selected_model.protocol_model,
         request.app.state.cfg,
@@ -1104,7 +1146,6 @@ async def create_run(
         resolved_skill,
     )
     if skill_instruction:
-        messages = with_skill_instruction(messages, skill_instruction)
         routing_messages = with_skill_instruction(
             routing_messages,
             skill_instruction,
@@ -1114,6 +1155,13 @@ async def create_run(
             selected_model.protocol_model,
             len(skill_instruction),
         )
+    messages = with_project_context(
+        [
+            user_preferences_system_message(preferences),
+            *routing_messages,
+        ],
+        project_context,
+    )
     pipeline_payload = ChatCompletionRequest(
         model=selected_model.protocol_model,
         skill=payload.skill,
@@ -1134,6 +1182,7 @@ async def create_run(
         skill_instruction=skill_instruction,
         resolved_skill=resolved_skill,
         model_tools=model_tools,
+        initial_sources=project_context.sources if project_context is not None else (),
     )
     base = _run_response(started.run).model_dump()
     return RunCreateResponse(

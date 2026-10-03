@@ -129,6 +129,82 @@ class StatsResponse(BaseModel):
     image_collection: str
 
 
+async def search_private_file_text(
+    request: Request,
+    *,
+    user: str,
+    query: str,
+    file_ids: Sequence[str],
+    top_k: int = 20,
+) -> list[KBHit]:
+    """Search only an already-authorized owner's selected private files."""
+
+    search_query = str(query).strip()
+    if not search_query:
+        raise ValueError("private file search query is required")
+    # Native messages may be much larger than the public KB query contract.
+    # The question is normally at the end of a long pasted context, so retain
+    # the newest 2,000 characters rather than sending an unbounded embed input.
+    search_query = search_query[-2_000:]
+    selected = [str(file_id).strip() for file_id in file_ids]
+    if not selected or any(not file_id for file_id in selected):
+        raise ValueError("private file search requires at least one file id")
+    if len(selected) > 20 or len(set(selected)) != len(selected):
+        raise ValueError("private file search requires at most 20 distinct file ids")
+    if not 1 <= top_k <= 20:
+        raise ValueError("private file search top_k must be between 1 and 20")
+    qdrant: QdrantKB | None = getattr(request.app.state, "qdrant", None)
+    embedder: TextEmbedder | None = getattr(request.app.state, "text_embedder", None)
+    if qdrant is None or embedder is None:
+        raise RuntimeError("KB is not initialized")
+
+    scope = await _exclude_deleted_private_files(
+        request,
+        user=user,
+        scope=SearchScope(file_ids=selected),
+    )
+    started = time.perf_counter()
+    vector = await embedder.embed_one(search_query)
+    hybrid = _hybrid_cfg(request)
+    if hybrid.get("enabled"):
+        hits, had_user = await _search_text_hybrid(
+            qdrant,
+            vector,
+            query=search_query,
+            top_k=top_k,
+            user=user,
+            min_score=_kb_min_score(request),
+            cfg=hybrid,
+            scope=scope,
+        )
+    else:
+        hits, had_user = await _search_text_merged(
+            qdrant,
+            vector,
+            top_k=top_k,
+            user=user,
+            min_score=_kb_min_score(request),
+            scope=scope,
+        )
+    elapsed = time.perf_counter() - started
+    kb_search_seconds.labels(
+        kind="text",
+        had_user_collection=str(had_user).lower(),
+    ).observe(elapsed)
+    kb_search_hits.labels(kind="text").observe(len(hits))
+    log.info(
+        "kb.project: user=%s q=%r files=%d top_k=%d -> %d hit(s) in %.2fs  %s",
+        user,
+        _clip(search_query, _LOG_QUERY_MAX),
+        len(selected),
+        top_k,
+        len(hits),
+        elapsed,
+        _file_distribution(hits),
+    )
+    return hits
+
+
 def _hybrid_cfg(request: Request) -> dict[str, Any]:
     cfg = getattr(request.app.state, "cfg", None)
     if cfg is None:

@@ -9,8 +9,9 @@ prioritized [Phase 14 Slice 14A](phase-14-bot-accounts-and-token-lifetimes.md),
 which is laptop-complete and awaits native acceptance. The next build is
 [Phase 15](phase-15-composer-and-projects.md). Slice 15A's composer control
 rail passed user acceptance, Slice 15B's owner-scoped Projects storage and API
-passed their restart smoke, and Slice 15C's project navigation and management
-UI is laptop-complete pending native browser acceptance.
+passed their restart smoke, and Slices 15C–15D are laptop-complete pending their
+combined native browser acceptance. Approved
+[Phase 16](phase-16-native-document-tools.md) follows.
 
 ## Closed prerequisites
 
@@ -341,8 +342,8 @@ Detailed scope:
 
 ## Next build - Phase 15 composer controls and Projects
 
-**State:** Slice 15A is user-accepted. Slice 15B is live-passed. Slice 15C
-is laptop-complete and awaits native browser acceptance.
+**State:** Slice 15A is user-accepted. Slice 15B is live-passed. Slices 15C
+and 15D are laptop-complete and await combined native browser acceptance.
 
 - [x] Build Slice 15A: narrow and center the composer; move Model, Add files,
   and Tools & skills into a labeled, symmetric rail below the message field.
@@ -356,13 +357,31 @@ is laptop-complete and awaits native browser acceptance.
   Files selection, new project conversations, and move/remove actions.
 - [ ] Pass the Slice 15C desktop, narrow-screen, keyboard, refresh, project
   management, conversation move/remove, and non-destructive deletion checks.
-- [ ] Build Slice 15D: server-resolved project instructions and bounded
+- [x] Build Slice 15D: server-resolved project instructions and bounded
   selected-file retrieval with persisted private-file provenance.
 - [ ] Pass the final two-document context, refresh, isolation, mutation
   snapshot, project deletion, and restart-persistence gates.
 
 Detailed scope:
 [phase-15-composer-and-projects.md](phase-15-composer-and-projects.md).
+
+## Approved next phase - Phase 16 native document tools
+
+**State:** Approved and sequenced after Phase 15 acceptance.
+
+- [ ] Build 16A: exact-operation approvals, immutable file derivations,
+  expected-version conflicts, idempotency, cancellation, and crash recovery.
+- [ ] Build 16B: one reviewed private template-to-DOCX operation with package
+  validation, text read-back, provenance, and My Files publication.
+- [ ] Build 16C: isolated DOCX-to-PDF rendering with no egress, bounded
+  resources, output verification, and atomic publication.
+- [ ] Build 16D: literal-only typed spreadsheet revisions with whole-request
+  validation and read-back of actual cell types.
+- [ ] Reassess formula execution and sharing only after 16A–16D pass and a new
+  narrow plan is approved.
+
+Detailed scope:
+[phase-16-native-document-tools.md](phase-16-native-document-tools.md).
 
 ## 7. Expand Responses API compatibility
 
@@ -401,10 +420,10 @@ Detailed scope:
 
 ## 10. Finish model and production measurements
 
-- [ ] Run Clef's broad System One decision probe and review its text, JSON,
+- [x] Run Clef's broad System One decision probe and review its text, JSON,
   image, accuracy, calibration, latency, token, and residency results.
-- [ ] Compare Clef and Clef Flash with `qwen3.5:4b` on the existing router
-  fixture; keep production unchanged unless a candidate clears every ship gate.
+- [x] Compare Clef and Clef Flash with `qwen3.5:4b`; retain the incumbent after
+  full Clef failed cold/footprint gates and Flash failed cold-start reliability.
 - [ ] Verify the installed `deepseek-v4.1-flash:cloud` capabilities with
   `ollama show` and one tool-call probe.
 - [ ] Run the real A-B-A for `factcheck_worker.compress_keep_last` with a fresh

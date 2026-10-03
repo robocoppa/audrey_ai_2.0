@@ -57,12 +57,16 @@ unloads models for cold samples, run it while Audrey is idle. Its exact version,
 model-install, runner, and success criteria are maintained in
 `docs/campaign-3/phase-06-system-one-routing.md`.
 
-### Measure Clef and Clef Flash
+### Clef and Clef Flash measurement — settled 2026-10-03
 
-Use these after both pulls finish. Run the broad Clef measurement first; it
-unloads `clef:latest` when complete. Then run the router comparison, which
-measures both candidates before the incumbent and leaves `qwen3.5:4b` warm.
-Each command self-detaches and immediately prints its persistent log path.
+The broad Clef and two-candidate router probes completed on Ollama 0.35.1. Full
+Clef matched all 69 production-reached routing samples but failed the cold-load
+and residency gates. Clef Flash returned two production-reached timeouts during
+cold loading. Audrey retains `qwen3.5:4b`; do not repeat these probes unless a
+later Ollama or Clef release changes load time, residency, or model behavior.
+
+The commands are retained for reproducibility. Run the broad probe first so it
+unloads Clef, then the router comparison so the incumbent is warm at the end:
 
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
@@ -78,20 +82,9 @@ scripts/probes/probe-onbox.sh systemone_router_probe.py \
   ROUNDS=3
 ```
 
-No upload or browser action is involved. The probes do not change Audrey's
-configuration, conversations, files, or model catalog. They only load and
-unload the named Ollama models while collecting cold/warm latency and residency
-evidence, so run them while Audrey is idle. The setup check requires Ollama
-0.35.1 or later and the exact `clef:latest` and `clef-flash:latest` tags; a
-missing tag or older Ollama exits 2 without measuring anything.
-
-These are measurements, so exit 0 means the report was collected successfully,
-not that a model should ship. Send back both log files or their complete JSON.
-For routing, compare the 23 cases that reach the model: a candidate must match
-the incumbent's 23/23 result without adding a costly false `reasoning` route or
-an escalation. For the broader Clef report, inspect response failures, exact
-case and question accuracy, the image result, score-range errors, calibration,
-latency, tokens, and residency together.
+These probes require no browser, upload, or Audrey credential and do not change
+application data or configuration. They do load and unload Ollama models, so
+any future repeat must run while Audrey is idle.
 
 ## Keep credentials private and runner-specific
 

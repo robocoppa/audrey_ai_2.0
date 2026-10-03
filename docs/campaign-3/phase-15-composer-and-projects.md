@@ -1,8 +1,8 @@
 # Campaign 3 Phase 15 - composer controls and Projects
 
 **Status:** Slice 15A passed user acceptance on 2026-10-02. Slice 15B passed
-its live deployment and restart-persistence gate on 2026-10-02. Slice 15C is
-laptop-complete and awaits native browser acceptance.
+its live deployment and restart-persistence gate on 2026-10-02. Slices 15C and
+15D are laptop-complete and await the combined native browser acceptance gate.
 
 ## Goal
 
@@ -332,6 +332,31 @@ Use two real documents with distinct facts and one project instruction:
    change.
 7. Verify a second user receives 404 for the project and cannot add their file
    to it or move a conversation into it.
+
+### Slice 15D implementation result
+
+**Completed on the laptop, 2026-10-03.** Native run creation now snapshots the
+conversation's owner-scoped project, instructions, and Ready file relations on
+the server. It revalidates file metadata through the authenticated upload
+catalog, searches only selected non-image file IDs in the owner's private
+index, promotes each represented file's best hit, and caps automatic retrieval
+at eight passages and 3,000 tokens.
+
+The project context is inserted after Audrey's leading system guidance and
+before conversation messages. It is excluded from classification and complexity
+routing. Filenames and passages are JSON-encoded and labeled as untrusted data;
+project images are listed but explicitly require a normal message attachment
+for visual inspection. Workflow models keep their existing owner-scoped tools,
+while direct models receive the same bounded text context without gaining
+tools.
+
+Retrieved filenames are seeded into the normal source-event and durable
+assistant-source contracts. A transaction guard returns HTTP 409 without
+creating messages if another tab moves the conversation after the snapshot but
+before the run row is created. The full hermetic backend suite passes 3,135 tests with one existing
+FastAPI deprecation warning; changed-file Ruff and compilation pass. The real two-document
+answer, refresh, isolation, mutation-snapshot, and restart checks remain the
+native acceptance gate.
 
 ## Delivery order
 

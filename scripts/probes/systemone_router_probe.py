@@ -449,6 +449,9 @@ def summarize_samples(
         "accuracy": round(
             sum(bool(sample["correct"]) for sample in valid) / len(valid), 4
         ) if valid else None,
+        "end_to_end_accuracy": round(
+            sum(bool(sample["correct"]) for sample in valid) / len(samples), 4
+        ) if samples else None,
         "latency_p50_seconds": _rounded(statistics.median(latencies) if latencies else None),
         "latency_p95_seconds": _rounded(_percentile(latencies, 0.95)),
         "costly_false_reasoning": costly_false_reasoning,
@@ -713,7 +716,9 @@ def _print_summary(report: dict[str, Any]) -> None:
         cold = result["cold"]["sample"]
         print(
             f"{result['backend']:>10} {result['model']}: "
-            f"{warm['correct']}/{warm['valid']} correct, "
+            f"{warm['correct']}/{warm['samples']} correct across all samples, "
+            f"valid-only accuracy={warm['accuracy']:.4f}, "
+            f"failures={warm['response_failures']}, "
             f"costly false reasoning={warm['costly_false_reasoning']}, "
             f"projected escalations={warm['projected_fast_to_deep_escalations']}, "
             f"cold={cold['latency_seconds']:.2f}s, "
