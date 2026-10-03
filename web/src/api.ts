@@ -272,6 +272,39 @@ export interface ConversationPatch {
   project_id?: string | null;
 }
 
+export interface ProjectLimits {
+  max_name_chars: number;
+  max_instructions_chars: number;
+  max_files: number;
+}
+
+export interface AudreyProject {
+  id: string;
+  name: string;
+  instructions: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AudreyProjectList extends ListResponse<AudreyProject> {
+  limits: ProjectLimits;
+}
+
+export interface AudreyProjectFile {
+  id: string;
+  filename: string;
+  mime: string;
+  kind: "text" | "image" | "video" | "audio";
+  bytes: number;
+  uploaded_at: string;
+  added_at: string;
+}
+
+export interface AudreyProjectFileList {
+  items: AudreyProjectFile[];
+  limits: ProjectLimits;
+}
+
 export interface AudreyFile {
   id: string;
   filename: string;
@@ -689,6 +722,100 @@ export function createConversation(modelId: string): Promise<Conversation> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model_id: modelId }),
   });
+}
+
+export function listProjects(cursor?: string): Promise<AudreyProjectList> {
+  const params = new URLSearchParams({ limit: "100" });
+  if (cursor) params.set("cursor", cursor);
+  return apiJson<AudreyProjectList>(`/api/projects?${params}`);
+}
+
+export function createProject(
+  name: string,
+  instructions = "",
+): Promise<AudreyProject> {
+  return apiJson<AudreyProject>("/api/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, instructions }),
+  });
+}
+
+export function updateProject(
+  projectId: string,
+  patch: { name?: string; instructions?: string },
+): Promise<AudreyProject> {
+  return apiJson<AudreyProject>(`/api/projects/${encodeURIComponent(projectId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteProject(projectId: string): Promise<void> {
+  await apiResponse(`/api/projects/${encodeURIComponent(projectId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function listProjectConversations(
+  projectId: string,
+  options: ConversationListOptions = {},
+): Promise<ListResponse<Conversation>> {
+  const params = new URLSearchParams({
+    archived: String(Boolean(options.archived)),
+    limit: "100",
+  });
+  const search = options.search?.trim();
+  if (search) params.set("q", search);
+  if (options.cursor) params.set("cursor", options.cursor);
+  return apiJson<ListResponse<Conversation>>(
+    `/api/projects/${encodeURIComponent(projectId)}/conversations?${params}`,
+  );
+}
+
+export function createProjectConversation(
+  projectId: string,
+  modelId: string,
+): Promise<Conversation> {
+  return apiJson<Conversation>(
+    `/api/projects/${encodeURIComponent(projectId)}/conversations`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_id: modelId }),
+    },
+  );
+}
+
+export function listProjectFiles(projectId: string): Promise<AudreyProjectFileList> {
+  return apiJson<AudreyProjectFileList>(
+    `/api/projects/${encodeURIComponent(projectId)}/files`,
+  );
+}
+
+export function addProjectFile(
+  projectId: string,
+  fileId: string,
+): Promise<AudreyProjectFile> {
+  return apiJson<AudreyProjectFile>(
+    `/api/projects/${encodeURIComponent(projectId)}/files`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: fileId }),
+    },
+  );
+}
+
+export async function removeProjectFile(
+  projectId: string,
+  fileId: string,
+): Promise<void> {
+  await apiResponse(
+    `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}`,
+    { method: "DELETE" },
+  );
 }
 
 export function getConversation(conversationId: string): Promise<Conversation> {

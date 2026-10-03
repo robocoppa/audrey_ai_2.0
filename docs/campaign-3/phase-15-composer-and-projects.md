@@ -1,7 +1,8 @@
 # Campaign 3 Phase 15 - composer controls and Projects
 
-**Status:** Slice 15A passed user acceptance on 2026-10-02. Slice 15B is
-laptop-complete and awaits its targeted deployment and restart-persistence gate.
+**Status:** Slice 15A passed user acceptance on 2026-10-02. Slice 15B passed
+its live deployment and restart-persistence gate on 2026-10-02. Slice 15C is
+laptop-complete and awaits native browser acceptance.
 
 ## Goal
 
@@ -204,7 +205,13 @@ step creates disposable projects and one conversation, references one existing
 Ready file without changing it, and proves cross-owner and duplicate rejection.
 After Audrey restarts, verify checks project, conversation, and file-reference
 persistence, then proves project deletion retains the conversation and file and
-removes all temporary records. This live result remains pending.
+removes all temporary records.
+
+**Live result, 2026-10-02:** Passed. Project, conversation membership, and file
+reference persistence all survived restart. Project deletion returned HTTP 204,
+the deleted project returned HTTP 404, its conversation was retained with a
+null project id, and the referenced Ready file still returned HTTP 200. Cleanup
+removed both remaining temporary projects and the temporary conversation.
 
 ## Slice 15C - Projects navigation and management
 
@@ -244,6 +251,31 @@ an explicit confirmation that says conversations and files will be kept.
    list and both files remain in My Files.
 6. Verify desktop, narrow-screen, keyboard, focus, empty, loading, and error
    states manually in the native browser.
+
+### Slice 15C implementation result
+
+**Completed on the laptop, 2026-10-02.** The sidebar now has a compact,
+scroll-bounded Projects section below New conversation. A project opens its own
+home with editable name and instructions, project conversation creation and
+listing, a Ready-file chooser built from the My Files explorer pattern, file
+removal, and an explicit non-destructive delete confirmation. Conversation
+headers show a project breadcrumb plus a project selector for moving or
+ungrouping the conversation.
+
+Global New conversation returns to ordinary chat. Active, Archived, title
+search, pagination, empty-draft cleanup, and persisted project membership are
+preserved. Project switches clear the prior project's visible data before the
+next request completes and stale pagination results are ignored. Long project
+names ellipsize, only one project conversation list can expand, long Ready-file
+libraries scroll inside the picker, and narrow layouts wrap the project selector
+and stack the project home without horizontal clipping.
+
+API-client and Playwright contracts cover encoded project requests and the
+create, rename, instructions, two-file selection, two-conversation creation,
+move/ungroup, and non-destructive deletion flow. The full hermetic backend suite
+passes 3,113 tests with the existing FastAPI warning. Node remains deferred on
+the laptop, so TypeScript, Vitest, build, and Playwright results remain part of
+the deployed UI gate and are not claimed locally.
 
 ## Slice 15D - project instructions and file context
 

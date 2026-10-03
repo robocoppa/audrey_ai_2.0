@@ -8,8 +8,9 @@ Item 7 has started with laptop-complete
 prioritized [Phase 14 Slice 14A](phase-14-bot-accounts-and-token-lifetimes.md),
 which is laptop-complete and awaits native acceptance. The next build is
 [Phase 15](phase-15-composer-and-projects.md). Slice 15A's composer control
-rail passed user acceptance. Slice 15B's owner-scoped Projects storage and API
-are laptop-complete and await their deployment and restart smoke.
+rail passed user acceptance, Slice 15B's owner-scoped Projects storage and API
+passed their restart smoke, and Slice 15C's project navigation and management
+UI is laptop-complete pending native browser acceptance.
 
 ## Closed prerequisites
 
@@ -340,8 +341,8 @@ Detailed scope:
 
 ## Next build - Phase 15 composer controls and Projects
 
-**State:** Slice 15A is user-accepted. Slice 15B is laptop-complete; its
-targeted deployment and restart-persistence smoke is pending.
+**State:** Slice 15A is user-accepted. Slice 15B is live-passed. Slice 15C
+is laptop-complete and awaits native browser acceptance.
 
 - [x] Build Slice 15A: narrow and center the composer; move Model, Add files,
   and Tools & skills into a labeled, symmetric rail below the message field.
@@ -349,10 +350,12 @@ targeted deployment and restart-persistence smoke is pending.
   upload, send/stop, and retry browser checks.
 - [x] Build Slice 15B: schema 19 Projects storage, owner-scoped APIs, project
   file references, and nullable conversation membership.
-- [ ] Pass the Slice 15B deployment and restart-persistence smoke using one
+- [x] Pass the Slice 15B deployment and restart-persistence smoke using one
   existing Ready file without deleting it.
-- [ ] Build Slice 15C: compact Projects navigation, project home, reusable My
+- [x] Build Slice 15C: compact Projects navigation, project home, reusable My
   Files selection, new project conversations, and move/remove actions.
+- [ ] Pass the Slice 15C desktop, narrow-screen, keyboard, refresh, project
+  management, conversation move/remove, and non-destructive deletion checks.
 - [ ] Build Slice 15D: server-resolved project instructions and bounded
   selected-file retrieval with persisted private-file provenance.
 - [ ] Pass the final two-document context, refresh, isolation, mutation

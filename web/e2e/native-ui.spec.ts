@@ -2998,6 +2998,192 @@ test("recovers a reloaded active attached run and retries after stopping it", as
   await expect(page.getByText(/HTTP 409/)).toHaveCount(0);
 });
 
+test("creates and manages a personal project without losing conversations or files", async ({ page }) => {
+  const limits = {
+    max_name_chars: 100,
+    max_instructions_chars: 4000,
+    max_files: 20,
+  };
+  const readyFiles = [
+    browserFile("file_project_one", "operations.md", 128),
+    browserFile("file_project_two", "support.md", 256),
+  ];
+  const projects: Array<Record<string, unknown>> = [];
+  const conversations: Array<Record<string, unknown>> = [
+    { ...browserConversation("Ordinary conversation"), project_id: null },
+  ];
+  const projectFiles = new Map<string, Array<Record<string, unknown>>>();
+  let projectConversationSequence = 0;
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const method = request.method();
+    if (url.pathname === "/api/me/preferences") return json(route, browserPreferences());
+    if (url.pathname === "/api/me") return json(route, browserTester());
+    if (url.pathname === "/api/models") return json(route, { items: browserModels() });
+    if (url.pathname === "/api/skills") {
+      return json(route, { enabled: true, status: "ready", items: [] });
+    }
+    if (url.pathname === "/api/files" && method === "GET") {
+      return json(route, browserFileListing(readyFiles));
+    }
+    if (url.pathname === "/api/projects" && method === "GET") {
+      return json(route, { items: projects, next_cursor: null, limits });
+    }
+    if (url.pathname === "/api/projects" && method === "POST") {
+      const payload = request.postDataJSON() as { name: string; instructions: string };
+      const project = {
+        id: "proj_browser",
+        name: payload.name,
+        instructions: payload.instructions,
+        created_at: "2026-10-02T12:00:00Z",
+        updated_at: "2026-10-02T12:00:00Z",
+      };
+      projects.unshift(project);
+      projectFiles.set(String(project.id), []);
+      return json(route, project, 201);
+    }
+    const projectMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/u);
+    if (projectMatch) {
+      const projectId = decodeURIComponent(projectMatch[1]);
+      const project = projects.find(({ id }) => id === projectId);
+      if (!project) return json(route, { detail: "Project not found." }, 404);
+      if (method === "PATCH") {
+        Object.assign(project, request.postDataJSON(), { updated_at: "2026-10-02T12:01:00Z" });
+        return json(route, project);
+      }
+      if (method === "DELETE") {
+        projects.splice(projects.indexOf(project), 1);
+        for (const conversation of conversations) {
+          if (conversation.project_id === projectId) conversation.project_id = null;
+        }
+        projectFiles.delete(projectId);
+        return route.fulfill({ status: 204 });
+      }
+      return json(route, project);
+    }
+    const projectConversationMatch = url.pathname.match(
+      /^\/api\/projects\/([^/]+)\/conversations$/u,
+    );
+    if (projectConversationMatch) {
+      const projectId = decodeURIComponent(projectConversationMatch[1]);
+      if (method === "POST") {
+        projectConversationSequence += 1;
+        const conversation = {
+          ...browserConversation("New conversation"),
+          id: `con_project_${projectConversationSequence}`,
+          project_id: projectId,
+          last_message_at: `2026-10-02T12:0${projectConversationSequence}:00Z`,
+        };
+        conversations.unshift(conversation);
+        return json(route, conversation, 201);
+      }
+      return json(route, {
+        items: conversations.filter(({ project_id }) => project_id === projectId),
+        next_cursor: null,
+      });
+    }
+    const projectFilesMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/files$/u);
+    if (projectFilesMatch) {
+      const projectId = decodeURIComponent(projectFilesMatch[1]);
+      const selected = projectFiles.get(projectId) ?? [];
+      if (method === "POST") {
+        const payload = request.postDataJSON() as { file_id: string };
+        const file = readyFiles.find(({ id }) => id === payload.file_id)!;
+        const relation = { ...file, added_at: "2026-10-02T12:02:00Z" };
+        selected.push(relation);
+        projectFiles.set(projectId, selected);
+        return json(route, relation, 201);
+      }
+      return json(route, { items: selected, limits });
+    }
+    const projectFileMatch = url.pathname.match(
+      /^\/api\/projects\/([^/]+)\/files\/([^/]+)$/u,
+    );
+    if (projectFileMatch && method === "DELETE") {
+      const projectId = decodeURIComponent(projectFileMatch[1]);
+      const fileId = decodeURIComponent(projectFileMatch[2]);
+      projectFiles.set(
+        projectId,
+        (projectFiles.get(projectId) ?? []).filter(({ id }) => id !== fileId),
+      );
+      return route.fulfill({ status: 204 });
+    }
+    if (url.pathname === "/api/conversations" && method === "GET") {
+      return json(route, { items: conversations, next_cursor: null });
+    }
+    const messagesMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)\/messages$/u);
+    if (messagesMatch) return json(route, { items: [], next_cursor: null });
+    const conversationMatch = url.pathname.match(/^\/api\/conversations\/([^/]+)$/u);
+    if (conversationMatch) {
+      const conversationId = decodeURIComponent(conversationMatch[1]);
+      const conversation = conversations.find(({ id }) => id === conversationId);
+      if (!conversation) return json(route, { detail: "Conversation not found." }, 404);
+      if (method === "PATCH") {
+        Object.assign(conversation, request.postDataJSON());
+        return json(route, conversation);
+      }
+      if (method === "DELETE") {
+        conversations.splice(conversations.indexOf(conversation), 1);
+        return route.fulfill({ status: 204 });
+      }
+      return json(route, conversation);
+    }
+    await route.abort("failed");
+  });
+
+  await page.goto("./");
+  await expect(page.getByRole("heading", { name: "Ordinary conversation" })).toBeVisible();
+
+  await page.getByRole("button", { name: "New project" }).click();
+  const editor = page.getByRole("dialog", { name: "New project" });
+  await editor.getByRole("textbox", { name: "Project name" }).fill("Client launch");
+  await editor.getByRole("textbox", { name: /Project instructions/u }).fill("Prefer concise updates.");
+  await editor.getByRole("button", { name: "Create project" }).click();
+  await expect(page.getByRole("heading", { name: "Client launch" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Edit project" }).click();
+  await page.getByRole("textbox", { name: "Project name" }).fill("Renamed launch");
+  await page.getByRole("textbox", { name: "Project instructions" }).fill("Use selected project documents.");
+  await page.getByRole("button", { name: "Save project" }).click();
+  await expect(page.getByRole("heading", { name: "Renamed launch" })).toBeVisible();
+  await expect(page.getByText("Use selected project documents.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Manage project files" }).click();
+  const picker = page.getByRole("dialog", { name: "Choose project files" });
+  await picker.getByRole("button", { name: /operations\.md/u }).click();
+  await picker.getByRole("button", { name: /support\.md/u }).click();
+  await expect(picker.getByText("2 selected", { exact: true })).toBeVisible();
+  await picker.getByRole("button", { name: "Done" }).click();
+  await expect(page.getByText("operations.md")).toBeVisible();
+  await expect(page.getByText("support.md")).toBeVisible();
+
+  await page.getByRole("button", { name: "New conversation in project" }).click();
+  await expect(page.getByRole("navigation", { name: "Project breadcrumb" })).toContainText("Renamed launch");
+  await page.getByRole("navigation", { name: "Project breadcrumb" }).getByRole("button", { name: "Renamed launch" }).click();
+  await page.getByRole("button", { name: "New conversation in project" }).click();
+  await page.getByRole("navigation", { name: "Project breadcrumb" }).getByRole("button", { name: "Renamed launch" }).click();
+  await expect(page.getByRole("region", { name: "Project conversations" }).getByText("New conversation")).toHaveCount(2);
+
+  const ordinaryHistory = page.getByRole("navigation", { name: "Conversation history" });
+  await ordinaryHistory.getByRole("button", { name: /Ordinary conversation/u }).click();
+  const projectSelect = page.getByRole("combobox", { name: "Move conversation to project" });
+  await projectSelect.selectOption({ label: "Renamed launch" });
+  await expect(page.getByRole("navigation", { name: "Project breadcrumb" })).toContainText("Renamed launch");
+  await projectSelect.selectOption({ label: "No project" });
+  await expect(page.getByRole("navigation", { name: "Project breadcrumb" })).toHaveCount(0);
+
+  const projectSidebar = page.getByRole("region", { name: "Projects" });
+  await projectSidebar.getByRole("button", { name: "Renamed launch", exact: true }).click();
+  await page.getByRole("button", { name: "Delete project" }).click();
+  await expect(page.getByText("Conversations and files will be kept.")).toBeVisible();
+  await page.getByRole("button", { name: "Confirm delete project" }).click();
+  await expect(projectSidebar.getByRole("button", { name: "Renamed launch", exact: true })).toHaveCount(0);
+  expect(conversations.every(({ project_id }) => project_id === null)).toBe(true);
+  expect(readyFiles).toHaveLength(2);
+});
+
 test("discards abandoned empty conversations from history", async ({ page }) => {
   let next = 0;
   const drafts: Array<ReturnType<typeof browserConversation>> = [];
@@ -3110,6 +3296,18 @@ async function mockAudreyApi(
       await json(route, { items: models });
       return;
     }
+    if (url.pathname === "/api/projects" && request.method() === "GET") {
+      await json(route, {
+        items: [],
+        next_cursor: null,
+        limits: {
+          max_name_chars: 100,
+          max_instructions_chars: 4000,
+          max_files: 20,
+        },
+      });
+      return;
+    }
     if (url.pathname === "/api/skills") {
       await json(route, { enabled: true, status: "ready", items: browserSkills() });
       return;
@@ -3118,9 +3316,9 @@ async function mockAudreyApi(
   });
 }
 
-async function json(route: Route, payload: unknown) {
+async function json(route: Route, payload: unknown, status = 200) {
   await route.fulfill({
-    status: 200,
+    status,
     contentType: "application/json",
     body: JSON.stringify(payload),
   });

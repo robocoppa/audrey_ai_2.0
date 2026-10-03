@@ -1,12 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  addProjectFile,
   createConversation,
+  createProject,
+  createProjectConversation,
+  deleteProject,
   fetchVideoFromUrl,
   getFileArtifactDownloadUrl,
   getFileDownloadUrl,
+  listProjects,
+  removeProjectFile,
   resetAdminModelPolicy,
   updateAdminModel,
+  updateConversation,
   updateConversationModel,
   uploadFile,
   type AudreyFileLimits,
@@ -169,6 +176,73 @@ describe("native file uploads", () => {
       LIMITS,
     )).rejects.toThrow("exceeds Audrey's");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("owner-scoped project requests", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("encodes project resources and sends explicit membership changes", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({})));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listProjects("next page");
+    await createProject("Launch", "Keep answers concise.");
+    await createProjectConversation("proj / 1", "research");
+    await addProjectFile("proj / 1", "file / 1");
+    await removeProjectFile("proj / 1", "file / 1");
+    await updateConversation("con / 1", { project_id: null });
+    await deleteProject("proj / 1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/projects?limit=100&cursor=next+page",
+      expect.objectContaining({ credentials: "same-origin" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/projects",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ name: "Launch", instructions: "Keep answers concise." }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/projects/proj%20%2F%201/conversations",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ model_id: "research" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/api/projects/proj%20%2F%201/files",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ file_id: "file / 1" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "/api/projects/proj%20%2F%201/files/file%20%2F%201",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      "/api/conversations/con%20%2F%201",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ project_id: null }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      7,
+      "/api/projects/proj%20%2F%201",
+      expect.objectContaining({ method: "DELETE" }),
+    );
   });
 });
 

@@ -356,6 +356,13 @@ report remote-image HTTP 422 and `"validation_error": true`.
 
 ## Run the 15B Projects restart smoke
 
+**Result:** Passed and settled on 2026-10-02. Project, conversation membership,
+and Ready-file reference persistence all survived restart. Deletion retained
+the conversation with a null project id and left the referenced file readable;
+cleanup removed every temporary record. Do not repeat this smoke unless a later
+change touches schema 19, project ownership, membership persistence, or project
+deletion.
+
 This is the targeted live gate for schema 19 and the owner-scoped Projects API.
 It needs two distinct current Access assertions in the laptop's
 `.env.test.local` and at least one file already showing **Ready** in the smoke

@@ -48,6 +48,9 @@ import {
   listFiles,
   getFile,
   listMessages,
+  listProjectConversations,
+  listProjectFiles,
+  listProjects,
   uploadFile,
   uploadPrecheck,
   updateConversation,
@@ -55,17 +58,21 @@ import {
   type AudreyFile,
   type AudreyFileLimits,
   type AudreyModel,
+  type AudreyProject,
+  type AudreyProjectFile,
   type Conversation,
   type ConversationMessage,
   type MessageAttachment,
   type MessageModelUsage,
   type MessageSource,
   type MessageToolCall,
+  type ProjectLimits,
   type SkillSummary,
   type CurrentUser,
   type UserPreferences,
 } from "./api";
 import { latestActionFetch } from "./agentTransport";
+import { NewProjectDialog, ProjectHome } from "./ProjectWorkspace";
 
 const MODEL_PORTRAITS: Readonly<Record<string, string>> = {
   auto: autoPortrait,
@@ -138,6 +145,12 @@ const IDLE_ACTIVITY: RunActivity = {
   tools: [],
 };
 
+const DEFAULT_PROJECT_LIMITS: ProjectLimits = {
+  max_name_chars: 100,
+  max_instructions_chars: 4_000,
+  max_files: 20,
+};
+
 export function ChatWorkspace({
   user,
   preferences,
@@ -151,6 +164,21 @@ export function ChatWorkspace({
 }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [openedConversations, setOpenedConversations] = useState<Conversation[]>([]);
+  const [projects, setProjects] = useState<AudreyProject[]>([]);
+  const [projectLimits, setProjectLimits] = useState<ProjectLimits>(DEFAULT_PROJECT_LIMITS);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [projectsLoadingMore, setProjectsLoadingMore] = useState(false);
+  const [projectsNextCursor, setProjectsNextCursor] = useState<string | null>(null);
+  const [projectsError, setProjectsError] = useState("");
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
+  const [projectConversations, setProjectConversations] = useState<Conversation[]>([]);
+  const [projectConversationsLoading, setProjectConversationsLoading] = useState(false);
+  const [projectConversationsNextCursor, setProjectConversationsNextCursor] = useState<string | null>(null);
+  const [projectFiles, setProjectFiles] = useState<AudreyProjectFile[]>([]);
+  const [projectFilesLoading, setProjectFilesLoading] = useState(false);
+  const [projectError, setProjectError] = useState("");
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -164,6 +192,7 @@ export function ChatWorkspace({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const listKeyRef = useRef("");
   const selectedIdRef = useRef<string | null>(null);
+  const selectedProjectIdRef = useRef<string | null>(null);
   const defaultModelId = models.find(({ id }) => id === "auto")?.id ?? models[0]?.id ?? null;
   const catalogUnavailable = defaultModelId === null;
   const canBrowseDirectModels = models.some((model) =>
@@ -183,6 +212,7 @@ export function ChatWorkspace({
           .then(() => {
             setConversations((current) => current.filter(({ id }) => id !== previousId));
             setOpenedConversations((current) => current.filter(({ id }) => id !== previousId));
+            setProjectConversations((current) => current.filter(({ id }) => id !== previousId));
           })
           .catch(async () => {
             // The server may have accepted a message after the list snapshot.
@@ -200,6 +230,66 @@ export function ChatWorkspace({
     selectedIdRef.current = conversation?.id ?? null;
     setSelectedId(selectedIdRef.current);
   }
+
+  useEffect(() => {
+    let active = true;
+    setProjectsLoading(true);
+    setProjectsError("");
+    listProjects()
+      .then(({ items, next_cursor, limits }) => {
+        if (!active) return;
+        setProjects(items);
+        setProjectsNextCursor(next_cursor);
+        if (limits) setProjectLimits(limits);
+      })
+      .catch((reason: unknown) => {
+        if (active) setProjectsError(messageOf(reason));
+      })
+      .finally(() => {
+        if (active) setProjectsLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedProjectId) {
+      setProjectConversations([]);
+      setProjectConversationsNextCursor(null);
+      setProjectFiles([]);
+      setProjectError("");
+      return;
+    }
+    let active = true;
+    setProjectConversations([]);
+    setProjectConversationsNextCursor(null);
+    setProjectFiles([]);
+    setProjectConversationsLoading(true);
+    setProjectFilesLoading(true);
+    setProjectError("");
+    Promise.all([
+      listProjectConversations(selectedProjectId, {
+        archived: view === "archived",
+        search: searchQuery,
+      }),
+      listProjectFiles(selectedProjectId),
+    ])
+      .then(([conversationPage, filePage]) => {
+        if (!active) return;
+        setProjectConversations(conversationPage.items);
+        setProjectConversationsNextCursor(conversationPage.next_cursor);
+        setProjectFiles(filePage.items);
+        if (filePage.limits) setProjectLimits(filePage.limits);
+      })
+      .catch((reason: unknown) => {
+        if (active) setProjectError(messageOf(reason));
+      })
+      .finally(() => {
+        if (!active) return;
+        setProjectConversationsLoading(false);
+        setProjectFilesLoading(false);
+      });
+    return () => { active = false; };
+  }, [searchQuery, selectedProjectId, view]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -223,21 +313,33 @@ export function ChatWorkspace({
     listConversations({ archived: view === "archived", search: searchQuery })
       .then(async ({ items, next_cursor }) => {
         if (!active) return;
-        if (view === "active" && !searchQuery && items.length === 0) {
+        const ordinaryItems = items.filter(({ project_id }) => !project_id);
+        if (
+          view === "active"
+          && !searchQuery
+          && items.length === 0
+          && selectedProjectIdRef.current === null
+        ) {
           const conversation = await createConversation(defaultModelId);
           if (!active) return;
-          setConversations([conversation]);
-          setNextCursor(null);
+          setConversations([conversation, ...items]);
+          setNextCursor(next_cursor);
           selectConversation(conversation);
           return;
         }
         if (!active) return;
         setConversations(items);
         setNextCursor(next_cursor);
-        const selected = items.find(({ id }) => id === selectedIdRef.current)
+        if (selectedProjectIdRef.current !== null && selectedIdRef.current === null) return;
+        const nextSelected = items.find(({ id }) => id === selectedIdRef.current)
+          ?? ordinaryItems[0]
           ?? items[0]
           ?? null;
-        selectConversation(selected);
+        if (nextSelected) {
+          openConversation(nextSelected);
+        } else {
+          selectConversation(null);
+        }
       })
       .catch((reason: unknown) => {
         if (active) setError(messageOf(reason));
@@ -250,8 +352,16 @@ export function ChatWorkspace({
     };
   }, [defaultModelId, searchQuery, view]);
 
-  const selected = conversations.find(({ id }) => id === selectedId) ?? null;
-  const historyConversations = conversations.filter(({ last_message_at }) => last_message_at !== null);
+  const selected = openedConversations.find(({ id }) => id === selectedId)
+    ?? conversations.find(({ id }) => id === selectedId)
+    ?? null;
+  const selectedProject = projects.find(({ id }) => id === selectedProjectId) ?? null;
+  const historyConversations = conversations.filter(({ last_message_at, project_id }) =>
+    last_message_at !== null && (!project_id || Boolean(searchQuery)),
+  );
+  const projectHistoryConversations = projectConversations.filter(
+    ({ last_message_at }) => last_message_at !== null,
+  );
   const renderedConversations = selected
     && !openedConversations.some(({ id }) => id === selected.id)
     ? [...openedConversations, selected]
@@ -267,12 +377,34 @@ export function ChatWorkspace({
     setView(nextView);
   }
 
+  function clearProjectSelection() {
+    selectedProjectIdRef.current = null;
+    setSelectedProjectId(null);
+    setExpandedProjectId(null);
+  }
+
+  function openProject(project: AudreyProject) {
+    selectedProjectIdRef.current = project.id;
+    setSelectedProjectId(project.id);
+    setExpandedProjectId(project.id);
+    selectConversation(null);
+  }
+
+  function openConversation(conversation: Conversation) {
+    const projectId = conversation.project_id ?? null;
+    selectedProjectIdRef.current = projectId;
+    setSelectedProjectId(projectId);
+    setExpandedProjectId(projectId);
+    selectConversation(conversation);
+  }
+
   async function startConversation() {
     if (!defaultModelId) return;
     setCreating(true);
     setError("");
     try {
       const conversation = await createConversation(defaultModelId);
+      clearProjectSelection();
       const visibleImmediately = view === "active" && !searchQuery;
       if (visibleImmediately) {
         setConversations((current) => [conversation, ...current]);
@@ -291,7 +423,18 @@ export function ChatWorkspace({
   }
 
   function replaceConversation(updated: Conversation) {
+    if (selectedIdRef.current === updated.id) {
+      const projectId = updated.project_id ?? null;
+      selectedProjectIdRef.current = projectId;
+      setSelectedProjectId(projectId);
+      setExpandedProjectId(projectId);
+    }
     setOpenedConversations((current) => upsertConversation(current, updated));
+    setProjectConversations((current) =>
+      updated.project_id === selectedProjectId
+        ? upsertConversation(current, updated)
+        : current.filter(({ id }) => id !== updated.id),
+    );
     if (
       searchQuery
       && !updated.title.toLocaleLowerCase().includes(searchQuery.toLocaleLowerCase())
@@ -299,27 +442,75 @@ export function ChatWorkspace({
       removeFromCurrentView(updated.id);
       return;
     }
-    setConversations((current) =>
-      current.map((conversation) =>
-        conversation.id === updated.id ? updated : conversation,
-      ),
-    );
+    setConversations((current) => upsertConversation(current, updated));
   }
 
   function removeFromCurrentView(conversationId: string, closeThread = false) {
     const remaining = conversations.filter(({ id }) => id !== conversationId);
     setConversations(remaining);
+    setProjectConversations((current) => current.filter(({ id }) => id !== conversationId));
     if (closeThread) {
       setOpenedConversations((current) =>
         current.filter(({ id }) => id !== conversationId),
       );
     }
     if (selectedId === conversationId) {
-      selectConversation(remaining[0] ?? null);
-      if (remaining.length === 0 && view === "active" && !searchQuery) {
-        void startConversation();
+      if (selectedProjectId) {
+        selectConversation(null);
+      } else {
+        const nextOrdinary = remaining.find(({ project_id }) => !project_id) ?? null;
+        selectConversation(nextOrdinary);
+        if (!nextOrdinary && view === "active" && !searchQuery) {
+          void startConversation();
+        }
       }
     }
+  }
+
+  function projectCreated(project: AudreyProject) {
+    setProjects((current) => [project, ...current]);
+    setNewProjectOpen(false);
+    openProject(project);
+  }
+
+  function projectChanged(updated: AudreyProject) {
+    setProjects((current) => current.map((project) =>
+      project.id === updated.id ? updated : project,
+    ));
+  }
+
+  function projectDeleted(projectId: string) {
+    const retained = projectConversations.map((conversation) => ({
+      ...conversation,
+      project_id: null,
+    }));
+    setProjects((current) => current.filter(({ id }) => id !== projectId));
+    setConversations((current) => current.map((conversation) =>
+      conversation.project_id === projectId
+        ? { ...conversation, project_id: null }
+        : conversation,
+    ));
+    setOpenedConversations((current) => current.map((conversation) =>
+      conversation.project_id === projectId
+        ? { ...conversation, project_id: null }
+        : conversation,
+    ));
+    setProjectConversations([]);
+    setProjectFiles([]);
+    clearProjectSelection();
+    const nextConversation = retained[0]
+      ?? conversations.find(({ project_id }) => !project_id)
+      ?? null;
+    selectConversation(nextConversation);
+    if (!nextConversation && view === "active" && !searchQuery) {
+      void startConversation();
+    }
+  }
+
+  function projectConversationCreated(conversation: Conversation) {
+    setConversations((current) => upsertConversation(current, conversation));
+    setProjectConversations((current) => upsertConversation(current, conversation));
+    openConversation(conversation);
   }
 
   async function deleteFromSidebar(conversationId: string) {
@@ -359,8 +550,56 @@ export function ChatWorkspace({
     }
   }
 
+  async function loadMoreProjects() {
+    if (!projectsNextCursor || projectsLoadingMore) return;
+    setProjectsLoadingMore(true);
+    setProjectsError("");
+    try {
+      const page = await listProjects(projectsNextCursor);
+      setProjects((current) => [...current, ...page.items]);
+      setProjectsNextCursor(page.next_cursor);
+      if (page.limits) setProjectLimits(page.limits);
+    } catch (reason) {
+      setProjectsError(messageOf(reason));
+    } finally {
+      setProjectsLoadingMore(false);
+    }
+  }
+
+  async function loadMoreProjectConversations() {
+    if (!selectedProjectId || !projectConversationsNextCursor) return;
+    const expectedProjectId = selectedProjectId;
+    setProjectConversationsLoading(true);
+    setProjectError("");
+    try {
+      const page = await listProjectConversations(expectedProjectId, {
+        archived: view === "archived",
+        cursor: projectConversationsNextCursor,
+        search: searchQuery,
+      });
+      if (selectedProjectIdRef.current !== expectedProjectId) return;
+      setProjectConversations((current) => [...current, ...page.items]);
+      setProjectConversationsNextCursor(page.next_cursor);
+    } catch (reason) {
+      if (selectedProjectIdRef.current === expectedProjectId) {
+        setProjectError(messageOf(reason));
+      }
+    } finally {
+      if (selectedProjectIdRef.current === expectedProjectId) {
+        setProjectConversationsLoading(false);
+      }
+    }
+  }
+
   return (
     <div className="workspace">
+      {newProjectOpen ? (
+        <NewProjectDialog
+          limits={projectLimits}
+          onClose={() => setNewProjectOpen(false)}
+          onCreated={projectCreated}
+        />
+      ) : null}
       <aside className="sidebar" aria-label="Conversations">
         <div className="sidebar-primary-action">
           <button
@@ -375,6 +614,100 @@ export function ChatWorkspace({
             <span>{creating ? "Creating…" : "New conversation"}</span>
           </button>
         </div>
+
+        <section className="projects-sidebar" aria-labelledby="projects-sidebar-title">
+          <header>
+            <h2 id="projects-sidebar-title">Projects</h2>
+            <button type="button" onClick={() => setNewProjectOpen(true)} aria-label="New project">
+              <span aria-hidden="true">＋</span>
+              <span>New</span>
+            </button>
+          </header>
+          {projectsLoading ? <p className="sidebar-status" role="status">Loading projects…</p> : null}
+          {!projectsLoading && projects.length === 0 ? (
+            <p className="sidebar-status">No projects yet.</p>
+          ) : null}
+          {projects.length ? (
+            <ul className="project-sidebar-list">
+              {projects.map((project) => {
+                const expanded = expandedProjectId === project.id;
+                const current = selectedProjectId === project.id;
+                return (
+                  <li key={project.id} className={current ? "project-sidebar-row current" : "project-sidebar-row"}>
+                    <div className="project-sidebar-main">
+                      <button
+                        className="project-sidebar-link"
+                        type="button"
+                        onClick={() => openProject(project)}
+                        aria-current={current && selectedId === null ? "page" : undefined}
+                        title={project.name}
+                      >
+                        <span className="project-folder-icon" aria-hidden="true">◇</span>
+                        <span>{project.name}</span>
+                      </button>
+                      <button
+                        className="project-sidebar-toggle"
+                        type="button"
+                        onClick={() => {
+                          if (expanded) {
+                            setExpandedProjectId(null);
+                          } else {
+                            openProject(project);
+                          }
+                        }}
+                        aria-label={`${expanded ? "Collapse" : "Expand"} project ${project.name}`}
+                        aria-expanded={expanded}
+                      >
+                        <span aria-hidden="true">{expanded ? "⌄" : "›"}</span>
+                      </button>
+                    </div>
+                    {expanded ? (
+                      <nav className="project-conversation-list" aria-label={`${project.name} conversations`}>
+                        {projectConversationsLoading ? (
+                          <p className="sidebar-status" role="status">Loading conversations…</p>
+                        ) : null}
+                        {!projectConversationsLoading && projectHistoryConversations.length === 0 ? (
+                          <p className="sidebar-status">
+                            {searchQuery ? "No matching titles." : view === "archived" ? "No archived conversations." : "No conversations yet."}
+                          </p>
+                        ) : null}
+                        {projectHistoryConversations.map((conversation) => (
+                          <button
+                            key={conversation.id}
+                            className={conversation.id === selectedId ? "project-conversation active" : "project-conversation"}
+                            type="button"
+                            onClick={() => openConversation(conversation)}
+                            aria-current={conversation.id === selectedId ? "page" : undefined}
+                            title={conversation.title || "New conversation"}
+                          >
+                            <span>{conversation.title || "New conversation"}</span>
+                            <small>{modelLabel(models, conversation)}</small>
+                          </button>
+                        ))}
+                        {projectConversationsNextCursor ? (
+                          <button
+                            className="project-load-more"
+                            type="button"
+                            onClick={() => void loadMoreProjectConversations()}
+                            disabled={projectConversationsLoading}
+                          >
+                            {projectConversationsLoading ? "Loading…" : "Load older"}
+                          </button>
+                        ) : null}
+                      </nav>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+          {projectsNextCursor ? (
+            <button className="project-load-more" type="button" onClick={() => void loadMoreProjects()} disabled={projectsLoadingMore}>
+              {projectsLoadingMore ? "Loading…" : "Load more projects"}
+            </button>
+          ) : null}
+          {projectsError ? <p className="sidebar-error">{projectsError}</p> : null}
+        </section>
 
         <label className="conversation-search">
           <span>Search titles</span>
@@ -424,7 +757,7 @@ export function ChatWorkspace({
               <button
                 className={conversation.id === selectedId ? "conversation active" : "conversation"}
                 type="button"
-                onClick={() => selectConversation(conversation)}
+                onClick={() => openConversation(conversation)}
                 aria-current={conversation.id === selectedId ? "page" : undefined}
               >
                 <span>{conversation.title || "New conversation"}</span>
@@ -484,7 +817,26 @@ export function ChatWorkspace({
             <h2>No models available</h2>
             <p>An Audrey administrator can enable a model from the Admin panel.</p>
           </div>
-        ) : renderedConversations.map((opened) => (
+        ) : null}
+        {!catalogUnavailable && selectedProject && !selected ? (
+          <ProjectHome
+            project={selectedProject}
+            conversations={projectConversations}
+            files={projectFiles}
+            filesLoading={projectFilesLoading}
+            limits={projectLimits}
+            defaultModelId={defaultModelId ?? "auto"}
+            onProjectChange={projectChanged}
+            onProjectDeleted={projectDeleted}
+            onConversationCreated={projectConversationCreated}
+            onConversationSelected={openConversation}
+            onFilesChange={setProjectFiles}
+          />
+        ) : null}
+        {!catalogUnavailable && projectError && selectedProject && !selected ? (
+          <p className="project-page-error" role="alert">{projectError}</p>
+        ) : null}
+        {!catalogUnavailable ? renderedConversations.map((opened) => (
           <div
             className="conversation-thread-slot"
             hidden={opened.id !== selectedId}
@@ -493,16 +845,24 @@ export function ChatWorkspace({
             <ConversationThread
               conversation={opened}
               models={models}
+              projects={projects}
               skills={skills}
               canBrowseDirectModels={canBrowseDirectModels}
               showProgress={preferences.show_progress}
               onConversationChange={replaceConversation}
               onRemoveFromView={removeFromCurrentView}
+              onOpenProject={(projectId) => {
+                const project = projects.find(({ id }) => id === projectId);
+                if (project) openProject(project);
+              }}
             />
           </div>
-        ))}
-        {!catalogUnavailable && !selected && (loading || creating) ? (
+        )) : null}
+        {!catalogUnavailable && !selectedProject && !selected && (loading || creating) ? (
           <AudreyLoader label="Opening conversation" showPortrait={false} />
+        ) : null}
+        {!catalogUnavailable && selectedProjectId && !selectedProject && projectsLoading ? (
+          <AudreyLoader label="Opening project" showPortrait={false} />
         ) : null}
       </section>
     </div>
@@ -512,19 +872,23 @@ export function ChatWorkspace({
 function ConversationThread({
   conversation,
   models,
+  projects,
   skills,
   canBrowseDirectModels,
   showProgress,
   onConversationChange,
   onRemoveFromView,
+  onOpenProject,
 }: {
   conversation: Conversation;
   models: AudreyModel[];
+  projects: AudreyProject[];
   skills: SkillSummary[];
   canBrowseDirectModels: boolean;
   showProgress: boolean;
   onConversationChange: (conversation: Conversation) => void;
   onRemoveFromView: (conversationId: string, closeThread?: boolean) => void;
+  onOpenProject: (projectId: string) => void;
 }) {
   const [thread, setThread] = useState<ThreadState>({ status: "idle" });
   const [modelId, setModelId] = useState(
@@ -534,7 +898,7 @@ function ConversationThread({
   );
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(conversation.title);
-  const [mutation, setMutation] = useState<"model" | "rename" | "archive" | "delete" | null>(null);
+  const [mutation, setMutation] = useState<"model" | "rename" | "project" | "archive" | "delete" | null>(null);
   const [mutationError, setMutationError] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [runActive, setRunActive] = useState(false);
@@ -548,6 +912,7 @@ function ConversationThread({
   const selectedModelId = models.some(({ id }) => id === modelId)
     ? modelId
     : (models.find(({ id }) => id === "auto") ?? models[0]).id;
+  const conversationProject = projects.find(({ id }) => id === conversation.project_id) ?? null;
 
   useEffect(() => {
     let active = true;
@@ -686,6 +1051,21 @@ function ConversationThread({
     }
   }
 
+  async function moveToProject(projectId: string | null) {
+    if ((conversation.project_id ?? null) === projectId || runActive) return;
+    setMutation("project");
+    setMutationError("");
+    try {
+      onConversationChange(await updateConversation(conversation.id, {
+        project_id: projectId,
+      }));
+    } catch (reason) {
+      setMutationError(messageOf(reason));
+    } finally {
+      setMutation(null);
+    }
+  }
+
   async function toggleArchived() {
     setMutation("archive");
     setMutationError("");
@@ -718,7 +1098,15 @@ function ConversationThread({
       <div className="thread-header-shell">
         <header className="thread-header">
           <div className="thread-title">
-            <span>Conversation</span>
+            {conversationProject ? (
+              <nav className="project-breadcrumb" aria-label="Project breadcrumb">
+                <button type="button" onClick={() => onOpenProject(conversationProject.id)}>{conversationProject.name}</button>
+                <span aria-hidden="true">›</span>
+                <span>Conversation</span>
+              </nav>
+            ) : (
+              <span>Conversation</span>
+            )}
             {editingTitle ? (
               <form className="rename-conversation" onSubmit={(event) => void renameConversation(event)}>
                 <input
@@ -755,6 +1143,23 @@ function ConversationThread({
           </div>
           <div className="thread-controls">
             <div className="conversation-actions">
+              <label className="project-move-control">
+                <span>Project</span>
+                <select
+                  value={conversation.project_id ?? ""}
+                  onChange={(event) => void moveToProject(event.target.value || null)}
+                  disabled={runActive || mutation !== null}
+                  aria-label="Move conversation to project"
+                >
+                  <option value="">No project</option>
+                  {conversation.project_id && !conversationProject ? (
+                    <option value={conversation.project_id}>Current project</option>
+                  ) : null}
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>{project.name}</option>
+                  ))}
+                </select>
+              </label>
               <button
                 type="button"
                 onClick={() => void toggleArchived()}
