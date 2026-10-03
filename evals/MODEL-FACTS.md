@@ -502,6 +502,25 @@ One candidate clears the accuracy, escalation, and footprint gate. **Keep
 `confidence` is distribution concentration and was not treated as correctness
 probability. `[2026-09-30-systemone-router-probe-results.json, 2026-09-30]`
 
+### Clef System One follow-up — awaiting live measurement 2026-10-03
+
+Ollama publishes `clef:latest` as a 27B, approximately 18 GB multimodal
+decision model and `clef-flash:latest` as a latency-focused 9B, approximately
+11 GB decision model. Both require Ollama 0.35.1 or later and use the typed
+`/v1/systemone` choice, yes/no, and score contract. Clef supports image input.
+These are vendor facts, not Audrey measurements.
+`[https://ollama.com/library/clef; https://ollama.com/library/clef-flash;
+https://docs.ollama.com/api/systemone, checked 2026-10-03]`
+
+The follow-up keeps the production router unchanged while it collects two
+separate reports. The router report compares both tags with `qwen3.5:4b` on the
+existing 36 cases and retains the prior model-reached accuracy and costly-route
+gate. The broad Clef report covers 12 cases and 29 choice, yes/no, and score
+questions over text, structured JSON, and image input, with accuracy,
+calibration, latency, token, and residency measurements. Because System One is
+a decision endpoint, this does not measure conversational answer quality.
+`[systemone_router_probe.py; systemone_decision_probe.py; prepared 2026-10-03]`
+
 ### `ornith-1.5:35b`
 
 - **59/60 on the grounding suite**, `--repeat 5`. One real failure; see below.

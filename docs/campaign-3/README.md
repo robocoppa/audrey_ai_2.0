@@ -83,7 +83,10 @@ cases that reach Audrey's model router, `qwen3.5:4b` scored 23/23 and Nimble
 22/23; both Tev1 sizes trailed further. Nimble also added a costly reasoning
 route and escalation, loaded more slowly, and used over twice the resident
 memory. No candidate cleared the gate, Slice 6B was not opened, and no
-production classifier or config changed.
+production classifier or config changed. A 2026-10-03 probe-only follow-up is
+prepared for Clef 27B and Clef Flash 9B. It repeats the same router comparison
+and adds a broad typed-decision benchmark; live results are pending and the
+incumbent remains unchanged.
 
 Phase 7 OCR completed on 2026-09-30. Slice 7A adds bounded English OCR for
 image-only PDFs through the durable media-worker queue. The corrected live
@@ -142,7 +145,7 @@ and finally adds the first general skills layer on that owned surface.
 | 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | Complete (3A–3C live-settled; explicit grounded-document pilot ships; automatic selection deferred) |
 | 04 | [File and artifact downloads](phase-04-file-downloads.md) | Owner-scoped recovery of stored originals and useful derived artifacts from the native Files surface | Phase 03 explicit-skill ship decision | Complete |
 | 05 | [Responses API compatibility](phase-05-responses-api.md) | OpenAI Responses clients use Audrey's existing authenticated generation and policy boundaries | Phase 04 completion | Complete (5A and 5B live-settled) |
-| 06 | [System One decision routing](phase-06-system-one-routing.md) | Measure purpose-built local decision models against Audrey's incumbent router and retain a one-setting rollback | Phase 05 Slice 5B gate | Complete (6A measured; incumbent retained; 6B not opened) |
+| 06 | [System One decision routing](phase-06-system-one-routing.md) | Measure purpose-built local decision models against Audrey's incumbent router and retain a one-setting rollback | Phase 05 Slice 5B gate | Original comparison complete; Clef follow-up awaiting live measurement |
 | 07 | [Scanned PDF OCR](phase-07-scanned-pdf-ocr.md) | Queue image-only PDFs for bounded owner-scoped OCR, indexing, and native reading | Phase 06 decision | Complete (OCR and PDF presentation live-settled) |
 | 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Transcribe, summarize, search, inspect, and attach spoken audio as a first-class file kind | Phase 07 completion | Complete (8A and 8B live-passed) |
 | 09 | [Broader spoken audio](phase-09-broader-audio.md) | Admit measured OGG, Opus, and raw AAC containers before separately scoped speaker or media analysis | Phase 08 and Phase 2D.5 completion | Complete (9A live-passed) |

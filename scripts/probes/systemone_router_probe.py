@@ -33,7 +33,9 @@ Environment:
   CASE_FILE           alternate labeled JSON fixture
   REPORT_PATH         optional path for the complete JSON report
 
-The proposed winner/margin floors are reported, not shipped. System One's
+Clef and Clef Flash require Ollama 0.35.1 or later; older System One models
+retain the endpoint's 0.35.0 minimum. The proposed winner/margin floors are
+reported, not shipped. System One's
 ``confidence`` measures distribution concentration; this probe keeps it
 separate from Audrey's self-reported chat confidence and 0.95 escalation gate.
 """
@@ -60,6 +62,8 @@ import httpx
 TASKS = ("code", "reasoning", "general", "vl")
 LIVE_EXPECTED_TASKS = frozenset({"code", "reasoning", "general"})
 MIN_OLLAMA_VERSION = (0, 35, 0)
+CLEF_MIN_OLLAMA_VERSION = (0, 35, 1)
+CLEF_MODEL_FAMILIES = frozenset({"clef", "clef-flash"})
 
 ROUTER_QUESTION: dict[str, Any] = {
     "type": "choice",
@@ -301,6 +305,15 @@ def _version_tuple(raw: str) -> tuple[int, int, int]:
     if len(parts) < 2:
         raise ProbeError(f"cannot parse Ollama version {raw!r}")
     return tuple([*parts, 0, 0][:3])  # type: ignore[return-value]
+
+
+def _minimum_systemone_version(
+    candidates: tuple[str, ...],
+) -> tuple[tuple[int, int, int], str]:
+    families = {model.partition(":")[0] for model in candidates}
+    if families & CLEF_MODEL_FAMILIES:
+        return CLEF_MIN_OLLAMA_VERSION, "0.35.1"
+    return MIN_OLLAMA_VERSION, "0.35.0"
 
 
 def _model_name(row: dict[str, Any]) -> str:
@@ -595,8 +608,14 @@ async def collect_report(
     )
     try:
         version = await client.version()
-        if _version_tuple(version) < MIN_OLLAMA_VERSION:
-            raise ProbeError(f"Ollama {version} is too old; System One requires 0.35+")
+        minimum_version, minimum_version_label = _minimum_systemone_version(
+            settings.candidates
+        )
+        if _version_tuple(version) < minimum_version:
+            raise ProbeError(
+                f"Ollama {version} is too old; selected candidates require "
+                f"{minimum_version_label}+"
+            )
         tags = await client.tags()
         requested = [*settings.candidates, settings.incumbent_model]
         missing = [model for model in requested if _model_metadata(tags, model) is None]
@@ -659,7 +678,7 @@ async def collect_report(
             "ollama": {
                 "base_url": settings.base_url,
                 "version": version,
-                "minimum_systemone_version": "0.35.0",
+                "minimum_systemone_version": minimum_version_label,
                 "initial_residency": _residency(initial_residency),
                 "initial_residency_error": initial_ps_error,
             },

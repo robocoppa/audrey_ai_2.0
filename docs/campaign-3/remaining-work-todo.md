@@ -401,6 +401,10 @@ Detailed scope:
 
 ## 10. Finish model and production measurements
 
+- [ ] Run Clef's broad System One decision probe and review its text, JSON,
+  image, accuracy, calibration, latency, token, and residency results.
+- [ ] Compare Clef and Clef Flash with `qwen3.5:4b` on the existing router
+  fixture; keep production unchanged unless a candidate clears every ship gate.
 - [ ] Verify the installed `deepseek-v4.1-flash:cloud` capabilities with
   `ollama show` and one tool-call probe.
 - [ ] Run the real A-B-A for `factcheck_worker.compress_keep_last` with a fresh

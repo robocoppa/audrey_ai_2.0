@@ -1,8 +1,8 @@
 # Campaign 3 Phase 6 - System One decision routing
 
-**Status:** Complete. The on-box comparison finished cleanly on 2026-09-30.
-No System One candidate cleared the ship gate, so Audrey retains
-`qwen3.5:4b`; Slice 6B was not opened and production routing did not change.
+**Status:** The original comparison completed on 2026-09-30 and retained
+`qwen3.5:4b`. A probe-only Clef and Clef Flash follow-up is prepared and awaits
+live measurement; production routing remains unchanged.
 
 ## Goal
 
@@ -14,6 +14,8 @@ GPU residency, and deep-panel cost.
 Official references:
 
 - https://docs.ollama.com/api/systemone
+- https://ollama.com/library/clef
+- https://ollama.com/library/clef-flash
 - https://ollama.com/library/tev1
 - https://ollama.com/library/nimble
 
@@ -163,7 +165,37 @@ costly false-reasoning outcomes, while the incumbent remains at 34/36 with two.
 **Decision:** retain `qwen3.5:4b`. No candidate matched its production-reachable
 accuracy, escalation behavior, and footprint. A concurrent worker-contention
 test would not rescue a candidate that already failed the earlier accuracy and
-cost gates, so no further live smoke is required for this phase.
+cost gates, so no further live smoke is required for the original candidates.
+
+## Clef follow-up evaluation — prepared 2026-10-03
+
+Ollama now publishes the 27B `clef:latest` and latency-focused 9B
+`clef-flash:latest` decision models. Both use `/v1/systemone`, require Ollama
+0.35.1 or later, and are evaluated as decision models rather than ordinary chat
+generators. This follow-up is measurement only: it does not register either
+model, edit `config.yaml`, or open Slice 6B.
+
+The Audrey router comparison reuses the same 36-case fixture and the real
+incumbent path. Both Clef tags run before `qwen3.5:4b`, and the probe records
+the original accuracy, costly false-reasoning, uncertainty, latency, token,
+package-size, and residency fields. Clef or Clef Flash must match the
+incumbent's 23/23 model-reached accuracy without adding a costly reasoning
+route or escalation before footprint or speed can justify a production trial.
+
+`scripts/probes/systemone_decision_probe.py` adds a separate broad System One
+measurement for Clef. Its tracked fixture contains 12 cases and 29 questions:
+11 choice, 12 yes/no, and 6 score decisions across eight text inputs, three
+structured JSON states, and one generated image. It reports exact-case and
+per-question accuracy, calibration signals, score-range error, input/output
+tokens, cold and warm latency, package metadata, and residency. This benchmark
+tests Clef's wider decision contract; it does not claim conversational answer
+quality because the endpoint does not generate chat answers.
+
+Run the broad Clef probe first and the router comparison second using the exact
+Tower commands in `docs/reference/live-smoke-testing.md`. The broad probe
+unloads Clef after measurement; the router probe runs the incumbent last so
+Audrey's current router is warm at the end. Live results remain pending and no
+ship decision should be recorded until both logs have been reviewed.
 
 ## Slice 6B - not opened
 

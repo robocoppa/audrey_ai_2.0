@@ -310,3 +310,16 @@ class TestEndToEndCollection:
 )
 def test_version_parser(raw, expected):
     assert probe._version_tuple(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "candidates,expected",
+    [
+        (("tev1:0.8b",), ((0, 35, 0), "0.35.0")),
+        (("nimble:latest",), ((0, 35, 0), "0.35.0")),
+        (("clef:latest",), ((0, 35, 1), "0.35.1")),
+        (("clef-flash:latest", "nimble:latest"), ((0, 35, 1), "0.35.1")),
+    ],
+)
+def test_candidate_specific_minimum_ollama_version(candidates, expected):
+    assert probe._minimum_systemone_version(candidates) == expected

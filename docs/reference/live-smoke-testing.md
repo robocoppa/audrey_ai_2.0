@@ -57,6 +57,42 @@ unloads models for cold samples, run it while Audrey is idle. Its exact version,
 model-install, runner, and success criteria are maintained in
 `docs/campaign-3/phase-06-system-one-routing.md`.
 
+### Measure Clef and Clef Flash
+
+Use these after both pulls finish. Run the broad Clef measurement first; it
+unloads `clef:latest` when complete. Then run the router comparison, which
+measures both candidates before the incumbent and leaves `qwen3.5:4b` warm.
+Each command self-detaches and immediately prints its persistent log path.
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+
+scripts/probes/probe-onbox.sh systemone_decision_probe.py \
+  COPY=systemone_decision_cases.json \
+  MODELS=clef:latest \
+  ROUNDS=3
+
+scripts/probes/probe-onbox.sh systemone_router_probe.py \
+  COPY=systemone_router_cases.json \
+  CANDIDATES=clef:latest,clef-flash:latest \
+  ROUNDS=3
+```
+
+No upload or browser action is involved. The probes do not change Audrey's
+configuration, conversations, files, or model catalog. They only load and
+unload the named Ollama models while collecting cold/warm latency and residency
+evidence, so run them while Audrey is idle. The setup check requires Ollama
+0.35.1 or later and the exact `clef:latest` and `clef-flash:latest` tags; a
+missing tag or older Ollama exits 2 without measuring anything.
+
+These are measurements, so exit 0 means the report was collected successfully,
+not that a model should ship. Send back both log files or their complete JSON.
+For routing, compare the 23 cases that reach the model: a candidate must match
+the incumbent's 23/23 result without adding a costly false `reasoning` route or
+an escalation. For the broader Clef report, inspect response failures, exact
+case and question accuracy, the image result, score-range errors, calibration,
+latency, tokens, and residency together.
+
 ## Keep credentials private and runner-specific
 
 The laptop's gitignored `.env.test.local` is the permanent local credential

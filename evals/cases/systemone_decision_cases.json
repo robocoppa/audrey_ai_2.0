@@ -1,0 +1,376 @@
+{
+  "schema": 1,
+  "description": "Broad local System One decision coverage for choice, yes/no, score, structured-state, batching, and Clef vision behavior.",
+  "cases": [
+    {
+      "id": "support-billing-refund",
+      "input_kind": "text",
+      "state": "I was charged twice for order 4182. Please refund the duplicate payment.",
+      "questions": {
+        "team": {
+          "type": "choice",
+          "instructions": "Which team should handle this request?",
+          "criteria": {
+            "billing": "Payments, duplicate charges, invoices, and refunds",
+            "technical": "Product errors, outages, and configuration",
+            "sales": "Plans, quotes, and upgrades"
+          }
+        },
+        "refund_requested": {
+          "type": "noul",
+          "instructions": "Does the customer explicitly request a refund?",
+          "criteria": {
+            "false": "No refund is requested",
+            "true": "The customer requests a refund"
+          }
+        },
+        "urgency": {
+          "type": "score",
+          "instructions": "How urgently should this request be handled?",
+          "criteria": [
+            "Routine: no customer impact or time pressure",
+            "Soon: one customer is financially inconvenienced",
+            "Immediate: widespread or safety-critical impact"
+          ]
+        }
+      },
+      "expected": {
+        "team": {"type": "choice", "value": "billing"},
+        "refund_requested": {"type": "noul", "value": true},
+        "urgency": {"type": "score", "minimum": 0.25, "maximum": 1.6}
+      }
+    },
+    {
+      "id": "support-technical-outage",
+      "input_kind": "text",
+      "state": "Checkout returns HTTP 500 for every customer in every region and has failed for 45 minutes.",
+      "questions": {
+        "team": {
+          "type": "choice",
+          "instructions": "Which team should handle this request?",
+          "criteria": {
+            "billing": "Payments, duplicate charges, invoices, and refunds",
+            "technical": "Product errors, outages, and configuration",
+            "sales": "Plans, quotes, and upgrades"
+          }
+        },
+        "widespread": {
+          "type": "noul",
+          "instructions": "Does the state describe widespread customer impact?"
+        },
+        "severity": {
+          "type": "score",
+          "instructions": "How severe is the customer impact?",
+          "criteria": [
+            "No impact",
+            "Minor impact",
+            "Major impact",
+            "Critical outage"
+          ]
+        }
+      },
+      "expected": {
+        "team": {"type": "choice", "value": "technical"},
+        "widespread": {"type": "noul", "value": true},
+        "severity": {"type": "score", "minimum": 2.25, "maximum": 3.0}
+      }
+    },
+    {
+      "id": "support-sales-upgrade",
+      "input_kind": "text",
+      "state": "We need a quote to upgrade 80 seats from the Starter plan to Enterprise next quarter.",
+      "questions": {
+        "team": {
+          "type": "choice",
+          "instructions": "Which team should handle this request?",
+          "criteria": {
+            "billing": "Payments, duplicate charges, invoices, and refunds",
+            "technical": "Product errors, outages, and configuration",
+            "sales": "Plans, quotes, and upgrades"
+          }
+        },
+        "refund_requested": {
+          "type": "noul",
+          "instructions": "Does the customer request a refund?"
+        }
+      },
+      "expected": {
+        "team": {"type": "choice", "value": "sales"},
+        "refund_requested": {"type": "noul", "value": false}
+      }
+    },
+    {
+      "id": "tool-read-only",
+      "input_kind": "text",
+      "state": "get_file_text(file_id=\"file_018\", offset=0)",
+      "questions": {
+        "operation": {
+          "type": "choice",
+          "instructions": "What kind of operation is proposed?",
+          "criteria": {
+            "read_only": "Reads existing information without modifying external state",
+            "write": "Creates or changes external state",
+            "destructive": "Deletes data or causes difficult-to-reverse effects"
+          }
+        },
+        "harm": {
+          "type": "noul",
+          "instructions": "Could this operation directly change or delete external state?"
+        }
+      },
+      "expected": {
+        "operation": {"type": "choice", "value": "read_only"},
+        "harm": {"type": "noul", "value": false}
+      }
+    },
+    {
+      "id": "tool-high-blast-radius",
+      "input_kind": "text",
+      "state": "send_email(to=\"all-customers\", subject=\"FINAL NOTICE\", body=\"Your account will be suspended today unless you pay immediately.\")",
+      "questions": {
+        "operation": {
+          "type": "choice",
+          "instructions": "What kind of operation is proposed?",
+          "criteria": {
+            "read_only": "Reads existing information without modifying external state",
+            "write": "Creates or changes external state with limited impact",
+            "destructive": "Has broad, harmful, or difficult-to-reverse effects"
+          }
+        },
+        "harm": {
+          "type": "noul",
+          "instructions": "Could this operation cause material harm if executed?"
+        },
+        "blast_radius": {
+          "type": "score",
+          "instructions": "How large is the possible blast radius?",
+          "criteria": [
+            "None",
+            "One reversible local record",
+            "Several people or systems",
+            "A broad external audience or critical system"
+          ]
+        }
+      },
+      "expected": {
+        "operation": {"type": "choice", "value": "destructive"},
+        "harm": {"type": "noul", "value": true},
+        "blast_radius": {"type": "score", "minimum": 2.25, "maximum": 3.0}
+      }
+    },
+    {
+      "id": "message-phishing",
+      "input_kind": "text",
+      "state": "Your mailbox will be disabled in 30 minutes. Reply with your password and MFA code to keep access.",
+      "questions": {
+        "message_type": {
+          "type": "choice",
+          "instructions": "Which description best fits this message?",
+          "criteria": {
+            "phishing": "Uses pressure or impersonation to obtain secrets or money",
+            "transactional": "A legitimate account or purchase notification",
+            "marketing": "Promotional content",
+            "internal": "Routine internal coordination"
+          }
+        },
+        "requests_secret": {
+          "type": "noul",
+          "instructions": "Does the message ask the recipient to disclose authentication secrets?"
+        }
+      },
+      "expected": {
+        "message_type": {"type": "choice", "value": "phishing"},
+        "requests_secret": {"type": "noul", "value": true}
+      }
+    },
+    {
+      "id": "message-transactional",
+      "input_kind": "text",
+      "state": "Your password was changed successfully. If you did not make this change, visit the official support site from your saved bookmark.",
+      "questions": {
+        "message_type": {
+          "type": "choice",
+          "instructions": "Which description best fits this message?",
+          "criteria": {
+            "phishing": "Uses pressure or impersonation to obtain secrets or money",
+            "transactional": "A legitimate account or purchase notification",
+            "marketing": "Promotional content",
+            "internal": "Routine internal coordination"
+          }
+        },
+        "requests_secret": {
+          "type": "noul",
+          "instructions": "Does the message ask the recipient to disclose a password or MFA code?"
+        }
+      },
+      "expected": {
+        "message_type": {"type": "choice", "value": "transactional"},
+        "requests_secret": {"type": "noul", "value": false}
+      }
+    },
+    {
+      "id": "invoice-structured",
+      "input_kind": "json",
+      "state": {
+        "invoice_id": "INV-2048",
+        "vendor_approved": true,
+        "duplicate": false,
+        "total_matches_purchase_order": true,
+        "currency": "USD",
+        "amount": 840.0
+      },
+      "questions": {
+        "action": {
+          "type": "choice",
+          "instructions": "What action fits the supplied invoice checks?",
+          "criteria": {
+            "approve": "All required checks pass",
+            "manual_review": "One or more checks are missing or uncertain",
+            "reject": "A supplied check explicitly fails"
+          }
+        },
+        "known_duplicate": {
+          "type": "noul",
+          "instructions": "Is the invoice marked as a duplicate?"
+        },
+        "risk": {
+          "type": "score",
+          "instructions": "How risky is automatic approval from the supplied fields?",
+          "criteria": [
+            "Low risk: every supplied check passes",
+            "Moderate risk: a check is missing or uncertain",
+            "High risk: a check fails or fraud is indicated"
+          ]
+        }
+      },
+      "expected": {
+        "action": {"type": "choice", "value": "approve"},
+        "known_duplicate": {"type": "noul", "value": false},
+        "risk": {"type": "score", "minimum": 0.0, "maximum": 0.8}
+      }
+    },
+    {
+      "id": "deployment-structured",
+      "input_kind": "json",
+      "state": {
+        "deployment": "2026.10.3",
+        "error_rate_before": 0.002,
+        "error_rate_after": 0.19,
+        "regions_affected": 4,
+        "regions_total": 4,
+        "rollback_available": true
+      },
+      "questions": {
+        "action": {
+          "type": "choice",
+          "instructions": "What is the safest immediate action?",
+          "criteria": {
+            "continue": "Keep the deployment running unchanged",
+            "observe": "Wait for more evidence without changing state",
+            "rollback": "Return to the previous known-good deployment"
+          }
+        },
+        "critical": {
+          "type": "noul",
+          "instructions": "Does the supplied state describe a critical widespread regression?"
+        },
+        "severity": {
+          "type": "score",
+          "instructions": "How severe is this deployment regression?",
+          "criteria": [
+            "No regression",
+            "Minor regression",
+            "Major regression",
+            "Critical widespread regression"
+          ]
+        }
+      },
+      "expected": {
+        "action": {"type": "choice", "value": "rollback"},
+        "critical": {"type": "noul", "value": true},
+        "severity": {"type": "score", "minimum": 2.4, "maximum": 3.0}
+      }
+    },
+    {
+      "id": "routine-priority",
+      "input_kind": "text",
+      "state": "Please update the spelling of my display name whenever convenient. Nothing is blocked.",
+      "questions": {
+        "priority": {
+          "type": "score",
+          "instructions": "How urgent is this request?",
+          "criteria": [
+            "Routine",
+            "Soon",
+            "Urgent",
+            "Critical"
+          ]
+        },
+        "blocking": {
+          "type": "noul",
+          "instructions": "Does the state say work is blocked?"
+        }
+      },
+      "expected": {
+        "priority": {"type": "score", "minimum": 0.0, "maximum": 0.75},
+        "blocking": {"type": "noul", "value": false}
+      }
+    },
+    {
+      "id": "policy-structured",
+      "input_kind": "json",
+      "state": {
+        "actor_role": "contractor",
+        "resource": "production_customer_export",
+        "contains_personal_data": true,
+        "approved_ticket": false,
+        "requested_action": "download"
+      },
+      "questions": {
+        "decision": {
+          "type": "choice",
+          "instructions": "What access decision follows from the supplied facts?",
+          "criteria": {
+            "allow": "The request is authorized as supplied",
+            "review": "Authorization is unclear and needs human review",
+            "deny": "The supplied facts explicitly lack required authorization"
+          }
+        },
+        "sensitive": {
+          "type": "noul",
+          "instructions": "Does the requested resource contain sensitive personal data?"
+        }
+      },
+      "expected": {
+        "decision": {"type": "choice", "value": "deny"},
+        "sensitive": {"type": "noul", "value": true}
+      }
+    },
+    {
+      "id": "vision-red-swatch",
+      "input_kind": "image",
+      "state": "Judge the dominant visible color of the attached plain color swatch.",
+      "image_fixture": "solid_red_png",
+      "questions": {
+        "dominant_color": {
+          "type": "choice",
+          "instructions": "Which color dominates the image?",
+          "criteria": {
+            "red": "The image is predominantly red",
+            "green": "The image is predominantly green",
+            "blue": "The image is predominantly blue",
+            "grayscale": "The image is predominantly black, white, or gray"
+          }
+        },
+        "mostly_red": {
+          "type": "noul",
+          "instructions": "Is the image predominantly red?"
+        }
+      },
+      "expected": {
+        "dominant_color": {"type": "choice", "value": "red"},
+        "mostly_red": {"type": "noul", "value": true}
+      }
+    }
+  ]
+}
