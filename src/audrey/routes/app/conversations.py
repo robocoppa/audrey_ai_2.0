@@ -16,6 +16,7 @@ from audrey.app_state import (
     ConversationRecord,
     InvalidApplicationStateError,
     MessageRecord,
+    ProjectNotFoundError,
 )
 from audrey.auth import require_scope
 from audrey.identity import Principal
@@ -34,6 +35,7 @@ class ConversationCreateRequest(BaseModel):
     title: str = Field(default="", max_length=200)
     default_mode: _Mode | None = None
     model_id: str = Field(default="auto", min_length=1, max_length=200)
+    project_id: str | None = Field(default=None, min_length=1, max_length=200)
 
     @model_validator(mode="after")
     def reject_ambiguous_model(self):
@@ -49,12 +51,17 @@ class ConversationPatchRequest(BaseModel):
     default_mode: _Mode | None = None
     model_id: str | None = Field(default=None, min_length=1, max_length=200)
     archived: bool | None = None
+    project_id: str | None = Field(default=None, min_length=1, max_length=200)
 
     @model_validator(mode="after")
     def require_explicit_values(self):
         if not self.model_fields_set:
             raise ValueError("at least one conversation field is required")
-        if any(getattr(self, field) is None for field in self.model_fields_set):
+        if any(
+            getattr(self, field) is None
+            for field in self.model_fields_set
+            if field != "project_id"
+        ):
             raise ValueError("conversation fields cannot be null")
         if "default_mode" in self.model_fields_set and "model_id" in self.model_fields_set:
             raise ValueError("use model_id or default_mode, not both")
@@ -70,6 +77,7 @@ class ConversationResponse(BaseModel):
     updated_at: str
     last_message_at: str | None
     archived_at: str | None
+    project_id: str | None
 
 
 class ConversationListResponse(BaseModel):
@@ -162,6 +170,7 @@ def _conversation_response(record: ConversationRecord) -> ConversationResponse:
         updated_at=record.updated_at,
         last_message_at=record.last_message_at,
         archived_at=record.archived_at,
+        project_id=record.project_id,
     )
 
 
@@ -244,7 +253,10 @@ async def create_conversation(
             title=payload.title,
             default_mode=model.mode,
             default_model_id=model.id,
+            project_id=payload.project_id,
         )
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Project not found.") from exc
     except InvalidApplicationStateError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _conversation_response(record)
@@ -342,7 +354,11 @@ async def update_conversation(
             default_mode=selected.mode if selected is not None else None,
             default_model_id=selected.id if selected is not None else None,
             archived=payload.archived if "archived" in payload.model_fields_set else None,
+            project_id=payload.project_id,
+            update_project="project_id" in payload.model_fields_set,
         )
+    except ProjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Project not found.") from exc
     except ConversationHasActiveRunError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except InvalidApplicationStateError as exc:

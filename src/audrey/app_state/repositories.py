@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from audrey.app_state.projects import ProjectNotFoundError
 from audrey.app_state.records import (
     AttachmentSnapshot,
     ChatProjectionDeletionRecord,
@@ -146,9 +147,15 @@ class ConversationsRepository:
         title: str = "",
         default_mode: str = "auto",
         default_model_id: str | None = None,
+        project_id: str | None = None,
     ) -> ConversationRecord:
         return await asyncio.to_thread(
-            self._create_sync, user_id, title, default_mode, default_model_id
+            self._create_sync,
+            user_id,
+            title,
+            default_mode,
+            default_model_id,
+            project_id,
         )
 
     def _create_sync(
@@ -157,11 +164,13 @@ class ConversationsRepository:
         title: str,
         default_mode: str,
         default_model_id: str | None,
+        project_id: str | None,
     ) -> ConversationRecord:
         user_id = _required(user_id, "user id")
         title = _normalize_title(title)
         default_mode = _normalize_mode(default_mode)
         default_model_id = _normalize_model_id(default_model_id or default_mode)
+        project_id = _required(project_id, "project id") if project_id is not None else None
         conversation_id = _new_id("con")
         now = _utc_now()
 
@@ -174,11 +183,16 @@ class ConversationsRepository:
                 ).fetchone()
                 if owner is None:
                     raise InvalidApplicationStateError("conversation owner does not exist")
+                if project_id is not None and self._conn.execute(
+                    "SELECT 1 FROM app_projects WHERE user_id = ? AND project_id = ?",
+                    (user_id, project_id),
+                ).fetchone() is None:
+                    raise ProjectNotFoundError("project not found")
                 self._conn.execute(
                     "INSERT INTO app_conversations "
                     "(conversation_id, user_id, title, default_mode, default_model_id, "
-                    "created_at, updated_at, last_message_at, archived_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)",
+                    "created_at, updated_at, last_message_at, archived_at, project_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)",
                     (
                         conversation_id,
                         user_id,
@@ -187,6 +201,7 @@ class ConversationsRepository:
                         default_model_id,
                         now,
                         now,
+                        project_id,
                     ),
                 )
                 row = self._conversation_row_locked(user_id, conversation_id)
@@ -233,6 +248,7 @@ class ConversationsRepository:
         search: str = "",
         before_activity_at: str | None = None,
         before_conversation_id: str | None = None,
+        project_id: str | None = None,
     ) -> tuple[ConversationRecord, ...]:
         """List one stable keyset page for an owner-scoped title search."""
 
@@ -244,6 +260,7 @@ class ConversationsRepository:
             search,
             before_activity_at,
             before_conversation_id,
+            project_id,
         )
 
     def _list_page_sync(
@@ -254,11 +271,13 @@ class ConversationsRepository:
         search: str,
         before_activity_at: str | None,
         before_conversation_id: str | None,
+        project_id: str | None,
     ) -> tuple[ConversationRecord, ...]:
         user_id = _required(user_id, "user id")
         if not 1 <= limit <= 200:
             raise InvalidApplicationStateError("conversation limit must be between 1 and 200")
         search = str(search).strip()
+        project_id = _required(project_id, "project id") if project_id is not None else None
         if len(search) > 200:
             raise InvalidApplicationStateError(
                 "conversation search must be at most 200 characters"
@@ -277,8 +296,9 @@ class ConversationsRepository:
             rows = self._conn.execute(
                 "SELECT conversation_id, user_id, title, default_mode, "
                 "default_model_id, created_at, "
-                "updated_at, last_message_at, archived_at FROM app_conversations "
-                "WHERE user_id = ? "
+                "updated_at, last_message_at, archived_at, project_id "
+                "FROM app_conversations WHERE user_id = ? "
+                "AND (? IS NULL OR project_id = ?) "
                 "AND ((? = 1 AND archived_at IS NOT NULL) "
                 "OR (? = 0 AND archived_at IS NULL)) "
                 "AND (? = '' OR instr(lower(title), lower(?)) > 0) "
@@ -289,6 +309,8 @@ class ConversationsRepository:
                 "conversation_id DESC LIMIT ?",
                 (
                     user_id,
+                    project_id,
+                    project_id,
                     int(archived),
                     int(archived),
                     search,
@@ -311,6 +333,8 @@ class ConversationsRepository:
         default_mode: str | None = None,
         default_model_id: str | None = None,
         archived: bool | None = None,
+        project_id: str | None = None,
+        update_project: bool = False,
     ) -> ConversationRecord | None:
         return await asyncio.to_thread(
             self._update_sync,
@@ -320,6 +344,8 @@ class ConversationsRepository:
             default_mode,
             default_model_id,
             archived,
+            project_id,
+            update_project,
         )
 
     def _update_sync(
@@ -330,6 +356,8 @@ class ConversationsRepository:
         default_mode: str | None,
         default_model_id: str | None,
         archived: bool | None,
+        project_id: str | None,
+        update_project: bool,
     ) -> ConversationRecord | None:
         user_id = _required(user_id, "user id")
         conversation_id = _required(conversation_id, "conversation id")
@@ -338,6 +366,7 @@ class ConversationsRepository:
             and default_mode is None
             and default_model_id is None
             and archived is None
+            and not update_project
         ):
             raise InvalidApplicationStateError("conversation update has no fields")
 
@@ -348,11 +377,21 @@ class ConversationsRepository:
             if default_model_id is not None
             else "auto"
         )
+        normalized_project_id = (
+            _required(project_id, "project id")
+            if update_project and project_id is not None
+            else None
+        )
         now = _utc_now()
 
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
+                if update_project and normalized_project_id is not None and self._conn.execute(
+                    "SELECT 1 FROM app_projects WHERE user_id = ? AND project_id = ?",
+                    (user_id, normalized_project_id),
+                ).fetchone() is None:
+                    raise ProjectNotFoundError("project not found")
                 if archived is True and self._has_active_run_locked(user_id, conversation_id):
                     raise ConversationHasActiveRunError(
                         "conversation cannot be archived while a run is active"
@@ -364,6 +403,7 @@ class ConversationsRepository:
                     "default_model_id = CASE WHEN ? = 1 THEN ? "
                     "ELSE default_model_id END, "
                     "archived_at = CASE WHEN ? = 1 THEN ? ELSE archived_at END, "
+                    "project_id = CASE WHEN ? = 1 THEN ? ELSE project_id END, "
                     "updated_at = ? "
                     "WHERE user_id = ? AND conversation_id = ?",
                     (
@@ -375,6 +415,8 @@ class ConversationsRepository:
                         normalized_model_id,
                         int(archived is not None),
                         now if archived else None,
+                        int(update_project),
+                        normalized_project_id,
                         now,
                         user_id,
                         conversation_id,
@@ -453,7 +495,8 @@ class ConversationsRepository:
             rows = self._conn.execute(
                 "SELECT conversation_id, user_id, title, default_mode, "
                 "default_model_id, created_at, "
-                "updated_at, last_message_at, archived_at FROM app_conversations "
+                "updated_at, last_message_at, archived_at, project_id "
+                "FROM app_conversations "
                 "WHERE user_id = ? ORDER BY COALESCE(last_message_at, created_at) DESC, "
                 "conversation_id DESC LIMIT ?",
                 (user_id, limit),
@@ -1066,7 +1109,8 @@ class ConversationsRepository:
         return self._conn.execute(
             "SELECT conversation_id, user_id, title, default_mode, "
             "default_model_id, created_at, "
-            "updated_at, last_message_at, archived_at FROM app_conversations "
+            "updated_at, last_message_at, archived_at, project_id "
+            "FROM app_conversations "
             "WHERE user_id = ? AND conversation_id = ?",
             (user_id, conversation_id),
         ).fetchone()
@@ -1546,6 +1590,7 @@ def _conversation_from_row(row: sqlite3.Row) -> ConversationRecord:
         updated_at=str(row["updated_at"]),
         last_message_at=str(row["last_message_at"]) if row["last_message_at"] else None,
         archived_at=str(row["archived_at"]) if row["archived_at"] else None,
+        project_id=str(row["project_id"]) if row["project_id"] else None,
     )
 
 

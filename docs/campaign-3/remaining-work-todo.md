@@ -8,8 +8,8 @@ Item 7 has started with laptop-complete
 prioritized [Phase 14 Slice 14A](phase-14-bot-accounts-and-token-lifetimes.md),
 which is laptop-complete and awaits native acceptance. The next build is
 [Phase 15](phase-15-composer-and-projects.md). Slice 15A's composer control
-rail is implementation-complete and awaits its deployed browser gate, followed
-by owner-scoped Projects.
+rail passed user acceptance. Slice 15B's owner-scoped Projects storage and API
+are laptop-complete and await their deployment and restart smoke.
 
 ## Closed prerequisites
 
@@ -340,15 +340,17 @@ Detailed scope:
 
 ## Next build - Phase 15 composer controls and Projects
 
-**State:** Slice 15A is implementation-complete. Frontend and browser
-acceptance is pending.
+**State:** Slice 15A is user-accepted. Slice 15B is laptop-complete; its
+targeted deployment and restart-persistence smoke is pending.
 
 - [x] Build Slice 15A: narrow and center the composer; move Model, Add files,
   and Tools & skills into a labeled, symmetric rail below the message field.
-- [ ] Pass the Slice 15A desktop, narrow-screen, keyboard, picker-dismissal,
+- [x] Pass the Slice 15A desktop, narrow-screen, keyboard, picker-dismissal,
   upload, send/stop, and retry browser checks.
-- [ ] Build Slice 15B: schema 19 Projects storage, owner-scoped APIs, project
+- [x] Build Slice 15B: schema 19 Projects storage, owner-scoped APIs, project
   file references, and nullable conversation membership.
+- [ ] Pass the Slice 15B deployment and restart-persistence smoke using one
+  existing Ready file without deleting it.
 - [ ] Build Slice 15C: compact Projects navigation, project home, reusable My
   Files selection, new project conversations, and move/remove actions.
 - [ ] Build Slice 15D: server-resolved project instructions and bounded

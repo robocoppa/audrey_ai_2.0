@@ -783,6 +783,45 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         PRAGMA legacy_alter_table = OFF;
         """,
     ),
+    (
+        19,
+        """
+        CREATE TABLE IF NOT EXISTS app_projects (
+          project_id   TEXT PRIMARY KEY,
+          user_id      TEXT NOT NULL,
+          name         TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 100),
+          instructions TEXT NOT NULL DEFAULT '' CHECK (length(instructions) <= 4000),
+          created_at   TEXT NOT NULL,
+          updated_at   TEXT NOT NULL,
+          UNIQUE (project_id, user_id),
+          FOREIGN KEY (user_id) REFERENCES app_users(user_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_app_projects_owner_updated
+          ON app_projects(user_id, updated_at DESC, project_id DESC);
+
+        CREATE TABLE IF NOT EXISTS app_project_files (
+          project_id TEXT NOT NULL,
+          file_id    TEXT NOT NULL,
+          added_at   TEXT NOT NULL,
+          PRIMARY KEY (project_id, file_id),
+          FOREIGN KEY (project_id) REFERENCES app_projects(project_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_app_project_files_project_added
+          ON app_project_files(project_id, added_at DESC, file_id);
+
+        ALTER TABLE app_conversations
+          ADD COLUMN project_id TEXT
+          REFERENCES app_projects(project_id) ON DELETE SET NULL;
+
+        CREATE INDEX IF NOT EXISTS idx_app_conversations_owner_project_activity
+          ON app_conversations(
+            user_id, project_id, archived_at,
+            last_message_at DESC, created_at DESC, conversation_id DESC
+          );
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS"]

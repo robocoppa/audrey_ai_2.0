@@ -601,6 +601,12 @@ async def delete_file(
     )
     if not result.deleted:
         raise HTTPException(status_code=404, detail="File not found.")
+    store = getattr(request.app.state, "application_store", None)
+    if store is not None:
+        await store.projects.prune_file(
+            user_id=principal.user_id,
+            file_id=file_id,
+        )
     return NativeFileDeleteResponse(
         id=result.file_id,
         deleted=True,

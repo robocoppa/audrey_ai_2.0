@@ -163,6 +163,7 @@ def _stable_conversation(record: dict[str, Any]) -> dict[str, Any]:
         "default_mode": str(record.get("default_mode") or ""),
         "default_model_id": str(record.get("default_model_id") or ""),
         "archived_at": record.get("archived_at"),
+        "project_id": record.get("project_id"),
     }
     if not conversation["id"] or not conversation["default_model_id"]:
         raise SmokeError("conversation omitted its id or selected model")

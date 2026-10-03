@@ -354,6 +354,65 @@ Success is exit code zero and JSON ending in `"status": "passed"`. The
 `output_text`, and `"sentinel": true`. The `unsupported` block must
 report remote-image HTTP 422 and `"validation_error": true`.
 
+## Run the 15B Projects restart smoke
+
+This is the targeted live gate for schema 19 and the owner-scoped Projects API.
+It needs two distinct current Access assertions in the laptop's
+`.env.test.local` and at least one file already showing **Ready** in the smoke
+user's **My Files**. If none exists, upload one small document in the browser
+and wait for Ready before starting. The script references that file but never
+changes or deletes it.
+
+First, rebuild Audrey on Tower. Then run the capture step from the laptop over
+the working LAN/WARP route:
+
+```bash
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
+(
+  set -a
+  source .env.test.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_native_projects.py capture
+)
+```
+
+Capture creates two temporary projects and one project conversation for the
+ordinary user plus one temporary project for the admin user. It checks the
+server-owned limits, pagination, moving and ungrouping the conversation,
+cross-owner HTTP 404 responses, one Ready file reference, and duplicate HTTP
+409 behavior. Success ends with `"status": "captured"` and tells you to restart
+Audrey. Leave the laptop snapshot in place.
+
+On Tower, restart only the backend and wait for it to become healthy:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose restart audrey
+```
+
+Then return to the same laptop checkout and run verification:
+
+```bash
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
+(
+  set -a
+  source .env.test.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_native_projects.py verify
+)
+```
+
+Success is exit code zero and JSON ending in `"status": "passed"`. All three
+`persistence` values must be `true`. Deletion must report project HTTP 204,
+project-read HTTP 404, a retained conversation with null `project_id`, and
+retained-file HTTP 200. Verification deletes every temporary project and the
+temporary conversation, then removes its local snapshot. It leaves the
+pre-existing Ready file untouched.
+
+If capture succeeded but you decide not to restart and verify, run the same
+laptop command with `cleanup` in place of `capture`; it removes the temporary
+records and snapshot.
+
 ## Phase 7 PDF acceptance and diagnostic
 
 **Result:** Passed and settled on 2026-09-30. The synthetic OCR boundary moved

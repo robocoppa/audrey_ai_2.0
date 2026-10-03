@@ -1,7 +1,7 @@
 # Campaign 3 Phase 15 - composer controls and Projects
 
-**Status:** Slice 15A is implementation-complete. Its deployed frontend and
-manual browser acceptance gate is pending; Slice 15B follows acceptance.
+**Status:** Slice 15A passed user acceptance on 2026-10-02. Slice 15B is
+laptop-complete and awaits its targeted deployment and restart-persistence gate.
 
 ## Goal
 
@@ -126,10 +126,10 @@ columns, and at 400 px it stacks into one column. Focused Vitest and Playwright
 contracts cover the explanatory copy, skill choice, equal desktop sizing,
 narrow-screen containment, dismissal, and focus behavior.
 
-The full hermetic backend suite passes 3,108 tests with the existing FastAPI
-deprecation warning, and the diff check is clean. Node remains deferred on the
-laptop, so TypeScript, Vitest, build, Playwright, and visual acceptance must run
-in the deployed `audrey-ui` environment before Slice 15A closes.
+The user accepted the deployed UI slice on 2026-10-02 while continuing normal
+use and will reopen any regression found during that testing. Node remains
+deferred on the laptop, so no local TypeScript, Vitest, build, or Playwright
+result is claimed.
 
 ## Slice 15B - Projects storage and owner-scoped API
 
@@ -179,6 +179,32 @@ cleanup.
 - File deletion removes or harmlessly prunes every project reference.
 - Restart persistence and backup verification include the new tables and
   conversation field.
+
+### Slice 15B implementation result
+
+**Completed on the laptop, 2026-10-02.** Schema 19 adds owner-scoped projects,
+unique project/file references, and nullable conversation membership. The
+native API now supports project CRUD and pagination, project file selection,
+project conversation creation and listing, and moving or ungrouping existing
+conversations. Ready-file and owner checks are resolved through the existing
+native file authority. File deletion prunes project references, while project
+deletion transactionally ungroups conversations and keeps both conversations
+and files.
+
+Backup inspection now counts both project tables, and restart snapshots retain
+the conversation project id. Repository and route coverage includes the schema
+18 migration, limits, duplicate and non-ready files, cross-owner 404 behavior,
+move and ungroup behavior, transactional deletion, and native file cleanup.
+The focused backend set passes 145 tests. The full hermetic suite passes 3,113
+tests with the existing FastAPI deprecation warning; changed-file Ruff and
+Python compilation pass.
+
+`tests/smoke/smoke_native_projects.py` is the targeted live gate. Its capture
+step creates disposable projects and one conversation, references one existing
+Ready file without changing it, and proves cross-owner and duplicate rejection.
+After Audrey restarts, verify checks project, conversation, and file-reference
+persistence, then proves project deletion retains the conversation and file and
+removes all temporary records. This live result remains pending.
 
 ## Slice 15C - Projects navigation and management
 

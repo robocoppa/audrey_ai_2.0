@@ -71,6 +71,28 @@ class ConversationRecord:
     updated_at: str
     last_message_at: str | None
     archived_at: str | None
+    project_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectRecord:
+    """One owner-scoped workspace for conversations and shared file context."""
+
+    project_id: str
+    user_id: str
+    name: str
+    instructions: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectFileRecord:
+    """One durable reference from a project to an existing My Files item."""
+
+    project_id: str
+    file_id: str
+    added_at: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,6 +265,8 @@ __all__ = [
     "LocalUserDataPurge",
     "MessageRecord",
     "ModelAccessPolicy",
+    "ProjectFileRecord",
+    "ProjectRecord",
     "RunRecord",
     "StartedRun",
     "UserPreferences",

@@ -196,6 +196,7 @@ export type AudreyMode =
 
 export interface Conversation {
   id: string;
+  project_id?: string | null;
   title: string;
   default_mode: AudreyMode;
   default_model_id: string;
@@ -268,6 +269,7 @@ export interface ConversationPatch {
   default_mode?: AudreyMode;
   model_id?: string;
   archived?: boolean;
+  project_id?: string | null;
 }
 
 export interface AudreyFile {

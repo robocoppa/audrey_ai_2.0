@@ -291,6 +291,14 @@ def _inspect_application_database(path: Path) -> dict[str, object]:
                     "SELECT COUNT(*) FROM app_conversations"
                 ).fetchone()[0]
             ),
+            "projects": int(
+                connection.execute("SELECT COUNT(*) FROM app_projects").fetchone()[0]
+            ),
+            "project_files": int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM app_project_files"
+                ).fetchone()[0]
+            ),
             "messages": int(
                 connection.execute("SELECT COUNT(*) FROM app_messages").fetchone()[0]
             ),

@@ -24,6 +24,7 @@ from pathlib import Path
 
 from audrey.app_state.history_import import HistoryImportRepository
 from audrey.app_state.migrations import MIGRATIONS
+from audrey.app_state.projects import ProjectsRepository
 from audrey.app_state.records import (
     AccessRoleRecord,
     AdminUserRecord,
@@ -93,6 +94,7 @@ class ApplicationStore:
             self._conn.execute("PRAGMA journal_mode = WAL")
             self._migrate_locked()
         self.preferences = PreferencesRepository(self._conn, self._lock)
+        self.projects = ProjectsRepository(self._conn, self._lock)
         self.conversations = ConversationsRepository(self._conn, self._lock)
         self.chat_projections = ChatProjectionsRepository(self._conn, self._lock)
         self.history_imports = HistoryImportRepository(self._conn, self._lock)

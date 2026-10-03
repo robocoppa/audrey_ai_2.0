@@ -372,6 +372,15 @@ async def test_operator_cli_verifies_backup_through_isolated_restore(
             email="restore-proof@example.com",
         )
         await store.conversations.create(user_id=account.user_id)
+        project = await store.projects.create(
+            user_id=account.user_id,
+            name="Restore proof",
+        )
+        await store.projects.add_file(
+            user_id=account.user_id,
+            project_id=project.project_id,
+            file_id="restore-proof-file",
+        )
         expected_schema = store.schema_version
     finally:
         store.close()
@@ -407,6 +416,8 @@ async def test_operator_cli_verifies_backup_through_isolated_restore(
     assert result["counts"] == {
         "accounts": 1,
         "conversations": 1,
+        "projects": 1,
+        "project_files": 1,
         "messages": 0,
         "runs": 0,
     }
