@@ -418,6 +418,10 @@ async def test_operator_cli_verifies_backup_through_isolated_restore(
         "conversations": 1,
         "projects": 1,
         "project_files": 1,
+        "file_versions": 0,
+        "document_jobs": 0,
+        "document_approvals": 0,
+        "file_derivations": 0,
         "messages": 0,
         "runs": 0,
     }

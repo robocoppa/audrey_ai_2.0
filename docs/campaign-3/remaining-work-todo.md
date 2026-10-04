@@ -9,9 +9,10 @@ prioritized [Phase 14 Slice 14A](phase-14-bot-accounts-and-token-lifetimes.md),
 which is laptop-complete and awaits native acceptance. The next build is
 [Phase 15](phase-15-composer-and-projects.md). Slice 15A's composer control
 rail passed user acceptance, Slice 15B's owner-scoped Projects storage and API
-passed their restart smoke, and Slices 15C–15D are laptop-complete pending their
-combined native browser acceptance. Approved
-[Phase 16](phase-16-native-document-tools.md) follows.
+passed its restart smoke, and the user accepted Slices 15C–15D. The direct
+project-upload follow-up is laptop-complete pending its browser check. Approved
+[Phase 16](phase-16-native-document-tools.md) has started with laptop-complete
+Slice 16A.
 
 ## Closed prerequisites
 
@@ -342,8 +343,8 @@ Detailed scope:
 
 ## Next build - Phase 15 composer controls and Projects
 
-**State:** Slice 15A is user-accepted. Slice 15B is live-passed. Slices 15C
-and 15D are laptop-complete and await combined native browser acceptance.
+**State:** Complete. Slices 15A–15D passed user or targeted live acceptance.
+The direct project-upload follow-up is laptop-complete pending browser review.
 
 - [x] Build Slice 15A: narrow and center the composer; move Model, Add files,
   and Tools & skills into a labeled, symmetric rail below the message field.
@@ -355,22 +356,28 @@ and 15D are laptop-complete and await combined native browser acceptance.
   existing Ready file without deleting it.
 - [x] Build Slice 15C: compact Projects navigation, project home, reusable My
   Files selection, new project conversations, and move/remove actions.
-- [ ] Pass the Slice 15C desktop, narrow-screen, keyboard, refresh, project
+- [x] Pass the Slice 15C desktop, narrow-screen, keyboard, refresh, project
   management, conversation move/remove, and non-destructive deletion checks.
 - [x] Build Slice 15D: server-resolved project instructions and bounded
   selected-file retrieval with persisted private-file provenance.
-- [ ] Pass the final two-document context, refresh, isolation, mutation
+- [x] Pass the final two-document context, refresh, isolation, mutation
   snapshot, project deletion, and restart-persistence gates.
+- [x] Build direct project upload with persistent processing membership and
+  polish the My Files Add files and Choose files actions.
+- [ ] Pass direct project upload, progress, processing-to-Ready refresh, My
+  Files styling, mobile layout, and hard-refresh behavior in the deployed UI.
 
 Detailed scope:
 [phase-15-composer-and-projects.md](phase-15-composer-and-projects.md).
 
 ## Approved next phase - Phase 16 native document tools
 
-**State:** Approved and sequenced after Phase 15 acceptance.
+**State:** Slice 16A is laptop-complete; its native restart smoke is pending.
 
-- [ ] Build 16A: exact-operation approvals, immutable file derivations,
+- [x] Build 16A: exact-operation approvals, immutable file derivations,
   expected-version conflicts, idempotency, cancellation, and crash recovery.
+- [ ] Pass the 16A two-stage native restart smoke for pending, queued, and
+  running jobs, stale-worker denial, single publication, and cleanup.
 - [ ] Build 16B: one reviewed private template-to-DOCX operation with package
   validation, text read-back, provenance, and My Files publication.
 - [ ] Build 16C: isolated DOCX-to-PDF rendering with no egress, bounded

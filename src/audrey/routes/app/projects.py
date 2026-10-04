@@ -94,6 +94,7 @@ class ProjectFileResponse(BaseModel):
     mime: str
     kind: str
     bytes: int
+    status: str
     uploaded_at: str
     added_at: str
 
@@ -147,6 +148,7 @@ def _project_file_response(
         mime=row.mime,
         kind=native_files._kind(row.mime),
         bytes=row.bytes,
+        status=row.status,
         uploaded_at=row.uploaded_at,
         added_at=relation.added_at,
     )
@@ -297,7 +299,7 @@ async def list_project_files(
     items: list[ProjectFileResponse] = []
     for relation in relations:
         row = by_id.get(relation.file_id)
-        if row is None or row.status != "ready":
+        if row is None:
             await store.projects.prune_file(
                 user_id=principal.user_id,
                 project_id=project_id,
@@ -320,8 +322,11 @@ async def add_project_file(
     principal: Principal = Depends(_project_access),
 ) -> ProjectFileResponse:
     row = await native_files._owned_row(request, principal, payload.file_id)
-    if row.status != "ready":
-        raise HTTPException(status_code=422, detail="Project files must be ready.")
+    if row.status not in {"ready", "pending", "processing"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Project files must be ready or processing.",
+        )
     try:
         relation = await _store(request).projects.add_file(
             user_id=principal.user_id,

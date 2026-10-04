@@ -22,6 +22,7 @@ import uuid
 from collections.abc import Iterable
 from pathlib import Path
 
+from audrey.app_state.document_tools import DocumentToolsRepository
 from audrey.app_state.history_import import HistoryImportRepository
 from audrey.app_state.migrations import MIGRATIONS
 from audrey.app_state.projects import ProjectsRepository
@@ -94,6 +95,7 @@ class ApplicationStore:
             self._conn.execute("PRAGMA journal_mode = WAL")
             self._migrate_locked()
         self.preferences = PreferencesRepository(self._conn, self._lock)
+        self.document_tools = DocumentToolsRepository(self._conn, self._lock)
         self.projects = ProjectsRepository(self._conn, self._lock)
         self.conversations = ConversationsRepository(self._conn, self._lock)
         self.chat_projections = ChatProjectionsRepository(self._conn, self._lock)
@@ -830,6 +832,18 @@ class ApplicationStore:
                 )
                 self._conn.execute(
                     "DELETE FROM app_history_import_conversations WHERE user_id = ?",
+                    (user_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM app_document_jobs WHERE user_id = ?",
+                    (user_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM app_file_versions WHERE user_id = ?",
+                    (user_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM app_projects WHERE user_id = ?",
                     (user_id,),
                 )
                 self._conn.execute(

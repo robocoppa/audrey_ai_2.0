@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import {
   addProjectFile,
@@ -6,8 +6,11 @@ import {
   createProjectConversation,
   deleteProject,
   listFiles,
+  listProjectFiles,
   removeProjectFile,
   updateProject,
+  uploadFile,
+  uploadPrecheck,
   type AudreyFile,
   type AudreyProject,
   type AudreyProjectFile,
@@ -162,15 +165,50 @@ export function ProjectHome({
   const [filesOpen, setFilesOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
+  const [uploadingName, setUploadingName] = useState("");
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadNotice, setUploadNotice] = useState("");
   const [error, setError] = useState("");
+  const projectUploadRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setName(project.name);
     setInstructions(project.instructions);
     setEditing(false);
     setConfirmingDelete(false);
+    setUploadNotice("");
     setError("");
   }, [project.id, project.instructions, project.name]);
+
+  const hasProcessingFiles = files.some(({ status }) =>
+    status === "pending" || status === "processing",
+  );
+
+  useEffect(() => {
+    if (!hasProcessingFiles) return;
+    let active = true;
+    let refreshing = false;
+    const refreshFiles = () => {
+      if (refreshing || document.visibilityState !== "visible") return;
+      refreshing = true;
+      listProjectFiles(project.id)
+        .then((listing) => {
+          if (active) onFilesChange(listing.items);
+        })
+        .catch((reason: unknown) => {
+          if (active) setError(messageOf(reason));
+        })
+        .finally(() => { refreshing = false; });
+    };
+    const timer = window.setInterval(refreshFiles, 5000);
+    document.addEventListener("visibilitychange", refreshFiles);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshFiles);
+    };
+  }, [hasProcessingFiles, onFilesChange, project.id]);
 
   async function saveProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -231,6 +269,49 @@ export function ProjectHome({
       setConfirmingDelete(false);
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function uploadToProject(selected: FileList) {
+    const chosen = Array.from(selected);
+    if (!chosen.length || uploadingFiles) return;
+    const remaining = limits.max_files - files.length;
+    if (remaining <= 0 || chosen.length > remaining) {
+      setError(`This project has room for ${Math.max(0, remaining)} more file${remaining === 1 ? "" : "s"}.`);
+      if (projectUploadRef.current) projectUploadRef.current.value = "";
+      return;
+    }
+    setUploadingFiles(true);
+    setUploadProgress(0);
+    setUploadNotice("");
+    setError("");
+    let nextFiles = files;
+    let processing = 0;
+    try {
+      const library = await listFiles();
+      for (const file of chosen) {
+        const precheck = uploadPrecheck(file, library.limits);
+        if (precheck) throw new Error(`${file.name}: ${precheck}`);
+        setUploadingName(file.name);
+        setUploadProgress(0);
+        const uploaded = await uploadFile(file, library.limits, setUploadProgress);
+        const relation = await addProjectFile(project.id, uploaded.id);
+        if (relation.status !== "ready") processing += 1;
+        nextFiles = [relation, ...nextFiles];
+        onFilesChange(nextFiles);
+      }
+      setUploadNotice(
+        processing
+          ? `${chosen.length} file${chosen.length === 1 ? "" : "s"} added. Processing files become project context when Ready.`
+          : `${chosen.length} file${chosen.length === 1 ? "" : "s"} added to this project.`,
+      );
+    } catch (reason) {
+      setError(messageOf(reason));
+    } finally {
+      setUploadingFiles(false);
+      setUploadingName("");
+      setUploadProgress(0);
+      if (projectUploadRef.current) projectUploadRef.current.value = "";
     }
   }
 
@@ -326,11 +407,32 @@ export function ProjectHome({
             <small>{files.length}/{limits.max_files}</small>
           </header>
           <p className="project-panel-copy">
-            Select Ready files from My Files for this project.
+            Upload here or select Ready files already in My Files. Processing uploads become shared context when Ready.
           </p>
-          <button className="project-manage-files" type="button" onClick={() => setFilesOpen(true)}>
-            Manage project files
-          </button>
+          <div className="project-file-actions">
+            <input
+              ref={projectUploadRef}
+              type="file"
+              multiple
+              hidden
+              disabled={uploadingFiles || files.length >= limits.max_files}
+              onChange={(event) => event.target.files ? void uploadToProject(event.target.files) : undefined}
+            />
+            <button
+              className="project-upload-files"
+              type="button"
+              onClick={() => projectUploadRef.current?.click()}
+              disabled={uploadingFiles || files.length >= limits.max_files}
+            >
+              <span aria-hidden="true">＋</span>
+              {uploadingFiles ? `Uploading ${uploadingName} · ${Math.max(1, Math.round(uploadProgress * 100))}%` : "Upload to project"}
+            </button>
+            <button className="project-manage-files" type="button" onClick={() => setFilesOpen(true)} disabled={uploadingFiles}>
+              Choose from My Files
+            </button>
+          </div>
+          {uploadingFiles ? <progress className="project-upload-progress" value={uploadProgress} max={1} aria-label="Project file upload progress" /> : null}
+          {uploadNotice ? <p className="project-upload-notice" role="status">{uploadNotice}</p> : null}
           {filesLoading ? <p className="project-empty" role="status">Loading project files…</p> : null}
           {!filesLoading && files.length === 0 ? (
             <p className="project-empty">No files selected.</p>
@@ -340,7 +442,10 @@ export function ProjectHome({
               {files.map((file) => (
                 <li key={file.id}>
                   <span className="project-file-symbol" aria-hidden="true">{kindSymbol(file.kind)}</span>
-                  <span title={file.filename}>{file.filename}</span>
+                  <span className="project-file-details" title={file.filename}>
+                    <span>{file.filename}</span>
+                    {file.status === "ready" ? null : <small>{projectFileStatus(file.status)}</small>}
+                  </span>
                   <button
                     type="button"
                     onClick={() => void removeFile(file)}
@@ -582,6 +687,12 @@ function kindLabel(kind: AudreyFile["kind"]) {
   if (kind === "audio") return "Audio";
   if (kind === "video") return "Video";
   return "Document";
+}
+
+function projectFileStatus(status: string) {
+  if (status === "pending" || status === "processing") return "Processing";
+  if (status === "failed") return "Processing failed";
+  return status;
 }
 
 function formatBytes(bytes: number) {

@@ -1,10 +1,10 @@
 # Campaign 3 — correctness foundations, Audrey UI, and reusable skills
 
-**Status:** Campaign 3 Phases 1–11 are complete. Phases 12–14 are
-laptop-complete and awaiting their targeted live gates. Phase 15 Slices 15A and
-15B are live-passed; Slices 15C and 15D are laptop-complete and await their
-combined native browser gate. Phase 16 native document tools is approved and
-queued after Phase 15.
+**Status:** Campaign 3 Phases 1–11 and Phase 15 are complete. Phases 12–14
+are laptop-complete and awaiting their targeted live gates. Phase 15's direct
+project-upload polish is laptop-complete pending its browser check. Phase 16A's
+native approval and immutable derivation foundation is laptop-complete and
+awaits its restart smoke.
 
 The Milestone 2E parity build is laptop-complete across native memory
 settings, owner-bound file and video upload and inspection, source and answer
@@ -77,13 +77,18 @@ coverage. Its 3,113-test laptop gate and targeted restart smoke both pass. Slice
 selection, project conversation creation, breadcrumbs, and conversation
 move/ungroup controls. Slice 15D adds server-resolved project snapshots, bounded
 selected-file retrieval, prompt-injection boundaries, and persisted private-file
-sources. The full hermetic backend suite passes 3,135 tests; their combined
-native browser gate is pending.
+sources. The user accepted Slices 15C–15D on 2026-10-03, closing Phase 15. A
+follow-up now adds direct project uploads with durable processing membership and
+refresh, plus cleaner Add files and Choose files controls in My Files; its code
+is complete and awaits the deployed browser check.
 
-Phase 16 was approved on 2026-10-03. It adds native approval and immutable
-revision foundations, then private template-to-DOCX generation, isolated PDF
-rendering, and literal-only spreadsheet revisions. Formula execution and
-sharing remain separate later approval decisions.
+Phase 16 was approved on 2026-10-03. Slice 16A is laptop-complete with schema
+20 immutable versions, exact single-use approvals, leased document jobs,
+restart recovery, derivation provenance, owner APIs, privacy purge, backup
+counts, focused tests, and a two-stage native restart smoke. Its live gate is
+pending. Private template-to-DOCX generation is next; isolated PDF rendering
+and literal-only spreadsheet revisions follow. Formula execution and sharing
+remain separate later approval decisions.
 
 Phase 6 completed on 2026-09-30. Slice 6A's probe-only comparison finished
 148 valid calls across Tev1 0.8B, Tev1 4B, Nimble, and the incumbent. On the 23
@@ -162,8 +167,8 @@ and finally adds the first general skills layer on that owned surface.
 | 12 | [Sidebar navigation](phase-12-sidebar-navigation.md) | Simplify primary conversation creation and move My Files into a distinct top-bar action | Phase 11 completion | Revised Slice 12A laptop-complete; native browser gate pending |
 | 13 | [Responses multimodal input](phase-13-responses-multimodal-input.md) | Accept typed text and bounded inline image parts through the shared Responses adapter | Phase 12 implementation | Slice 13A laptop-complete; targeted live gate pending |
 | 14 | [Bot accounts and token lifetimes](phase-14-bot-accounts-and-token-lifetimes.md) | Add limited automation accounts, intentional permanent PATs, and fresh admin data on every open | Phase 13 implementation | Slice 14A laptop-complete; native acceptance pending |
-| 15 | [Composer controls and Projects](phase-15-composer-and-projects.md) | Clarify and rebalance the composer, then group conversations with reusable instructions and selected-file context | Phase 14 implementation | Slices 15A–15B live-passed; Slices 15C–15D laptop-complete, combined browser gate pending |
-| 16 | [Native document tools](phase-16-native-document-tools.md) | Add approved, private, verified document generation and revision through native approval and isolated workers | Phase 15 acceptance | Approved; Slice 16A queued |
+| 15 | [Composer controls and Projects](phase-15-composer-and-projects.md) | Clarify and rebalance the composer, then group conversations with reusable instructions and selected-file context | Phase 14 implementation | Complete; direct-upload UI follow-up pending browser check |
+| 16 | [Native document tools](phase-16-native-document-tools.md) | Add approved, private, verified document generation and revision through native approval and isolated workers | Phase 15 acceptance | Slice 16A laptop-complete; native restart smoke pending |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1
 through Campaign 3 Phase 16, or use the topic filenames.
@@ -194,7 +199,6 @@ Items 5–10, their execution order, and pass criteria are tracked in
 navigation slice ahead of Item 7. Its requested top-bar correction is ready
 for browser acceptance, and Item 7's first multimodal slice is ready for its
 targeted live gate. Phase 14's account administration slice is also
-laptop-complete and awaits its native browser and PAT checks. Phase 15 Slices
-15A and 15B are live-passed. Slices 15C and 15D are laptop-complete and await
-their combined native browser acceptance. Approved Phase 16 starts with the
-approval and immutable revision foundation after that gate.
+laptop-complete and awaits its native browser and PAT checks. Phase 15 is complete; its direct
+project-upload polish awaits one browser check. Phase 16A's approval and immutable revision foundation is
+laptop-complete and awaits its native restart smoke.

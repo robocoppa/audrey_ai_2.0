@@ -296,6 +296,7 @@ export interface AudreyProjectFile {
   mime: string;
   kind: "text" | "image" | "video" | "audio";
   bytes: number;
+  status: string;
   uploaded_at: string;
   added_at: string;
 }

@@ -84,7 +84,7 @@ async def test_schema_19_preserves_existing_conversations_with_no_project(tmp_pa
 
     store = ApplicationStore(path)
     try:
-        assert store.schema_version == 19
+        assert store.schema_version == 20
         conversation = await store.conversations.get(
             user_id="usr_existing",
             conversation_id="con_existing",
@@ -358,13 +358,12 @@ def test_projects_api_is_owner_scoped_and_revalidates_ready_files(tmp_path, monk
                 ).status_code
                 == 409
             )
-            assert (
-                client.post(
-                    f"/api/projects/{project_id}/files",
-                    json={"file_id": "alice-pending"},
-                ).status_code
-                == 422
+            pending = client.post(
+                f"/api/projects/{project_id}/files",
+                json={"file_id": "alice-pending"},
             )
+            assert pending.status_code == 201
+            assert pending.json()["status"] == "pending"
             assert (
                 client.post(
                     f"/api/projects/{project_id}/files",
@@ -375,7 +374,14 @@ def test_projects_api_is_owner_scoped_and_revalidates_ready_files(tmp_path, monk
 
             listed_files = client.get(f"/api/projects/{project_id}/files")
             assert listed_files.status_code == 200
-            assert [item["id"] for item in listed_files.json()["items"]] == ["alice-ready"]
+            assert [item["id"] for item in listed_files.json()["items"]] == [
+                "alice-pending",
+                "alice-ready",
+            ]
+            assert [item["status"] for item in listed_files.json()["items"]] == [
+                "pending",
+                "ready",
+            ]
 
             conversation = client.post(
                 f"/api/projects/{project_id}/conversations",

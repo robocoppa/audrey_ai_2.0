@@ -449,6 +449,90 @@ If capture succeeded but you decide not to restart and verify, run the same
 laptop command with `cleanup` in place of `capture`; it removes the temporary
 records and snapshot.
 
+## Run the Phase 15 direct project-upload browser check
+
+This is a manual browser gate because it judges the real operating-system file
+picker, upload progress, responsive layout, and processing transition. Rebuild
+both `audrey` and `audrey-ui`, then use the normal `ai.builtryte.xyz` browser
+surface as the ordinary user.
+
+1. Open a project home. Confirm **Upload to project** is the primary action and
+   **Choose from My Files** remains beside it.
+2. Use **Upload to project** for one small `.txt` file. Confirm the button shows
+   the filename and real percentage, then the file appears in the project and
+   in **My Files** without another selection step.
+3. Upload one PDF, audio file, or video that requires processing. Confirm the
+   project row says **Processing**. Hard refresh while it is processing and
+   confirm the row remains assigned to the project. Wait for **Ready**; the
+   processing label should disappear without reopening the project.
+4. Start a project conversation and ask about the uploaded file without
+   attaching it to the message. Confirm Audrey can use it after it is Ready.
+5. Open **My Files**. Confirm **Add files** is a compact highlighted card that
+   still expands and collapses normally. Open it and confirm the native
+   **Choose files** action is visibly styled, keyboard focus is clear, drag and
+   drop still works, and upload results remain readable.
+6. Repeat the project actions at a narrow viewport. The two actions should
+   stack without clipping or horizontal scrolling.
+
+The upload is a real user file and remains in My Files until the user removes
+it. Removing it from the project alone must leave the My Files copy intact.
+
+## Run the 16A document-approval restart smoke on Tower
+
+This is a backend API and application-state smoke. Run all three commands on
+Tower from the deployed checkout. The wrapper reaches `audrey-ui` over the
+Docker network, so the laptop's LAN/WARP address is not involved. It reads the
+existing Access assertions from `.env.smoke.local` and mounts only Audrey's
+runtime directory at `/data` for this probe.
+
+Capture creates one disposable source-version metadata row and three document
+jobs for the ordinary smoke account: one awaiting approval, one queued, and one
+holding a one-second worker lease. It sends approval decisions through the
+native HTTP API, proves an altered digest returns HTTP 409, and proves the admin
+account receives HTTP 404 for the ordinary user's job. It creates no document
+bytes and changes no My Files item.
+
+After rebuilding Audrey, run:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+bash tests/smoke/smoke-native-onbox.sh \
+  smoke_native_document_approvals.py capture
+```
+
+Success is exit code zero with `"status": "captured"`, database schema 20,
+HTTP 409 for the altered digest, HTTP 404 for cross-owner access, and the three
+expected states. Leave the snapshot in `/mnt/user/appdata/runtime` and restart
+only Audrey:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose restart audrey
+```
+
+Then verify from Tower:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+bash tests/smoke/smoke-native-onbox.sh \
+  smoke_native_document_approvals.py verify
+```
+
+Success is exit code zero with `"status": "passed"`. All three persistence
+values must be true. Recovery must report two attempts and
+`stale_worker_blocked: true`. Publication must report `succeeded`, one `fver_`
+output, and changed-output denial. The remaining jobs must finish as rejected
+and cancelled. Verification deletes every probe job, approval, version, and
+derivation, then removes the snapshot.
+
+If capture succeeds but verification will not be run, clean up from Tower:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+bash tests/smoke/smoke-native-onbox.sh \
+  smoke_native_document_approvals.py cleanup
+```
+
 ## Phase 7 PDF acceptance and diagnostic
 
 **Result:** Passed and settled on 2026-09-30. The synthetic OCR boundary moved

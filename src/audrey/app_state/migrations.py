@@ -822,6 +822,129 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           );
         """,
     ),
+    (
+        20,
+        """
+        CREATE TABLE IF NOT EXISTS app_file_versions (
+          version_id        TEXT PRIMARY KEY,
+          user_id           TEXT NOT NULL,
+          file_id           TEXT NOT NULL,
+          version_number    INTEGER NOT NULL CHECK (version_number > 0),
+          parent_version_id TEXT,
+          filename          TEXT NOT NULL CHECK (length(filename) BETWEEN 1 AND 255),
+          mime              TEXT NOT NULL CHECK (length(mime) BETWEEN 1 AND 200),
+          bytes             INTEGER NOT NULL CHECK (bytes >= 0),
+          content_sha256    TEXT NOT NULL CHECK (length(content_sha256) = 64),
+          origin            TEXT NOT NULL CHECK (origin IN ('upload', 'derivation')),
+          created_at        TEXT NOT NULL,
+          UNIQUE (version_id, user_id),
+          UNIQUE (user_id, file_id, version_number),
+          UNIQUE (user_id, file_id, content_sha256),
+          FOREIGN KEY (user_id) REFERENCES app_users(user_id) ON DELETE CASCADE,
+          FOREIGN KEY (parent_version_id, user_id)
+            REFERENCES app_file_versions(version_id, user_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_app_file_versions_owner_file
+          ON app_file_versions(user_id, file_id, version_number DESC);
+
+        CREATE TRIGGER IF NOT EXISTS trg_app_file_versions_immutable
+        BEFORE UPDATE ON app_file_versions
+        BEGIN
+          SELECT RAISE(ABORT, 'file versions are immutable');
+        END;
+
+        CREATE TABLE IF NOT EXISTS app_document_jobs (
+          job_id             TEXT PRIMARY KEY,
+          user_id            TEXT NOT NULL,
+          input_version_id   TEXT NOT NULL,
+          operation          TEXT NOT NULL CHECK (length(operation) BETWEEN 1 AND 100),
+          arguments_json     TEXT NOT NULL,
+          operation_digest   TEXT NOT NULL CHECK (length(operation_digest) = 64),
+          output_mime        TEXT NOT NULL CHECK (length(output_mime) BETWEEN 1 AND 200),
+          summary            TEXT NOT NULL CHECK (length(summary) BETWEEN 1 AND 500),
+          preview            TEXT NOT NULL CHECK (length(preview) <= 2000),
+          requested_by_kind  TEXT NOT NULL
+                             CHECK (requested_by_kind IN ('user', 'model', 'bot')),
+          requested_by_id    TEXT NOT NULL,
+          idempotency_key    TEXT NOT NULL CHECK (length(idempotency_key) BETWEEN 1 AND 200),
+          status             TEXT NOT NULL CHECK (status IN (
+                               'awaiting_approval', 'queued', 'running', 'succeeded',
+                               'rejected', 'expired', 'cancelled', 'failed'
+                             )),
+          attempts           INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+          lease_id           TEXT NOT NULL DEFAULT '',
+          lease_expires_at   TEXT,
+          output_version_id  TEXT,
+          error_code         TEXT NOT NULL DEFAULT '',
+          created_at         TEXT NOT NULL,
+          updated_at         TEXT NOT NULL,
+          completed_at       TEXT,
+          UNIQUE (job_id, user_id),
+          UNIQUE (user_id, idempotency_key),
+          FOREIGN KEY (user_id) REFERENCES app_users(user_id) ON DELETE CASCADE,
+          FOREIGN KEY (input_version_id, user_id)
+            REFERENCES app_file_versions(version_id, user_id),
+          FOREIGN KEY (output_version_id, user_id)
+            REFERENCES app_file_versions(version_id, user_id),
+          CHECK (
+            (status IN ('awaiting_approval', 'queued', 'running') AND completed_at IS NULL)
+            OR (status NOT IN ('awaiting_approval', 'queued', 'running')
+                AND completed_at IS NOT NULL)
+          )
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_app_document_jobs_owner_created
+          ON app_document_jobs(user_id, created_at DESC, job_id DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_app_document_jobs_claim
+          ON app_document_jobs(status, lease_expires_at, created_at, job_id);
+
+        CREATE TABLE IF NOT EXISTS app_document_approvals (
+          approval_id       TEXT PRIMARY KEY,
+          job_id            TEXT NOT NULL,
+          user_id           TEXT NOT NULL,
+          operation_digest  TEXT NOT NULL CHECK (length(operation_digest) = 64),
+          expires_at        TEXT NOT NULL,
+          decision          TEXT NOT NULL CHECK (decision IN (
+                              'pending', 'approved', 'rejected', 'expired',
+                              'used', 'cancelled'
+                            )),
+          actor_user_id     TEXT,
+          created_at        TEXT NOT NULL,
+          decided_at        TEXT,
+          used_at           TEXT,
+          UNIQUE (approval_id, user_id),
+          UNIQUE (job_id),
+          FOREIGN KEY (job_id, user_id)
+            REFERENCES app_document_jobs(job_id, user_id) ON DELETE CASCADE,
+          FOREIGN KEY (actor_user_id) REFERENCES app_users(user_id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_app_document_approvals_owner_created
+          ON app_document_approvals(user_id, created_at DESC, approval_id DESC);
+
+        CREATE TABLE IF NOT EXISTS app_file_derivations (
+          output_version_id TEXT PRIMARY KEY,
+          input_version_id  TEXT NOT NULL,
+          job_id             TEXT NOT NULL UNIQUE,
+          user_id            TEXT NOT NULL,
+          operation_digest   TEXT NOT NULL CHECK (length(operation_digest) = 64),
+          worker_version     TEXT NOT NULL CHECK (length(worker_version) BETWEEN 1 AND 200),
+          verified_at        TEXT NOT NULL,
+          UNIQUE (output_version_id, user_id),
+          FOREIGN KEY (output_version_id, user_id)
+            REFERENCES app_file_versions(version_id, user_id) ON DELETE CASCADE,
+          FOREIGN KEY (input_version_id, user_id)
+            REFERENCES app_file_versions(version_id, user_id),
+          FOREIGN KEY (job_id, user_id)
+            REFERENCES app_document_jobs(job_id, user_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_app_file_derivations_owner_input
+          ON app_file_derivations(user_id, input_version_id, verified_at DESC);
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS"]

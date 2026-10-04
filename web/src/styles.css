@@ -3651,8 +3651,13 @@ a:focus-visible {
 }
 
 .file-add-panel {
+  overflow: hidden;
   flex: none;
-  border-bottom: 1px solid var(--border);
+  margin: 0.9rem 1.4rem 0;
+  border: 1px solid rgb(99 181 255 / 30%);
+  border-radius: 0.8rem;
+  background: linear-gradient(110deg, rgb(52 153 250 / 11%), rgb(123 92 255 / 7%));
+  box-shadow: 0 0.65rem 1.6rem rgb(0 0 0 / 14%);
 }
 
 .file-add-panel > summary {
@@ -3660,7 +3665,7 @@ a:focus-visible {
   align-items: center;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 0.65rem;
-  padding: 0.72rem 1.4rem;
+  padding: 0.78rem 0.9rem;
   cursor: pointer;
   color: var(--text-soft);
   list-style: none;
@@ -3671,7 +3676,12 @@ a:focus-visible {
 }
 
 .file-add-panel > summary:hover {
-  background: var(--surface-active);
+  background: linear-gradient(110deg, rgb(52 153 250 / 17%), rgb(123 92 255 / 11%));
+}
+
+.file-add-panel > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .file-add-panel > summary > span:nth-child(2) {
@@ -3849,6 +3859,24 @@ a:focus-visible {
   border-color: var(--border-strong);
   background: var(--surface-raised);
   box-shadow: var(--focus-glow);
+}
+
+.file-upload input[type="file"]::file-selector-button {
+  margin-right: 0.75rem;
+  padding: 0.48rem 0.75rem;
+  border: 1px solid rgb(99 181 255 / 38%);
+  border-radius: 0.5rem;
+  background: linear-gradient(135deg, rgb(52 153 250 / 28%), rgb(123 92 255 / 24%));
+  color: var(--text);
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.file-upload input[type="file"]::file-selector-button:hover {
+  border-color: var(--accent);
+  background: var(--brand-gradient);
+  color: #fff;
 }
 
 .file-upload button {
@@ -5168,10 +5196,52 @@ a:focus-visible {
   font-size: 0.68rem;
 }
 
+.project-file-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin-top: 0.35rem;
+}
+
+.project-file-actions button {
+  min-height: 2.35rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.project-upload-files {
+  border-color: transparent;
+  background: var(--brand-gradient);
+  color: #fff;
+}
+
+.project-upload-files > span {
+  margin-right: 0.28rem;
+  font-size: 0.9rem;
+}
+
+.project-upload-files:hover {
+  border-color: transparent;
+  box-shadow: var(--focus-glow);
+}
+
 .project-manage-files {
-  width: 100%;
-  margin-top: 0.2rem;
   color: var(--accent);
+}
+
+.project-upload-progress {
+  width: 100%;
+  margin-top: 0.65rem;
+  accent-color: var(--accent-soft);
+}
+
+.project-upload-notice {
+  margin: 0.65rem 0 0;
+  color: var(--success);
+  font-size: 0.72rem;
+  line-height: 1.45;
 }
 
 .project-file-summary li {
@@ -5184,12 +5254,24 @@ a:focus-visible {
   background: var(--input-surface);
 }
 
-.project-file-summary li > span:nth-child(2) {
+.project-file-summary .project-file-details {
+  display: grid;
+  min-width: 0;
+  gap: 0.14rem;
+  overflow: hidden;
+}
+
+.project-file-details > span {
   overflow: hidden;
   color: var(--text);
   font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.project-file-details > small {
+  color: var(--accent);
+  font-size: 0.64rem;
 }
 
 .project-file-summary button {
@@ -5410,6 +5492,10 @@ a:focus-visible {
   }
 
   .project-home-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .project-file-actions {
     grid-template-columns: 1fr;
   }
 

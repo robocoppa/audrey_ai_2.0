@@ -1,8 +1,9 @@
 # Campaign 3 Phase 15 - composer controls and Projects
 
-**Status:** Slice 15A passed user acceptance on 2026-10-02. Slice 15B passed
-its live deployment and restart-persistence gate on 2026-10-02. Slices 15C and
-15D are laptop-complete and await the combined native browser acceptance gate.
+**Status:** Complete. Slice 15A passed user acceptance on 2026-10-02, Slice
+15B passed its deployment and restart-persistence gate on 2026-10-02, and the
+user accepted Slices 15C and 15D on 2026-10-03. The direct project-upload
+follow-up is laptop-complete and awaits its deployed browser check.
 
 ## Goal
 
@@ -21,7 +22,8 @@ A Project is an owner-bound workspace with:
 
 - a name;
 - optional project instructions;
-- references to ready files already owned in **My Files**;
+- references to files already owned in **My Files**, with processing files
+  becoming eligible for context only after they are Ready;
 - conversations that belong to that project.
 
 Project files are references to the existing owner-scoped files. Audrey does
@@ -354,9 +356,29 @@ Retrieved filenames are seeded into the normal source-event and durable
 assistant-source contracts. A transaction guard returns HTTP 409 without
 creating messages if another tab moves the conversation after the snapshot but
 before the run row is created. The full hermetic backend suite passes 3,135 tests with one existing
-FastAPI deprecation warning; changed-file Ruff and compilation pass. The real two-document
-answer, refresh, isolation, mutation-snapshot, and restart checks remain the
-native acceptance gate.
+FastAPI deprecation warning; changed-file Ruff and compilation pass.
+
+**Live result, 2026-10-03:** Passed by the user. Project navigation,
+management, shared instructions, selected-file grounding, refresh behavior,
+and the related normal-use checks are accepted; Phase 15 is closed.
+
+### Direct project-upload follow-up
+
+**Completed on the laptop, 2026-10-03.** Project home now has a primary
+**Upload to project** action beside **Choose from My Files**. New uploads are
+attached to the project immediately. Pending and processing files retain that
+membership across refresh or restart, display their state in the project, and
+become eligible for grounded context only when the server reports Ready. The
+project view refreshes active file states every five seconds while visible.
+
+My Files now presents **Add files** as a compact highlighted card, and the
+native **Choose files** control has a clearer styled action. Project file
+responses now include processing status; missing files are pruned, while
+active and failed rows stay visible for honest state and explicit removal.
+Focused project, grounding, and native-run tests pass 29/29. The deployed
+browser still needs the direct upload, progress, processing-to-Ready, My Files
+polish, mobile layout, and refresh checks. Node remains deferred on the laptop,
+so no local TypeScript, Vitest, build, or Playwright result is claimed.
 
 ## Delivery order
 

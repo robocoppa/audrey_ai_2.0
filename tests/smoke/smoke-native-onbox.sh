@@ -21,7 +21,7 @@ case "${SMOKE_SCRIPT}" in
   smoke_native_auth_cutover.py|smoke_native_ui.py|smoke_native_files.py|\
   smoke_native_chat_projection.py|smoke_native_access_models.py|\
   smoke_native_preferences.py|smoke_native_tool_events.py|smoke_native_modes.py|\
-  smoke_native_restart_persistence.py)
+  smoke_native_restart_persistence.py|smoke_native_document_approvals.py)
     ;;
   *)
     die "unsupported native smoke script: ${SMOKE_SCRIPT}"
@@ -81,6 +81,12 @@ if [[ "${SMOKE_SCRIPT}" == "smoke_native_restart_persistence.py" ]]; then
   DOCKER_USER_ARGS+=(--user 0:0)
   DOCKER_ENV_ARGS+=(--env "AUDREY_PERSISTENCE_SNAPSHOT_PATH=/state/c3-restart-persistence.json")
   DOCKER_VOLUME_ARGS+=(--volume "${PERSISTENCE_STATE_DIR}:/state")
+fi
+if [[ "${SMOKE_SCRIPT}" == "smoke_native_document_approvals.py" ]]; then
+  AUDREY_RUNTIME_DIR="${AUDREY_RUNTIME_DIR:-/mnt/user/appdata/runtime}"
+  [[ -d "${AUDREY_RUNTIME_DIR}" ]] \
+    || die "Audrey runtime directory missing: ${AUDREY_RUNTIME_DIR}"
+  DOCKER_VOLUME_ARGS+=(--volume "${AUDREY_RUNTIME_DIR}:/data")
 fi
 for env_name in "${OPTIONAL_ENV_NAMES[@]}"; do
   env_value="${!env_name-}"

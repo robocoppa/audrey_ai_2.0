@@ -1,7 +1,7 @@
 # Campaign 3 Phase 16 - native document tools
 
-**Status:** Approved on October 3, 2026. Queued after Phase 15 Projects
-grounding and its native acceptance gate.
+**Status:** Approved on October 3, 2026. Slice 16A is laptop-complete and
+awaits its two-stage native restart smoke. Slice 16B is next after that gate.
 
 ## Goal
 
@@ -73,6 +73,37 @@ or version change requires a new approval.
 4. Kill and restart Audrey around pending, approved, and running jobs; recover
    without duplicate or partial publication.
 5. Confirm approval records and logs exclude document bodies and credentials.
+
+### Slice 16A implementation result
+
+**Completed on the laptop, 2026-10-03.** Additive schema 20 introduces
+owner-scoped immutable file versions, document jobs, single-use approvals, and
+derivation provenance. The operation digest covers the normalized operation,
+input version, bounded JSON arguments, and output MIME type. Idempotency keys
+may repeat only the same digest. Approvals have bounded expiry, exact digest
+matching, provider-authenticated owner decisions, and explicit rejection,
+expiry, cancellation, and consumption states. Bot accounts cannot approve;
+bot-created requests default deny unless the internal caller supplies an
+administrator-owned operation allowlist.
+
+A durable repository validates current input versions before request,
+approval, claim, and publication. It uses exclusive short transactions for
+claims, bounded leases and attempts, restart recovery, stale-worker rejection,
+and atomic publication of one immutable output version plus provenance. A
+repeated identical completion returns the existing output, while a changed
+completion is rejected. Approval rows and owner-visible API responses exclude
+operation arguments and document bodies; they expose only the bounded summary,
+preview, digest, state, and audit times. Native routes list/read owned jobs,
+approve or reject them through provider authentication, and cancel active
+work. Privacy purge and isolated backup verification include the new records.
+
+The focused Phase 16A suite passes 6/6, the surrounding schema, migration,
+history, Projects, administration, and deletion set passes 83/83, and changed
+Python files pass Ruff and compilation. The two-stage
+`smoke_native_document_approvals.py` gate captures pending, queued, and running
+states, restarts Audrey, reclaims an expired lease, blocks the stale worker,
+proves single publication, terminates remaining jobs, and deletes all probe
+records. Its deployed result remains pending.
 
 ## Slice 16B - private template to DOCX
 
