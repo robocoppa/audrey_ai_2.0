@@ -505,8 +505,11 @@ bash tests/smoke/smoke-native-onbox.sh \
 
 Success is exit code zero with `"status": "captured"`, database schema 20,
 HTTP 409 for the altered digest, HTTP 404 for cross-owner access, and the three
-expected states. Leave the snapshot in `/mnt/user/appdata/runtime` and restart
-only Audrey:
+expected states. An HTTP 401 or 403 means one of the two stored Cloudflare
+Access application assertions must be refreshed in `.env.smoke.local`; capture
+stops before creating the snapshot or disposable rows, so refresh both values
+and rerun capture without restarting Audrey. Leave a successful snapshot in
+`/mnt/user/appdata/runtime` and restart only Audrey:
 
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0

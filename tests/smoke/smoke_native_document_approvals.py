@@ -45,6 +45,10 @@ class SmokeError(RuntimeError):
     """A deployed document approval contract was not satisfied."""
 
 
+class SmokeCredentialError(SmokeError):
+    """The stored Cloudflare Access assertions cannot authenticate the probe."""
+
+
 def _hash(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
@@ -81,9 +85,13 @@ def _json_request(
     except HTTPError as exc:
         status, content = exc.code, exc.read()
     if status not in expected:
-        raise SmokeError(
-            f"{method} {path}: HTTP {status}: {content.decode(errors='replace')[:500]}"
-        )
+        excerpt = content.decode(errors="replace")[:500]
+        if status in {401, 403}:
+            raise SmokeCredentialError(
+                f"{method} {target}: HTTP {status}: {excerpt}; refresh the current "
+                "Cloudflare Access application assertions in .env.smoke.local"
+            )
+        raise SmokeError(f"{method} {target}: HTTP {status}: {excerpt}")
     if not content:
         return status, {}
     try:
@@ -110,6 +118,8 @@ def _wait_ready() -> dict[str, str]:
             if health.get("status") == "ok" and capabilities.get("status") == "ready":
                 return {"health": "ok", "capabilities": "ready"}
             last = f"health={health.get('status')!r}, capabilities={capabilities.get('status')!r}"
+        except SmokeCredentialError:
+            raise
         except Exception as exc:  # noqa: BLE001 - startup failures are retried
             last = f"{type(exc).__name__}: {exc}"
         time.sleep(1)
