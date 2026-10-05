@@ -51,8 +51,58 @@ def test_private_url_guards_run_before_any_generation(monkeypatch, capsys, bad_g
 
     monkeypatch.setattr(smoke.http, "_request", request)
     monkeypatch.setattr(smoke.http, "_json", lambda *a, **kw: (_ for _ in ()).throw(smoke.http.SmokeError("stop before generation")))
-    assert smoke.main() == 1
+    assert smoke.main([]) == 1
     result = json.loads(capsys.readouterr().out)
     assert result["uploads_created"] == 0
     assert len(calls) == (1 if bad_guard else 2)
     assert "completed" not in result
+
+
+def _stream_body(answer):
+    events = [
+        {"type": "response.created", "sequence_number": 0},
+        {"type": "response.output_text.delta", "sequence_number": 1, "delta": answer["output_text"]},
+        {"type": "response.completed", "sequence_number": 2, "response": answer},
+    ]
+    return "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events).encode()
+
+
+def test_streamed_only_runs_one_model_call_with_explicit_budget(monkeypatch, capsys):
+    monkeypatch.setattr(smoke.http, "BASE_URL", "http://example.test")
+    monkeypatch.setattr(smoke.http, "USER_TOKEN", "user-test")
+    payloads = []
+
+    def request(path, **kwargs):
+        assert path == "/v1/responses"
+        payloads.append(json.loads(kwargs["body"]))
+        return 200, _stream_body(reply()), "text/event-stream"
+
+    monkeypatch.setattr(smoke.http, "_request", request)
+    monkeypatch.setattr(smoke.http, "_json", lambda *a, **kw: pytest.fail("completed call must not repeat"))
+
+    assert smoke.main(["--case", "streamed", "--max-output-tokens", "8192"]) == 0
+
+    result = json.loads(capsys.readouterr().out)
+    assert result["case"] == "streamed"
+    assert result["status"] == "passed"
+    assert result["streamed"]["progress_hidden"] is True
+    assert result["uploads_created"] == 0
+    assert "completed" not in result
+    assert "guards" not in result
+    assert len(payloads) == 1
+    assert payloads[0]["stream"] is True
+    assert payloads[0]["max_output_tokens"] == 8192
+
+
+def test_stream_smoke_rejects_progress_as_answer_text():
+    answer = reply("> _Thinking_ ✅ model\n\n---\nDummy PDF file | PYTHON")
+    with pytest.raises(smoke.http.SmokeError, match="progress banner"):
+        smoke._validate_stream(_stream_body(answer), "text/event-stream")
+
+
+@pytest.mark.parametrize("budget", ["0", "-1"])
+def test_invalid_smoke_budget_is_rejected_before_network(monkeypatch, budget):
+    monkeypatch.setattr(smoke.http, "_request", lambda *a, **kw: pytest.fail("network called"))
+    with pytest.raises(SystemExit) as exc:
+        smoke.main(["--max-output-tokens", budget])
+    assert exc.value.code == 2

@@ -7,8 +7,9 @@ Item 7 has live-settled [Phase 13 Slice
 13B](phase-13-responses-multimodal-input.md); Slice 13A remains laptop-complete
 with its targeted live gate pending. Slice 13C adds owner-scoped image and
 document references and passed its targeted protocol smoke on 2026-10-05.
-Slice 13D adds bounded public image/document URLs and awaits its targeted
-remote-input smoke. The user then
+Slice 13D's normal URL answer and private-URL guards passed; its corrected
+stream awaits the targeted retry after a token-limit false completion.
+The user then
 prioritized [Phase 14 Slice 14A](phase-14-bot-accounts-and-token-lifetimes.md),
 which is laptop-complete and awaits native acceptance.
 [Phase 15](phase-15-composer-and-projects.md) is complete. Slice 15A's composer control
@@ -400,7 +401,10 @@ Detailed decision record:
 - [x] Pass the targeted Slice 13C file-reference protocol smoke (2026-10-05).
 - [x] Build Slice 13D: add remote HTTP(S) image/document inputs through a
   bounded SSRF-safe fetch contract, with temporary parsing and joint budgets.
-- [ ] Pass the targeted Slice 13D remote-input protocol smoke.
+- [x] Pass Slice 13D's normal URL answer and private-URL guards (2026-10-05).
+- [x] Correct Fast stream token-limit/empty completion and remove progress from
+  Responses answer text; preserve usage, run observations, and caller limits.
+- [ ] Pass Slice 13D's streamed-only retry with the explicit 8,192-token ceiling.
 - [x] Add bounded json_schema structured text output for completed and
   streamed Responses, with final validation and an explicit legacy json_object
   rejection.

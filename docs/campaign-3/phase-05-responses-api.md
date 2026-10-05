@@ -75,7 +75,11 @@ generation, policy, fair-scheduling, metrics, and token-accounting paths as
 Chat Completions. A stream-session factory selects only the outer renderer:
 Chat Completions retains its existing chunks, while Responses renders the same
 client-neutral run events as typed Responses SSE. No adapter parses another
-adapter's wire format.
+adapter's wire format. Responses output_text contains answer text only;
+progress stays in the internal run trace and the established Chat/native
+renderers. Token-limit streams end with response.incomplete and a
+max_output_tokens reason, preserving partial text and usage. A normal completion
+without answer text fails instead of presenting progress as a successful answer.
 
 ## Deliberate boundary
 

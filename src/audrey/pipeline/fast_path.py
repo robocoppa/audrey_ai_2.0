@@ -293,6 +293,7 @@ async def stream_fast_path(
 
             answer_started = False
             saw_done = False
+            pending_prefix = ""
             content_filter = _InlineThinkFilter()
             try:
                 think = await _think(
@@ -319,6 +320,15 @@ async def stream_fast_path(
                         filtered = content_filter.feed(
                             str(message.get("content", "") or "")
                         )
+                        if not answer_started:
+                            filtered = pending_prefix + filtered
+                            if filtered.strip():
+                                pending_prefix = ""
+                            else:
+                                # Do not announce a successful answer for a
+                                # stream containing only whitespace/reasoning.
+                                pending_prefix = filtered
+                                filtered = ""
                         if filtered:
                             if not answer_started:
                                 answer_started = True
@@ -334,12 +344,16 @@ async def stream_fast_path(
                         if chunk.get("done"):
                             tail = content_filter.finish()
                             if not answer_started:
-                                answer_started = True
-                                yield FastStreamEvent(
-                                    FastStreamEventType.STARTED,
-                                    model=candidate.name,
-                                )
+                                tail = pending_prefix + tail
+                                if not tail.strip():
+                                    tail = ""
                             if tail:
+                                if not answer_started:
+                                    answer_started = True
+                                    yield FastStreamEvent(
+                                        FastStreamEventType.STARTED,
+                                        model=candidate.name,
+                                    )
                                 yield FastStreamEvent(
                                     FastStreamEventType.TEXT,
                                     model=candidate.name,
@@ -360,10 +374,25 @@ async def stream_fast_path(
                                 if chunk.get("done_reason") == "length"
                                 else "stop"
                             )
+                            if finish_reason == "length":
+                                # Reasoning spends the same output budget as
+                                # visible text. An empty token-limited answer
+                                # is incomplete, never a successful done.
+                                health.record_success(candidate.name)
+                                terminal.finish(
+                                    StreamOutcome.TRUNCATED,
+                                    finish_reason="length",
+                                )
+                                saw_done = True
+                                break
+                            if not answer_started:
+                                raise OllamaError(
+                                    "Ollama completed without answer text"
+                                )
                             health.record_success(candidate.name)
                             terminal.finish(
                                 StreamOutcome.OK,
-                                finish_reason=finish_reason,
+                                finish_reason="stop",
                             )
                             saw_done = True
                             break
@@ -374,6 +403,10 @@ async def stream_fast_path(
                 # chunk. Preserve any held marker tail. With no visible answer
                 # this is still pre-token and can fall back; otherwise truncate.
                 tail = content_filter.finish()
+                if not answer_started:
+                    tail = pending_prefix + tail
+                    if not tail.strip():
+                        tail = ""
                 if tail:
                     if not answer_started:
                         answer_started = True

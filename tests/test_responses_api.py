@@ -361,19 +361,18 @@ def test_responses_stream_session_emits_typed_lifecycle_and_usage():
         "response.output_item.added",
         "response.content_part.added",
         "response.output_text.delta",
-        "response.output_text.delta",
         "response.output_text.done",
         "response.content_part.done",
         "response.output_item.done",
         "response.completed",
     ]
-    assert [event["sequence_number"] for event in events] == list(range(10))
-    assert events[4]["delta"] == "> _Thinking_\n"
-    assert events[5]["delta"] == "Answer."
+    assert progress == ""
+    assert [event["sequence_number"] for event in events] == list(range(9))
+    assert events[4]["delta"] == "Answer."
     completed = events[-1]["response"]
     assert completed["id"] == "resp_test"
     assert completed["status"] == "completed"
-    assert completed["output_text"] == "> _Thinking_\nAnswer."
+    assert completed["output_text"] == "Answer."
     assert completed["output"][0]["id"] == "msg_test"
     assert completed["usage"] == {
         "input_tokens": 12,
@@ -522,3 +521,73 @@ async def test_empty_answer_without_token_limit_is_an_upstream_error(monkeypatch
 
     assert exc.value.status_code == 502
     assert exc.value.detail == "generation completed without an answer"
+
+
+@pytest.mark.parametrize("text", ["", " \n\t"])
+def test_plain_stream_cannot_complete_without_answer_text(text):
+    session = ResponsesStreamSession(
+        request=ResponseCreateRequest(model="audrey_fast", input="Explain.", stream=True),
+        virtual_model="audrey_fast", fingerprint_model="fast-model",
+    )
+    session.role_frame()
+    session.stage_started("thinking", label="Thinking")
+    assert session.status_frame("> _Thinking_ ✅ fast-model\n", stage="thinking") == ""
+    session.stage_finished("thinking")
+    assert session.status_frame("\n---\n") == ""
+    if text:
+        session.content_frame(text)
+    session.terminal.finish(StreamOutcome.OK, finish_reason="stop")
+
+    event = _sse_events(session.terminal_frame())[-1]
+
+    assert event["type"] == "response.failed"
+    response = event["response"]
+    assert response["status"] == "failed"
+    assert response["error"]["code"] == "empty_answer"
+    assert response["output_text"] == text
+    assert response["completed_at"] is None
+
+
+@pytest.mark.parametrize("text", ["", "partial answer"])
+def test_length_finish_is_incomplete_even_if_upstream_reports_ok(text):
+    session = ResponsesStreamSession(
+        request=ResponseCreateRequest(model="audrey_fast", input="Explain.", stream=True, max_output_tokens=4096),
+        virtual_model="audrey_fast", fingerprint_model="fast-model",
+    )
+    session.role_frame()
+    if text:
+        session.content_frame(text)
+    session.usage_reported(prompt_tokens=1177, completion_tokens=4096)
+    session.terminal.finish(StreamOutcome.OK, finish_reason="length")
+
+    event = _sse_events(session.terminal_frame())[-1]
+
+    assert event["type"] == "response.incomplete"
+    response = event["response"]
+    assert response["status"] == "incomplete"
+    assert response["incomplete_details"] == {"reason": "max_output_tokens"}
+    assert response["usage"]["output_tokens"] == 4096
+    assert response["output_text"] == text
+    assert response["completed_at"] is None
+
+
+def test_progress_is_recorded_in_internal_events_without_response_text():
+    from audrey.pipeline.run_events import StageProgressEvent
+
+    observed = []
+    session = ResponsesStreamSession(
+        request=ResponseCreateRequest(model="audrey_fast", input="Explain.", stream=True),
+        virtual_model="audrey_fast", fingerprint_model="fast-model", event_sink=observed.append,
+    )
+    session.role_frame()
+    session.stage_started("thinking", label="Thinking")
+    assert session.status_frame("> _Thinking_", stage="thinking") == ""
+    session.stage_finished("thinking")
+    literal = "> _Thinking_ is literal text in this answer."
+    delta = session.content_frame(literal)
+    session.terminal.finish(StreamOutcome.OK, finish_reason="stop")
+
+    assert any(isinstance(event, StageProgressEvent) for event in observed)
+    events = _sse_events(delta, session.terminal_frame())
+    assert events[0]["delta"] == literal
+    assert events[-1]["response"]["output_text"] == literal

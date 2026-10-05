@@ -510,22 +510,27 @@ uploads. No browser action or existing library file was needed.
 
 ## Run the 13D Responses remote-input smoke from the laptop
 
-**Result:** Implementation and laptop gates pass; live acceptance is pending.
+**Result, 2026-10-05:** The normal answer and both private-URL guards passed.
+Streaming reached the 4,096-token ceiling and returned only Audrey's progress
+banner while incorrectly reporting `completed`. The corrected laptop code
+reports token-limited streams as `incomplete`, suppresses progress in Responses
+answer text, and refuses an empty normal completion. Live streaming acceptance
+still needs the single retry below; retain the passed checks.
 
 This API-only slice lets callers provide public image/document URLs directly in
 `POST /v1/responses`. You do not need to upload a PDF, image, or video in the
 browser. The script uses a small [W3C sample PDF](https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf)
 containing "Dummy PDF file" and the [Python logo](https://www.python.org/static/community_logos/python-logo.png).
-It asks Audrey to read the PDF and identify the logo, once as a completed
-response and once as a stream. Each call has a 4,096-token ceiling. Before
-those calls, it checks that private loopback image and document URLs return
-ordinary JSON denials even when streaming was requested.
+The normal answer read both correctly: 21 visible characters, 1,375 input tokens,
+and 692 output tokens. Both loopback probes returned JSON HTTP 422 before SSE.
+The failed stream reported 1,177 input tokens and 4,096 output tokens, with no
+visible answer beyond the 36-character banner. No uploads were created.
 
 The script uses the existing `AUDREY_USER_JWT` in laptop `.env.test.local`.
 It does not need an admin token or the eval PAT. It creates no uploads or
-library entries and uses `### Task:` so the two model calls do not enter
-compatibility chat history. Temporary downloads and parsers are cleaned up
-by the backend; there is no operator cleanup step.
+library entries and uses `### Task:` so model calls do not enter compatibility
+chat history. Temporary downloads and parsers are cleaned up by the backend;
+there is no operator cleanup step.
 
 First rebuild on Tower from the updated checkout:
 
@@ -534,7 +539,7 @@ cd /mnt/user/appdata/audrey_ai_2.0
 docker compose up -d --build audrey
 ```
 
-Then run on the laptop:
+Then retry **only streaming** on the laptop:
 
 ```bash
 cd /home/bart/Documents/github/audrey/audrey_ai_2.0
@@ -542,25 +547,39 @@ cd /home/bart/Documents/github/audrey/audrey_ai_2.0
   set -a
   source .env.test.local
   set +a
-  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_responses_remote_inputs.py
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_responses_remote_inputs.py --case streamed --max-output-tokens 8192
 )
 ```
 
-Allow several minutes for the two vision calls. Success is exit zero and
-`"status": "passed"`, with:
+This sends one generation request and does not repeat the successful normal
+answer or guards. The explicit 8,192-token ceiling gives the vision model more
+room for reasoning before its short answer. This changes only the smoke request;
+Audrey still honors the caller's output limit. It is a ceiling, not a required
+token spend, and does not guarantee every model draw finishes. Existing vision
+measurements show that `think: false` does not remove qwen3-vl's reasoning cost.
+We retain the current model and production thinking policy.
 
-- `uploads_created: 0`;
-- `guards.input_image: 422`, `guards.input_file: 422`,
-  `error: responses_remote_input_blocked`, and `before_sse: true`;
-- completed and streamed HTTP 200, `pdf_text: true`, `image_logo: python`,
-  a `resp_` id, and integer token usage;
-- `streamed.terminal: response.completed` and matching non-empty deltas.
+Allow a few minutes for the one vision call. Success is exit zero and:
 
-If the fixture host is unreachable or returns an HTTP error, the smoke fails
-with a fetch error rather than pretending the model analyzed it. Keep that
-result separate from the already-settled Slice 13C owned-file smoke. This
-single targeted protocol check is the live gate for 13D; there is no new
-native upload or browser flow to retest.
+- `status: passed`, `case: streamed`, and `uploads_created: 0`;
+- `streamed.http: 200`, `pdf_text: true`, and `image_logo: python`;
+- `streamed.terminal: response.completed`, `progress_hidden: true`, and
+  matching non-empty answer deltas;
+- a `resp_` id and integer usage, with `max_output_tokens: 8192`.
+
+If the model reaches that ceiling too, the smoke must fail with terminal
+`response.incomplete`, `status: incomplete`, and
+`incomplete_details.reason: max_output_tokens`. Those fields prove honest
+termination, but do not pass the answer gate; retain the output for diagnosis.
+[Official OpenAI documentation](https://developers.openai.com/api/docs/guides/reasoning)
+specifies that the output ceiling includes reasoning and that exhaustion can
+occur before visible text.
+
+The default smoke still runs both answers and the guards with a 4,096-token
+ceiling. `--case completed` or `--case streamed` selects just one generation
+case; `--max-output-tokens` makes the request budget explicit. Neither selector
+reports skipped cases as passed. Fixture fetch failures remain separate from
+model-answer failures. Slice 13C remains live-settled and is not repeated.
 
 ## Run the 15B Projects restart smoke
 

@@ -2,7 +2,8 @@
 
 **Status:** Slices 13B and 13C are live-settled. Slice 13A remains
 laptop-complete with its targeted live gate pending. Slice 13D is
-laptop-complete with its remote-input live gate pending.
+laptop-complete. Its normal URL answer and private-URL guards passed;
+streaming acceptance awaits the correction's targeted retry.
 
 ## Goal
 
@@ -356,7 +357,7 @@ failures are ordinary JSON responses before a model call or SSE stream opens.
 
 ### Slice 13D verification
 
-**Laptop result, 2026-10-05:** 194 focused remote/file/Responses/structured-output
+**Initial laptop result, 2026-10-05:** 194 focused remote/file/Responses/structured-output
 and harness cases pass. The full hermetic backend suite passes 3,309 tests with
 the existing FastAPI deprecation warning. Scoped Ruff, compilation, and the diff
 check pass. Tests cover mixed public/private DNS answers, rebinding after vetting,
@@ -366,14 +367,43 @@ evidence, shared budgets, JSON denials before SSE, and child cleanup after timeo
 and cancellation. Signed query parameters are absent from HTTP logs and forwarded
 evidence.
 
-**Live result:** Pending user deployment and the targeted
-`tests/smoke/smoke_responses_remote_inputs.py` result. It uses a public W3C sample
-PDF and Python logo, requires both inputs in one completed and one streamed
-answer, and proves image/document loopback destinations return JSON HTTP 422
-before SSE. No browser upload, existing library file, admin token, or cleanup
-repair is needed. Exact steps are in
+**First live result, 2026-10-05:** The completed answer used both remote inputs:
+"Dummy PDF file" and "Python", 21 characters, 1,375 input tokens, and 692 output
+tokens. Both private image/document probes returned JSON HTTP 422 before SSE.
+No uploads were created. Streaming reached all 4,096 output tokens but returned
+only the 36-character Thinking banner. It incorrectly reported completed, so
+Slice 13D is not live-settled.
+
+**Streaming correction:** The plain Fast owner now maps Ollama's
+`done_reason: length` to `StreamOutcome.TRUNCATED`, retaining token usage and
+partial answer text without retrying past the caller's ceiling. It announces
+answer start only after meaningful text; empty normal completion uses the
+existing bounded pre-answer fallback, failing when exhausted. Responses exposes
+`response.incomplete` with `reason: max_output_tokens` for the cap and has a
+second guard against blank successful output. Incomplete/failed Responses keep
+`completed_at: null`. Progress remains available in internal run events but is
+excluded from both plain and structured `output_text`. Chat Completions and the
+native browser retain their progress rendering.
+
+The fixed smoke accepts `--case streamed --max-output-tokens 8192` so the next
+live gate sends only one model request, preserving the normal answer and guards
+as passed. It verifies both inputs, matching deltas, `response.completed`, and
+`progress_hidden: true`. The larger request ceiling allows more vision reasoning
+but does not change production defaults or bypass output bounds. An incomplete
+response remains a failed answer gate, with usage and reason retained.
+Exact steps are in
 [the live runbook](../reference/live-smoke-testing.md#run-the-13d-responses-remote-input-smoke-from-the-laptop).
 Slice 13C remains live-settled and is not repeated.
+
+**Correction laptop result, 2026-10-05:** 106 focused streaming, Responses,
+structured-output, and harness cases pass. The full backend suite passes 3,328
+tests with the existing FastAPI deprecation warning. Scoped Ruff, compilation,
+and diff checks pass. Regressions cover empty/partial token-limit stops,
+whitespace-only completion, bounded fallback, internal progress observations,
+literal answer text, the actual image/vl route, and the one-case smoke selector.
+
+Token-limit behavior follows the
+[official OpenAI reasoning contract](https://developers.openai.com/api/docs/guides/reasoning).
 
 Official URL field references: [OpenAI file inputs](https://developers.openai.com/api/docs/guides/file-inputs)
 and [OpenAI image inputs](https://developers.openai.com/api/docs/guides/images-vision).

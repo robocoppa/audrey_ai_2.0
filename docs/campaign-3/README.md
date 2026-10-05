@@ -66,7 +66,10 @@ live gates passed on 2026-10-05. Completed and streamed answers used both
 files, ownership/kind/deletion guards passed, and both uploads were removed.
 Slice 13D adds bounded public image/document URLs with DNS pinning, checked
 redirects, temporary parsing, and joint input limits. Its implementation and
-laptop gate pass; its targeted remote-input live smoke is pending.
+laptop gate pass. The normal remote-input answer and private-URL guards passed;
+streaming exhausted its token ceiling and exposed false completion/progress
+leaks. The corrected stream now reports truncation honestly and keeps answer
+text clean; its streamed-only live retry is pending.
 
 Phase 14 started on 2026-10-02. Slice 14A adds a protected Bots access group,
 Bot-targeted model policy, zero-day never-expiring personal tokens, and

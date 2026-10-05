@@ -342,7 +342,7 @@ class ResponsesStreamAdapter:
                 content_index=0,
                 part=self._part(),
             )
-        if isinstance(event, (TextDeltaEvent, StageProgressEvent)):
+        if isinstance(event, TextDeltaEvent):
             if not self._message_started or self._message_finished:
                 raise RuntimeError("response output text is not active")
             if self._terminal_emitted:
@@ -409,7 +409,7 @@ class ResponsesStreamAdapter:
                 incomplete_details = None
             response = self._response(
                 status=status,
-                completed_at=completed_at,
+                completed_at=completed_at if status == "completed" else None,
                 output_started=True,
                 error=error,
                 incomplete_details=incomplete_details,
@@ -476,12 +476,10 @@ class ResponsesStreamSession:
         return frame
 
     def status_frame(self, text: str, *, stage: str = "") -> str:
+        # Keep progress in the internal run trace. Responses output_text
+        # contains only answer text, for plain and structured output alike.
         event = self._events.stage_progress(text, stage=stage)
-        if self._structured:
-            return ""
-        frame = self._adapter.render(event)
-        assert frame is not None
-        return frame
+        return self._adapter.render(event) or ""
 
     def stage_started(self, stage: str, *, label: str = "") -> None:
         self._events.stage_started(stage, label=label)
@@ -514,13 +512,21 @@ class ResponsesStreamSession:
 
     def terminal_frame(self) -> str:
         outcome = self.terminal.outcome
+        # A provider's length finish can never be a completed response, even
+        # if another pipeline owner has reported an inconsistent OK outcome.
+        if outcome is StreamOutcome.OK and self.terminal.finish_reason == "length":
+            outcome = StreamOutcome.TRUNCATED
         structured_error = ""
+        empty_answer = False
         if outcome is StreamOutcome.OK and self._structured:
             try:
                 validate_structured_output(self._adapter.text, self.request)
             except StructuredOutputError as exc:
                 outcome = StreamOutcome.ERROR
                 structured_error = str(exc)
+        if outcome is StreamOutcome.OK and not self._adapter.text.strip():
+            outcome = StreamOutcome.ERROR
+            empty_answer = True
         run_status = {
             StreamOutcome.OK: "succeeded",
             StreamOutcome.CANCELLED: "cancelled",
@@ -540,16 +546,17 @@ class ResponsesStreamSession:
         message = self._events.message_finished(
             status="completed" if outcome is StreamOutcome.OK else "incomplete"
         )
-        error_code = (
-            "structured_output_invalid"
-            if structured_error
-            else {
+        if structured_error:
+            error_code = "structured_output_invalid"
+        elif empty_answer:
+            error_code = "empty_answer"
+        else:
+            error_code = {
                 StreamOutcome.OK: "",
                 StreamOutcome.CANCELLED: "cancelled",
                 StreamOutcome.ERROR: "pipeline_error",
                 StreamOutcome.TRUNCATED: "stream_truncated",
             }[outcome]
-        )
         finished = self._events.run_finished(
             status=run_status,  # type: ignore[arg-type]
             finish_reason=self.terminal.finish_reason or "",

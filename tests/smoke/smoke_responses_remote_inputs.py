@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Prove remote PDF/image Responses input and public-address denial.
 
-Two generation calls use public W3C/Python fixtures. No uploads, library changes,
-admin credential, or browser action is required.
+Public W3C/Python fixtures support the full smoke or one selected generation
+case. No uploads, library changes, admin credential, or browser action is required.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import sys
@@ -20,9 +21,9 @@ DOCUMENT_URL = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/du
 IMAGE_URL = "https://www.python.org/static/community_logos/python-logo.png"
 
 
-def _payload(*, stream: bool) -> dict[str, Any]:
+def _payload(*, stream: bool, max_output_tokens: int = 4096) -> dict[str, Any]:
     return {
-        "model": http.MODEL, "stream": stream, "max_output_tokens": 4096,
+        "model": http.MODEL, "stream": stream, "max_output_tokens": max_output_tokens,
         "input": [{"role": "user", "content": [
             {"type": "input_text", "text": (
                 "### Task:\nRead the text in the attached PDF and identify the "
@@ -75,41 +76,57 @@ def _validate_stream(body: bytes, content_type: str) -> dict[str, Any]:
     deltas = [event["delta"] for event in events if event.get("type") == "response.output_text.delta"]
     if not deltas or "".join(deltas) != response.get("output_text"):
         raise http.SmokeError("remote stream deltas do not match the final answer")
+    answer = "".join(deltas)
+    if any(banner in answer for banner in (
+        "> _Thinking", "> _Planning", "> _Dispatching panel", "> _Synthesizing",
+    )):
+        raise http.SmokeError("remote stream leaked a progress banner into output_text")
     result = _validate(response)
-    result.update(terminal="response.completed", delta_count=len(deltas), event_count=len(events))
+    result.update(terminal="response.completed", delta_count=len(deltas), event_count=len(events), progress_hidden=True)
     return result
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--case", choices=("all", "completed", "streamed"), default="all",
+                        help="Run all checks, or only the selected answer case.")
+    parser.add_argument("--max-output-tokens", type=int, default=4096,
+                        help="Visible answer and reasoning token ceiling per call (default: 4096).")
+    args = parser.parse_args(argv)
+    if args.max_output_tokens <= 0:
+        parser.error("--max-output-tokens must be positive")
     if not http.BASE_URL or not http.USER_TOKEN:
         print("Set AUDREY_SMOKE_BASE_URL and AUDREY_USER_JWT in .env.test.local.", file=sys.stderr)
         return 2
-    result: dict[str, Any] = {"schema": 1, "uploads_created": 0}
+    result: dict[str, Any] = {"schema": 1, "case": args.case, "uploads_created": 0}
     try:
-        # Denials first: failures here must be ordinary JSON, even with stream=True.
-        guards = {}
-        for part_type, key in (("input_image", "image_url"), ("input_file", "file_url")):
-            probe = {"model": http.MODEL, "stream": True, "input": [{"role": "user", "content": [
-                {"type": part_type, key: "http://127.0.0.1/private"},
-            ]}]}
-            status, body, content_type = http._request(
-                "/v1/responses", token=http.USER_TOKEN, method="POST", body=json.dumps(probe).encode(),
-                content_type="application/json", expected=frozenset({422}),
+        if args.case == "all":
+            # Denials first: failures here must be ordinary JSON, even with stream=True.
+            guards = {}
+            for part_type, key in (("input_image", "image_url"), ("input_file", "file_url")):
+                probe = {"model": http.MODEL, "stream": True, "input": [{"role": "user", "content": [
+                    {"type": part_type, key: "http://127.0.0.1/private"},
+                ]}]}
+                status, body, content_type = http._request(
+                    "/v1/responses", token=http.USER_TOKEN, method="POST", body=json.dumps(probe).encode(),
+                    content_type="application/json", expected=frozenset({422}),
+                )
+                error = json.loads(body)
+                if not content_type.startswith("application/json") or error.get("detail", {}).get("error") != "responses_remote_input_blocked":
+                    raise http.SmokeError(f"private {part_type} denial changed: {error}")
+                guards[part_type] = status
+            result["guards"] = {**guards, "error": "responses_remote_input_blocked", "before_sse": True}
+        if args.case in {"all", "completed"}:
+            payload = _payload(stream=False, max_output_tokens=args.max_output_tokens)
+            _, response = http._json("/v1/responses", token=http.USER_TOKEN, method="POST", payload=payload)
+            result["completed"] = http._response_diagnostics(response)
+            result["completed"].update(_validate(response))
+        if args.case in {"all", "streamed"}:
+            payload = _payload(stream=True, max_output_tokens=args.max_output_tokens)
+            _, body, content_type = http._request(
+                "/v1/responses", token=http.USER_TOKEN, method="POST", body=json.dumps(payload).encode(), content_type="application/json",
             )
-            error = json.loads(body)
-            if not content_type.startswith("application/json") or error.get("detail", {}).get("error") != "responses_remote_input_blocked":
-                raise http.SmokeError(f"private {part_type} denial changed: {error}")
-            guards[part_type] = status
-        result["guards"] = {**guards, "error": "responses_remote_input_blocked", "before_sse": True}
-        payload = _payload(stream=False)
-        _, response = http._json("/v1/responses", token=http.USER_TOKEN, method="POST", payload=payload)
-        result["completed"] = http._response_diagnostics(response)
-        result["completed"].update(_validate(response))
-        payload["stream"] = True
-        _, body, content_type = http._request(
-            "/v1/responses", token=http.USER_TOKEN, method="POST", body=json.dumps(payload).encode(), content_type="application/json",
-        )
-        result["streamed"] = _validate_stream(body, content_type)
+            result["streamed"] = _validate_stream(body, content_type)
         result["status"] = "passed"
     except Exception as exc:  # noqa: BLE001 - structured operator evidence
         result.update(status="failed", error=f"{type(exc).__name__}: {exc}")

@@ -25,9 +25,10 @@ from audrey.routes.openai.pipeline import (
     _generate_via_pipeline,
     _stream_via_pipeline,
 )
-from audrey.routes.openai.schemas import ChatCompletionRequest
+from audrey.routes.openai.schemas import ChatCompletionRequest, ResponseCreateRequest
 from audrey.routes.openai.streaming import (
     OpenAIStreamSession,
+    ResponsesStreamSession,
     StreamOutcome,
     StreamTerminal,
 )
@@ -301,6 +302,119 @@ async def test_plain_fast_empty_missing_done_falls_back(recorded_metrics):
     assert terminal.outcome == StreamOutcome.OK
     assert not health.is_healthy("a")
     assert health.is_healthy("b")
+
+
+@pytest.mark.parametrize("content", ["", "<think>hidden reasoning</think>", "partial answer"])
+async def test_plain_fast_token_limit_is_incomplete_with_usage_and_no_retry(
+    recorded_metrics, content,
+):
+    ollama = _ScriptedOllama({
+        "a": [{
+            "message": {"content": content, "thinking": "hidden reasoning"},
+            "done": True,
+            "done_reason": "length",
+            "prompt_eval_count": 1177,
+            "eval_count": 4096,
+        }],
+        "b": [{"message": {"content": "must not run"}, "done": True}],
+    })
+    health = HealthTracker()
+
+    events, terminal = await _events(
+        ollama, _registry(("a", 100, "local"), ("b", 50, "local")), health,
+    )
+
+    assert [call["model"] for call in ollama.calls] == ["a"]
+    visible = "partial answer" if content == "partial answer" else ""
+    assert "".join(
+        event.text for event in events if event.type == FastStreamEventType.TEXT
+    ) == visible
+    assert sum(event.type == FastStreamEventType.STARTED for event in events) == bool(visible)
+    usage = next(event for event in events if event.type == FastStreamEventType.USAGE)
+    assert (usage.prompt_tokens, usage.completion_tokens) == (1177, 4096)
+    assert terminal.outcome == StreamOutcome.TRUNCATED
+    assert terminal.finish_reason == "length"
+    assert health.is_healthy("a")
+    assert recorded_metrics[1].labels_seen[0]["outcome"] == "truncated"
+
+
+@pytest.mark.parametrize("content", ["", " \n" * 20, "<think>hidden reasoning</think>"])
+async def test_plain_fast_empty_done_falls_back_before_announcing_answer(
+    recorded_metrics, content,
+):
+    ollama = _ScriptedOllama({
+        "a": [{
+            "message": {"content": content, "thinking": "hidden reasoning"},
+            "done": True,
+            "done_reason": "stop",
+            "eval_count": 12,
+        }],
+        "b": [{
+            "message": {"content": "fallback answer"},
+            "done": True,
+            "eval_count": 3,
+        }],
+    })
+    health = HealthTracker()
+
+    events, terminal = await _events(
+        ollama, _registry(("a", 100, "local"), ("b", 50, "local")), health,
+    )
+
+    assert [call["model"] for call in ollama.calls] == ["a", "b"]
+    assert [event.model for event in events if event.type == FastStreamEventType.STARTED] == ["b"]
+    assert "".join(
+        event.text for event in events if event.type == FastStreamEventType.TEXT
+    ) == "fallback answer"
+    assert [
+        event.completion_tokens for event in events if event.type == FastStreamEventType.USAGE
+    ] == [12, 3]
+    assert terminal.outcome == StreamOutcome.OK
+    assert not health.is_healthy("a")
+    assert health.is_healthy("b")
+
+
+async def test_plain_fast_empty_done_exhaustion_is_bounded_failure(recorded_metrics):
+    empty = {"message": {"thinking": "hidden"}, "done": True, "done_reason": "stop"}
+    ollama = _ScriptedOllama({
+        "a": [empty], "b": [empty],
+        "c": [{"message": {"content": "must not run"}, "done": True}],
+    })
+    health = HealthTracker()
+
+    events, terminal = await _events(
+        ollama,
+        _registry(("a", 100, "local"), ("b", 50, "local"), ("c", 10, "local")),
+        health,
+    )
+
+    assert [call["model"] for call in ollama.calls] == ["a", "b"]
+    assert not any(event.type == FastStreamEventType.STARTED for event in events)
+    assert events[-1].type == FastStreamEventType.ERROR
+    assert "completed without answer text" in events[-1].text
+    assert terminal.outcome == StreamOutcome.ERROR
+    assert not health.is_healthy("a")
+    assert not health.is_healthy("b")
+    assert health.is_healthy("c")
+
+
+async def test_plain_fast_preserves_leading_whitespace_once_answer_starts(recorded_metrics):
+    ollama = _ScriptedOllama({
+        "a": [
+            {"message": {"content": " \n" * 20}, "done": False},
+            {"message": {"content": "answer"}, "done": True},
+        ],
+    })
+
+    events, terminal = await _events(
+        ollama, _registry(("a", 100, "local")), HealthTracker(),
+    )
+
+    assert "".join(
+        event.text for event in events if event.type == FastStreamEventType.TEXT
+    ) == " \n" * 20 + "answer"
+    assert sum(event.type == FastStreamEventType.STARTED for event in events) == 1
+    assert terminal.outcome == StreamOutcome.OK
 
 
 async def test_plain_fast_does_not_fallback_after_text(recorded_metrics):
@@ -617,6 +731,69 @@ async def test_route_uses_one_id_one_role_and_the_configured_thinking_policy(
     )
     usage = next(event for event in events if event.type == "usage.reported")
     assert (usage.prompt_tokens, usage.completion_tokens) == (0, 0)
+
+
+@pytest.mark.parametrize("content", ["", "partial answer"])
+async def test_responses_vision_route_token_limit_reports_incomplete(content):
+    cfg = _Cfg(("qwen3-vl:32b", 100, "local"))
+    cfg.model_registry["vl"] = cfg.model_registry["general"]
+    ollama = _ScriptedOllama({
+        "qwen3-vl:32b": [{
+            "message": {"content": content, "thinking": "hidden reasoning"},
+            "done": True,
+            "done_reason": "length",
+            "prompt_eval_count": 1177,
+            "eval_count": 4096,
+        }],
+    })
+    app = _route_app(cfg, ollama, _RecordingArchive())
+    app.state.archive_client = None
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Read the document and image."},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,aGVsbG8="}},
+        ],
+    }]
+    payload = ChatCompletionRequest(
+        model="audrey_fast", messages=messages, stream=True, max_tokens=4096,
+    )
+    response_request = ResponseCreateRequest(
+        model="audrey_fast", input="Read the document and image.",
+        stream=True, max_output_tokens=4096,
+    )
+    run_events: list[RunEvent] = []
+
+    def session_factory(**kwargs):
+        return ResponsesStreamSession(
+            request=response_request, event_sink=run_events.append, **kwargs,
+        )
+
+    frames = [
+        frame async for frame in _stream_via_pipeline(
+            app, payload, messages, {"num_predict": 4096},
+            user_id="alice@example.com", conversation_id="", user_turn_text="Read the image.",
+            stream_session_factory=session_factory,
+        )
+    ]
+    wire_events = [
+        json.loads(line[6:])
+        for frame in frames for line in frame.splitlines() if line.startswith("data: ")
+    ]
+    terminal = wire_events[-1]
+
+    assert terminal["type"] == "response.incomplete"
+    assert not any(event["type"] == "response.completed" for event in wire_events)
+    response = terminal["response"]
+    assert response["status"] == "incomplete"
+    assert response["incomplete_details"] == {"reason": "max_output_tokens"}
+    assert response["usage"]["input_tokens"] == 1177
+    assert response["usage"]["output_tokens"] == 4096
+    assert "".join(event.delta for event in run_events if event.type == "text.delta") == content
+    assert ollama.calls[0]["think"] is None
+    assert ollama.calls[0]["options"] == {"num_predict": 4096}
+    if not content:
+        assert "✅" not in response["output_text"]
 
 
 async def test_native_preference_context_reaches_model_but_not_auto_routing(
