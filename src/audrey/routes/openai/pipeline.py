@@ -156,6 +156,7 @@ async def _generate_via_pipeline(
     skill_instruction: str | None = None,
     resolved_skill: ResolvedSkill | None = None,
     model_tools: ToolRegistry | None = None,
+    response_format: dict[str, Any] | None = None,
 ):
     """Non-streaming path: invoke the compiled LangGraph and format the result."""
     graph = app.state.graph
@@ -170,6 +171,7 @@ async def _generate_via_pipeline(
         "temperature": payload.temperature,
         "top_p": payload.top_p,
         "max_tokens": payload.max_tokens,
+        "response_format": response_format,
         "user_id": user_id,
         "compatibility_request": True,
     }
@@ -235,7 +237,7 @@ async def _generate_via_pipeline(
     # comparison); research gets the staged trace (notes → ledger →
     # fact-check → writer guidance), since its drafts are researcher notes,
     # not candidate answers.
-    if final.get("mode") == "deep":
+    if response_format is None and final.get("mode") == "deep":
         agentic_cfg = app.state.cfg.raw.get("agentic", {}) or {}
         if final.get("panel_pool") == "deep_panel_research":
             if bool(agentic_cfg.get("debug_research_trace", False)):
@@ -268,6 +270,7 @@ async def _stream_via_pipeline(
     resolved_skill: ResolvedSkill | None = None,
     model_tools: ToolRegistry | None = None,
     stream_session_factory: Callable[..., Any] = OpenAIStreamSession,
+    response_format: dict[str, Any] | None = None,
 ):
     """Streaming path.
 
@@ -394,6 +397,7 @@ async def _stream_via_pipeline(
                         resolved_skill=resolved_skill,
                         model_tools=model_tools,
                         stream_session_factory=stream_session_factory,
+                        response_format=response_format,
                     ):
                         yield frame
                     return
@@ -405,6 +409,7 @@ async def _stream_via_pipeline(
                     resolved_skill=resolved_skill,
                     model_tools=model_tools,
                     stream_session_factory=stream_session_factory,
+                    response_format=response_format,
                 ):
                     yield frame
                 return
@@ -462,7 +467,10 @@ async def _stream_via_pipeline(
             # the loop completes, rather than streaming tokens during ReAct rounds.
             tool_capable = set(cfg.raw.get("fast_path", {}).get("tool_capable_models", []) or [])
             tools_active = (
-                spec is not None and bool(model_tools.by_name) and spec.name in tool_capable
+                response_format is None
+                and spec is not None
+                and bool(model_tools.by_name)
+                and spec.name in tool_capable
             )
             if tools_active:
                 # Tool-capable path can take 1-3s on a `kb_search` round, so
@@ -634,6 +642,7 @@ async def _stream_via_pipeline(
                 user_id=user_id,
                 pipeline_started_at=fast_pipeline_started_at,
                 no_thinking_prose=no_thinking_prose,
+                response_format=response_format,
                 terminal=fast_stream.terminal,
             ):
                 if event.type == FastStreamEventType.ATTEMPT:
@@ -723,6 +732,7 @@ async def _stream_deep_with_banners(
     resolved_skill: ResolvedSkill | None = None,
     model_tools: ToolRegistry | None = None,
     stream_session_factory: Callable[..., Any] = OpenAIStreamSession,
+    response_format: dict[str, Any] | None = None,
 ):
     """Streaming deep path with progress banners.
 
@@ -913,6 +923,7 @@ async def _stream_deep_with_banners(
                 # longer `deep_worker` budget.
                 subtasks=subtasks, timeout_s=timeout_s,
                 user_id=user_id or None,
+                response_format=response_format,
             ),
             maxsize=128,
             name="deep-synthesis",
@@ -1112,6 +1123,7 @@ async def _stream_research_with_banners(
     resolved_skill: ResolvedSkill | None = None,
     model_tools: ToolRegistry | None = None,
     stream_session_factory: Callable[..., Any] = OpenAIStreamSession,
+    response_format: dict[str, Any] | None = None,
 ):
     """Streaming `audrey_research` path: Planning → Researching → Verifying → Writing.
 
@@ -1232,6 +1244,7 @@ async def _stream_research_with_banners(
                 tools=tools, tool_capable_models=tool_capable_models,
                 user_id=user_id or None,
                 tool_observer=tool_observer,
+                response_format=response_format,
             ),
             maxsize=256,
             name="research-pipeline",

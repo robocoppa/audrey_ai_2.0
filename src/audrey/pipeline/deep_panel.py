@@ -1854,6 +1854,7 @@ async def run_research_pipeline_streaming(
     tool_capable_models: set[str] | None = None,
     user_id: str | None = None,
     tool_observer: RunEventToolObserver | None = None,
+    response_format: dict[str, Any] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Run the staged research pipeline, yielding stage events.
 
@@ -2185,11 +2186,23 @@ async def run_research_pipeline_streaming(
         dispatch_total.labels(model=model, task_type=str(task), path="research_write").inc()
         started = False
         try:
+            think = (
+                await ollama.thinking_flag(model, False)
+                if response_format is not None
+                else None
+            )
             async with gate.acquire(model, location=loc, user_id=user_id):
-                async for chunk in ollama.chat_stream(
-                    model=model, messages=w_msgs,
-                    options={"temperature": 0.3}, timeout_s=timeout_s,
-                ):
+                stream_kwargs: dict[str, Any] = {
+                    "model": model,
+                    "messages": w_msgs,
+                    "options": {"temperature": 0.3},
+                    "timeout_s": timeout_s,
+                }
+                if think is not None:
+                    stream_kwargs["think"] = think
+                if response_format is not None:
+                    stream_kwargs["format"] = response_format
+                async for chunk in ollama.chat_stream(**stream_kwargs):
                     text = (chunk.get("message", {}) or {}).get("content", "") or ""
                     if text:
                         started = True
@@ -2222,7 +2235,11 @@ async def run_research_pipeline_streaming(
     # degrades prose). Only on a clean answer, and only when a
     # grounded ledger yields surviving sources with usable URLs; an
     # ungrounded/creative answer renders nothing.
-    if write_error == "" and accumulated.strip():
+    if (
+        response_format is None
+        and write_error == ""
+        and accumulated.strip()
+    ):
         sources_block = _render_sources_block(ledger, fc_result)
         if sources_block:
             accumulated += sources_block
@@ -2265,6 +2282,7 @@ async def run_research_pipeline(
     tool_capable_models: set[str] | None = None,
     user_id: str | None = None,
     tool_observer: RunEventToolObserver | None = None,
+    response_format: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Non-streaming staged research pipeline. Returns a dict to merge into state.
 
@@ -2280,7 +2298,7 @@ async def run_research_pipeline(
         task=task, messages=messages, options=options,
         timeout_s=timeout_s, max_researchers_cloud=max_researchers_cloud,
         tools=tools, tool_capable_models=tool_capable_models, user_id=user_id,
-        tool_observer=tool_observer,
+        tool_observer=tool_observer, response_format=response_format,
     ):
         if evt.get("type") == "done":
             final = evt

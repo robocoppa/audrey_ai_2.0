@@ -383,6 +383,34 @@ Success is exit code zero and JSON ending in `"status": "passed"`. The
 `output_text`, and `"sentinel": true`. The `unsupported` block must
 report remote-image HTTP 422 and `"validation_error": true`.
 
+## Run the 13B Responses structured output smoke from the laptop
+
+This targeted protocol proof makes two short Fast model calls: one completed
+and one streamed. Both must return exactly the schema-constrained sentinel
+object. The script validates schema echo, typed output, token usage, streaming
+event order, matching deltas, and the absence of Audrey progress text inside
+the JSON. It then proves legacy json_object mode remains an explicit HTTP 400.
+It uploads, stores, and deletes nothing.
+
+After rebuilding Audrey, use the working LAN/WARP route and the existing
+AUDREY_EVAL_API_KEY:
+
+~~~bash
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
+(
+  set -a
+  source .env.test.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_responses_structured.py
+)
+~~~
+
+Success is exit code zero and JSON ending in status passed. Both completed and
+streamed blocks must report HTTP 200, format json_schema, and sentinel true.
+The streamed block must report response.completed and progress_hidden true.
+The unsupported block must report HTTP 400 and
+responses_feature_unsupported. No file upload or browser action is needed.
+
 ## Run the 15B Projects restart smoke
 
 **Result:** Passed and settled on 2026-10-02. Project, conversation membership,

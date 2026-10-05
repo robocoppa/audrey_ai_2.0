@@ -52,9 +52,24 @@ class _ScriptedOllama:
     def __init__(self, outcomes: dict[str, Any]) -> None:
         self._outcomes = outcomes
         self.calls: list[str] = []
+        self.formats: list[dict[str, Any] | str | None] = []
 
-    async def chat(self, *, model: str, messages, options=None, tools=None, timeout_s=None, think=None):
+    async def thinking_flag(self, model: str, enabled: bool) -> bool:
+        return enabled
+
+    async def chat(
+        self,
+        *,
+        model: str,
+        messages,
+        options=None,
+        tools=None,
+        format=None,
+        timeout_s=None,
+        think=None,
+    ):
         self.calls.append(model)
+        self.formats.append(format)
         outcome = self._outcomes[model]
         if isinstance(outcome, OllamaError):
             raise outcome
@@ -207,6 +222,43 @@ async def test_fast_path_raises_when_no_healthy_candidates():
         raise AssertionError("expected OllamaError when nothing is healthy")
 
     assert ollama.calls == []
+
+
+async def test_structured_format_reaches_plain_call_and_suppresses_tools():
+    registry = _registry(("a", 100, "local"))
+    health = HealthTracker()
+    ollama = _ScriptedOllama({"a": _resp('{"answer":"ok"}')})
+    tools = ToolRegistry(by_name={
+        "web_search": ToolSpec(
+            name="web_search",
+            description="d",
+            parameters={"type": "object", "properties": {}},
+            server_url="http://t",
+            path="/web_search",
+        ),
+    })
+    schema = {
+        "type": "object",
+        "properties": {"answer": {"type": "string"}},
+        "required": ["answer"],
+        "additionalProperties": False,
+    }
+
+    concrete, response = await run_fast_path(
+        ollama, registry, health, _gate(),  # type: ignore[arg-type]
+        task="general",
+        messages=[{"role": "user", "content": "q"}],
+        options={},
+        timeout_s=5.0,
+        tools=tools,
+        tool_capable_models={"a"},
+        response_format=schema,
+    )
+
+    assert concrete == "a"
+    assert response["message"]["content"] == '{"answer":"ok"}'
+    assert ollama.calls == ["a"]
+    assert ollama.formats == [schema]
 
 
 # ─── run_fast_path: tools branch stays single-shot ─────────────────────

@@ -146,6 +146,7 @@ async def _try_synth(
     timeout_s: float,
     user_id: str | None = None,
     cfg: Config | None = None,
+    response_format: dict[str, Any] | None = None,
 ) -> tuple[str, int, int]:
     """Run one synthesizer attempt. Returns (content, prompt_tokens, completion_tokens)."""
     messages = _build_synth_messages(
@@ -154,15 +155,22 @@ async def _try_synth(
     # Outside the gate on purpose: first sight of a model costs an `/api/show`,
     # and holding the GPU gate through a metadata round trip would stall every
     # local worker behind it.
-    think = await think_for(ollama, cfg, role="deep_synth", model=model)
+    think = (
+        await ollama.thinking_flag(model, False)
+        if response_format is not None
+        else await think_for(ollama, cfg, role="deep_synth", model=model)
+    )
     async with gate.acquire(model, location=location, user_id=user_id):
-        resp = await ollama.chat(
-            model=model,
-            messages=messages,
-            options={"temperature": 0.2},
-            timeout_s=timeout_s,
-            think=think,
-        )
+        chat_kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "options": {"temperature": 0.2},
+            "timeout_s": timeout_s,
+            "think": think,
+        }
+        if response_format is not None:
+            chat_kwargs["format"] = response_format
+        resp = await ollama.chat(**chat_kwargs)
     health.record_success(model)
     msg = resp.get("message", {}) or {}
     return (
@@ -186,6 +194,7 @@ async def synthesize(
     subtasks: list[str],
     timeout_s: float,
     user_id: str | None = None,
+    response_format: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return a dict to merge into PipelineState.
 
@@ -226,6 +235,7 @@ async def synthesize(
                 timeout_s=timeout_s,
                 user_id=user_id,
                 cfg=cfg,
+                response_format=response_format,
             )
             log.info("synth: %s ok in %.2fs (attempt %d)", model, time.monotonic() - start, attempt)
             if content.strip():
@@ -268,6 +278,7 @@ async def synthesize_stream(
     subtasks: list[str],
     timeout_s: float,
     user_id: str | None = None,
+    response_format: dict[str, Any] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Streaming variant of `synthesize`.
 
@@ -351,13 +362,23 @@ async def synthesize_stream(
         start = time.monotonic()
         attempt_started_tokens = False
         try:
+            think = (
+                await ollama.thinking_flag(model, False)
+                if response_format is not None
+                else None
+            )
             async with gate.acquire(model, location=loc, user_id=user_id):
-                async for chunk in ollama.chat_stream(
-                    model=model,
-                    messages=synth_messages,
-                    options={"temperature": 0.2},
-                    timeout_s=timeout_s,
-                ):
+                stream_kwargs: dict[str, Any] = {
+                    "model": model,
+                    "messages": synth_messages,
+                    "options": {"temperature": 0.2},
+                    "timeout_s": timeout_s,
+                }
+                if think is not None:
+                    stream_kwargs["think"] = think
+                if response_format is not None:
+                    stream_kwargs["format"] = response_format
+                async for chunk in ollama.chat_stream(**stream_kwargs):
                     msg_part = chunk.get("message", {}) or {}
                     text = msg_part.get("content", "") or ""
                     if text:

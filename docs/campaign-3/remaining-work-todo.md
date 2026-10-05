@@ -3,8 +3,9 @@
 **Status:** Items 1–6 were closed on 2026-10-01. The user reprioritized
 [Phase 12](phase-12-sidebar-navigation.md) ahead of Items 7–10. Slice 12A is
 laptop-complete with its My Files correction and awaits browser acceptance.
-Item 7 has started with laptop-complete
-[Phase 13 Slice 13A](phase-13-responses-multimodal-input.md). The user then
+Item 7 has laptop-complete [Phase 13 Slices 13A and
+13B](phase-13-responses-multimodal-input.md); both targeted live gates remain
+pending. The user then
 prioritized [Phase 14 Slice 14A](phase-14-bot-accounts-and-token-lifetimes.md),
 which is laptop-complete and awaits native acceptance. The next build is
 [Phase 15](phase-15-composer-and-projects.md). Slice 15A's composer control
@@ -393,7 +394,9 @@ Detailed decision record:
   for completed and streaming requests.
 - [ ] Add remote/file-id image resolution and `input_file` only with explicit
   SSRF and owner-scoped storage contracts.
-- [ ] Add structured text output configuration.
+- [x] Add bounded json_schema structured text output for completed and
+  streamed Responses, with final validation and an explicit legacy json_object
+  rejection.
 - [ ] Add client-provided tools with explicit policy boundaries.
 - [ ] Add stored responses and `previous_response_id`/conversation chaining.
 - [ ] Add background execution, retrieval, cancellation, and retention.

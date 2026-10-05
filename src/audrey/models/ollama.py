@@ -418,6 +418,7 @@ class OllamaClient:
         messages: list[dict[str, Any]],
         options: dict[str, Any] | None = None,
         tools: list[dict[str, Any]] | None = None,
+        format: dict[str, Any] | str | None = None,
         timeout_s: float | None = None,
         think: bool | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
@@ -453,6 +454,8 @@ class OllamaClient:
             payload["options"] = options
         if tools:
             payload["tools"] = tools
+        if format is not None:
+            payload["format"] = format
         if think is not None:
             payload["think"] = think
         timeout = httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT

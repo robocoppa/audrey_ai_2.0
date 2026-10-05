@@ -32,6 +32,11 @@ from audrey.routes.openai.pipeline import _generate_via_pipeline, _stream_via_pi
 from audrey.routes.openai.responses import _options_from_request, _to_responses_api_response
 from audrey.routes.openai.schemas import ChatCompletionRequest, ResponseCreateRequest
 from audrey.routes.openai.streaming import OpenAIStreamSession, ResponsesStreamSession
+from audrey.routes.openai.structured_outputs import (
+    StructuredOutputError,
+    response_json_schema,
+    structured_output_instruction,
+)
 from audrey.skills import SkillSelectionError, skill_mode_for_virtual_model
 
 log = logging.getLogger(__name__)
@@ -131,6 +136,7 @@ async def _create_chat_completion(
     me: AuthedUser,
     *,
     stream_session_factory: Callable[..., Any] | None = None,
+    response_format: dict[str, Any] | None = None,
 ):
     """Run the shared authenticated generation path with one wire adapter."""
 
@@ -150,12 +156,17 @@ async def _create_chat_completion(
                     "message": "Skills cannot be combined with passthrough models.",
                 },
             )
+        passthrough_kwargs: dict[str, Any] = {
+            "stream_session_factory": requested_stream_session_factory,
+        }
+        if response_format is not None:
+            passthrough_kwargs["response_format"] = response_format
         return await _handle_passthrough(
             app,
             request,
             payload,
             me,
-            stream_session_factory=requested_stream_session_factory,
+            **passthrough_kwargs,
         )
 
     if payload.model not in VIRTUAL_MODELS:
@@ -283,6 +294,11 @@ async def _create_chat_completion(
                 resolved_skill=resolved_skill,
                 model_tools=model_tools,
                 stream_session_factory=stream_session_factory,
+                **(
+                    {"response_format": response_format}
+                    if response_format is not None
+                    else {}
+                ),
             ),
             media_type="text/event-stream",
         )
@@ -295,6 +311,11 @@ async def _create_chat_completion(
         skill_instruction=skill_instruction,
         resolved_skill=resolved_skill,
         model_tools=model_tools,
+        **(
+            {"response_format": response_format}
+            if response_format is not None
+            else {}
+        ),
     )
 
 
@@ -316,7 +337,11 @@ async def create_response(
             ("previous_response_id", payload.previous_response_id is not None),
             ("conversation", payload.conversation is not None),
             ("tools", payload.tools is not None),
-            ("text", payload.text is not None),
+            (
+                "text",
+                payload.text is not None
+                and payload.text.format.type == "json_object",
+            ),
         )
         if active
     ]
@@ -332,10 +357,24 @@ async def create_response(
             },
         )
 
+    try:
+        response_format = response_json_schema(payload)
+        format_instruction = structured_output_instruction(payload)
+    except StructuredOutputError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "responses_structured_output_invalid",
+                "message": str(exc),
+            },
+        ) from exc
+
     input_messages = _response_input_messages(payload)
     messages: list[dict[str, Any]] = []
     if payload.instructions:
         messages.append({"role": "developer", "content": payload.instructions})
+    if format_instruction:
+        messages.append({"role": "developer", "content": format_instruction})
     messages.extend(input_messages)
     chat_payload = ChatCompletionRequest(
         model=payload.model,
@@ -349,11 +388,19 @@ async def create_response(
         user=payload.user,
     )
     if payload.stream:
+        stream_kwargs: dict[str, Any] = {
+            "stream_session_factory": partial(
+                ResponsesStreamSession,
+                request=payload,
+            ),
+        }
+        if response_format is not None:
+            stream_kwargs["response_format"] = response_format
         stream_response = await _create_chat_completion(
             chat_payload,
             request,
             me,
-            stream_session_factory=partial(ResponsesStreamSession, request=payload),
+            **stream_kwargs,
         )
         if not isinstance(stream_response, StreamingResponse):
             raise HTTPException(
@@ -362,7 +409,15 @@ async def create_response(
             )
         return stream_response
 
-    chat_response = await chat_completions(chat_payload, request, me)
+    if response_format is None:
+        chat_response = await chat_completions(chat_payload, request, me)
+    else:
+        chat_response = await _create_chat_completion(
+            chat_payload,
+            request,
+            me,
+            response_format=response_format,
+        )
     if not isinstance(chat_response, dict):
         raise HTTPException(status_code=502, detail="Generation returned an invalid response.")
     try:

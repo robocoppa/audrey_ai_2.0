@@ -15,6 +15,10 @@ from typing import Any
 
 from audrey import __version__
 from audrey.routes.openai.schemas import ChatCompletionRequest, ResponseCreateRequest
+from audrey.routes.openai.structured_outputs import (
+    response_text_config,
+    validate_structured_output,
+)
 
 
 def _options_from_request(req: ChatCompletionRequest) -> dict[str, Any]:
@@ -85,6 +89,7 @@ def _to_responses_api_response(
     content = message.get("content")
     if not isinstance(content, str):
         raise ValueError("generation returned no text content")
+    validate_structured_output(content, request)
 
     usage = chat_response.get("usage") or {}
     input_tokens = int(usage.get("prompt_tokens", 0) or 0)
@@ -166,7 +171,7 @@ def _responses_api_response_object(
         "output_text": content,
         "parallel_tool_calls": True,
         "previous_response_id": None,
-        "text": {"format": {"type": "text"}},
+        "text": response_text_config(request),
         "tool_choice": "auto",
         "tools": [],
         "truncation": "disabled",

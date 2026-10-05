@@ -167,6 +167,7 @@ async def _handle_passthrough(
     me: AuthedUser,
     *,
     stream_session_factory: Callable[..., Any] | None = None,
+    response_format: dict[str, Any] | None = None,
 ):
     """Route a passthrough request: validate, wrap in inflight, forward.
 
@@ -238,6 +239,7 @@ async def _handle_passthrough(
                             options=options,
                             user_id=me.email,
                             tools=payload.tools,
+                            format=response_format,
                             timeout_s=timeout_s,
                             think=think,
                             terminal=terminal,
@@ -280,8 +282,8 @@ async def _handle_passthrough(
                 ollama, gate,
                 concrete=concrete, location=location,
                 messages=messages, options=options,
-                user_id=me.email, tools=payload.tools, timeout_s=timeout_s,
-                think=think,
+                user_id=me.email, tools=payload.tools, format=response_format,
+                timeout_s=timeout_s, think=think,
             )
     except OllamaError as e:
         outcome = "error"
@@ -322,6 +324,7 @@ async def _passthrough_stream_events(
     options: dict[str, Any],
     user_id: str,
     tools: list[dict[str, Any]] | None,
+    format: dict[str, Any] | None,
     timeout_s: float | None,
     stream_session_factory: Callable[..., Any],
     think: bool | None = None,
@@ -347,6 +350,7 @@ async def _passthrough_stream_events(
             options=options,
             user_id=user_id,
             tools=tools,
+            format=format,
             timeout_s=timeout_s,
             think=think,
         ):

@@ -117,7 +117,7 @@ def escalation_decision(
     case where a short or low-confidence answer is the right one. Reaching the
     length and confidence checks below means none of them applied.
     """
-    if not enabled:
+    if not enabled or state.get("response_format") is not None:
         return "end"
     if state.get("virtual_model") == "audrey_fast":
         # The always-fast virtual model — never escalates, even on long
@@ -432,6 +432,7 @@ def build_graph(
             cfg=cfg,
             no_thinking=fast_no_thinking,
             no_thinking_prose=fast_no_thinking_prose,
+            response_format=state.get("response_format"),
             tool_observer=state.get("tool_observer"),
         )
         msg = resp.get("message", {}) or {}
@@ -510,6 +511,7 @@ def build_graph(
             # `timeouts.cloud`, local-holding pools get `timeouts.deep_worker`.
             timeout_s=pick_panel_timeout(cfg, pool_key),
             user_id=(state.get("user_id") or None),
+            response_format=state.get("response_format"),
         )
         # Concrete_model exposed to the caller is the synthesizer (or the
         # fallback tag, e.g. "fallback:longest_draft").
@@ -538,6 +540,7 @@ def build_graph(
             tool_capable_models=tool_capable_models,
             user_id=(state.get("user_id") or None),
             tool_observer=state.get("tool_observer"),
+            response_format=state.get("response_format"),
         )
         drafts = list(result.get("drafts") or [])
         ok = sum(1 for d in drafts if (d.get("content") or "").strip())
@@ -563,6 +566,12 @@ def build_graph(
         }
 
     async def node_reflect(state: PipelineState) -> dict[str, Any]:
+        if state.get("response_format") is not None:
+            return {
+                "reflect_attempts": state.get("reflect_attempts", 0),
+                "reflect_passed": True,
+                "reflect_reason": "structured_output",
+            }
         if not reflection_enabled:
             return {"reflect_attempts": state.get("reflect_attempts", 0),
                     "reflect_passed": True, "reflect_reason": "disabled"}

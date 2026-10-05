@@ -55,6 +55,7 @@ class PipelineState(TypedDict, total=False):
     temperature: float | None
     top_p: float | None
     max_tokens: int | None
+    response_format: dict[str, Any] | None  # final-answer Ollama JSON schema
     user_id: str                     # OpenAI-spec `user` field; "" if unset. Required to enable memory.
     tool_observer: RunEventToolObserver  # native-only transient event projection
     compatibility_request: bool      # /v1 client semantics; false for native Audrey runs

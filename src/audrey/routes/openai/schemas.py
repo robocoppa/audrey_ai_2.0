@@ -386,6 +386,52 @@ class ResponseInputMessage(BaseModel):
         return self
 
 
+class ResponseFormatText(BaseModel):
+    """Ordinary Responses text output."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["text"]
+
+
+class ResponseFormatJSONObject(BaseModel):
+    """Legacy JSON mode, parsed so the route can reject it explicitly."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["json_object"]
+
+
+class ResponseFormatJSONSchema(BaseModel):
+    """Named JSON Schema format used by the Responses API."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    type: Literal["json_schema"]
+    name: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    )
+    description: str | None = Field(default=None, max_length=1024)
+    schema_: dict[str, Any] = Field(alias="schema")
+    strict: bool | None = None
+
+
+ResponseFormat = Annotated[
+    ResponseFormatText | ResponseFormatJSONObject | ResponseFormatJSONSchema,
+    Field(discriminator="type"),
+]
+
+
+class ResponseTextConfig(BaseModel):
+    """Responses output text configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    format: ResponseFormat = Field(default_factory=lambda: ResponseFormatText(type="text"))
+
+
 class ResponseCreateRequest(BaseModel):
     """Supported subset of the OpenAI POST /v1/responses request."""
 
@@ -400,7 +446,7 @@ class ResponseCreateRequest(BaseModel):
     previous_response_id: str | None = None
     conversation: str | dict[str, Any] | None = None
     tools: list[dict[str, Any]] | None = None
-    text: dict[str, Any] | None = None
+    text: ResponseTextConfig | None = None
     temperature: float | None = None
     top_p: float | None = None
     max_output_tokens: int | None = Field(default=None, gt=0)

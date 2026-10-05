@@ -43,6 +43,7 @@ async def passthrough_chat(
     options: dict[str, Any],
     user_id: str,
     tools: list[dict[str, Any]] | None = None,
+    format: dict[str, Any] | str | None = None,
     timeout_s: float | None = None,
     think: bool | None = None,
 ) -> dict[str, Any]:
@@ -61,10 +62,17 @@ async def passthrough_chat(
     ).inc()
     t0 = time.perf_counter()
     async with gate.acquire(concrete, location=location, user_id=user_id):
-        resp = await ollama.chat(
-            model=concrete, messages=messages, options=options,
-            tools=tools, timeout_s=timeout_s, think=think,
-        )
+        chat_kwargs: dict[str, Any] = {
+            "model": concrete,
+            "messages": messages,
+            "options": options,
+            "tools": tools,
+            "timeout_s": timeout_s,
+            "think": think,
+        }
+        if format is not None:
+            chat_kwargs["format"] = format
+        resp = await ollama.chat(**chat_kwargs)
     msg = resp.get("message") or {}
     # ⚠️ `think=` IS WHAT WAS ASKED FOR; `thinking_len=` IS WHAT CAME BACK.
     # Logging only one of them makes a `PASSTHROUGH_THINK` A/B unfalsifiable.
@@ -102,6 +110,7 @@ async def passthrough_stream(
     options: dict[str, Any],
     user_id: str,
     tools: list[dict[str, Any]] | None = None,
+    format: dict[str, Any] | str | None = None,
     timeout_s: float | None = None,
     think: bool | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
@@ -161,10 +170,17 @@ async def passthrough_stream(
     # sync; keep it that way.
     try:
         async with gate.acquire(concrete, location=location, user_id=user_id):
-            async for chunk in ollama.chat_stream(
-                model=concrete, messages=messages, options=options,
-                tools=tools, timeout_s=timeout_s, think=think,
-            ):
+            stream_kwargs: dict[str, Any] = {
+                "model": concrete,
+                "messages": messages,
+                "options": options,
+                "tools": tools,
+                "timeout_s": timeout_s,
+                "think": think,
+            }
+            if format is not None:
+                stream_kwargs["format"] = format
+            async for chunk in ollama.chat_stream(**stream_kwargs):
                 chunks_received += 1
                 cmsg = chunk.get("message") or {}
                 total_content_len += len(str(cmsg.get("content") or ""))

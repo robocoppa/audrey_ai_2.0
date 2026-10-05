@@ -24,6 +24,11 @@ from audrey.pipeline.run_events import (
 from audrey.pipeline.streaming import StreamOutcome, StreamTerminal
 from audrey.routes.openai.responses import _responses_api_response_object
 from audrey.routes.openai.schemas import ResponseCreateRequest
+from audrey.routes.openai.structured_outputs import (
+    StructuredOutputError,
+    response_json_schema,
+    validate_structured_output,
+)
 
 
 @dataclass(slots=True)
@@ -432,6 +437,7 @@ class ResponsesStreamSession:
     concrete_model: str = ""
     _events: RunEventEmitter = field(init=False, repr=False)
     _adapter: ResponsesStreamAdapter = field(init=False, repr=False)
+    _structured: bool = field(init=False, repr=False)
     _done_emitted: bool = False
 
     def __post_init__(self) -> None:
@@ -452,6 +458,7 @@ class ResponsesStreamSession:
             message_id=self.assistant_message_id,
             created=self.created,
         )
+        self._structured = response_json_schema(self.request) is not None
 
     @property
     def run_event_emitter(self) -> RunEventEmitter:
@@ -469,7 +476,10 @@ class ResponsesStreamSession:
         return frame
 
     def status_frame(self, text: str, *, stage: str = "") -> str:
-        frame = self._adapter.render(self._events.stage_progress(text, stage=stage))
+        event = self._events.stage_progress(text, stage=stage)
+        if self._structured:
+            return ""
+        frame = self._adapter.render(event)
         assert frame is not None
         return frame
 
@@ -504,6 +514,13 @@ class ResponsesStreamSession:
 
     def terminal_frame(self) -> str:
         outcome = self.terminal.outcome
+        structured_error = ""
+        if outcome is StreamOutcome.OK and self._structured:
+            try:
+                validate_structured_output(self._adapter.text, self.request)
+            except StructuredOutputError as exc:
+                outcome = StreamOutcome.ERROR
+                structured_error = str(exc)
         run_status = {
             StreamOutcome.OK: "succeeded",
             StreamOutcome.CANCELLED: "cancelled",
@@ -523,12 +540,16 @@ class ResponsesStreamSession:
         message = self._events.message_finished(
             status="completed" if outcome is StreamOutcome.OK else "incomplete"
         )
-        error_code = {
-            StreamOutcome.OK: "",
-            StreamOutcome.CANCELLED: "cancelled",
-            StreamOutcome.ERROR: "pipeline_error",
-            StreamOutcome.TRUNCATED: "stream_truncated",
-        }[outcome]
+        error_code = (
+            "structured_output_invalid"
+            if structured_error
+            else {
+                StreamOutcome.OK: "",
+                StreamOutcome.CANCELLED: "cancelled",
+                StreamOutcome.ERROR: "pipeline_error",
+                StreamOutcome.TRUNCATED: "stream_truncated",
+            }[outcome]
+        )
         finished = self._events.run_finished(
             status=run_status,  # type: ignore[arg-type]
             finish_reason=self.terminal.finish_reason or "",

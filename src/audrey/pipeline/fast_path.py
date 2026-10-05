@@ -254,6 +254,7 @@ async def stream_fast_path(
     user_id: str | None = None,
     pipeline_started_at: float | None = None,
     no_thinking_prose: bool = False,
+    response_format: dict[str, Any] | None = None,
     terminal: StreamTerminal | None = None,
 ) -> AsyncIterator[FastStreamEvent]:
     """Stream one no-tools Fast answer with the non-stream policy contract.
@@ -294,19 +295,26 @@ async def stream_fast_path(
             saw_done = False
             content_filter = _InlineThinkFilter()
             try:
-                think = await _think(ollama, candidate.name, no_thinking_prose)
+                think = await _think(
+                    ollama,
+                    candidate.name,
+                    no_thinking_prose or response_format is not None,
+                )
                 async with gate.acquire(
                     candidate.name,
                     location=candidate.location,
                     user_id=user_id,
                 ):
-                    async for chunk in ollama.chat_stream(
-                        model=candidate.name,
-                        messages=messages,
-                        options=options or None,
-                        timeout_s=timeout_s,
-                        think=think,
-                    ):
+                    stream_kwargs: dict[str, Any] = {
+                        "model": candidate.name,
+                        "messages": messages,
+                        "options": options or None,
+                        "timeout_s": timeout_s,
+                        "think": think,
+                    }
+                    if response_format is not None:
+                        stream_kwargs["format"] = response_format
+                    async for chunk in ollama.chat_stream(**stream_kwargs):
                         message = chunk.get("message", {}) or {}
                         filtered = content_filter.feed(
                             str(message.get("content", "") or "")
@@ -472,6 +480,7 @@ async def run_fast_path(
     cfg: Any = None,
     no_thinking: bool = False,
     no_thinking_prose: bool | None = None,
+    response_format: dict[str, Any] | None = None,
     tool_observer: RunEventToolObserver | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Return (concrete_model, response_like_dict).
@@ -497,7 +506,8 @@ async def run_fast_path(
     """
     spec = pick_fast_model(registry, health, task=task)
     use_tools = bool(
-        tools and tools.by_name
+        response_format is None
+        and tools and tools.by_name
         and tool_capable_models is not None
         and spec.name in tool_capable_models
     )
@@ -538,12 +548,19 @@ async def run_fast_path(
             ).inc()
             try:
                 think = await _think(ollama, cand.name, prose_no_thinking)
+                if response_format is not None:
+                    think = await _think(ollama, cand.name, True)
                 async with gate.acquire(cand.name, location=cand.location, user_id=user_id):
-                    resp = await ollama.chat(
-                        model=cand.name, messages=messages,
-                        options=options or None, timeout_s=timeout_s,
-                        think=think,
-                    )
+                    chat_kwargs: dict[str, Any] = {
+                        "model": cand.name,
+                        "messages": messages,
+                        "options": options or None,
+                        "timeout_s": timeout_s,
+                        "think": think,
+                    }
+                    if response_format is not None:
+                        chat_kwargs["format"] = response_format
+                    resp = await ollama.chat(**chat_kwargs)
                 health.record_success(cand.name)
                 return cand.name, resp
             except OllamaError as e:

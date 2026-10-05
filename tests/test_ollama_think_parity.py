@@ -26,7 +26,7 @@ from audrey.models.ollama import OllamaClient
 #: Knobs that must exist on BOTH chat paths. Anything a caller can thread
 #: through one and not the other is a `TypeError` waiting for a code path that
 #: only fires in production.
-_SHARED_KNOBS = ("model", "messages", "options", "tools", "timeout_s", "think")
+_SHARED_KNOBS = ("model", "messages", "options", "tools", "format", "timeout_s", "think")
 
 
 def _params(fn) -> dict[str, inspect.Parameter]:
