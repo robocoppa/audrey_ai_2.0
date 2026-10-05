@@ -2,18 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   addProjectFile,
-  cancelDocumentJob,
   createConversation,
-  createProjectBrief,
   createProject,
   createProjectConversation,
-  decideDocumentJob,
   deleteProject,
   fetchVideoFromUrl,
   getFileArtifactDownloadUrl,
-  getDocumentJob,
   getFileDownloadUrl,
-  listDocumentJobs,
   listProjects,
   removeProjectFile,
   resetAdminModelPolicy,
@@ -247,71 +242,6 @@ describe("owner-scoped project requests", () => {
       7,
       "/api/projects/proj%20%2F%201",
       expect.objectContaining({ method: "DELETE" }),
-    );
-  });
-});
-
-describe("owner-scoped document requests", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("creates, reviews, polls, and cancels through encoded native routes", async () => {
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ items: [] })));
-    vi.stubGlobal("fetch", fetchMock);
-    const request = {
-      template_id: "project-brief-v1" as const,
-      filename: "Launch brief.docx",
-      fields: {
-        title: "Launch",
-        prepared_for: "Build Ryte",
-        prepared_on: "2026-10-04",
-        summary: "A reviewed launch brief.",
-        objectives: ["Ship safely"],
-        next_steps: ["Approve the request"],
-      },
-      idempotency_key: "brief-one",
-    };
-
-    await listDocumentJobs();
-    await createProjectBrief(request);
-    await getDocumentJob("job / one");
-    await decideDocumentJob("job / one", "a".repeat(64), "approved");
-    await cancelDocumentJob("job / one");
-
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      "/api/document-jobs?limit=50",
-      expect.objectContaining({ credentials: "same-origin" }),
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      "/api/document-jobs/template-to-docx",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify(request),
-      }),
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
-      "/api/document-jobs/job%20%2F%20one",
-      expect.objectContaining({ credentials: "same-origin" }),
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      4,
-      "/api/document-jobs/job%20%2F%20one/decision",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          decision: "approved",
-          operation_digest: "a".repeat(64),
-        }),
-      }),
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      5,
-      "/api/document-jobs/job%20%2F%20one/cancel",
-      expect.objectContaining({ method: "POST" }),
     );
   });
 });

@@ -22,7 +22,6 @@ import uuid
 from collections.abc import Iterable
 from pathlib import Path
 
-from audrey.app_state.document_tools import DocumentToolsRepository
 from audrey.app_state.history_import import HistoryImportRepository
 from audrey.app_state.migrations import MIGRATIONS
 from audrey.app_state.projects import ProjectsRepository
@@ -95,7 +94,6 @@ class ApplicationStore:
             self._conn.execute("PRAGMA journal_mode = WAL")
             self._migrate_locked()
         self.preferences = PreferencesRepository(self._conn, self._lock)
-        self.document_tools = DocumentToolsRepository(self._conn, self._lock)
         self.projects = ProjectsRepository(self._conn, self._lock)
         self.conversations = ConversationsRepository(self._conn, self._lock)
         self.chat_projections = ChatProjectionsRepository(self._conn, self._lock)
@@ -530,21 +528,6 @@ class ApplicationStore:
             "WHERE i.provider = ? AND i.subject = ?",
             (provider, subject),
         ).fetchone()
-
-    async def active_storage_namespace(self, *, user_id: str) -> str | None:
-        """Return one active account's opaque storage namespace for internal work."""
-
-        return await asyncio.to_thread(self._active_storage_namespace_sync, user_id)
-
-    def _active_storage_namespace_sync(self, user_id: str) -> str | None:
-        user_id = _required(user_id, "user id")
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT storage_namespace FROM app_users "
-                "WHERE user_id = ? AND status = 'active'",
-                (user_id,),
-            ).fetchone()
-        return str(row[0]) if row is not None else None
 
     async def update_display_name(
         self,

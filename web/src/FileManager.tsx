@@ -1,18 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
 
 import {
-  cancelDocumentJob,
-  createProjectBrief,
-  decideDocumentJob,
   deleteFile,
   fetchVideoFromUrl,
-  getDocumentJob,
   getFileArtifact,
   getFileArtifactDownloadUrl,
   getFileDownloadUrl,
   getFileImageUrl,
   getFileText,
-  listDocumentJobs,
   listFiles,
   uploadFile,
   uploadPrecheck,
@@ -21,7 +16,6 @@ import {
   type AudreyFileArtifactKind,
   type AudreyFileText,
   type AudreyFileList,
-  type DocumentJob,
 } from "./api";
 
 type FileKindFilter = "all" | AudreyFile["kind"];
@@ -386,8 +380,6 @@ export function FileManager({ onClose }: { onClose: () => void }) {
           </div>
         </details>
 
-        <ProjectBriefBuilder onPublished={refresh} />
-
         {error ? <p className="file-manager-error" role="alert">{error}</p> : null}
         {loading ? <p className="file-manager-status" role="status">Loading files…</p> : null}
         {!loading && listing?.items.length === 0 ? (
@@ -539,313 +531,6 @@ export function FileManager({ onClose }: { onClose: () => void }) {
       </section>
     </div>
   );
-}
-
-type BriefForm = {
-  filename: string;
-  title: string;
-  preparedFor: string;
-  preparedOn: string;
-  summary: string;
-  objectives: string;
-  nextSteps: string;
-};
-
-function localDateValue(): string {
-  const now = new Date();
-  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
-}
-
-const emptyBrief = (): BriefForm => ({
-  filename: "Project brief.docx",
-  title: "",
-  preparedFor: "",
-  preparedOn: localDateValue(),
-  summary: "",
-  objectives: "",
-  nextSteps: "",
-});
-
-const activeDocumentStatuses = new Set(["awaiting_approval", "queued", "running"]);
-
-function ProjectBriefBuilder({ onPublished }: { onPublished: () => Promise<AudreyFileList> }) {
-  const [form, setForm] = useState<BriefForm>(emptyBrief);
-  const [job, setJob] = useState<DocumentJob | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [panelOpen, setPanelOpen] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let active = true;
-    listDocumentJobs()
-      .then(({ items }) => {
-        if (!active) return;
-        const current = (items ?? []).find((item) =>
-          item.operation === "template_to_docx" && activeDocumentStatuses.has(item.status),
-        );
-        if (current) {
-          setJob(current);
-          setPanelOpen(true);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (active) setError(messageOf(reason));
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => { active = false; };
-  }, []);
-
-  const jobId = job?.id ?? null;
-  const jobStatus = job?.status ?? null;
-
-  useEffect(() => {
-    if (!jobId || !jobStatus || !["queued", "running"].includes(jobStatus)) return;
-    let active = true;
-    let refreshing = false;
-    const check = async () => {
-      if (refreshing) return;
-      refreshing = true;
-      try {
-        const next = await getDocumentJob(jobId);
-        if (!active) return;
-        setJob(next);
-        if (next.status === "succeeded") await onPublished();
-      } catch (reason) {
-        if (active) setError(messageOf(reason));
-      } finally {
-        refreshing = false;
-      }
-    };
-    void check();
-    const timer = window.setInterval(() => void check(), 1500);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [jobId, jobStatus, onPublished]);
-
-  function change<K extends keyof BriefForm>(field: K, value: BriefForm[K]) {
-    setForm((current) => ({ ...current, [field]: value }));
-    setError("");
-  }
-
-  async function requestDocument(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (submitting) return;
-    const objectives = lines(form.objectives);
-    const nextSteps = lines(form.nextSteps);
-    if (!objectives.length || !nextSteps.length) {
-      setError("Add at least one objective and one next step, one per line.");
-      return;
-    }
-    if (objectives.length > 8 || nextSteps.length > 8) {
-      setError("Use no more than eight objectives and eight next steps.");
-      return;
-    }
-    if ([...objectives, ...nextSteps].some((item) => item.length > 300)) {
-      setError("Keep each objective and next step under 300 characters.");
-      return;
-    }
-    setSubmitting(true);
-    setError("");
-    try {
-      const cleanName = form.filename.trim();
-      const filename = cleanName.toLocaleLowerCase().endsWith(".docx")
-        ? cleanName
-        : cleanName + ".docx";
-      const random = globalThis.crypto?.randomUUID?.()
-        ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      const created = await createProjectBrief({
-        template_id: "project-brief-v1",
-        filename,
-        fields: {
-          title: form.title.trim(),
-          prepared_for: form.preparedFor.trim(),
-          prepared_on: form.preparedOn.trim(),
-          summary: form.summary.trim(),
-          objectives,
-          next_steps: nextSteps,
-        },
-        idempotency_key: `project-brief-${random}`,
-      });
-      setJob(created);
-      setPanelOpen(true);
-    } catch (reason) {
-      setError(messageOf(reason));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function decide(decision: "approved" | "rejected") {
-    if (!job || submitting) return;
-    setSubmitting(true);
-    setError("");
-    try {
-      setJob(await decideDocumentJob(job.id, job.operation_digest, decision));
-    } catch (reason) {
-      setError(messageOf(reason));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function cancel() {
-    if (!job || submitting) return;
-    setSubmitting(true);
-    setError("");
-    try {
-      setJob(await cancelDocumentJob(job.id));
-    } catch (reason) {
-      setError(messageOf(reason));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  const objectiveLines = lines(form.objectives);
-  const nextStepLines = lines(form.nextSteps);
-  const valid = Boolean(
-    form.filename.trim() && form.title.trim() && form.preparedFor.trim()
-    && form.preparedOn.trim() && form.summary.trim()
-    && objectiveLines.length > 0 && nextStepLines.length > 0,
-  );
-  const generating = job && ["queued", "running"].includes(job.status);
-
-  return (
-    <details
-      className="file-add-panel file-document-panel"
-      open={panelOpen}
-      onToggle={(event) => setPanelOpen(event.currentTarget.open)}
-    >
-      <summary>
-        <span className="file-add-symbol" aria-hidden="true">▤</span>
-        <span>
-          <strong>Create a document</strong>
-          <small>Build a private Project Brief from a reviewed Audrey template</small>
-        </span>
-        <span className="file-add-chevron" aria-hidden="true">⌄</span>
-      </summary>
-      <div className="file-document-content">
-        {loading ? <p role="status">Checking document requests…</p> : null}
-        {!loading && !job ? (
-          <form className="file-document-form" onSubmit={(event) => void requestDocument(event)}>
-            <div className="file-document-form-heading">
-              <div>
-                <strong>Project Brief</strong>
-                <small>Creates a new DOCX in My Files. Existing files are never changed.</small>
-              </div>
-              <span>Reviewed template</span>
-            </div>
-            <label>
-              <span>Document name</span>
-              <input value={form.filename} maxLength={255} required onChange={(event) => change("filename", event.target.value)} />
-            </label>
-            <label>
-              <span>Title</span>
-              <input value={form.title} maxLength={120} required onChange={(event) => change("title", event.target.value)} />
-            </label>
-            <label>
-              <span>Prepared for</span>
-              <input value={form.preparedFor} maxLength={120} required onChange={(event) => change("preparedFor", event.target.value)} />
-            </label>
-            <label>
-              <span>Date</span>
-              <input type="date" value={form.preparedOn} required onChange={(event) => change("preparedOn", event.target.value)} />
-            </label>
-            <label className="file-document-wide">
-              <span>Summary</span>
-              <textarea value={form.summary} maxLength={2000} required rows={3} onChange={(event) => change("summary", event.target.value)} />
-            </label>
-            <label>
-              <span>Objectives · one per line</span>
-              <textarea value={form.objectives} maxLength={2400} required rows={4} onChange={(event) => change("objectives", event.target.value)} />
-              <small>Up to 8 items and 300 characters per item.</small>
-            </label>
-            <label>
-              <span>Next steps · one per line</span>
-              <textarea value={form.nextSteps} maxLength={2400} required rows={4} onChange={(event) => change("nextSteps", event.target.value)} />
-              <small>Up to 8 items and 300 characters per item.</small>
-            </label>
-            <div className="file-document-actions file-document-wide">
-              <small>Audrey will show a request summary and its exact fingerprint before generating anything.</small>
-              <button type="submit" disabled={!valid || submitting}>
-                {submitting ? "Preparing…" : "Review request"}
-              </button>
-            </div>
-          </form>
-        ) : null}
-
-        {job ? (
-          <div className="file-document-approval" aria-live="polite">
-            <div className="file-document-form-heading">
-              <div>
-                <strong>{documentStatus(job)}</strong>
-                <small>{job.summary}</small>
-              </div>
-              <span>{job.status.replaceAll("_", " ")}</span>
-            </div>
-            <p>{job.preview}</p>
-            <dl>
-              <div><dt>Request fingerprint</dt><dd>{job.operation_digest.slice(0, 16)}…</dd></div>
-              <div><dt>Output</dt><dd>Private DOCX in My Files</dd></div>
-            </dl>
-            {job.status === "awaiting_approval" ? (
-              <div className="file-document-actions">
-                <small>Approval applies only to this request fingerprint and expires at {formatFileTime(job.approval.expires_at)}.</small>
-                <div>
-                  <button type="button" className="secondary" disabled={submitting} onClick={() => void decide("rejected")}>Reject</button>
-                  <button type="button" disabled={submitting} onClick={() => void decide("approved")}>
-                    {submitting ? "Submitting…" : "Approve and create"}
-                  </button>
-                </div>
-              </div>
-            ) : null}
-            {generating ? (
-              <div className="file-document-actions">
-                <small>Audrey is generating, reopening, indexing, and verifying the document.</small>
-                <button type="button" className="secondary" disabled={submitting} onClick={() => void cancel()}>
-                  {submitting ? "Cancelling…" : "Cancel"}
-                </button>
-              </div>
-            ) : null}
-            {!activeDocumentStatuses.has(job.status) ? (
-              <div className="file-document-actions">
-                <small>{job.status === "succeeded"
-                  ? "The verified document is ready below and can be added to any Project."
-                  : job.error_code ? `Audrey stopped: ${job.error_code.replaceAll("_", " ")}.` : "No document was created."}</small>
-                <button type="button" onClick={() => {
-                  setJob(null);
-                  setForm(emptyBrief());
-                  setError("");
-                }}>Create another</button>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-        {error ? <p className="file-manager-error" role="alert">{error}</p> : null}
-      </div>
-    </details>
-  );
-}
-
-function lines(value: string): string[] {
-  return value.split("\n").map((line) => line.trim()).filter(Boolean);
-}
-
-function documentStatus(job: DocumentJob): string {
-  if (job.status === "awaiting_approval") return "Review this document request";
-  if (job.status === "queued") return "Document queued";
-  if (job.status === "running") return "Creating and verifying document";
-  if (job.status === "succeeded") return "Document created";
-  if (job.status === "rejected") return "Request rejected";
-  if (job.status === "cancelled") return "Request cancelled";
-  if (job.status === "expired") return "Approval expired";
-  return "Document generation stopped";
 }
 
 const artifactKinds: AudreyFileArtifactKind[] = ["summary", "transcript", "visual"];

@@ -9,10 +9,10 @@ prioritized [Phase 14 Slice 14A](phase-14-bot-accounts-and-token-lifetimes.md),
 which is laptop-complete and awaits native acceptance. The next build is
 [Phase 15](phase-15-composer-and-projects.md). Slice 15A's composer control
 rail passed user acceptance, Slice 15B's owner-scoped Projects storage and API
-passed its restart smoke, and the user accepted Slices 15C–15D. The direct
-project-upload follow-up passed its browser check. Approved
-[Phase 16](phase-16-native-document-tools.md) has a live-passed Slice 16A and a
-laptop-complete Slice 16B awaiting browser acceptance.
+passed its restart smoke, and the user accepted Slices 15C–15D plus the
+direct project-upload follow-up.
+[Phase 16](phase-16-native-document-tools.md) is retired because document and
+spreadsheet authoring already belongs to the separate Hermes bot workspace.
 
 ## Closed prerequisites
 
@@ -343,8 +343,8 @@ Detailed scope:
 
 ## Next build - Phase 15 composer controls and Projects
 
-**State:** Complete. Slices 15A–15D passed user or targeted live acceptance.
-The direct project-upload follow-up is laptop-complete pending browser review.
+**State:** Complete. Slices 15A–15D and the direct project-upload follow-up
+passed user or targeted live acceptance.
 
 - [x] Build Slice 15A: narrow and center the composer; move Model, Add files,
   and Tools & skills into a labeled, symmetric rail below the message field.
@@ -370,27 +370,20 @@ The direct project-upload follow-up is laptop-complete pending browser review.
 Detailed scope:
 [phase-15-composer-and-projects.md](phase-15-composer-and-projects.md).
 
-## Approved next phase - Phase 16 native document tools
+## Retired Phase 16 - Audrey document tools
 
-**State:** Slice 16A is live-passed. Slice 16B is laptop-complete and awaits
-its Project Brief browser acceptance.
+**State:** Closed without a replacement Audrey feature.
 
-- [x] Build 16A: exact-operation approvals, immutable file derivations,
-  expected-version conflicts, idempotency, cancellation, and crash recovery.
-- [x] Pass the 16A two-stage native restart smoke for pending, queued, and
-  running jobs, stale-worker denial, single publication, and cleanup.
-- [x] Build 16B: one reviewed private template-to-DOCX operation with package
-  validation, text read-back, provenance, and My Files publication.
-- [ ] Pass 16B's native Project Brief approval, download/read-back, Project
-  selection, refresh recovery, cancellation, and second-user isolation checks.
-- [ ] Build 16C: isolated DOCX-to-PDF rendering with no egress, bounded
-  resources, output verification, and atomic publication.
-- [ ] Build 16D: literal-only typed spreadsheet revisions with whole-request
-  validation and read-back of actual cell types.
-- [ ] Reassess formula execution and sharing only after 16A–16D pass and a new
-  narrow plan is approved.
+- [x] Confirm the existing Hermes path: Bot Tools MCP APIs, Nextcloud,
+  Collabora, and `cloud.builtryte.xyz`.
+- [x] Remove Audrey's document creation UI, document-job API, template worker,
+  bundled template, tests, smoke, and future DOCX/PDF/spreadsheet roadmap.
+- [x] Retain schema 20 only as inert deployed migration history with backup and
+  privacy cleanup compatibility.
+- [x] Record the standing boundary: Hermes workspace capabilities are API-driven
+  and do not affect Audrey's user experience.
 
-Detailed scope:
+Detailed decision record:
 [phase-16-native-document-tools.md](phase-16-native-document-tools.md).
 
 ## 7. Expand Responses API compatibility

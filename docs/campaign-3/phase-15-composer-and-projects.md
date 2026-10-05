@@ -3,7 +3,7 @@
 **Status:** Complete. Slice 15A passed user acceptance on 2026-10-02, Slice
 15B passed its deployment and restart-persistence gate on 2026-10-02, and the
 user accepted Slices 15C and 15D on 2026-10-03. The direct project-upload
-follow-up is laptop-complete and awaits its deployed browser check.
+follow-up also passed its deployed browser check and is accepted.
 
 ## Goal
 
@@ -376,9 +376,10 @@ native **Choose files** control has a clearer styled action. Project file
 responses now include processing status; missing files are pruned, while
 active and failed rows stay visible for honest state and explicit removal.
 Focused project, grounding, and native-run tests pass 29/29. The deployed
-browser still needs the direct upload, progress, processing-to-Ready, My Files
-polish, mobile layout, and refresh checks. Node remains deferred on the laptop,
-so no local TypeScript, Vitest, build, or Playwright result is claimed.
+browser check also passed: direct upload, real progress, processing-to-Ready
+refresh, My Files controls, narrow layout, and hard-refresh persistence were
+accepted. Node remains deferred on the laptop, so no local TypeScript, Vitest,
+build, or Playwright result is claimed.
 
 ## Delivery order
 

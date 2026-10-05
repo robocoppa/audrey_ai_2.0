@@ -65,14 +65,14 @@ Full listing verified against the Unraid docker view **2026-07-30**.
 | **open-webui** | **8080 → 8080** | 172.18.0.14 | OWUI frontend / public surface |
 | **ollama** | 11434 → 11434 | 172.18.0.13 | Model runtime |
 | **qdrant** | 6333/6334 | 172.18.0.15 | Vector DB (KB) |
-| **bot-tools-mcp** | 9110 | 172.18.0.9 | Separate MCP (bot fleet — NOT Audrey web_search) |
+| **bot-tools-mcp** | 9110 | 172.18.0.9 | Hermes bot workspace APIs; separate from Audrey |
 | **fleet-watchdog** | 9099 | 172.18.0.8 | Notify hub (Telegram eval-completion pings) |
 | **prometheus** | 9090 | 172.18.0.2 | Metrics |
 | **grafana** | 3000 | 172.18.0.7 | Dashboards |
-| nextcloud | **8081 → 80** | 172.18.0.4 | Adjacent — not in the Audrey request path |
+| nextcloud | **8081 → 80** | 172.18.0.4 | Hermes workspace storage behind `cloud.builtryte.xyz`; not Audrey |
 | nextcloud-db (postgres) | none (internal) | 172.18.0.3 | Adjacent |
 | nextcloud-redis | none (internal) | 172.18.0.6 | Adjacent |
-| collabora | 9980 | 172.18.0.11 | Adjacent |
+| collabora | 9980 | 172.18.0.11 | Hermes document/sheet editor behind `cloud.builtryte.xyz`; not Audrey |
 | radicale | 5232 | 172.17.0.2 (bridge) + 172.18.0.10 | Adjacent — dual-homed |
 | cloudflared | **host network — all ports** | host | Tunnel; not port-mapped |
 | audrey-eval | none (stopped) | — | Eval runner, run on demand |
@@ -120,6 +120,16 @@ OWUI  ──►  audrey:8000  ──►  custom-tools:8001  ──►  SearXNG:8
                 ├──►  ollama:11434        (models)
                 └──►  qdrant:6333         (KB vectors)
 ```
+
+The separate bot workspace path is:
+
+```text
+Hermes -> bot-tools-mcp:9110 -> Nextcloud / Collabora -> cloud.builtryte.xyz
+```
+
+Audrey does not proxy, store, approve, or present those bot workspace actions.
+Future Hermes document or spreadsheet changes belong to the Bot Tools MCP stack
+and its API contracts, not the Audrey browser interface.
 
 - **`web_search` is served by `custom-tools`, not `audrey`.** audrey
   *discovers* it via OpenAPI from `http://custom-tools:8001` (see `tools:` in

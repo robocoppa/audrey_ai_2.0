@@ -449,12 +449,11 @@ If capture succeeded but you decide not to restart and verify, run the same
 laptop command with `cleanup` in place of `capture`; it removes the temporary
 records and snapshot.
 
-## Run the Phase 15 direct project-upload browser check
+## Phase 15 direct project-upload browser check
 
-This is a manual browser gate because it judges the real operating-system file
-picker, upload progress, responsive layout, and processing transition. Rebuild
-both `audrey` and `audrey-ui`, then use the normal `ai.builtryte.xyz` browser
-surface as the ordinary user.
+**Result:** Passed and settled. The real file picker, upload progress, responsive
+layout, processing transition, project grounding, My Files controls, and hard
+refresh behavior were accepted. The steps remain below for regression use only.
 
 1. Open a project home. Confirm **Upload to project** is the primary action and
    **Choose from My Files** remains beside it.
@@ -477,128 +476,16 @@ surface as the ordinary user.
 The upload is a real user file and remains in My Files until the user removes
 it. Removing it from the project alone must leave the My Files copy intact.
 
-## Run the 16A document-approval restart smoke on Tower
+## Retired Phase 16 document tooling
 
-This is a backend API and application-state smoke. Run all three commands on
-Tower from the deployed checkout. The wrapper checks readiness directly at
-`audrey:8000/health`, then exercises the approval API through `audrey-ui` over
-the Docker network. The UI proxy deliberately serves the browser app at
-`/health`, so it is not a backend health endpoint. The laptop's LAN/WARP address
-is not involved. The wrapper reads the existing Access assertions from
-`.env.smoke.local` and mounts only Audrey's runtime directory at `/data` for
-this probe.
+The Audrey document-approval and Project Brief smokes were removed on
+2026-10-05. Document and spreadsheet authoring belongs to the existing Hermes
+Bot Tools MCP plus Nextcloud and Collabora workspace. Audrey has no recurring
+document-generation acceptance gate.
 
-Capture creates one disposable source-version metadata row and three document
-jobs for the ordinary smoke account: one awaiting approval, one queued, and one
-holding a one-second worker lease. It sends approval decisions through the
-native HTTP API, proves an altered digest returns HTTP 409, and proves the admin
-account receives HTTP 404 for the ordinary user's job. It creates no document
-bytes and changes no My Files item.
-
-After rebuilding Audrey, run:
-
-```bash
-cd /mnt/user/appdata/audrey_ai_2.0
-bash tests/smoke/smoke-native-onbox.sh \
-  smoke_native_document_approvals.py capture
-```
-
-Success is exit code zero with `"status": "captured"`, database schema 20,
-HTTP 409 for the altered digest, HTTP 404 for cross-owner access, and the three
-expected states. An HTTP 401 or 403 means one of the two stored Cloudflare
-Access application assertions must be refreshed in `.env.smoke.local`; capture
-stops before creating the snapshot or disposable rows, so refresh both values
-and rerun capture without restarting Audrey. Leave a successful snapshot in
-`/mnt/user/appdata/runtime` and restart only Audrey:
-
-```bash
-cd /mnt/user/appdata/audrey_ai_2.0
-docker compose restart audrey
-```
-
-Then verify from Tower:
-
-```bash
-cd /mnt/user/appdata/audrey_ai_2.0
-bash tests/smoke/smoke-native-onbox.sh \
-  smoke_native_document_approvals.py verify
-```
-
-Success is exit code zero with `"status": "passed"`. All three persistence
-values must be true. Recovery must report two attempts and
-`stale_worker_blocked: true`. Publication must report `succeeded`, one `fver_`
-output, and changed-output denial. The remaining jobs must finish as rejected
-and cancelled. Verification deletes every probe job, approval, version, and
-derivation, then removes the snapshot.
-
-If capture succeeds but verification will not be run, or verification reports
-that its functional checks passed but cleanup failed, sync the corrected runner
-and clean up from Tower without repeating capture or restart:
-
-```bash
-cd /mnt/user/appdata/audrey_ai_2.0
-bash tests/smoke/smoke-native-onbox.sh \
-  smoke_native_document_approvals.py cleanup
-```
-
-## Run the 16B Project Brief browser acceptance
-
-This is a native UI gate because it verifies the form, approval boundary,
-dialog recovery, downloaded Word file, My Files refresh, and Project picker.
-It creates real private DOCX files, so delete the disposable outputs at the end.
-
-After pulling the slice on Tower, rebuild both services:
-
-```bash
-cd /mnt/user/appdata/audrey_ai_2.0
-docker compose up -d --build --force-recreate audrey audrey-ui
-```
-
-From the laptop, confirm the backend is reachable over the working LAN/WARP
-route. Do not substitute the broken Tailscale address:
-
-```bash
-curl -fsS http://192.168.1.11:8000/health
-```
-
-The response must be JSON with `"status":"ok"`. Then use the normal
-`https://ai.builtryte.xyz` browser surface as the ordinary account:
-
-1. Open **My Files**, expand **Create a document**, and confirm the Project
-   Brief form is readable at normal and narrow widths. Enter a unique filename
-   such as `C3 Project Brief 16B.docx`, a title, recipient, date, summary, two
-   objectives, and two next steps.
-2. Select **Review request**. Confirm no DOCX has appeared yet. The panel must
-   show **Review this document request**, the filename/template summary, the
-   objective and next-step counts, an expiry, and a request fingerprint.
-3. Select **Reject**. Confirm the request becomes rejected and no file appears.
-   Select **Create another**, submit a fresh request with a second unique
-   filename, and choose **Approve and create**.
-4. While the second request is queued or running, collapse the panel, close My
-   Files, reopen it, and hard refresh once if the state remains visible long
-   enough. The same request must return without a duplicate. Wait for
-   **Document created** and confirm exactly one Ready DOCX appears automatically.
-5. Download the DOCX from its file row and open it in Word or LibreOffice.
-   Confirm the title, recipient, date, summary, both objectives, and both next
-   steps match the submitted values. The document should contain no image,
-   macro warning, external-link prompt, formula, or broken placeholder.
-6. Open the generated file in My Files and confirm its extracted text is
-   readable. Add it to a Project with **Choose from My Files**, start a project
-   conversation, and ask for one distinctive objective. Audrey must answer from
-   the generated brief.
-7. Create one more request and choose **Approve and create**, then select
-   **Cancel** while its queued/running state is still visible. If the small file
-   completes before the click, repeat once; a cancelled request must not publish
-   a new file. A request rejected before approval must also publish nothing.
-8. Sign in as the second test account. The generated filename must be absent
-   from My Files and the Project picker. Return to the owner account, remove the
-   disposable DOCX files from the Project, and delete them from My Files.
-
-Pass Slice 16B when the approval boundary creates nothing before approval, the
-approved file appears once and opens with exact text, refresh does not duplicate
-it, Project grounding works, cancellation/rejection publish nothing, and the
-second user cannot see it. Report any step that fails together with the visible
-job status and filename.
+After deploying the retirement, perform only this regression check: My Files
+has no **Create a document** panel, `/api/document-jobs` returns HTTP 404, and
+normal upload, inspection, Project selection, and grounded chat still work.
 
 ## Phase 7 PDF acceptance and diagnostic
 

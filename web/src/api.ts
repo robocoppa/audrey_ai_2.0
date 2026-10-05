@@ -353,47 +353,6 @@ export interface AudreyFileUpload {
   status: string;
 }
 
-export interface DocumentApproval {
-  id: string;
-  operation_digest: string;
-  expires_at: string;
-  decision: string;
-  decided_at: string | null;
-  used_at: string | null;
-}
-
-export interface DocumentJob {
-  id: string;
-  input_version_id: string;
-  output_version_id: string | null;
-  operation: string;
-  operation_digest: string;
-  output_mime: string;
-  summary: string;
-  preview: string;
-  status: "awaiting_approval" | "queued" | "running" | "succeeded" | "rejected" | "expired" | "cancelled" | "failed";
-  attempts: number;
-  error_code: string;
-  created_at: string;
-  updated_at: string;
-  completed_at: string | null;
-  approval: DocumentApproval;
-}
-
-export interface ProjectBriefRequest {
-  template_id: "project-brief-v1";
-  filename: string;
-  fields: {
-    title: string;
-    prepared_for: string;
-    prepared_on: string;
-    summary: string;
-    objectives: string[];
-    next_steps: string[];
-  };
-  idempotency_key: string;
-}
-
 export type AudreyFileArtifactKind = "transcript" | "visual" | "summary";
 
 export interface AudreyFileArtifact {
@@ -948,49 +907,6 @@ export async function discardEmptyConversation(conversationId: string): Promise<
 
 export function listFiles(): Promise<AudreyFileList> {
   return apiJson<AudreyFileList>("/api/files");
-}
-
-export function listDocumentJobs(): Promise<{ items: DocumentJob[] }> {
-  return apiJson<{ items: DocumentJob[] }>("/api/document-jobs?limit=50");
-}
-
-export function createProjectBrief(request: ProjectBriefRequest): Promise<DocumentJob> {
-  return apiJson<DocumentJob>("/api/document-jobs/template-to-docx", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
-  });
-}
-
-export function getDocumentJob(jobId: string): Promise<DocumentJob> {
-  return apiJson<DocumentJob>(
-    `/api/document-jobs/${encodeURIComponent(jobId)}`,
-  );
-}
-
-export function decideDocumentJob(
-  jobId: string,
-  operationDigest: string,
-  decision: "approved" | "rejected",
-): Promise<DocumentJob> {
-  return apiJson<DocumentJob>(
-    `/api/document-jobs/${encodeURIComponent(jobId)}/decision`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        decision,
-        operation_digest: operationDigest,
-      }),
-    },
-  );
-}
-
-export function cancelDocumentJob(jobId: string): Promise<DocumentJob> {
-  return apiJson<DocumentJob>(
-    `/api/document-jobs/${encodeURIComponent(jobId)}/cancel`,
-    { method: "POST" },
-  );
 }
 
 export function getFile(fileId: string): Promise<AudreyFile> {

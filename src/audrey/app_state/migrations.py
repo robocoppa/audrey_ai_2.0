@@ -823,6 +823,9 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
         """,
     ),
     (
+        # Retained as deployed migration history. The Phase 16 document runtime
+        # was retired; these inert tables remain for schema-20 compatibility,
+        # backup verification, and privacy cleanup of any historical rows.
         20,
         """
         CREATE TABLE IF NOT EXISTS app_file_versions (

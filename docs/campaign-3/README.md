@@ -2,8 +2,9 @@
 
 **Status:** Campaign 3 Phases 1–11 and Phase 15 are complete. Phases 12–14
 are laptop-complete and awaiting their targeted live gates. Phase 15's direct
-project-upload follow-up and Phase 16A's restart gate are accepted. Phase 16B's
-private Project Brief generation is laptop-complete pending browser acceptance.
+project-upload follow-up is accepted. Phase 16 document tooling was retired
+after confirming that Hermes already uses the separate Bot Tools MCP, Nextcloud,
+and Collabora stack at `cloud.builtryte.xyz`.
 
 The Milestone 2E parity build is laptop-complete across native memory
 settings, owner-bound file and video upload and inspection, source and answer
@@ -76,18 +77,18 @@ coverage. Its 3,113-test laptop gate and targeted restart smoke both pass. Slice
 selection, project conversation creation, breadcrumbs, and conversation
 move/ungroup controls. Slice 15D adds server-resolved project snapshots, bounded
 selected-file retrieval, prompt-injection boundaries, and persisted private-file
-sources. The user accepted Slices 15C–15D on 2026-10-03, closing Phase 15.
-The direct project-upload follow-up, durable processing membership, refresh,
-and My Files upload-control polish also passed its deployed browser check.
+sources. The user accepted Slices 15C–15D on 2026-10-03, closing Phase 15. A
+follow-up added direct project uploads with durable processing membership and
+refresh, plus cleaner Add files and Choose files controls in My Files; its
+deployed browser check passed.
 
-Phase 16 was approved on 2026-10-03. Slice 16A's schema 20 approvals, immutable
-versions, leased jobs, restart recovery, provenance, privacy purge, backup
-coverage, and deployed two-stage restart smoke now pass. Slice 16B adds the
-reviewed Project Brief template, typed bounded fields, package and text
-read-back verification, private indexed My Files publication, deterministic
-restart recovery, and a native approval panel. Its laptop gate passes and its
-browser acceptance is next. Isolated PDF rendering and literal-only spreadsheet
-revisions follow. Formula execution and sharing remain separate later decisions.
+Phase 16 was retired on 2026-10-05. The earlier plan incorrectly moved a
+Hermes bot capability into Audrey's product surface even though the bot fleet
+already has API-driven document and spreadsheet tools through `bot-tools-mcp`,
+Nextcloud, and Collabora at `cloud.builtryte.xyz`. Audrey's creation panel,
+document-job routes, worker, template, and future PDF/spreadsheet slices are
+removed. Deployed schema 20 remains as inert migration history so production
+databases continue to start and restore safely.
 
 Phase 6 completed on 2026-09-30. Slice 6A's probe-only comparison finished
 148 valid calls across Tev1 0.8B, Tev1 4B, Nimble, and the incumbent. On the 23
@@ -167,7 +168,7 @@ and finally adds the first general skills layer on that owned surface.
 | 13 | [Responses multimodal input](phase-13-responses-multimodal-input.md) | Accept typed text and bounded inline image parts through the shared Responses adapter | Phase 12 implementation | Slice 13A laptop-complete; targeted live gate pending |
 | 14 | [Bot accounts and token lifetimes](phase-14-bot-accounts-and-token-lifetimes.md) | Add limited automation accounts, intentional permanent PATs, and fresh admin data on every open | Phase 13 implementation | Slice 14A laptop-complete; native acceptance pending |
 | 15 | [Composer controls and Projects](phase-15-composer-and-projects.md) | Clarify and rebalance the composer, then group conversations with reusable instructions and selected-file context | Phase 14 implementation | Complete, including direct project upload |
-| 16 | [Native document tools](phase-16-native-document-tools.md) | Add approved, private, verified document generation and revision through native approval and isolated workers | Phase 15 acceptance | Slice 16A live-passed; Slice 16B laptop-complete pending browser acceptance |
+| 16 | [Retired Audrey document tools](phase-16-native-document-tools.md) | Record the boundary between Audrey file analysis and the existing Hermes workspace APIs | Architecture review | Retired; no Audrey document or spreadsheet authoring surface |
 
 Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1
 through Campaign 3 Phase 16, or use the topic filenames.
@@ -186,6 +187,8 @@ through Campaign 3 Phase 16, or use the topic filenames.
   through migrations and rollback windows.
 - Skills do not execute code or grant permissions. Tools act; skills instruct;
   platform policy authorizes.
+- Hermes workspace capabilities stay in the separate Bot Tools MCP service and
+  do not create Audrey interface features.
 - A feature is not called verified on Unraid until the user confirms it.
 - Any source/config edit runs the full hermetic suite and changed-file ruff.
   Lesson-link sweeps run only when the user explicitly requests one.
@@ -198,6 +201,6 @@ Items 5–10, their execution order, and pass criteria are tracked in
 navigation slice ahead of Item 7. Its requested top-bar correction is ready
 for browser acceptance, and Item 7's first multimodal slice is ready for its
 targeted live gate. Phase 14's account administration slice is also
-laptop-complete and awaits its native browser and PAT checks. Phase 15 and
-its direct-upload follow-up are complete. Phase 16A is live-passed; Phase 16B
-awaits its Project Brief browser acceptance.
+laptop-complete and awaits its native browser and PAT checks. Phase 15 and its
+direct project-upload follow-up are accepted. Phase 16 is retired and has no
+remaining Audrey build or smoke gate.

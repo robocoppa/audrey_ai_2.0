@@ -96,66 +96,6 @@ class ProjectFileRecord:
 
 
 @dataclass(frozen=True, slots=True)
-class FileVersionRecord:
-    """Immutable metadata for one owner-scoped source or derived file version."""
-
-    version_id: str
-    user_id: str
-    file_id: str
-    version_number: int
-    parent_version_id: str | None
-    filename: str
-    mime: str
-    bytes: int
-    content_sha256: str
-    origin: str
-    created_at: str
-
-
-@dataclass(frozen=True, slots=True)
-class DocumentJobRecord:
-    """One exact document operation moving through approval and worker states."""
-
-    job_id: str
-    user_id: str
-    input_version_id: str
-    operation: str
-    arguments: dict[str, Any]
-    operation_digest: str
-    output_mime: str
-    summary: str
-    preview: str
-    requested_by_kind: str
-    requested_by_id: str
-    idempotency_key: str
-    status: str
-    attempts: int
-    lease_id: str
-    lease_expires_at: str | None
-    output_version_id: str | None
-    error_code: str
-    created_at: str
-    updated_at: str
-    completed_at: str | None
-
-
-@dataclass(frozen=True, slots=True)
-class DocumentApprovalRecord:
-    """Single-use approval for one exact document job digest."""
-
-    approval_id: str
-    job_id: str
-    user_id: str
-    operation_digest: str
-    expires_at: str
-    decision: str
-    actor_user_id: str | None
-    created_at: str
-    decided_at: str | None
-    used_at: str | None
-
-
-@dataclass(frozen=True, slots=True)
 class MessageRecord:
     """One ordered canonical message, including an in-progress assistant row."""
 
@@ -321,9 +261,6 @@ __all__ = [
     "ChatProjectionDeletionRecord",
     "ChatProjectionRecord",
     "ConversationRecord",
-    "DocumentApprovalRecord",
-    "DocumentJobRecord",
-    "FileVersionRecord",
     "FinishedRun",
     "LocalUserDataPurge",
     "MessageRecord",
