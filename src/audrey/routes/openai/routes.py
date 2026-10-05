@@ -23,6 +23,11 @@ from audrey.auth import AuthedUser, require_user
 from audrey.pipeline.chat_archive import resolve_conversation_id
 from audrey.pipeline.messages import last_user_text
 from audrey.pipeline.prompts import skill_instruction_for, with_skill_instruction
+from audrey.routes.openai.file_inputs import (
+    has_file_references,
+    response_input_messages,
+    validate_file_prompt,
+)
 from audrey.routes.openai.passthrough import (
     PASSTHROUGH_PREFIX,
     _handle_passthrough,
@@ -55,35 +60,6 @@ VIRTUAL_MODELS = (
     "audrey_fast",     # always fast (no escalation, even on long prompts)
     "audrey_video",    # adaptive like audrey_auto, plus the video task role
 )
-
-
-def _response_input_messages(payload: ResponseCreateRequest) -> list[dict[str, Any]]:
-    """Adapt validated Responses easy-input messages to Audrey chat messages."""
-
-    if isinstance(payload.input, str):
-        return [{"role": "user", "content": payload.input}]
-    messages: list[dict[str, Any]] = []
-    for item in payload.input:
-        if isinstance(item.content, str):
-            content: str | list[dict[str, Any]] = item.content
-        else:
-            content = []
-            for part in item.content:
-                raw = part.model_dump()
-                if raw["type"] == "input_text":
-                    content.append({"type": "text", "text": raw["text"]})
-                elif raw["type"] == "input_image":
-                    content.append({
-                        "type": "image_url",
-                        "image_url": {
-                            "url": raw["image_url"],
-                            "detail": raw["detail"],
-                        },
-                    })
-                else:
-                    raise ValueError(f"unsupported Responses input part: {raw['type']}")
-        messages.append({"role": item.role, "content": content})
-    return messages
 
 
 @router.get("/models")
@@ -351,7 +327,7 @@ async def create_response(
             detail={
                 "error": "responses_feature_unsupported",
                 "message": (
-                    "This Audrey Responses slice supports plain-text generation; "
+                    "These Responses features are not supported; "
                     f"unsupported fields: {', '.join(unsupported)}."
                 ),
             },
@@ -369,13 +345,15 @@ async def create_response(
             },
         ) from exc
 
-    input_messages = _response_input_messages(payload)
+    input_messages = await response_input_messages(payload, request, me)
     messages: list[dict[str, Any]] = []
     if payload.instructions:
         messages.append({"role": "developer", "content": payload.instructions})
     if format_instruction:
         messages.append({"role": "developer", "content": format_instruction})
     messages.extend(input_messages)
+    if has_file_references(payload):
+        await validate_file_prompt(messages)
     chat_payload = ChatCompletionRequest(
         model=payload.model,
         skill=payload.skill,

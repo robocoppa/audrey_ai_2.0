@@ -275,7 +275,6 @@ def test_empty_input_is_rejected(input_value):
         [{"type": "input_image", "image_url": "https://example.org/image.png"}],
         [{"type": "input_image", "image_url": "data:image/gif;base64,AAAA"}],
         [{"type": "input_image", "image_url": "data:image/png;base64,%%%"}],
-        [{"type": "input_image", "file_id": "file_example"}],
         [{"type": "output_text", "text": "Wrong direction."}],
     ],
 )

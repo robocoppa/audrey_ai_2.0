@@ -325,17 +325,20 @@ class ResponseInputText(BaseModel):
 
 
 class ResponseInputImage(BaseModel):
-    """One bounded inline Responses image input."""
+    """One inline image or authenticated Audrey image reference."""
 
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["input_image"]
-    image_url: str = Field(min_length=1, max_length=_RESPONSES_IMAGE_DATA_URL_MAX_CHARS)
+    image_url: str | None = Field(default=None, min_length=1, max_length=_RESPONSES_IMAGE_DATA_URL_MAX_CHARS)
+    file_id: str | None = Field(default=None, min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$")
     detail: Literal["auto", "low", "high", "original"] = "auto"
 
     @field_validator("image_url")
     @classmethod
-    def require_inline_supported_image(cls, value: str) -> str:
+    def require_inline_supported_image(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
         header, separator, payload = value.partition(",")
         mime = header.removeprefix("data:").removesuffix(";base64")
         if (
@@ -356,9 +359,24 @@ class ResponseInputImage(BaseModel):
             raise ValueError("input_image image_url must contain image bytes")
         return value
 
+    @model_validator(mode="after")
+    def require_one_source(self) -> ResponseInputImage:
+        if (self.image_url is None) == (self.file_id is None):
+            raise ValueError("input_image requires exactly one of image_url or file_id")
+        return self
+
+
+class ResponseInputFile(BaseModel):
+    """One ready document in the authenticated caller's Audrey library."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["input_file"]
+    file_id: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$")
+
 
 ResponseInputContentPart = Annotated[
-    ResponseInputText | ResponseInputImage,
+    ResponseInputText | ResponseInputImage | ResponseInputFile,
     Field(discriminator="type"),
 ]
 
@@ -380,9 +398,9 @@ class ResponseInputMessage(BaseModel):
         if not self.content:
             raise ValueError("message content must contain at least one part")
         if self.role != "user" and any(
-            isinstance(part, ResponseInputImage) for part in self.content
+            isinstance(part, (ResponseInputImage, ResponseInputFile)) for part in self.content
         ):
-            raise ValueError("input_image parts are supported only on user messages")
+            raise ValueError("input_image and input_file parts are supported only on user messages")
         return self
 
 

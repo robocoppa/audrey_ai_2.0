@@ -385,6 +385,13 @@ report remote-image HTTP 422 and `"validation_error": true`.
 
 ## Run the 13B Responses structured output smoke from the laptop
 
+**Result:** Passed and settled on 2026-10-05. Completed and streamed
+json_schema output both returned HTTP 200 with the sentinel object, typed
+output, and valid usage. The stream produced 16 JSON deltas across 24 events,
+hid Audrey progress text, and ended with response.completed. Legacy
+json_object mode returned the expected HTTP 400. Do not repeat unless a later
+change touches Responses text formats, final model calls, or stream rendering.
+
 This targeted protocol proof makes two short Fast model calls: one completed
 and one streamed. Both must return exactly the schema-constrained sentinel
 object. The script validates schema echo, typed output, token usage, streaming
@@ -410,6 +417,58 @@ streamed blocks must report HTTP 200, format json_schema, and sentinel true.
 The streamed block must report response.completed and progress_hidden true.
 The unsupported block must report HTTP 400 and
 responses_feature_unsupported. No file upload or browser action is needed.
+
+## Run the 13C Responses file reference smoke from the laptop
+
+**Result:** Implementation and laptop contracts pass; live deployment is pending.
+
+This tests the Responses API's new references to files already stored in
+Audrey. No browser action, video upload, or existing Ready file is required.
+The script creates and uploads one tiny text file with a randomized code and
+one red PNG under the smoke user. It waits for both files to become Ready,
+then makes one completed and one streamed Fast model call. Each answer must
+read the document's code and recognize the image's red color.
+
+Both Cloudflare Access application assertions are required:
+`AUDREY_USER_JWT` and `AUDREY_ADMIN_JWT`, already stored in the laptop's
+`.env.test.local`. They must resolve to distinct active Audrey accounts. The
+second account is used only to prove it cannot read the first account's files;
+no admin settings, repair operation, or personal-token change is performed.
+This smoke uses those assertions rather than `AUDREY_EVAL_API_KEY`.
+
+First deploy the code on Tower from the updated checkout:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey
+```
+
+Then run this on the laptop using the working LAN/WARP address:
+
+```bash
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
+(
+  set -a
+  source .env.test.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_responses_file_inputs.py
+)
+```
+
+Allow several minutes for image indexing and the two model calls. Success is
+exit code zero and JSON ending in `"status": "passed"`, with:
+
+- `uploads.ready: true` and `uploads.count: 2`;
+- completed and streamed HTTP 200, `document_sentinel: true`, `image_color: red`,
+  a `resp_` identifier, and integer token usage;
+- streamed `terminal: response.completed` and matching non-empty deltas;
+- guard results HTTP 404 for foreign, missing, and deleted references,
+  `same_not_found: true`, and HTTP 422 for the wrong file kind;
+- `cleanup.uploads_deleted: 2` and no `cleanup_errors`.
+
+The script deletes only its temporary uploads, including when a model call
+fails. This protocol check is the acceptance gate for Slice 13C. Existing
+native browser upload and chat acceptance remains recorded as passed.
 
 ## Run the 15B Projects restart smoke
 

@@ -3,12 +3,13 @@
 **Status:** Items 1–6 were closed on 2026-10-01. The user reprioritized
 [Phase 12](phase-12-sidebar-navigation.md) ahead of Items 7–10. Slice 12A is
 laptop-complete with its My Files correction and awaits browser acceptance.
-Item 7 has laptop-complete [Phase 13 Slices 13A and
-13B](phase-13-responses-multimodal-input.md); both targeted live gates remain
-pending. The user then
+Item 7 has live-settled [Phase 13 Slice
+13B](phase-13-responses-multimodal-input.md); Slice 13A remains laptop-complete
+with its targeted live gate pending. Slice 13C adds owner-scoped image and
+document references and is laptop-complete with its protocol smoke pending. The user then
 prioritized [Phase 14 Slice 14A](phase-14-bot-accounts-and-token-lifetimes.md),
-which is laptop-complete and awaits native acceptance. The next build is
-[Phase 15](phase-15-composer-and-projects.md). Slice 15A's composer control
+which is laptop-complete and awaits native acceptance.
+[Phase 15](phase-15-composer-and-projects.md) is complete. Slice 15A's composer control
 rail passed user acceptance, Slice 15B's owner-scoped Projects storage and API
 passed its restart smoke, and the user accepted Slices 15C–15D plus the
 direct project-upload follow-up.
@@ -392,8 +393,11 @@ Detailed decision record:
 - [x] Start the expansion as separate per-capability protocol slices.
 - [x] Add typed `input_text` plus bounded inline `input_image` content parts
   for completed and streaming requests.
-- [ ] Add remote/file-id image resolution and `input_file` only with explicit
-  SSRF and owner-scoped storage contracts.
+- [x] Build Slice 13C: add owner-scoped `file_id` image and document inputs
+  through Audrey storage, with ready-state, type, count, and size limits.
+- [ ] Pass the targeted Slice 13C file-reference protocol smoke.
+- [ ] Add remote HTTP(S) image or document inputs only through a separate
+  SSRF-safe fetch contract.
 - [x] Add bounded json_schema structured text output for completed and
   streamed Responses, with final validation and an explicit legacy json_object
   rejection.

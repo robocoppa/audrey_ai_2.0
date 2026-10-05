@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import io
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -21,7 +22,9 @@ from audrey.kb.extract import (
     extract_uploaded_text,
     is_audio_mime,
     is_image_mime,
+    is_text_mime,
     is_video_mime,
+    ocr_text_path,
 )
 from audrey.pipeline.summarise import brief_video_summary
 from audrey.pipeline.vision import vision_cfg
@@ -355,27 +358,63 @@ async def get_file_text(
 ) -> NativeFileTextResponse:
     """Page through the same extracted document text used by ingestion."""
 
-    row = await _owned_row(request, principal, file_id)
-    if _kind(row.mime) != "text" or row.status != "ready":
-        raise HTTPException(status_code=422, detail="Text is available for ready documents only.")
-    path = _source_path(request, principal, row)
-    if row.source_freed_at or not await asyncio.to_thread(path.is_file):
-        raise HTTPException(status_code=410, detail="Stored document is unavailable.")
-    try:
-        content = await asyncio.to_thread(extract_uploaded_text, path)
-    except (EmptyExtractionError, OSError) as exc:
-        raise HTTPException(status_code=409, detail="Document text is unavailable.") from exc
+    document = await read_owned_document_text(request, principal, file_id)
+    content = document.text
 
     start = min(offset, len(content))
     end = min(start + 4000, len(content))
     response.headers["Cache-Control"] = "private, no-store"
     return NativeFileTextResponse(
-        id=row.file_id,
+        id=file_id,
         text=content[start:end],
         offset=start,
         next_offset=end if end < len(content) else None,
         total_chars=len(content),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class OwnedDocumentText:
+    """Extracted evidence and source metadata admitted for one owner."""
+
+    filename: str
+    text: str
+    source_bytes: int
+
+
+async def read_owned_document_text(
+    request: Request,
+    principal: Principal,
+    file_id: str,
+    *,
+    max_source_bytes: int | None = None,
+    max_text_chars: int | None = None,
+) -> OwnedDocumentText:
+    """Reuse the native document reader, optionally enforcing API input bounds."""
+
+    row = await _owned_row(request, principal, file_id)
+    if not is_text_mime(row.mime) or row.status != "ready":
+        raise HTTPException(status_code=422, detail="Text is available for ready documents only.")
+    path = _source_path(request, principal, row)
+    if row.source_freed_at or not await asyncio.to_thread(path.is_file):
+        raise HTTPException(status_code=410, detail="Stored document is unavailable.")
+
+    def read() -> OwnedDocumentText:
+        source_bytes = path.stat().st_size
+        if max_source_bytes is not None and source_bytes > max_source_bytes:
+            raise HTTPException(status_code=413, detail="Document source exceeds the Responses byte limit.")
+        sidecar = ocr_text_path(path)
+        if max_text_chars is not None and sidecar.is_file() and sidecar.stat().st_size > max_text_chars * 4:
+            raise HTTPException(status_code=413, detail="Document text exceeds the Responses character limit.")
+        content = extract_uploaded_text(path)
+        if max_text_chars is not None and len(content) > max_text_chars:
+            raise HTTPException(status_code=413, detail="Document text exceeds the Responses character limit.")
+        return OwnedDocumentText(filename=row.filename, text=content, source_bytes=source_bytes)
+
+    try:
+        return await asyncio.to_thread(read)
+    except (EmptyExtractionError, OSError) as exc:
+        raise HTTPException(status_code=409, detail="Document text is unavailable.") from exc
 
 
 async def read_owned_image_preview(
@@ -617,6 +656,7 @@ async def delete_file(
 __all__ = [
     "native_image_limit",
     "read_owned_image_preview",
+    "read_owned_document_text",
     "resolve_owned_attachments",
     "router",
 ]
