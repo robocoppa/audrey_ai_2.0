@@ -10,9 +10,9 @@ which is laptop-complete and awaits native acceptance. The next build is
 [Phase 15](phase-15-composer-and-projects.md). Slice 15A's composer control
 rail passed user acceptance, Slice 15B's owner-scoped Projects storage and API
 passed its restart smoke, and the user accepted Slices 15C–15D. The direct
-project-upload follow-up is laptop-complete pending its browser check. Approved
-[Phase 16](phase-16-native-document-tools.md) has started with laptop-complete
-Slice 16A.
+project-upload follow-up passed its browser check. Approved
+[Phase 16](phase-16-native-document-tools.md) has a live-passed Slice 16A and a
+laptop-complete Slice 16B awaiting browser acceptance.
 
 ## Closed prerequisites
 
@@ -364,7 +364,7 @@ The direct project-upload follow-up is laptop-complete pending browser review.
   snapshot, project deletion, and restart-persistence gates.
 - [x] Build direct project upload with persistent processing membership and
   polish the My Files Add files and Choose files actions.
-- [ ] Pass direct project upload, progress, processing-to-Ready refresh, My
+- [x] Pass direct project upload, progress, processing-to-Ready refresh, My
   Files styling, mobile layout, and hard-refresh behavior in the deployed UI.
 
 Detailed scope:
@@ -372,14 +372,17 @@ Detailed scope:
 
 ## Approved next phase - Phase 16 native document tools
 
-**State:** Slice 16A is laptop-complete; its native restart smoke is pending.
+**State:** Slice 16A is live-passed. Slice 16B is laptop-complete and awaits
+its Project Brief browser acceptance.
 
 - [x] Build 16A: exact-operation approvals, immutable file derivations,
   expected-version conflicts, idempotency, cancellation, and crash recovery.
-- [ ] Pass the 16A two-stage native restart smoke for pending, queued, and
+- [x] Pass the 16A two-stage native restart smoke for pending, queued, and
   running jobs, stale-worker denial, single publication, and cleanup.
-- [ ] Build 16B: one reviewed private template-to-DOCX operation with package
+- [x] Build 16B: one reviewed private template-to-DOCX operation with package
   validation, text read-back, provenance, and My Files publication.
+- [ ] Pass 16B's native Project Brief approval, download/read-back, Project
+  selection, refresh recovery, cancellation, and second-user isolation checks.
 - [ ] Build 16C: isolated DOCX-to-PDF rendering with no egress, bounded
   resources, output verification, and atomic publication.
 - [ ] Build 16D: literal-only typed spreadsheet revisions with whole-request

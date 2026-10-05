@@ -1,7 +1,7 @@
 # Campaign 3 Phase 16 - native document tools
 
-**Status:** Approved on October 3, 2026. Slice 16A is laptop-complete and
-awaits its two-stage native restart smoke. Slice 16B is next after that gate.
+**Status:** Slice 16A passed its deployed restart gate on October 4, 2026.
+Slice 16B is laptop-complete and awaits its native browser acceptance.
 
 ## Goal
 
@@ -103,7 +103,14 @@ Python files pass Ruff and compilation. The two-stage
 `smoke_native_document_approvals.py` gate captures pending, queued, and running
 states, restarts Audrey, reclaims an expired lease, blocks the stale worker,
 proves single publication, terminates remaining jobs, and deletes all probe
-records. Its deployed result remains pending.
+records.
+
+**Live result, October 4, 2026:** Passed. Capture proved schema 20, exact-digest
+denial, cross-owner denial, and all three pre-restart states. Verify passed its
+persistence, stale-lease, idempotent-publication, rejection, and cancellation
+checks. The cleanup ordering was corrected to delete derived output versions
+before their parent source; the retained probe then cleaned three jobs and two
+versions with no foreign-key violation.
 
 ## Slice 16B - private template to DOCX
 
@@ -125,6 +132,42 @@ Create a document through the native approval flow, download it through the
 existing private route, reopen it, and verify its package structure, expected
 text, hash, provenance, My Files presentation, Project selection, cancellation,
 restart recovery, and second-user denial.
+
+### Slice 16B implementation result
+
+**Completed on the laptop, October 4, 2026.** Audrey now ships one reviewed
+server-owned **Project Brief** template. Its typed request accepts a filename,
+title, recipient, date, summary, one to eight objectives, and one to eight next
+steps. The exact template SHA-256 is included in the approved operation digest,
+so replacing the bundled template invalidates an older approval.
+
+The pure-Python worker claims only `template_to_docx` jobs. It renders to a
+private staged path, rejects unsafe ZIP paths, macros, ActiveX, embedded files,
+images, external relationships, fields, and formulas, then reopens the DOCX and
+reads every expected value back before publication. A successful output uses a
+deterministic file ID, Audrey's quota reservation and private Qdrant indexing,
+the normal My Files lifecycle, one immutable derived version, an output hash,
+and a verified worker identity. A restart after My Files commits reopens and
+publishes the same file instead of creating a duplicate.
+
+My Files now has a separate **Create a document** panel. The user completes the
+Project Brief form, reviews the server summary and exact request fingerprint,
+then approves or rejects it. Queued and running work is polled across dialog
+reopens; cancellation remains available, and a verified success refreshes the
+file explorer automatically. The output can then be downloaded, opened, or
+selected in a Project like any other private Ready document.
+
+Sixteen focused backend tests cover rendering and package safety, validation,
+owner isolation, approval routing, operation-specific claims, private
+publication, provenance, cancellation boundaries, and restart recovery. The
+full 3,154-test hermetic backend gate, scoped Ruff, compilation, and diff integrity pass.
+Node remains deferred on this laptop, so the added Vitest/API coverage and web
+build run as part of the deployed `audrey-ui` gate rather than being claimed
+locally.
+
+The remaining native gate is the browser runbook in
+`docs/reference/live-smoke-testing.md`. Slice 16C does not start until that
+Project Brief flow is accepted.
 
 ## Slice 16C - isolated PDF rendering
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from audrey.app_state import (
     ApplicationStore,
@@ -17,6 +17,15 @@ from audrey.app_state import (
     InvalidDocumentOperationError,
 )
 from audrey.auth import require_provider_principal, require_scope
+from audrey.documents import (
+    DOCX_MIME,
+    PROJECT_BRIEF_TEMPLATE_ID,
+    TEMPLATE_OPERATION,
+    DocumentTemplateCatalog,
+    DocumentTemplateError,
+    ProjectBriefFields,
+    TemplateDocumentArguments,
+)
 from audrey.identity import Principal
 
 router = APIRouter(prefix="/document-jobs", tags=["document-jobs"])
@@ -61,6 +70,27 @@ class DocumentDecisionRequest(BaseModel):
     operation_digest: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
 
 
+class DocumentTemplateResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    version: int
+    fields: list[str]
+
+
+class DocumentTemplateListResponse(BaseModel):
+    items: list[DocumentTemplateResponse]
+
+
+class CreateProjectBriefRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    template_id: Literal["project-brief-v1"] = PROJECT_BRIEF_TEMPLATE_ID
+    filename: str = Field(min_length=1, max_length=255)
+    fields: ProjectBriefFields
+    idempotency_key: str = Field(min_length=1, max_length=200)
+
+
 def _store(request: Request) -> ApplicationStore:
     store = getattr(request.app.state, "application_store", None)
     if store is None:
@@ -69,6 +99,22 @@ def _store(request: Request) -> ApplicationStore:
             detail="Audrey application state is not initialized.",
         )
     return store
+
+
+def _catalog(request: Request) -> DocumentTemplateCatalog:
+    catalog = getattr(request.app.state, "document_templates", None)
+    if catalog is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Document templates are not initialized.",
+        )
+    return catalog
+
+
+def _wake_worker(request: Request) -> None:
+    worker = getattr(request.app.state, "document_template_worker", None)
+    if worker is not None:
+        worker.wake()
 
 
 def _response(
@@ -99,6 +145,73 @@ def _response(
             used_at=approval.used_at,
         ),
     )
+
+
+@router.get("/templates", response_model=DocumentTemplateListResponse)
+async def list_document_templates(
+    request: Request,
+    _principal: Principal = Depends(_document_access),
+) -> DocumentTemplateListResponse:
+    return DocumentTemplateListResponse(items=[
+        DocumentTemplateResponse(
+            id=descriptor.template_id,
+            name=descriptor.name,
+            description=descriptor.description,
+            version=descriptor.version,
+            fields=list(descriptor.fields),
+        )
+        for descriptor in _catalog(request).list()
+    ])
+
+
+@router.post("/template-to-docx", response_model=DocumentJobResponse, status_code=201)
+async def create_project_brief(
+    payload: CreateProjectBriefRequest,
+    request: Request,
+    principal: Principal = Depends(_document_access),
+) -> DocumentJobResponse:
+    catalog = _catalog(request)
+    try:
+        descriptor = catalog.descriptor(payload.template_id)
+        arguments = TemplateDocumentArguments(
+            template_id=descriptor.template_id,
+            template_sha256=descriptor.content_sha256,
+            filename=payload.filename,
+            fields=payload.fields,
+        )
+        source = await _store(request).document_tools.register_source_version(
+            user_id=principal.user_id,
+            file_id=f"template_{descriptor.template_id}",
+            filename=f"{descriptor.template_id}.docx",
+            mime=DOCX_MIME,
+            bytes_count=descriptor.bytes_count,
+            content_sha256=descriptor.content_sha256,
+        )
+        job, approval = await _store(request).document_tools.create_request(
+            user_id=principal.user_id,
+            input_version_id=source.version_id,
+            operation=TEMPLATE_OPERATION,
+            arguments=arguments.model_dump(mode="json"),
+            output_mime=DOCX_MIME,
+            summary=f"Create {payload.filename} from the reviewed Project brief template.",
+            preview=(
+                f"Project brief: {payload.fields.title} for {payload.fields.prepared_for}; "
+                f"{len(payload.fields.objectives)} objectives and "
+                f"{len(payload.fields.next_steps)} next steps."
+            ),
+            idempotency_key=payload.idempotency_key,
+            requested_by_kind="user",
+            requested_by_id=principal.user_id,
+        )
+    except (
+        DocumentTemplateError,
+        InvalidDocumentOperationError,
+        ValidationError,
+    ) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except DocumentConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _response(job, approval)
 
 
 @router.get("", response_model=DocumentJobListResponse)
@@ -159,6 +272,8 @@ async def decide_document_job(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if record is None:
         raise HTTPException(status_code=404, detail="Document job not found.")
+    if record[0].status == "queued":
+        _wake_worker(request)
     return _response(*record)
 
 
@@ -181,9 +296,12 @@ async def cancel_document_job(
 
 
 __all__ = [
+    "CreateProjectBriefRequest",
     "DocumentApprovalResponse",
     "DocumentDecisionRequest",
     "DocumentJobListResponse",
     "DocumentJobResponse",
+    "DocumentTemplateListResponse",
+    "DocumentTemplateResponse",
     "router",
 ]

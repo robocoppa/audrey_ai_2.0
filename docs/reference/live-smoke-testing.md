@@ -541,6 +541,65 @@ bash tests/smoke/smoke-native-onbox.sh \
   smoke_native_document_approvals.py cleanup
 ```
 
+## Run the 16B Project Brief browser acceptance
+
+This is a native UI gate because it verifies the form, approval boundary,
+dialog recovery, downloaded Word file, My Files refresh, and Project picker.
+It creates real private DOCX files, so delete the disposable outputs at the end.
+
+After pulling the slice on Tower, rebuild both services:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build --force-recreate audrey audrey-ui
+```
+
+From the laptop, confirm the backend is reachable over the working LAN/WARP
+route. Do not substitute the broken Tailscale address:
+
+```bash
+curl -fsS http://192.168.1.11:8000/health
+```
+
+The response must be JSON with `"status":"ok"`. Then use the normal
+`https://ai.builtryte.xyz` browser surface as the ordinary account:
+
+1. Open **My Files**, expand **Create a document**, and confirm the Project
+   Brief form is readable at normal and narrow widths. Enter a unique filename
+   such as `C3 Project Brief 16B.docx`, a title, recipient, date, summary, two
+   objectives, and two next steps.
+2. Select **Review request**. Confirm no DOCX has appeared yet. The panel must
+   show **Review this document request**, the filename/template summary, the
+   objective and next-step counts, an expiry, and a request fingerprint.
+3. Select **Reject**. Confirm the request becomes rejected and no file appears.
+   Select **Create another**, submit a fresh request with a second unique
+   filename, and choose **Approve and create**.
+4. While the second request is queued or running, collapse the panel, close My
+   Files, reopen it, and hard refresh once if the state remains visible long
+   enough. The same request must return without a duplicate. Wait for
+   **Document created** and confirm exactly one Ready DOCX appears automatically.
+5. Download the DOCX from its file row and open it in Word or LibreOffice.
+   Confirm the title, recipient, date, summary, both objectives, and both next
+   steps match the submitted values. The document should contain no image,
+   macro warning, external-link prompt, formula, or broken placeholder.
+6. Open the generated file in My Files and confirm its extracted text is
+   readable. Add it to a Project with **Choose from My Files**, start a project
+   conversation, and ask for one distinctive objective. Audrey must answer from
+   the generated brief.
+7. Create one more request and choose **Approve and create**, then select
+   **Cancel** while its queued/running state is still visible. If the small file
+   completes before the click, repeat once; a cancelled request must not publish
+   a new file. A request rejected before approval must also publish nothing.
+8. Sign in as the second test account. The generated filename must be absent
+   from My Files and the Project picker. Return to the owner account, remove the
+   disposable DOCX files from the Project, and delete them from My Files.
+
+Pass Slice 16B when the approval boundary creates nothing before approval, the
+approved file appears once and opens with exact text, refresh does not duplicate
+it, Project grounding works, cancellation/rejection publish nothing, and the
+second user cannot see it. Report any step that fails together with the visible
+job status and filename.
+
 ## Phase 7 PDF acceptance and diagnostic
 
 **Result:** Passed and settled on 2026-09-30. The synthetic OCR boundary moved

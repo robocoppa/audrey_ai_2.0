@@ -675,6 +675,7 @@ class DocumentToolsRepository:
         lease_seconds: int,
         max_attempts: int = 3,
         now: str | None = None,
+        operation: str | None = None,
     ) -> DocumentJobRecord | None:
         return await asyncio.to_thread(
             self._claim_next_sync,
@@ -682,6 +683,7 @@ class DocumentToolsRepository:
             lease_seconds,
             max_attempts,
             now,
+            operation,
         )
 
     def _claim_next_sync(
@@ -690,8 +692,15 @@ class DocumentToolsRepository:
         lease_seconds: int,
         max_attempts: int,
         now: str | None,
+        operation: str | None,
     ) -> DocumentJobRecord | None:
         lease_id = _required(lease_id, "lease id")
+        if operation is not None:
+            operation = _required(operation, "operation", maximum=100)
+            if not _OPERATION_RE.fullmatch(operation):
+                raise InvalidDocumentOperationError(
+                    "operation filter must use lowercase snake case"
+                )
         if lease_seconds < 1 or lease_seconds > 86_400:
             raise InvalidDocumentOperationError("lease seconds must be between 1 and 86400")
         if max_attempts < 1 or max_attempts > 20:
@@ -734,13 +743,24 @@ class DocumentToolsRepository:
                     (now_text, now_text, max_attempts),
                 )
                 while True:
-                    row = self._conn.execute(
-                        "SELECT j.* FROM app_document_jobs AS j "
-                        "JOIN app_document_approvals AS a ON a.job_id = j.job_id "
-                        "AND a.user_id = j.user_id WHERE j.status = 'queued' "
-                        "AND a.decision IN ('approved', 'used') "
-                        "ORDER BY j.created_at, j.job_id LIMIT 1"
-                    ).fetchone()
+                    if operation is None:
+                        row = self._conn.execute(
+                            "SELECT j.* FROM app_document_jobs AS j "
+                            "JOIN app_document_approvals AS a ON a.job_id = j.job_id "
+                            "AND a.user_id = j.user_id WHERE j.status = 'queued' "
+                            "AND a.decision IN ('approved', 'used') "
+                            "ORDER BY j.created_at, j.job_id LIMIT 1",
+                        ).fetchone()
+                    else:
+                        row = self._conn.execute(
+                            "SELECT j.* FROM app_document_jobs AS j "
+                            "JOIN app_document_approvals AS a ON a.job_id = j.job_id "
+                            "AND a.user_id = j.user_id WHERE j.status = 'queued' "
+                            "AND a.decision IN ('approved', 'used') "
+                            "AND j.operation = ? "
+                            "ORDER BY j.created_at, j.job_id LIMIT 1",
+                            (operation,),
+                        ).fetchone()
                     if row is None:
                         self._conn.commit()
                         return None

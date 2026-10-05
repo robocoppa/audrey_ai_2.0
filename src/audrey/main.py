@@ -23,6 +23,7 @@ from audrey.auth import AuthedUser, require_admin
 from audrey.chat_projection import ChatProjectionPromoter
 from audrey.config import get_config
 from audrey.conversation_titles import ConversationTitleGenerator
+from audrey.documents import DocumentTemplateCatalog, DocumentTemplateWorker
 from audrey.identity import build_cloudflare_access_verifier
 from audrey.kb.embed import ImageEmbedder, TextEmbedder
 from audrey.kb.file_deletion import FileDeletionWorker, FileOperationLocks
@@ -238,6 +239,20 @@ async def lifespan(app: FastAPI):
         model_name=kb_cfg.get("image_model", "clip-ViT-B-32"),
         cache_folder=kb_cfg.get("image_cache_folder", "/home/audrey/.cache/clip"),
     )
+    document_templates = DocumentTemplateCatalog()
+    document_template_worker = DocumentTemplateWorker(
+        store=application_store,
+        catalog=document_templates,
+        uploads_db=uploads_db,
+        storage=storage_lifecycle,
+        qdrant=qdrant,
+        text_embedder=text_embedder,
+        upload_root=upload_root,
+        max_user_bytes=int(kb_cfg.get("max_user_bytes", 1024 * 1024 * 1024)),
+        chunk_tokens=int(kb_cfg.get("chunk_tokens", 1000)),
+        overlap_tokens=int(kb_cfg.get("chunk_overlap", 100)),
+    )
+    await document_template_worker.start()
 
     watcher: KBWatcher | None = None
     if cfg.env.kb_watcher_enabled:
@@ -282,6 +297,8 @@ async def lifespan(app: FastAPI):
     app.state.file_deletions = file_deletions
     app.state.text_embedder = text_embedder
     app.state.image_embedder = image_embedder
+    app.state.document_templates = document_templates
+    app.state.document_template_worker = document_template_worker
     app.state.kb_watcher = watcher
     app.state.kb_reconciler = reconciler
 
@@ -397,6 +414,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         await native_runs.stop()
+        await document_template_worker.stop()
         if tools_retry_task is not None and not tools_retry_task.done():
             tools_retry_task.cancel()
             try:

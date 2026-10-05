@@ -306,3 +306,143 @@ it("shows a PDF summary first and its extracted text under Transcript", async ()
     credentials: "include",
   });
 });
+
+
+it("reviews and approves a Project Brief before adding the verified DOCX", async () => {
+  const emptyListing = {
+    items: [],
+    total_bytes: 0,
+    server_time: "2026-10-04T18:00:00+00:00",
+    limits: {
+      max_upload_bytes: 50_000_000,
+      max_user_bytes: 1_000_000_000,
+      allowed_extensions: [".docx"],
+      chunked_max_bytes: 2_000_000_000,
+      part_size: 8_000_000,
+      fetch_hosts: [],
+      max_images_per_turn: 4,
+    },
+  };
+  const generatedFile = {
+    id: "generated_docx",
+    filename: "Generated brief.docx",
+    mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    bytes: 42_000,
+    uploaded_at: "2026-10-04T18:01:00+00:00",
+    kind: "text",
+    chunks: 1,
+    status: "ready",
+    failure_reason: "",
+    duration_s: 0,
+    summary: "",
+    source_freed_at: "",
+    leased_at: "",
+    source_url: "",
+    transcript_source: "",
+    fetch_downloaded_bytes: 0,
+    fetch_total_bytes: 0,
+  };
+  const approval = {
+    id: "approval_one",
+    operation_digest: "a".repeat(64),
+    expires_at: "2026-10-04T18:15:00+00:00",
+    decision: "pending",
+    decided_at: null,
+    used_at: null,
+  };
+  const baseJob = {
+    id: "job_one",
+    input_version_id: "version_template",
+    output_version_id: null,
+    operation: "template_to_docx",
+    operation_digest: "a".repeat(64),
+    output_mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    summary: "Create Generated brief.docx from the reviewed Project brief template.",
+    preview: "Project brief: Launch plan for Build Ryte; 1 objectives and 1 next steps.",
+    status: "awaiting_approval",
+    attempts: 0,
+    error_code: "",
+    created_at: "2026-10-04T18:00:00+00:00",
+    updated_at: "2026-10-04T18:00:00+00:00",
+    completed_at: null,
+    approval,
+  };
+  let generated = false;
+  const fetchMock = vi.fn().mockImplementation((path: string, request?: RequestInit) => {
+    if (path === "/api/files") {
+      return Promise.resolve(new Response(JSON.stringify(generated
+        ? { ...emptyListing, items: [generatedFile], total_bytes: generatedFile.bytes }
+        : emptyListing), { headers: { "Content-Type": "application/json" } }));
+    }
+    if (path === "/api/document-jobs?limit=50") {
+      return Promise.resolve(new Response(JSON.stringify({ items: [] }), {
+        headers: { "Content-Type": "application/json" },
+      }));
+    }
+    if (path === "/api/document-jobs/template-to-docx") {
+      return Promise.resolve(new Response(JSON.stringify(baseJob), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }
+    if (path.endsWith("/decision") && request?.method === "POST") {
+      return Promise.resolve(new Response(JSON.stringify({
+        ...baseJob,
+        status: "queued",
+        approval: { ...approval, decision: "approved" },
+      }), { headers: { "Content-Type": "application/json" } }));
+    }
+    if (path === "/api/document-jobs/job_one") {
+      generated = true;
+      return Promise.resolve(new Response(JSON.stringify({
+        ...baseJob,
+        status: "succeeded",
+        output_version_id: "version_output",
+        completed_at: "2026-10-04T18:01:00+00:00",
+        approval: { ...approval, decision: "used" },
+      }), { headers: { "Content-Type": "application/json" } }));
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<FileManager onClose={() => undefined} />);
+
+  fireEvent.click(await screen.findByText("Create a document"));
+  fireEvent.change(screen.getByLabelText("Document name"), {
+    target: { value: "Generated brief.docx" },
+  });
+  fireEvent.change(screen.getByLabelText("Title"), {
+    target: { value: "Launch plan" },
+  });
+  fireEvent.change(screen.getByLabelText("Prepared for"), {
+    target: { value: "Build Ryte" },
+  });
+  fireEvent.change(screen.getByLabelText("Summary"), {
+    target: { value: "A concise plan for launching Audrey document tools." },
+  });
+  fireEvent.change(screen.getByLabelText("Objectives · one per line"), {
+    target: { value: "Verify the generated document" },
+  });
+  fireEvent.change(screen.getByLabelText("Next steps · one per line"), {
+    target: { value: "Approve the exact request" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Review request" }));
+
+  expect(await screen.findByText("Review this document request")).toBeVisible();
+  expect(screen.getByText(baseJob.preview)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Approve and create" }));
+
+  expect(await screen.findByText("Document created")).toBeVisible();
+  expect(await screen.findByText("Generated brief.docx")).toBeVisible();
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/document-jobs/job_one/decision",
+    expect.objectContaining({
+      method: "POST",
+      body: JSON.stringify({
+        decision: "approved",
+        operation_digest: "a".repeat(64),
+      }),
+    }),
+  );
+});

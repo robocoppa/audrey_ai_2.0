@@ -531,6 +531,21 @@ class ApplicationStore:
             (provider, subject),
         ).fetchone()
 
+    async def active_storage_namespace(self, *, user_id: str) -> str | None:
+        """Return one active account's opaque storage namespace for internal work."""
+
+        return await asyncio.to_thread(self._active_storage_namespace_sync, user_id)
+
+    def _active_storage_namespace_sync(self, user_id: str) -> str | None:
+        user_id = _required(user_id, "user id")
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT storage_namespace FROM app_users "
+                "WHERE user_id = ? AND status = 'active'",
+                (user_id,),
+            ).fetchone()
+        return str(row[0]) if row is not None else None
+
     async def update_display_name(
         self,
         *,
