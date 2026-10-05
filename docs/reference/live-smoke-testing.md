@@ -480,10 +480,13 @@ it. Removing it from the project alone must leave the My Files copy intact.
 ## Run the 16A document-approval restart smoke on Tower
 
 This is a backend API and application-state smoke. Run all three commands on
-Tower from the deployed checkout. The wrapper reaches `audrey-ui` over the
-Docker network, so the laptop's LAN/WARP address is not involved. It reads the
-existing Access assertions from `.env.smoke.local` and mounts only Audrey's
-runtime directory at `/data` for this probe.
+Tower from the deployed checkout. The wrapper checks readiness directly at
+`audrey:8000/health`, then exercises the approval API through `audrey-ui` over
+the Docker network. The UI proxy deliberately serves the browser app at
+`/health`, so it is not a backend health endpoint. The laptop's LAN/WARP address
+is not involved. The wrapper reads the existing Access assertions from
+`.env.smoke.local` and mounts only Audrey's runtime directory at `/data` for
+this probe.
 
 Capture creates one disposable source-version metadata row and three document
 jobs for the ordinary smoke account: one awaiting approval, one queued, and one

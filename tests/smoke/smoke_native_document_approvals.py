@@ -26,6 +26,10 @@ else:
     from smoke_native_auth import MISSING_CREDENTIALS, SmokeCredentials
 
 BASE_URL = os.getenv("AUDREY_SMOKE_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+BACKEND_HEALTH_URL = os.getenv(
+    "AUDREY_DOCUMENT_HEALTH_URL",
+    "http://audrey:8000/health",
+).strip()
 DATABASE_PATH = Path(os.getenv("AUDREY_APPLICATION_DB", "/data/audrey_app.sqlite"))
 SNAPSHOT_PATH = Path(os.getenv(
     "AUDREY_DOCUMENT_APPROVALS_SNAPSHOT_PATH",
@@ -60,14 +64,16 @@ def _json_request(
     method: str = "GET",
     payload: dict[str, Any] | None = None,
     expected: frozenset[int] = frozenset({200}),
+    absolute_url: str = "",
 ) -> tuple[int, dict[str, Any]]:
     headers = {"Accept": "application/json", **_headers(token)}
     body = None
     if payload is not None:
         headers["Content-Type"] = "application/json"
         body = json.dumps(payload).encode()
-    request = Request(  # noqa: S310 - operator controls the smoke base URL
-        f"{BASE_URL}{path}", data=body, headers=headers, method=method,
+    target = absolute_url or f"{BASE_URL}{path}"
+    request = Request(  # noqa: S310 - operator controls the smoke URLs
+        target, data=body, headers=headers, method=method,
     )
     try:
         with urlopen(request, timeout=60) as response:  # noqa: S310
@@ -83,9 +89,12 @@ def _json_request(
     try:
         value = json.loads(content)
     except json.JSONDecodeError as exc:
-        raise SmokeError(f"{method} {path} returned invalid JSON") from exc
+        excerpt = content.decode(errors="replace")[:200].replace("\n", "\\n")
+        raise SmokeError(
+            f"{method} {target} returned invalid JSON: {excerpt!r}"
+        ) from exc
     if not isinstance(value, dict):
-        raise SmokeError(f"{method} {path} returned non-object JSON")
+        raise SmokeError(f"{method} {target} returned non-object JSON")
     return status, value
 
 
@@ -94,7 +103,9 @@ def _wait_ready() -> dict[str, str]:
     last = ""
     while time.monotonic() < deadline:
         try:
-            _, health = _json_request("/health", token=USER_TOKEN)
+            _, health = _json_request(
+                "", token=USER_TOKEN, absolute_url=BACKEND_HEALTH_URL,
+            )
             _, capabilities = _json_request("/api/capabilities", token=USER_TOKEN)
             if health.get("status") == "ok" and capabilities.get("status") == "ready":
                 return {"health": "ok", "capabilities": "ready"}
@@ -406,6 +417,9 @@ def main() -> int:
         return 2
     if READY_TIMEOUT_SECONDS <= 0:
         print("AUDREY_DOCUMENT_SMOKE_TIMEOUT_SECONDS must be positive.", file=sys.stderr)
+        return 2
+    if not BACKEND_HEALTH_URL:
+        print("AUDREY_DOCUMENT_HEALTH_URL must not be empty.", file=sys.stderr)
         return 2
     if len(sys.argv) != 2 or sys.argv[1] not in {"capture", "verify", "cleanup"}:
         print("usage: smoke_native_document_approvals.py capture|verify|cleanup", file=sys.stderr)
