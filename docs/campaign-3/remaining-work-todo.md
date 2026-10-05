@@ -6,7 +6,9 @@ laptop-complete with its My Files correction and awaits browser acceptance.
 Item 7 has live-settled [Phase 13 Slice
 13B](phase-13-responses-multimodal-input.md); Slice 13A remains laptop-complete
 with its targeted live gate pending. Slice 13C adds owner-scoped image and
-document references and is laptop-complete with its protocol smoke pending. The user then
+document references and passed its targeted protocol smoke on 2026-10-05.
+Slice 13D adds bounded public image/document URLs and awaits its targeted
+remote-input smoke. The user then
 prioritized [Phase 14 Slice 14A](phase-14-bot-accounts-and-token-lifetimes.md),
 which is laptop-complete and awaits native acceptance.
 [Phase 15](phase-15-composer-and-projects.md) is complete. Slice 15A's composer control
@@ -395,9 +397,10 @@ Detailed decision record:
   for completed and streaming requests.
 - [x] Build Slice 13C: add owner-scoped `file_id` image and document inputs
   through Audrey storage, with ready-state, type, count, and size limits.
-- [ ] Pass the targeted Slice 13C file-reference protocol smoke.
-- [ ] Add remote HTTP(S) image or document inputs only through a separate
-  SSRF-safe fetch contract.
+- [x] Pass the targeted Slice 13C file-reference protocol smoke (2026-10-05).
+- [x] Build Slice 13D: add remote HTTP(S) image/document inputs through a
+  bounded SSRF-safe fetch contract, with temporary parsing and joint budgets.
+- [ ] Pass the targeted Slice 13D remote-input protocol smoke.
 - [x] Add bounded json_schema structured text output for completed and
   streamed Responses, with final validation and an explicit legacy json_object
   rejection.

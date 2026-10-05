@@ -91,9 +91,10 @@ Slice 5A rejects these fields with HTTP 400 and
 Phase 13 Slice 13A accepts typed `input_text` parts and bounded inline
 `input_image` data URLs. Slice 13B adds bounded `json_schema` output, and
 Slice 13C adds owner-scoped `input_image.file_id` and `input_file.file_id`
-references for ready images and extracted documents. Remote URLs, inline
-file data, and unknown top-level fields still fail request validation rather
-than disappearing silently. Later slices add each remaining capability with its own
+references for ready images and extracted documents. Slice 13D adds temporary
+public HTTP(S) image/document URLs through a bounded fetch and extraction
+contract. Inline file data and unknown top-level fields still fail request
+validation rather than disappearing silently. Later slices add each remaining capability with its own
 storage, event, fetch, or tool-call contract.
 
 ## Shared behavior

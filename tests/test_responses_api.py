@@ -272,7 +272,7 @@ def test_empty_input_is_rejected(input_value):
 @pytest.mark.parametrize(
     "content",
     [
-        [{"type": "input_image", "image_url": "https://example.org/image.png"}],
+        [{"type": "input_image", "image_url": "file:///image.png"}],
         [{"type": "input_image", "image_url": "data:image/gif;base64,AAAA"}],
         [{"type": "input_image", "image_url": "data:image/png;base64,%%%"}],
         [{"type": "output_text", "text": "Wrong direction."}],

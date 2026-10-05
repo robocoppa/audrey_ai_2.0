@@ -61,8 +61,12 @@ chaining, and client tools remain explicit later slices. Phase 13 Slice 13A adds
 Slice 13B adds bounded json_schema output, provider constraints, terminal
 validation, and clean JSON-only streaming through the same generation paths;
 its targeted live gate passed on 2026-10-05. Slice 13C adds owner-scoped image
-and document file references with admission limits; its laptop gate passes
-and its targeted live smoke is pending.
+and document file references with admission limits; its laptop and targeted
+live gates passed on 2026-10-05. Completed and streamed answers used both
+files, ownership/kind/deletion guards passed, and both uploads were removed.
+Slice 13D adds bounded public image/document URLs with DNS pinning, checked
+redirects, temporary parsing, and joint input limits. Its implementation and
+laptop gate pass; its targeted remote-input live smoke is pending.
 
 Phase 14 started on 2026-10-02. Slice 14A adds a protected Bots access group,
 Bot-targeted model policy, zero-day never-expiring personal tokens, and
@@ -168,7 +172,7 @@ and finally adds the first general skills layer on that owned surface.
 | 10 | [Ordinary-answer provenance](phase-10-ordinary-answer-provenance.md) | Persist deterministic public URL and private file evidence on ordinary tool-backed answers | Phase 09 completion | Complete (10A live-passed) |
 | 11 | [Native file explorer](phase-11-native-file-explorer.md) | Browse, attach, and manage private files through compact folder-style native views | Phase 10 completion | Complete (11A user-closed) |
 | 12 | [Sidebar navigation](phase-12-sidebar-navigation.md) | Simplify primary conversation creation and move My Files into a distinct top-bar action | Phase 11 completion | Revised Slice 12A laptop-complete; native browser gate pending |
-| 13 | [Responses input and structured output](phase-13-responses-multimodal-input.md) | Add bounded typed inputs and JSON Schema output through the shared Responses adapter | Phase 12 implementation | Slice 13B live-settled; Slice 13C laptop-complete; 13A/13C targeted live gates pending |
+| 13 | [Responses input and structured output](phase-13-responses-multimodal-input.md) | Add bounded typed inputs and JSON Schema output through the shared Responses adapter | Phase 12 implementation | Slices 13B/13C live-settled; 13D laptop-complete; 13A/13D live gates pending |
 | 14 | [Bot accounts and token lifetimes](phase-14-bot-accounts-and-token-lifetimes.md) | Add limited automation accounts, intentional permanent PATs, and fresh admin data on every open | Phase 13 implementation | Slice 14A laptop-complete; native acceptance pending |
 | 15 | [Composer controls and Projects](phase-15-composer-and-projects.md) | Clarify and rebalance the composer, then group conversations with reusable instructions and selected-file context | Phase 14 implementation | Complete, including direct project upload |
 | 16 | [Retired Audrey document tools](phase-16-native-document-tools.md) | Record the boundary between Audrey file analysis and the existing Hermes workspace APIs | Architecture review | Retired; no Audrey document or spreadsheet authoring surface |

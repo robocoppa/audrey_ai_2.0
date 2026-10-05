@@ -362,7 +362,8 @@ must report HTTP 400 and `responses_feature_unsupported`.
 
 This targeted proof sends an in-memory red PNG as an inline `input_image`
 beside an `input_text` part. It requires a completed typed response and then
-proves a remote image URL is rejected by validation before generation. It
+proves an unsupported `file://` image URL is rejected before generation. Its
+output ceiling is 4,096 tokens to leave room for vision reasoning. It
 uploads, stores, and deletes nothing.
 
 After rebuilding Audrey, use the working LAN/WARP route and the existing
@@ -381,7 +382,7 @@ cd /home/bart/Documents/github/audrey/audrey_ai_2.0
 Success is exit code zero and JSON ending in `"status": "passed"`. The
 `multimodal` block must report HTTP 200, a `resp_` id, output type
 `output_text`, and `"sentinel": true`. The `unsupported` block must
-report remote-image HTTP 422 and `"validation_error": true`.
+report HTTP 422 for the unsupported URL and `"validation_error": true`.
 
 ## Run the 13B Responses structured output smoke from the laptop
 
@@ -420,8 +421,12 @@ responses_feature_unsupported. No file upload or browser action is needed.
 
 ## Run the 13C Responses file reference smoke from the laptop
 
-**Result:** Live acceptance is pending after an empty-answer failure. Rebuild
-Audrey with the token-limit reporting fix before rerunning this smoke.
+**Result:** Passed and settled on 2026-10-05 over
+`http://192.168.1.11:8000`, based on the user's reported output. Completed
+and streamed answers both read the document code and recognized RED.
+Ownership, missing/deleted, and wrong-kind guards passed; both uploads
+were deleted without cleanup errors. Commands below are retained for
+reproducibility; repeat only when a later change touches this contract.
 
 This tests the Responses API's new references to files already stored in
 Audrey. No browser action, video upload, or existing Ready file is required.
@@ -493,9 +498,69 @@ The follow-up preserves the completed Fast model's token-limit stop reason:
 Responses returns `status: incomplete` with `reason: max_output_tokens`,
 preserving partial text and usage. An empty answer without that stop reason
 returns HTTP 502. On failure, the smoke now retains response id, status,
-usage, answer length, and any incomplete reason. Cleanup still runs. Rebuild
-the backend and rerun only this smoke; no manual upload is needed. The live
-gate remains pending.
+usage, answer length, and any incomplete reason. Cleanup still runs.
+
+**Third attempt, 2026-10-05: Passed.** Completed generation returned HTTP
+200, a 25-character answer using both inputs, 1,376 input tokens, and 205
+output tokens with a 4,096-token ceiling. Streaming returned HTTP 200,
+15 deltas across 23 events, 1,178 input tokens, 179 output tokens, and
+`response.completed`. All four guard results matched their expected HTTP
+statuses, foreign and missing responses matched, and cleanup deleted both
+uploads. No browser action or existing library file was needed.
+
+## Run the 13D Responses remote-input smoke from the laptop
+
+**Result:** Implementation and laptop gates pass; live acceptance is pending.
+
+This API-only slice lets callers provide public image/document URLs directly in
+`POST /v1/responses`. You do not need to upload a PDF, image, or video in the
+browser. The script uses a small [W3C sample PDF](https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf)
+containing "Dummy PDF file" and the [Python logo](https://www.python.org/static/community_logos/python-logo.png).
+It asks Audrey to read the PDF and identify the logo, once as a completed
+response and once as a stream. Each call has a 4,096-token ceiling. Before
+those calls, it checks that private loopback image and document URLs return
+ordinary JSON denials even when streaming was requested.
+
+The script uses the existing `AUDREY_USER_JWT` in laptop `.env.test.local`.
+It does not need an admin token or the eval PAT. It creates no uploads or
+library entries and uses `### Task:` so the two model calls do not enter
+compatibility chat history. Temporary downloads and parsers are cleaned up
+by the backend; there is no operator cleanup step.
+
+First rebuild on Tower from the updated checkout:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey
+```
+
+Then run on the laptop:
+
+```bash
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
+(
+  set -a
+  source .env.test.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_responses_remote_inputs.py
+)
+```
+
+Allow several minutes for the two vision calls. Success is exit zero and
+`"status": "passed"`, with:
+
+- `uploads_created: 0`;
+- `guards.input_image: 422`, `guards.input_file: 422`,
+  `error: responses_remote_input_blocked`, and `before_sse: true`;
+- completed and streamed HTTP 200, `pdf_text: true`, `image_logo: python`,
+  a `resp_` id, and integer token usage;
+- `streamed.terminal: response.completed` and matching non-empty deltas.
+
+If the fixture host is unreachable or returns an HTTP error, the smoke fails
+with a fetch error rather than pretending the model analyzed it. Keep that
+result separate from the already-settled Slice 13C owned-file smoke. This
+single targeted protocol check is the live gate for 13D; there is no new
+native upload or browser flow to retest.
 
 ## Run the 15B Projects restart smoke
 

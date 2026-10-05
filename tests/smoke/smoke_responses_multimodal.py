@@ -109,7 +109,7 @@ def main() -> int:
                     ],
                 }
             ],
-            "max_output_tokens": 32,
+            "max_output_tokens": 4096,
         })
         answer = str(response.get("output_text") or "")
         if response.get("status") != "completed":
@@ -143,7 +143,7 @@ def main() -> int:
                             {"type": "input_text", "text": "Do not generate."},
                             {
                                 "type": "input_image",
-                                "image_url": "https://example.org/image.png",
+                                "image_url": "file:///image.png",
                             },
                         ],
                     }

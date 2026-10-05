@@ -24,7 +24,7 @@ from audrey.pipeline.chat_archive import resolve_conversation_id
 from audrey.pipeline.messages import last_user_text
 from audrey.pipeline.prompts import skill_instruction_for, with_skill_instruction
 from audrey.routes.openai.file_inputs import (
-    has_file_references,
+    has_file_inputs,
     response_input_messages,
     validate_file_prompt,
 )
@@ -352,7 +352,7 @@ async def create_response(
     if format_instruction:
         messages.append({"role": "developer", "content": format_instruction})
     messages.extend(input_messages)
-    if has_file_references(payload):
+    if has_file_inputs(payload):
         await validate_file_prompt(messages)
     chat_payload = ChatCompletionRequest(
         model=payload.model,

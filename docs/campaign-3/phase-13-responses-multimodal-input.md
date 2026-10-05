@@ -1,6 +1,8 @@
 # Campaign 3 Phase 13 - Responses multimodal input
 
-**Status:** Slice 13B is live-settled. Slice 13A remains laptop-complete with its targeted live gate pending. Slice 13C is laptop-complete with its targeted file-reference live gate pending.
+**Status:** Slices 13B and 13C are live-settled. Slice 13A remains
+laptop-complete with its targeted live gate pending. Slice 13D is
+laptop-complete with its remote-input live gate pending.
 
 ## Goal
 
@@ -30,7 +32,7 @@ Contract references:
 
 ## Slice 13A initial boundary
 
-Slice 13A rejects these before generation:
+At its initial release, Slice 13A rejected these before generation:
 
 - HTTP or HTTPS image URLs;
 - OpenAI `file_id` image references;
@@ -39,9 +41,9 @@ Slice 13A rejects these before generation:
 - image parts on non-user roles;
 - unknown content-part types such as output-only `output_text`.
 
-Remote fetching needs a separate SSRF-safe fetch contract. Slice 13C below
-adds the explicit mapping from file ids to Audrey's owner-scoped file store
-and document extraction. The existing HTTP 400
+Slices 13C and 13D below subsequently add owned file ids and public URLs.
+URLs use a separate bounded fetch contract that prevents server-side request
+forgery (SSRF). The existing HTTP 400
 `responses_feature_unsupported` boundary remains unchanged for client tools, stored or chained responses,
 and background execution.
 
@@ -52,11 +54,13 @@ and background execution.
 - Streaming input uses the same adapter and still creates a
   `ResponsesStreamSession`.
 - Message roles and ordering survive typed text adaptation.
-- Remote URLs, file ids, unsupported MIME types, malformed base64, wrong-role
-  images, and unknown part types fail validation.
+- Unsupported URL schemes, unsupported MIME types, malformed base64,
+  wrong-role images, and unknown part types fail validation. Later slices
+  cover owned file ids and bounded public URLs.
 - The targeted smoke generates a valid 32 by 32 red PNG in memory, submits it
   through Responses, requires a completed typed response and sentinel, then
-  proves a remote URL returns HTTP 422 without generation.
+  proves a `file://` URL returns HTTP 422 without generation. Its output
+  ceiling is now 4,096 tokens, matching the measured vision budget.
 
 ## Laptop result
 
@@ -70,7 +74,7 @@ is clean.
 Run `tests/smoke/smoke_responses_multimodal.py` from the laptop against the
 working LAN/WARP backend route after rebuilding Audrey. A pass reports HTTP
 200, a `resp_` id, `output_text`, the `RESPONSES_IMAGE_OK` sentinel,
-integer usage, and HTTP 422 for a remote image URL.
+integer usage, and HTTP 422 for an unsupported `file://` image URL.
 
 ## Slice 13B - structured text output
 
@@ -217,8 +221,8 @@ compilation, and the diff check pass.
 
 ### Slice 13C targeted live gate
 
-After rebuilding Audrey, run
-`tests/smoke/smoke_responses_file_inputs.py` from the laptop at
+The settled gate uses `tests/smoke/smoke_responses_file_inputs.py` from
+the laptop at
 `http://192.168.1.11:8000`. The exact command and credential names are in
 [the live smoke runbook](../reference/live-smoke-testing.md#run-the-13c-responses-file-reference-smoke-from-the-laptop).
 
@@ -230,18 +234,146 @@ image as red. The script also proves both reference types deny a second owner
 with the same HTTP 404 as a missing id, rejects the wrong file kind, deletes
 both temporary uploads, and proves deleted references return HTTP 404.
 
-**Live status:** Two attempts have not passed. Expired Access assertions
-blocked the first attempt before uploads. After refreshing credentials, the
-second attempt uploaded and indexed both files, received an empty completed
-answer, and deleted both uploads. A follow-up raises the smoke's output ceiling
-from 64 to 4,096 tokens, using the existing vision measurements, and preserves
-Fast token-limit status instead of declaring success. The next failure report
-will include response status, usage, answer length, and any incomplete reason.
-The actual live stop cause remains unconfirmed; rebuild and rerun this gate.
+**Live status: Passed, 2026-10-05**, from the user's reported result over
+`http://192.168.1.11:8000`, after the output-budget and status follow-up.
 
-HTTP and HTTPS image or document URLs, inline `file_data`, PDF visual detail,
-client-provided tools, stored response chaining, and background execution remain
-separate capabilities. Remote fetching requires an explicit SSRF-safe contract.
+| Check | Observed result |
+|---|---|
+| Uploads | Two files reached Ready |
+| Completed answer | HTTP 200; document sentinel and RED; status completed; 25 characters |
+| Completed usage | 1,376 input tokens and 205 output tokens; 4,096-token ceiling |
+| Streamed answer | HTTP 200; document sentinel and RED; response.completed; 15 deltas across 23 events |
+| Streamed usage | 1,178 input tokens and 179 output tokens |
+| Owner and existence guards | Foreign, missing, and deleted references returned HTTP 404; same not-found response |
+| Kind guard | Wrong file kind returned HTTP 422 |
+| Cleanup | Both temporary uploads deleted; no cleanup errors |
+
+Earlier attempts stopped on expired Access assertions, then on an empty
+answer under a 64-token ceiling. The corrected smoke uses the measured
+4,096-token vision ceiling. Both successful calls generated more than 64
+tokens, supporting the budget change; the earlier upstream stop cause was
+not captured. Token-limit and empty-answer error semantics remain covered
+by the laptop regressions. This gate is settled; repeat only if a later
+change touches these contracts.
+
+Slice 13D below adds HTTP(S) image/document URLs. Inline `file_data`, PDF
+visual detail, client-provided tools, stored response chaining, and background
+execution remain separate capabilities.
 
 Contract references: [OpenAI file inputs](https://developers.openai.com/api/docs/guides/file-inputs)
 and [Responses request schema](https://developers.openai.com/api/reference/resources/responses/methods/create).
+
+## Slice 13D - bounded public URL inputs
+
+Both completed and streamed Responses requests accept these additional sources:
+
+| Part | Source | Adaptation |
+|---|---|---|
+| `input_image` | Public HTTP(S) `image_url`, mutually exclusive with `file_id` | Sniffed JPEG/PNG/WEBP, first frame, metadata-free JPEG preview, at most 1600 by 1600 pixels |
+| `input_file` | Public HTTP(S) `file_url`, mutually exclusive with `file_id` | Extracted PDF/DOCX/HTML/plain-text/Markdown/CSV/RST text quoted as user evidence |
+
+Parts remain user-message evidence only. Existing authentication resolves a
+principal before file admission; remote input does not grant a different account,
+model, or skill policy. Caller headers, cookies, and access credentials are never
+sent to the source host. Downloaded inputs are temporary and do not create My Files
+entries, ingestion jobs, embeddings, or project references. Ordinary compatibility
+archive behavior still applies to the generated turn.
+
+For example:
+
+```json
+{
+  "model": "audrey_fast",
+  "max_output_tokens": 4096,
+  "input": [{
+    "role": "user",
+    "content": [
+      {"type": "input_text", "text": "Explain this document and its image."},
+      {"type": "input_file", "file_url": "https://example.org/report.pdf"},
+      {"type": "input_image", "image_url": "https://example.org/chart.png"}
+    ]
+  }]
+}
+```
+
+### URL and connection contract
+
+- Only HTTP port 80 and HTTPS port 443 are admitted. Embedded credentials,
+  unsupported schemes, malformed URLs, control characters, backslashes, scoped
+  IPv6 addresses, and URLs over 4,096 characters are rejected.
+- All initial destinations are resolved and vetted before any HTTP request.
+  Every returned address must be globally routable. Loopback, private, link-local,
+  shared/Tailscale, multicast, reserved, site-local, special protocol, and
+  Teredo/6to4/NAT64 addresses are blocked.
+  DNS failure fails closed; container search domains are not used.
+- Each socket connects to a vetted numeric address. The original hostname remains
+  in Host and TLS SNI, and HTTPS certificates are verified against that name.
+  Only connection failures try another address from the same vetted list.
+- Redirects are manual, capped at three, and revalidate the next URL and every DNS
+  answer before connecting. HTTPS cannot redirect to HTTP. Connections are not
+  reused between hops, ensuring each hostname receives its own certificate check.
+- The dedicated HTTP transport ignores proxy environment variables, has no cookie
+  jar, and avoids HTTPX's full-URL INFO logging. Signed query parameters are used
+  for the request but stripped from quoted source evidence and archives.
+- HTTP compression is disabled and non-identity Content-Encoding is rejected.
+  Raw bytes are streamed under their cap even without a Content-Length. Oversized
+  declared lengths are rejected without reading the body; non-200 final responses
+  and empty bodies fail explicitly.
+
+### Download and parsing limits
+
+The Slice 13C count, image, document byte/character/token, and final prompt limits
+also apply to remote inputs and mixed owned/remote requests. Repeated inputs count
+again. Additional remote bounds are:
+
+| Limit | Value |
+|---|---|
+| Image source | 6 MiB per remote image |
+| Total remote download bodies | 32 MiB per request |
+| Remote admission | 45 seconds total, including queue wait, DNS, downloads, and parsing |
+| Concurrent remote admissions | 4 per backend worker |
+| Each fetch | 30 seconds total; 5-second connect and 10-second read/write/pool operations |
+| Parser wall time | 15 seconds per asset |
+| Parser CPU time / address space | 10 seconds / 512 MiB per Linux child process |
+| Image pixels before decoding | 50 million |
+| DOCX archive | 1,000 entries and 32 MiB total expanded contents |
+
+Bytes are sniffed with libmagic; headers and filename extensions cannot make
+an arbitrary blob into a supported input. Explicit Content-Type must match the
+sniffed kind, with normal text-type aliases and octet-stream/no-header handling.
+A disposable process applies the resource limits and reuses the existing document
+loaders. The parent kills and reaps it on timeout or cancellation and removes the
+private temporary directory. This is resource containment, not a general OS sandbox.
+
+PDFs contribute their text layer only. Scanned or empty PDFs must use Audrey's
+existing upload/OCR flow; URL input does not start OCR or process page images.
+Unsupported, corrupt, encrypted, or empty content is rejected. Excess byte,
+character, token, pixel, archive, or parser resource budgets return HTTP 413;
+blocked destinations and invalid content return HTTP 422. Fetch failures return
+HTTP 502, as do unexpected parser exits. Timeouts return HTTP 504 and parser
+startup failure HTTP 503. All admission
+failures are ordinary JSON responses before a model call or SSE stream opens.
+
+### Slice 13D verification
+
+**Laptop result, 2026-10-05:** 194 focused remote/file/Responses/structured-output
+and harness cases pass. The full hermetic backend suite passes 3,309 tests with
+the existing FastAPI deprecation warning. Scoped Ruff, compilation, and the diff
+check pass. Tests cover mixed public/private DNS answers, rebinding after vetting,
+IP-pinned Host/SNI routing, connection fallback, redirect denial and cookie
+isolation, raw byte and deadline bounds, real image/PDF/DOCX parsing, quoted
+evidence, shared budgets, JSON denials before SSE, and child cleanup after timeout
+and cancellation. Signed query parameters are absent from HTTP logs and forwarded
+evidence.
+
+**Live result:** Pending user deployment and the targeted
+`tests/smoke/smoke_responses_remote_inputs.py` result. It uses a public W3C sample
+PDF and Python logo, requires both inputs in one completed and one streamed
+answer, and proves image/document loopback destinations return JSON HTTP 422
+before SSE. No browser upload, existing library file, admin token, or cleanup
+repair is needed. Exact steps are in
+[the live runbook](../reference/live-smoke-testing.md#run-the-13d-responses-remote-input-smoke-from-the-laptop).
+Slice 13C remains live-settled and is not repeated.
+
+Official URL field references: [OpenAI file inputs](https://developers.openai.com/api/docs/guides/file-inputs)
+and [OpenAI image inputs](https://developers.openai.com/api/docs/guides/images-vision).

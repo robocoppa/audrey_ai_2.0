@@ -292,7 +292,7 @@ async def test_preview_byte_limit(library, monkeypatch):
     {"type": "input_image", "file_id": "file_doc", "image_url": "data:image/png;base64,AAAA"},
     {"type": "input_file", "file_id": ""},
     {"type": "input_file", "file_id": "../secret"},
-    {"type": "input_file", "file_url": "https://example.org/document.pdf"},
+    {"type": "input_file", "file_url": "file:///document.pdf"},
     {"type": "input_file", "file_data": "base64", "filename": "doc.txt"},
     {"type": "input_file", "file_id": "file_doc", "detail": "high"},
 ])

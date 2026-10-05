@@ -16,6 +16,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from audrey.net.public_fetch import parse_public_url
+
 log = logging.getLogger(__name__)
 
 ChatContent = str | list[dict[str, Any]]
@@ -325,7 +327,7 @@ class ResponseInputText(BaseModel):
 
 
 class ResponseInputImage(BaseModel):
-    """One inline image or authenticated Audrey image reference."""
+    """One inline/public image URL or authenticated Audrey image reference."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -339,6 +341,8 @@ class ResponseInputImage(BaseModel):
     def require_inline_supported_image(cls, value: str | None) -> str | None:
         if value is None:
             return value
+        if not value.startswith("data:"):
+            return str(parse_public_url(value))
         header, separator, payload = value.partition(",")
         mime = header.removeprefix("data:").removesuffix(";base64")
         if (
@@ -367,12 +371,24 @@ class ResponseInputImage(BaseModel):
 
 
 class ResponseInputFile(BaseModel):
-    """One ready document in the authenticated caller's Audrey library."""
+    """One ready Audrey document or a temporary public document URL."""
 
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["input_file"]
-    file_id: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$")
+    file_id: str | None = Field(default=None, min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$")
+    file_url: str | None = Field(default=None, min_length=1, max_length=4096)
+
+    @field_validator("file_url")
+    @classmethod
+    def require_public_url_shape(cls, value: str | None) -> str | None:
+        return str(parse_public_url(value)) if value is not None else None
+
+    @model_validator(mode="after")
+    def require_one_source(self) -> ResponseInputFile:
+        if (self.file_url is None) == (self.file_id is None):
+            raise ValueError("input_file requires exactly one of file_url or file_id")
+        return self
 
 
 ResponseInputContentPart = Annotated[
