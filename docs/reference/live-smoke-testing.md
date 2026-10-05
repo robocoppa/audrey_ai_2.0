@@ -531,7 +531,9 @@ output, and changed-output denial. The remaining jobs must finish as rejected
 and cancelled. Verification deletes every probe job, approval, version, and
 derivation, then removes the snapshot.
 
-If capture succeeds but verification will not be run, clean up from Tower:
+If capture succeeds but verification will not be run, or verification reports
+that its functional checks passed but cleanup failed, sync the corrected runner
+and clean up from Tower without repeating capture or restart:
 
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0

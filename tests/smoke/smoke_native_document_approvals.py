@@ -183,7 +183,8 @@ def _cleanup(snapshot: dict[str, Any]) -> dict[str, int]:
         raise SmokeError("snapshot omitted document jobs")
     job_ids = [str(row.get("id") or "") for row in jobs.values() if isinstance(row, dict)]
     user_id = str(snapshot.get("user_id") or "")
-    versions = [str(snapshot.get("version_id") or "")]
+    source_version_id = str(snapshot.get("version_id") or "")
+    output_version_ids: list[str] = []
     with sqlite3.connect(DATABASE_PATH) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
         for job_id in job_ids:
@@ -192,11 +193,15 @@ def _cleanup(snapshot: dict[str, Any]) -> dict[str, int]:
                 (user_id, job_id),
             ).fetchone()
             if row is not None and row[0]:
-                versions.append(str(row[0]))
+                output_version_ids.append(str(row[0]))
         deleted_jobs = sum(max(0, connection.execute(
             "DELETE FROM app_document_jobs WHERE user_id = ? AND job_id = ?",
             (user_id, job_id),
         ).rowcount) for job_id in job_ids)
+        # A derived version names the source as its immutable parent. Delete
+        # every derived output first so the source can then be removed without
+        # violating app_file_versions.parent_version_id.
+        versions = [*dict.fromkeys(output_version_ids), source_version_id]
         deleted_versions = sum(max(0, connection.execute(
             "DELETE FROM app_file_versions WHERE user_id = ? AND version_id = ?",
             (user_id, version_id),
@@ -411,7 +416,7 @@ def verify() -> dict[str, Any]:
     if primary_error is not None:
         raise primary_error
     if cleanup_error is not None:
-        raise SmokeError(f"cleanup failed: {cleanup_error}")
+        raise SmokeError(f"verification passed but cleanup failed: {cleanup_error}")
     return result
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -56,3 +58,75 @@ def test_readiness_fails_immediately_when_access_assertion_is_rejected(monkeypat
         smoke.BACKEND_HEALTH_URL,
         "/api/capabilities",
     ]
+
+
+def test_cleanup_removes_derived_output_before_its_source(tmp_path, monkeypatch):
+    database_path = tmp_path / "app.sqlite"
+    store = smoke.ApplicationStore(database_path)
+    owner = asyncio.run(store.resolve_external_identity(
+        provider="owui",
+        subject="cleanup-owner",
+        email="alice@example.com",
+        display_name="Alice",
+        role="user",
+        auth_method="owui_bearer",
+        legacy_storage_namespace="alice@example.com",
+    ))
+    source = asyncio.run(store.document_tools.register_source_version(
+        user_id=owner.user_id,
+        file_id="smoke_cleanup_source",
+        filename="source.txt",
+        mime="text/plain",
+        bytes_count=6,
+        content_sha256=smoke._hash("source"),
+    ))
+    job, approval = asyncio.run(smoke._create_request(
+        store,
+        user_id=owner.user_id,
+        version_id=source.version_id,
+        suffix="cleanup",
+        label="published",
+    ))
+    asyncio.run(store.document_tools.decide(
+        user_id=owner.user_id,
+        job_id=job.job_id,
+        actor_user_id=owner.user_id,
+        operation_digest=approval.operation_digest,
+        decision="approved",
+    ))
+    claimed = asyncio.run(store.document_tools.claim_next(
+        lease_id="cleanup-worker",
+        lease_seconds=60,
+    ))
+    assert claimed is not None
+    _completed, output = asyncio.run(store.document_tools.publish(
+        user_id=owner.user_id,
+        job_id=job.job_id,
+        lease_id="cleanup-worker",
+        output_file_id="smoke_cleanup_output",
+        filename="output.docx",
+        mime=job.output_mime,
+        bytes_count=12,
+        content_sha256=smoke._hash("output"),
+        worker_version="smoke-test/1",
+    ))
+    assert output.parent_version_id == source.version_id
+    store.close()
+
+    monkeypatch.setattr(smoke, "DATABASE_PATH", database_path)
+    result = smoke._cleanup({
+        "schema": 1,
+        "user_id": owner.user_id,
+        "version_id": source.version_id,
+        "jobs": {"running": {"id": job.job_id}},
+    })
+
+    assert result == {"jobs": 1, "versions": 2}
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM app_document_jobs"
+        ).fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT COUNT(*) FROM app_file_versions"
+        ).fetchone()[0] == 0
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
