@@ -314,3 +314,20 @@ async def test_ollama_stream_forwards_format_schema():
 
     assert chunks[-1]["done"] is True
     assert seen["format"] == _schema()
+
+
+@pytest.mark.parametrize("content", ["", '{"answer":'])
+async def test_token_limited_json_is_incomplete_instead_of_schema_failure(monkeypatch, content):
+    async def generate(*_args, **_kwargs):
+        result = _chat_result(content)
+        result["choices"][0]["finish_reason"] = "length"
+        return result
+
+    monkeypatch.setattr(openai_routes, "_create_chat_completion", generate)
+
+    result = await create_response(_payload(), _request(), _user())
+
+    assert result["status"] == "incomplete"
+    assert result["incomplete_details"] == {"reason": "max_output_tokens"}
+    assert result["output_text"] == content
+    assert result["usage"]["output_tokens"] == 5

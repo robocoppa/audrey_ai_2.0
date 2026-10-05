@@ -201,14 +201,18 @@ limits, preserving its existing paged reading flow.
 - Per-file, aggregate, repeated-reference, mixed-image, instruction, and final
   prompt budgets are enforced.
 - HTTP route tests exercise parsing, the owner denial, and both answer formats.
+- Completed Fast token limits return incomplete status, reason, partial text,
+  and usage, including reasoning-only replies. Empty normal completions return
+  HTTP 502; truncated JSON is incomplete rather than a schema error.
+- A successful Deep answer ignores a previous Fast attempt's token-limit stop.
 - Live harness tests prove stream consistency, terminal success, color checking,
-  and cleanup on model, upload, or deletion failure.
+  failure diagnostics, and cleanup on model, upload, or deletion failure.
 
 ### Slice 13C laptop result
 
-**Passed, 2026-10-05.** Focused file-reference, Responses, native-file, and
-harness tests pass 110 cases. The full hermetic backend suite passes 3,210
-tests with the existing FastAPI deprecation warning. Scoped Ruff, Python
+**Passed, 2026-10-05.** Focused file-reference, Responses, structured-output,
+Fast-path, vision, and harness tests pass 145 cases. The full hermetic backend
+suite passes 3,224 tests with the existing FastAPI deprecation warning. Scoped Ruff, Python
 compilation, and the diff check pass.
 
 ### Slice 13C targeted live gate
@@ -226,7 +230,14 @@ image as red. The script also proves both reference types deny a second owner
 with the same HTTP 404 as a missing id, rejects the wrong file kind, deletes
 both temporary uploads, and proves deleted references return HTTP 404.
 
-**Live status:** Pending user deployment and result.
+**Live status:** Two attempts have not passed. Expired Access assertions
+blocked the first attempt before uploads. After refreshing credentials, the
+second attempt uploaded and indexed both files, received an empty completed
+answer, and deleted both uploads. A follow-up raises the smoke's output ceiling
+from 64 to 4,096 tokens, using the existing vision measurements, and preserves
+Fast token-limit status instead of declaring success. The next failure report
+will include response status, usage, answer length, and any incomplete reason.
+The actual live stop cause remains unconfirmed; rebuild and rerun this gate.
 
 HTTP and HTTPS image or document URLs, inline `file_data`, PDF visual detail,
 client-provided tools, stored response chaining, and background execution remain

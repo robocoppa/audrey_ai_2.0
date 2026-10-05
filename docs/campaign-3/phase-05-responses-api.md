@@ -45,6 +45,13 @@ item containing `output_text`, a matching top-level `output_text`, and
 Responses-style token usage. It does not return a Chat Completions
 `choices` array.
 
+The Phase 13C follow-up preserves token-limit stops from completed Fast
+generation: `status: incomplete`, `completed_at: null`, and
+`incomplete_details.reason: max_output_tokens`, with partial text and usage.
+A reasoning-only truncated reply can have an empty output list. Empty normal
+completions return HTTP 502. See [Phase 13](phase-13-responses-multimodal-input.md)
+for the current verification and live gate.
+
 ## Slice 5B - typed streaming responses
 
 A request with `stream: true` now returns `text/event-stream` using the

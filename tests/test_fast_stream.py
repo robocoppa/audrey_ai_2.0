@@ -977,3 +977,35 @@ async def test_route_archives_missing_done_as_partial_without_banner_text(
     assert archive.calls[0]["assistant_content"] == "partial answer"
     assert archive.calls[0]["partial"] is True
     assert archive.calls[0]["concrete_model"] == "a"
+
+
+@pytest.mark.parametrize(
+    ("mode", "done_reason", "expected_finish"),
+    [("fast", "length", "length"), ("fast", "stop", "stop"), ("deep", "length", "stop")],
+)
+async def test_nonstream_preserves_final_fast_truncation_without_tainting_deep(
+    mode, done_reason, expected_finish,
+):
+    class FinalGraph(_FixedGraph):
+        async def ainvoke(self, state):
+            final = await super().ainvoke(state)
+            final.update(mode=mode, fast_done_reason=done_reason)
+            return final
+
+    archive = _RecordingArchive()
+    app = SimpleNamespace(state=SimpleNamespace(
+        graph=FinalGraph(),
+        inflight=UserInflightRegistry(max_inflight_per_user=2),
+        archive_client=archive, tools=_NoTools(), cfg=_Cfg(("a", 100, "local")),
+    ))
+    messages = [{"role": "user", "content": "Explain this."}]
+    payload = ChatCompletionRequest(model="audrey_fast", messages=messages)
+
+    result = await _generate_via_pipeline(
+        app, payload, messages, {}, user_id="alice@example.com",
+        conversation_id="conversation-1", user_turn_text="Explain this.",
+    )
+
+    assert result["choices"][0]["finish_reason"] == expected_finish
+    assert result["choices"][0]["message"]["content"] == "utility result"
+    assert archive.calls[0]["partial"] is (expected_finish == "length")

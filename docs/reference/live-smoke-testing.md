@@ -420,14 +420,17 @@ responses_feature_unsupported. No file upload or browser action is needed.
 
 ## Run the 13C Responses file reference smoke from the laptop
 
-**Result:** Implementation and laptop contracts pass; live deployment is pending.
+**Result:** Live acceptance is pending after an empty-answer failure. Rebuild
+Audrey with the token-limit reporting fix before rerunning this smoke.
 
 This tests the Responses API's new references to files already stored in
 Audrey. No browser action, video upload, or existing Ready file is required.
 The script creates and uploads one tiny text file with a randomized code and
 one red PNG under the smoke user. It waits for both files to become Ready,
 then makes one completed and one streamed Fast model call. Each answer must
-read the document's code and recognize the image's red color.
+read the document's code and recognize the image's red color. Each call has
+a 4,096-token output ceiling so vision reasoning can finish before the short
+visible answer. This is a ceiling, not a required answer length.
 
 Both Cloudflare Access application assertions are required:
 `AUDREY_USER_JWT` and `AUDREY_ADMIN_JWT`, already stored in the laptop's
@@ -469,6 +472,30 @@ exit code zero and JSON ending in `"status": "passed"`, with:
 The script deletes only its temporary uploads, including when a model call
 fails. This protocol check is the acceptance gate for Slice 13C. Existing
 native browser upload and chat acceptance remains recorded as passed.
+
+**First attempt, 2026-10-05:** Stopped at the initial `GET /api/me` with HTTP
+401, before uploads or model calls. Both saved laptop Access assertions had
+expired on 2026-10-04. `uploads_deleted: 0` is expected because no uploads were
+created. Refresh both values in `.env.test.local` from the `CF_Authorization`
+application cookies on `ai.builtryte.xyz`, using separate signed-in user and
+admin browser profiles, then rerun this same targeted smoke. A rebuild is not
+needed for a credential refresh.
+
+**Second attempt, 2026-10-05:** Authentication worked, both uploads became
+Ready, and cleanup deleted both files. The first completed answer was empty;
+the smoke stopped before its streamed and denial checks. The old harness
+hid response usage and status details, so the live stop cause is unconfirmed.
+Its 64-token ceiling could be exhausted by vision-model thinking. Existing
+vision measurements in `config.yaml` show even 2,048 tokens can produce no
+visible answer; the corrected harness uses the established 4,096-token ceiling.
+
+The follow-up preserves the completed Fast model's token-limit stop reason:
+Responses returns `status: incomplete` with `reason: max_output_tokens`,
+preserving partial text and usage. An empty answer without that stop reason
+returns HTTP 502. On failure, the smoke now retains response id, status,
+usage, answer length, and any incomplete reason. Cleanup still runs. Rebuild
+the backend and rerun only this smoke; no manual upload is needed. The live
+gate remains pending.
 
 ## Run the 15B Projects restart smoke
 

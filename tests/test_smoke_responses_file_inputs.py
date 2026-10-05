@@ -43,7 +43,7 @@ def test_color_check_requires_a_word_not_incidental_substring():
         smoke._validate_response(_response("FILE_REF_TEST considered BLUE"), "FILE_REF_TEST")
 
 
-@pytest.mark.parametrize("failure", [None, "generation", "second_upload", "cleanup"])
+@pytest.mark.parametrize("failure", [None, "generation", "second_upload", "cleanup", "empty_answer", "incomplete"])
 def test_smoke_always_attempts_cleanup_of_created_uploads(monkeypatch, capsys, failure):
     monkeypatch.setattr(smoke, "BASE_URL", "http://example.test")
     monkeypatch.setattr(smoke, "USER_TOKEN", "user-test")
@@ -78,7 +78,10 @@ def test_smoke_always_attempts_cleanup_of_created_uploads(monkeypatch, capsys, f
             return 422, {"detail": "wrong kind"}
         if failure == "generation":
             raise smoke.SmokeError("model failed")
-        return 200, _response(sentinel + " RED")
+        response = _response("" if failure in {"empty_answer", "incomplete"} else sentinel + " RED")
+        if failure == "incomplete":
+            response.update(status="incomplete", incomplete_details={"reason": "max_output_tokens"})
+        return 200, response
 
     monkeypatch.setattr(smoke, "_upload", upload)
     monkeypatch.setattr(smoke, "_wait_ready", lambda _ids: None)
@@ -95,3 +98,36 @@ def test_smoke_always_attempts_cleanup_of_created_uploads(monkeypatch, capsys, f
         assert result["cleanup"]["uploads_deleted"] == 2
         assert result["guards"]["deleted_http"] == 404
         assert len(probes) == 5
+    if failure in {"empty_answer", "incomplete"}:
+        assert result["completed"]["answer_chars"] == 0
+        assert result["completed"]["output_tokens"] == 4
+        assert result["completed"]["id"] == "resp_test"
+        assert result["cleanup"]["uploads_deleted"] == 2
+    if failure == "incomplete":
+        assert result["completed"]["incomplete_details"] == {"reason": "max_output_tokens"}
+
+
+def test_smoke_allows_thinking_before_the_short_visible_answer():
+    completed = smoke._payload("document", "image", stream=False)
+    streamed = smoke._payload("document", "image", stream=True)
+
+    assert completed["max_output_tokens"] == streamed["max_output_tokens"]
+    assert completed["max_output_tokens"] >= 4096
+
+
+def test_incomplete_stream_keeps_stop_reason_and_usage_in_failure():
+    response = _response("")
+    response.update(status="incomplete", incomplete_details={"reason": "max_output_tokens"})
+    events = [
+        {"type": "response.created", "sequence_number": 0},
+        {"type": "response.incomplete", "sequence_number": 1, "response": response},
+    ]
+    body = "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events).encode()
+
+    with pytest.raises(smoke.SmokeError) as exc:
+        smoke._validate_stream(body, "text/event-stream", "FILE_REF_TEST")
+
+    assert "response.incomplete" in str(exc.value)
+    assert "max_output_tokens" in str(exc.value)
+    assert "'output_tokens': 4" in str(exc.value)
+    assert "'answer_chars': 0" in str(exc.value)

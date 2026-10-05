@@ -483,3 +483,42 @@ async def test_streaming_response_uses_shared_generation_with_responses_session(
 def test_responses_route_is_registered():
     route = next(item for item in router.routes if item.path == "/v1/responses")
     assert "POST" in route.methods
+
+
+@pytest.mark.parametrize("content", ["", "A partial answer"])
+async def test_completed_token_limit_returns_incomplete_not_success(monkeypatch, content):
+    async def generate(*_args):
+        result = _chat_result(content=content)
+        result["choices"][0]["finish_reason"] = "length"
+        return result
+
+    monkeypatch.setattr(openai_routes, "chat_completions", generate)
+    payload = ResponseCreateRequest(model="audrey_fast", input="Explain this.", max_output_tokens=4)
+
+    result = await create_response(payload, _request(), _user())
+
+    assert result["status"] == "incomplete"
+    assert result["completed_at"] is None
+    assert result["incomplete_details"] == {"reason": "max_output_tokens"}
+    assert result["output_text"] == content
+    assert result["usage"]["output_tokens"] == 4
+    if content:
+        assert result["output"][0]["status"] == "incomplete"
+        assert result["output"][0]["content"][0]["text"] == content
+    else:
+        assert result["output"] == []
+
+
+@pytest.mark.parametrize("content", ["", " \n\t"])
+async def test_empty_answer_without_token_limit_is_an_upstream_error(monkeypatch, content):
+    async def generate(*_args):
+        return _chat_result(content=content)
+
+    monkeypatch.setattr(openai_routes, "chat_completions", generate)
+    payload = ResponseCreateRequest(model="audrey_fast", input="Explain this.")
+
+    with pytest.raises(HTTPException) as exc:
+        await create_response(payload, _request(), _user())
+
+    assert exc.value.status_code == 502
+    assert exc.value.detail == "generation completed without an answer"

@@ -47,9 +47,9 @@ def _to_openai_response(
     prompt_tokens: int,
     completion_tokens: int,
     tool_calls: list[dict[str, Any]] | None = None,
+    finish_reason: str = "stop",
 ) -> dict[str, Any]:
     message: dict[str, Any] = {"role": "assistant", "content": content}
-    finish_reason = "stop"
     if tool_calls:
         message["tool_calls"] = tool_calls
         finish_reason = "tool_calls"
@@ -89,7 +89,11 @@ def _to_responses_api_response(
     content = message.get("content")
     if not isinstance(content, str):
         raise ValueError("generation returned no text content")
-    validate_structured_output(content, request)
+    truncated = choices[0].get("finish_reason") == "length"
+    if not truncated:
+        if not content.strip():
+            raise ValueError("generation completed without an answer")
+        validate_structured_output(content, request)
 
     usage = chat_response.get("usage") or {}
     input_tokens = int(usage.get("prompt_tokens", 0) or 0)
@@ -100,11 +104,13 @@ def _to_responses_api_response(
         response_id=f"resp_{uuid.uuid4().hex}",
         message_id=f"msg_{uuid.uuid4().hex}",
         created_at=created_at,
-        completed_at=int(time.time()),
-        status="completed",
+        completed_at=None if truncated else int(time.time()),
+        status="incomplete" if truncated else "completed",
         content=content,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        output_started=bool(content) if truncated else True,
+        incomplete_details={"reason": "max_output_tokens"} if truncated else None,
     )
 
 

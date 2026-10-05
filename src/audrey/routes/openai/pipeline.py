@@ -181,6 +181,14 @@ async def _generate_via_pipeline(
         except OllamaError as e:
             raise HTTPException(status_code=502, detail=f"Ollama error: {e}") from e
 
+    # A previous fast attempt may remain in state after deep escalation.
+    # Only the final fast answer inherits that attempt's token-limit stop.
+    finish_reason = (
+        "length"
+        if final.get("mode") == "fast" and final.get("fast_done_reason") == "length"
+        else "stop"
+    )
+
     # Commit the compact local outbox row after generation. Remote HTTP,
     # embedding, and Qdrant indexing belong to the lifecycle-owned worker.
     archive_client: ChatArchiveQueue | None = getattr(
@@ -195,7 +203,7 @@ async def _generate_via_pipeline(
             conversation_id=conversation_id,
             user_content=user_turn_text,
             assistant_content=str(final.get("content", "") or ""),
-            partial=False,
+            partial=finish_reason == "length",
             virtual_model=payload.model,
             concrete_model=str(final.get("concrete_model", "?")),
             prompt_tokens=int(final.get("prompt_eval_count", 0)),
@@ -220,7 +228,7 @@ async def _generate_via_pipeline(
             names = ",".join(c.get("name", "?") for c in calls) or "-"
             extra = f" tool_rounds={rounds} tool_calls=[{names}]"
     log.info(
-        "chat.completions model=%s task=%s(%s, conf=%.2f) mode=%s -> %s%s",
+        "chat.completions model=%s task=%s(%s, conf=%.2f) mode=%s -> %s%s finish=%s",
         payload.model,
         final.get("task_type"),
         final.get("classify_reason"),
@@ -228,6 +236,7 @@ async def _generate_via_pipeline(
         final.get("mode"),
         final.get("concrete_model"),
         extra,
+        finish_reason,
     )
     content = final.get("content", "") or ""
     # Debug/eval parity with the streaming path: append the debug block when
@@ -257,6 +266,7 @@ async def _generate_via_pipeline(
         content=content,
         prompt_tokens=int(final.get("prompt_eval_count", 0)),
         completion_tokens=int(final.get("eval_count", 0)),
+        finish_reason=finish_reason,
     )
 
 

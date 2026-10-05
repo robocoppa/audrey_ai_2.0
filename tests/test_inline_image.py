@@ -291,3 +291,30 @@ async def test_sidecar_off_restores_the_vl_pin_for_deep_picks(monkeypatch):
     assert out["mode"] == "fast"
     assert out["task_type"] == "vl"
     assert calls == []
+
+
+async def test_fast_vision_token_limit_survives_graph_state(monkeypatch):
+    async def generate(*_args, **_kwargs):
+        return "qwen3-vl:32b", {
+            "message": {"content": "", "thinking": "reasoning without a visible answer"},
+            "done_reason": "length", "prompt_eval_count": 15, "eval_count": 64,
+        }
+
+    monkeypatch.setattr(gmod, "run_fast_path", generate)
+    cfg = get_config()
+    ollama = OllamaClient(base_url="http://unused")
+    try:
+        graph = gmod.build_graph(
+            cfg, ollama, ModelRegistry(cfg), HealthTracker(),
+            FairLocalGate(concurrency=1), _NoTools(), _HTTP,
+        )
+        result = await graph.nodes["fast_path"].bound.ainvoke({
+            "task_type": "vl", "messages": [{"role": "user", "content": _IMAGE_CONTENT}],
+        })
+    finally:
+        await ollama.aclose()
+
+    assert result["fast_done_reason"] == "length"
+    assert result["content"] == ""
+    assert result["eval_count"] == 64
+    assert "thinking" not in result

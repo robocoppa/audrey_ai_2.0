@@ -104,7 +104,8 @@ def _wait_ready(file_ids: list[str]) -> None:
 
 def _payload(document_id: str, image_id: str, *, stream: bool) -> dict[str, Any]:
     return {
-        "model": MODEL, "stream": stream, "max_output_tokens": 64,
+        # Leave room for vision-model thinking before the short visible answer.
+        "model": MODEL, "stream": stream, "max_output_tokens": 4096,
         "input": [{"role": "user", "content": [
             {"type": "input_text", "text": (
                 "### Task:\nRead the launch code from the attached document and "
@@ -117,12 +118,27 @@ def _payload(document_id: str, image_id: str, *, stream: bool) -> dict[str, Any]
     }
 
 
+def _response_diagnostics(response: dict[str, Any]) -> dict[str, Any]:
+    """Keep failure evidence bounded, without prompts or model thinking."""
+    text = str(response.get("output_text") or "")
+    usage = response.get("usage") or {}
+    return {
+        "id": response.get("id"), "status": response.get("status"),
+        "model": response.get("model"),
+        "max_output_tokens": response.get("max_output_tokens"),
+        "incomplete_details": response.get("incomplete_details"),
+        "input_tokens": usage.get("input_tokens"),
+        "output_tokens": usage.get("output_tokens"),
+        "answer_chars": len(text), "answer_excerpt": text[-500:],
+    }
+
+
 def _validate_response(response: dict[str, Any], sentinel: str) -> dict[str, Any]:
     if response.get("status") != "completed" or not str(response.get("id", "")).startswith("resp_"):
-        raise SmokeError(f"invalid completed response: {response}")
+        raise SmokeError(f"invalid completed response: {_response_diagnostics(response)}")
     text = str(response.get("output_text") or "")
     if sentinel not in text or not re.search(r"\bRED\b", text, re.IGNORECASE):
-        raise SmokeError(f"answer did not use both file inputs: {text[-500:]!r}")
+        raise SmokeError(f"answer did not use both file inputs: {_response_diagnostics(response)}")
     output = response.get("output") or []
     if len(output) != 1 or output[0].get("content", [{}])[0].get("type") != "output_text":
         raise SmokeError("completed response omitted its typed output_text")
@@ -153,7 +169,12 @@ def _validate_stream(body: bytes, content_type: str, sentinel: str) -> dict[str,
             raise SmokeError("Responses SSE label did not match its typed event")
         events.append(event)
     if not events or events[0].get("type") != "response.created" or events[-1].get("type") != "response.completed":
-        raise SmokeError("Responses stream did not start and complete normally")
+        terminal = events[-1] if events else {}
+        diagnostics = _response_diagnostics(terminal.get("response") or {})
+        raise SmokeError(
+            f"Responses stream did not start and complete normally: "
+            f"terminal={terminal.get('type')}; response={diagnostics}"
+        )
     if [event.get("sequence_number") for event in events] != list(range(len(events))):
         raise SmokeError("Responses stream sequence numbers are not contiguous")
     deltas = [event["delta"] for event in events if event.get("type") == "response.output_text.delta"]
@@ -194,7 +215,8 @@ def main() -> int:
         result["uploads"] = {"count": 2, "ready": True, "document_id": document_id, "image_id": image_id}
         payload = _payload(document_id, image_id, stream=False)
         _, response = _json("/v1/responses", token=USER_TOKEN, method="POST", payload=payload)
-        result["completed"] = _validate_response(response, sentinel)
+        result["completed"] = _response_diagnostics(response)
+        result["completed"].update(_validate_response(response, sentinel))
         payload["stream"] = True
         _, body, content_type = _request(
             "/v1/responses", token=USER_TOKEN, method="POST", body=json.dumps(payload).encode(),

@@ -440,6 +440,7 @@ def build_graph(
         return {
             "concrete_model": concrete,
             "content": msg.get("content", "") or "",
+            "fast_done_reason": str(resp.get("done_reason") or ""),
             "prompt_eval_count": int(resp.get("prompt_eval_count", 0) or 0),
             "eval_count": int(resp.get("eval_count", 0) or 0),
             "tool_rounds": int(react_meta.get("tool_rounds", 0)),

@@ -112,6 +112,7 @@ class PipelineState(TypedDict, total=False):
 
     # Output
     content: str                     # final assistant text
+    fast_done_reason: str            # fast attempt only; ignore after deep escalation
     prompt_eval_count: int
     eval_count: int
     error: str                       # non-empty means a failure; main route turns it into 5xx
