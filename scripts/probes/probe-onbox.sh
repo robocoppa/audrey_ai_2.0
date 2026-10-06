@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# probe-onbox.sh — run any probe ON THE BOX, detached, and Telegram-notify on
-# completion. Sibling of eval-onbox.sh, same conventions.
+# probe-onbox.sh — run any probe ON THE BOX. Detached runs Telegram-notify;
+# FOREGROUND=1 prints results and saves the same log. Sibling of eval-onbox.sh.
 #
 # WHY THIS EXISTS
 #
@@ -47,7 +47,10 @@
 # so the file is simply absent however right the path looks — and the probe
 # then exits 1, which this wrapper reports as a FINDING rather than a mis-run.
 #
-#   FOREGROUND=1 scripts/probes/probe-onbox.sh …   # do not detach (for debugging)
+#   FOREGROUND=1 scripts/probes/probe-onbox.sh …   # shell results + saved log
+#   FOREGROUND=1 NOTIFY=1 scripts/probes/probe-onbox.sh …   # also Telegram-notify
+#
+# Foreground runs wait for completion and skip Telegram unless NOTIFY=1.
 #
 set -uo pipefail
 
@@ -55,6 +58,60 @@ APPDATA="${APPDATA:-/mnt/user/appdata/audrey_ai_2.0}"
 CONTAINER="${CONTAINER:-audrey}"
 OUT_DIR="${OUT_DIR:-${APPDATA}/testing-out/probes}"
 WATCHDOG_ENV="${WATCHDOG_ENV:-/mnt/user/appdata/fleet-watchdog/.env}"
+
+notify_probe() {
+  # A foreground worker is piped through tee. Only its parent may notify,
+  # after tee has closed the complete log that will be attached.
+  if [[ -n "${_PROBE_FOREGROUND_LOGGED:-}" || ( -n "${FOREGROUND:-}" && "${NOTIFY:-0}" != "1" ) ]]; then
+    return 0
+  fi
+  local verdict summary api
+  # ── notify (detached by default; foreground opt-in; non-fatal) ──────────────────────────────────────────────
+  # The probe has already run and its log is saved — a failed send must not mask
+  # that. ⚠️ Non-zero is NOT necessarily an error: router_probe exits 1 for a
+  # DISQUALIFIED candidate and check_model_inventory exits 1 when config names a
+  # model Ollama does not have. Both are findings, which is the point.
+  if [[ -f "${WATCHDOG_ENV}" ]]; then
+    # shellcheck disable=SC1090
+    set -a; . "${WATCHDOG_ENV}"; set +a
+    if [[ -n "${WATCHDOG_TOKEN:-}" && -n "${WATCHDOG_CHAT_ID:-}" ]]; then
+      case "${rc}" in
+        0) verdict="✅ clean" ;;
+        1) verdict="⚠️ finished with FINDINGS (exit 1 — read the log, this is usually the point)" ;;
+        2) verdict="❌ setup error (exit 2) — nothing probed" ;;
+        *) verdict="❌ exit ${rc}" ;;
+      esac
+      # ⚠️ MESSAGE FORMAT IS eval-onbox.sh's, DELIBERATELY UNCHANGED — a one-line
+      # verdict, then the probe's own summary line, then the full log as a
+      # document. It reads well on a phone and is the shape already trusted; do
+      # not "improve" it by inlining a log tail (tried 2026-08-15, reverted).
+      # Text messages cap at 4096 chars anyway, which is why the log goes as
+      # sendDocument rather than in the body.
+      summary="$(grep -E 'parse rate|NOT ON THE BOX|every model named|reclaimable|DISQUALIFIED' \
+                   "${LOG}" 2>/dev/null | tail -1)"
+      [[ -z "${summary}" ]] && summary="$(grep -v '^[[:space:]]*$' "${LOG}" 2>/dev/null | tail -1)"
+      api="https://api.telegram.org/bot${WATCHDOG_TOKEN}"
+
+      curl -s "${api}/sendMessage" \
+        -d chat_id="${WATCHDOG_CHAT_ID}" \
+        -d "text=${verdict} Audrey probe ${LABEL} finished (exit ${rc}) → ${LOG}
+${summary:-（summary unavailable）}" \
+        >/dev/null || echo "WARN: Telegram summary send failed." >&2
+
+      # Attach the full log as a document.
+      if [[ -f "${LOG}" ]]; then
+        curl -s "${api}/sendDocument" \
+          -F chat_id="${WATCHDOG_CHAT_ID}" \
+          -F document=@"${LOG}" \
+          >/dev/null || echo "WARN: Telegram document send failed (log still on box)." >&2
+      fi
+    else
+      echo "WARN: WATCHDOG_TOKEN/CHAT_ID not in ${WATCHDOG_ENV}; skipped notify." >&2
+    fi
+  else
+    echo "WARN: ${WATCHDOG_ENV} not found; skipped Telegram notify." >&2
+  fi
+}
 
 # A probe is named by its file name and found in the first of these folders
 # that holds it. ops/, analysis/, and evals/ also contain standalone model
@@ -90,9 +147,37 @@ LABEL="${PROBE%.py}"
 # The detached child must keep the identity used for the parent's redirect.
 # Reading the clock again can cross a second and notify a different log path.
 # Fresh calls (including FOREGROUND=1) ignore any inherited STAMP/LOG values.
-if [[ -z "${_PROBE_DETACHED:-}" || -n "${FOREGROUND:-}" || -z "${STAMP:-}" || -z "${LOG:-}" ]]; then
+if [[ ( -z "${_PROBE_DETACHED:-}" && -z "${_PROBE_FOREGROUND_LOGGED:-}" ) ||
+      ( -n "${FOREGROUND:-}" && -z "${_PROBE_FOREGROUND_LOGGED:-}" ) ||
+      -z "${STAMP:-}" || -z "${LOG:-}" ]]; then
   STAMP="$(docker exec "${CONTAINER}" date +%Y-%m-%d-%H%M%S 2>/dev/null || date +%Y-%m-%d-%H%M%S)"
   LOG="${OUT_DIR}/${STAMP}-${LABEL}.log"
+  if ! mkdir -p "${OUT_DIR}"; then
+    echo "ERROR: could not create log directory: ${OUT_DIR}" >&2
+    exit 2
+  fi
+  # Reserve the run's log without overwriting an earlier run in the same second.
+  if ! (set -o noclobber; : >"${LOG}") 2>/dev/null; then
+    STAMP="${STAMP}-$$"
+    LOG="${OUT_DIR}/${STAMP}-${LABEL}.log"
+    if ! (set -o noclobber; : >"${LOG}") 2>/dev/null; then
+      echo "ERROR: could not create a new probe log: ${LOG}" >&2
+      exit 2
+    fi
+  fi
+fi
+
+if [[ -n "${FOREGROUND:-}" && -z "${_PROBE_FOREGROUND_LOGGED:-}" ]]; then
+  _PROBE_FOREGROUND_LOGGED=1 STAMP="${STAMP}" LOG="${LOG}" \
+    "$0" "${PROBE}" "$@" 2>&1 | tee -a "${LOG}"
+  foreground_status=("${PIPESTATUS[@]}")
+  rc="${foreground_status[0]}"
+  if [[ "${foreground_status[1]}" != "0" ]]; then
+    echo "ERROR: probe output could not be saved to ${LOG}" >&2
+    [[ "${rc}" != "0" ]] || rc=2
+  fi
+  notify_probe
+  exit "${rc}"
 fi
 
 if [[ -z "${_PROBE_DETACHED:-}" && -z "${FOREGROUND:-}" ]]; then
@@ -131,6 +216,7 @@ for kv in "$@"; do
   esac
 done
 
+echo ">> log     : ${LOG}"
 echo ">> probe   : ${PROBE}"
 echo ">> env     : ${ENV_FLAGS[*]:-（none）}"
 echo ">> args    : ${PROBE_ARGS:-（none）}"
@@ -188,50 +274,6 @@ echo
 echo ">> finished: $(date)"
 echo ">> exit    : ${rc}"
 
-# ── notify (always; non-fatal) ──────────────────────────────────────────────
-# The probe has already run and its log is saved — a failed send must not mask
-# that. ⚠️ Non-zero is NOT necessarily an error: router_probe exits 1 for a
-# DISQUALIFIED candidate and check_model_inventory exits 1 when config names a
-# model Ollama does not have. Both are findings, which is the point.
-if [[ -f "${WATCHDOG_ENV}" ]]; then
-  # shellcheck disable=SC1090
-  set -a; . "${WATCHDOG_ENV}"; set +a
-  if [[ -n "${WATCHDOG_TOKEN:-}" && -n "${WATCHDOG_CHAT_ID:-}" ]]; then
-    case "${rc}" in
-      0) verdict="✅ clean" ;;
-      1) verdict="⚠️ finished with FINDINGS (exit 1 — read the log, this is usually the point)" ;;
-      2) verdict="❌ setup error (exit 2) — nothing probed" ;;
-      *) verdict="❌ exit ${rc}" ;;
-    esac
-    # ⚠️ MESSAGE FORMAT IS eval-onbox.sh's, DELIBERATELY UNCHANGED — a one-line
-    # verdict, then the probe's own summary line, then the full log as a
-    # document. It reads well on a phone and is the shape already trusted; do
-    # not "improve" it by inlining a log tail (tried 2026-08-15, reverted).
-    # Text messages cap at 4096 chars anyway, which is why the log goes as
-    # sendDocument rather than in the body.
-    summary="$(grep -E 'parse rate|NOT ON THE BOX|every model named|reclaimable|DISQUALIFIED' \
-                 "${LOG}" 2>/dev/null | tail -1)"
-    [[ -z "${summary}" ]] && summary="$(grep -v '^[[:space:]]*$' "${LOG}" 2>/dev/null | tail -1)"
-    api="https://api.telegram.org/bot${WATCHDOG_TOKEN}"
-
-    curl -s "${api}/sendMessage" \
-      -d chat_id="${WATCHDOG_CHAT_ID}" \
-      -d "text=${verdict} Audrey probe ${LABEL} finished (exit ${rc}) → ${LOG}
-${summary:-（summary unavailable）}" \
-      >/dev/null || echo "WARN: Telegram summary send failed." >&2
-
-    # Attach the full log as a document.
-    if [[ -f "${LOG}" ]]; then
-      curl -s "${api}/sendDocument" \
-        -F chat_id="${WATCHDOG_CHAT_ID}" \
-        -F document=@"${LOG}" \
-        >/dev/null || echo "WARN: Telegram document send failed (log still on box)." >&2
-    fi
-  else
-    echo "WARN: WATCHDOG_TOKEN/CHAT_ID not in ${WATCHDOG_ENV}; skipped notify." >&2
-  fi
-else
-  echo "WARN: ${WATCHDOG_ENV} not found; skipped Telegram notify." >&2
-fi
+notify_probe
 
 exit "${rc}"

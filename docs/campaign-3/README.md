@@ -54,8 +54,11 @@ so activation remains deferred. The Spanish document pilot passed on
 63.16% activation precision, 15/42 ordinary false activations, and three
 rejected choices per study. All calls completed. [Slice 3D.2](phase-03-skill-selection-policy.md)
 now separates firm abstention from undecided requests and resolves scoped
-exclusions. Its full laptop gate passed 3,845 tests; first measurement on 30
-new proposed controls is pending. Automatic selection stays disabled.
+exclusions. Its first new-control measurement completed: 27/30 correct labels,
+12/13 activation precision, two missed positives, and one ordinary false
+activation. [Slice 3D.3](phase-03-skill-selection-terminal-results.md) repairs
+those exposed regressions and restores compact foreground shell results.
+Automatic selection stays disabled; human label and workflow gates remain open.
 
 Phase 4 completed on 2026-09-29. Slice 4A's owner-scoped, ranged
 original-file downloads are live-settled. Slice 4B's read-only backend smoke

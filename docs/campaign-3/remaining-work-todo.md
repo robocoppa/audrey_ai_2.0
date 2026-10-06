@@ -444,9 +444,11 @@ calls on 2026-10-06 but measured 63.16% precision, 15/42 ordinary false
 activations, and three rejected choices each. Automatic selection stays off.
 Slice 3D.2 policy refinement is laptop-complete: 3,845 backend tests passed.
 Rules on the same development set: nine correct activations, zero false
-activations, five undecided positives; no model calls. The next measurement
-uses 30 separately authored proposed controls once.
-[Recorded study](phase-03-skill-selection-evaluation.md) / [new measurement](phase-03-skill-selection-policy.md).
+activations, five undecided positives; no model calls. First new-control result:
+27/30 hybrid labels, 12/13 precision, two misses, one ordinary false activation;
+zero model errors. Slice 3D.3 repairs those three exposed cases and adds compact
+foreground results. Its targeted Tower regression check is pending.
+[Recorded study](phase-03-skill-selection-evaluation.md) / [new-control result](phase-03-skill-selection-policy.md) / [terminal results](phase-03-skill-selection-terminal-results.md).
 
 - [x] Keep `skills.auto_select: false` during the study.
 - [x] Build 42 labeled positive, ambiguous, and ordinary-chat control cases.
@@ -464,8 +466,15 @@ uses 30 separately authored proposed controls once.
 - [x] Reserve 30 separately authored proposed controls without selector tuning;
   labels still require independent human review.
 - [x] Preserve probe launch logfile identity through detachment; behavior tested.
-- [ ] Collect the first revision-2 measurement on those 30 controls once.
-- [ ] Review new-control findings and labels before expanding measurements.
+- [x] Collect the first revision-2 measurement on those 30 controls once.
+- [x] Review its three mismatches independently; proposed labels remain defensible.
+- [x] Repair quotation, file-location comma scope, and bounded Spanish management
+  regressions, preserving the exposed baseline (Slice 3D.3).
+- [x] Restore foreground shell logs and compact selection results; mismatches
+  now exit 1 even when model execution completed.
+- [ ] Pass the targeted three-case revision-3 Tower check in the launching shell.
+- [ ] Obtain fresh independent controls and human label review before broader
+  selection-quality conclusions; the measured fixture is now regression data.
 - [ ] Consider a separate router/System One arm only if revised policy evidence
   warrants that comparison; no new candidate probe is queued now.
 - [x] Propose separate precision, false-activation, and missed-activation

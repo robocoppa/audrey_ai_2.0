@@ -4,8 +4,9 @@
 3,725 passed. The one-case live pilot passed on 2026-10-06. Two repeated
 42-case studies subsequently collected all calls but exposed unsuitable
 selection behavior. Automatic selection remains disabled. [Slice 3D.2](phase-03-skill-selection-policy.md)
-now adds firm abstention and scoped evidence resolution; its new-controls live
-measurement is pending.
+added firm abstention and scoped evidence resolution; its first new-control
+measurement completed with three findings. [Slice 3D.3](phase-03-skill-selection-terminal-results.md)
+repairs those exposed regressions and restores copyable terminal results.
 
 ## Purpose
 
@@ -229,10 +230,12 @@ and explicit skills unchanged; this study measures a different decision.
 ## Follow-up: 3D.2 evaluation policy refinement
 
 [Slice 3D.2](phase-03-skill-selection-policy.md) is laptop-complete: 3,845 backend
-checks passed. It implements the policy refinements below and reserves a
-separately authored 30-case proposed control set for its first measurement.
-Automatic runtime activation remains deferred; the revision-1 evidence above
-is preserved.
+checks passed. It implemented the policy refinements below and reserved a
+separately authored 30-case proposed control set. Its first measurement is now
+received: 27/30 hybrid labels, two misses, and one ordinary false activation.
+The three findings are repaired in [Slice 3D.3](phase-03-skill-selection-terminal-results.md);
+the exposed controls now supply regressions rather than untouched validation.
+Automatic activation remains deferred, and the revision-1 evidence is preserved.
 
 1. Separate a terminal abstention from an undecided rules result. Explicitly
    forbidden file analysis, quoted commands, interface-management questions,

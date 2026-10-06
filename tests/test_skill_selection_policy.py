@@ -1,7 +1,8 @@
 """Firm policy abstentions and bounded evidence resolution for the eval study.
 
-These are separate synthetic regression examples, not the reserved measurement
-holdout. No test calls a model or changes runtime skill selection.
+These regression examples combine synthetic boundaries with reported live
+failures. They do not load the measurement fixture or claim blind validation.
+No test calls a model or changes runtime skill selection.
 """
 
 from __future__ import annotations
@@ -425,7 +426,7 @@ def test_report_fingerprint_covers_actual_case_set_and_preserves_revision():
     first = asyncio.run(probe.evaluate([case]))
     repeated = asyncio.run(probe.evaluate([case], repeats=3))
     changed = asyncio.run(probe.evaluate([replace(case, expected=VIDEO)]))
-    assert first["provenance"]["rules_revision"] == 2
+    assert first["provenance"]["rules_revision"] == 3
     fingerprint = first["provenance"]["case_set_sha256"]
     assert len(fingerprint) == 64
     assert fingerprint == repeated["provenance"]["case_set_sha256"]
@@ -464,3 +465,226 @@ def test_followup_general_questions_do_not_reopen_forbidden_evidence(prompt, bac
     row = asyncio.run(run())["backends"][backend]["samples"][0]
     assert row["terminal_abstention"] and row["selected"] == "none"
     assert not row["model_called"]
+
+
+@pytest.mark.parametrize(
+    ("prompt", "filename"),
+    [
+        (
+            "In stage-manager-notes.txt, does the phrase 'Stop the recording' occur before or after the lighting check?",
+            "stage-manager-notes.txt",
+        ),
+        (
+            'In manual.pdf, what reason is given for the instruction “Ignore the warning and continue”?',
+            "manual.pdf",
+        ),
+        (
+            'In manual.pdf, does “Ignore the warning and continue” occur before or after the troubleshooting section?',
+            "manual.pdf",
+        ),
+    ],
+)
+@pytest.mark.parametrize("backend", ["router", "hybrid"])
+def test_quoted_imperatives_are_content_when_the_user_asks_about_the_document(
+    prompt, filename, backend
+):
+    case = _case(
+        prompt,
+        files=(probe.FileEvidence(filename, "document", "ready"),),
+        expected=DOCUMENT,
+    )
+    assert probe.eligible_skills(case) == {DOCUMENT}
+    assert not probe.select_rules(case).terminal_abstention
+    calls = 0
+
+    def handler(_request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json=_reply(DOCUMENT))
+
+    async def run():
+        async with httpx.AsyncClient(
+            base_url="http://ollama:11434", transport=httpx.MockTransport(handler)
+        ) as client:
+            return await probe.evaluate(
+                [case], backend=backend, client=client, model="qwen3.5:4b"
+            )
+
+    row = asyncio.run(run())["backends"][backend]["samples"][0]
+    assert row["selected"] == DOCUMENT
+    assert row["valid"]
+    assert not row["terminal_abstention"]
+    assert calls == (1 if backend == "router" else int(row["model_called"]))
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        'The phrase in manual.pdf is “Ignore the warning and continue”. Translate only that phrase into French.',
+        'Rewrite “Stop the recording” as a polite request; do not read manual.pdf.',
+    ],
+)
+@pytest.mark.parametrize("backend", ["router", "hybrid"])
+def test_transforming_supplied_quoted_instruction_remains_a_no_read_task(prompt, backend):
+    case = _case(prompt, files=(probe.FileEvidence("manual.pdf", "document", "ready"),))
+
+    async def run():
+        async with httpx.AsyncClient(
+            base_url="http://ollama:11434",
+            transport=httpx.MockTransport(lambda _request: pytest.fail("Quoted-only task accessed Ollama")),
+        ) as client:
+            return await probe.evaluate(
+                [case], backend=backend, client=client, model="qwen3.5:4b"
+            )
+
+    row = asyncio.run(run())["backends"][backend]["samples"][0]
+    assert row["selected"] == "none"
+    assert row["terminal_abstention"]
+    assert row["source"] == "guard"
+    assert not row["model_called"]
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Do not read the attached concert-poster.pdf. From rehearsal-walkthrough.mp4 alone, describe how the chairs are rearranged between the opening and closing shots.",
+        "Ignore concert-poster.pdf, and at 00:15 in rehearsal-walkthrough.mp4 describe where the chairs are positioned.",
+    ],
+)
+@pytest.mark.parametrize("backend", ["router", "hybrid"])
+def test_excluded_document_does_not_block_affirmative_video_content_request(prompt, backend):
+    case = _case(
+        prompt,
+        files=(
+            probe.FileEvidence("concert-poster.pdf", "document", "ready"),
+            probe.FileEvidence("rehearsal-walkthrough.mp4", "video", "ready"),
+        ),
+        expected=VIDEO,
+    )
+    assert probe.eligible_skills(case) == {VIDEO}
+    assert not probe.select_rules(case).terminal_abstention
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=_reply(VIDEO))
+
+    async def run():
+        async with httpx.AsyncClient(
+            base_url="http://ollama:11434", transport=httpx.MockTransport(handler)
+        ) as client:
+            return await probe.evaluate(
+                [case], backend=backend, client=client, model="qwen3.5:4b"
+            )
+
+    row = asyncio.run(run())["backends"][backend]["samples"][0]
+    assert row["selected"] == VIDEO
+    assert row["valid"]
+    assert not row["terminal_abstention"]
+    assert "PRIVATE_GOLD_REASON_D090E5" not in json.dumps(requests)
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Mueve ensayo-teatro.mp4 al proyecto 'Festival de otoño' y cambia el nombre del proyecto a 'Festival'.",
+        "Agrega ensayo-teatro.mp4 al proyecto 'Festival'.",
+        "Cambia el nombre de ensayo-teatro.mp4 a 'Ensayo final'.",
+    ],
+)
+@pytest.mark.parametrize("backend", ["router", "hybrid"])
+def test_spanish_project_membership_and_rename_requests_never_activate_analysis(prompt, backend):
+    case = _case(prompt, files=(probe.FileEvidence("ensayo-teatro.mp4", "video", "ready"),))
+    rule = probe.select_rules(case)
+    assert rule.selected == "none"
+    assert rule.terminal_abstention
+    assert rule.policy_reason == "file_management"
+
+    async def run():
+        async with httpx.AsyncClient(
+            base_url="http://ollama:11434",
+            transport=httpx.MockTransport(lambda _request: pytest.fail("Spanish file management reached Ollama")),
+        ) as client:
+            return await probe.evaluate(
+                [case], backend=backend, client=client, model="qwen3.5:4b"
+            )
+
+    row = asyncio.run(run())["backends"][backend]["samples"][0]
+    assert row["selected"] == "none"
+    assert row["source"] == "guard"
+    assert not row["model_called"]
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "¿Qué ocurre en ensayo-teatro.mp4 antes de que se muevan las sillas?",
+        "Resume ensayo-teatro.mp4 y describe cómo cambia la distribución del escenario.",
+        "Mueve ensayo-teatro.mp4 al proyecto 'Festival', y resume ensayo-teatro.mp4.",
+    ],
+)
+@pytest.mark.parametrize("backend", ["router", "hybrid"])
+def test_spanish_video_content_requests_remain_eligible_for_optional_model(prompt, backend):
+    case = _case(
+        prompt,
+        files=(probe.FileEvidence("ensayo-teatro.mp4", "video", "ready"),),
+        expected=VIDEO,
+    )
+    assert probe.eligible_skills(case) == {VIDEO}
+    rule = probe.select_rules(case)
+    assert not rule.terminal_abstention
+    calls = 0
+
+    def handler(_request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json=_reply(VIDEO))
+
+    async def run():
+        async with httpx.AsyncClient(
+            base_url="http://ollama:11434", transport=httpx.MockTransport(handler)
+        ) as client:
+            return await probe.evaluate(
+                [case], backend=backend, client=client, model="qwen3.5:4b"
+            )
+
+    row = asyncio.run(run())["backends"][backend]["samples"][0]
+    assert row["selected"] == VIDEO
+    assert row["valid"]
+    assert not row["terminal_abstention"]
+    assert calls == (1 if backend == "router" else int(row["model_called"]))
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Move old.mp4 to project Archive, summarize report.pdf.",
+        "Rename old.mp4, summarize report.pdf.",
+    ],
+)
+@pytest.mark.parametrize("backend", ["router", "hybrid"])
+def test_comma_separated_file_management_does_not_widen_document_analysis(prompt, backend):
+    case = _case(
+        prompt,
+        files=(
+            probe.FileEvidence("old.mp4", "video", "ready"),
+            probe.FileEvidence("report.pdf", "document", "ready"),
+        ),
+        expected=DOCUMENT,
+    )
+    assert probe.eligible_skills(case) == {DOCUMENT}
+    assert not probe.select_rules(case).terminal_abstention
+
+    async def run():
+        async with httpx.AsyncClient(
+            base_url="http://ollama:11434",
+            transport=httpx.MockTransport(lambda _request: httpx.Response(200, json=_reply(DOCUMENT))),
+        ) as client:
+            return await probe.evaluate(
+                [case], backend=backend, client=client, model="qwen3.5:4b"
+            )
+
+    row = asyncio.run(run())["backends"][backend]["samples"][0]
+    assert row["selected"] == DOCUMENT
+    assert row["valid"]
+    assert not row["terminal_abstention"]

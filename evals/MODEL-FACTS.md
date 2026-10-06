@@ -1194,9 +1194,10 @@ set select nine of 14 positives correctly and abstain on all 28 negative
 controls: 37/42 correct labels, zero false activations, five positive abstentions.
 No model was called. These development results supply no new Qwen quality,
 latency, or token measurements and do not replace the revision-1 model evidence
-above. The first measurement on 30 separately authored, untuned proposed
-controls is pending; those labels still need independent human review.
-Automatic runtime selection remains disabled.
+above. The first measurement on 30 separately authored proposed controls is
+now recorded below; its three exposed findings are repaired in Slice 3D.3.
+Those cases now serve as regression data, and their labels still need human
+review. Automatic runtime selection remains disabled.
 
 Sources: Tower logs `2026-10-06-110216-eval_skill_selection.log` and
 `2026-10-06-110258-eval_skill_selection.log`; report timestamps
@@ -1204,6 +1205,63 @@ Sources: Tower logs `2026-10-06-110216-eval_skill_selection.log` and
 `2026-10-06T17:03:04.733490+00:00`.
 Retained raw reports: [first study](results/2026-10-06-skill-selection-hybrid-110216-results.json)
 and [later study](results/2026-10-06-skill-selection-hybrid-110258-results.json).
+
+### Retained Qwen skill selection on new controls (October 6, 2026)
+
+**Decision: Keep automatic selection disabled.** Evaluation policy revision 2
+improved selection on 30 separately authored synthetic proposed controls, but
+retained three quality findings. The report completed without model errors;
+its older exit-zero contract was not a selection-quality pass.
+
+The controls were authored separately without access to selector code,
+development prompts, or model logs; required project-state reading exposed
+summary results. Their first measurement used `qwen3.5:4b`, one repeat,
+temperature 0, serial requests, no retries, and at most 128 output tokens.
+Gold labels and reasons stayed out of model requests. Automatic selection was
+disabled. Labels received independent agent review, not human validation.
+
+| Proposed-label measurement | Rules | Hybrid |
+|---|---:|---:|
+| Correct labels | 21/30 | 27/30 |
+| Correct activations / activations | 5/5 | 12/13 |
+| Activation precision | 100% (five activations) | 92.31% (13 activations) |
+| Missed positive requests | 9/14 | 2/14 |
+| Ordinary false activations | 0/8 | 1/8 |
+| Actual model calls | 0 | 8 |
+| Model errors / rejected ineligible choices | 0 / 0 | 0 / 0 |
+
+The hybrid's router recovered seven eligible positives, falsely activated
+video analysis on its sole ordinary request, and abstained zero times. It
+recovered Spanish/Japanese document questions, a document request excluding an
+unrelated video, a misleading filename, a French video question, an unrelated
+negation, and a question about quoted video content. The two remaining missed
+positives were incorrectly blocked by rules: locating a quoted phrase inside a
+document, and describing a video while excluding an unrelated poster. The
+ordinary false activation was Spanish file/project management. All eight
+ambiguous controls abstained correctly. Proposed quality limits remain
+unagreed and unmet.
+
+The eight actual calls totaled 2,261 input and 80 output tokens. Model-only
+median latency was 0.167845 seconds and nearest-rank p95 was 7.506008 seconds;
+the first request took 7.506008 seconds. Loading was uncontrolled and there was
+no seed or repeat distribution. These observations do not establish controlled
+warm/cold speed, comparative router quality, production precision, or benefit
+to final answers.
+
+**Follow-up:** [Slice 3D.3](../docs/campaign-3/phase-03-skill-selection-terminal-results.md)
+repairs the three exposed regressions in evaluation policy revision 3 and
+makes terminal results distinguish findings from successful execution. The
+three cases match offline without model calls. This is regression evidence,
+not a new Qwen measurement. The measured controls are now exposed to tuning;
+fresh reviewed controls and real workflow evidence are still required.
+
+Source: Tower log `2026-10-06-155526-eval_skill_selection.log`, report timestamp
+`2026-10-06T21:55:36.393253+00:00`;
+[preserved full JSON](results/2026-10-06-skill-selection-policy-v2-holdout-results.json).
+Raw fixture SHA-256: `098ac965713ea811ec9f90a32fb66fbc43061dbb20375258636ceeeeb80af4ba`;
+canonical evaluated-case SHA-256:
+`26b27546a68ca68f145ee637a6da970809046f35d7196059cfb20d6fad243b97`.
+Both match the reserved fixture. Previous reports remain unchanged.
 
 ### Kimi K3 and GLM 5.3 client protocol assessment (received October 6, 2026)
 

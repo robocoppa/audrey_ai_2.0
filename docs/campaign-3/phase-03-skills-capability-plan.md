@@ -509,10 +509,12 @@ Spanish document pilot passed on 2026-10-06 with one retained-router call.
 Two repeated hybrid studies subsequently completed all calls with identical
 findings: 63.16% precision, 15/42 ordinary false activations, and three rejected
 ineligible choices per study. [Slice 3D.2](phase-03-skill-selection-policy.md)
-now refines evaluation policy and reserves new proposed controls; 3,845 backend
-tests passed, with first new-control measurement pending. The 3C answer
-comparison stays passed and does not measure selector precision or false
-activation.
+completed its first 30-control measurement with 27/30 correct labels, 12/13
+activation precision, two misses, and one ordinary false activation.
+[Slice 3D.3](phase-03-skill-selection-terminal-results.md) repairs the three
+exposed findings and provides copyable terminal results. Automatic selection
+remains disabled. The 3C answer comparison stays passed and does not measure
+selector precision or false activation.
 
 Campaign 3 Phase 6's System One task-router comparison is settled; no candidate
 cleared its gate, and the retained router is unchanged. A future candidate may

@@ -58,19 +58,22 @@ _OWN_REFERENCE = re.compile(
 _DOCUMENT = re.compile(r"\b(?:documents?|pdfs?|reports?|contracts?|invoices?|spreadsheets?)\b", re.I)
 _VIDEO = re.compile(r"\b(?:videos?|recordings?|clips?|footage)\b", re.I)
 _INTENT = re.compile(
-    r"\b(?:summari[sz]e|summary|analy[sz]e|compare|explain|extract|review|outline|find|count|read)\b"
+    r"\b(?:summari[sz]e|summary|analy[sz]e|compare|describe|explain|extract|review|outline|find|count|read)\b"
     r"|\bwhat\b.{0,80}\b(?:say|says|show|shows|contain|contains|main|takeaway|happens|happened)\b"
-    r"|\b(?:who|when|where|how much|how many)\b", re.I
+    r"|\b(?:who|when|where|how much|how many)\b"
+    r"|\bdoes\b.{0,80}\b(?:occur|appear)\b", re.I
 )
 # These bounded English patterns are evaluation policy, not a general NLP parser.
 _QUOTED = re.compile(r"```[\s\S]*?```|`[^`\n]*`|(?<!\w)'(?:[^'\n]|(?<=\w)'(?=\w))*'|\"(?:\\.|[^\"\\])*\"|“[^”\n]*”|‘(?:[^’\n]|(?<=\w)’(?=\w))*’")
 _FILE_TOKEN = re.compile(
     r"\b[\w.-]+\.(?:pdf|docx?|xlsx?|csv|txt|md|mp4|mov|webm|mkv|png|jpe?g|wav|mp3)\b", re.I
 )
-_ACTION = r"(?:summari[sz]e|analy[sz]e|compare|explain|extract|review|outline|find|count|read)"
+_ACTION = r"(?:summari[sz]e|analy[sz]e|compare|describe|explain|extract|review|outline|find|count|read)"
+_SPANISH_ACTION = r"(?:mueve|mover|agrega|añade|renombra|renombrar|cambia|elimina|borra|resume|analiza|compara|explica|describe)"
 _CLAUSE_BREAK = re.compile(
-    rf"[;\n]|[.!?](?=\s|$)|\b(?:and|but|then)\s+(?=(?:not\b|do not\b|don['’]t\b|never\b|ignore\b|{_ACTION}\b))"
-    rf"|,\s*(?=(?:not\b|do not\b|don['’]t\b|never\b|without\b|ignore\b|{_ACTION}\b))", re.I
+    rf"[;\n]|[.!?](?=\s|$)|\b(?:and|but|then)\s+(?=(?:not\b|do not\b|don['’]t\b|never\b|ignore\b|{_ACTION}\b|(?:in|from)\b|at\s+\d{{1,2}}:\d{{2}}))"
+    rf"|,\s*(?=(?:not\b|do not\b|don['’]t\b|never\b|without\b|ignore\b|{_ACTION}\b))"
+    rf"|\b(?:y|pero|luego)\s+(?={_SPANISH_ACTION}\b)", re.I
 )
 _NEGATED_ACTION = re.compile(
     rf"\b(?:do not(?: want (?:you )?to)?|don't|never|without|not asking (?:you )?to)\s+"
@@ -91,6 +94,17 @@ _UNRESOLVED = re.compile(
 _MANAGEMENT = re.compile(
     r"\b(?:rename|delete|move|remove)\b|\b(?:button|sidebar|interface|files page|my files)\b"
     r"|\b(?:group|organize)\b.{0,60}\b(?:conversation|project)s?\b", re.I
+)
+# Bounded management forms observed in Spanish controls. Unknown languages
+# remain eligible for the model rather than being classified as management.
+_SPANISH_MANAGEMENT = re.compile(
+    r"^\s*(?:por favor\s+)?(?:mueve|mover|renombra|renombrar|elimina|borra)\b"
+    r"|^\s*(?:por favor\s+)?(?:cambia|cambiar)\s+(?:el\s+)?nombre\b"
+    r"|^\s*(?:por favor\s+)?(?:agrega|añade)\b.{0,100}\b(?:al|a un|a otro)\s+proyecto\b",
+    re.I,
+)
+_SPANISH_CONTENT_ACTION = re.compile(
+    r"^\s*(?:por favor\s+)?(?:resume|analiza|compara|explica|describe)\b", re.I
 )
 _METADATA_ONLY = re.compile(r"\b(?:filename|file name|file type|received it)\b", re.I)
 _TEXT_TRANSFORM = re.compile(
@@ -114,6 +128,9 @@ _CONTENT_LOCATION = re.compile(
 )
 _CONTENT_PREDICATE = re.compile(
     r"^\s*(?:says?|contains?|states?|describes?|shows?|documents?|explains?|mentions?)\b", re.I
+)
+_CONTENT_QUESTION = re.compile(
+    r"\b(?:does?|did|why|which)\b|(?:^|,\s*)(?:is|are|was|were)\b", re.I
 )
 _NO_SPECIALIZATION = re.compile(
     r"\b(?:do not|don't|never)\s+(?:activate|select|use)\s+(?:a |any |the )?(?:skill|speciali[sz])",
@@ -269,15 +286,37 @@ def _mask_filenames(text: str, files: tuple[FileEvidence, ...]) -> str:
     return "".join(chars).replace("’", "'")
 
 
+def _request_clauses(text: str, files: tuple[FileEvidence, ...]) -> list[str]:
+    """Keep a file-location prefix with its action across an ordinary comma."""
+    clauses = []
+    start = 0
+    for split in _CLAUSE_BREAK.finditer(text):
+        if split.group().startswith(",") and re.match(rf"\s*{_ACTION}\b", text[split.end():], re.I):
+            prefix_text = text[start:split.start()]
+            prefix = _mask_filenames(prefix_text, files)
+            source_prefix = any(
+                _CONTENT_LOCATION.search(prefix_text[:span[0]])
+                for _, span in _file_matches(prefix_text, files)
+            )
+            if source_prefix and not (_EXCLUSION.search(prefix) or _NEGATED_ACTION.search(prefix)):
+                continue
+        clauses.append(text[start:split.start()])
+        start = split.end()
+    clauses.append(text[start:])
+    return clauses
+
+
 def _file_content_request(clause: str, words: str, matches: list) -> bool:
     """Distinguish document content about an operation from performing it."""
-    if not _INTENT.search(words):
-        return False
+    # A location question can mention a quoted instruction without asking us
+    # to rewrite that instruction. The quote itself remains masked data.
+    intent = bool(_INTENT.search(words))
     for _, (start, end) in matches:
-        if (_CONTENT_LOCATION.search(clause[:start])
-                or _CONTENT_PREDICATE.search(clause[end:])):
+        if ((intent or _CONTENT_QUESTION.search(words))
+                and (_CONTENT_LOCATION.search(clause[:start])
+                     or _CONTENT_PREDICATE.search(clause[end:]))):
             return True
-    return bool(matches and _CONTENT_ACTION.search(words))
+    return bool(intent and matches and _CONTENT_ACTION.search(words))
 
 
 def _resolve_policy(case: Case, catalog=DEFAULT_CATALOG) -> _Policy:
@@ -306,7 +345,7 @@ def _resolve_policy(case: Case, catalog=DEFAULT_CATALOG) -> _Policy:
     has_meta_task = False
     missing_target = False
     affirmative_evidence = False
-    for clause in _CLAUSE_BREAK.split(text):
+    for clause in _request_clauses(text, case.files):
         if not clause.strip():
             continue
         matches = _file_matches(clause, case.files)
@@ -317,7 +356,7 @@ def _resolve_policy(case: Case, catalog=DEFAULT_CATALOG) -> _Policy:
         content_request = _file_content_request(clause, words, matches)
         if content_request and not negated:
             exclusion = False
-        management = bool(_MANAGEMENT.search(words)) and not content_request
+        management = bool(_MANAGEMENT.search(words) or _SPANISH_MANAGEMENT.search(words)) and not content_request
         metadata = bool(_METADATA_ONLY.search(words)) and not content_request
         transform = (quoted_prose and bool(_TEXT_TRANSFORM.search(words))
                      and not content_request)
@@ -337,9 +376,10 @@ def _resolve_policy(case: Case, catalog=DEFAULT_CATALOG) -> _Policy:
         if not negated and not management and not metadata and not transform and not meta_task:
             affirmative.append(words)
             affirmative_refs.extend(clause_files)
-            affirmative_evidence |= bool(_INTENT.search(words) and (
-                clause_files or _OWN_REFERENCE.search(words)
-            ))
+            affirmative_evidence |= content_request or bool(
+                (_INTENT.search(words) or _SPANISH_CONTENT_ACTION.search(words))
+                and (clause_files or _OWN_REFERENCE.search(words))
+            )
 
     if missing_target:
         return _Policy(frozenset(), "", "missing_target")
@@ -609,7 +649,7 @@ async def evaluate(
             "case_count": len(cases), "repeats": repeats, "timeout_seconds": timeout_s,
             "router_max_output_tokens": 128, "router_temperature": 0,
             "serial_calls": True, "retries": 0, "automatic_selection_enabled_in_harness": False,
-            "catalog": catalog, "rules_revision": 2,
+            "catalog": catalog, "rules_revision": 3,
             "case_set_sha256": hashlib.sha256(json.dumps(
                 [asdict(case) for case in cases], sort_keys=True, ensure_ascii=False,
                 separators=(",", ":"),
@@ -625,7 +665,50 @@ async def evaluate(
             "population": "eligible rules abstentions only; not a full router comparison",
             "summary": summarize_samples(conditional_router), "samples": conditional_router,
         }
+    # Label checks use only the requested study arm. A hybrid can legitimately
+    # recover rules misses; counting both arms would misreport its outcome.
+    findings = _label_findings(report)
+    report["selection_check"] = {
+        "backend": backend,
+        "status": "errors" if errors else "findings" if findings else "matched_labels",
+        "finding_count": len(findings),
+        "scope": "proposed synthetic labels; not production acceptance",
+    }
     return report
+
+
+def _label_findings(report: dict) -> list[dict]:
+    backend = report["provenance"]["backend"]
+    keys = ("id", "repeat", "expected", "selected", "valid", "source", "error",
+            "error_kind", "raw_selected", "terminal_abstention", "policy_reason")
+    return [{key: sample[key] for key in keys} for sample in report["backends"][backend]["samples"]
+            if not sample["valid"] or sample["selected"] != sample["expected"]]
+
+
+def terminal_summary(report: dict) -> dict:
+    """Copyable terminal result with findings and actual model cost, no sample dump."""
+    backend = report["provenance"]["backend"]
+    summary = report["backends"][backend]["summary"]
+    check = report["selection_check"]
+    provenance_keys = ("backend", "model", "case_count", "repeats", "rules_revision",
+                       "case_set_sha256", "automatic_selection_enabled_in_harness",
+                       "evaluation_only", "cold_load_controlled")
+    selection_keys = ("correct", "total", "correct_activations", "activations", "precision",
+                      "positives", "misses", "ordinary_false_activations", "ordinary_total")
+    execution_keys = ("errors", "ineligible_choices", "model_called", "guarded",
+                      "model_latency_p50_seconds", "model_latency_p95_seconds")
+    return {
+        "schema": report["schema"],
+        "status": {"matched_labels": "passed", "findings": "findings", "errors": "failed"}[check["status"]],
+        "measurement_status": report["status"], "created_at": report["created_at"],
+        "scope": check["scope"],
+        "provenance": {key: report["provenance"][key] for key in provenance_keys},
+        "selection": {key: summary[key] for key in selection_keys},
+        "execution": {**{key: summary[key] for key in execution_keys},
+                      "input_tokens": summary["input_tokens"],
+                      "output_tokens": summary["output_tokens"]},
+        "findings": _label_findings(report),
+    }
 
 
 def load_catalog(root: Path) -> tuple[dict, ...]:
@@ -733,7 +816,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repeats", type=int, help="1..5; default rules=1, live=3")
     parser.add_argument("--timeout", type=float, help="per-call seconds, at most 60")
     parser.add_argument("--only", help="comma-separated exact case IDs")
-    parser.add_argument("--save-json", type=Path, help="new private report file; never overwrites")
+    parser.add_argument("--save-json", type=Path, help="new private full report file; never overwrites")
+    parser.add_argument("--summary", action="store_true", help="print a compact copyable label check instead of all samples")
     return parser
 
 
@@ -785,8 +869,11 @@ def main(argv: list[str] | None = None) -> int:
         report = asyncio.run(_amain(args))
         if args.save_json:
             save_report(args.save_json, report)
-        print(json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False))
-        return 1 if report["status"] == "failed" else 0
+        output = terminal_summary(report) if args.summary else report
+        if args.summary and args.save_json:
+            output["full_report"] = str(args.save_json)
+        print(json.dumps(output, ensure_ascii=False, indent=2, allow_nan=False))
+        return 0 if report["selection_check"]["status"] == "matched_labels" else 1
     except (EvalError, ValueError) as exc:
         print(json.dumps({"schema": 1, "status": "failed", "error": str(exc)}), file=sys.stderr)
         return 2

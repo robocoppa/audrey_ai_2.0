@@ -48,7 +48,9 @@ with the published backend port `8000`.
 A probe that needs Docker-only Ollama DNS, model residency, or GPU observations
 runs through `scripts/probes/probe-onbox.sh` on Tower. The wrapper copies the
 selected probe and any `COPY=` fixtures into the running Audrey container,
-self-detaches, keeps its log in `testing-out/probes`, and prints that log path.
+keeps its log in `testing-out/probes`, and prints that log path. For short
+tests, prefix it with `FOREGROUND=1` so results return directly in the shell;
+Telegram is skipped unless `NOTIFY=1`. Long probes still self-detach by default.
 It does not require host Python or a repository mount inside the container.
 
 Campaign 3 Phase 6's System One comparison is this kind of probe. It needs no
@@ -57,7 +59,7 @@ unloads models for cold samples, run it while Audrey is idle. Its exact version,
 model-install, runner, and success criteria are maintained in
 `docs/campaign-3/phase-06-system-one-routing.md`.
 
-### Skill selection study — Slices 3D.1–3D.2
+### Skill selection study — Slices 3D.1–3D.3
 
 This standalone evaluator uses synthetic file metadata and the retained
 `qwen3.5:4b` router. It runs through the direct Ollama probe runner, which also
@@ -73,11 +75,14 @@ choices. Both measured 63.16% activation precision and 15/42 ordinary false
 activations. See the [recorded findings and policy follow-up](../campaign-3/phase-03-skill-selection-evaluation.md#repeated-hybrid-evidence-2026-10-06).
 Keep automatic selection off. Do not repeat the settled pilot or revision-1
 study. Slice 3D.2 separates firm abstention from undecided eligible requests and
-resolves scoped exclusions. The [next measurement](../campaign-3/phase-03-skill-selection-policy.md#first-measurement-on-tower)
-uses 30 new proposed controls once, without uploads, tokens, or a rebuild.
-It can finish in seconds because many cases make no model call. Check the run's
-log timestamps and actual call count rather than Telegram arrival time. The
-wrapper preserves the parent's log identity through detachment.
+resolves scoped exclusions. Its first 30-control measurement completed with
+27/30 correct labels, two misses, and one ordinary false activation. That is
+execution-complete with quality findings. Slice 3D.3 repairs the three exposed
+regressions. Run its [targeted foreground check](../campaign-3/phase-03-skill-selection-terminal-results.md#targeted-tower-check)
+with `--summary` and copy JSON from the launching shell; no upload, token,
+rebuild, or model call is expected. The CLI now exits 1 for label mismatches as
+well as model errors. Fresh reviewed controls and workflow evidence remain
+required; automatic activation stays off.
 
 ### Clef and Clef Flash measurement — settled 2026-10-03
 

@@ -2,8 +2,9 @@
 
 **Status:** Laptop-complete, 2026-10-06. Full hermetic backend: 3,845 passed;
 focused evaluator/policy/runner gate: 203 passed. Automatic runtime selection
-remains disabled. The next live measurement uses new proposed controls; the
-settled revision-1 studies remain preserved.
+remains disabled. The first new-control measurement completed on Tower with
+three selection findings; see the received result below and the
+[Slice 3D.3 repairs](phase-03-skill-selection-terminal-results.md).
 
 ## Why this slice exists
 
@@ -52,10 +53,11 @@ development cases, or model logs. Required repository-state reading exposed
 summary study results. These are separately authored proposed labels, not a
 validated or blind human-authored holdout.
 
-The implementation and regression tests do not inspect or evaluate these
-prompts. The original 42-case development fixture and revision-1 results remain
-preserved. Do not tune the selector to this new set after inspecting results and
-then continue presenting it as untouched validation evidence.
+Revision 2 implementation and regression tests did not inspect or evaluate
+these prompts before the first measurement. That measurement is now received
+and reviewed. Slice 3D.3 repairs its three exposed findings, so this set now
+serves as regression evidence, rather than an untouched validation set. The
+original fixture and all earlier reports remain preserved.
 
 Reserved fixture file SHA-256:
 `098ac965713ea811ec9f90a32fb66fbc43061dbb20375258636ceeeeb80af4ba`.
@@ -95,13 +97,16 @@ document requests, and Portuguese/German video requests. They remain eligible
 for an optional model decision. With this development set, a three-repeat hybrid
 would now make 15 model calls; this is a calculated budget, not a new live
 hybrid result. Nine correct rule activations do not establish production
-precision. The reserved controls have not been evaluated or used for tuning.
+precision. These numbers preceded the new-control measurement recorded below.
 
 Private final development artifact:
 `testing-out/evals/2026-10-06-skill-selection-rules-v2-final.json`.
 No live model call or deployed behavior was tested by the laptop gate.
 
-## First measurement on Tower
+## First measurement on Tower — completed with findings
+
+The historical command below produced the received revision-2 report. Do not
+repeat it unchanged; use Slice 3D.3's targeted foreground check for the repairs.
 
 Update the Tower checkout to include this slice, then run the command once
 while Audrey is idle. No video/PDF upload, browser action, Audrey token, model
@@ -132,3 +137,40 @@ is a finding to retain, not a reason to change its label. Follow-up repetitions
 or targeted comparisons depend on this first measurement. Independent human
 label review, agreed quality/cost limits, and final-answer benefit remain
 required before automatic runtime activation.
+
+## Received result — October 6, 2026
+
+The 15:55:26 Tower log reports revision 2, 30 cases, one repeat, retained
+`qwen3.5:4b`, and automatic selection disabled. Its status is `completed`, with
+zero transport, format, or ineligible-choice errors. Under this older CLI,
+exit zero indicated execution completion, even with valid incorrect choices.
+The raw fixture checksum matches the reserved fixture; the canonical case hash
+is `26b27546a68ca68f145ee637a6da970809046f35d7196059cfb20d6fad243b97`.
+
+| Proposed-label measurement | Rules | Hybrid |
+|---|---:|---:|
+| Correct labels | 21 / 30 | 27 / 30 |
+| Correct activations / activations | 5 / 5 | 12 / 13 |
+| Missed positive requests | 9 / 14 | 2 / 14 |
+| Ordinary false activations | 0 / 8 | 1 / 8 |
+| Actual model calls | 0 | 8 |
+
+The hybrid blocked a document question locating the phrase “Stop the recording”
+and a video description request that excluded an unrelated poster. It also
+activated video analysis for a Spanish request to move a file into a project
+and rename that project. A separate agent reviewed the three mismatches and
+retained their proposed labels. Human label validation remains outstanding.
+All eight ambiguous controls abstained correctly. The model recovered seven
+other positives and abstained on none of its eight calls.
+
+Model-only median latency was 0.167845 seconds and nearest-rank p95 was
+7.506008 seconds; the first request took 7.506008 seconds. Loading was
+uncontrolled. Usage totaled 2,261 input and 80 output tokens. These are eight
+observations from one run, not controlled warm/cold timing or answer-quality
+evidence. Proposed production thresholds remain unagreed and unmet.
+
+[Preserved full report](../../evals/results/2026-10-06-skill-selection-policy-v2-holdout-results.json),
+created `2026-10-06T21:55:36.393253+00:00`; source Tower log
+`2026-10-06-155526-eval_skill_selection.log`. The measurement is complete;
+automatic activation remains deferred. The [next bounded repair](phase-03-skill-selection-terminal-results.md)
+addresses the three findings and restores copyable foreground shell results.

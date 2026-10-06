@@ -227,6 +227,9 @@ def identity_runner(tmp_path):
             "    print(f'2026-10-06-1200{count:02d}')\n"
             "elif 'python3' in sys.argv:\n"
             "    print('identity probe output')\n"
+            "    if os.environ.get('TEST_PROBE_STDERR'):\n"
+            "        print(os.environ['TEST_PROBE_STDERR'], file=sys.stderr)\n"
+            "    sys.exit(int(os.environ.get('TEST_PROBE_EXIT', '0')))\n"
         ),
         "setsid": (
             "import os, subprocess, sys\n"
@@ -261,6 +264,8 @@ def identity_runner(tmp_path):
     )
     environment.pop("_PROBE_DETACHED", None)
     environment.pop("FOREGROUND", None)
+    environment.pop("_PROBE_FOREGROUND_LOGGED", None)
+    environment.pop("NOTIFY", None)
     return environment, calls, notifications, completed
 
 
@@ -294,6 +299,7 @@ def test_detached_clock_rollover_preserves_parent_run_identity(identity_runner):
     message = next(arg for arg in sends[0]["arguments"] if arg.startswith("text="))
     assert f"→ {announced}\n" in message
     assert "finished (exit 0)" in message
+    assert message.endswith("\n>> exit    : 0")
     assert f"document=@{announced}" in sends[1]["arguments"]
     assert sends[1]["document_content"] == captured
 
@@ -312,10 +318,77 @@ def test_fresh_foreground_invocation_replaces_inherited_run_identity(identity_ru
     assert "audrey:/tmp/probe-2026-10-06-120000.py" in next(
         call for call in operations if call[0] == "cp"
     )
-    sends = [json.loads(line) for line in notifications.read_text().splitlines()]
-    assert len(sends) == 1  # Foreground output goes to the caller, without a log file.
-    message = next(arg for arg in sends[0]["arguments"] if arg.startswith("text="))
     expected_log = Path(environment["OUT_DIR"]) / "2026-10-06-120000-identity_probe.log"
-    assert f"→ {expected_log}\n" in message
-    assert environment["LOG"] not in message
+    assert expected_log.read_text() == result.stdout
     assert "identity probe output" in result.stdout
+    assert environment["LOG"] not in result.stdout
+    assert not notifications.exists(), "foreground must skip Telegram unless explicitly requested"
+
+
+@pytest.mark.parametrize("probe_exit", [0, 1, 7])
+def test_foreground_captures_stdout_and_stderr_and_preserves_probe_exit(identity_runner, probe_exit):
+    environment, _, notifications, _ = identity_runner
+    environment.update(FOREGROUND="1", TEST_PROBE_EXIT=str(probe_exit),
+                       TEST_PROBE_STDERR="probe diagnostic on stderr")
+    result = subprocess.run(
+        ["bash", str(_SCRIPT), "identity_probe.py"], env=environment,
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == probe_exit
+    log = Path(environment["OUT_DIR"]) / "2026-10-06-120000-identity_probe.log"
+    captured = log.read_text()
+    assert captured == result.stdout
+    assert "identity probe output" in captured
+    assert "probe diagnostic on stderr" in captured
+    assert f">> exit    : {probe_exit}" in captured
+    assert not notifications.exists()
+
+
+def test_foreground_notification_opt_in_attaches_complete_real_log(identity_runner):
+    environment, _, notifications, _ = identity_runner
+    environment.update(FOREGROUND="1", NOTIFY="1", TEST_PROBE_EXIT="7",
+                       TEST_PROBE_STDERR="probe diagnostic on stderr")
+    result = subprocess.run(
+        ["bash", str(_SCRIPT), "identity_probe.py"], env=environment,
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 7
+    log = Path(environment["OUT_DIR"]) / "2026-10-06-120000-identity_probe.log"
+    captured = log.read_text()
+    sends = [json.loads(line) for line in notifications.read_text().splitlines()]
+    assert len(sends) == 2
+    message = next(arg for arg in sends[0]["arguments"] if arg.startswith("text="))
+    assert f"→ {log}\n" in message
+    assert "finished (exit 7)" in message
+    assert message.endswith("\n>> exit    : 7")
+    assert f"document=@{log}" in sends[1]["arguments"]
+    assert sends[1]["document_content"] == captured == result.stdout
+    assert "probe diagnostic on stderr" in captured
+    assert ">> exit    : 7" in captured
+
+
+@pytest.mark.parametrize("foreground", [False, True])
+def test_timestamp_collision_preserves_earlier_log(identity_runner, foreground):
+    environment, _, _, completed = identity_runner
+    out = Path(environment["OUT_DIR"])
+    out.mkdir()
+    retained = out / "2026-10-06-120000-identity_probe.log"
+    retained.write_text("retained earlier probe result")
+    if foreground:
+        environment["FOREGROUND"] = "1"
+    result = subprocess.run(
+        ["bash", str(_SCRIPT), "identity_probe.py"], env=environment,
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    if not foreground:
+        deadline = time.monotonic() + 5
+        while not completed.exists() and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert completed.exists()
+    assert retained.read_text() == "retained earlier probe result"
+    new_logs = [log for log in out.iterdir() if log != retained]
+    assert len(new_logs) == 1
+    assert new_logs[0].name.startswith("2026-10-06-120000-")
+    assert new_logs[0].name.endswith("-identity_probe.log")
+    assert "identity probe output" in new_logs[0].read_text()

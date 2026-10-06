@@ -312,8 +312,19 @@ The 42 development cases remain in `cases/skill_selection_cases.json`; the
 [revision-1 findings](../docs/campaign-3/phase-03-skill-selection-evaluation.md)
 are preserved. Slice 3D.2 adds request-scope guards, case-set fingerprints, and
 30 separately authored proposed controls in `cases/skill_selection_holdout.json`.
-That new set is reserved for its first measurement, without local selector
-inspection or tuning. Its labels still need independent human review.
-See the [policy refinement and first measurement](../docs/campaign-3/phase-03-skill-selection-policy.md).
+Its first measurement completed with 27/30 hybrid labels correct, two misses,
+and one ordinary false activation. Slice 3D.3 repairs these exposed cases; the
+set now supplies regression evidence, not untouched validation. Its labels
+still need independent human review. See the [received result](../docs/campaign-3/phase-03-skill-selection-policy.md#received-result--october-6-2026)
+and [targeted foreground check](../docs/campaign-3/phase-03-skill-selection-terminal-results.md#targeted-tower-check).
 The direct model arms use `scripts/probes/probe-onbox.sh`, not this suite's
 PAT-backed `/v1` runner. Production auto selection remains disabled.
+
+For short Tower studies, prefix the probe runner with `FOREGROUND=1`. Results
+return in the launching shell and a log is saved; Telegram is skipped unless
+`NOTIFY=1`. Add `--summary` to print a compact label check and its findings.
+An execution-only `status: completed` is not selection-quality acceptance.
+The CLI exits 1 for mismatched proposed labels or model errors, and 2 for setup
+errors. Compact `status: passed` means this requested study arm matched the
+selected synthetic labels; production activation remains a separate gate.
+`--save-json` retains the full private artifact with either output format.
