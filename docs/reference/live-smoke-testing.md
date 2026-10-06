@@ -57,7 +57,7 @@ unloads models for cold samples, run it while Audrey is idle. Its exact version,
 model-install, runner, and success criteria are maintained in
 `docs/campaign-3/phase-06-system-one-routing.md`.
 
-### Skill selection study — Slice 3D.1
+### Skill selection study — Slices 3D.1–3D.2
 
 This standalone evaluator uses synthetic file metadata and the retained
 `qwen3.5:4b` router. It runs through the direct Ollama probe runner, which also
@@ -65,10 +65,19 @@ finds scripts in `evals/`. No upload, browser, Audrey token, new model, or rebui
 is needed. Config and skill metadata come from the existing read-only mounts.
 Automatic skill selection stays off; the evaluator never activates a skill.
 
-The [study instructions](../campaign-3/phase-03-skill-selection-evaluation.md#small-live-check-on-tower)
-start with one Spanish document case and then, only if the call works, a
-three-repeat hybrid study. A completed report is measured evidence, not a
-production selector pass. Keep mistakes and model errors for review.
+The Spanish document pilot passed on 2026-10-06: one retained-router call
+correctly selected `grounded-document-analysis`, zero errors, 7.35355 seconds,
+277 input / 11 output tokens. Loading was uncontrolled. Two repeated studies
+then completed all 30 calls each but exited 1 for three rejected ineligible
+choices. Both measured 63.16% activation precision and 15/42 ordinary false
+activations. See the [recorded findings and policy follow-up](../campaign-3/phase-03-skill-selection-evaluation.md#repeated-hybrid-evidence-2026-10-06).
+Keep automatic selection off. Do not repeat the settled pilot or revision-1
+study. Slice 3D.2 separates firm abstention from undecided eligible requests and
+resolves scoped exclusions. The [next measurement](../campaign-3/phase-03-skill-selection-policy.md#first-measurement-on-tower)
+uses 30 new proposed controls once, without uploads, tokens, or a rebuild.
+It can finish in seconds because many cases make no model call. Check the run's
+log timestamps and actual call count rather than Telegram arrival time. The
+wrapper preserves the parent's log identity through detachment.
 
 ### Clef and Clef Flash measurement — settled 2026-10-03
 

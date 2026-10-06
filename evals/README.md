@@ -303,12 +303,17 @@ answers. Use both.
 `eval_skill_selection.py` is a separate metadata-only study, outside the answer
 quality suite. Its default `rules` backend is offline. Optional `router` and
 `hybrid` arms call the retained local router through Ollama; hybrid uses the
-model only for eligible rule abstentions. No skill is activated, file is read,
-or runtime setting is changed. Gold labels and full skill instructions are
-excluded from model requests.
+model only for eligible undecided rule results. Firm abstentions end selection
+without a model call. No skill is activated, uploaded content fetched, or
+runtime setting changed. Gold labels and full skill instructions stay out of
+model requests.
 
-The 42 synthetic cases live in `cases/skill_selection_cases.json`. See the
-[study plan](../docs/campaign-3/phase-03-skill-selection-evaluation.md) for
-label policy, metric definitions, the small Tower check, and the repeated study.
+The 42 development cases remain in `cases/skill_selection_cases.json`; the
+[revision-1 findings](../docs/campaign-3/phase-03-skill-selection-evaluation.md)
+are preserved. Slice 3D.2 adds request-scope guards, case-set fingerprints, and
+30 separately authored proposed controls in `cases/skill_selection_holdout.json`.
+That new set is reserved for its first measurement, without local selector
+inspection or tuning. Its labels still need independent human review.
+See the [policy refinement and first measurement](../docs/campaign-3/phase-03-skill-selection-policy.md).
 The direct model arms use `scripts/probes/probe-onbox.sh`, not this suite's
 PAT-backed `/v1` runner. Production auto selection remains disabled.

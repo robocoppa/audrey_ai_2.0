@@ -1082,6 +1082,129 @@ privacy decision.
 
 Open questions, and what would close each.
 
+### Retained Qwen skill-selection pilot (October 6, 2026)
+
+**Observed protocol success, not an established selector-quality result.**
+Tower ran the metadata-only hybrid evaluator for one Spanish document request
+(`positive-document-spanish`), one repeat, using `qwen3.5:4b`. Rules abstained;
+one model call correctly selected `grounded-document-analysis`, with valid
+output and zero errors or retries. Automatic selection remained disabled.
+
+| Observed measurement | Result |
+|---|---:|
+| Cases / model calls | 1 / 1 |
+| Valid / correct model choices | 1 / 1 |
+| Request elapsed time | 7.35355s |
+| Input / output tokens | 277 / 11 |
+| Temperature / output ceiling | 0 / 128 tokens |
+
+Source: Tower log `2026-10-06-105732-eval_skill_selection.log`, report timestamp
+`2026-10-06T16:57:40.340643+00:00`; [retained JSON](results/2026-10-06-skill-selection-pilot-results.json).
+The conditional-router section duplicates the same call, not an independent
+observation. Model loading was uncontrolled, and no seed was recorded. This
+single positive sample cannot establish warm/cold latency, false activation,
+production selection precision, or comparative model quality. Keep it separate
+from task-router measurements above and from the 42-case offline rules report.
+The subsequent full study is recorded below; it found excessive false activations.
+Holdout and workflow evidence remain required before enabling automatic selection.
+
+### Retained Qwen automatic skill-selection study (October 6, 2026)
+
+**Decision: Keep automatic selection disabled.** The rules-first hybrid recovered
+positive requests missed by the rules, but also activated skills for unrelated or
+explicitly excluded file tasks. Its selection precision fell from 70.00% to
+63.16%, and ordinary-request false activations rose from 6/42 to 15/42. These
+results fail the proposed selection-quality gate. They do not overturn the
+separate task-routing results that retain `qwen3.5:4b` as Audrey's router.
+
+**Method.** Tower ran the same 42 synthetic cases three times in each of two
+serial studies, using `qwen3.5:4b`, temperature 0, a 128-token output ceiling,
+a 20-second timeout, and no retries. Each study produced 126 decisions per full
+arm: rules only, and rules first with a model call for an eligible abstention.
+The latter made **30 actual model calls per study**. Models received catalog and
+file metadata plus the request, without document contents, skill bodies, or gold
+labels. No final answers or native user workflows were evaluated. The harness
+and runtime configuration kept automatic selection disabled.
+
+The later study is the primary report; both studies produced the same decisions,
+error categories, and token counts. The first finished at 17:02:22 UTC before the
+second started at 17:02:58 UTC, so these logs do not indicate overlapping study
+calls. Repeating the same fixtures is not independent holdout evidence.
+
+| Measurement per 126-decision study | Rules only | Hybrid |
+|---|---:|---:|
+| Correct decisions | 96/126 | 96/126 |
+| Valid decisions / rejected choices | 126 / 0 | 123 / 3 |
+| Correct activations / valid activations | 21/30 | 36/57 |
+| Activation precision | 70.00% | 63.16% |
+| Correct selections for positive requests | 21/42 | 36/42 |
+| Missed positive requests | 21/42 | 6/42 |
+| Valid false activations | 9 | 21 |
+| Ordinary-request false activations | 6/42 | 15/42 |
+| Actual model calls | 0 | 30 |
+
+Activation precision uses valid activations as its denominator; the three rejected
+choices remain recorded as errors. Each hybrid study exited 1 because
+`ambiguous-video-negated` selected the document skill for video evidence on all
+three repeats. The eligibility guard rejected those choices. There were **zero
+transport, malformed-JSON, or truncated-output errors**; suppressing the three
+rejections would not fix the selection-quality failure.
+
+**What failed and what improved.** All repeats agreed within and across studies:
+
+- The model recovered five positive case types: document contradiction checks,
+  Spanish and French document requests, and Portuguese and German video requests.
+  The two remaining positive misses concern explicitly selected document/video
+  subsets among mixed attachments; the conservative eligibility guard abstained.
+- Three false case types already selected by the rules remained: uncertain
+  document identity, translating quoted document instructions, and finding a
+  video delete control. The hybrid does not reconsider a positive rule choice.
+- Model calls added valid false activations for a negated document request,
+  file renaming, an unrelated attached document, and project organization. The
+  negated video case produced the three rejected document-skill attempts.
+- Among the **same 30 model calls** reported again in `conditional_router`,
+  15 selected the expected skill, 12 made valid false activations, and 3 made
+  ineligible attempts. There were **zero model abstentions**. This subset is
+  conditional on a rules abstention; it is not another 30 calls or a complete
+  model-only comparison.
+
+**Measured model cost.** Latencies below include only the 30 model requests in
+each study. The whole-hybrid median is zero because the report records guards at
+zero elapsed time; it does not describe model response speed. Quantiles use
+nearest-rank sampling.
+
+| Model-call measurement | First study | Later study |
+|---|---:|---:|
+| Request latency median / p95 | 0.16070s / 0.20747s | 0.16197s / 0.21186s |
+| Input tokens, total / measured calls | 8,223 / 30 | 8,223 / 30 |
+| Output tokens, total / measured calls | 318 / 30 | 318 / 30 |
+| Median input / output tokens per call | 273 / 11 | 273 / 11 |
+
+Model loading was uncontrolled and no seed was recorded. These observations
+cannot establish controlled cold/warm latency or a speedup relative to the
+7.35-second single-case pilot. The fixture labels are proposed conservative
+selection policy, with three repeats per case at temperature 0, and require
+independent review. This study does not compare router candidates or measure
+answer quality, workflow benefit, or production selection precision.
+
+**Follow-up: evaluation policy revision 2.** [Slice 3D.2](../docs/campaign-3/phase-03-skill-selection-policy.md)
+adds firm abstention and scoped target resolution to the standalone evaluator.
+Its 3,845-test laptop gate passed. Offline rules on the unchanged development
+set select nine of 14 positives correctly and abstain on all 28 negative
+controls: 37/42 correct labels, zero false activations, five positive abstentions.
+No model was called. These development results supply no new Qwen quality,
+latency, or token measurements and do not replace the revision-1 model evidence
+above. The first measurement on 30 separately authored, untuned proposed
+controls is pending; those labels still need independent human review.
+Automatic runtime selection remains disabled.
+
+Sources: Tower logs `2026-10-06-110216-eval_skill_selection.log` and
+`2026-10-06-110258-eval_skill_selection.log`; report timestamps
+`2026-10-06T17:02:22.219753+00:00` and
+`2026-10-06T17:03:04.733490+00:00`.
+Retained raw reports: [first study](results/2026-10-06-skill-selection-hybrid-110216-results.json)
+and [later study](results/2026-10-06-skill-selection-hybrid-110258-results.json).
+
 ### Kimi K3 and GLM 5.3 client protocol assessment (received October 6, 2026)
 
 **Source and scope.** Claudette, a Hermes bot, supplied

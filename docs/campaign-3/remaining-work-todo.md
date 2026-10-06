@@ -439,16 +439,35 @@ Detailed decision record:
 
 **State:** Slice 3D.1 evaluation foundation is laptop-complete: 3,725 backend
 tests passed. Rules baseline is measured (70% precision, three false activations,
-seven misses); live router measurements are pending. [Study plan and small check](phase-03-skill-selection-evaluation.md).
+seven misses). The pilot passed; two repeated hybrid studies completed all
+calls on 2026-10-06 but measured 63.16% precision, 15/42 ordinary false
+activations, and three rejected choices each. Automatic selection stays off.
+Slice 3D.2 policy refinement is laptop-complete: 3,845 backend tests passed.
+Rules on the same development set: nine correct activations, zero false
+activations, five undecided positives; no model calls. The next measurement
+uses 30 separately authored proposed controls once.
+[Recorded study](phase-03-skill-selection-evaluation.md) / [new measurement](phase-03-skill-selection-policy.md).
 
 - [x] Keep `skills.auto_select: false` during the study.
 - [x] Build 42 labeled positive, ambiguous, and ordinary-chat control cases.
 - [x] Add an offline rules baseline and optional retained-router and hybrid
   measurement arms, with explicit errors, abstention, latency, and usage.
-- [ ] Pass the one-case direct-model pilot before the repeated study.
-- [ ] Measure missed activation and false activation separately.
-- [ ] Compare deterministic rules with the retained router and System One
-  candidates.
+- [x] Pass the one-case direct-model pilot: rules abstained and one retained
+  router call correctly selected document analysis; zero errors, auto off.
+- [x] Collect the 42-case, three-repeat hybrid study (30 model calls per run);
+  both received reports have identical selection findings.
+- [x] Measure missed activation and false activation separately; current hybrid
+  improves recall but worsens activation precision and ordinary false activation.
+- [x] Compare deterministic rules with the retained-router hybrid on identical cases.
+- [x] Refine evaluation policy: terminal abstention, excluded-file targets,
+  scoped negation, and quoted content (Slice 3D.2).
+- [x] Reserve 30 separately authored proposed controls without selector tuning;
+  labels still require independent human review.
+- [x] Preserve probe launch logfile identity through detachment; behavior tested.
+- [ ] Collect the first revision-2 measurement on those 30 controls once.
+- [ ] Review new-control findings and labels before expanding measurements.
+- [ ] Consider a separate router/System One arm only if revised policy evidence
+  warrants that comparison; no new candidate probe is queued now.
 - [x] Propose separate precision, false-activation, and missed-activation
   thresholds; retain `auto_select: false` throughout measurement.
 - [ ] Agree the final gates, validate a holdout set, and prove answer-quality

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import math
 import os
@@ -61,12 +62,64 @@ _INTENT = re.compile(
     r"|\bwhat\b.{0,80}\b(?:say|says|show|shows|contain|contains|main|takeaway|happens|happened)\b"
     r"|\b(?:who|when|where|how much|how many)\b", re.I
 )
-_DO_NOT_SELECT = re.compile(
-    r"\b(?:don't|do not|never|without|not asking (?:you )?to)\b.{0,60}"
-    r"\b(?:analy[sz]e|summari[sz]e|summary|read|review|compare|extract)\b"
-    r"|\b(?:hypothetical|pretend|imagine|example prompt|write (?:a )?(?:script|program|code))\b",
+# These bounded English patterns are evaluation policy, not a general NLP parser.
+_QUOTED = re.compile(r"```[\s\S]*?```|`[^`\n]*`|(?<!\w)'(?:[^'\n]|(?<=\w)'(?=\w))*'|\"(?:\\.|[^\"\\])*\"|“[^”\n]*”|‘(?:[^’\n]|(?<=\w)’(?=\w))*’")
+_FILE_TOKEN = re.compile(
+    r"\b[\w.-]+\.(?:pdf|docx?|xlsx?|csv|txt|md|mp4|mov|webm|mkv|png|jpe?g|wav|mp3)\b", re.I
+)
+_ACTION = r"(?:summari[sz]e|analy[sz]e|compare|explain|extract|review|outline|find|count|read)"
+_CLAUSE_BREAK = re.compile(
+    rf"[;\n]|[.!?](?=\s|$)|\b(?:and|but|then)\s+(?=(?:not\b|do not\b|don['’]t\b|never\b|ignore\b|{_ACTION}\b))"
+    rf"|,\s*(?=(?:not\b|do not\b|don['’]t\b|never\b|without\b|ignore\b|{_ACTION}\b))", re.I
+)
+_NEGATED_ACTION = re.compile(
+    rf"\b(?:do not(?: want (?:you )?to)?|don't|never|without|not asking (?:you )?to)\s+"
+    rf"(?:read(?:ing)?|open(?:ing)?|access(?:ing)?|watch(?:ing)?|us(?:e|ing)|inspect(?:ing)?|{_ACTION})\b", re.I
+)
+_EXCLUSION = re.compile(
+    r"\b(?:ignore|disregard|unrelated|irrelevant|excluded)\b"
+    r"|\b(?:do not|don't|never|without)\s+(?:us(?:e|ing)|read(?:ing)?|open(?:ing)?|access(?:ing)?|watch(?:ing)?|analy[sz]e)\b"
+    r"|^\s*not\b", re.I
+)
+_UNRESOLVED = re.compile(
+    r"\b(?:cannot|can't|don't|do not) (?:remember|know) which\b"
+    r"|\bnot (?:yet )?chosen which\b"
+    r"|\bnot sure which\b.{0,60}\b(?:file|document|report|video|upload|recording)s?\b"
+    r"|\b(?:unsure|uncertain) which\b.{0,60}\b(?:file|document|report|video|upload|recording)s?\b",
     re.I,
 )
+_MANAGEMENT = re.compile(
+    r"\b(?:rename|delete|move|remove)\b|\b(?:button|sidebar|interface|files page|my files)\b"
+    r"|\b(?:group|organize)\b.{0,60}\b(?:conversation|project)s?\b", re.I
+)
+_METADATA_ONLY = re.compile(r"\b(?:filename|file name|file type|received it)\b", re.I)
+_TEXT_TRANSFORM = re.compile(
+    r"\b(?:translate|rewrite|copy)\b|\b(?:meaning|phrase|quoted (?:sentence|line|text))\b", re.I
+)
+_UNSELECTED_TARGET = re.compile(
+    r"\bnot (?:yet )?(?:chosen|decided) which\s+(?:file|document|report|video|upload|recording|one)\b",
+    re.I,
+)
+_PROGRAM_TASK = re.compile(
+    r"^\s*(?:please\s+|can you\s+|could you\s+)?(?:write|create|build|implement|debug)\s+"
+    r"(?:a |an |the )?(?:(?:python|javascript|shell|bash)\s+)?(?:script|program|function|code|parser)\b",
+    re.I,
+)
+_HYPOTHETICAL_TASK = re.compile(
+    r"^\s*(?:imagine|pretend|suppose)\b|\b(?:hypothetical request|example prompt)\b", re.I
+)
+_CONTENT_ACTION = re.compile(r"\b(?:summari[sz]e|analy[sz]e|compare|extract|review)\b", re.I)
+_CONTENT_LOCATION = re.compile(
+    r"\b(?:in|from|inside|within|according to)\s+(?:(?:my|the|uploaded|attached)\s+)*$", re.I
+)
+_CONTENT_PREDICATE = re.compile(
+    r"^\s*(?:says?|contains?|states?|describes?|shows?|documents?|explains?|mentions?)\b", re.I
+)
+_NO_SPECIALIZATION = re.compile(
+    r"\b(?:do not|don't|never)\s+(?:activate|select|use)\s+(?:a |any |the )?(?:skill|speciali[sz])",
+    re.I,
+)
+
 
 
 class EvalError(RuntimeError):
@@ -101,6 +154,8 @@ class Decision:
     latency_seconds: float = 0.0
     input_tokens: int | None = None
     output_tokens: int | None = None
+    terminal_abstention: bool = False
+    policy_reason: str | None = None
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict:
@@ -175,44 +230,180 @@ def load_cases(path: Path) -> list[Case]:
     return cases
 
 
-def eligible_skills(case: Case, catalog=DEFAULT_CATALOG) -> set[str]:
-    """Require a supported mode and a resolvable, ready, homogeneous target."""
-    matches = [(file, match.span()) for file in case.files for match in re.finditer(
-        rf"(?<![\w.-]){re.escape(file.name)}(?![\w-]|\.\w)", case.prompt, re.I
+@dataclass(frozen=True, slots=True)
+class _Policy:
+    eligible: frozenset[str]
+    intent_text: str
+    reason: str | None = None
+
+
+def _request_text(case: Case) -> tuple[str, bool]:
+    """Hide quoted prose/code, while preserving quoted exact file references."""
+    quoted_prose = False
+
+    def replace(match: re.Match) -> str:
+        nonlocal quoted_prose
+        body = match.group().strip("`'\"“”‘’").strip()
+        if any(body.casefold() == file.name.casefold() for file in case.files):
+            return match.group()
+        if _FILE_TOKEN.fullmatch(body):
+            return match.group()  # A quoted missing name still must fail resolution.
+        quoted_prose = True
+        return " " * len(match.group())
+
+    return _QUOTED.sub(replace, case.prompt), quoted_prose
+
+
+def _file_matches(text: str, files: tuple[FileEvidence, ...]) -> list[tuple[FileEvidence, tuple[int, int]]]:
+    return [(file, match.span()) for file in files for match in re.finditer(
+        rf"(?<![\w.-]){re.escape(file.name)}(?![\w-]|\.\w)", text, re.I
     )]
-    named_tokens = re.finditer(
-        r"\b[\w.-]+\.(?:pdf|docx?|xlsx?|csv|txt|md|mp4|mov|webm|mkv|png|jpe?g|wav|mp3)\b",
-        case.prompt, re.I,
-    )
-    if any(not any(start <= token.start() and token.end() <= end for _, (start, end) in matches)
-           for token in named_tokens):
-        return set()
-    matched = [file for file in case.files if any(file == found for found, _ in matches)]
-    if matched:
-        targets = matched
-    elif _OWN_REFERENCE.search(case.prompt):
-        doc = bool(_DOCUMENT.search(case.prompt))
-        video = bool(_VIDEO.search(case.prompt))
+
+
+def _mask_filenames(text: str, files: tuple[FileEvidence, ...]) -> str:
+    spans = [span for _, span in _file_matches(text, files)]
+    spans.extend(match.span() for match in _FILE_TOKEN.finditer(text))
+    chars = list(text)
+    for start, end in spans:
+        chars[start:end] = " " * (end - start)
+    return "".join(chars).replace("’", "'")
+
+
+def _file_content_request(clause: str, words: str, matches: list) -> bool:
+    """Distinguish document content about an operation from performing it."""
+    if not _INTENT.search(words):
+        return False
+    for _, (start, end) in matches:
+        if (_CONTENT_LOCATION.search(clause[:start])
+                or _CONTENT_PREDICATE.search(clause[end:])):
+            return True
+    return bool(matches and _CONTENT_ACTION.search(words))
+
+
+def _resolve_policy(case: Case, catalog=DEFAULT_CATALOG) -> _Policy:
+    """Resolve affirmative target clauses; excluded files never replace targets."""
+    supported = {entry["id"] for entry in catalog if case.mode in entry["supported_modes"]}
+    if not supported:
+        return _Policy(frozenset(), "", "unsupported_mode")
+    text, quoted_prose = _request_text(case)
+    lexical = _mask_filenames(text, case.files)
+    known_targets = _file_matches(text, case.files)
+    alternative = bool(re.search(r"\b(?:one of|either)\b.{0,160}\bor\b", text, re.I))
+    if (_UNSELECTED_TARGET.search(lexical)
+            or (_UNRESOLVED.search(lexical) and (not known_targets or alternative))):
+        return _Policy(frozenset(), "", "unresolved_target")
+    if _NO_SPECIALIZATION.search(lexical):
+        return _Policy(frozenset(), "", "prohibited_specialization")
+
+    references: list[FileEvidence] = []
+    affirmative_refs: list[FileEvidence] = []
+    excluded: set[FileEvidence] = set()
+    affirmative = []
+    negative_analysis = False
+    has_management = False
+    has_metadata_task = False
+    has_transform = False
+    has_meta_task = False
+    missing_target = False
+    affirmative_evidence = False
+    for clause in _CLAUSE_BREAK.split(text):
+        if not clause.strip():
+            continue
+        matches = _file_matches(clause, case.files)
+        clause_files = [file for file, _ in matches]
+        words = _mask_filenames(clause, case.files)
+        exclusion = bool(_EXCLUSION.search(words))
+        negated = bool(_NEGATED_ACTION.search(words))
+        content_request = _file_content_request(clause, words, matches)
+        if content_request and not negated:
+            exclusion = False
+        management = bool(_MANAGEMENT.search(words)) and not content_request
+        metadata = bool(_METADATA_ONLY.search(words)) and not content_request
+        transform = (quoted_prose and bool(_TEXT_TRANSFORM.search(words))
+                     and not content_request)
+        meta_task = bool(_PROGRAM_TASK.search(words) or _HYPOTHETICAL_TASK.search(words))
+        has_management |= management
+        has_metadata_task |= metadata
+        has_transform |= transform
+        has_meta_task |= meta_task
+        negative_analysis |= negated
+        references.extend(clause_files)
+        if exclusion:
+            excluded.update(clause_files)
+            continue
+        for token in _FILE_TOKEN.finditer(clause):
+            if not any(start <= token.start() and token.end() <= end for _, (start, end) in matches):
+                missing_target = True
+        if not negated and not management and not metadata and not transform and not meta_task:
+            affirmative.append(words)
+            affirmative_refs.extend(clause_files)
+            affirmative_evidence |= bool(_INTENT.search(words) and (
+                clause_files or _OWN_REFERENCE.search(words)
+            ))
+
+    if missing_target:
+        return _Policy(frozenset(), "", "missing_target")
+    intent_text = " ".join(affirmative)
+    # Generic explanations after a meta-task are not permission to read its
+    # illustrative filename. A scoped method switch can refer to real evidence
+    # by pronoun, such as "do not summarize the file; compare its sections".
+    if (not has_meta_task and not has_transform
+            and any(file not in excluded for file in references)
+            and _CONTENT_ACTION.search(intent_text)
+            and re.search(r"\b(?:it|its|them|their)\b", intent_text, re.I)):
+        affirmative_evidence = True
+    if not affirmative_evidence and has_transform:
+        return _Policy(frozenset(), "", "quoted_text_task")
+    if not affirmative_evidence and has_meta_task:
+        return _Policy(frozenset(), "", "hypothetical_or_programming_task")
+    if not affirmative_evidence and has_management:
+        return _Policy(frozenset(), "", "file_management")
+    if not affirmative_evidence and has_metadata_task:
+        return _Policy(frozenset(), "", "metadata_only")
+    if not affirmative_evidence and negative_analysis:
+        return _Policy(frozenset(), "", "prohibited_analysis")
+
+    # Named affirmative targets take precedence over names in prohibitions.
+    targets = list(dict.fromkeys(affirmative_refs))
+    if not targets:
+        targets = [file for file in dict.fromkeys(references) if file not in excluded]
+    if any(file in excluded for file in targets):
+        return _Policy(frozenset(), "", "prohibited_evidence_access")
+    if not targets and references and not affirmative_evidence:
+        return _Policy(frozenset(), "", "prohibited_evidence_access")
+    if not targets and _OWN_REFERENCE.search(intent_text):
+        doc = bool(_DOCUMENT.search(intent_text))
+        video = bool(_VIDEO.search(intent_text))
         kind = "document" if doc and not video else "video" if video and not doc else None
-        targets = [file for file in case.files if kind is None or file.kind == kind]
-    else:
-        return set()
-    if not targets or any(file.status != "ready" for file in targets):
-        return set()
+        targets = [file for file in case.files
+                   if file not in excluded and (kind is None or file.kind == kind)]
+    if not targets:
+        return _Policy(frozenset(), "", "no_target")
+    if any(file.status != "ready" for file in targets):
+        return _Policy(frozenset(), "", "unready_target")
     kinds = {file.kind for file in targets}
-    if len(kinds) != 1 or not kinds <= {"document", "video"}:
-        return set()
+    if len(kinds) != 1:
+        return _Policy(frozenset(), "", "mixed_target")
+    if not kinds <= {"document", "video"}:
+        return _Policy(frozenset(), "", "unsupported_kind")
     wanted = SKILL_IDS[0] if kinds == {"document"} else SKILL_IDS[1]
-    return {entry["id"] for entry in catalog
-            if entry["id"] == wanted and case.mode in entry["supported_modes"]}
+    if wanted not in supported:
+        return _Policy(frozenset(), "", "unsupported_mode")
+    return _Policy(frozenset({wanted}), intent_text)
+
+
+def eligible_skills(case: Case, catalog=DEFAULT_CATALOG) -> set[str]:
+    """Expose only ready targets allowed by the bounded evaluation policy."""
+    return set(_resolve_policy(case, catalog).eligible)
 
 
 def select_rules(case: Case, *, catalog=DEFAULT_CATALOG) -> Decision:
     start = time.perf_counter()
-    eligible = eligible_skills(case, catalog)
-    selected = NONE
-    if len(eligible) == 1 and _INTENT.search(case.prompt) and not _DO_NOT_SELECT.search(case.prompt):
-        selected = next(iter(eligible))
+    policy = _resolve_policy(case, catalog)
+    if policy.reason:
+        return Decision(NONE, latency_seconds=time.perf_counter() - start,
+                        terminal_abstention=True, policy_reason=policy.reason)
+    selected = next(iter(policy.eligible)) if _INTENT.search(policy.intent_text) else NONE
     return Decision(selected, latency_seconds=time.perf_counter() - start)
 
 
@@ -267,9 +458,10 @@ async def select_router(
     case: Case, *, client: httpx.AsyncClient, model: str,
     timeout_s: float = 20, catalog=DEFAULT_CATALOG,
 ) -> Decision:
+    rules = select_rules(case, catalog=catalog)
+    if rules.terminal_abstention:
+        return rules
     eligible = eligible_skills(case, catalog)
-    if not eligible:
-        return Decision(NONE)
     payload = {
         "model": model, "messages": build_router_messages(case, catalog), "stream": False,
         "format": CHOICE_SCHEMA, "options": {"temperature": 0, "num_predict": 128},
@@ -342,6 +534,9 @@ def summarize_samples(samples: list[dict]) -> dict:
         "error_rate": errors / total if total else None,
         "model_called": sum(sample.get("model_called", False) for sample in samples),
         "guarded": sum(sample.get("source") == "guard" for sample in samples),
+        "terminal_abstentions": sum(sample.get("terminal_abstention", False) for sample in valid),
+        "policy_reasons": dict(Counter(sample["policy_reason"] for sample in valid
+                                       if sample.get("terminal_abstention", False))),
         "confusion": {expected: {selected: count for (gold, selected), count in confusion.items()
                                  if gold == expected} for expected in (*SKILL_IDS, NONE)},
         "latency_p50_seconds": _quantile(latencies, .5),
@@ -389,15 +584,15 @@ async def evaluate(
     for case in cases:
         for repeat in range(1, repeats + 1):
             rules = select_rules(case, catalog=catalog)
-            eligible = eligible_skills(case, catalog)
-            buckets["rules"].append(_sample(case, rules, repeat, "rules", False))
+            source = "guard" if rules.terminal_abstention else "rules"
+            buckets["rules"].append(_sample(case, rules, repeat, source, False))
             if backend == "rules":
+                continue
+            if rules.terminal_abstention:
+                buckets[backend].append(_sample(case, rules, repeat, "guard", False))
                 continue
             if backend == "hybrid" and rules.selected != NONE:
                 buckets[backend].append(_sample(case, rules, repeat, "rules", False))
-                continue
-            if not eligible:
-                buckets[backend].append(_sample(case, Decision(NONE), repeat, "guard", False))
                 continue
             decision = await select_router(case, client=client, model=model,
                                            timeout_s=timeout_s, catalog=catalog)
@@ -414,7 +609,11 @@ async def evaluate(
             "case_count": len(cases), "repeats": repeats, "timeout_seconds": timeout_s,
             "router_max_output_tokens": 128, "router_temperature": 0,
             "serial_calls": True, "retries": 0, "automatic_selection_enabled_in_harness": False,
-            "catalog": catalog, "rules_revision": 1,
+            "catalog": catalog, "rules_revision": 2,
+            "case_set_sha256": hashlib.sha256(json.dumps(
+                [asdict(case) for case in cases], sort_keys=True, ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")).hexdigest(),
             "evaluation_only": True, "cold_load_controlled": False,
             "latency_quantile": "nearest_rank", "latency_includes_cold_load": True,
         },

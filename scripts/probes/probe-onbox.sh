@@ -86,9 +86,14 @@ fi
 # env var stops the child from doing it again. `setsid` (not just nohup) so the
 # process leaves the controlling terminal's session entirely — nohup alone only
 # ignores SIGHUP, and a closed terminal can still take a process group with it.
-STAMP="$(docker exec "${CONTAINER}" date +%Y-%m-%d-%H%M%S 2>/dev/null || date +%Y-%m-%d-%H%M%S)"
 LABEL="${PROBE%.py}"
-LOG="${OUT_DIR}/${STAMP}-${LABEL}.log"
+# The detached child must keep the identity used for the parent's redirect.
+# Reading the clock again can cross a second and notify a different log path.
+# Fresh calls (including FOREGROUND=1) ignore any inherited STAMP/LOG values.
+if [[ -z "${_PROBE_DETACHED:-}" || -n "${FOREGROUND:-}" || -z "${STAMP:-}" || -z "${LOG:-}" ]]; then
+  STAMP="$(docker exec "${CONTAINER}" date +%Y-%m-%d-%H%M%S 2>/dev/null || date +%Y-%m-%d-%H%M%S)"
+  LOG="${OUT_DIR}/${STAMP}-${LABEL}.log"
+fi
 
 if [[ -z "${_PROBE_DETACHED:-}" && -z "${FOREGROUND:-}" ]]; then
   mkdir -p "${OUT_DIR}"

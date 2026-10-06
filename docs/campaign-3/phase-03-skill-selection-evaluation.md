@@ -1,8 +1,11 @@
 # Campaign 3 Slice 3D.1 — skill selection evaluation foundation
 
 **Status:** Laptop-complete, 2026-10-06. Full hermetic backend verification:
-3,725 passed. Automatic selection remains disabled. The rules baseline is
-measured; live router measurements are pending.
+3,725 passed. The one-case live pilot passed on 2026-10-06. Two repeated
+42-case studies subsequently collected all calls but exposed unsuitable
+selection behavior. Automatic selection remains disabled. [Slice 3D.2](phase-03-skill-selection-policy.md)
+now adds firm abstention and scoped evidence resolution; its new-controls live
+measurement is pending.
 
 ## Purpose
 
@@ -94,7 +97,10 @@ selector miss, not a reason to enable it or rerun all previous smokes.
 
 ## Full measurement after the small check
 
-Only after the small model call works, run:
+The pilot and two repeated studies are settled on 2026-10-06. The command
+below records how those studies ran; do not repeat unchanged measurements.
+Future measurements should follow the policy refinement described below.
+When needed after that change, the runner executes on Tower while Audrey is idle:
 
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0
@@ -105,13 +111,11 @@ scripts/probes/probe-onbox.sh eval_skill_selection.py \
 
 This repeats the 42 cases three times. With the current fixture and rules,
 it makes 30 router calls (10 eligible abstentions per repeat). Rules make no
-model calls; the hybrid asks the router only for eligible rule abstentions. An independent router arm
-can be run later with `--backend router` if the hybrid evidence warrants it.
-Do not run model candidates or a broad answer-quality suite for this foundation.
-
-Review the saved errors, activation mistakes, latency, and usage before deciding
-whether to expand the study. This small development fixture cannot establish
-production precision or show that selected skills improve final answers.
+model calls; the hybrid asks the router only for eligible rule abstentions.
+The current findings require policy refinement before another model arm or
+candidate comparison. No broad answer-quality rerun is needed for this study.
+A synthetic development fixture cannot establish production precision or show
+that selected skills improve final answers.
 
 ## Laptop evidence, 2026-10-06
 
@@ -145,7 +149,104 @@ those false activations.
 
 Local result: `testing-out/evals/2026-10-06-skill-selection-rules-final.json`.
 This is a development fixture, not an independent production quality estimate.
-No live router sample or selector cost measurement has run on the laptop.
+No live model was called by the laptop verification.
+
+## Live pilot evidence, 2026-10-06
+
+Tower log: `2026-10-06-105732-eval_skill_selection.log`. Its report was created
+at `2026-10-06T16:57:40.340643+00:00`. The [retained result](../../evals/results/2026-10-06-skill-selection-pilot-results.json)
+records exactly one `positive-document-spanish` case, one repeat, and one
+`qwen3.5:4b` call. Rules abstained; the hybrid called the router and selected
+`grounded-document-analysis`, matching the label. Output was valid, with zero
+errors, retries, wrong choices, or missed selection in this case. Both harness
+activation and configured runtime auto selection remained false.
+
+The call took 7.35355 seconds and used 277 input / 11 output tokens with
+temperature 0 and a 128-token output ceiling. Model loading was not controlled,
+so this single elapsed time does not establish warm or cold latency. The
+`conditional_router` section repeats the same sample; it is not another call.
+No ordinary or ambiguous case was included, so this pilot supplies no evidence
+about false activation. The repeated study below supplies those development
+measurements. The pilot is settled; do not repeat it for unchanged behavior.
+
+## Repeated hybrid evidence, 2026-10-06
+
+Both Tower logs contain all 42 cases repeated three times, 126 decisions per
+full arm, and 30 actual model calls per study. Preserve the reports separately:
+
+- [First report: 110216](../../evals/results/2026-10-06-skill-selection-hybrid-110216-results.json), created at `2026-10-06T17:02:22.219753+00:00`.
+- [Second report: 110258](../../evals/results/2026-10-06-skill-selection-hybrid-110258-results.json), created at `2026-10-06T17:03:04.733490+00:00`.
+
+Decisions, errors, and token counts match exactly across repeats and both
+studies. Wrapper timestamps show the first finished at 17:02:22 UTC and the
+second started at 17:02:58 UTC; these runs did not overlap. They use the same
+42 development cases, so the second run is replication, not an independent
+holdout. The conditional-router section duplicates model-reached observations
+from the hybrid; it does not represent additional calls.
+
+| Per-study measurement | Rules | Hybrid |
+|---|---:|---:|
+| Correct decisions overall | 96 / 126 | 96 / 126 |
+| Correct activations / all valid activations | 21 / 30 (70%) | 36 / 57 (63.16%) |
+| Useful selections recovered | 21 / 42 (50%) | 36 / 42 (85.71%) |
+| Useful selections missed | 21 / 42 | 6 / 42 |
+| Valid false activations | 9 | 21 |
+| Ordinary-chat false activations | 6 / 42 | 15 / 42 |
+| Invalid selections | 0 | 3 |
+| Model calls | 0 | 30 |
+
+Each report exits 1 because `ambiguous-video-negated` returns
+`grounded-document-analysis` in all three repeats, although only video evidence
+is eligible. The post-response eligibility check rejects that choice. There
+are no reported transport, timeout, malformed-JSON, or truncation failures.
+Those three rejected attempts remain separate from the 21 valid false
+activations; they are not counted as successful abstentions.
+
+Among the 30 model-reached observations, the model activates for every request:
+15 correct positive selections, 12 valid false activations, and three rejected
+ineligible attempts. It never returns `none`. The five recovered positive cases
+cover conflicting document sections, Spanish/French document requests, and
+Portuguese/German video requests. New valid false choices concern negated
+document analysis, file renaming, an unrelated attachment, and project
+organization. The hybrid also inherits the rules' unresolved-report, quoted
+instruction, and delete-button mistakes. The remaining six missed positives
+are two explicitly selected attachment subsets repeated three times; the
+guard treats an explicitly excluded file as another target.
+
+For the second study, model-only request latency is 0.16197s median and
+0.21186s p95 over 30 calls. The first study records 0.16070s / 0.20747s.
+Each uses 8,223 input / 318 output tokens; median usage is 273 input / 11 output
+tokens. Whole-hybrid median latency is zero because guards return immediately;
+it is not a model-speed measurement. Temperature is 0, output ceiling is 128,
+retries are zero, and loading is uncontrolled. These are observed request
+timings, not proven warm/cold benchmarks or candidate comparisons.
+
+**Decision:** The foundation collected useful evidence, but the current rules
+and hybrid do not support automatic activation. Both harness and configured
+runtime auto selection remain false. Keep the existing production task router
+and explicit skills unchanged; this study measures a different decision.
+
+## Follow-up: 3D.2 evaluation policy refinement
+
+[Slice 3D.2](phase-03-skill-selection-policy.md) is laptop-complete: 3,845 backend
+checks passed. It implements the policy refinements below and reserves a
+separately authored 30-case proposed control set for its first measurement.
+Automatic runtime activation remains deferred; the revision-1 evidence above
+is preserved.
+
+1. Separate a terminal abstention from an undecided rules result. Explicitly
+   forbidden file analysis, quoted commands, interface-management questions,
+   and unresolved targets must not fall through to a model that activates.
+2. Resolve explicitly excluded attachments conservatively while preserving
+   readiness, supported-mode, and evidence-identity checks.
+3. Add independently reviewed controls before refining rules or model prompts;
+   retain an untouched holdout and preserve this revision-1 baseline. Do not
+   change labels merely to make current decisions look correct.
+4. Measure affected cases and new controls after the change. Restricting the
+   output enum alone is insufficient: it could replace a rejected document
+   choice with an unwanted video choice while concealing the underlying error.
+5. Agree quality and cost gates before testing automatic behavior. No unchanged
+   pilot/full-study rerun or new model candidate is requested by these findings.
 
 ## Requirements before enabling automatic selection
 

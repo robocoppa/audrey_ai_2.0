@@ -49,7 +49,13 @@ Automatic selection remains disabled. Slice 3D.1 now supplies a separate
 [selection evaluation foundation](phase-03-skill-selection-evaluation.md),
 with labeled controls and offline rules / optional retained-router measurements.
 Its laptop gate passed 3,725 tests; the rules baseline measured 70% precision,
-so activation remains deferred. Live router measurements are pending.
+so activation remains deferred. The Spanish document pilot passed on
+2026-10-06. Two repeated hybrid studies then returned identical findings:
+63.16% activation precision, 15/42 ordinary false activations, and three
+rejected choices per study. All calls completed. [Slice 3D.2](phase-03-skill-selection-policy.md)
+now separates firm abstention from undecided requests and resolves scoped
+exclusions. Its full laptop gate passed 3,845 tests; first measurement on 30
+new proposed controls is pending. Automatic selection stays disabled.
 
 Phase 4 completed on 2026-09-29. Slice 4A's owner-scoped, ranged
 original-file downloads are live-settled. Slice 4B's read-only backend smoke

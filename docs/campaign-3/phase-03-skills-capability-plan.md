@@ -504,14 +504,20 @@ consistency at acceptable cost.
 [evaluation foundation](phase-03-skill-selection-evaluation.md): 42 synthetic
 labeled cases, an offline rules baseline, and optional retained-router/hybrid
 measurement arms. Laptop verification passed 3,725 tests. Rules measured
-70% precision with three false activations and seven misses; live router
-measurements are pending. The 3C answer comparison stays passed and does not
-measure selector precision or false activation.
+70% precision with three false activations and seven misses. The one-case
+Spanish document pilot passed on 2026-10-06 with one retained-router call.
+Two repeated hybrid studies subsequently completed all calls with identical
+findings: 63.16% precision, 15/42 ordinary false activations, and three rejected
+ineligible choices per study. [Slice 3D.2](phase-03-skill-selection-policy.md)
+now refines evaluation policy and reserves new proposed controls; 3,845 backend
+tests passed, with first new-control measurement pending. The 3C answer
+comparison stays passed and does not measure selector precision or false
+activation.
 
-Campaign 3 Phase 6 will evaluate Ollama System One for Audrey's task router.
-If a small decision model passes that gate, the same typed-choice mechanism may
-later be evaluated here with `none` as an explicit abstention outcome. That
-experiment does not enable automatic selection or relax this milestone's gate.
+Campaign 3 Phase 6's System One task-router comparison is settled; no candidate
+cleared its gate, and the retained router is unchanged. A future candidate may
+be evaluated here only if new evidence warrants it. Task-routing results do not
+establish skill-selection quality or relax this milestone's gate.
 
 Open only after explicit selection has stable evidence.
 

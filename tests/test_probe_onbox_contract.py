@@ -1,7 +1,8 @@
 """`probe-onbox.sh` must keep the properties that make an unattended run survive.
 
-This is a shell script, so the tests are structural rather than behavioural —
-but every property asserted here has a specific failure behind it:
+Structural checks cover the wrapper conventions; local fake commands also
+exercise its invocation and detached run identity without Docker or network.
+Every property asserted here has a specific failure behind it:
 
 - **Self-detaching.** Long runs previously died to laptop-sleep process
   orphaning and looked like broken probes for two days. An incantation you have
@@ -23,6 +24,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -195,3 +197,125 @@ def test_evaluation_harness_is_found_copied_and_invoked(tmp_path):
         "--backend", "hybrid", "--config", "/app/config.yaml",
     ]
     assert "evaluation completed" in result.stdout
+
+
+@pytest.fixture
+def identity_runner(tmp_path):
+    """Run the actual wrapper with deterministic clocks and local-only commands."""
+    appdata = tmp_path / "checkout"
+    harness = appdata / "scripts" / "probes" / "identity_probe.py"
+    harness.parent.mkdir(parents=True)
+    harness.write_text("print('identity probe output')\n")
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    calls = tmp_path / "docker-calls.jsonl"
+    notifications = tmp_path / "notifications.jsonl"
+    completed = tmp_path / "detached-completed"
+    clock = tmp_path / "clock-count"
+    watchdog = tmp_path / "watchdog.env"
+    watchdog.write_text("WATCHDOG_TOKEN=test-only-token\nWATCHDOG_CHAT_ID=test-only-chat\n")
+    commands = {
+        "docker": (
+            "import json, os, sys\n"
+            "from pathlib import Path\n"
+            "with open(os.environ['TEST_DOCKER_CALLS'], 'a') as log:\n"
+            "    log.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+            "if 'date' in sys.argv:\n"
+            "    clock = Path(os.environ['TEST_CLOCK_COUNT'])\n"
+            "    count = int(clock.read_text()) if clock.exists() else 0\n"
+            "    clock.write_text(str(count + 1))\n"
+            "    print(f'2026-10-06-1200{count:02d}')\n"
+            "elif 'python3' in sys.argv:\n"
+            "    print('identity probe output')\n"
+        ),
+        "setsid": (
+            "import os, subprocess, sys\n"
+            "from pathlib import Path\n"
+            "result = subprocess.run(sys.argv[1:], check=False)\n"
+            "Path(os.environ['TEST_DETACHED_COMPLETED']).touch()\n"
+            "sys.exit(result.returncode)\n"
+        ),
+        "nohup": "import os, sys\nos.execvp(sys.argv[1], sys.argv[1:])\n",
+        "curl": (
+            "import json, os, sys\n"
+            "from pathlib import Path\n"
+            "record = {'arguments': sys.argv[1:]}\n"
+            "for arg in sys.argv[1:]:\n"
+            "    if arg.startswith('document=@'):\n"
+            "        record['document_content'] = Path(arg[10:]).read_text()\n"
+            "with open(os.environ['TEST_NOTIFICATIONS'], 'a') as log:\n"
+            "    log.write(json.dumps(record) + '\\n')\n"
+        ),
+    }
+    for name, source in commands.items():
+        executable = binaries / name
+        executable.write_text(f"#!{sys.executable}\n" + source)
+        executable.chmod(0o700)
+    environment = dict(
+        os.environ, APPDATA=str(appdata), OUT_DIR=str(tmp_path / "results"),
+        WATCHDOG_ENV=str(watchdog), TEST_DOCKER_CALLS=str(calls),
+        TEST_CLOCK_COUNT=str(clock), TEST_NOTIFICATIONS=str(notifications),
+        TEST_DETACHED_COMPLETED=str(completed),
+        STAMP="inherited-old-stamp", LOG=str(tmp_path / "inherited-old.log"),
+        PATH=str(binaries) + os.pathsep + os.environ["PATH"],
+    )
+    environment.pop("_PROBE_DETACHED", None)
+    environment.pop("FOREGROUND", None)
+    return environment, calls, notifications, completed
+
+
+def test_detached_clock_rollover_preserves_parent_run_identity(identity_runner):
+    environment, calls, notifications, completed = identity_runner
+    result = subprocess.run(
+        ["bash", str(_SCRIPT), "identity_probe.py"], env=environment,
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    deadline = time.monotonic() + 5
+    while not completed.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert completed.exists(), "fake detached wrapper did not finish"
+    announced = Path(next(
+        line.removeprefix(">> log: ") for line in result.stdout.splitlines()
+        if line.startswith(">> log: ")
+    ))
+    assert announced.name == "2026-10-06-120000-identity_probe.log"
+    captured = announced.read_text()
+    assert "identity probe output" in captured
+    assert ">> exit    : 0" in captured
+    operations = [json.loads(line) for line in calls.read_text().splitlines()]
+    assert len([call for call in operations if "date" in call]) == 1
+    assert [call for call in operations if call[0] == "cp"] == [[
+        "cp", str(Path(environment["APPDATA"]) / "scripts/probes/identity_probe.py"),
+        "audrey:/tmp/probe-2026-10-06-120000.py",
+    ]]
+    sends = [json.loads(line) for line in notifications.read_text().splitlines()]
+    assert len(sends) == 2
+    message = next(arg for arg in sends[0]["arguments"] if arg.startswith("text="))
+    assert f"→ {announced}\n" in message
+    assert "finished (exit 0)" in message
+    assert f"document=@{announced}" in sends[1]["arguments"]
+    assert sends[1]["document_content"] == captured
+
+
+def test_fresh_foreground_invocation_replaces_inherited_run_identity(identity_runner):
+    environment, calls, notifications, _ = identity_runner
+    environment["FOREGROUND"] = "1"
+    environment["_PROBE_DETACHED"] = "1"  # A foreground call still starts afresh.
+    result = subprocess.run(
+        ["bash", str(_SCRIPT), "identity_probe.py"], env=environment,
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    operations = [json.loads(line) for line in calls.read_text().splitlines()]
+    assert len([call for call in operations if "date" in call]) == 1
+    assert "audrey:/tmp/probe-2026-10-06-120000.py" in next(
+        call for call in operations if call[0] == "cp"
+    )
+    sends = [json.loads(line) for line in notifications.read_text().splitlines()]
+    assert len(sends) == 1  # Foreground output goes to the caller, without a log file.
+    message = next(arg for arg in sends[0]["arguments"] if arg.startswith("text="))
+    expected_log = Path(environment["OUT_DIR"]) / "2026-10-06-120000-identity_probe.log"
+    assert f"→ {expected_log}\n" in message
+    assert environment["LOG"] not in message
+    assert "identity probe output" in result.stdout

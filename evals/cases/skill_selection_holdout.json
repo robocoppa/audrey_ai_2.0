@@ -1,0 +1,485 @@
+{
+  "schema": 1,
+  "description": "Separately agent-authored synthetic proposed controls for later evaluation of the automatic skill selector. Labels are intended for human review, were drafted without reading the development fixture or selector implementation, and are not validated or a blind human-authored holdout. Required repository state guidance exposed a summary of earlier study measurements. Metadata represents owned synthetic files only; no file contents or model responses were used. Image-only and audio-only none labels describe this two-skill study's scope, not Audrey's capabilities.",
+  "cases": [
+    {
+      "id": "holdout-document-direct-count",
+      "category": "positive",
+      "prompt": "How many volunteers does orchard-census.pdf say joined the autumn survey? Give the page that supports the number.",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "orchard-census.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "grounded-document-analysis",
+      "reason": "The question asks for a fact and supporting location from a specifically named ready owned document."
+    },
+    {
+      "id": "holdout-document-version-comparison",
+      "category": "positive",
+      "prompt": "Compare the visitor hours in gallery-notice-v1.txt and gallery-notice-v2.txt. Which days changed?",
+      "mode": "deep",
+      "files": [
+        {
+          "name": "gallery-notice-v1.txt",
+          "kind": "document",
+          "status": "ready"
+        },
+        {
+          "name": "gallery-notice-v2.txt",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "grounded-document-analysis",
+      "reason": "Both named targets are ready documents, and comparing their stated content is document analysis."
+    },
+    {
+      "id": "holdout-document-spanish-question",
+      "category": "positive",
+      "prompt": "¿Qué excepciones permite el reglamento adjunto, reglamento-huerto.pdf, para acceder al huerto fuera de horario? Cita la sección correspondiente.",
+      "mode": "fast",
+      "files": [
+        {
+          "name": "reglamento-huerto.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "grounded-document-analysis",
+      "reason": "The Spanish request clearly asks for rules and a citation from the named ready document."
+    },
+    {
+      "id": "holdout-document-japanese-question",
+      "category": "positive",
+      "prompt": "添付の運用規程「観測所の手順.pdf」では、停電時に最初に誰へ連絡すると書かれていますか？根拠の節も示してください。",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "観測所の手順.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "grounded-document-analysis",
+      "reason": "The Japanese request identifies a ready document and asks who it instructs the reader to contact during an outage."
+    },
+    {
+      "id": "holdout-document-excludes-unrelated-video",
+      "category": "positive",
+      "prompt": "Ignore picnic-outtakes.mp4. Use only seed-order.csv to tell me which seed variety has the largest quantity.",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "picnic-outtakes.mp4",
+          "kind": "video",
+          "status": "ready"
+        },
+        {
+          "name": "seed-order.csv",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "grounded-document-analysis",
+      "reason": "The exclusion applies to an unrelated video; the remaining explicit request analyzes the ready document."
+    },
+    {
+      "id": "holdout-document-unrelated-negation",
+      "category": "positive",
+      "prompt": "Don't answer in German. Explain in English why the author of bridge-fieldnotes.pdf rejected the first repair proposal, using the author's evidence.",
+      "mode": "deep",
+      "files": [
+        {
+          "name": "bridge-fieldnotes.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "grounded-document-analysis",
+      "reason": "The negation limits output language and does not negate the explicit request to analyze a ready document."
+    },
+    {
+      "id": "holdout-document-quoted-content-question",
+      "category": "positive",
+      "prompt": "In stage-manager-notes.txt, does the phrase 'Stop the recording' occur before or after the lighting check?",
+      "mode": "fast",
+      "files": [
+        {
+          "name": "stage-manager-notes.txt",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "grounded-document-analysis",
+      "reason": "The quoted imperative is content to locate within a ready document; the user's actual task is a grounded content question."
+    },
+    {
+      "id": "holdout-document-misleading-filename",
+      "category": "positive",
+      "prompt": "What three locations are mentioned in museum-tour.mp4.txt?",
+      "mode": "fast",
+      "files": [
+        {
+          "name": "museum-tour.mp4.txt",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "grounded-document-analysis",
+      "reason": "The file metadata identifies a ready document despite a video-like substring in its name."
+    },
+    {
+      "id": "holdout-video-direct-action",
+      "category": "positive",
+      "prompt": "Who places the red basket beside the gate at 00:42 in garden-demo.webm?",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "garden-demo.webm",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "video-analysis",
+      "reason": "The user asks about a visible action at a specific time in the named ready owned video."
+    },
+    {
+      "id": "holdout-video-comparison",
+      "category": "positive",
+      "prompt": "Compare wheel-test-a.mp4 and wheel-test-b.mp4. Which clip shows the wheel wobbling first, and when does it begin in each?",
+      "mode": "deep",
+      "files": [
+        {
+          "name": "wheel-test-a.mp4",
+          "kind": "video",
+          "status": "ready"
+        },
+        {
+          "name": "wheel-test-b.mp4",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "video-analysis",
+      "reason": "Both comparison targets are ready videos, and the requested evidence concerns their observed events and timestamps."
+    },
+    {
+      "id": "holdout-video-french-question",
+      "category": "positive",
+      "prompt": "À quel moment de atelier-argile.mp4 la personne pose-t-elle le bol sur l'étagère ? Décris aussi ce qui se passe juste avant.",
+      "mode": "fast",
+      "files": [
+        {
+          "name": "atelier-argile.mp4",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "video-analysis",
+      "reason": "The French request identifies a ready video and asks for the timing and sequence of visible events."
+    },
+    {
+      "id": "holdout-video-excludes-unrelated-document",
+      "category": "positive",
+      "prompt": "Do not read the attached concert-poster.pdf. From rehearsal-walkthrough.mp4 alone, describe how the chairs are rearranged between the opening and closing shots.",
+      "mode": "deep",
+      "files": [
+        {
+          "name": "concert-poster.pdf",
+          "kind": "document",
+          "status": "ready"
+        },
+        {
+          "name": "rehearsal-walkthrough.mp4",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "video-analysis",
+      "reason": "The user excludes only an unrelated document and explicitly requests analysis of the ready video."
+    },
+    {
+      "id": "holdout-video-unrelated-negation",
+      "category": "positive",
+      "prompt": "Don't suggest equipment to buy. Tell me what the operator does immediately after opening the hatch in pump-inspection.mov.",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "pump-inspection.mov",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "video-analysis",
+      "reason": "The negation concerns purchase advice; the actual request remains analysis of an event in a ready video."
+    },
+    {
+      "id": "holdout-video-quoted-content-question",
+      "category": "positive",
+      "prompt": "In classroom-drawing.webm, the instructor says 'Read the worksheet.' What does the student at the front do next?",
+      "mode": "fast",
+      "files": [
+        {
+          "name": "classroom-drawing.webm",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "video-analysis",
+      "reason": "The quoted instruction marks an event in the video; answering requires the next observed action in that ready video."
+    },
+    {
+      "id": "holdout-ambiguous-vague-mixed-attachments",
+      "category": "ambiguous",
+      "prompt": "Can you take a look at this for me?",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "harbor-note.pdf",
+          "kind": "document",
+          "status": "ready"
+        },
+        {
+          "name": "harbor-overview.mp4",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "The request does not identify either a task or which of the two different evidence kinds is the target."
+    },
+    {
+      "id": "holdout-unavailable-pending-document",
+      "category": "ambiguous",
+      "prompt": "What deadline is stated in trail-restoration.pdf?",
+      "mode": "fast",
+      "files": [
+        {
+          "name": "trail-restoration.pdf",
+          "kind": "document",
+          "status": "pending"
+        }
+      ],
+      "expected": "none",
+      "reason": "The intended document is clear but is still pending, so there is no ready target for this evaluation selector."
+    },
+    {
+      "id": "holdout-unavailable-failed-video",
+      "category": "ambiguous",
+      "prompt": "What happens when the rope comes loose in kite-launch.mp4?",
+      "mode": "deep",
+      "files": [
+        {
+          "name": "kite-launch.mp4",
+          "kind": "video",
+          "status": "failed"
+        }
+      ],
+      "expected": "none",
+      "reason": "The named video failed processing and cannot satisfy the ready-owned-evidence requirement."
+    },
+    {
+      "id": "holdout-unresolved-named-document",
+      "category": "ambiguous",
+      "prompt": "What does telescope-manual.pdf say about cleaning the primary mirror?",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "observatory-hours.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "The requested document is absent from the inventory; the unrelated ready document does not resolve the target."
+    },
+    {
+      "id": "holdout-ambiguous-shared-subject",
+      "category": "ambiguous",
+      "prompt": "Summarize the orientation material I attached.",
+      "mode": "deep",
+      "files": [
+        {
+          "name": "orientation-handout.pdf",
+          "kind": "document",
+          "status": "ready"
+        },
+        {
+          "name": "orientation-walkthrough.mp4",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "Both ready files fit the target description, and the request does not resolve whether document or video analysis is intended."
+    },
+    {
+      "id": "holdout-unresolved-prior-video",
+      "category": "ambiguous",
+      "prompt": "In the video I sent last week, what did the speaker say about the new route?",
+      "mode": "fast",
+      "files": [],
+      "expected": "none",
+      "reason": "No owned video metadata is supplied to resolve the reference to an earlier upload."
+    },
+    {
+      "id": "holdout-pending-target-ready-distractor",
+      "category": "ambiguous",
+      "prompt": "Summarize beehive-repair.mp4, not the old beehive-checklist.pdf.",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "beehive-repair.mp4",
+          "kind": "video",
+          "status": "pending"
+        },
+        {
+          "name": "beehive-checklist.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "The sole requested target is pending and the ready document is explicitly excluded; readiness of a distractor is insufficient."
+    },
+    {
+      "id": "holdout-unsupported-research-mode",
+      "category": "ambiguous",
+      "prompt": "List the hypotheses discussed in meadow-study.pdf and the evidence offered for each.",
+      "mode": "research",
+      "files": [
+        {
+          "name": "meadow-study.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "Although the content request and target are clear, research mode is outside the evaluated selector's supported modes."
+    },
+    {
+      "id": "holdout-ordinary-unrelated-attachment",
+      "category": "ordinary",
+      "prompt": "Write a warm two-sentence thank-you to a neighbor for watering my plants. The attached pantry-inventory.txt is unrelated.",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "pantry-inventory.txt",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "The task is general writing and explicitly excludes the unrelated document as evidence."
+    },
+    {
+      "id": "holdout-ordinary-quoted-command",
+      "category": "ordinary",
+      "prompt": "Make this sentence sound more polite: 'Summarize the attached train-timetable.pdf.'",
+      "mode": "fast",
+      "files": [
+        {
+          "name": "train-timetable.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "The user asks to rewrite a quoted sentence; its instruction to summarize a file is not the task to execute."
+    },
+    {
+      "id": "holdout-ordinary-explicit-analysis-negation",
+      "category": "ordinary",
+      "prompt": "Do not inspect or summarize the attached lantern-assembly.mp4. Just explain what the word 'transcript' means.",
+      "mode": "deep",
+      "files": [
+        {
+          "name": "lantern-assembly.mp4",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "Video analysis is explicitly negated and the remaining task is a general vocabulary question."
+    },
+    {
+      "id": "holdout-ordinary-interface-help",
+      "category": "ordinary",
+      "prompt": "Where in the chat interface can I see whether an upload finished? I'm asking how the interface works, not for the contents of fence-plan.pdf.",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "fence-plan.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "The request concerns upload status controls and explicitly excludes a document content task."
+    },
+    {
+      "id": "holdout-ordinary-file-management",
+      "category": "ordinary",
+      "prompt": "Rename market-stall-layout.pdf to stall-layout-final.pdf in my file list.",
+      "mode": "fast",
+      "files": [
+        {
+          "name": "market-stall-layout.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "Renaming a file changes metadata and does not request analysis of its contents."
+    },
+    {
+      "id": "holdout-ordinary-project-management-spanish",
+      "category": "ordinary",
+      "prompt": "Mueve ensayo-teatro.mp4 al proyecto 'Festival de otoño' y cambia el nombre del proyecto a 'Festival'.",
+      "mode": "deep",
+      "files": [
+        {
+          "name": "ensayo-teatro.mp4",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "The Spanish request manages a file's project membership and a project name, without asking about video contents."
+    },
+    {
+      "id": "holdout-ordinary-image-only-study-scope",
+      "category": "ordinary",
+      "prompt": "What does the handwritten sign in porch-sign.png say?",
+      "mode": "auto",
+      "files": [
+        {
+          "name": "porch-sign.png",
+          "kind": "image",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "Image analysis is outside this study's document/video skill catalog; none does not claim Audrey cannot analyze images."
+    },
+    {
+      "id": "holdout-ordinary-audio-only-study-scope",
+      "category": "ordinary",
+      "prompt": "Which speaker starts talking first in rowing-interview.wav?",
+      "mode": "fast",
+      "files": [
+        {
+          "name": "rowing-interview.wav",
+          "kind": "audio",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "Audio analysis is outside this study's document/video skill catalog; none does not claim Audrey cannot analyze audio."
+    }
+  ]
+}
