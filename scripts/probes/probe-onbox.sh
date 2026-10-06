@@ -57,9 +57,9 @@ OUT_DIR="${OUT_DIR:-${APPDATA}/testing-out/probes}"
 WATCHDOG_ENV="${WATCHDOG_ENV:-/mnt/user/appdata/fleet-watchdog/.env}"
 
 # A probe is named by its file name and found in the first of these folders
-# that holds it. ops/ and analysis/ are here because some of their scripts run
-# the same way (`check_model_inventory.py` is the usual one).
-PROBE_DIRS=(scripts/probes scripts/ops scripts/analysis)
+# that holds it. ops/, analysis/, and evals/ also contain standalone model
+# measurements, including the skill-selection study.
+PROBE_DIRS=(scripts/probes scripts/ops scripts/analysis evals)
 
 PROBE="${1:-}"
 if [[ -z "${PROBE}" ]]; then

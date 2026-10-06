@@ -57,6 +57,19 @@ unloads models for cold samples, run it while Audrey is idle. Its exact version,
 model-install, runner, and success criteria are maintained in
 `docs/campaign-3/phase-06-system-one-routing.md`.
 
+### Skill selection study — Slice 3D.1
+
+This standalone evaluator uses synthetic file metadata and the retained
+`qwen3.5:4b` router. It runs through the direct Ollama probe runner, which also
+finds scripts in `evals/`. No upload, browser, Audrey token, new model, or rebuild
+is needed. Config and skill metadata come from the existing read-only mounts.
+Automatic skill selection stays off; the evaluator never activates a skill.
+
+The [study instructions](../campaign-3/phase-03-skill-selection-evaluation.md#small-live-check-on-tower)
+start with one Spanish document case and then, only if the call works, a
+three-repeat hybrid study. A completed report is measured evidence, not a
+production selector pass. Keep mistakes and model errors for review.
+
 ### Clef and Clef Flash measurement — settled 2026-10-03
 
 The broad Clef and two-candidate router probes completed on Ollama 0.35.1. Full
@@ -589,7 +602,12 @@ model-answer failures. Slice 13C remains live-settled and is not repeated.
 
 ## Run the 13E Responses client-tools smoke from the laptop
 
-**Status:** Passed and settled on 2026-10-05. The three-call report verified
+**Status:** Qwen's complete protocol proof passed and settled on 2026-10-05.
+Claudette's Kimi/GLM assessment was received 2026-10-06; both models have reported
+completed calls/results and text SSE. Keep its current Chat connection after
+catalog review. Its report does not prove streamed function argument events or
+production adapter interruption handling.
+The three-call report verified
 completed/streamed calls, argument deltas, client result replay, and both
 JSON400 guards. Do not repeat it for unchanged functionality. This is an API-only
 capability for clients and bots. You do not need to upload any file, open the
@@ -663,9 +681,77 @@ passed. `--max-output-tokens` changes only the request ceiling;
 passthrough model without changing configuration. Slice 13D's passed remote
 input gate stays settled and is not repeated here.
 
+### Kimi K3 and GLM 5.3 Hermes assessment
+
+**Assessment reviewed, 2026-10-06:** The user supplied Claudette's report with
+completed function calls/results, harmless local execution, text SSE, and
+isolated cross-model replay on both models. Its measured 20-tool / 35.4 KB
+catalog exceeds Responses' 16-definition limit, so keep the existing Chat
+Completions connection. The report supplies no streamed function argument trace
+or installed-adapter interruption proof. See [the reviewed guide](../guides/hermes-responses-client-tools.md)
+and [reported model measurements](../../evals/MODEL-FACTS.md).
+
+The commands below are available for a future targeted protocol investigation;
+this assessment is closed and does not require another cloud run. Both models
+already appear in `passthrough.allowed_models`. Do not switch production to run
+a probe. The complete Qwen gate remains passed.
+
+Use the same **laptop** checkout and existing `.env.test.local` user assertion
+as the 13E smoke above. No upload, browser action, model pull, config edit,
+admin assertion, or new PAT is required. Against a deployment containing 13E,
+run Kimi K3 first:
+
+```bash
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
+(
+  set -a
+  source .env.test.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 AUDREY_RESPONSES_TOOL_MODEL=audrey_passthrough/kimi-k3:cloud .venv/bin/python tests/smoke/smoke_responses_client_tools.py
+)
+```
+
+Then test GLM 5.3 independently:
+
+```bash
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
+(
+  set -a
+  source .env.test.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 AUDREY_RESPONSES_TOOL_MODEL=audrey_passthrough/glm-5.3:cloud .venv/bin/python tests/smoke/smoke_responses_client_tools.py
+)
+```
+
+Each command makes three cloud generations, six total, with an 8,192-token
+ceiling per call; allow a few minutes per model. Each must independently return
+exit zero, `status: passed`, the exact requested `model`, valid completed and
+streamed call arguments, matching argument deltas, `response.completed`, and
+`followup.sentinel: true`. Keep both JSON reports, including failures and usage.
+Do not report a model pass from the other model's result or substitute Qwen.
+
+These reports prove Audrey's protocol on each candidate. They do not prove the
+installed Hermes adapter, full tool catalog, context limits, or primary/fallback
+behavior fits the new endpoint. The [assessment handoff](../guides/hermes-responses-client-tools.md)
+asks the bot to establish those facts using its own source/configuration and
+existing Bearer PAT, compare its working connection, and test fallback in an
+isolated environment. Do not pass a bot PAT via `AUDREY_USER_JWT`: that variable
+is sent as a Cloudflare Access assertion.
+
+Leave production Kimi-primary/GLM-fallback routing unchanged during assessment.
+The GPT Sol 6.1 bot is outside this task. Saved Responses passed their separate
+restart gate; stateless tests do not need them.
+
 ## Run the 13F Responses storage and restart smoke
 
-**Status:** Laptop implementation complete; targeted deployed gate pending.
+**Status:** Passed; the user supplied a successful restart verify on 2026-10-06.
+Root and child retrieval returned their exact objects after restart. Root deletion
+cascaded to the child; subsequent reads and continuation returned 404, with the
+continuation rejected before SSE. Verify made zero generations and zero uploads.
+Capture timestamp: `2026-10-06T02:39:38.805519+00:00` (October 5 in Denver).
+Do not rerun this settled gate for unchanged functionality. The instructions
+below document reproduction and recovery.
+
 This API-only slice saves text/function Responses and permits continuation by
 `previous_response_id`. No browser upload, image, PDF, video, or Hermes tool is
 needed. It proves the deployed protocol and restart persistence.

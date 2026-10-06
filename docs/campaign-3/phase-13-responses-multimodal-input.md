@@ -4,8 +4,9 @@
 laptop-complete with its targeted live gate pending. Slice 13D's streamed retry
 passed on 2026-10-05 after the token-limit and progress-rendering correction.
 Slice 13E client-executed function tools passed its targeted live gate on
-2026-10-05. Slice 13F saved Responses and text/function continuation is
-laptop-complete; its targeted restart gate is pending.
+2026-10-05. Slice 13F saved Responses and text/function continuation passed
+its targeted restart verification, reported on 2026-10-06. Claudette's cloud
+assessment is reviewed; its working Hermes connection stays on Chat Completions.
 
 ## Goal
 
@@ -583,10 +584,22 @@ on the follow-up, all under the explicit 8,192-token ceilings. Three generation
 calls, no uploads; virtual-model and required-choice guards returned JSON HTTP
 400 before SSE. This gate is settled.
 
-The [Hermes integration handoff](../guides/hermes-responses-client-tools.md)
-contains the adapter contract and a message to forward to the bot maintainer.
-Audrey's protocol proof does not establish that a particular Hermes installation
-has switched adapters or passed its own end-to-end test.
+**Hermes assessment received, 2026-10-06:** Claudette reports completed
+function calls, result replay, harmless local execution, text SSE, and isolated
+cross-model replay on both Kimi K3 and GLM 5.3. Its measured catalog contains
+20 tools / 35.4 KB of schemas, exceeding the 16-definition boundary. Retain
+Kimi primary / GLM fallback on the current Chat Completions connection. The
+report does not demonstrate streamed function argument events or production
+Hermes fallback under provider interruption. This closes the adoption assessment,
+without claiming those unreported cases passed.
+
+The [reviewed Hermes guide](../guides/hermes-responses-client-tools.md) records
+limits, corrections, and a follow-up message. Current Chat requests ignore
+unmodeled `tool_choice` and `reasoning_effort`; Responses rejects unknown
+reasoning fields with 422. Executor approvals remain a client responsibility.
+The reported accepted 20K probe needs its exact payload and admission token
+count before it establishes a budget defect. GPT Sol 6.1 remains outside this
+assessment. Per-case reported measurements are in [the model ledger](../../evals/MODEL-FACTS.md).
 
 Contract sources: [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling),
 [Responses streaming events](https://developers.openai.com/api/reference/resources/responses/streaming-events),
@@ -595,8 +608,8 @@ and [Ollama tool calling](https://docs.ollama.com/capabilities/tool-calling).
 
 ## Slice 13F - saved Responses and text/function continuation
 
-**Status:** Laptop implementation and required verification passed, 2026-10-05;
-capture/restart/verify live gate pending. API only; no native browser change.
+**Status:** Passed. Laptop verification passed 2026-10-05; the user supplied
+successful targeted restart verification on 2026-10-06. API only.
 
 ### Storage and ownership
 
@@ -658,9 +671,11 @@ Then send only the new question with the returned response id:
 
 For a saved function-call response, new input may contain just its matching
 `function_call_output` items. Audrey reconstructs original messages and call
-items before validating the combined history. Every pending call still needs
-its result; historical arguments are checked against any newly supplied
-matching definition. Functions continue to execute in the client.
+items before validating the combined history. The provider receives that full
+combined history; chaining reduces client payload and bookkeeping, not model
+input tokens by itself. Provider caching would require separate evidence.
+Every pending call still needs its result; historical arguments are checked
+against any newly supplied matching definition. Functions continue to execute in the client.
 
 Request-level instructions, tools, model, skill, metadata, sampling settings,
 and token ceilings are not inherited. Supply the desired settings again. Explicit
@@ -727,7 +742,17 @@ GET, no previous instructions inherited, owner guards before SSE, and
 After the user restarts Audrey, verify compares exact saved objects without
 new generation, deletes the root and descendants, checks deleted-chain404, and
 removes the snapshot. No upload, browser action, Hermes execution, admin mutation,
-or newly issued PAT is required. The restart proof remains pending.
+or newly issued PAT is required.
+
+**Live result received, 2026-10-06:** The user's `action: verify` report returned
+`status: passed` with zero generation calls and zero uploads. Its valid capture
+snapshot was timestamped `2026-10-06T02:39:38.805519+00:00` (October 5 locally).
+Root and child GETs each returned 200 with exact terminal-object matches after
+restart. Root DELETE returned 200, removed its descendant, and both later GETs
+returned 404. Continuing the deleted chain returned 404 before SSE. The two
+account identities were distinct. This targeted gate is settled; do not repeat
+it for unchanged functionality. The supplied verify report does not separately
+list the earlier capture-stage measurements.
 
 Contract sources: [OpenAI conversation state](https://developers.openai.com/api/docs/guides/conversation-state),
 [Responses retrieval](https://developers.openai.com/api/reference/resources/responses/methods/retrieve),

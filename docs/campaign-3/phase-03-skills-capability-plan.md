@@ -500,9 +500,13 @@ consistency at acceptable cost.
 
 ## Milestone 3D — optional automatic selection
 
-**Status:** Deferred. Explicit selection is stable, but the 3C comparison does
-not measure selector precision or false activation. Opening this milestone
-requires a separate precision and abstention evaluation.
+**Status:** Automatic activation remains deferred. Slice 3D.1 opens the
+[evaluation foundation](phase-03-skill-selection-evaluation.md): 42 synthetic
+labeled cases, an offline rules baseline, and optional retained-router/hybrid
+measurement arms. Laptop verification passed 3,725 tests. Rules measured
+70% precision with three false activations and seven misses; live router
+measurements are pending. The 3C answer comparison stays passed and does not
+measure selector precision or false activation.
 
 Campaign 3 Phase 6 will evaluate Ollama System One for Audrey's task router.
 If a small decision model passes that gate, the same typed-choice mechanism may

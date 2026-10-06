@@ -19,6 +19,10 @@ but every property asserted here has a specific failure behind it:
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -142,3 +146,52 @@ class TestArgumentHandling:
 
     def test_an_unrecognised_argument_warns_rather_than_being_swallowed(self, src):
         assert "WARN: ignoring" in src
+
+
+def test_evaluation_harness_is_found_copied_and_invoked(tmp_path):
+    """Exercise the real wrapper with Docker replaced, without network calls."""
+    appdata = tmp_path / "checkout"
+    harness = appdata / "evals" / "eval_skill_selection.py"
+    fixture = appdata / "evals" / "cases" / "skill_selection_cases.json"
+    fixture.parent.mkdir(parents=True)
+    harness.write_text("print('evaluation')\n")
+    fixture.write_text('{"schema":1,"cases":[]}')
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    calls = tmp_path / "docker-calls.jsonl"
+    docker = binaries / "docker"
+    docker.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "with open(os.environ['TEST_DOCKER_CALLS'], 'a') as log:\n"
+        "    log.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        "if 'date' in sys.argv:\n"
+        "    print('2026-10-06-120000')\n"
+        "elif 'python3' in sys.argv:\n"
+        "    print('evaluation completed')\n"
+    )
+    docker.chmod(0o700)
+    environment = dict(os.environ, APPDATA=str(appdata), FOREGROUND="1",
+                       OUT_DIR=str(tmp_path / "results"),
+                       WATCHDOG_ENV=str(tmp_path / "missing.env"),
+                       TEST_DOCKER_CALLS=str(calls),
+                       PATH=str(binaries) + os.pathsep + os.environ["PATH"])
+    result = subprocess.run(
+        ["bash", str(_SCRIPT), "eval_skill_selection.py",
+         "COPY=skill_selection_cases.json",
+         "ARGS=--backend hybrid --config /app/config.yaml"],
+        env=environment, capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 0, result.stderr
+    operations = [json.loads(line) for line in calls.read_text().splitlines()]
+    copies = [call for call in operations if call[0] == "cp"]
+    assert copies == [
+        ["cp", str(harness), "audrey:/tmp/probe-2026-10-06-120000.py"],
+        ["cp", str(fixture), "audrey:/tmp/skill_selection_cases.json"],
+    ]
+    execution = next(call for call in operations if "python3" in call)
+    assert execution == [
+        "exec", "audrey", "python3", copies[0][2].split(":", 1)[1],
+        "--backend", "hybrid", "--config", "/app/config.yaml",
+    ]
+    assert "evaluation completed" in result.stdout

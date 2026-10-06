@@ -296,3 +296,19 @@ docs/plans/
 The hermetic unit suite is separate — `tests/` + `.venv/bin/pytest tests/ -q`.
 It proves the plumbing offline (no live model); this live suite judges the
 answers. Use both.
+
+
+## Automatic skill selection study
+
+`eval_skill_selection.py` is a separate metadata-only study, outside the answer
+quality suite. Its default `rules` backend is offline. Optional `router` and
+`hybrid` arms call the retained local router through Ollama; hybrid uses the
+model only for eligible rule abstentions. No skill is activated, file is read,
+or runtime setting is changed. Gold labels and full skill instructions are
+excluded from model requests.
+
+The 42 synthetic cases live in `cases/skill_selection_cases.json`. See the
+[study plan](../docs/campaign-3/phase-03-skill-selection-evaluation.md) for
+label policy, metric definitions, the small Tower check, and the repeated study.
+The direct model arms use `scripts/probes/probe-onbox.sh`, not this suite's
+PAT-backed `/v1` runner. Production auto selection remains disabled.

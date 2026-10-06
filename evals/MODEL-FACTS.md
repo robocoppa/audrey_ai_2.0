@@ -1,9 +1,10 @@
 # Audrey model evaluation report and evidence ledger
 
-**Last updated:** October 3, 2026
+**Last updated:** October 6, 2026
 
-This document records measured model behavior on Audrey's hardware. The public
-report below summarizes decisions that affect the product. The detailed ledger
+This document records measured model behavior through Audrey and attributed
+client assessments. The public report below summarizes decisions that affect
+the product. The detailed ledger
 that follows preserves the evidence, limitations, and unresolved questions used
 to reach those decisions. Vendor specifications are identified separately from
 Audrey measurements.
@@ -758,6 +759,11 @@ are both gone from the box and from `config.yaml` + `pull-models.sh`;
 
 ## Cloud models
 
+The reported Kimi K3 / GLM 5.3 Responses capability check is recorded under
+[Not established](#kimi-k3-and-glm-53-client-protocol-assessment-received-october-6-2026).
+Its individual timings are retained as observations from one bot assessment;
+they do not establish a cloud speed or quality ranking.
+
 `deepseek-v4-pro:cloud`, `kimi-k2.6:cloud`, `kimi-k2.7-code:cloud`,
 `qwen3.5:397b-cloud`, `deepseek-v3.2:cloud`, `deepseek-v4-flash:cloud`,
 `nemotron-3-super:cloud`, `glm-5.2:cloud`. `[pull-models.sh]`
@@ -1075,6 +1081,99 @@ privacy decision.
 ## Not established
 
 Open questions, and what would close each.
+
+### Kimi K3 and GLM 5.3 client protocol assessment (received October 6, 2026)
+
+**Source and scope.** Claudette, a Hermes bot, supplied
+`audrey-responses-assessment-telegram.md` and a follow-up conversation shared
+October 5–6. The report's heading says October 3; the actual execution date is
+not independently established. This entry records receipt on October 6.
+The bot reported Hermes v0.21.0 and retained its existing
+`/v1/chat/completions` connection throughout: primary
+`audrey_passthrough/kimi-k3:cloud`, fallback
+`audrey_passthrough/glm-5.3:cloud`. The assessment used isolated Responses
+requests and local execution; it did not migrate the production client.
+
+**Reported measurements.** Each row is an individual reported observation,
+with no repeated samples, controlled sampler settings, or raw machine-readable
+results supplied. Token pairs are reported input/output usage; a dash means no
+measurement was provided. These cases establish reported protocol success only,
+and do not establish general answer quality, latency distributions, billing
+savings, or a speed ranking between the models.
+
+| Kimi K3 case | Reported result | Latency | Input/output tokens |
+|---|---|---:|---:|
+| Basic completion | Completed; output text `OK` | 1.19s | 147 / 40 |
+| Function call | Completed; `get_weather` with `city: Tokyo` | 2.04s | 235 / 85 |
+| Function result → final answer | Completed; weather data used in the answer | 1.84s | 330 / 65 |
+| Streamed text SSE | Completed; report records nine typed events | 2.23s | 150 / 55 |
+| File write dispatch | Completed; expected function and arguments | 2.11s | — |
+| Local execution → final answer | Completed; written file content verified | 1.63s | — |
+
+| GLM 5.3 case | Reported result | Latency | Input/output tokens |
+|---|---|---:|---:|
+| Basic completion | Completed | 1.77s | 17 / 254 |
+| Function call | Completed | 0.45s | 172 / 40 |
+| Function result → final answer | Completed | 0.61s | 202 / 50 |
+| Streamed text SSE | Completed; report records all nine event types | 0.75s | 20 / 94 |
+| File write dispatch | Completed | 0.47s | — |
+| Local execution → final answer | Completed; written file content verified | 0.44s | — |
+
+The documented stream coverage is text: creation, progress, output item and
+content part events, text deltas, and `response.completed`. The report does not
+supply streamed function-argument deltas, so streamed function calls remain
+unestablished for these two models. Non-streamed calls and client result replay
+were reported successful on both models.
+
+The isolated cross-model replay tests reportedly preserved history before a
+function call and preserved the same call ID after a result, in both Kimi → GLM
+and GLM → Kimi directions, without executing the function twice in those tests.
+The pre-call failure was simulated using an unavailable model ID that returned
+HTTP 403, followed by a manual retry with the other model. This does not exercise
+an actual provider outage, a partially emitted stream, or the installed Hermes
+adapter's retry and execution-deduplication behavior.
+
+**Workload fit and decision.** The bot measured 20 model-visible functions and
+35.4 KB of definitions in its actual request dump. The byte count fits Audrey's
+64 KiB Responses allowance, but the count exceeds its 16-function maximum.
+Audrey also permits eight calls per group and 128 replay items. The bot described
+regular groups of four to eight calls, possible larger bursts, and a 150-turn
+client setting; no oversized group or long-session payload was supplied here.
+Keep the existing Chat Completions connection. The small Responses checks show
+that both models can use its tested subset; they do not establish compatibility
+with the bot's complete catalog and conversation workload.
+
+**Corrections to the report and later follow-up.** These follow from Audrey's
+request schemas and replay path, rather than additional model measurements:
+
+- Responses supports `tool_choice: auto|none`. Required or named selection is
+  unavailable, but function selection does not authorize execution. Hermes's
+  executor must apply its approval policy before running a function on either
+  API. The current Chat Completions schema also ignores an unmodelled
+  `tool_choice` field, so effective forced selection on the existing connection
+  has not been demonstrated.
+- The current Chat Completions schema ignores `reasoning_effort`; it supports
+  the capability-gated boolean `think` on passthrough requests. Responses rejects
+  unknown `reasoning_effort` or `reasoning` fields with HTTP 422. The report's
+  configured `medium`/`max`/`none` settings therefore do not prove that reasoning
+  effort reached either model on the existing connection.
+- The reportedly accepted “20K-token” request does not establish a soft limit:
+  its exact payload, tokenizer, and request branch were not supplied. Audrey
+  enforces a 16,000-token `cl100k_base` admission bound for client-function,
+  hydrated-file, and stored/chained requests; an ordinary text-only request
+  without those features follows a different branch.
+- Opt-in `store: true` and `previous_response_id` are now implemented, and the
+  owner-scoped retrieval/deletion and restart gate passed on October 6. Chaining
+  can reduce client request bytes and history bookkeeping. Audrey rebuilds the
+  full prior context for model inference, so chaining alone does not demonstrate
+  lower input-token usage or inference cost. No provider caching or billing
+  comparison was measured.
+
+**What would settle the remaining claims:** retain actual request bodies and
+raw Responses events for streamed function calls, the prompt-limit probe, and
+reasoning/selection controls; compare repeated equivalent workloads before
+claiming relative speed or savings. Changes to limits or the bot's provider
+configuration require a concrete workload need, rather than these timings.
 
 - **Smaller Qwen router alternatives.** Ollama's official Qwen 3.8 page
   publishes only 27B variants, so there is no smaller Qwen 3.8 parameter model.

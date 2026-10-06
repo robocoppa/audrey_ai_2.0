@@ -11,7 +11,10 @@ Slice 13D's normal URL answer, private-URL guards, and corrected streamed retry
 passed on 2026-10-05; its remote-input protocol gate is live-settled.
 Slice 13E client-executed function tools passed its three-call protocol smoke
 on 2026-10-05. Slice 13F saved Responses and text/function continuation is
-laptop-complete with 3,665 full tests passed; its targeted restart gate is pending.
+live-settled after 3,665 laptop tests and the user's successful restart verify
+received 2026-10-06. Claudette's cloud assessment is reviewed: keep the current
+Kimi-primary/GLM-fallback Chat Completions connection; the 20-tool catalog exceeds
+Responses admission. Further compatibility expansion needs a caller use case.
 The user then
 prioritized [Phase 14 Slice 14A](phase-14-bot-accounts-and-token-lifetimes.md),
 which is laptop-complete and awaits native acceptance.
@@ -414,23 +417,42 @@ Detailed decision record:
 - [x] Build Slice 13E: client-provided functions on permitted tool-capable
   passthrough models, typed completed/streamed calls, validated arguments, and
   stateless call/result replay; caller execution only, API only.
-- [x] Pass Slice 13E's targeted completed, streamed, and result-replay smoke (2026-10-05).
+- [x] Pass Slice 13E's Qwen completed, streamed, and result-replay smoke (2026-10-05).
+- [x] Review Claudette's Kimi K3 / GLM 5.3 assessment and actual Hermes catalog.
+  Keep its current Chat Completions connection after the reported 20-tool catalog
+  fails the optional Responses limit. Completed calls/results and text SSE are
+  bot-reported evidence; streamed function arguments and production interruption
+  handling were not shown. GPT Sol 6.1 is outside this task.
 - [x] Build Slice 13F: opt-in stored text/function Responses, owner-scoped
   retrieval/deletion, bounded retention, and `previous_response_id` continuation.
-- [ ] Pass Slice 13F's targeted capture/restart/verify gate.
-- [ ] Add the distinct Conversations API after its owner and lifecycle contract.
-- [ ] Add background execution, in-progress retrieval, and cancellation.
+- [x] Pass Slice 13F's targeted restart verify (received 2026-10-06): exact
+  retained root/child objects, cascading deletion, and deleted-chain guard;
+  zero new generations or uploads.
+- [ ] Add the distinct Conversations API only when a caller needs its owner and
+  lifecycle contract; deferred after the Hermes assessment.
+- [ ] Add background execution, in-progress retrieval, and cancellation only
+  for a demonstrated caller workflow; deferred after the Hermes assessment.
 - [ ] Preserve the current explicit HTTP 400 response for every unsupported
   feature until its complete contract ships.
 
 ## 8. Evaluate automatic skill selection
 
-- [ ] Keep `skills.auto_select: false` during the study.
-- [ ] Build labeled positive, ambiguous, and ordinary-chat control cases.
+**State:** Slice 3D.1 evaluation foundation is laptop-complete: 3,725 backend
+tests passed. Rules baseline is measured (70% precision, three false activations,
+seven misses); live router measurements are pending. [Study plan and small check](phase-03-skill-selection-evaluation.md).
+
+- [x] Keep `skills.auto_select: false` during the study.
+- [x] Build 42 labeled positive, ambiguous, and ordinary-chat control cases.
+- [x] Add an offline rules baseline and optional retained-router and hybrid
+  measurement arms, with explicit errors, abstention, latency, and usage.
+- [ ] Pass the one-case direct-model pilot before the repeated study.
 - [ ] Measure missed activation and false activation separately.
 - [ ] Compare deterministic rules with the retained router and System One
   candidates.
-- [ ] Define a precision threshold and rollback switch before enabling anything.
+- [x] Propose separate precision, false-activation, and missed-activation
+  thresholds; retain `auto_select: false` throughout measurement.
+- [ ] Agree the final gates, validate a holdout set, and prove answer-quality
+  and cost benefit before enabling anything.
 - [ ] Ship only if the selector beats explicit selection without narrowing tools
   or activating a skill on unrelated chat.
 

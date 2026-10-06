@@ -45,8 +45,11 @@ live-settled. The targeted 3B native Fast run selected and persisted
 `video-analysis` v1 successfully and completed cleanup. For 3C, controls
 passed 9/9; the repaired `grounded-document-analysis` skill then passed 9/9,
 and human review accepted all answers. It ships as an explicit opt-in skill.
-Automatic selection remains deferred because selector precision and false
-activation were outside this evaluation.
+Automatic selection remains disabled. Slice 3D.1 now supplies a separate
+[selection evaluation foundation](phase-03-skill-selection-evaluation.md),
+with labeled controls and offline rules / optional retained-router measurements.
+Its laptop gate passed 3,725 tests; the rules baseline measured 70% precision,
+so activation remains deferred. Live router measurements are pending.
 
 Phase 4 completed on 2026-09-29. Slice 4A's owner-scoped, ranged
 original-file downloads are live-settled. Slice 4B's read-only backend smoke
@@ -74,8 +77,12 @@ client-executed function tools on permitted passthrough models, completed and
 streamed call items, stateless result replay, and schema validation before
 exposing calls. Its targeted three-call live gate passed on 2026-10-05.
 Slice 13F adds opt-in saved text/function Responses and continuation by id;
-its laptop gate passes 3,665 tests and its targeted restart proof is pending.
-Client tools never enter Audrey's server dispatcher or browser UI.
+its laptop gate passed 3,665 tests and the user supplied a passed restart verify
+on 2026-10-06. Exact root/child retrieval, cascading deletion, and deleted-chain
+rejection passed with zero new generations. Claudette's Kimi K3/GLM 5.3 report
+supports keeping its current Chat Completions connection: its 20-tool catalog
+exceeds the optional Responses limit. See the [reviewed assessment](../guides/hermes-responses-client-tools.md).
+Client tools execute in the caller.
 
 Phase 14 started on 2026-10-02. Slice 14A adds a protected Bots access group,
 Bot-targeted model policy, zero-day never-expiring personal tokens, and
@@ -181,7 +188,7 @@ and finally adds the first general skills layer on that owned surface.
 | 10 | [Ordinary-answer provenance](phase-10-ordinary-answer-provenance.md) | Persist deterministic public URL and private file evidence on ordinary tool-backed answers | Phase 09 completion | Complete (10A live-passed) |
 | 11 | [Native file explorer](phase-11-native-file-explorer.md) | Browse, attach, and manage private files through compact folder-style native views | Phase 10 completion | Complete (11A user-closed) |
 | 12 | [Sidebar navigation](phase-12-sidebar-navigation.md) | Simplify primary conversation creation and move My Files into a distinct top-bar action | Phase 11 completion | Revised Slice 12A laptop-complete; native browser gate pending |
-| 13 | [Responses input, structured output, and client tools](phase-13-responses-multimodal-input.md) | Add bounded inputs, JSON Schema output, and caller-executed functions | Phase 12 implementation | 13B–13E live-settled; 13F laptop-complete/restart gate pending; 13A live gate pending |
+| 13 | [Responses input, structured output, and client tools](phase-13-responses-multimodal-input.md) | Add bounded inputs, JSON Schema output, and caller-executed functions | Phase 12 implementation | 13B–13F live-settled; Hermes stays on Chat Completions after assessment; 13A live gate pending |
 | 14 | [Bot accounts and token lifetimes](phase-14-bot-accounts-and-token-lifetimes.md) | Add limited automation accounts, intentional permanent PATs, and fresh admin data on every open | Phase 13 implementation | Slice 14A laptop-complete; native acceptance pending |
 | 15 | [Composer controls and Projects](phase-15-composer-and-projects.md) | Clarify and rebalance the composer, then group conversations with reusable instructions and selected-file context | Phase 14 implementation | Complete, including direct project upload |
 | 16 | [Retired Audrey document tools](phase-16-native-document-tools.md) | Record the boundary between Audrey file analysis and the existing Hermes workspace APIs | Architecture review | Retired; no Audrey document or spreadsheet authoring surface |
