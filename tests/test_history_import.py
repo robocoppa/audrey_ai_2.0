@@ -351,7 +351,7 @@ def test_preview_does_not_migrate_v11_and_apply_migrates_after_backup(
     with sqlite3.connect(db_path) as connection:
         assert connection.execute(
             "SELECT MAX(version) FROM app_schema_migrations"
-        ).fetchone()[0] == 20
+        ).fetchone()[0] == 21
         assert connection.execute(
             "SELECT COUNT(*) FROM app_history_import_conversations"
         ).fetchone()[0] == 1

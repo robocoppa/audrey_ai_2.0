@@ -17,6 +17,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import aclosing
 from typing import Any
 
 from fastapi import HTTPException, Request
@@ -246,8 +247,9 @@ async def _handle_passthrough(
                             stream_session_factory=stream_session_factory,
                         )
                     )
-                    async for frame in stream:
-                        yield frame
+                    async with aclosing(stream):
+                        async for frame in stream:
+                            yield frame
             except asyncio.CancelledError:
                 terminal.finish_if_unset(StreamOutcome.CANCELLED)
                 raise
@@ -294,6 +296,8 @@ async def _handle_passthrough(
             mode="passthrough", task_type="passthrough", outcome=outcome,
         ).inc()
         raise HTTPException(status_code=502, detail=f"Ollama error: {e}") from e
+    truncated = resp.get("done_reason") == "length"
+    outcome = "truncated" if truncated else outcome
     pipeline_seconds.labels(
         mode="passthrough", task_type="passthrough",
     ).observe(time.perf_counter() - t0)
@@ -302,7 +306,7 @@ async def _handle_passthrough(
     ).inc()
 
     msg = resp.get("message") or {}
-    tool_calls = _ollama_to_openai_tool_calls(msg.get("tool_calls"))
+    tool_calls = None if truncated else _ollama_to_openai_tool_calls(msg.get("tool_calls"))
     return _to_openai_response(
         virtual=payload.model,
         concrete=concrete,
@@ -310,6 +314,7 @@ async def _handle_passthrough(
         prompt_tokens=int(resp.get("prompt_eval_count", 0) or 0),
         completion_tokens=int(resp.get("eval_count", 0) or 0),
         tool_calls=tool_calls,
+        finish_reason="length" if truncated else "stop",
     )
 
 
@@ -341,7 +346,7 @@ async def _passthrough_stream_events(
     session.set_concrete_model(concrete)
     yield session.role_frame()
     try:
-        async for chunk in passthrough_stream(
+        async with aclosing(passthrough_stream(
             ollama,
             gate,
             concrete=concrete,
@@ -353,21 +358,24 @@ async def _passthrough_stream_events(
             format=format,
             timeout_s=timeout_s,
             think=think,
-        ):
-            msg = chunk.get("message", {}) or {}
-            content = msg.get("content", "") or ""
-            if content:
-                yield session.content_frame(content)
-            if chunk.get("done"):
-                session.usage_reported(
-                    prompt_tokens=int(chunk.get("prompt_eval_count", 0) or 0),
-                    completion_tokens=int(chunk.get("eval_count", 0) or 0),
-                )
-                terminal.finish(StreamOutcome.OK, finish_reason="stop")
-                yield session.terminal_frame()
-                yield session.done_frame()
-                return
-        terminal.finish(StreamOutcome.TRUNCATED, finish_reason="length")
+        )) as stream:
+            async for chunk in stream:
+                msg = chunk.get("message", {}) or {}
+                content = msg.get("content", "") or ""
+                if content:
+                    yield session.content_frame(content)
+                if chunk.get("done"):
+                    session.usage_reported(
+                        prompt_tokens=int(chunk.get("prompt_eval_count", 0) or 0),
+                        completion_tokens=int(chunk.get("eval_count", 0) or 0),
+                    )
+                    truncated = chunk.get("done_reason") == "length"
+                    terminal.finish(StreamOutcome.TRUNCATED if truncated else StreamOutcome.OK,
+                                    finish_reason="length" if truncated else "stop")
+                    yield session.terminal_frame()
+                    yield session.done_frame()
+                    return
+        terminal.finish(StreamOutcome.ERROR, finish_reason="stop")
         yield session.terminal_frame()
         yield session.done_frame()
     except asyncio.CancelledError:

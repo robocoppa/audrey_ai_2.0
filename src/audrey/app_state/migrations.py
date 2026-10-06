@@ -948,6 +948,33 @@ MIGRATIONS: tuple[tuple[int, str], ...] = (
           ON app_file_derivations(user_id, input_version_id, verified_at DESC);
         """,
     ),
+    (
+        21,
+        """
+        CREATE TABLE IF NOT EXISTS app_responses (
+          response_id          TEXT PRIMARY KEY,
+          owner_id             TEXT NOT NULL,
+          previous_response_id TEXT,
+          created_at           INTEGER NOT NULL CHECK (created_at >= 0),
+          expires_at           INTEGER NOT NULL CHECK (expires_at > created_at),
+          response_json        TEXT NOT NULL,
+          replay_json          TEXT NOT NULL,
+          UNIQUE (response_id, owner_id),
+          FOREIGN KEY (owner_id) REFERENCES app_users(user_id) ON DELETE CASCADE,
+          FOREIGN KEY (previous_response_id)
+            REFERENCES app_responses(response_id) ON DELETE CASCADE,
+          FOREIGN KEY (previous_response_id, owner_id)
+            REFERENCES app_responses(response_id, owner_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_app_responses_owner_created
+          ON app_responses(owner_id, created_at DESC, response_id);
+        CREATE INDEX IF NOT EXISTS idx_app_responses_parent
+          ON app_responses(previous_response_id);
+        CREATE INDEX IF NOT EXISTS idx_app_responses_expires
+          ON app_responses(expires_at);
+        """,
+    ),
 )
 
 __all__ = ["MIGRATIONS"]

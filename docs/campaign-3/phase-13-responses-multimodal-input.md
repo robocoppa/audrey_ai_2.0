@@ -3,7 +3,9 @@
 **Status:** Slices 13B, 13C, and 13D are live-settled. Slice 13A remains
 laptop-complete with its targeted live gate pending. Slice 13D's streamed retry
 passed on 2026-10-05 after the token-limit and progress-rendering correction.
-Slice 13E client-executed function tools is laptop-complete; live proof is pending.
+Slice 13E client-executed function tools passed its targeted live gate on
+2026-10-05. Slice 13F saved Responses and text/function continuation is
+laptop-complete; its targeted restart gate is pending.
 
 ## Goal
 
@@ -45,9 +47,9 @@ At its initial release, Slice 13A rejected these before generation:
 Slices 13C and 13D below subsequently add owned file ids and public URLs.
 URLs use a separate bounded fetch contract that prevents server-side request
 forgery (SSRF). The existing HTTP 400
-`responses_feature_unsupported` boundary remains for stored/chained responses
-and background execution. Slice 13E adds client function tools on permitted
-passthrough models only.
+`responses_feature_unsupported` boundary remains for background execution
+and the separate Conversations API. Slice 13E adds client function tools on
+permitted passthrough models; Slice 13F adds saved text/function Responses.
 
 ## Automated contracts
 
@@ -102,8 +104,8 @@ additionalProperties to false.
 
 The legacy json_object mode remains an explicit HTTP 400
 responses_feature_unsupported response. Slice 13E below adds client functions
-on permitted passthrough models. Stored responses, chaining, and background
-work remain separate future slices.
+on permitted passthrough models. Slice 13F adds saved text/function Responses
+and continuation by id; background work remains a future capability.
 
 Contract references:
 
@@ -260,8 +262,9 @@ by the laptop regressions. This gate is settled; repeat only if a later
 change touches these contracts.
 
 Slice 13D below adds HTTP(S) image/document URLs. Inline `file_data`, PDF
-visual detail, stored response chaining, and background execution remain
-separate capabilities. Slice 13E below adds client-provided functions.
+visual detail and background execution remain separate capabilities. Slice 13E
+below adds client-provided functions; Slice 13F adds saved text/function
+Responses and id continuation.
 
 Contract references: [OpenAI file inputs](https://developers.openai.com/api/docs/guides/file-inputs)
 and [Responses request schema](https://developers.openai.com/api/reference/resources/responses/methods/create).
@@ -420,7 +423,7 @@ and [OpenAI image inputs](https://developers.openai.com/api/docs/guides/images-v
 
 ## Slice 13E - client-executed function tools
 
-**Status:** Laptop implementation complete; targeted live gate pending.
+**Status:** Laptop and targeted live gates passed, 2026-10-05.
 This API capability lets a bot or other client advertise its own functions,
 receive validated call requests, execute those functions itself, and submit
 results for a final answer. It adds no Audrey browser controls or document
@@ -440,7 +443,8 @@ client function controls on those models return HTTP 400. Native `direct/...`
 model policy remains a separate catalog. Fair GPU scheduling, per-user limits,
 configured thinking policy, sampling options, token usage, and authentication
 reuse the existing passthrough path. Like existing passthrough requests, these
-calls do not create compatibility chat history or stored Responses records.
+calls do not create compatibility chat history. Slice 13F below adds explicit
+Responses storage; omission or `store: false` keeps this path stateless.
 
 ### Request and replay contract
 
@@ -489,14 +493,15 @@ Keep the advertised definitions when requesting further calls. `tool_choice:
 calls may also be replayed without current definitions. Every result must match
 one unique preceding unanswered call; all pending calls require results before
 a later message or generation. Adjacent parallel calls and their accompanying
-assistant text become one provider assistant turn. Client input is stateless:
-there is no lookup by response id.
+assistant text become one provider assistant turn. Slice 13E input is stateless.
+Slice 13F below adds explicit saved response lookup and text/function
+continuation by id.
 
 Only `tool_choice: auto` or `none` is supported. Omission means auto.
 `parallel_tool_calls: false` rejects a provider batch containing multiple calls
 before exposing executable items. Required/forced choices, built-in tools,
-combined skills, combined JSON Schema text output, stored/chained responses,
-and background execution remain explicit HTTP 400 boundaries.
+combined skills, combined JSON Schema text output, and background execution
+remain explicit HTTP 400 boundaries. Slice 13F adds saved text/function responses.
 
 ### Validation and limits
 
@@ -566,6 +571,164 @@ read-only local marker function, executes it on the laptop, and proves the
 final answer uses that result. It makes three generation calls and two JSON
 denial probes. Slice 13D remains passed and is not repeated.
 
+**Live result, 2026-10-05:** The user's all-case report passed on
+`audrey_passthrough/qwen3.8:latest`. Completed and streamed requests each
+returned one validated `get_smoke_marker` function item with stable `fc_` and
+`call_` ids. Function-only output correctly contained no answer text. The stream
+contained seven events, one matching argument delta, terminal
+`response.completed`, and no native tool events or progress. The client executed
+one function and the stateless follow-up returned the exact 28-character marker.
+Usage was 384 input / 97 output tokens completed, 384 / 84 streamed, and 176 / 52
+on the follow-up, all under the explicit 8,192-token ceilings. Three generation
+calls, no uploads; virtual-model and required-choice guards returned JSON HTTP
+400 before SSE. This gate is settled.
+
+The [Hermes integration handoff](../guides/hermes-responses-client-tools.md)
+contains the adapter contract and a message to forward to the bot maintainer.
+Audrey's protocol proof does not establish that a particular Hermes installation
+has switched adapters or passed its own end-to-end test.
+
 Contract sources: [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling),
 [Responses streaming events](https://developers.openai.com/api/reference/resources/responses/streaming-events),
 and [Ollama tool calling](https://docs.ollama.com/capabilities/tool-calling).
+
+
+## Slice 13F - saved Responses and text/function continuation
+
+**Status:** Laptop implementation and required verification passed, 2026-10-05;
+capture/restart/verify live gate pending. API only; no native browser change.
+
+### Storage and ownership
+
+`POST /v1/responses` accepts `store: true` to retain a completed response and
+its text/function replay in Audrey's canonical SQLite application database.
+Omission, null, or false keeps the response unretained. This is a deliberate
+Audrey difference from OpenAI's default storage behavior: callers opt in.
+Responses echo `store` and `previous_response_id` in completed objects and
+streamed response objects.
+
+The existing Cloudflare assertion or first-party PAT with `compat:full`
+resolves a canonical Audrey account. Claimed `user`, email, and metadata never
+select the owner. Retention requires that account and an available application
+store. Passthrough role/allow-list and current virtual-model/skill policies
+remain authoritative on every generation.
+
+| Operation | Contract |
+|---|---|
+| `GET /v1/responses/{id}` | Exact saved terminal response object; no generation |
+| `DELETE /v1/responses/{id}` | `{"id":"resp_…","object":"response.deleted","deleted":true}`; deletes descendants too |
+| `previous_response_id` on a new request | Owned retained history plus only the new input; optional independent `store: true` for the new result |
+| Missing, foreign, deleted, or expired id | Identical JSON HTTP 404 `responses_not_found`, before provider dispatch or SSE |
+
+Schema 21 adds `app_responses` with foreign keys to its account and parent.
+The compound parent/owner key prevents cross-account links even at the database
+boundary. Terminal JSON and full replay are immutable snapshots. No provider
+reasoning is saved. Incomplete, failed, interrupted, and cancelled generations
+are not retained and cannot become continuation parents.
+
+Each record expires 30 days after saving. Expiry is pruned at startup and on
+repository operations. Removing or expiring a parent cascades through descendants,
+so a descendant may be removed before its own 30-day deadline. This prevents
+continued retention of a parent's copied context after deletion. Account data
+purge also removes retained Responses. No dedicated conversation/list API,
+background job, or in-progress retrieval is added.
+
+### Continuation and bounds
+
+Example first request:
+
+```json
+{
+  "model": "audrey_passthrough/qwen3.8:latest",
+  "store": true,
+  "input": "Remember the shipment code ALPHA-17."
+}
+```
+
+Then send only the new question with the returned response id:
+
+```json
+{
+  "model": "audrey_passthrough/qwen3.8:latest",
+  "previous_response_id": "resp_id_from_the_first_request",
+  "store": true,
+  "input": "What shipment code did I give you?"
+}
+```
+
+For a saved function-call response, new input may contain just its matching
+`function_call_output` items. Audrey reconstructs original messages and call
+items before validating the combined history. Every pending call still needs
+its result; historical arguments are checked against any newly supplied
+matching definition. Functions continue to execute in the client.
+
+Request-level instructions, tools, model, skill, metadata, sampling settings,
+and token ceilings are not inherited. Supply the desired settings again. Explicit
+system/developer messages originally submitted inside input remain history.
+Plain assistant history does not turn a virtual-model request into a client-tool
+request. Call/result history still requires a permitted tool-capable passthrough
+model. Both completed and streamed generation and bounded JSON Schema text
+output reuse their existing adapters.
+
+Saved or chained input supports strings, typed `input_text`, assistant output,
+and client function calls/results only. File ids, inline/remote images, and remote
+documents are rejected with JSON HTTP 400 before hydration for these requests.
+Ordinary unretained multimodal requests keep their existing behavior.
+
+| Bound | Limit |
+|---|---|
+| Chain depth | 32 responses |
+| Replay items, including stored output | 128 |
+| Retained request JSON before generation | 1 MiB |
+| Combined saved terminal/replay JSON | 2 MiB |
+| Per owner | 100 records / 30 MiB |
+| Provider text, arguments/results, instructions, effective definitions | Existing 250,000 characters / 16,000 admitted tokens |
+
+No context is silently dropped. Oversized input fails HTTP 413 before dispatch;
+record/owner quota is checked atomically at completion. Client-tool definitions
+and all existing per-call bounds are still admitted separately.
+
+### Persistence and interruption
+
+A successful terminal is committed before the completed HTTP object or its
+SSE completion group is exposed. Disk errors return HTTP 503 for normal requests
+or typed `response.failed` for streams. Quota failures use
+`responses_storage_limit`; a parent deleted during generation uses
+`responses_not_found`. No completion or executable function group is forwarded
+when persistence fails. Current text already streamed may remain visible.
+
+Cancellation waits for a concurrent bounded SQLite save and removes its unseen
+record before propagating cancellation. Stream closing propagates through the
+existing provider and user/GPU gates. Confirmed passthrough token-limit stops
+now produce incomplete Responses, including the plain passthrough path;
+unconfirmed provider EOF produces failure rather than a stored success.
+
+### Verification and targeted acceptance
+
+**Laptop result, 2026-10-05:** 3,665 full hermetic backend tests passed, with
+one existing FastAPI HTTP422 deprecation warning. This includes 52 new repository
+cases, 51 new ASGI/provider route cases, and 45 new smoke-harness cases. Two obsolete
+unsupported-field cases were removed because storage and continuation now ship.
+Scoped Ruff, compilation, and diff checks passed.
+
+The tests prove migration from schema 20, reopen persistence, ownership/FK
+constraints, actual quotas, expiry and cascades, three-turn text history, function
+results, current schema/policy/prompt admission, commit before stream success,
+parent deletion during generation, failure/truncation/EOF without retention,
+and cancellation cleanup even when a request is cancelled repeatedly during a
+concurrent SQLite write. Normal virtual-model text continuation is also covered.
+
+The [13F storage smoke](../reference/live-smoke-testing.md#run-the-13f-responses-storage-and-restart-smoke)
+uses the working laptop LAN route and two distinct Access identities. Capture
+makes exactly three small generations: saved completed root, saved streamed
+child recalling the root's marker, and unretained continuation. It proves exact
+GET, no previous instructions inherited, owner guards before SSE, and
+`store: false` GET404. It retains two records in a private laptop snapshot.
+After the user restarts Audrey, verify compares exact saved objects without
+new generation, deletes the root and descendants, checks deleted-chain404, and
+removes the snapshot. No upload, browser action, Hermes execution, admin mutation,
+or newly issued PAT is required. The restart proof remains pending.
+
+Contract sources: [OpenAI conversation state](https://developers.openai.com/api/docs/guides/conversation-state),
+[Responses retrieval](https://developers.openai.com/api/reference/resources/responses/methods/retrieve),
+and [Responses deletion](https://developers.openai.com/api/reference/resources/responses/methods/delete).

@@ -100,8 +100,10 @@ public HTTP(S) image/document URLs through a bounded fetch and extraction
 contract. Slice 13E adds caller-executed functions on permitted passthrough
 models with actual tool capability, typed call events, and stateless result
 replay. Virtual pipeline models retain their server-managed tools; client
-functions never enter the server dispatcher. Stored/chained responses and
-background execution remain unsupported. Inline file data and unknown top-level fields still fail request
+functions never enter the server dispatcher. Slice 13F adds opt-in stored
+text/function Responses, owner-scoped retrieval/deletion, bounded retention,
+and previous_response_id continuation. Background execution and the distinct
+conversation API remain unsupported. Inline file data and unknown top-level fields still fail request
 validation rather than disappearing silently. Later slices add each remaining capability with its own
 storage, event, fetch, or tool-call contract.
 

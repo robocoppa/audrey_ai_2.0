@@ -84,7 +84,7 @@ async def test_schema_19_preserves_existing_conversations_with_no_project(tmp_pa
 
     store = ApplicationStore(path)
     try:
-        assert store.schema_version == 20
+        assert store.schema_version == 21
         conversation = await store.conversations.get(
             user_id="usr_existing",
             conversation_id="con_existing",

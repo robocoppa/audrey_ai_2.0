@@ -45,6 +45,12 @@ from audrey.routes.openai.passthrough import (
     _is_passthrough,
 )
 from audrey.routes.openai.pipeline import _generate_via_pipeline, _stream_via_pipeline
+from audrey.routes.openai.response_storage import (
+    expand_stored_request,
+    read_response,
+    remove_response,
+    retain_response,
+)
 from audrey.routes.openai.responses import _options_from_request, _to_responses_api_response
 from audrey.routes.openai.schemas import ChatCompletionRequest, ResponseCreateRequest
 from audrey.routes.openai.streaming import OpenAIStreamSession, ResponsesStreamSession
@@ -316,13 +322,30 @@ async def create_response(
 ):
     """Generate one completed or streamed response through Audrey."""
 
+    payload = await expand_stored_request(payload, request, me)
+    result = await _create_response(payload, request, me)
+    return await retain_response(result, payload, request, me)
+
+
+@router.get("/responses/{response_id}")
+async def retrieve_response(response_id: str, request: Request, me: AuthedUser = Depends(require_user)):
+    """Read one unexpired saved response belonging to the current account."""
+    return (await read_response(request, me, response_id))["response"]
+
+
+@router.delete("/responses/{response_id}")
+async def delete_response(response_id: str, request: Request, me: AuthedUser = Depends(require_user)):
+    """Delete one owned response and every retained descendant."""
+    return await remove_response(request, me, response_id)
+
+
+async def _create_response(payload: ResponseCreateRequest, request: Request, me: AuthedUser):
+
     client_tools = has_client_tools(payload)
     unsupported = [
         name
         for name, active in (
             ("background", payload.background),
-            ("store", payload.store is not None),
-            ("previous_response_id", payload.previous_response_id is not None),
             ("conversation", payload.conversation is not None),
             ("tools", client_tools and not _is_passthrough(payload.model)),
             ("skill", client_tools and payload.skill is not None),
@@ -365,6 +388,8 @@ async def create_response(
         validate_client_tool_request(payload)
         await validate_client_tool_prompt(payload)
         target = await prepare_client_tool_model(payload, request, me)
+    elif payload.store is True or payload.previous_response_id is not None:
+        await validate_client_tool_prompt(payload)
     input_messages = await response_input_messages(payload, request, me)
     messages: list[dict[str, Any]] = []
     if payload.instructions:
@@ -372,7 +397,7 @@ async def create_response(
     if format_instruction:
         messages.append({"role": "developer", "content": format_instruction})
     messages.extend(input_messages)
-    if has_file_inputs(payload) or client_tools:
+    if has_file_inputs(payload) or client_tools or payload.store is True or payload.previous_response_id is not None:
         budget_messages = messages
         if client_tools:
             budget_messages = [*messages, {"content": json.dumps(provider_tools(payload) or [], ensure_ascii=False)}]

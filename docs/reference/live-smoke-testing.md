@@ -589,7 +589,9 @@ model-answer failures. Slice 13C remains live-settled and is not repeated.
 
 ## Run the 13E Responses client-tools smoke from the laptop
 
-**Status:** Laptop checks pass; deployed gate pending. This is an API-only
+**Status:** Passed and settled on 2026-10-05. The three-call report verified
+completed/streamed calls, argument deltas, client result replay, and both
+JSON400 guards. Do not repeat it for unchanged functionality. This is an API-only
 capability for clients and bots. You do not need to upload any file, open the
 browser, or enable a chat tool. It requests client-owned function calls rather
 than running Audrey's server-managed tools.
@@ -660,6 +662,110 @@ passed. `--max-output-tokens` changes only the request ceiling;
 `AUDREY_RESPONSES_TOOL_MODEL` selects another already-permitted, tool-capable
 passthrough model without changing configuration. Slice 13D's passed remote
 input gate stays settled and is not repeated here.
+
+## Run the 13F Responses storage and restart smoke
+
+**Status:** Laptop implementation complete; targeted deployed gate pending.
+This API-only slice saves text/function Responses and permits continuation by
+`previous_response_id`. No browser upload, image, PDF, video, or Hermes tool is
+needed. It proves the deployed protocol and restart persistence.
+
+Use the laptop's existing `.env.test.local` with `AUDREY_USER_JWT` and
+`AUDREY_ADMIN_JWT`. The assertions must identify two different Audrey accounts;
+admin authority is not used to mutate settings. Both need to be current. No
+new PAT is issued or revoked. The default generation model is the existing
+permitted `audrey_passthrough/qwen3.8:latest`.
+
+### 1. Deploy on Tower
+
+After updating the checkout, run on **Tower**:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey
+```
+
+Audrey applies additive application schema 21 on startup. The frontend and
+custom-tools images do not need rebuilding for this slice.
+
+### 2. Capture on the laptop
+
+Run on the **laptop**:
+
+```bash
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
+(
+  set -a
+  source .env.test.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_responses_storage.py capture
+)
+```
+
+Capture makes exactly three model calls with 8,192-token ceilings. Allow a few
+minutes. It checks:
+
+1. A stored completed root has an exact GET match.
+2. Missing ids and another owner's GET, DELETE, and continuation return the same
+   JSON404 before SSE. The second identity cannot read or delete the root.
+3. A stored streamed child recalls a randomized marker supplied only to the
+   first request. The first request's instructions are not inherited.
+4. An explicit `store: false` continuation can use saved context, while its own
+   response remains unavailable to GET.
+
+Expected capture output: `status: captured`, `generation_calls: 3`,
+`uploads_created: 0`, both stored retrievals `exact_terminal_object: true`,
+streamed `chained_history: true`, `previous_instructions_not_inherited: true`,
+and `not_stored.get_http: 404`. Capture leaves two temporary saved records and a
+mode-600 snapshot at `testing-out/smokes/c3-responses-storage.json` in this laptop
+checkout. **Only proceed to restart after capture succeeds.** A failed capture
+does not satisfy the restart precondition.
+
+### 3. Restart on Tower
+
+Run on **Tower**:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose restart audrey
+```
+
+### 4. Verify on the same laptop
+
+Use the same checkout, URL, and assertions as capture:
+
+```bash
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
+(
+  set -a
+  source .env.test.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_responses_storage.py verify
+)
+```
+
+Verify makes **zero** model calls. It compares both exact saved response objects
+after restart, deletes the root and its descendant, proves their GET404 and
+post-deletion continuation404 before SSE, and removes the local snapshot.
+
+Success means exit zero and `status: passed`, `generation_calls: 0`, both
+`restart` retrievals `exact_terminal_object: true`,
+`cleanup.descendant_cascade: true`, `root_get_http: 404`, `child_get_http: 404`,
+`deleted_chain_http: 404`, and `before_sse: true`. Paste capture and verify JSON
+for acceptance. Earlier 13B–13E live gates stay passed.
+
+If capture fails, keep its report; the harness attempts to remove newly created
+records and reports any cleanup failure with `recovery_root_id`. If verify
+fails before deletion, it preserves the snapshot and records for diagnosis.
+Use the same laptop command with `cleanup` instead of `verify` to abandon only
+this temporary snapshot's response tree. Do not delete a snapshot to bypass a
+failure. Running default `all` performs protocol proof and immediate cleanup;
+it does not prove restart persistence and should not precede the capture gate.
+
+A 401 usually means an Access assertion expired; refresh the specific assertion.
+A 403 means the selected model is not permitted. `--max-output-tokens` changes
+only the ceiling; `AUDREY_RESPONSES_STORAGE_MODEL` selects another already
+permitted model. No automatic route to direct Ollama or another owner is used.
 
 ## Run the 15B Projects restart smoke
 

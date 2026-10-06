@@ -37,6 +37,7 @@ from audrey.app_state.repositories import (
     ConversationsRepository,
     PreferencesRepository,
 )
+from audrey.app_state.responses import ResponsesRepository
 from audrey.identity import (
     TOKEN_SCOPES,
     IssuedPersonalToken,
@@ -98,6 +99,8 @@ class ApplicationStore:
         self.conversations = ConversationsRepository(self._conn, self._lock)
         self.chat_projections = ChatProjectionsRepository(self._conn, self._lock)
         self.history_imports = HistoryImportRepository(self._conn, self._lock)
+        self.responses = ResponsesRepository(self._conn, self._lock)
+        self.responses._prune_expired_sync()
 
     def _migrate_locked(self) -> None:
         self._conn.execute(
@@ -838,6 +841,10 @@ class ApplicationStore:
                 )
                 self._conn.execute(
                     "DELETE FROM app_file_versions WHERE user_id = ?",
+                    (user_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM app_responses WHERE owner_id = ?",
                     (user_id,),
                 )
                 self._conn.execute(

@@ -234,8 +234,6 @@ async def test_typed_text_parts_keep_message_roles_and_order(monkeypatch):
     ("field", "value"),
     [
         ("background", True),
-        ("store", False),
-        ("previous_response_id", "resp_previous"),
         ("conversation", "conv_123"),
         ("tools", []),
         ("text", {"format": {"type": "json_object"}}),

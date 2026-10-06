@@ -9,8 +9,9 @@ with its targeted live gate pending. Slice 13C adds owner-scoped image and
 document references and passed its targeted protocol smoke on 2026-10-05.
 Slice 13D's normal URL answer, private-URL guards, and corrected streamed retry
 passed on 2026-10-05; its remote-input protocol gate is live-settled.
-Slice 13E client-executed function tools is laptop-complete with 3,519 full
-backend tests passing; its three-call protocol smoke is the next live gate.
+Slice 13E client-executed function tools passed its three-call protocol smoke
+on 2026-10-05. Slice 13F saved Responses and text/function continuation is
+laptop-complete with 3,665 full tests passed; its targeted restart gate is pending.
 The user then
 prioritized [Phase 14 Slice 14A](phase-14-bot-accounts-and-token-lifetimes.md),
 which is laptop-complete and awaits native acceptance.
@@ -413,9 +414,12 @@ Detailed decision record:
 - [x] Build Slice 13E: client-provided functions on permitted tool-capable
   passthrough models, typed completed/streamed calls, validated arguments, and
   stateless call/result replay; caller execution only, API only.
-- [ ] Pass Slice 13E's targeted completed, streamed, and result-replay smoke.
-- [ ] Add stored responses and `previous_response_id`/conversation chaining.
-- [ ] Add background execution, retrieval, cancellation, and retention.
+- [x] Pass Slice 13E's targeted completed, streamed, and result-replay smoke (2026-10-05).
+- [x] Build Slice 13F: opt-in stored text/function Responses, owner-scoped
+  retrieval/deletion, bounded retention, and `previous_response_id` continuation.
+- [ ] Pass Slice 13F's targeted capture/restart/verify gate.
+- [ ] Add the distinct Conversations API after its owner and lifecycle contract.
+- [ ] Add background execution, in-progress retrieval, and cancellation.
 - [ ] Preserve the current explicit HTTP 400 response for every unsupported
   feature until its complete contract ships.
 

@@ -533,7 +533,7 @@ class ResponseCreateRequest(BaseModel):
     stream: bool = False
     background: bool = False
     store: bool | None = None
-    previous_response_id: str | None = None
+    previous_response_id: str | None = Field(default=None, min_length=1, max_length=200, pattern=r"^resp_[A-Za-z0-9_-]+$")
     conversation: str | dict[str, Any] | None = None
     tools: list[dict[str, Any]] | None = None
     tool_choice: str | dict[str, Any] | None = None
