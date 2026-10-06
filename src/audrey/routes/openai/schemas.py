@@ -420,6 +420,62 @@ class ResponseInputMessage(BaseModel):
         return self
 
 
+class ResponseOutputTextPart(BaseModel):
+    """Answer text replayed from an earlier stateless Responses object."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["output_text"]
+    text: str
+    annotations: list[Any] = Field(default_factory=list, max_length=0)
+    logprobs: list[Any] = Field(default_factory=list, max_length=0)
+
+
+class ResponseReplayMessage(BaseModel):
+    """Completed assistant output accepted for client-owned history replay."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["message"]
+    id: str | None = Field(default=None, min_length=1, max_length=200)
+    status: Literal["completed"] = "completed"
+    role: Literal["assistant"]
+    content: list[ResponseOutputTextPart] = Field(min_length=1)
+
+
+class ResponseInputFunctionCall(BaseModel):
+    """A completed call the client replays before its matching result."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["function_call"]
+    id: str | None = Field(default=None, min_length=1, max_length=200)
+    call_id: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$")
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    arguments: str = Field(max_length=64 * 1024)
+    status: Literal["completed"] = "completed"
+
+
+class ResponseInputFunctionCallOutput(BaseModel):
+    """The client's result for an earlier call; Audrey never executes it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["function_call_output"]
+    id: str | None = Field(default=None, min_length=1, max_length=200)
+    call_id: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$")
+    output: str = Field(max_length=100_000)
+    status: Literal["completed"] = "completed"
+
+
+ResponseInputItem = (
+    ResponseInputMessage
+    | ResponseReplayMessage
+    | ResponseInputFunctionCall
+    | ResponseInputFunctionCallOutput
+)
+
+
 class ResponseFormatText(BaseModel):
     """Ordinary Responses text output."""
 
@@ -472,7 +528,7 @@ class ResponseCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model: str = Field(min_length=1)
-    input: str | list[ResponseInputMessage]
+    input: str | list[ResponseInputItem]
     instructions: str | None = None
     stream: bool = False
     background: bool = False
@@ -480,6 +536,8 @@ class ResponseCreateRequest(BaseModel):
     previous_response_id: str | None = None
     conversation: str | dict[str, Any] | None = None
     tools: list[dict[str, Any]] | None = None
+    tool_choice: str | dict[str, Any] | None = None
+    parallel_tool_calls: bool | None = None
     text: ResponseTextConfig | None = None
     temperature: float | None = None
     top_p: float | None = None

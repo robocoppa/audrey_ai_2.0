@@ -1,9 +1,9 @@
 # Campaign 3 Phase 13 - Responses multimodal input
 
-**Status:** Slices 13B and 13C are live-settled. Slice 13A remains
-laptop-complete with its targeted live gate pending. Slice 13D is
-laptop-complete. Its normal URL answer and private-URL guards passed;
-streaming acceptance awaits the correction's targeted retry.
+**Status:** Slices 13B, 13C, and 13D are live-settled. Slice 13A remains
+laptop-complete with its targeted live gate pending. Slice 13D's streamed retry
+passed on 2026-10-05 after the token-limit and progress-rendering correction.
+Slice 13E client-executed function tools is laptop-complete; live proof is pending.
 
 ## Goal
 
@@ -45,8 +45,9 @@ At its initial release, Slice 13A rejected these before generation:
 Slices 13C and 13D below subsequently add owned file ids and public URLs.
 URLs use a separate bounded fetch contract that prevents server-side request
 forgery (SSRF). The existing HTTP 400
-`responses_feature_unsupported` boundary remains unchanged for client tools, stored or chained responses,
-and background execution.
+`responses_feature_unsupported` boundary remains for stored/chained responses
+and background execution. Slice 13E adds client function tools on permitted
+passthrough models only.
 
 ## Automated contracts
 
@@ -100,8 +101,9 @@ generation. Strict object schemas must require every declared property and set
 additionalProperties to false.
 
 The legacy json_object mode remains an explicit HTTP 400
-responses_feature_unsupported response. Client tools, stored responses,
-chaining, and background work remain separate future slices.
+responses_feature_unsupported response. Slice 13E below adds client functions
+on permitted passthrough models. Stored responses, chaining, and background
+work remain separate future slices.
 
 Contract references:
 
@@ -258,8 +260,8 @@ by the laptop regressions. This gate is settled; repeat only if a later
 change touches these contracts.
 
 Slice 13D below adds HTTP(S) image/document URLs. Inline `file_data`, PDF
-visual detail, client-provided tools, stored response chaining, and background
-execution remain separate capabilities.
+visual detail, stored response chaining, and background execution remain
+separate capabilities. Slice 13E below adds client-provided functions.
 
 Contract references: [OpenAI file inputs](https://developers.openai.com/api/docs/guides/file-inputs)
 and [Responses request schema](https://developers.openai.com/api/reference/resources/responses/methods/create).
@@ -372,7 +374,7 @@ evidence.
 tokens. Both private image/document probes returned JSON HTTP 422 before SSE.
 No uploads were created. Streaming reached all 4,096 output tokens but returned
 only the 36-character Thinking banner. It incorrectly reported completed, so
-Slice 13D is not live-settled.
+that first attempt did not pass the streaming gate.
 
 **Streaming correction:** The plain Fast owner now maps Ollama's
 `done_reason: length` to `StreamOutcome.TRUNCATED`, retaining token usage and
@@ -385,9 +387,9 @@ second guard against blank successful output. Incomplete/failed Responses keep
 excluded from both plain and structured `output_text`. Chat Completions and the
 native browser retain their progress rendering.
 
-The fixed smoke accepts `--case streamed --max-output-tokens 8192` so the next
-live gate sends only one model request, preserving the normal answer and guards
-as passed. It verifies both inputs, matching deltas, `response.completed`, and
+The fixed smoke accepts `--case streamed --max-output-tokens 8192`; the retry
+sent only one model request, preserving the normal answer and guards as passed.
+It verifies both inputs, matching deltas, `response.completed`, and
 `progress_hidden: true`. The larger request ceiling allows more vision reasoning
 but does not change production defaults or bypass output bounds. An incomplete
 response remains a failed answer gate, with usage and reason retained.
@@ -402,8 +404,168 @@ and diff checks pass. Regressions cover empty/partial token-limit stops,
 whitespace-only completion, bounded fallback, internal progress observations,
 literal answer text, the actual image/vl route, and the one-case smoke selector.
 
+**Final live result, 2026-10-05: Passed.** The streamed-only retry returned
+HTTP 200 and the 22-character answer "Dummy PDF file, Python". Five answer
+deltas across 13 events ended with `response.completed`; `progress_hidden` was
+true and `incomplete_details` was null. Usage was 1,177 input tokens and 1,670
+output tokens under the explicit 8,192-token ceiling. No uploads were created.
+Together with the already-passed normal answer and private-URL guards, this
+closes Slice 13D. Do not repeat these settled checks without a relevant change.
+
 Token-limit behavior follows the
 [official OpenAI reasoning contract](https://developers.openai.com/api/docs/guides/reasoning).
 
 Official URL field references: [OpenAI file inputs](https://developers.openai.com/api/docs/guides/file-inputs)
 and [OpenAI image inputs](https://developers.openai.com/api/docs/guides/images-vision).
+
+## Slice 13E - client-executed function tools
+
+**Status:** Laptop implementation complete; targeted live gate pending.
+This API capability lets a bot or other client advertise its own functions,
+receive validated call requests, execute those functions itself, and submit
+results for a final answer. It adds no Audrey browser controls or document
+creation features.
+
+### Models and execution policy
+
+Use an existing permitted `audrey_passthrough/<concrete-model>` id. Audrey
+checks `passthrough.enabled`, `require_role`, and `allowed_models`, then verifies
+that Ollama reports the concrete model's `tools` capability. These checks finish
+before file admission or SSE starts. Unavailable capability metadata fails
+closed with HTTP 502; a model without tools returns HTTP 400.
+
+Audrey's server tool registry and dispatcher never execute these functions.
+Virtual pipeline models continue to use their existing server-managed tools;
+client function controls on those models return HTTP 400. Native `direct/...`
+model policy remains a separate catalog. Fair GPU scheduling, per-user limits,
+configured thinking policy, sampling options, token usage, and authentication
+reuse the existing passthrough path. Like existing passthrough requests, these
+calls do not create compatibility chat history or stored Responses records.
+
+### Request and replay contract
+
+Definitions use the flat Responses function shape:
+
+```json
+{
+  "model": "audrey_passthrough/qwen3.8:latest",
+  "max_output_tokens": 8192,
+  "tools": [{
+    "type": "function",
+    "name": "get_weather",
+    "description": "Read current weather for a city from the client.",
+    "strict": true,
+    "parameters": {
+      "type": "object",
+      "properties": {"city": {"type": "string"}},
+      "required": ["city"],
+      "additionalProperties": false
+    }
+  }],
+  "tool_choice": "auto",
+  "input": [{"role": "user", "content": "Check the weather in Denver."}]
+}
+```
+
+A successful call item has `type: function_call`, an `fc_` item id, a distinct
+`call_id`, the advertised `name`, completed status, and JSON-string `arguments`.
+A function-only answer has no empty assistant message. Ordinary answer text
+can accompany calls in a separate message item.
+
+The client must validate and execute the requested function, then send another
+request containing the original input, every item from `response.output`, and
+one result per call:
+
+```json
+{
+  "type": "function_call_output",
+  "call_id": "call_id_from_the_response",
+  "output": "{\"temperature_c\":18,\"conditions\":\"clear\"}"
+}
+```
+
+Keep the advertised definitions when requesting further calls. `tool_choice:
+"none"` withholds definitions from the provider for final synthesis. Historical
+calls may also be replayed without current definitions. Every result must match
+one unique preceding unanswered call; all pending calls require results before
+a later message or generation. Adjacent parallel calls and their accompanying
+assistant text become one provider assistant turn. Client input is stateless:
+there is no lookup by response id.
+
+Only `tool_choice: auto` or `none` is supported. Omission means auto.
+`parallel_tool_calls: false` rejects a provider batch containing multiple calls
+before exposing executable items. Required/forced choices, built-in tools,
+combined skills, combined JSON Schema text output, stored/chained responses,
+and background execution remain explicit HTTP 400 boundaries.
+
+### Validation and limits
+
+Audrey admits the documented [bounded JSON Schema subset](#slice-13b---structured-text-output)
+and validates every generated call's name and arguments against the advertised
+schema before returning any executable item. `strict: true` requires all object
+properties to be required and `additionalProperties: false`. Missing `strict`
+is treated and echoed as false; Audrey does not apply OpenAI's default strict
+normalization. The provider receives native function definitions. Local final
+validation does not guarantee constrained generation or that auto will call a
+function on every model draw.
+
+| Budget | Limit |
+|---|---|
+| Function definitions | 16; 64 KiB aggregate JSON |
+| Function names | 1–64 letters, digits, underscores, or hyphens |
+| Function description | 1,024 characters |
+| Call arguments | JSON object; 64 KiB per call |
+| Calls per pending/output group | 8 |
+| Client replay input | 128 items |
+| Result text | 100,000 characters per item |
+| Adapted provider text, history arguments/results, instructions, and effective definitions | 250,000 characters and 16,000 `cl100k_base` tokens |
+
+The aggregate prompt budget is checked before file access, after document
+hydration, and after vision descriptions. Submitted definitions always undergo
+their separate size and schema admission, including with `tool_choice: none`.
+Existing owned-file and public-URL input limits and guards remain authoritative.
+
+### Streaming and failure behavior
+
+Function items use `response.output_item.added`,
+`response.function_call_arguments.delta`,
+`response.function_call_arguments.done`, and `response.output_item.done`, followed
+by the typed terminal response. Ids and output indices are stable; sequence
+numbers are contiguous from zero. Text streams through the ordinary output-text
+events. Reasoning fields and native tool/progress events are not answer text.
+
+Ollama sends parsed argument objects. Audrey collects calls from every chunk,
+waits for confirmed successful termination, validates the entire batch, and
+then emits one complete argument delta per call. Clients must wait for completed
+call items before execution. Invalid batches expose no executable items;
+completed requests return HTTP 502 and streamed requests end in response.failed.
+
+A token-limit stop returns response.incomplete, partial text and usage, and
+`incomplete_details.reason: max_output_tokens`; buffered calls are discarded.
+An unconfirmed stream EOF returns response.failed with
+`responses_stream_interrupted`, preserving partial text without attributing the
+interruption to the token limit. Closing or cancelling a stream closes its
+provider before releasing the GPU slot and releases the per-user slot.
+
+### Verification and live gate
+
+**Laptop result, 2026-10-05:** 3,519 full hermetic backend tests passed,
+including 82 new tool-contract cases, 62 new route/provider integration cases,
+45 new smoke-harness cases, and two shared provider-cleanup regressions. Scoped
+Ruff, Python compilation, and diff checks passed. The existing FastAPI
+deprecation warning remains.
+
+Hermetic coverage includes real Ollama request/stream adaptation, call and
+result links, parallel replay, malformed provider output, token truncation,
+pre-fetch model/control denials, prompt budgets, owned evidence, and stream
+cancellation. The separate smoke harness is also tested without live services.
+
+Run [the targeted 13E protocol smoke](../reference/live-smoke-testing.md#run-the-13e-responses-client-tools-smoke-from-the-laptop)
+after rebuilding Audrey. No browser upload is needed: the harness requests a
+read-only local marker function, executes it on the laptop, and proves the
+final answer uses that result. It makes three generation calls and two JSON
+denial probes. Slice 13D remains passed and is not repeated.
+
+Contract sources: [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling),
+[Responses streaming events](https://developers.openai.com/api/reference/resources/responses/streaming-events),
+and [Ollama tool calling](https://docs.ollama.com/capabilities/tool-calling).

@@ -510,12 +510,18 @@ uploads. No browser action or existing library file was needed.
 
 ## Run the 13D Responses remote-input smoke from the laptop
 
-**Result, 2026-10-05:** The normal answer and both private-URL guards passed.
-Streaming reached the 4,096-token ceiling and returned only Audrey's progress
-banner while incorrectly reporting `completed`. The corrected laptop code
-reports token-limited streams as `incomplete`, suppresses progress in Responses
-answer text, and refuses an empty normal completion. Live streaming acceptance
-still needs the single retry below; retain the passed checks.
+**Result, 2026-10-05: Passed and settled.** The normal answer and both
+private-URL guards passed first. The corrected streamed-only retry returned
+"Dummy PDF file, Python", 22 characters, five deltas, and 13 events ending with
+`response.completed`. Progress was hidden, incomplete_details was null, and
+usage was 1,177 input tokens / 1,670 output tokens under the 8,192-token ceiling.
+No uploads were created. Slice 13D is closed; do not repeat these checks unless a
+later change touches its input admission, stream output, or terminal contract.
+
+The first stream had spent all 4,096 tokens and falsely reported completion with
+only a progress banner. The deployed correction reports token-limit stops as
+incomplete, excludes progress from Responses answer text, and refuses blank
+successful completion. Commands below are retained for reproduction.
 
 This API-only slice lets callers provide public image/document URLs directly in
 `POST /v1/responses`. You do not need to upload a PDF, image, or video in the
@@ -539,7 +545,7 @@ cd /mnt/user/appdata/audrey_ai_2.0
 docker compose up -d --build audrey
 ```
 
-Then retry **only streaming** on the laptop:
+The accepted retry ran **only streaming** on the laptop:
 
 ```bash
 cd /home/bart/Documents/github/audrey/audrey_ai_2.0
@@ -580,6 +586,80 @@ ceiling. `--case completed` or `--case streamed` selects just one generation
 case; `--max-output-tokens` makes the request budget explicit. Neither selector
 reports skipped cases as passed. Fixture fetch failures remain separate from
 model-answer failures. Slice 13C remains live-settled and is not repeated.
+
+## Run the 13E Responses client-tools smoke from the laptop
+
+**Status:** Laptop checks pass; deployed gate pending. This is an API-only
+capability for clients and bots. You do not need to upload any file, open the
+browser, or enable a chat tool. It requests client-owned function calls rather
+than running Audrey's server-managed tools.
+
+The test uses the existing `AUDREY_USER_JWT` in laptop `.env.test.local`;
+no admin assertion or eval PAT is needed. Its default model is the currently
+permitted `audrey_passthrough/qwen3.8:latest`. Ollama must declare that model's
+`tools` capability. Existing passthrough role and allow-list rules still apply.
+
+After updating the checkout, rebuild **on Tower**:
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+docker compose up -d --build audrey
+```
+
+Then run this **on the laptop**:
+
+```bash
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
+(
+  set -a
+  source .env.test.local
+  set +a
+  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_responses_client_tools.py
+)
+```
+
+The harness does the following:
+
+1. Checks that a virtual Audrey model and `tool_choice: required` each return
+   JSON HTTP 400 before SSE begins. Neither probe generates an answer.
+2. Makes one completed request that must return a `get_smoke_marker` function
+   call with a randomized nonce matching its declared argument schema.
+3. Makes one streamed request for the same function, checking typed call
+   events, stable ids, argument deltas, usage, and response.completed.
+4. Runs that read-only function **locally on the laptop**, deriving a marker,
+   then submits original history, response output, and the matching call
+   result with `tool_choice: none`. The final answer must repeat the marker.
+
+This is three model calls, each with an 8,192-token ceiling that includes
+reasoning. Allow a few minutes. It creates no uploads, stored responses, or
+conversation records and needs no cleanup. It does not access the Hermes
+workspace or execute any Audrey server tool.
+
+Success means exit zero and a report with:
+
+- `status: passed`, `generation_calls: 3`, and `uploads_created: 0`;
+- both `guards` HTTP values 400 and `before_sse: true`;
+- `completed.arguments_valid: true` and `function_calls: 1`;
+- `streamed.terminal: response.completed`, `argument_deltas_match: true`,
+  and `native_tool_events: 0`;
+- `followup.sentinel: true`, `caller_executed: true`, and
+  `stateless_history: true`.
+
+If one case fails, keep the JSON output. A 401 means the user Access assertion
+needs refreshing; a 403 means passthrough policy denied the selected model. A
+400 about capability means Ollama did not declare tools. A token-limit stop is
+incomplete and exposes no executable calls; it does not pass this gate. Invalid
+arguments fail before the client can execute a function. Auto allows the model
+to choose text instead of a call, so the live test also proves this model follows
+the concrete function request.
+
+Only after a failed proof, use `--case completed` for one call or
+`--case streamed` for the streamed request plus replay (two calls). These
+selectors omit the two already-passed guards and never report skipped checks as
+passed. `--max-output-tokens` changes only the request ceiling;
+`AUDREY_RESPONSES_TOOL_MODEL` selects another already-permitted, tool-capable
+passthrough model without changing configuration. Slice 13D's passed remote
+input gate stays settled and is not repeated here.
 
 ## Run the 15B Projects restart smoke
 

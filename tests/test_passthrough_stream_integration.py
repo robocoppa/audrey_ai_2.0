@@ -18,6 +18,7 @@ caught by draining the stream.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 
@@ -28,6 +29,7 @@ from audrey.models.health import HealthTracker
 from audrey.models.ollama import OllamaClient
 from audrey.models.registry import ModelRegistry
 from audrey.pipeline.fair_gate import FairLocalGate
+from audrey.pipeline.passthrough import passthrough_stream
 from audrey.routes.inflight import UserInflightRegistry
 from audrey.routes.openai import (
     PASSTHROUGH_PREFIX,
@@ -293,3 +295,68 @@ async def test_two_request_tool_loop_preserves_linkage_to_ollama(stream):
         )
     else:
         assert second["choices"][0]["message"]["content"] == "It is 22 C in New York."
+
+
+@pytest.mark.parametrize("stop", ["close_after_chunk", "cancel_awaiting_chunk"])
+async def test_provider_transport_closes_before_gate_releases(monkeypatch, stop):
+    """Closing after a yielded chunk must not depend on generator collection."""
+    gate = FairLocalGate(concurrency=1)
+    close_gate_states: list[int] = []
+    waiting = asyncio.Event()
+
+    class BlockingBody(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b'{"message":{"content":"hi"},"done":false}\n'
+            waiting.set()
+            await asyncio.Event().wait()
+
+        async def aclose(self):
+            close_gate_states.append(gate.pressure_snapshot()["in_use"])
+
+    ollama = OllamaClient(
+        "http://ollama:11434",
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(200, stream=BlockingBody()),
+        ),
+    )
+    provider_streams = []
+    original_chat_stream = ollama.chat_stream
+
+    def capture_stream(**kwargs):
+        stream = original_chat_stream(**kwargs)
+        provider_streams.append(stream)
+        return stream
+
+    monkeypatch.setattr(ollama, "chat_stream", capture_stream)
+    outer = passthrough_stream(
+        ollama, gate, concrete=_MODEL, location="local",
+        messages=[{"role": "user", "content": "hello"}], options={},
+        user_id="alice@example.com",
+    )
+    pending = None
+    try:
+        assert (await anext(outer))["message"]["content"] == "hi"
+        assert gate.pressure_snapshot()["in_use"] == 1
+        assert close_gate_states == []
+        assert len(provider_streams) == 1
+        if stop == "close_after_chunk":
+            await outer.aclose()
+        else:
+            pending = asyncio.create_task(anext(outer))
+            await asyncio.wait_for(waiting.wait(), timeout=1)
+            pending.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await pending
+        # The retained provider generator rules out GC as a cleanup mechanism.
+        assert provider_streams[0].ag_frame is None
+        assert close_gate_states == [1]
+        assert gate.pressure_snapshot()["in_use"] == 0
+    finally:
+        if pending is not None and not pending.done():
+            pending.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await pending
+        await outer.aclose()
+        for stream in provider_streams:
+            await stream.aclose()
+        await ollama.aclose()

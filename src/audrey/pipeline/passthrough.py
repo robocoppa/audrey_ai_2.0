@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 from typing import Any
 
 from audrey.metrics import dispatch_total
@@ -180,19 +181,22 @@ async def passthrough_stream(
             }
             if format is not None:
                 stream_kwargs["format"] = format
-            async for chunk in ollama.chat_stream(**stream_kwargs):
-                chunks_received += 1
-                cmsg = chunk.get("message") or {}
-                total_content_len += len(str(cmsg.get("content") or ""))
-                # Ollama streams reasoning in its own `thinking` field, never in
-                # `content`, so a model that spends its whole budget there
-                # yields a stream of chunks that sum to no text at all.
-                total_thinking_len += len(str(cmsg.get("thinking") or ""))
-                total_tool_calls += len(list(cmsg.get("tool_calls") or []))
-                if chunk.get("done"):
-                    last_eval_count = int(chunk.get("eval_count", 0) or 0)
-                    last_done_reason = chunk.get("done_reason", "?")
-                yield chunk
+            # Close the provider before releasing its GPU slot, including
+            # when the caller closes us while suspended at a yielded chunk.
+            async with aclosing(ollama.chat_stream(**stream_kwargs)) as stream:
+                async for chunk in stream:
+                    chunks_received += 1
+                    cmsg = chunk.get("message") or {}
+                    total_content_len += len(str(cmsg.get("content") or ""))
+                    # Ollama streams reasoning in its own `thinking` field, never in
+                    # `content`, so a model that spends its whole budget there
+                    # yields a stream of chunks that sum to no text at all.
+                    total_thinking_len += len(str(cmsg.get("thinking") or ""))
+                    total_tool_calls += len(list(cmsg.get("tool_calls") or []))
+                    if chunk.get("done"):
+                        last_eval_count = int(chunk.get("eval_count", 0) or 0)
+                        last_done_reason = chunk.get("done_reason", "?")
+                    yield chunk
     finally:
         log.info(
             "passthrough.stream model=%s user=%s tools=%d elapsed=%.2fs think=%s "

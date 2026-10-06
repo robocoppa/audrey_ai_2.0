@@ -83,7 +83,7 @@ without answer text fails instead of presenting progress as a successful answer.
 
 ## Deliberate boundary
 
-Slice 5A rejects these fields with HTTP 400 and
+At its initial release, Slice 5A rejected these fields with HTTP 400 and
 `responses_feature_unsupported` before generation starts:
 
 - background execution;
@@ -97,7 +97,11 @@ Phase 13 Slice 13A accepts typed `input_text` parts and bounded inline
 Slice 13C adds owner-scoped `input_image.file_id` and `input_file.file_id`
 references for ready images and extracted documents. Slice 13D adds temporary
 public HTTP(S) image/document URLs through a bounded fetch and extraction
-contract. Inline file data and unknown top-level fields still fail request
+contract. Slice 13E adds caller-executed functions on permitted passthrough
+models with actual tool capability, typed call events, and stateless result
+replay. Virtual pipeline models retain their server-managed tools; client
+functions never enter the server dispatcher. Stored/chained responses and
+background execution remain unsupported. Inline file data and unknown top-level fields still fail request
 validation rather than disappearing silently. Later slices add each remaining capability with its own
 storage, event, fetch, or tool-call contract.
 
@@ -108,7 +112,9 @@ The route adapts a validated Responses request to the existing
 authentication. It therefore keeps model validation, passthrough role and
 allow-list gates, skill resolution, server-managed tool policy, vision
 fallbacks, inflight limits, GPU fairness, generation metrics, and archive
-behavior in one implementation.
+behavior in one implementation. Slice 13E uses the same passthrough provider
+helpers and gates with a dedicated renderer for validated function items. It
+checks tool policy before file fetching or SSE begins.
 
 The targeted live smoke uses Audrey's existing `### Task:` compatibility
 form so the one model call is excluded from chat history. It also submits one

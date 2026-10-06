@@ -9,6 +9,7 @@ pipeline, and wires streaming vs non-streaming. The heavy lifting lives in
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import Callable
@@ -23,6 +24,16 @@ from audrey.auth import AuthedUser, require_user
 from audrey.pipeline.chat_archive import resolve_conversation_id
 from audrey.pipeline.messages import last_user_text
 from audrey.pipeline.prompts import skill_instruction_for, with_skill_instruction
+from audrey.routes.openai.client_tool_generation import (
+    generate_client_tool_response,
+    prepare_client_tool_model,
+    validate_client_tool_prompt,
+)
+from audrey.routes.openai.client_tools import (
+    has_client_tools,
+    provider_tools,
+    validate_client_tool_request,
+)
 from audrey.routes.openai.file_inputs import (
     has_file_inputs,
     response_input_messages,
@@ -303,8 +314,9 @@ async def create_response(
     request: Request,
     me: AuthedUser = Depends(require_user),
 ):
-    """Generate one completed or streamed text response through Audrey."""
+    """Generate one completed or streamed response through Audrey."""
 
+    client_tools = has_client_tools(payload)
     unsupported = [
         name
         for name, active in (
@@ -312,11 +324,14 @@ async def create_response(
             ("store", payload.store is not None),
             ("previous_response_id", payload.previous_response_id is not None),
             ("conversation", payload.conversation is not None),
-            ("tools", payload.tools is not None),
+            ("tools", client_tools and not _is_passthrough(payload.model)),
+            ("skill", client_tools and payload.skill is not None),
             (
                 "text",
                 payload.text is not None
-                and payload.text.format.type == "json_object",
+                and (payload.text.format.type == "json_object" or (
+                    client_tools and payload.text.format.type != "text"
+                )),
             ),
         )
         if active
@@ -345,6 +360,11 @@ async def create_response(
             },
         ) from exc
 
+    target = None
+    if client_tools:
+        validate_client_tool_request(payload)
+        await validate_client_tool_prompt(payload)
+        target = await prepare_client_tool_model(payload, request, me)
     input_messages = await response_input_messages(payload, request, me)
     messages: list[dict[str, Any]] = []
     if payload.instructions:
@@ -352,8 +372,14 @@ async def create_response(
     if format_instruction:
         messages.append({"role": "developer", "content": format_instruction})
     messages.extend(input_messages)
-    if has_file_inputs(payload):
-        await validate_file_prompt(messages)
+    if has_file_inputs(payload) or client_tools:
+        budget_messages = messages
+        if client_tools:
+            budget_messages = [*messages, {"content": json.dumps(provider_tools(payload) or [], ensure_ascii=False)}]
+        await validate_file_prompt(budget_messages)
+    if client_tools:
+        assert target is not None
+        return await generate_client_tool_response(payload, request, me, messages, target)
     chat_payload = ChatCompletionRequest(
         model=payload.model,
         skill=payload.skill,

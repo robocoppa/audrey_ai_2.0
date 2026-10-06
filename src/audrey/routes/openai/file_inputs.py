@@ -26,7 +26,8 @@ from audrey.routes.app.files import (
     read_owned_document_text,
     read_owned_image_preview,
 )
-from audrey.routes.openai.schemas import ResponseCreateRequest
+from audrey.routes.openai.client_tools import adapt_tool_history_item
+from audrey.routes.openai.schemas import ResponseCreateRequest, ResponseInputMessage
 
 MAX_FILE_PARTS = 10
 MAX_DOCUMENT_SOURCE_BYTES = 20 * 1024 * 1024
@@ -60,7 +61,7 @@ def _remote_url(part) -> str | None:
 def has_file_inputs(payload: ResponseCreateRequest) -> bool:
     return not isinstance(payload.input, str) and any(
         (getattr(part, "file_id", None) is not None or _remote_url(part) is not None)
-        for item in payload.input if isinstance(item.content, list)
+        for item in payload.input if isinstance(item, ResponseInputMessage) and isinstance(item.content, list)
         for part in item.content
     )
 
@@ -70,11 +71,12 @@ async def validate_file_prompt(messages: list[dict[str, Any]]) -> None:
 
     texts = []
     for message in messages:
-        content = message["content"]
+        content = message.get("content")
         if isinstance(content, str):
             texts.append(content)
-        else:
+        elif isinstance(content, list):
             texts.extend(part["text"] for part in content if part["type"] == "text")
+        texts.extend(call["function"]["arguments"] for call in message.get("tool_calls") or [])
     if sum(map(len, texts)) > MAX_PROMPT_CHARS:
         raise HTTPException(status_code=413, detail="Responses file prompt exceeds the character limit.")
     tokens = await asyncio.to_thread(lambda: sum(_token_count(text) for text in texts))
@@ -90,7 +92,7 @@ async def response_input_messages(
     """Finish remote admission before opening generation or an SSE stream."""
     remote = not isinstance(payload.input, str) and any(
         _remote_url(part) is not None
-        for item in payload.input if isinstance(item.content, list)
+        for item in payload.input if isinstance(item, ResponseInputMessage) and isinstance(item.content, list)
         for part in item.content
     )
     if not remote:
@@ -110,7 +112,7 @@ async def _response_input_messages(payload, request, me) -> list[dict[str, Any]]
         return [{"role": "user", "content": payload.input}]
     file_parts = [
         part
-        for item in payload.input if isinstance(item.content, list)
+        for item in payload.input if isinstance(item, ResponseInputMessage) and isinstance(item.content, list)
         for part in item.content if getattr(part, "file_id", None) is not None or _remote_url(part) is not None
     ]
     principal = getattr(me, "principal", None)
@@ -121,22 +123,24 @@ async def _response_input_messages(payload, request, me) -> list[dict[str, Any]]
             raise HTTPException(status_code=422, detail=f"At most {MAX_FILE_PARTS} file references are allowed per response.")
         images = sum(
             part.type == "input_image"
-            for item in payload.input if isinstance(item.content, list)
+            for item in payload.input if isinstance(item, ResponseInputMessage) and isinstance(item.content, list)
             for part in item.content
         )
         image_limit = native_image_limit(request.app.state.cfg)
         if images > image_limit:
             raise HTTPException(status_code=422, detail=f"At most {image_limit} images are allowed per response.")
         # Reject an oversized caller prompt before reading any files.
-        caller_messages = [
-            {
-                "content": item.content if isinstance(item.content, str) else [
-                    {"type": "text", "text": part.text}
-                    for part in item.content if part.type == "input_text"
-                ]
-            }
-            for item in payload.input
-        ]
+        caller_messages = []
+        for item in payload.input:
+            if isinstance(item, ResponseInputMessage):
+                caller_messages.append({
+                    "content": item.content if isinstance(item.content, str) else [
+                        {"type": "text", "text": part.text}
+                        for part in item.content if part.type == "input_text"
+                    ],
+                })
+            else:
+                caller_messages.append(adapt_tool_history_item(item))
         if payload.instructions:
             caller_messages.append({"content": payload.instructions})
         await validate_file_prompt(caller_messages)
@@ -152,6 +156,9 @@ async def _response_input_messages(payload, request, me) -> list[dict[str, Any]]
     source_bytes = text_chars = text_tokens = image_bytes = remote_bytes = 0
     messages: list[dict[str, Any]] = []
     for item in payload.input:
+        if not isinstance(item, ResponseInputMessage):
+            messages.append(adapt_tool_history_item(item))
+            continue
         if isinstance(item.content, str):
             content: str | list[dict[str, Any]] = item.content
         else:

@@ -7,8 +7,10 @@ Item 7 has live-settled [Phase 13 Slice
 13B](phase-13-responses-multimodal-input.md); Slice 13A remains laptop-complete
 with its targeted live gate pending. Slice 13C adds owner-scoped image and
 document references and passed its targeted protocol smoke on 2026-10-05.
-Slice 13D's normal URL answer and private-URL guards passed; its corrected
-stream awaits the targeted retry after a token-limit false completion.
+Slice 13D's normal URL answer, private-URL guards, and corrected streamed retry
+passed on 2026-10-05; its remote-input protocol gate is live-settled.
+Slice 13E client-executed function tools is laptop-complete with 3,519 full
+backend tests passing; its three-call protocol smoke is the next live gate.
 The user then
 prioritized [Phase 14 Slice 14A](phase-14-bot-accounts-and-token-lifetimes.md),
 which is laptop-complete and awaits native acceptance.
@@ -404,11 +406,14 @@ Detailed decision record:
 - [x] Pass Slice 13D's normal URL answer and private-URL guards (2026-10-05).
 - [x] Correct Fast stream token-limit/empty completion and remove progress from
   Responses answer text; preserve usage, run observations, and caller limits.
-- [ ] Pass Slice 13D's streamed-only retry with the explicit 8,192-token ceiling.
+- [x] Pass Slice 13D's streamed-only retry with the explicit 8,192-token ceiling (2026-10-05).
 - [x] Add bounded json_schema structured text output for completed and
   streamed Responses, with final validation and an explicit legacy json_object
   rejection.
-- [ ] Add client-provided tools with explicit policy boundaries.
+- [x] Build Slice 13E: client-provided functions on permitted tool-capable
+  passthrough models, typed completed/streamed calls, validated arguments, and
+  stateless call/result replay; caller execution only, API only.
+- [ ] Pass Slice 13E's targeted completed, streamed, and result-replay smoke.
 - [ ] Add stored responses and `previous_response_id`/conversation chaining.
 - [ ] Add background execution, retrieval, cancellation, and retention.
 - [ ] Preserve the current explicit HTTP 400 response for every unsupported
