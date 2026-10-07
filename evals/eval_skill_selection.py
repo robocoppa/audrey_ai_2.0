@@ -51,7 +51,7 @@ CHOICE_SCHEMA = {
     "required": ["skill_id"],
     "additionalProperties": False,
 }
-RULES_REVISION = 3
+RULES_REVISION = 4
 PLAN_KIND = "skill_selection_plan"
 PLAN_GENERATION = {"max_output_tokens": 128, "temperature": 0, "serial_calls": True, "retries": 0}
 PLAN_CRITERIA = {
@@ -78,21 +78,32 @@ _INTENT = re.compile(
     r"|\b(?:who|when|where|how much|how many)\b"
     r"|\bdoes\b.{0,80}\b(?:occur|appear)\b", re.I
 )
-# These bounded English patterns are evaluation policy, not a general NLP parser.
-_QUOTED = re.compile(r"```[\s\S]*?```|`[^`\n]*`|(?<!\w)'(?:[^'\n]|(?<=\w)'(?=\w))*'|\"(?:\\.|[^\"\\])*\"|“[^”\n]*”|‘(?:[^’\n]|(?<=\w)’(?=\w))*’")
+# These bounded language patterns are evaluation policy, not a general NLP parser.
+_QUOTED = re.compile(r"```[\s\S]*?```|`[^`\n]*`|(?<!\w)'(?:[^'\n]|(?<=\w)'(?=\w))*'|\"(?:\\.|[^\"\\])*\"|“[^”\n]*”|‘(?:[^’\n]|(?<=\w)’(?=\w))*’|「[^」\n]*」|『[^』\n]*』")
 _FILE_TOKEN = re.compile(
     r"\b[\w.-]+\.(?:pdf|docx?|xlsx?|csv|txt|md|mp4|mov|webm|mkv|png|jpe?g|wav|mp3)\b", re.I
 )
 _ACTION = r"(?:summari[sz]e|analy[sz]e|compare|describe|explain|extract|review|outline|find|count|read)"
 _SPANISH_ACTION = r"(?:mueve|mover|agrega|añade|renombra|renombrar|cambia|elimina|borra|resume|analiza|compara|explica|describe)"
 _CLAUSE_BREAK = re.compile(
-    rf"[;\n]|[.!?](?=\s|$)|\b(?:and|but|then)\s+(?=(?:not\b|do not\b|don['’]t\b|never\b|ignore\b|{_ACTION}\b|(?:in|from)\b|at\s+\d{{1,2}}:\d{{2}}))"
+    rf"[;\n。！？；]|、|[.!?](?=\s|$)|\b(?:and|but|then)\s+(?=(?:not\b|do not\b|don['’]t\b|never\b|ignore\b|{_ACTION}\b|(?:in|from)\b|at\s+\d{{1,2}}:\d{{2}}))"
     rf"|,\s*(?=(?:not\b|do not\b|don['’]t\b|never\b|without\b|ignore\b|{_ACTION}\b))"
     rf"|\b(?:y|pero|luego)\s+(?={_SPANISH_ACTION}\b)", re.I
 )
 _NEGATED_ACTION = re.compile(
     rf"\b(?:do not(?: want (?:you )?to)?|don't|never|without|not asking (?:you )?to)\s+"
     rf"(?:read(?:ing)?|open(?:ing)?|access(?:ing)?|watch(?:ing)?|us(?:e|ing)|inspect(?:ing)?|{_ACTION})\b", re.I
+)
+# Bounded Japanese access prohibitions, outside quoted data. Unknown forms
+# still use the retained router; this is not a general language parser.
+_JAPANESE_NEGATED_ACCESS = re.compile(
+    r"^\s*(?:は|を)?\s*(?:読まずに|読まないで(?:ください)?|開かずに|開かないで(?:ください)?"
+    r"|参照せずに|参照しないで(?:ください)?)"
+    r"(?=[\s、,。！？；;.!?]|$)"
+)
+_JAPANESE_CONTENT_REQUEST = re.compile(
+    r"(?:要約|分析|比較|説明|抽出|確認)(?:し|する|を)"
+    r"|(?:何が|何を|どこ|どの|どのように|なぜ)"
 )
 _EXCLUSION = re.compile(
     r"\b(?:ignore|disregard|unrelated|irrelevant|excluded)\b"
@@ -275,7 +286,7 @@ def _request_text(case: Case) -> tuple[str, bool]:
 
     def replace(match: re.Match) -> str:
         nonlocal quoted_prose
-        body = match.group().strip("`'\"“”‘’").strip()
+        body = match.group().strip("`'\"“”‘’「」『』").strip()
         if any(body.casefold() == file.name.casefold() for file in case.files):
             return match.group()
         if _FILE_TOKEN.fullmatch(body):
@@ -301,11 +312,32 @@ def _mask_filenames(text: str, files: tuple[FileEvidence, ...]) -> str:
     return "".join(chars).replace("’", "'")
 
 
+def _japanese_denials(clause: str, matches: list) -> list[re.Match]:
+    """Bind a bounded access denial to a named file, not supplied prose."""
+    denials = []
+    for _, (_, end) in matches:
+        # The quote masker preserves exact quoted filenames.
+        tail = clause[end:].lstrip("\"\'”’」』")
+        if match := _JAPANESE_NEGATED_ACCESS.match(tail):
+            denials.append(match)
+    return denials
+
+
 def _request_clauses(text: str, files: tuple[FileEvidence, ...]) -> list[str]:
     """Keep a file-location prefix with its action across an ordinary comma."""
     clauses = []
     start = 0
+    file_spans = [span for _, span in _file_matches(text, files)]
     for split in _CLAUSE_BREAK.finditer(text):
+        if any(left <= split.start() < right for left, right in file_spans):
+            continue  # Punctuation in an exact filename is not a clause break.
+        # Keep Japanese location prefixes across ordinary commas. A comma
+        # after an access prohibition starts a separately scoped task.
+        if split.group() == "、":
+            prefix = text[start:split.start()]
+            denials = _japanese_denials(prefix, _file_matches(prefix, files))
+            if not any(not match.string[match.end():].strip() for match in denials):
+                continue
         if split.group().startswith(",") and re.match(rf"\s*{_ACTION}\b", text[split.end():], re.I):
             prefix_text = text[start:split.start()]
             prefix = _mask_filenames(prefix_text, files)
@@ -331,7 +363,10 @@ def _file_content_request(clause: str, words: str, matches: list) -> bool:
                 and (_CONTENT_LOCATION.search(clause[:start])
                      or _CONTENT_PREDICATE.search(clause[end:]))):
             return True
-    return bool(intent and matches and _CONTENT_ACTION.search(words))
+    return bool(matches and (
+        (intent and _CONTENT_ACTION.search(words))
+        or _JAPANESE_CONTENT_REQUEST.search(words)
+    ))
 
 
 def _resolve_policy(case: Case, catalog=DEFAULT_CATALOG) -> _Policy:
@@ -366,8 +401,9 @@ def _resolve_policy(case: Case, catalog=DEFAULT_CATALOG) -> _Policy:
         matches = _file_matches(clause, case.files)
         clause_files = [file for file, _ in matches]
         words = _mask_filenames(clause, case.files)
-        exclusion = bool(_EXCLUSION.search(words))
-        negated = bool(_NEGATED_ACTION.search(words))
+        japanese_prohibition = bool(_japanese_denials(clause, matches))
+        exclusion = bool(_EXCLUSION.search(words) or japanese_prohibition)
+        negated = bool(_NEGATED_ACTION.search(words) or japanese_prohibition)
         content_request = _file_content_request(clause, words, matches)
         if content_request and not negated:
             exclusion = False

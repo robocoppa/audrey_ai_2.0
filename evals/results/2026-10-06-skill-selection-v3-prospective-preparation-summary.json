@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "status": "prepared",
+  "plan_path": "/data/c3-skill-selection-v3-prospective-plan.json",
+  "backend": "hybrid",
+  "model": "qwen3.5:4b",
+  "case_count": 24,
+  "repeats": 3,
+  "timeout_seconds": 20.0,
+  "model_called": 0,
+  "fingerprints": {
+    "source_sha256": "495ac532db6538cd098cc079a0fba3565736e193a84135ece9c348892bdf8a20",
+    "case_set_sha256": "99f5a308720b4013a02f8b16c49b4de6d66be8f9204fd29bdc00df9f87650842",
+    "catalog_sha256": "8390b964cfa34ff56f5a727bd486f6180ca42409bcad2ed03069394e50f2012d"
+  },
+  "budget": {
+    "max_router_calls": 36,
+    "planned_router_calls": 24
+  },
+  "review": {
+    "labels_reviewed": false,
+    "gates_agreed": false,
+    "basis": "operator_attestations_not_independent_proof"
+  },
+  "review_status": "pending_review",
+  "production_activation": false,
+  "limitations": {
+    "model_tag_is_not_weight_digest": true,
+    "final_answer_and_workflow_proof_required": true
+  }
+}

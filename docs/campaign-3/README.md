@@ -60,8 +60,15 @@ activation. [Slice 3D.3](phase-03-skill-selection-terminal-results.md) repairs
 those exposed regressions and restores compact foreground shell results; its
 three-case Tower check passed with zero model calls. [Slice 3D.4](phase-03-skill-selection-protocol.md)
 is laptop-complete (3,973 backend tests): frozen prospective study plans
-and 24 fresh proposed controls with agent review. First Tower measurement,
-human label review, and workflow gates remain open; automatic selection stays off.
+and 24 fresh proposed controls with agent review. The first frozen Tower study
+completed: 69/72 labels, 36/39 activation precision, zero misses or errors, and
+one ordinary false activation repeated three times. Pasted reports are now in
+the laptop checkout, including the verified full report.
+[Slice 3D.5](phase-03-skill-selection-japanese.md) repairs the exposed
+Japanese access-exclusion case with scoped guards and quoted-data handling.
+Laptop verification passed 4,031 backend tests; its four-case targeted
+Tower check remains pending. Quality, human-review, and workflow gates
+remain open; automatic selection stays off.
 
 Phase 4 completed on 2026-09-29. Slice 4A's owner-scoped, ranged
 original-file downloads are live-settled. Slice 4B's read-only backend smoke

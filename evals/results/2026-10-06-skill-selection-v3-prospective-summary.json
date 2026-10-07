@@ -1,0 +1,128 @@
+{
+  "schema": 1,
+  "status": "findings",
+  "measurement_status": "completed",
+  "created_at": "2026-10-07T02:29:27.091570+00:00",
+  "scope": "proposed synthetic labels; not production acceptance",
+  "provenance": {
+    "backend": "hybrid",
+    "model": "qwen3.5:4b",
+    "case_count": 24,
+    "repeats": 3,
+    "rules_revision": 3,
+    "case_set_sha256": "99f5a308720b4013a02f8b16c49b4de6d66be8f9204fd29bdc00df9f87650842",
+    "automatic_selection_enabled_in_harness": false,
+    "evaluation_only": true,
+    "cold_load_controlled": false
+  },
+  "selection": {
+    "correct": 69,
+    "total": 72,
+    "correct_activations": 36,
+    "activations": 39,
+    "precision": 0.9230769230769231,
+    "positives": 36,
+    "misses": 0,
+    "ordinary_false_activations": 3,
+    "ordinary_total": 18
+  },
+  "execution": {
+    "errors": 0,
+    "ineligible_choices": 0,
+    "model_called": 24,
+    "guarded": 33,
+    "model_latency_p50_seconds": 0.1583389090374112,
+    "model_latency_p95_seconds": 0.1764271967113018,
+    "input_tokens": {
+      "total": 7068,
+      "samples": 24,
+      "p50": 297,
+      "p95": 303
+    },
+    "output_tokens": {
+      "total": 246,
+      "samples": 24,
+      "p50": 11,
+      "p95": 11
+    }
+  },
+  "findings": [
+    {
+      "id": "prospective-ordinary-03",
+      "repeat": 1,
+      "expected": "none",
+      "selected": "grounded-document-analysis",
+      "valid": true,
+      "source": "router",
+      "error": null,
+      "error_kind": null,
+      "raw_selected": "grounded-document-analysis",
+      "terminal_abstention": false,
+      "policy_reason": null
+    },
+    {
+      "id": "prospective-ordinary-03",
+      "repeat": 2,
+      "expected": "none",
+      "selected": "grounded-document-analysis",
+      "valid": true,
+      "source": "router",
+      "error": null,
+      "error_kind": null,
+      "raw_selected": "grounded-document-analysis",
+      "terminal_abstention": false,
+      "policy_reason": null
+    },
+    {
+      "id": "prospective-ordinary-03",
+      "repeat": 3,
+      "expected": "none",
+      "selected": "grounded-document-analysis",
+      "valid": true,
+      "source": "router",
+      "error": null,
+      "error_kind": null,
+      "raw_selected": "grounded-document-analysis",
+      "terminal_abstention": false,
+      "policy_reason": null
+    }
+  ],
+  "qualification": {
+    "status": "pending_review",
+    "criteria_status": "findings",
+    "review": {
+      "labels_reviewed": false,
+      "gates_agreed": false,
+      "basis": "operator_attestations_not_independent_proof"
+    },
+    "findings": [
+      "activation_precision",
+      "ordinary_false_activations"
+    ],
+    "insufficient_evidence_reasons": [],
+    "production_activation": false,
+    "final_answer_and_workflow_proof_required": true,
+    "checks": {
+      "activation_precision": false,
+      "miss_rate": true,
+      "ordinary_false_activations": false,
+      "response_errors": true,
+      "router_calls": true,
+      "planned_call_count": true,
+      "cost_timeout": true
+    }
+  },
+  "plan": {
+    "created_at": "2026-10-07T02:28:58.234327+00:00",
+    "fingerprints": {
+      "source_sha256": "495ac532db6538cd098cc079a0fba3565736e193a84135ece9c348892bdf8a20",
+      "case_set_sha256": "99f5a308720b4013a02f8b16c49b4de6d66be8f9204fd29bdc00df9f87650842",
+      "catalog_sha256": "8390b964cfa34ff56f5a727bd486f6180ca42409bcad2ed03069394e50f2012d"
+    },
+    "budget": {
+      "max_router_calls": 36,
+      "planned_router_calls": 24
+    }
+  },
+  "full_report": "/data/c3-skill-selection-v3-prospective-results.json"
+}

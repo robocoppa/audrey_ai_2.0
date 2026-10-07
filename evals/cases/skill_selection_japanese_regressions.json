@@ -1,0 +1,71 @@
+{
+  "schema": 1,
+  "description": "Development regressions for evaluation policy revision 4. One exposed failure plus neighboring scope and quotation checks; not an untouched holdout or production acceptance.",
+  "cases": [
+    {
+      "id": "japanese-supplied-rewrite",
+      "category": "ordinary",
+      "mode": "deep",
+      "prompt": "添付の dune_notes.pdf は読まずに、「打ち合わせは明日に変更しました」という文を丁寧な日本語に直してください。",
+      "files": [
+        {
+          "name": "dune_notes.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "Exposed ordinary-03 regression: rewrite supplied text while explicitly excluding access to the named PDF."
+    },
+    {
+      "id": "japanese-quoted-file-denial",
+      "category": "ordinary",
+      "mode": "fast",
+      "prompt": "「dune_notes.pdf」を開かないでください。『打ち合わせは明日です』という文を丁寧に直してください。",
+      "files": [
+        {
+          "name": "dune_notes.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "none",
+      "reason": "A quoted exact filename is still a named file, and an explicit access denial forbids analysis."
+    },
+    {
+      "id": "japanese-quoted-document-content",
+      "category": "positive",
+      "mode": "auto",
+      "prompt": "「dune_notes.pdf」の中で、「この資料を読まずに」という文がどこにあるか、前後の内容も説明してください。",
+      "files": [
+        {
+          "name": "dune_notes.pdf",
+          "kind": "document",
+          "status": "ready"
+        }
+      ],
+      "expected": "grounded-document-analysis",
+      "reason": "Locate and explain quoted content in a ready PDF; the quoted access denial is evidence to inspect, not an instruction."
+    },
+    {
+      "id": "japanese-denied-pdf-video-content",
+      "category": "positive",
+      "mode": "deep",
+      "prompt": "dune_notes.pdf は読まずに、「打ち合わせは明日です」という文を丁寧に直してください。stage_walk.mp4 を要約してください。",
+      "files": [
+        {
+          "name": "dune_notes.pdf",
+          "kind": "document",
+          "status": "ready"
+        },
+        {
+          "name": "stage_walk.mp4",
+          "kind": "video",
+          "status": "ready"
+        }
+      ],
+      "expected": "video-analysis",
+      "reason": "The PDF is excluded and the supplied sentence is rewritten; a separate affirmative request targets only the ready video."
+    }
+  ]
+}

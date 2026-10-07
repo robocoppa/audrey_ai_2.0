@@ -3,36 +3,44 @@
 Every eval/probe harness in `evals/` and `scripts/`, where it runs, the exact command, and how
 to tell running-vs-stalled. Two environments:
 
-- **Laptop** (this repo, `.venv`) — hermetic harnesses, no box needed.
-- **Box** (`root@Tower`, `/mnt/user/appdata/audrey_ai_2.0`) — anything that hits the
-  live stack (`audrey:8000`, the KB, the research pipeline). The box has its own
-  git checkout; `git pull` there first, and note newly-pulled scripts are NOT inside
-  a running container until it's rebuilt (mount them into a throwaway instead).
+- **Laptop** (this repo, `.venv`) — hermetic checks and normal live Audrey API
+  evals over `http://192.168.1.11:8000/v1`; save reports in `evals/results/`.
+- **Box** (`root@Tower`, `/mnt/user/appdata/audrey_ai_2.0`) — direct Ollama
+  probes requiring Docker DNS/GPU controls, or optional long detached API evals
+  with Telegram notification. Saved full reports need a laptop copy step;
+  compact terminal output may instead provide all necessary findings.
 
 ---
 
-## 1. Research eval — `eval-onbox.sh` → `eval_research.py`  (BOX)
+## 1. Research eval — laptop normally; optional `eval-onbox.sh` on Tower
+
+The laptop harness is `evals/eval_research.py`, using the PAT in
+`.env.test.local` and the working LAN/WARP route. Its `--save-file` and
+`--save-json` destinations belong under local `evals/results/`. The following
+Tower workflow remains available for a long run that must survive disconnects.
 
 Full `audrey_research` pipeline over a case set. SLOW: ~70–280s per case, so a
 5-case run is ~10–20 min. Runs detached, Telegram-pings on completion.
 
-```bash
-cd /mnt/user/appdata/audrey_ai_2.0 && git pull
-# rebuild the eval image only if the case file / harness changed since last build:
-docker compose --profile eval build audrey-eval
+Update the Tower checkout first. The existing trace-diagnostic run remains:
 
-# the trace-diagnostic set (attention/plate-tectonics/mrna + reasoning + gk):
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
 CASES=eval_prompts_writer_ab.json LABEL=research-trace-diag nohup bash evals/eval-onbox.sh \
   > testing-out/last-research-run.log 2>&1 &
+```
 
-# full 10-case protocol set instead:
+For the ten-case research protocol instead:
+
+```bash
 CASES=eval_prompts_protocol.json LABEL=protocol nohup bash evals/eval-onbox.sh \
   > testing-out/last-research-run.log 2>&1 &
 ```
+
 - MODEL defaults to `audrey_research`; override with `MODEL=audrey_deep` etc.
-- Run from the repo root and use `bash scripts/…` (avoids exec-bit / PATH `Exit 127`).
-- Case files live in `evals/cases/eval_prompts*.json` and are BAKED into the eval image
-  — that's why a case-file change needs the `--profile eval build`.
+- Run from the repo root and use `bash evals/eval-onbox.sh`.
+- Harness and case files are read-only runtime mounts from `evals/`; edits to
+  these files need no image rebuild. Build only when image dependencies change.
 
 **Running vs stalled:**
 ```bash

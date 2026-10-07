@@ -1258,7 +1258,8 @@ The measured controls are now exposed to tuning;
 fresh reviewed controls and real workflow evidence are still required.
 [Slice 3D.4](../docs/campaign-3/phase-03-skill-selection-protocol.md) now supplies
 frozen prospective study plans and 24 new agent-reviewed proposed controls.
-Preparation and first measurement remain pending; no new model result is claimed.
+The first frozen measurement is recorded in the following entry; quality gates
+remain unmet and automatic selection stays disabled.
 
 Source: Tower log `2026-10-06-155526-eval_skill_selection.log`, report timestamp
 `2026-10-06T21:55:36.393253+00:00`;
@@ -1267,6 +1268,54 @@ Raw fixture SHA-256: `098ac965713ea811ec9f90a32fb66fbc43061dbb20375258636ceeeeb8
 canonical evaluated-case SHA-256:
 `26b27546a68ca68f145ee637a6da970809046f35d7196059cfb20d6fad243b97`.
 Both match the reserved fixture. Previous reports remain unchanged.
+
+### Retained Qwen prospective skill-selection study (October 6, 2026)
+
+**Decision: Keep automatic selection disabled.** The first frozen revision-3
+hybrid study completed without model errors but failed proposed activation
+precision and ordinary-false-activation criteria. Its 24 proposed synthetic
+cases had three repeats. All three mismatches were the same ordinary request;
+the other 23 distinct cases matched their proposed labels on every repeat.
+
+| Measure | Observed |
+|---|---:|
+| Matches | 69/72 repeat observations |
+| Correct activations / activations | 36/39 (92.31% precision) |
+| Positive misses | 0/36 |
+| Ordinary false activations | 3/18 observations; one of six distinct ordinary cases |
+| Actual / planned model calls | 24 / 24, within the 36-call cap |
+| Errors / rejected ineligible choices | 0 / 0 |
+| Input / output tokens | 7,068 / 246 |
+| Model-only median / nearest-rank p95 | 0.158339 / 0.176427 seconds |
+
+`prospective-ordinary-03` asks in Japanese to rewrite a supplied sentence more
+politely without reading an attached PDF. The retained `qwen3.5:4b` router
+selected document analysis on all three repeats. Independent agent review
+after measurement upheld the proposed `none` label. This is unnecessary skill
+selection, not proof of a file read or degraded final answer: the standalone
+study never activates skills or reads real uploaded content.
+
+Temperature was zero, calls serial, no retries, and output capped at 128 tokens.
+Frozen source/cases/catalog identities and planned call count match the pasted
+preparation/result. Model tags, not verified weight digests, were bound; loading
+was uncontrolled. The synthetic agent-authored labels remain pending human
+validation. Repeat observations are not independent new examples; neither
+production precision nor final-answer benefit is established.
+
+Sources: operator-pasted shell output, report timestamp
+`2026-10-07T02:29:27.091570+00:00` (October 6 locally), Tower logfile
+`2026-10-06-202916-eval_skill_selection.log`;
+[preserved laptop terminal result](results/2026-10-06-skill-selection-v3-prospective-summary.json)
+and [preparation](results/2026-10-06-skill-selection-v3-prospective-preparation-summary.json).
+The operator-copied [full report](results/2026-10-06-skill-selection-v3-prospective-full.json)
+is now verified on the laptop. It confirms rules alone missed 21/36 positive
+observations, all recovered by the hybrid. The first model call took 6.216
+seconds despite the low median/p95; loading remains uncontrolled.
+[Revision-4 policy repairs](../docs/campaign-3/phase-03-skill-selection-japanese.md)
+address the exposed request; hermetic guard tests supply no new model-quality
+or latency measurement and do not change the original study result.
+The measured fixture is now exposed regression data. Preserve the result;
+do not repeat it unchanged or tune labels to the outputs.
 
 ### Kimi K3 and GLM 5.3 client protocol assessment (received October 6, 2026)
 

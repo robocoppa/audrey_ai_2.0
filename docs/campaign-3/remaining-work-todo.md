@@ -450,8 +450,13 @@ zero model errors. Slice 3D.3 repairs those three exposed cases and adds compact
 foreground results. Its targeted Tower check passed 3/3 on October 6 with zero
 model calls. Slice 3D.4 is laptop-complete (3,973 backend tests): frozen
 prospective study plans and 24 separately authored, agent-reviewed controls.
-Tower preparation/measurement and human review remain pending; qualification
-stays separate from successful execution.
+Tower preparation and first measurement completed: 69/72 matches, 36/39
+activation precision, zero misses/errors, one ordinary request falsely selected
+in all three repeats, and 24 planned/actual model calls. Proposed quality gates
+remain unmet and human review remains pending; automatic selection stays off.
+Terminal receipts and the operator-copied full report are verified on the
+laptop. Slice 3D.5 repairs the exposed Japanese file-exclusion case;
+4,031 backend tests passed. Its targeted four-case Tower check is pending.
 [Recorded study](phase-03-skill-selection-evaluation.md) / [new-control result](phase-03-skill-selection-policy.md) / [terminal results](phase-03-skill-selection-terminal-results.md).
 
 - [x] Keep `skills.auto_select: false` during the study.
@@ -482,7 +487,14 @@ stays separate from successful execution.
   agent label review without evaluating or tuning on them (Slice 3D.4).
 - [x] Add frozen study plans and drift/budget checks before model HTTP;
   separate proposed criteria from human attestations and production approval.
-- [ ] Prepare the Tower plan and collect its first prospective measurement.
+- [x] Prepare the Tower plan and collect its first prospective measurement;
+  preserve the pasted terminal report on the laptop, including its findings.
+- [x] Verify the operator-copied full revision-3 report on the laptop,
+  including all repeated samples and qualification findings.
+- [x] Repair the exposed supplied-text Japanese false activation with
+  scoped file-access exclusions and quoted-data handling (Slice 3D.5).
+- [ ] Pass the four-case revision-4 Tower regression check once; two guarded
+  abstentions and two retained-router calls. Keep production selection off.
 - [ ] Obtain independent human label review before broader selection-quality
   conclusions; earlier measured fixtures are now regression data.
 - [ ] Consider a separate router/System One arm only if revised policy evidence

@@ -70,13 +70,14 @@ You need two things; the harness refuses to start without them.
    rule — laptop-local, never committed). The harness auto-loads it:
 
    ```text
-   AUDREY_EVAL_BASE_URL=http://100.113.157.98:8000/v1
+   AUDREY_EVAL_BASE_URL=http://192.168.1.11:8000/v1
    AUDREY_EVAL_API_KEY=aud_pat_...
    ```
 
    Create the token in native Audrey Settings → Personal access tokens with the
-   `compat:full` scope. Use `http://192.168.1.11:8000/v1` only when falling back
-   to WARP. The harness rejects mismatched legacy credentials before it starts a
+   `compat:full` scope. The current working laptop route is LAN/WARP at
+   `192.168.1.11`; the Tailscale route remains unavailable. The harness rejects
+   mismatched legacy credentials before it starts a
    long run. Keep explanations on separate comment lines: the harness
    intentionally treats everything after `=` as the value and does not accept
    inline comments.
@@ -84,6 +85,27 @@ You need two things; the harness refuses to start without them.
 
 You must also be **on the LAN/VPN** to reach the box — these run against the
 live stack, never from off-network and never from inside a container.
+
+## Where results belong
+
+Normal Audrey API evals run from this laptop checkout over the working
+`http://192.168.1.11:8000/v1` route. Save answers and results under
+`evals/results/`, where the user and coding agent can read them. Terminal
+output must also make clear whether execution completed and which checks failed.
+
+For long jobs that need to survive a disconnect, the existing Tower
+`CASES`/`LABEL`/`MODEL` + `nohup bash evals/eval-onbox.sh` workflow remains
+available and retains its Telegram completion notification. The runner moved
+from `scripts/` to `evals/`; that was a directory move, not a reason to replace
+this workflow with the direct-model probe runner. Copy any full report needed
+for analysis back to the laptop; a remote path alone is not a report handoff.
+
+Short direct Ollama experiments use `probe-onbox.sh` only when they need its
+Docker network or local-model controls. Their compact JSON can be the complete
+handoff for findings and aggregate costs. If per-sample JSON is also saved,
+include a laptop transfer step, as in the
+[prospective-study receipt](../docs/campaign-3/phase-03-skill-selection-protocol.md#optional-full-report-transfer--run-on-the-laptop).
+No new test should be run merely to relocate an existing report.
 
 ## Running — the whole suite in one command
 
@@ -341,7 +363,14 @@ The new `cases/skill_selection_prospective.json` contains 24 separately authored
 proposed controls with independent agent review; human validation remains pending.
 Do not evaluate them while developing or tuning the selector. Follow the
 [preparation and first-measurement commands](../docs/campaign-3/phase-03-skill-selection-protocol.md#tower-check--prepare-then-measure)
-on Tower with `FOREGROUND=1` and `--summary`. No PAT, upload, or rebuild is needed.
+on Tower with `FOREGROUND=1` and `--summary`. That first study is now completed
+with findings: 69/72 labels, 36/39 precision, zero misses/errors, and one repeated
+ordinary false activation. Its terminal receipts and operator-copied full
+report are verified on the laptop; do not repeat it unchanged.
+[Slice 3D.5](../docs/campaign-3/phase-03-skill-selection-japanese.md) repairs
+the exposed Japanese exclusion. Use its four-case foreground check for
+revision 4; the historical revision-3 plan now rejects source drift.
+No PAT, upload, or rebuild is needed for these direct checks.
 
 The compact label status stays distinct from nested `qualification`. Human
 attestations default false; a correct, adequate measurement may exit zero while

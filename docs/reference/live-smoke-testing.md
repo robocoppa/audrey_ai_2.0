@@ -52,6 +52,11 @@ keeps its log in `testing-out/probes`, and prints that log path. For short
 tests, prefix it with `FOREGROUND=1` so results return directly in the shell;
 Telegram is skipped unless `NOTIFY=1`. Long probes still self-detach by default.
 It does not require host Python or a repository mount inside the container.
+Normal Audrey API evals stay on the laptop and save results in `evals/results/`;
+the optional long-running `evals/eval-onbox.sh` path retains its Telegram ping.
+Direct-model probes must return sufficient findings/measurements in the shell
+or include a laptop copy step for any full saved report. A remote `/data` path
+alone is not an accessible report. Do not rerun an eval just to retrieve it.
 
 Campaign 3 Phase 6's System One comparison is this kind of probe. It needs no
 browser, Audrey token, upload, or laptop network route. Because it deliberately
@@ -59,7 +64,7 @@ unloads models for cold samples, run it while Audrey is idle. Its exact version,
 model-install, runner, and success criteria are maintained in
 `docs/campaign-3/phase-06-system-one-routing.md`.
 
-### Skill selection study — Slices 3D.1–3D.4
+### Skill selection study — Slices 3D.1–3D.5
 
 This standalone evaluator uses synthetic file metadata and the retained
 `qwen3.5:4b` router. It runs through the direct Ollama probe runner, which also
@@ -81,17 +86,18 @@ execution-complete with quality findings. Slice 3D.3's three-case Tower check
 passed on October 6: 3/3 labels, zero errors, model calls, or tokens. That gate
 is settled. Do not repeat it.
 
-The next check is [3D.4 plan preparation and the first frozen prospective
-measurement](../campaign-3/phase-03-skill-selection-protocol.md#tower-check--prepare-then-measure)
-on 24 new proposed controls. Use `FOREGROUND=1` and `--summary` so results return
-in the launching shell. Preparation makes no HTTP requests; measurement uses
-the saved call budget and refuses source/case/catalog/settings drift. No token,
-upload, new model, or rebuild is needed. Human label/gate attestations default
-false, so qualification remains `pending_review`; do not add approval flags just
-to make a result green. Label errors, unmet criteria, model errors, or insufficient
-evidence exit 1. Final-answer/workflow proof remains required and automatic
-activation stays off. Model tags are frozen but weight digests and cold loading
-are not independently controlled.
+The [3D.4 frozen prospective study](../campaign-3/phase-03-skill-selection-protocol.md#received-first-measurement--october-6-2026)
+is execution-complete: 69/72 proposed labels, 36/39 activation precision, zero
+misses/errors, 24 planned/actual model calls, and one ordinary false activation
+repeated three times. Keep that result; do not repeat the unchanged study.
+Its terminal receipts and operator-copied full report are now verified on
+the laptop. [Slice 3D.5](../campaign-3/phase-03-skill-selection-japanese.md#targeted-tower-check)
+repairs the exposed Japanese exclusion with scoped guards. Its four-case
+targeted check prints complete necessary findings in the launching shell:
+two guarded abstentions, two retained-router calls, no upload or PAT.
+Do not rerun the broad frozen study or try to reuse its revision-3 plan.
+Human review remains pending and proposed criteria have findings. Final-answer
+and workflow proof remain required; automatic activation stays off.
 
 ### Clef and Clef Flash measurement — settled 2026-10-03
 

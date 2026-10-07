@@ -426,7 +426,7 @@ def test_report_fingerprint_covers_actual_case_set_and_preserves_revision():
     first = asyncio.run(probe.evaluate([case]))
     repeated = asyncio.run(probe.evaluate([case], repeats=3))
     changed = asyncio.run(probe.evaluate([replace(case, expected=VIDEO)]))
-    assert first["provenance"]["rules_revision"] == 3
+    assert first["provenance"]["rules_revision"] == 4
     fingerprint = first["provenance"]["case_set_sha256"]
     assert len(fingerprint) == 64
     assert fingerprint == repeated["provenance"]["case_set_sha256"]

@@ -1,8 +1,10 @@
 # Campaign 3 Slice 3D.4 — frozen prospective skill-selection studies
 
-**Status:** Laptop-complete, 2026-10-06. Tower preparation and the first
-measurement remain pending. Automatic selection stays disabled. This slice
-changes only the standalone evaluation harness and its study documents.
+**Status:** Tower preparation and first frozen measurement completed on
+October 6, 2026. Execution had zero errors; selection has one reproducible
+false activation and does not meet the proposed quality criteria. Automatic
+selection stays disabled. This slice changes only the standalone evaluation
+harness and its study documents.
 
 ## Starting evidence
 
@@ -51,9 +53,11 @@ labels and rationales to the new fixture, without inspecting the selector or
 running it; it found all labels defensible and no inconsistencies. This is
 agent review, not a blind human-authored or human-validated holdout.
 
-No prospective selector or model outcomes were collected on the laptop, and
-the new cases have not been used to tune the selector. Rules revision 3 remains
-unchanged. Human label review remains pending.
+Before the first Tower measurement, no prospective selector or model outcomes
+were collected on the laptop and the cases were not used to tune the selector.
+That first measurement is now recorded below. The measured fixture is exposed
+regression data; its result cannot become untouched validation after tuning.
+Rules revision 3 is unchanged. Human label review remains pending.
 
 | Artifact identity | SHA-256 |
 |---|---|
@@ -99,6 +103,11 @@ The compact view includes fingerprints and checks; the full private report
 retains all samples, criteria observations, and the complete plan.
 
 ## Tower check — prepare, then measure
+
+The following commands describe the completed study. Do not rerun it unchanged.
+For future short direct-model checks, the compact JSON is the shell handoff;
+save a full report only when its additional samples are needed and include the
+laptop transfer step below. Normal Audrey API evals use the laptop harness.
 
 Update the Tower checkout first. No upload, Audrey token, new model, browser
 action, or container rebuild is needed. The runner copies the evaluator and
@@ -148,6 +157,76 @@ is retained at `/data/c3-skill-selection-v3-prospective-results.json`.
 Do not add `--labels-reviewed` or `--gates-agreed` merely to obtain a green
 result. Those preparation flags require actual prior operator review and
 agreement; the current handoff does not claim either.
+
+## Received first measurement — October 6, 2026
+
+The operator pasted plan preparation and the frozen hybrid result, dated
+`2026-10-07T02:29:27.091570+00:00` (October 6 locally). Preparation predicted
+24 model calls within a 36-call cap. Measurement made exactly 24 calls, with
+zero errors or rejected ineligible choices. Source, canonical case, and catalog
+hashes match the prepared plan and the original revision-3 laptop source.
+Slice 3D.5 later changes the evaluator; that source change invalidates the
+old plan for future runs without altering this historical result.
+The study stayed evaluation-only and production automatic selection remained off.
+
+| Observed result | Hybrid |
+|---|---:|
+| Proposed-label matches | 69/72 repeat observations (23/24 distinct cases) |
+| Correct activations / activations | 36/39 |
+| Activation precision | 92.31% |
+| Missed positive requests | 0/36 |
+| Ordinary false activations | 3/18 repeat observations (one of six distinct ordinary cases) |
+| Model errors / ineligible choices | 0 / 0 |
+| Model calls | 24, matching the prepared budget |
+| Model input / output tokens | 7,068 / 246 |
+| Model-only median / p95 | 0.158339 / 0.176427 seconds |
+
+All three mismatches are `prospective-ordinary-03`, a Japanese request to make
+a supplied sentence more polite while explicitly avoiding reading an attached
+PDF. All required text is in the prompt. Independent agent review after receipt
+confirmed the proposed `none` label remains defensible. The router selected
+document analysis in all three repeats. This is one reproducible failing request,
+not three independent failures, and it does not prove any PDF was read: this
+study only measures proposed selections against synthetic metadata.
+
+The proposed 95% precision and zero ordinary-false-activation criteria were
+unmet. `qualification.status: pending_review` correctly preserves the separate
+human-review state; `criteria_status: findings` and exit 1 are quality findings,
+not an execution failure. Latency is model-only with uncontrolled loading;
+small synthetic samples and repeated prompts do not establish production rates.
+Keep automatic selection disabled. Do not rerun this unchanged study or relabel
+the exposed failing case to obtain a pass.
+
+The [preparation summary](../../evals/results/2026-10-06-skill-selection-v3-prospective-preparation-summary.json)
+and [measurement summary](../../evals/results/2026-10-06-skill-selection-v3-prospective-summary.json)
+are now saved in the laptop checkout with mode 0600, preserving the exact
+objects pasted by the operator. They contain the complete terminal findings,
+aggregate measurements, and plan identities. They are not the full per-sample
+report. The operator has now copied the
+[full per-sample report](../../evals/results/2026-10-06-skill-selection-v3-prospective-full.json)
+to the laptop, with mode 0600. Independent read-only review reproduced its
+summaries, qualification findings, and matching preparation identities.
+It confirms the sole repeated false activation and the 21 positive misses
+recovered by the model from rules alone. The first model call took 6.216
+seconds; the low median/p95 do not establish consistently fast starts.
+[Slice 3D.5](phase-03-skill-selection-japanese.md) addresses that exposed
+failure while retaining this complete baseline.
+
+### Optional full report transfer — run on the laptop
+
+This copies the existing report and makes zero model requests. Compose maps
+container `/data` to Tower's `/mnt/user/appdata/runtime`. `-p` retains private
+permissions. SSH access to Tower is required; preserve any existing local report.
+
+```bash
+cd /home/bart/Documents/github/audrey/audrey_ai_2.0
+scp -p root@192.168.1.11:/mnt/user/appdata/runtime/c3-skill-selection-v3-prospective-results.json evals/results/2026-10-06-skill-selection-v3-prospective-full.json
+```
+
+Success is a locally readable JSON file at the destination. A transfer failure
+does not invalidate the pasted measurement and is not a reason to run it again.
+The operator completed this transfer and the copied JSON was verified locally;
+the agent did not repeat the transfer or the measurement.
 
 ## Verification and next step
 

@@ -516,9 +516,15 @@ exposed findings and provides copyable terminal results. Its three-case Tower
 check passed with zero model calls. [Slice 3D.4](phase-03-skill-selection-protocol.md)
 freezes prospective cases, selector source, catalog, settings, budget, and
 proposed criteria before measurement; 24 fresh controls have agent review,
-with human review and the first Tower measurement pending. Automatic selection
-remains disabled. The 3C answer comparison stays passed and does not measure
-selector precision or false activation.
+with human review pending. The first frozen Tower study completed with 69/72
+labels matched, 36/39 precision, zero misses/errors, and one reproducible
+ordinary false activation. Proposed quality gates remain unmet. Automatic selection
+remains disabled. The full report is now verified on the laptop.
+[Slice 3D.5](phase-03-skill-selection-japanese.md) repairs the exposed
+Japanese exclusion with bounded scoped guards; genuine file questions
+remain eligible for the retained router. Its laptop gate passed 4,031
+tests and its four-case Tower regression check is pending. The 3C answer
+comparison stays passed and does not measure selector precision or false activation.
 
 Campaign 3 Phase 6's System One task-router comparison is settled; no candidate
 cleared its gate, and the retained router is unchanged. A future candidate may
