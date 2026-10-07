@@ -209,6 +209,9 @@ ChatMessage = Annotated[
 ]
 
 
+ReasoningEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+
 class ChatCompletionRequest(BaseModel):
     # OWUI adds top-level extension fields such as `chat_id`. Keep accepting
     # them for client compatibility; the public compatibility table explicitly
@@ -254,6 +257,14 @@ class ChatCompletionRequest(BaseModel):
             "Still routed through `ollama.thinking_flag`, so asking for "
             "thinking on a model that does not declare the capability omits "
             "the field rather than erroring."
+        ),
+    )
+    reasoning_effort: ReasoningEffort | None = Field(
+        default=None,
+        description=(
+            "Passthrough only. Named effort must appear in the target model's "
+            "Ollama thinking values; none requires an advertised false value. "
+            "Cannot be combined with think. Omitted/null preserves configured defaults."
         ),
     )
     user: str | None = Field(
@@ -522,6 +533,14 @@ class ResponseTextConfig(BaseModel):
     format: ResponseFormat = Field(default_factory=lambda: ResponseFormatText(type="text"))
 
 
+class ResponseReasoningConfig(BaseModel):
+    """Supported Responses reasoning configuration; effort is model-specific."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    effort: ReasoningEffort | None = None
+
+
 class ResponseCreateRequest(BaseModel):
     """Supported subset of the OpenAI POST /v1/responses request."""
 
@@ -539,6 +558,7 @@ class ResponseCreateRequest(BaseModel):
     tool_choice: str | dict[str, Any] | None = None
     parallel_tool_calls: bool | None = None
     text: ResponseTextConfig | None = None
+    reasoning: ResponseReasoningConfig | None = None
     temperature: float | None = None
     top_p: float | None = None
     max_output_tokens: int | None = Field(default=None, gt=0)

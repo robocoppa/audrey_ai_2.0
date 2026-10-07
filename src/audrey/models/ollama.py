@@ -289,6 +289,7 @@ class OllamaClient:
         #: cached on failure, so a probe during an Ollama blip is retried
         #: rather than remembered as "cannot think".
         self._thinking_caps: dict[str, bool] = {}
+        self._thinking_values_cache: dict[str, tuple[bool | str, ...]] = {}
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -353,6 +354,47 @@ class OllamaClient:
         caps = (await self.show(model)).get("capabilities")
         return [str(c) for c in caps] if isinstance(caps, list) else []
 
+    async def thinking_values(self, model: str) -> tuple[bool | str, ...]:
+        """Return explicit thinking controls advertised by ``/api/show``.
+
+        Named levels also require the thinking capability. A missing/null
+        descriptor is unknown and exposes no effort controls. Successful
+        metadata is cached for this client; malformed or failed reads are not.
+        The descriptor is validated against Ollama's values/default contract,
+        using exact types so JSON numbers cannot masquerade as booleans.
+        Existing best-effort boolean callers keep ``thinking_flag`` semantics.
+        """
+        if model in self._thinking_values_cache:
+            return self._thinking_values_cache[model]
+        body = await self.show(model)
+        descriptor = body.get("thinking")
+        if descriptor is None:
+            self._thinking_values_cache[model] = ()
+            return ()
+        if not isinstance(descriptor, dict):
+            raise OllamaError("/api/show: invalid thinking descriptor")
+        values = descriptor.get("values")
+        if not isinstance(values, list) or not values:
+            raise OllamaError("/api/show: thinking.values must be a non-empty list")
+        distinct: list[bool | str] = []
+        for value in values:
+            if type(value) not in (bool, str) or value == "":
+                raise OllamaError("/api/show: thinking.values must contain booleans or non-empty strings")
+            if any(type(value) is type(prior) and value == prior for prior in distinct):
+                raise OllamaError("/api/show: thinking.values contains duplicate controls")
+            distinct.append(value)
+        default = descriptor.get("default")
+        if not any(type(default) is type(value) and default == value for value in distinct):
+            raise OllamaError("/api/show: thinking.default must be an advertised control")
+        capabilities = body.get("capabilities", [])
+        if not isinstance(capabilities, list) or any(type(value) is not str for value in capabilities):
+            raise OllamaError("/api/show: capabilities must be a list of strings")
+        result = tuple(
+            value for value in distinct if type(value) is bool or "thinking" in capabilities
+        )
+        self._thinking_values_cache[model] = result
+        return result
+
     async def thinking_flag(self, model: str, want: bool) -> bool | None:
         """`want` if the model accepts `think`, else `None` (omit the field).
 
@@ -387,7 +429,7 @@ class OllamaClient:
         tools: list[dict[str, Any]] | None = None,
         timeout_s: float | None = None,
         format: dict[str, Any] | str | None = None,
-        think: bool | None = None,
+        think: bool | str | None = None,
     ) -> dict[str, Any]:
         """Non-streaming chat completion. Returns the full Ollama response dict.
 
@@ -403,7 +445,8 @@ class OllamaClient:
         so a `format`-pinned call should not also pass `tools` — run the tool
         loop first, then a separate `format` call to structure the result.
 
-        `think` forwards Ollama's thinking toggle for models that declare the
+        `think` forwards a validated boolean or model-defined thinking level.
+        Boolean toggles apply to models that declare the
         `thinking` capability. **`None` means "do not send the field at all"**,
         which is not the same as `False`: Ollama rejects the field outright for
         a model that cannot think, so a default of `False` here would break
@@ -462,7 +505,7 @@ class OllamaClient:
         tools: list[dict[str, Any]] | None = None,
         format: dict[str, Any] | str | None = None,
         timeout_s: float | None = None,
-        think: bool | None = None,
+        think: bool | str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Streaming chat completion. Yields each Ollama chunk as a dict.
 

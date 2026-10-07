@@ -32,6 +32,7 @@ from audrey.pipeline.fair_gate import FairLocalGate
 from audrey.pipeline.messages import last_user_text
 from audrey.pipeline.passthrough import passthrough_chat, passthrough_stream
 from audrey.pipeline.vision import describe_for_text_model
+from audrey.routes.openai.reasoning import resolve_reasoning_effort, validate_reasoning_request
 from audrey.routes.openai.responses import (
     _ollama_to_openai_tool_calls,
     _options_from_request,
@@ -105,43 +106,22 @@ def _resolve_passthrough_model(
 
 async def _passthrough_think(
     ollama: OllamaClient, cfg, concrete: str, requested: bool | None = None,
-) -> bool | None:
-    """Resolve `passthrough.think` for one model. `None` = omit the field.
+    *, effort: str | None = None,
+) -> bool | str | None:
+    """Resolve one request control, otherwise keep the legacy boolean default.
 
-    Passthrough forwards a client's request verbatim and the OpenAI schema has
-    no thinking knob, so every passthrough turn ran in Ollama's `omitted`
-    state — whatever each model's template decides. That is defensible for
-    serving and useless for comparing: the local bake-off
-    (`evals/cases/eval_prompts_local_models.json`) reaches its models only through
-    this route, and on 2026-08-12 all three of its candidates declared
-    `thinking`, so their scores were being compared at three different and
-    unchosen reasoning budgets.
-
-    ⚠️ Routed through `ollama.thinking_flag`, never sent raw. Ollama HARD
-    ERRORS on `think` for a model that does not declare the capability, so a
-    bare `False` here would break every non-thinking model in
-    `allowed_models` — of which there are several. `thinking_flag` returns
-    None for those, which omits the field.
-
-    ⚠️ Default is still None (omit) — absent `requested` and absent config,
-    behaviour is unchanged and serving clients see exactly what they saw.
-
-    ▶ **REVERSED 2026-08-19: `requested` (the per-request `think` field) now
-    wins over config.** This docstring previously said a per-request field was
-    deliberately excluded, because "a client that could ask for thinking would
-    make the eval's model column mean something different per caller". That
-    concern is real but the prohibition was the wrong fix, and it cost a full
-    day of evidence: with the state living ONLY in `PASSTHROUGH_THINK`, the
-    arm of a run was recorded nowhere except this container's logs, and
-    `docker logs` starts empty after every recreate. On 2026-08-19 two model
-    sweeps (`repl-ab`, `repl-gap`) were rebuilt over ~20 minutes later and
-    their thinking arm became permanently unrecoverable — the runs are intact,
-    labelled, and worthless, because nothing says what they asked for.
-    ▶ The answer to "per-caller ambiguity" is RECORDING, not prohibition: the
-    harness sets this field and writes the value into its results JSON, so the
-    arm travels with the artifact instead of with a container. What the caller
-    asked for is also logged below, with its source.
+    Explicit effort requires verified provider metadata; unsupported names must
+    not silently become boolean True or a model default. Omitted effort keeps
+    request ``think`` over configured ``passthrough.think``, using the existing
+    best-effort capability gate. None omits the field. Log the resolved wire
+    value so a caller's requested setting is distinguishable from its effect.
     """
+    validate_reasoning_request(f"{PASSTHROUGH_PREFIX}{concrete}", effort=effort, think=requested)
+    if effort is not None:
+        resolved = await resolve_reasoning_effort(ollama, concrete, effort)
+        log.info("passthrough.reasoning model=%s requested_effort=%s resolved=%s src=request",
+                 concrete, effort, resolved)
+        return resolved
     src = "config"
     want = (cfg.raw.get("passthrough") or {}).get("think")
     if requested is not None:
@@ -190,7 +170,7 @@ async def _handle_passthrough(
     inflight = app.state.inflight
     ollama: OllamaClient = app.state.ollama
     gate: FairLocalGate = app.state.gate
-    think = await _passthrough_think(ollama, cfg, concrete, payload.think)
+    think = await _passthrough_think(ollama, cfg, concrete, payload.think, effort=payload.reasoning_effort)
 
     # Passthrough forwards verbatim, so an attached image reaches the
     # concrete model as Ollama's `images: [...]`. Text-only targets — most
@@ -332,7 +312,7 @@ async def _passthrough_stream_events(
     format: dict[str, Any] | None,
     timeout_s: float | None,
     stream_session_factory: Callable[..., Any],
-    think: bool | None = None,
+    think: bool | str | None = None,
     terminal: StreamTerminal | None = None,
 ):
     """Render a raw passthrough stream through a client protocol session."""
@@ -403,7 +383,7 @@ async def _passthrough_stream_sse(
     user_id: str,
     tools: list[dict[str, Any]] | None,
     timeout_s: float | None,
-    think: bool | None = None,
+    think: bool | str | None = None,
     terminal: StreamTerminal | None = None,
 ):
     """Stream Ollama chunks as OpenAI-shaped SSE frames.

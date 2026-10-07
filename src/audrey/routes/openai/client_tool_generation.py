@@ -66,6 +66,9 @@ async def prepare_client_tool_model(payload: ResponseCreateRequest, request: Req
     """Check existing passthrough policy and actual tool capability before fetch."""
     app = request.app
     target = _resolve_passthrough_model(payload.model, app.state.cfg, app.state.registry, me)
+    effort = payload.reasoning.effort if payload.reasoning is not None else None
+    if effort is not None:
+        await _passthrough_think(app.state.ollama, app.state.cfg, target[0], effort=effort)
     try:
         capabilities = await app.state.ollama.capabilities(target[0])
     except OllamaError as exc:
@@ -213,7 +216,8 @@ async def generate_client_tool_response(payload: ResponseCreateRequest, request:
                                  temperature=payload.temperature, top_p=payload.top_p,
                                  max_tokens=payload.max_output_tokens, tools=provider_tools(payload))
     messages = [message.model_dump(exclude_none=True, exclude={"metadata"}) for message in chat.messages]
-    think = await _passthrough_think(app.state.ollama, app.state.cfg, concrete)
+    effort = payload.reasoning.effort if payload.reasoning is not None else None
+    think = await _passthrough_think(app.state.ollama, app.state.cfg, concrete, effort=effort)
     async with app.state.inflight.slot(me.email):
         messages, _ = await describe_for_text_model(
             messages, ollama=app.state.ollama, registry=app.state.registry,

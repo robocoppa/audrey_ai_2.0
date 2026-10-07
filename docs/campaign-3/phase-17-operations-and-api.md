@@ -17,13 +17,12 @@ provider-reported input, output, and cached-input fields. Valid zero is observed
 missing/invalid fields stay unknown. Output can include reasoning. Cache is a
 subset observation, not extra input or a claim of billing savings.
 
-**17A.2: Built — operator model dashboard; browser acceptance pending.**
+**17A.2: Complete; user accepted October 7.**
 The provisioned **Audrey — Models** view provides model filtering, call counters
 and rate, terminal latency, error/cancellation behavior, reported token usage,
-and observation coverage. JSON, layout, datasource, and parsed PromQL checks pass locally;
-live Prometheus/Grafana execution remains the user check. One chat turn can make several
-provider calls. Use normal traffic; no new telemetry database or chat UI.
-Deployment/acceptance instructions live in [monitoring](../../monitoring/README.md).
+and observation coverage. One chat turn can make several provider calls.
+Use normal traffic; no new telemetry database or chat UI. Maintenance instructions
+live in [monitoring](../../monitoring/README.md).
 
 A bot-readable JSON view is conditional on a real consumer. Before adding it,
 define authorized model scope, time window, freshness, and monitoring-source
@@ -31,17 +30,32 @@ failure behavior. Do not expose global model traffic to arbitrary bot tokens.
 
 ## 17B — validated model reasoning controls
 
-- Inspect installed Ollama/model thinking metadata and the actual controls
-  Hermes sends, with credentials removed.
-- Resolve supported controls consistently for completed/streamed Chat and
-  Responses requests. Preserve omitted defaults and existing boolean `think`.
-- Reject unsupported explicit effort values and conflicting settings clearly.
-  Do not translate graded effort to a boolean and claim the same budget.
-- Prove forwarding separately from a measured effect on provider behavior.
+**Built; targeted live API check pending.** Completed/streamed Chat accepts
+`reasoning_effort`; Responses accepts `reasoning.effort`, including client-tool
+generation. Controls apply to permitted `audrey_passthrough/<model>` requests.
 
-Current Chat passthrough supports boolean `think`, gated by model capability.
-Chat currently ignores unknown `reasoning_effort`; Responses rejects unknown
-reasoning fields. A rejection does not establish that a model stopped thinking.
+Ollama `/api/show` supplies a typed thinking descriptor (`values` and `default`).
+Named efforts forward exactly only when advertised; `none` maps to native
+`false` only when that off control is advertised. A capability flag alone does
+not establish graded effort support. Successful metadata is cached for the
+backend process; restart after replacing a model to refresh its contract.
+
+| Installed Ollama 0.35.1 metadata, user confirmed October 7 | Accepted efforts | Omitted provider default |
+|---|---|---|
+| Kimi K3 | `none`, `low`, `high`, `max` | `max` |
+| GLM 5.3 | `low`, `high`, `max` | `max` |
+
+No `medium` mapping is invented. Unsupported effort or explicit pipeline-model
+effort returns JSON 400 before file hydration or SSE. Failed/malformed metadata
+returns 503 and is not cached. Supplying both Chat `think` and effort returns
+400. Omitted/null effort preserves existing defaults and the legacy boolean
+`think` behavior, including its best-effort capability gate.
+
+Responses echoes supplied reasoning configuration; saved continuation does not
+inherit it. Provider-wire forwarding is verified independently of model quality,
+reasoning-token counts, or billing effect. Native chat UI and Hermes's working
+Chat connection retain their current configuration. The targeted smoke uses
+two ordinary text generations and requires no uploaded files.
 
 ## 17C — failure and retry diagnostics
 

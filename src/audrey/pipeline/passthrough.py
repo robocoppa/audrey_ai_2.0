@@ -46,7 +46,7 @@ async def passthrough_chat(
     tools: list[dict[str, Any]] | None = None,
     format: dict[str, Any] | str | None = None,
     timeout_s: float | None = None,
-    think: bool | None = None,
+    think: bool | str | None = None,
 ) -> dict[str, Any]:
     """Non-streaming passthrough: gate-guarded `ollama.chat` forward.
 
@@ -113,7 +113,7 @@ async def passthrough_stream(
     tools: list[dict[str, Any]] | None = None,
     format: dict[str, Any] | str | None = None,
     timeout_s: float | None = None,
-    think: bool | None = None,
+    think: bool | str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Streaming passthrough: yield raw Ollama chunks, gate held across all.
 

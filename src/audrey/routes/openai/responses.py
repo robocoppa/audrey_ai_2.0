@@ -175,6 +175,7 @@ def _responses_api_response_object(
         "model": request.model,
         "output": output,
         "output_text": content,
+        **({"reasoning": request.reasoning.model_dump()} if request.reasoning is not None else {}),
         "parallel_tool_calls": True,
         "previous_response_id": request.previous_response_id,
         "store": request.store is True,

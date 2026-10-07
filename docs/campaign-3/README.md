@@ -12,7 +12,8 @@ they are not ongoing task lists.
 - **Passed:** model outcome/usage telemetry (formerly slice 11A.1), confirmed
   by the user October 7. Navigation, Bots, token revocation, Files, uploads,
   Projects, and the native cutover remain accepted.
-- **Built, ready for browser check:** [17A.2 model monitoring dashboard](phase-17-operations-and-api.md).
+- **Passed:** [17A.2 model monitoring dashboard](phase-17-operations-and-api.md),
+  confirmed by the user October 7. **Built:** 17B reasoning controls; targeted API acceptance pending.
 - **Independent followups:** 13A inline-image protocol proof, Tailscale
   reachability, and decision-relevant observations from existing model traffic.
   These do not reopen accepted features or require a broad test sweep.
@@ -37,20 +38,20 @@ they are not ongoing task lists.
 | 14 | [Bots and tokens](phase-14-bot-accounts-and-token-lifetimes.md) | Complete |
 | 15 | [Composer and Projects](phase-15-composer-and-projects.md) | Complete |
 | 16 | [Document tooling boundary](phase-16-native-document-tools.md) | Retired; Hermes uses its existing stack |
-| 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Telemetry passed; dashboard next |
+| 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning controls built |
 
 ## Remaining order
 
-1. Accept the built model monitoring view using normal traffic; then reasoning controls.
+1. Accept the built reasoning controls with the targeted API check, then
+   diagnose actual retry/quota failures only where evidence identifies a gap.
 2. Close the small 13A inline-image proof when the user runs its laptop check.
 3. Diagnose Tailscale from laptop route through Tower firewall/published port
    before editing configuration. Use the working LAN/WARP address meanwhile.
 4. Read existing Kimi K3 panel and DeepSeek capability evidence. Request only
    an observation needed for a model decision; keep Kimi first in cloud panels
    and the current router. Update the model ledger when something is measured.
-5. Validate useful model reasoning controls, then diagnose actual retry/quota
-   failures. Optional required tools/catalog expansion follows only for a
-   caller with a concrete Responses adoption benefit. Scope is in Phase 17.
+5. Optional required tools/catalog expansion follows only for a caller with a
+   concrete Responses adoption benefit. Scope is in Phase 17.
 
 ## Standing decisions
 

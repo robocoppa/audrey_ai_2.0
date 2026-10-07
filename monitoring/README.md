@@ -13,39 +13,6 @@ Sign in to Grafana with the existing operator account. Use the configured
 credentials; there is no documented default password. These are LAN operator
 surfaces, not a new Audrey user or bot endpoint.
 
-## This slice: model dashboard
-
-**Run on Tower after the user's changes are committed:**
-
-```bash
-cd /mnt/user/appdata/audrey_ai_2.0
-git pull
-```
-
-**No container rebuild or restart is needed for this slice.** The accepted
-backend telemetry is already deployed. Grafana's mounted dashboard directory
-reloads within 30 seconds. Its pinned Prometheus datasource remains unchanged.
-
-**Check in a browser on the laptop:**
-
-1. Open the Models dashboard above after the reload interval. Its title should
-   be **Audrey — Models**. Leave the range at **Last 6 hours** / **All** models.
-2. If there has been no recent traffic, open `https://ai.builtryte.xyz` and send
-   one ordinary question. Wait for the answer and the next metrics scrape.
-   No file upload or scripted evaluation is required.
-3. Confirm the calls-since-restart panel contains model/outcome rows. Select
-   a model in the **Model** filter and confirm the panels restrict to it.
-4. Confirm usage totals appear where the provider reported them. Missing fields
-   (often cached input) stay absent/**No data**, not fabricated zero or cost.
-   Rate/latency charts require multiple scrapes and calls in their window;
-   counter panels provide the immediate confirmation.
-
-Pass: dashboard loads, observed model rows/filter work, and unsupported usage
-is not invented. No forced cancellation or failure, extra model sweep, backend
-rebuild, or repeat of accepted telemetry is required. This dashboard has been
-validated locally for JSON, provisioning, layout, and parsed PromQL; live rendering is the
-remaining user check.
-
 ## Metric meaning
 
 | Metric | Meaning |

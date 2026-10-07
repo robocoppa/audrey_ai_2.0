@@ -104,7 +104,8 @@ Message compatibility:
 | `assistant` | Text may be null or omitted when function `tool_calls` are present. Call ids and JSON-string arguments are validated. |
 | `tool` | Requires `tool_call_id`; Audrey resolves it to the matching Ollama `tool_name`. |
 
-Unknown fields inside a message are rejected with HTTP 422. Per-message
+Unknown message extensions are dropped with a warning; fields placed on the
+wrong role and malformed tool histories are rejected. Per-message
 `metadata` is retained through validation for archive identity, then explicitly
 excluded at each model-provider boundary.
 
@@ -115,8 +116,9 @@ Top-level request compatibility:
 | `model`, `messages`, `stream` | Supported. |
 | `temperature`, `top_p`, `max_tokens` | Translated to Ollama generation options. |
 | `tools` | Forwarded only for `audrey_passthrough/<concrete>`; pipeline models use Audrey-managed tools. |
-| `user` | Accepted but never trusted for identity; the authenticated OWUI user wins. |
+| `user` | Accepted but never trusted for identity; the authenticated Audrey account wins. |
 | `think` | Audrey passthrough extension; applied only when the concrete model declares thinking support. |
+| `reasoning_effort` | Passthrough only; validated against Ollama model thinking values. Named values forward exactly; `none` requires advertised `false`. Cannot be combined with `think`. Unsupported values return 400 before generation. |
 | `chat_id`, `conversation_id`, `metadata` | Retained for archive stitching, never forwarded to a model. Explicit ids win; otherwise user + first user turn forms a stable fallback. |
 | `tool_choice`, `parallel_tool_calls`, `response_format`, `seed`, `stop`, penalties, `n`, `logprobs`, `stream_options`, and other unmodelled fields | Accepted for client forward-compatibility but currently ignored. Do not rely on them. |
 
@@ -126,17 +128,19 @@ legacy function-call message forms are not implemented.
 
 ## Responses compatibility
 
-`POST /v1/responses` supports completed plain-text generation from either
-a string or a text-only message list. `instructions`, sampling controls,
-token limits, metadata, authenticated identity, Audrey virtual and passthrough
-models, and explicit skills reuse the Chat Completions implementation. The
-response uses typed `output` items and `output_text` with
-Responses-style token usage.
+`POST /v1/responses` supports completed and streamed output, JSON Schema,
+inline/public images, uploaded/public documents, caller-executed functions on
+permitted passthrough models, and owner-scoped storage/continuation. The bounded
+contract is in [Phase 13](docs/campaign-3/phase-13-responses-multimodal-input.md).
+Background execution and the Conversations API remain unsupported.
 
-The first slice rejects streaming, background execution, response storage and
-chaining, client tools, structured output configuration, multimodal parts, and
-unknown fields instead of ignoring them. See
-`docs/campaign-3/phase-05-responses-api.md` for the exact boundary.
+`reasoning.effort` uses the same model validation as Chat's `reasoning_effort`.
+Omitted/null effort preserves defaults. Explicit effort applies to passthrough
+models only; it must match a model's advertised thinking values. No effort is
+inherited from a stored parent. Unsupported controls fail before fetching inputs
+or opening SSE. The response echoes the requested reasoning object when supplied;
+that echo does not measure reasoning tokens or prove a quality improvement.
+See [Phase 17](docs/campaign-3/phase-17-operations-and-api.md).
 
 ## Pipeline shape
 

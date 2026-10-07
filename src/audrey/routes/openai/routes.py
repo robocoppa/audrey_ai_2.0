@@ -43,8 +43,11 @@ from audrey.routes.openai.passthrough import (
     PASSTHROUGH_PREFIX,
     _handle_passthrough,
     _is_passthrough,
+    _passthrough_think,
+    _resolve_passthrough_model,
 )
 from audrey.routes.openai.pipeline import _generate_via_pipeline, _stream_via_pipeline
+from audrey.routes.openai.reasoning import validate_reasoning_request
 from audrey.routes.openai.response_storage import (
     expand_stored_request,
     read_response,
@@ -133,6 +136,7 @@ async def _create_chat_completion(
 ):
     """Run the shared authenticated generation path with one wire adapter."""
 
+    validate_reasoning_request(payload.model, effort=payload.reasoning_effort, think=payload.think)
     app = request.app
     requested_stream_session_factory = stream_session_factory
     stream_session_factory = stream_session_factory or OpenAIStreamSession
@@ -341,6 +345,8 @@ async def delete_response(response_id: str, request: Request, me: AuthedUser = D
 
 async def _create_response(payload: ResponseCreateRequest, request: Request, me: AuthedUser):
 
+    effort = payload.reasoning.effort if payload.reasoning is not None else None
+    validate_reasoning_request(payload.model, effort=effort)
     client_tools = has_client_tools(payload)
     unsupported = [
         name
@@ -390,6 +396,12 @@ async def _create_response(payload: ResponseCreateRequest, request: Request, me:
         target = await prepare_client_tool_model(payload, request, me)
     elif payload.store is True or payload.previous_response_id is not None:
         await validate_client_tool_prompt(payload)
+    if effort is not None and not client_tools:
+        app = request.app
+        concrete, _ = _resolve_passthrough_model(payload.model, app.state.cfg, app.state.registry, me)
+        # Reject unsupported controls before owned-file reads or remote fetches.
+        # Dispatch repeats the shared resolution against its cached metadata.
+        await _passthrough_think(app.state.ollama, app.state.cfg, concrete, effort=effort)
     input_messages = await response_input_messages(payload, request, me)
     messages: list[dict[str, Any]] = []
     if payload.instructions:
@@ -413,6 +425,7 @@ async def _create_response(payload: ResponseCreateRequest, request: Request, me:
         temperature=payload.temperature,
         top_p=payload.top_p,
         max_tokens=payload.max_output_tokens,
+        reasoning_effort=effort,
         metadata=payload.metadata,
         user=payload.user,
     )
