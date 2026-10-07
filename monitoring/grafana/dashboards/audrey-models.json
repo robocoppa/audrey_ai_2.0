@@ -1,0 +1,684 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Provider-call outcomes, terminal latency, and measured token reporting for Audrey. Calls are not chat turns; absent usage is unknown. No costs are estimated.",
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "title": "Tools dashboard",
+      "type": "link",
+      "url": "/d/audrey-tools",
+      "targetBlank": false
+    }
+  ],
+  "liveNow": false,
+  "panels": [
+    {
+      "description": "How to interpret model telemetry before comparing models.",
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "mode": "markdown",
+        "content": "**Provider calls are not chat turns.** One turn can call several models. Active calls are not counted yet.\n\n**Usage is measured.** Missing fields stay unknown; reported zero stays zero. Output may include reasoning. Cached input is a subset, not measured cost savings.\n\n**Read each window.** Counter panels show totals since backend restart; charts use the selected range. Rates need multiple scrapes. Latency is a histogram estimate."
+      },
+      "title": "Reading this dashboard",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Current histogram counts by model and terminal outcome: ok confirms provider completion, error includes unconfirmed end/failure, cancelled means interrupted before terminal. These are provider calls, not chat turns or visible answers, and exclude calls still in progress. Counts reset with the backend process; the dashboard time picker does not change this current-counter panel. Absent outcome series stay absent, rather than claiming zero.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0,
+          "noValue": "No data",
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "id": 2,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (model, outcome) (audrey_model_seconds_count{job=\"audrey\",model=~\"${model}\",outcome=~\"ok|error|cancelled\"})",
+          "instant": true,
+          "legendFormat": "{{model}} · {{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Provider calls since backend restart",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Recorded provider calls per second, by model and outcome, over $__rate_interval. Rate is calculated before aggregation so backend counter resets are handled. An ok terminal can still represent a length-limited answer; this is not an answer-quality or chat-turn rate. No observations and insufficient scrape history stay no data.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "provider calls/s",
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "min": 0,
+          "noValue": "No data",
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (model, outcome) (rate(audrey_model_seconds_count{job=\"audrey\",model=~\"${model}\",outcome=~\"ok|error|cancelled\"}[$__rate_interval]))",
+          "legendFormat": "{{model}} · {{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Provider terminal rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Estimated median time from starting the provider request until completion, failure, or cancellation, combined across all three outcomes for each model. This excludes earlier pipeline/GPU queue time and later consumer cleanup; it is not first-token or end-to-end chat latency. Uses $__rate_interval and classic histogram buckets with le preserved. Empty windows are omitted. The largest finite bucket is 180 seconds, so a longer tail cannot be resolved above that boundary.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "seconds to provider terminal",
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "min": 0,
+          "noValue": "No data",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.50, sum by (model, le) (rate(audrey_model_seconds_bucket{job=\"audrey\",model=~\"${model}\",outcome=~\"ok|error|cancelled\"}[$__rate_interval]))) and on (model) (sum by (model) (rate(audrey_model_seconds_count{job=\"audrey\",model=~\"${model}\",outcome=~\"ok|error|cancelled\"}[$__rate_interval])) > 0)",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Provider terminal latency · p50",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Estimated 95th percentile of provider-terminal latency, combining completed, failed, and cancelled calls per model. Compare with terminal outcome/rate panels: a timeout or cancellation can change this distribution. It does not measure first token, queue wait, or whole-chat latency. Empty windows are omitted. Buckets are coarse and the last finite bucket is 180 seconds; p95 cannot resolve a tail beyond that boundary.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "seconds to provider terminal",
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "min": 0,
+          "noValue": "No data",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (model, le) (rate(audrey_model_seconds_bucket{job=\"audrey\",model=~\"${model}\",outcome=~\"ok|error|cancelled\"}[$__rate_interval]))) and on (model) (sum by (model) (rate(audrey_model_seconds_count{job=\"audrey\",model=~\"${model}\",outcome=~\"ok|error|cancelled\"}[$__rate_interval])) > 0)",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Provider terminal latency · p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Recorded errors / (ok + error) calls over $__rate_interval, by model. Cancellations are excluded from both numerator and denominator. A zero is supplied only when non-cancelled calls are measured and no error series exists; it means no recorded errors, not unknown token usage. The positive denominator guard leaves no-call windows and absent metrics as no data. This detects provider/transport failures, not incorrect answers.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "errors / non-cancelled calls",
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "min": 0,
+          "noValue": "No data",
+          "unit": "percentunit",
+          "max": 1
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "((sum by (model) (rate(audrey_model_seconds_count{job=\"audrey\",model=~\"${model}\",outcome=\"error\"}[$__rate_interval])) or on (model) (0 * sum by (model) (rate(audrey_model_seconds_count{job=\"audrey\",model=~\"${model}\",outcome=~\"ok|error\"}[$__rate_interval])))) / on (model) sum by (model) (rate(audrey_model_seconds_count{job=\"audrey\",model=~\"${model}\",outcome=~\"ok|error\"}[$__rate_interval]))) and on (model) (sum by (model) (rate(audrey_model_seconds_count{job=\"audrey\",model=~\"${model}\",outcome=~\"ok|error\"}[$__rate_interval])) > 0)",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Provider error fraction · cancellations excluded",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Calls interrupted before a provider terminal, per second and model, over $__rate_interval. A consumer closing after an observed terminal does not become a cancellation. Cancellations do not enter the error-fraction denominator. An absent cancelled series stays no data; it is not synthesized as zero.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "cancelled calls/s",
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "min": 0,
+          "noValue": "No data",
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 22
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (model) (rate(audrey_model_seconds_count{job=\"audrey\",model=~\"${model}\",outcome=\"cancelled\"}[$__rate_interval]))",
+          "legendFormat": "{{model}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Provider cancellation rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Provider-reported tokens per second for input, output, and cached_input, by model. Each kind appears only when its usage-observation rate is positive in the same window. Thus a valid reported zero appears as zero, while calls omitting the field do not create a zero-token line. Partial coverage can undercount total usage; read coverage alongside this panel. Output may include reasoning. Cached input is a subset, not extra input or proven billing savings. No token estimates or prices are used.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "reported tokens/s",
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "min": 0,
+          "noValue": "No data",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 30
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (model, kind) (rate(audrey_model_tokens_total{job=\"audrey\",model=~\"${model}\",kind=~\"input|output|cached_input\"}[$__rate_interval])) and on (model, kind) (sum by (model, kind) (rate(audrey_model_usage_observations_total{job=\"audrey\",model=~\"${model}\",kind=~\"input|output|cached_input\"}[$__rate_interval])) > 0)",
+          "legendFormat": "{{model}} · {{kind}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Reported token rate · observed fields only",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Valid usage observations for a kind / all recorded provider calls for that model, over $__rate_interval. The denominator includes ok, error, and cancelled calls; a confirmed error terminal can report usage, while an interrupted call usually cannot. Each input/output/cached_input field has its own observation count. A reported zero counts as an observation. No observation series is unknown and stays absent; a known series with no new observations during measured traffic can show 0% coverage. No-call windows are omitted. Coverage measures reporting, not cache hit rate, correctness, or billing savings.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "calls reporting field / all calls",
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "min": 0,
+          "noValue": "No data",
+          "unit": "percentunit",
+          "max": 1
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 30
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (model, kind) (rate(audrey_model_usage_observations_total{job=\"audrey\",model=~\"${model}\",kind=~\"input|output|cached_input\"}[$__rate_interval])) / on (model) group_left() (sum by (model) (rate(audrey_model_seconds_count{job=\"audrey\",model=~\"${model}\",outcome=~\"ok|error|cancelled\"}[$__rate_interval])) > 0)",
+          "legendFormat": "{{model}} · {{kind}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Usage reporting coverage · by field",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Current provider-reported token counters by model and kind, shown only for fields with at least one valid usage observation. A valid measured zero is retained; an unreported field is absent. The counters reset when the backend process restarts and are not totals for the dashboard's selected time range. Counts may cover only part of the calls; check the observations and coverage panels. Output may include reasoning; cached_input is a subset of input, never add it to input when totaling usage. These are not billed-cost estimates.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0,
+          "noValue": "No data",
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 38
+      },
+      "id": 10,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (model, kind) (audrey_model_tokens_total{job=\"audrey\",model=~\"${model}\",kind=~\"input|output|cached_input\"}) and on (model, kind) (sum by (model, kind) (audrey_model_usage_observations_total{job=\"audrey\",model=~\"${model}\",kind=~\"input|output|cached_input\"}) > 0)",
+          "instant": true,
+          "legendFormat": "{{model}} · {{kind}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Reported tokens since backend restart",
+      "type": "bargauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Current count of provider calls reporting a valid native token count, separately for input, output, and cached_input. A reported integer zero increments this counter; a missing, malformed, or invalid count does not. This is the evidence behind the token-counter panels. Counts reset with the backend process and are not limited to the selected dashboard time range. Absent fields stay no data.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "min": 0,
+          "noValue": "No data",
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 38
+      },
+      "id": 11,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (model, kind) (audrey_model_usage_observations_total{job=\"audrey\",model=~\"${model}\",kind=~\"input|output|cached_input\"})",
+          "instant": true,
+          "legendFormat": "{{model}} · {{kind}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Usage observations since backend restart",
+      "type": "bargauge"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "audrey",
+    "models",
+    "operations"
+  ],
+  "templating": {
+    "list": [
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(audrey_model_seconds_count{job=\"audrey\"}, model)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Model",
+        "multi": true,
+        "name": "model",
+        "options": [],
+        "query": {
+          "query": "label_values(audrey_model_seconds_count{job=\"audrey\"}, model)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Audrey — Models",
+  "uid": "audrey-models",
+  "version": 1,
+  "weekStart": ""
+}

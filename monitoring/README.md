@@ -1,178 +1,97 @@
-# monitoring/
+# Audrey monitoring
 
-Prometheus + Grafana stack for Audrey. Lives in the repo (Phase 24)
-so config changes go through `git pull`, same as the rest of the
-deployment.
+Operator Prometheus/Grafana stack, separate from the application Compose.
+Persistent data stays in `/mnt/user/appdata/prometheus/{data,grafana-data}`.
+Both services join `ollama-net`; Prometheus scrapes `audrey:8000` every 15 seconds.
+URLs use the working LAN/WARP route:
 
-## Layout
+- [Models dashboard](http://192.168.1.11:3000/d/audrey-models)
+- [Tools dashboard](http://192.168.1.11:3000/d/audrey-tools)
+- [Prometheus](http://192.168.1.11:9090)
 
-```
-monitoring/
-├── compose.yaml                              # prometheus + grafana services
-├── config/
-│   └── prometheus.yml                        # scrape config (audrey + self-scrape)
-├── prometheus-rules/
-│   └── audrey.yml                            # 4 alert rules (Phase 22)
-├── grafana/
-│   ├── provisioning/
-│   │   ├── datasources/prometheus.yaml       # Prometheus datasource (uid: prometheus)
-│   │   └── dashboards/audrey.yaml            # dashboard provider pointed at dashboards/
-│   └── dashboards/
-│       └── audrey-tools.json                 # per-tool dispatch dashboard (Phase 9)
-└── README.md                                 # this file
-```
+Sign in to Grafana with the existing operator account. Use the configured
+credentials; there is no documented default password. These are LAN operator
+surfaces, not a new Audrey user or bot endpoint.
 
-Persistent state lives **outside the repo** at the existing Unraid
-paths so it doesn't bloat git history:
+## This slice: model dashboard
 
-```
-/mnt/user/appdata/prometheus/
-├── data/                  # prometheus TSDB (~30d retention)
-└── grafana-data/          # grafana SQLite, dashboards, datasources
+**Run on Tower after the user's changes are committed:**
+
+```bash
+cd /mnt/user/appdata/audrey_ai_2.0
+git pull
 ```
 
-The compose's bind-mounts use absolute paths for those two directories.
-TSDB and Grafana state survive container recreates and `git pull`s.
+**No container rebuild or restart is needed for this slice.** The accepted
+backend telemetry is already deployed. Grafana's mounted dashboard directory
+reloads within 30 seconds. Its pinned Prometheus datasource remains unchanged.
 
-## Running
+**Check in a browser on the laptop:**
+
+1. Open the Models dashboard above after the reload interval. Its title should
+   be **Audrey — Models**. Leave the range at **Last 6 hours** / **All** models.
+2. If there has been no recent traffic, open `https://ai.builtryte.xyz` and send
+   one ordinary question. Wait for the answer and the next metrics scrape.
+   No file upload or scripted evaluation is required.
+3. Confirm the calls-since-restart panel contains model/outcome rows. Select
+   a model in the **Model** filter and confirm the panels restrict to it.
+4. Confirm usage totals appear where the provider reported them. Missing fields
+   (often cached input) stay absent/**No data**, not fabricated zero or cost.
+   Rate/latency charts require multiple scrapes and calls in their window;
+   counter panels provide the immediate confirmation.
+
+Pass: dashboard loads, observed model rows/filter work, and unsupported usage
+is not invented. No forced cancellation or failure, extra model sweep, backend
+rebuild, or repeat of accepted telemetry is required. This dashboard has been
+validated locally for JSON, provisioning, layout, and parsed PromQL; live rendering is the
+remaining user check.
+
+## Metric meaning
+
+| Metric | Meaning |
+|---|---|
+| `audrey_model_seconds` | One provider-terminal latency observation per call, labeled model/outcome |
+| `audrey_model_tokens_total` | Sum of valid provider-reported input/output/cached-input fields |
+| `audrey_model_usage_observations_total` | Calls reporting a valid value, separately for each usage kind |
+
+Calls are provider generations, not chat turns; active calls are not yet counted.
+Outcomes are `ok` (confirmed completion, including a length stop), `error`
+(failure/unconfirmed end), and `cancelled` (interrupted before terminal).
+Terminal timing excludes pipeline queue time and later consumer cleanup.
+Histogram quantiles are estimates; the final finite bucket is 180 seconds.
+The error fraction excludes cancellations; the latency distributions include
+all terminal outcomes, so inspect outcome rates alongside latency.
+
+Valid zero increments an observation. Missing/invalid counts stay unknown.
+Output may include reasoning; cached input is a subset, not extra input or
+measured billing savings. Coverage measures field reporting, not cache hit rate.
+Counter panels reset with the backend process and ignore the dashboard time
+range; rate panels use that range and require multiple samples. No costs,
+prompts, account ids, or emails are added.
+
+## Maintenance
+
+Dashboard JSON lives in `grafana/dashboards/`, with stable unique UIDs and
+`editable: false`. Datasource UID is `prometheus`; provisioned dashboards are
+the source of truth. Pull dashboard edits on Tower; no build/restart.
+
+For an actual monitoring Compose change, run **on Tower**:
 
 ```bash
 cd /mnt/user/appdata/audrey_ai_2.0/monitoring
 docker compose up -d
-docker compose logs -f --tail 20
 ```
 
-The containers join `ollama-net` (external network owned by the audrey
-compose) so Prometheus can resolve `audrey:8000` for scrapes.
+Grafana requires `GRAFANA_ADMIN_PASSWORD` in its existing private environment
+for Compose interpolation. Provisioning changes require a Grafana restart;
+dashboard JSON changes do not.
 
-## URLs
-
-- Prometheus UI: <http://192.168.1.11:9090>
-- Grafana UI: <http://192.168.1.11:3000> (default `admin` / `changeme`)
-
-Both are LAN-only — not tunneled by `cloudflared`.
-
-## Provisioning (Grafana datasource + dashboards)
-
-Phase 9 moved Grafana off "click in the UI" onto file-based
-provisioning. The datasource, dashboard provider, and dashboard
-JSONs live in `grafana/` and are bind-mounted into the container:
-
-- `grafana/provisioning/` → `/etc/grafana/provisioning` (read at
-  Grafana startup; defines the Prometheus datasource and the
-  dashboard provider).
-- `grafana/dashboards/` → `/etc/grafana/dashboards` (the dashboard
-  provider watches this directory and reloads JSON changes within
-  `updateIntervalSeconds=30`).
-
-`allowUiUpdates: false` on the dashboard provider — the JSON file
-is the source of truth, UI edits don't persist. To change a
-dashboard, edit the JSON, commit, `git pull` on Unraid.
-
-The datasource UID (`prometheus`) is pinned in
-`provisioning/datasources/prometheus.yaml` so dashboard JSONs can
-hard-reference it. If you ever rename the UID, grep `grafana/`
-for the old name and update every match in lockstep.
-
-### Adding a new dashboard
-
-1. Export the dashboard JSON from the UI (one-time, for the shape)
-   or hand-write it using `audrey-tools.json` as a reference.
-2. Drop the file into `monitoring/grafana/dashboards/`.
-3. Make sure:
-   - `uid` is unique across all dashboards (used as the stable
-     identifier across reloads).
-   - Every panel's `datasource` block uses
-     `{"type": "prometheus", "uid": "prometheus"}` (not the
-     human-readable name — UID is what provisioning binds).
-   - `editable: false` at the top level — the JSON is the
-     source of truth.
-4. `git add` and commit.
-5. `git pull` on Unraid. Grafana picks it up within ~30 seconds
-   without a container restart.
-
-### Editing an existing dashboard
-
-Same flow as above — edit the JSON, commit, pull. The dashboard
-reloads in place; bumping the `version` field at the bottom is
-optional but lets you see in the UI that it actually reloaded.
-
-If you accidentally edited in the UI, the changes won't survive
-the next reload anyway (since `allowUiUpdates: false`). To capture
-a UI experiment, use the UI's **JSON Model** view, copy the JSON
-back into the file, and commit.
-
-## Model generation metrics
-
-The backend exports these through its existing `/metrics` route:
-
-| Metric | What it measures |
-|---|---|
-| `audrey_model_seconds` | One latency observation per provider call, with `model` and `outcome` labels |
-| `audrey_model_tokens_total` | Sum of provider-reported counts, with `model` and `kind` labels |
-| `audrey_model_usage_observations_total` | Number of calls reporting a valid count for each usage kind |
-
-Outcomes are `ok` (confirmed provider completion), `error` (failure or an
-unconfirmed end), and `cancelled` (interrupted before a terminal). A length-limit
-terminal is a completed provider call; the API separately reports answer
-truncation. Once a terminal is observed, delayed consumer cleanup changes
-neither its latency nor its outcome. Malformed stream lines retain their
-existing warning/skip behavior; a later valid terminal can still complete.
-The cloud error-rate alert excludes cancellations from its denominator.
-
-Usage kinds are `input`, `output`, and `cached_input`. Only valid native terminal
-fields populate them; missing usage does not become zero. A reported zero
-increments the observation count, so it is distinguishable from unknown data.
-Provider output counts can include reasoning. Cached input is a subset
-observation, not additional input or a measurement of billing savings. These
-counters do not estimate cost. Streaming records a terminal only once.
-
-Normal traffic populates the metrics after deploying the backend. For example,
-`sum by (model, outcome) (rate(audrey_model_seconds_count[5m]))` gives provider
-call rates, and `sum by (model, kind) (rate(audrey_model_tokens_total[5m]))` gives
-observed token rates. Use observation counts when deciding whether a model's
-usage data is available. Metric kind labels are fixed; prompts, account IDs,
-and emails are not labels.
-
-## Adding or editing alert rules
-
-1. Edit `prometheus-rules/audrey.yml` in the repo.
-2. `git pull` on Unraid.
-3. Hot-reload Prometheus without restart:
-   ```bash
-   curl -X POST http://localhost:9090/-/reload
-   ```
-   Works because the compose passes `--web.enable-lifecycle`.
-
-The bind mount at `./prometheus-rules:/etc/prometheus/rules:ro` is
-read directly — no `cp` step required (Phase 22 used to need one
-because the rules dir was outside the compose's working directory).
-
-## Verifying scrape + rules health
+Prometheus rule/config edits require a reload after pull, **on Tower**:
 
 ```bash
-# Are the scrape targets up?
-curl -s http://localhost:9090/api/v1/targets | jq -r '.data.activeTargets[] | "\(.labels.job) \(.health)"'
-
-# Are alert rules loaded?
-curl -s http://localhost:9090/api/v1/rules | jq -r '.data.groups[].rules[].name'
+curl --fail --silent --show-error --write-out 'HTTP %{http_code}\n' \
+  -X POST http://127.0.0.1:9090/-/reload
 ```
 
-Expect 2 targets `up` (audrey, prometheus self-scrape) and 4 rules
-loaded (AudreyPipelineErrorRate, AudreyToolCallErrorRate,
-AudreyToolCallLatencyP95, AudreyCloudModelErrorRate).
-
-## Why split from `audrey_ai_2.0/compose.yaml`?
-
-Audrey rebuilds frequently (`docker compose up -d --build audrey`
-every code change). Prometheus and Grafana are set-and-forget. Mixing
-them means a typo in audrey's image build would risk metrics/dashboard
-downtime. Two compose files, one network — clean separation.
-
-## Migration from the pre-Phase-24 layout
-
-Pre-Phase-24, the same files lived at `/mnt/user/appdata/prometheus/`
-outside git. To migrate, see `docs/phase-24-deploy.md`. Migration is
-zero-downtime-safe because the persistent state directories
-(`data/`, `grafana-data/`) stay at the same host path; only the
-compose, config, and rules move into the repo.
+Pass: HTTP 200. For application rebuilds and runner selection, use the
+[Campaign 3 main plan](../docs/campaign-3/README.md).

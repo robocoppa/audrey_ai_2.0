@@ -10,8 +10,8 @@
   that verified the phase when it shipped. `campaign-1/HISTORY.md` (gitignored,
   laptop-only) is the authoritative running state of the build campaign.
 - [`campaign-2/`](campaign-2/) — the previous build campaign, Phase 1 → 43.
-- [`campaign-3/`](campaign-3/) — the current planned campaign: codebase-audit
-  remediation followed by reusable skills. Start at
+- [`campaign-3/`](campaign-3/) — the current campaign: native application, skills,
+  file workflows, and API/operations improvements. Start at
   [`campaign-3/README.md`](campaign-3/README.md).
 - [`unraid-ollama.md`](guides/unraid-ollama.md) — canonical Ollama container config
   (referenced by Phase 1).
@@ -42,23 +42,20 @@ on its own.
 
 Campaign 2 and 3 filenames are zero-padded (`phase-07-…`) so they sort in phase
 order. Campaign 1's are not — it is closed, and its contents are indexed
-below. A trailing `-plan` / `-deploy` appears only where a phase has both
-documents; a bare topic name means it is the only one.
+below. Campaign 3 has one main plan and exactly one document per phase.
+Older campaigns retain their historical plan/deploy split.
 
 ## Phase docs by feature area
 
 The phase docs in `campaign-1/` are historical — written when the feature
 shipped. Use the groupings below for navigation.
 
-### Campaign 3 (current, planned)
+### Campaign 3 (current)
 
-- [Campaign 3 index](campaign-3/README.md)
-- [01 platform hardening](campaign-3/phase-01-platform-hardening-plan.md) —
-  strengthen privacy boundaries, request ownership, durable storage, component
-  readiness, and deployment reproducibility in separately deployable waves.
-- [02 reusable skills](campaign-3/phase-02-skills-capability-plan.md) — local,
-  versioned instruction/resource bundles with explicit selection and enforced
-  model-visible tool restriction. Gated on Phase 1.
+The [main plan](campaign-3/README.md) contains phase status, remaining order,
+and explicit Tower/laptop deployment and test guidance. Follow its table to
+the current phase; completed phases retain compact contracts rather than
+live-test logs or duplicate roadmaps.
 
 ### Campaign 2 (previous)
 

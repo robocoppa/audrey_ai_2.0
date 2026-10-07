@@ -1187,7 +1187,7 @@ selection policy, with three repeats per case at temperature 0, and require
 independent review. This study does not compare router candidates or measure
 answer quality, workflow benefit, or production selection precision.
 
-**Follow-up: evaluation policy revision 2.** [Slice 3D.2](../docs/campaign-3/phase-03-skill-selection-policy.md)
+**Follow-up: evaluation policy revision 2.** [Slice 3D.2](../docs/campaign-3/phase-03-skills.md)
 adds firm abstention and scoped target resolution to the standalone evaluator.
 Its 3,845-test laptop gate passed. Offline rules on the unchanged development
 set select nine of 14 positives correctly and abstain on all 28 negative
@@ -1248,7 +1248,7 @@ no seed or repeat distribution. These observations do not establish controlled
 warm/cold speed, comparative router quality, production precision, or benefit
 to final answers.
 
-**Follow-up:** [Slice 3D.3](../docs/campaign-3/phase-03-skill-selection-terminal-results.md)
+**Follow-up:** [Slice 3D.3](../docs/campaign-3/phase-03-skills.md)
 repairs the three exposed regressions in evaluation policy revision 3 and
 makes terminal results distinguish findings from successful execution. The
 three-case Tower check passed on October 6 (report 22:23:57 UTC): all three labels
@@ -1256,7 +1256,7 @@ matched, zero errors, zero model calls, zero tokens. Its [preserved terminal JSO
 settles the regression gate. This is not a new Qwen performance measurement.
 The measured controls are now exposed to tuning;
 fresh reviewed controls and real workflow evidence are still required.
-[Slice 3D.4](../docs/campaign-3/phase-03-skill-selection-protocol.md) now supplies
+[Slice 3D.4](../docs/campaign-3/phase-03-skills.md) now supplies
 frozen prospective study plans and 24 new agent-reviewed proposed controls.
 The first frozen measurement is recorded in the following entry; quality gates
 remain unmet and automatic selection stays disabled.
@@ -1311,7 +1311,7 @@ The operator-copied [full report](results/2026-10-06-skill-selection-v3-prospect
 is now verified on the laptop. It confirms rules alone missed 21/36 positive
 observations, all recovered by the hybrid. The first model call took 6.216
 seconds despite the low median/p95; loading remains uncontrolled.
-[Revision-4 policy repairs](../docs/campaign-3/phase-03-skill-selection-japanese.md)
+[Revision-4 policy repairs](../docs/campaign-3/phase-03-skills.md)
 address the exposed request; hermetic guard tests supply no new model-quality
 or latency measurement and do not change the original study result.
 The measured fixture is now exposed regression data. Preserve the result;

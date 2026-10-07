@@ -1,149 +1,21 @@
-# Campaign 3 Phase 5 - Responses API compatibility
+# Campaign 3 Phase 05 — Responses API foundation
 
-**Status:** Complete. Slice 5A was live-settled on 2026-09-29 and Slice
-5B's typed streaming contract passed its targeted live gate on 2026-09-30.
-Later typed multimodal expansion is tracked in
-[Phase 13](phase-13-responses-multimodal-input.md).
+**Status:** Complete and accepted. Expanded contracts are in [Phase 13](phase-13-responses-multimodal-input.md).
 
-## Goal
+## Shared generation
 
-Let OpenAI-compatible clients use Audrey through `POST /v1/responses`
-without creating a second generation pipeline. The adapter must preserve
-Audrey authentication, virtual and passthrough model policy, explicit skills,
-fair scheduling, tool restrictions, usage accounting, and compatibility chat
-archiving.
+`POST /v1/responses` adapts validated requests to Audrey's existing generation and policy paths. It preserves authenticated identity, virtual/passthrough model policy, explicit skills, scheduling, tool restrictions, usage, vision fallback, and applicable compatibility archiving.
 
-The contract follows the official OpenAI Responses API shape: requests may
-separate `instructions` from `input`, and completed text is returned
-inside typed `output` items rather than Chat Completions `choices`.
+Supported foundation fields include `model`, nonempty text `input`, optional `instructions` as a leading developer message, sampling/output limits, `metadata`, `user`, and Audrey's explicit `skill` extension. Authenticated identity always wins over a claimed user. `max_output_tokens` uses the existing output-limit mapping.
 
-Official references:
+## Output and streaming
 
-- https://developers.openai.com/api/reference/cli/resources/responses/methods/create
-- https://developers.openai.com/api/docs/guides/migrate-to-responses
+Completed responses use a `resp_` id and typed assistant/output-text items plus usage. There is no Chat Completions `choices` array.
 
-## Slice 5A - completed plain-text responses
+Streaming uses typed Responses events with contiguous sequence numbers from zero, stable response/message ids, text deltas and completed items, then `response.completed`. It does not append `[DONE]`. Pipeline failures use `response.failed`; confirmed output-limit stops use `response.incomplete` with `max_output_tokens`. Partial answer text and usage are preserved. Normal completions without an answer fail instead of returning progress as text.
 
-The native backend exposes:
+Responses answer text excludes Audrey's internal progress. Chat Completions and native chat retain their existing progress renderers. Both adapters render shared run events; neither parses the other's wire format.
 
-    POST /v1/responses
+## Boundaries
 
-This first slice accepts:
-
-| Field | Behavior |
-|---|---|
-| `model` | Required. Uses the same Audrey virtual and passthrough model policy as Chat Completions. |
-| `input` | A non-empty string or a non-empty text-only message list using system, developer, user, and assistant roles. |
-| `instructions` | Optional. Adapted to a developer message ahead of the input. |
-| `temperature`, `top_p`, `max_output_tokens` | Reuse the existing Ollama option mapping; `max_output_tokens` maps to Audrey's current `max_tokens` boundary. |
-| `metadata`, `user` | Retained at Audrey's compatibility boundary. Authenticated identity still wins over `user`. |
-| `skill` | Audrey extension. Uses the same explicit skill resolution and tool narrowing as Chat Completions. |
-| `stream: false`, `background: false` | Accepted explicitly. |
-
-The response includes a `resp_` id, completed status, one assistant message
-item containing `output_text`, a matching top-level `output_text`, and
-Responses-style token usage. It does not return a Chat Completions
-`choices` array.
-
-The Phase 13C follow-up preserves token-limit stops from completed Fast
-generation: `status: incomplete`, `completed_at: null`, and
-`incomplete_details.reason: max_output_tokens`, with partial text and usage.
-A reasoning-only truncated reply can have an empty output list. Empty normal
-completions return HTTP 502. See [Phase 13](phase-13-responses-multimodal-input.md)
-for the current verification and live gate.
-
-## Slice 5B - typed streaming responses
-
-A request with `stream: true` now returns `text/event-stream` using the
-Responses API's typed event vocabulary. The successful plain-text lifecycle is:
-
-1. `response.created` and `response.in_progress`;
-2. `response.output_item.added` and `response.content_part.added`;
-3. one or more `response.output_text.delta` events;
-4. `response.output_text.done`, `response.content_part.done`, and
-   `response.output_item.done`;
-5. `response.completed` carrying the final response object and token usage.
-
-Every event has a contiguous `sequence_number` beginning at zero. The response
-and message ids stay stable for the whole stream. Responses streams terminate
-with their typed terminal event and do not append Chat Completions' `[DONE]`
-marker. Pipeline failures use `response.failed`; an upstream stream that ends
-without its required completion marker uses `response.incomplete`.
-
-Both virtual models and permitted passthrough models use the same authenticated
-generation, policy, fair-scheduling, metrics, and token-accounting paths as
-Chat Completions. A stream-session factory selects only the outer renderer:
-Chat Completions retains its existing chunks, while Responses renders the same
-client-neutral run events as typed Responses SSE. No adapter parses another
-adapter's wire format. Responses output_text contains answer text only;
-progress stays in the internal run trace and the established Chat/native
-renderers. Token-limit streams end with response.incomplete and a
-max_output_tokens reason, preserving partial text and usage. A normal completion
-without answer text fails instead of presenting progress as a successful answer.
-
-## Deliberate boundary
-
-At its initial release, Slice 5A rejected these fields with HTTP 400 and
-`responses_feature_unsupported` before generation starts:
-
-- background execution;
-- persisted response retrieval or chaining through `store`,
-  `previous_response_id`, or `conversation`;
-- client-provided tools;
-- structured text output configuration.
-
-Phase 13 Slice 13A accepts typed `input_text` parts and bounded inline
-`input_image` data URLs. Slice 13B adds bounded `json_schema` output, and
-Slice 13C adds owner-scoped `input_image.file_id` and `input_file.file_id`
-references for ready images and extracted documents. Slice 13D adds temporary
-public HTTP(S) image/document URLs through a bounded fetch and extraction
-contract. Slice 13E adds caller-executed functions on permitted passthrough
-models with actual tool capability, typed call events, and stateless result
-replay. Virtual pipeline models retain their server-managed tools; client
-functions never enter the server dispatcher. Slice 13F adds opt-in stored
-text/function Responses, owner-scoped retrieval/deletion, bounded retention,
-and previous_response_id continuation. Background execution and the distinct
-conversation API remain unsupported. Inline file data and unknown top-level fields still fail request
-validation rather than disappearing silently. Later slices add each remaining capability with its own
-storage, event, fetch, or tool-call contract.
-
-## Shared behavior
-
-The route adapts a validated Responses request to the existing
-`ChatCompletionRequest` and calls the same internal generation function after
-authentication. It therefore keeps model validation, passthrough role and
-allow-list gates, skill resolution, server-managed tool policy, vision
-fallbacks, inflight limits, GPU fairness, generation metrics, and archive
-behavior in one implementation. Slice 13E uses the same passthrough provider
-helpers and gates with a dedicated renderer for validated function items. It
-checks tool policy before file fetching or SSE begins.
-
-The targeted live smoke uses Audrey's existing `### Task:` compatibility
-form so the one model call is excluded from chat history. It also submits one
-unsupported background request and proves rejection happens before generation.
-
-## Laptop verification
-
-- 17 focused Responses contract cases pass, including successful, failed,
-  incomplete, and shared-generation streaming boundaries.
-- 175 broader fast, deep, research, native, archive, and passthrough stream
-  regressions pass.
-- The full hermetic backend suite passes: 2,988 tests with one existing FastAPI
-  deprecation warning.
-- Changed-file Ruff and smoke-script compilation pass.
-
-## Targeted live result
-
-**Result:** Passed on 2026-09-30 over the working LAN/WARP route at
-`http://192.168.1.11:8000`.
-
-The deployed stream returned HTTP 200 with 19 typed events and 11 text deltas.
-It kept stable `resp_` and `msg_` ids, reported input and output token usage,
-included the expected sentinel, and terminated with `response.completed`.
-The separate `background: true` request returned HTTP 400 with
-`responses_feature_unsupported`, proving the deliberate boundary still rejects
-before generation.
-
-No upload or browser action was needed. This evidence is settled and is not
-repeated unless a later change touches Responses streaming or its shared run
-event renderer.
+Phase 13 adds typed images/files, bounded public URL inputs, JSON Schema answers, caller-executed functions, and opt-in response storage/chaining. Background execution, the separate Conversations API, inline file data, and unknown request fields remain rejected. Do not advertise full OpenAI parity.

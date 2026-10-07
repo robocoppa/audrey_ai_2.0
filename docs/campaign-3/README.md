@@ -1,264 +1,109 @@
-# Campaign 3 — correctness foundations, Audrey UI, and reusable skills
+# Campaign 3 — main plan
 
-**Scope:** English user input only. Non-English prompt evaluation/tuning is
-out of scope until the user explicitly changes that rule.
+**Updated October 7, 2026.** English user input only. Passed work stays closed.
+This is the only campaign roadmap; each phase has one document containing its
+behavior, decisions, and remaining work. Read this plan and the current phase.
+Model measurements belong in [MODEL-FACTS](../../evals/MODEL-FACTS.md), consulted
+when a model decision needs them. External assessments are already folded in;
+they are not ongoing task lists.
 
-**Current code slice:** 11A.1 model telemetry: accurate provider outcomes and
-measured token usage using the existing Prometheus metrics. The user closed
-12A and 14A, including revocation, on October 7. The remaining 13A protocol
-proof and Tailscale diagnosis stay tracked separately in the
-[remaining-work checklist](remaining-work-todo.md#execution-order).
-Automatic-selection studies are parked; completed gates stay settled.
-11A.1 laptop gate: 60 focused and 4,091 full backend tests pass; normal
-post-deploy metrics observation remains open. The operational view follows.
+## Current work
 
-**Status:** Campaign 3 Phases 1–12, 14, and 15 are complete. Phase 13A inline
-images remain awaiting their distinct protocol proof; 13B–13F are live-settled. Phase 15's direct
-project-upload follow-up is accepted. Phase 16 document tooling was retired
-after confirming that Hermes already uses the separate Bot Tools MCP, Nextcloud,
-and Collabora stack at `cloud.builtryte.xyz`.
+- **Passed:** model outcome/usage telemetry (formerly slice 11A.1), confirmed
+  by the user October 7. Navigation, Bots, token revocation, Files, uploads,
+  Projects, and the native cutover remain accepted.
+- **Built, ready for browser check:** [17A.2 model monitoring dashboard](phase-17-operations-and-api.md).
+- **Independent followups:** 13A inline-image protocol proof, Tailscale
+  reachability, and decision-relevant observations from existing model traffic.
+  These do not reopen accepted features or require a broad test sweep.
 
-The Milestone 2E parity build is laptop-complete across native memory
-settings, owner-bound file and video upload and inspection, source and answer
-presentation, image and direct chat attachments, safe retry, reload recovery,
-empty-draft cleanup, saved source and tool summaries, durable attachment
-presentation, answer and code copying, attachment-picker dismissal, and
-contextual startup and recovered-run presentation. The follow-up model activity
-disclosure passed live on 2026-10-01: new native answers show every concrete
-generation model and call count immediately left of Tool calls, and the menu
-survives refresh.
-Selected corrections passed live checks, and on 2026-09-24 the user marked the
-combined 2E regression gate and normal-use soak tested and settled. Milestone
-2F has therefore started. Slice 2F.1's focused authentication smoke passed on
-2026-09-24. Slice 2F.2 is deployed and makes the native application
-operationally authoritative: the OWUI bearer adapter is disabled, its startup
-state is live-confirmed, and a fresh auth-cutover smoke plus a direct laptop
-fast eval passed. The standalone-proxy native UI smoke also passed, covering
-the built assets and CSP, two-user isolation, a streamed Fast turn,
-conversation management, cleanup, and repair readiness. The corrected on-box
-`fast-capital` eval now passes 1/1 with its `Canberra` content contract.
-Slice 2F.3 is live-passed: native runs no longer apply OWUI's `### Task:`
-utility routing, `/v1` compatibility requests retain it, and the targeted
-public native Deep turn passed while Open WebUI remained stopped. Slice 2F.4
-is laptop-complete: the backend no longer builds, packages, configures, or
-serves an embedded browser shell. `audrey-ui` is the sole browser surface.
-The first live deploy exposed that Cloudflare still targeted backend port 8000;
-after switching to 8090, the long-lived UI proxy retained the recreated
-backend's old Docker address. Restarting `audrey-ui` restored authentication,
-confirming the diagnosis. The request-time Docker DNS correction is
-live-settled; its rendered resolver, variable upstream, and both variable proxy directives passed the deploy proof.
-The already-passed auth, proxy, routing, and eval checks are not repeated.
-Historical chat import is optional and runs only after a new explicit request.
-The initial standalone-UI soak is complete, and the stopped
-`audrey-ai-retired` pre-cutover container has been removed.
+## Phases
 
-Phase 3 completed on 2026-09-28. Milestones 3A.1, 3A.2, and 3B are
-live-settled. The targeted 3B native Fast run selected and persisted
-`video-analysis` v1 successfully and completed cleanup. For 3C, controls
-passed 9/9; the repaired `grounded-document-analysis` skill then passed 9/9,
-and human review accepted all answers. It ships as an explicit opt-in skill.
-Automatic selection remains disabled. Slice 3D.1 now supplies a separate
-[selection evaluation foundation](phase-03-skill-selection-evaluation.md),
-with labeled controls and offline rules / optional retained-router measurements.
-Its laptop gate passed 3,725 tests; the rules baseline measured 70% precision,
-so activation remains deferred. The Spanish document pilot passed on
-2026-10-06. Two repeated hybrid studies then returned identical findings:
-63.16% activation precision, 15/42 ordinary false activations, and three
-rejected choices per study. All calls completed. [Slice 3D.2](phase-03-skill-selection-policy.md)
-now separates firm abstention from undecided requests and resolves scoped
-exclusions. Its first new-control measurement completed: 27/30 correct labels,
-12/13 activation precision, two missed positives, and one ordinary false
-activation. [Slice 3D.3](phase-03-skill-selection-terminal-results.md) repairs
-those exposed regressions and restores compact foreground shell results; its
-three-case Tower check passed with zero model calls. [Slice 3D.4](phase-03-skill-selection-protocol.md)
-is laptop-complete (3,973 backend tests): frozen prospective study plans
-and 24 fresh proposed controls with agent review. The first frozen Tower study
-completed: 69/72 labels, 36/39 activation precision, zero misses or errors, and
-one ordinary false activation repeated three times. Pasted reports are now in
-the laptop checkout, including the verified full report.
-[Slice 3D.5](phase-03-skill-selection-japanese.md) repairs the exposed
-Japanese access-exclusion case with scoped guards and quoted-data handling.
-Laptop verification passed 4,031 backend tests. Its Tower check then
-failed 3/4 with one ineligible model choice. This language branch is now
-closed as out of scope under the hard English-only rule, not passed.
-No further repair or rerun is queued; automatic selection remains off
-and its studies are parked until a concrete English workflow warrants them.
+| Phase | Document | Status |
+|---|---|---|
+| 01 | [Platform hardening](phase-01-platform-hardening.md) | Complete |
+| 02 | [Native application](phase-02-native-application.md) | Complete |
+| 03 | [Skills](phase-03-skills.md) | Explicit skills complete; automatic selection parked |
+| 04 | [File downloads](phase-04-file-downloads.md) | Complete |
+| 05 | [Responses foundation](phase-05-responses-api.md) | Complete |
+| 06 | [Router candidates](phase-06-system-one-routing.md) | Complete; retain qwen3.5:4b |
+| 07 | [Scanned PDFs](phase-07-scanned-pdf-ocr.md) | Complete |
+| 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Complete |
+| 09 | [Broader audio](phase-09-broader-audio.md) | Complete |
+| 10 | [Answer provenance](phase-10-ordinary-answer-provenance.md) | Complete |
+| 11 | [File explorer](phase-11-native-file-explorer.md) | Complete |
+| 12 | [Navigation](phase-12-sidebar-navigation.md) | Complete |
+| 13 | [Responses extensions](phase-13-responses-multimodal-input.md) | 13B–13F complete; 13A proof open |
+| 14 | [Bots and tokens](phase-14-bot-accounts-and-token-lifetimes.md) | Complete |
+| 15 | [Composer and Projects](phase-15-composer-and-projects.md) | Complete |
+| 16 | [Document tooling boundary](phase-16-native-document-tools.md) | Retired; Hermes uses its existing stack |
+| 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Telemetry passed; dashboard next |
 
-Phase 4 completed on 2026-09-29. Slice 4A's owner-scoped, ranged
-original-file downloads are live-settled. Slice 4B's read-only backend smoke
-passed all three derived artifact types. The final native browser check passed
-after Summary downloads were removed: summary text begins without the old
-action row, while Transcript and Visual notes retain download actions.
+## Remaining order
 
-Phase 5 completed on 2026-09-30. Slice 5A's completed plain-text
-`POST /v1/responses` adapter and Slice 5B's typed Responses SSE both passed
-their laptop and targeted live gates. Background work remains a later slice. Phase 13 Slice 13A adds typed text and bounded inline image input.
-Slice 13B adds bounded json_schema output, provider constraints, terminal
-validation, and clean JSON-only streaming through the same generation paths;
-its targeted live gate passed on 2026-10-05. Slice 13C adds owner-scoped image
-and document file references with admission limits; its laptop and targeted
-live gates passed on 2026-10-05. Completed and streamed answers used both
-files, ownership/kind/deletion guards passed, and both uploads were removed.
-Slice 13D adds bounded public image/document URLs with DNS pinning, checked
-redirects, temporary parsing, and joint input limits. Its implementation and
-laptop and targeted live gates passed on 2026-10-05. The completed answer and
-private-URL guards passed first. After the stream correction, the single streamed
-retry returned both inputs, clean answer text, and response.completed: five
-deltas, 13 events, and 1,670 output tokens under the 8,192-token ceiling.
-Slice 13D is live-settled; do not repeat those checks. Slice 13E adds
-client-executed function tools on permitted passthrough models, completed and
-streamed call items, stateless result replay, and schema validation before
-exposing calls. Its targeted three-call live gate passed on 2026-10-05.
-Slice 13F adds opt-in saved text/function Responses and continuation by id;
-its laptop gate passed 3,665 tests and the user supplied a passed restart verify
-on 2026-10-06. Exact root/child retrieval, cascading deletion, and deleted-chain
-rejection passed with zero new generations. Claudette's Kimi K3/GLM 5.3 report
-supports keeping its current Chat Completions connection: its 20-tool catalog
-exceeds the optional Responses limit. See the [reviewed assessment](../guides/hermes-responses-client-tools.md).
-Client tools execute in the caller.
+1. Accept the built model monitoring view using normal traffic; then reasoning controls.
+2. Close the small 13A inline-image proof when the user runs its laptop check.
+3. Diagnose Tailscale from laptop route through Tower firewall/published port
+   before editing configuration. Use the working LAN/WARP address meanwhile.
+4. Read existing Kimi K3 panel and DeepSeek capability evidence. Request only
+   an observation needed for a model decision; keep Kimi first in cloud panels
+   and the current router. Update the model ledger when something is measured.
+5. Validate useful model reasoning controls, then diagnose actual retry/quota
+   failures. Optional required tools/catalog expansion follows only for a
+   caller with a concrete Responses adoption benefit. Scope is in Phase 17.
 
-Phase 14 started on 2026-10-02. Slice 14A adds a protected Bots access group,
-Bot-targeted model policy, zero-day never-expiring personal tokens, and
-uncached administration lists so reopening the panel shows new applicants.
-The user accepted all native checks on 2026-10-07, including the same-token
-200 → 401 revocation proof. Slice 14A is closed.
+## Standing decisions
 
-Phase 15 started on 2026-10-02. Slice 15A moves model, file, and tools/skills
-controls into a labeled, equal-width rail below a narrower 56 rem message
-composer. The new file and tools/skills pickers explain their behavior, exclude
-each other, and dismiss on outside click or Escape; the user accepted this UI
-slice on 2026-10-02. Slice 15B adds schema 19, owner-scoped project and file
-membership APIs, conversation grouping, deletion cleanup, and backup/restart
-coverage. Its 3,113-test laptop gate and targeted restart smoke both pass. Slice
-15C adds compact sidebar project navigation, project home management, Ready-file
-selection, project conversation creation, breadcrumbs, and conversation
-move/ungroup controls. Slice 15D adds server-resolved project snapshots, bounded
-selected-file retrieval, prompt-injection boundaries, and persisted private-file
-sources. The user accepted Slices 15C–15D on 2026-10-03, closing Phase 15. A
-follow-up added direct project uploads with durable processing membership and
-refresh, plus cleaner Add files and Choose files controls in My Files; its
-deployed browser check passed.
+- Hermes keeps its working Chat Completions adapter: Kimi K3 primary, GLM 5.3
+  fallback. The GPT bot is outside this work. No forced protocol migration.
+- Saved Responses/continuation already exist. They reduce client payload and
+  history bookkeeping; Audrey still sends full retained context to the model.
+  They do not establish input-token or billing savings.
+- Hermes executes and approves its tools. Audrey validates model requests;
+  required tool selection would not authorize execution.
+- Further automatic-selection research and non-English input work are parked.
+  Historical eval artifacts remain evidence, not new acceptance requirements.
+- Background generation, webhooks, Conversations API, historical imports,
+  broader media analysis, and model/config experiments require a real need.
+- Document/spreadsheet authoring belongs to the existing Hermes Bot Tools MCP,
+  Nextcloud, and Collabora setup, not Audrey's browser experience.
+- Analyze ordinary accumulated traffic for cost/quality questions; do not
+  generate workloads simply to satisfy an old checklist.
 
-Phase 16 was retired on 2026-10-05. The earlier plan incorrectly moved a
-Hermes bot capability into Audrey's product surface even though the bot fleet
-already has API-driven document and spreadsheet tools through `bot-tools-mcp`,
-Nextcloud, and Collabora at `cloud.builtryte.xyz`. Audrey's creation panel,
-document-job routes, worker, template, and future PDF/spreadsheet slices are
-removed. Deployed schema 20 remains as inert migration history so production
-databases continue to start and restore safely.
+## Deploy after git pull
 
-Phase 6 completed on 2026-09-30. Slice 6A's probe-only comparison finished
-148 valid calls across Tev1 0.8B, Tev1 4B, Nimble, and the incumbent. On the 23
-cases that reach Audrey's model router, `qwen3.5:4b` scored 23/23 and Nimble
-22/23; both Tev1 sizes trailed further. Nimble also added a costly reasoning
-route and escalation, loaded more slowly, and used over twice the resident
-memory. No candidate cleared the gate, Slice 6B was not opened, and no
-production classifier or config changed. The 2026-10-03 Clef follow-up is
-also complete: full Clef matched all 69 repeated production-reached samples but
-failed the 20-second cold-load and residency gates; Clef Flash returned two
-reached cold-load timeouts. The incumbent remains unchanged.
+**Run deployment commands on Tower**, in `/mnt/user/appdata/audrey_ai_2.0`.
+Pull the user's committed changes there first. Run only the rows relevant to
+the slice; its handoff must state which rows apply.
 
-Phase 7 OCR completed on 2026-09-30. Slice 7A adds bounded English OCR for
-image-only PDFs through the durable media-worker queue. The corrected live
-fixture moved from Pending to Ready in 4.619 seconds, produced one indexed
-chunk, returned page-marked recognized text, and cleaned up successfully. The
-user also accepted real PDF upload, generated Summary and full Transcript
-presentation, native reading, and grounded chat.
+| Changed files | Tower action after pull |
+|---|---|
+| Documentation only | None |
+| Backend Python/dependencies | `docker compose up -d --build audrey` |
+| Browser code/assets | `docker compose up -d --build audrey-ui` |
+| Shared KB code used by both services | Rebuild `audrey` and `custom-tools` |
+| Tools sidecar code | Rebuild `custom-tools`; restart `audrey` for startup discovery |
+| Media worker/fetcher code | Rebuild the corresponding `media-worker` or `media-fetcher` |
+| `config.yaml` or service environment | `docker compose up -d --force-recreate audrey` (use affected service; add `--build` when code changed) |
+| Eval image contents | `docker compose --profile eval build audrey-eval` |
+| Grafana dashboard JSON | No rebuild/restart; directory mount reloads within 30 seconds |
+| Prometheus rules | Reload Prometheus after pull; see [monitoring](../../monitoring/README.md) |
+| Monitoring Compose/provisioning | Run its Compose commands from `monitoring/`; provisioning needs Grafana restart |
 
-Phase 8 started on 2026-09-30. Slice 8A adds MP3 uploads as a first-class
-audio kind while reusing the durable media queue, Whisper transcript path,
-owner-scoped indexing, and fail-soft summaries. The native Files viewer offers
-audio filtering plus Summary and Transcript tabs, and canonical chat
-attachments persist audio through schema migration 16. The first synthetic
-live attempt exposed a faster-whisper/PyAV decoder mismatch; the worker now
-pins the compatible PyAV major and verifies WAV decoding during its image
-build. The real MP3 browser flow passed. Slice 8B adds measured WAV, M4A,
-and FLAC admission on the same pipeline. The user marked the WAV, M4A, and FLAC
-native gate passed on 2026-10-01, including the M4A Files/chat flow. Phase 8 is
-complete.
+Backend/API clients use `http://192.168.1.11:8000`. Browser testing uses
+`https://ai.builtryte.xyz`. Tower's browser origin `127.0.0.1:8090` is private
+loopback, not a laptop address. Tailscale `100.113.157.98:8000` remains unverified.
 
-A 2026-10-01 model-maintenance slice removes `qwen3.5:397b-cloud` after its
-confirmed HTTP 410 retirement. The tag is gone from the general registry,
-tool-capable and passthrough lists, cloud-panel workers, and the pull script.
-The already registered `kimi-k2.6:cloud` now fills its cloud-only reasoning,
-general, and vision draft slots, preserving two distinct workers and the
-separate `deepseek-v4-pro:cloud` synthesis fallback. A real-config invariant
-prevents the retired tag from returning to either runtime configuration or the
-pull list. The required full gate also exposed an uptime-dependent progress
-reporter bug: a fresh host could suppress media-fetcher's first update because
-`0.0` doubled as its never-sent timestamp. The reporter now uses an explicit
-unset state, so its first update is unconditional and later updates remain
-throttled. All 3,065 backend tests passed. The deployed native Cloud turn
-then completed with `glm-5.3:cloud` and `kimi-k2.6:cloud`, without the retired
-Qwen tag, and the on-box model inventory returned clean. This maintenance slice
-is live-settled.
+## Testing handoffs
 
-On 2026-10-02 the user superseded Kimi K3's older cost-based exclusion from
-production panels. `kimi-k3:cloud` now leads all twelve cloud-bearing worker
-and researcher lists across mixed Deep, Cloud, and Research modes. It replaces
-the former Kimi 2.x draft slot, so panel sizes and cloud concurrency do not
-increase; its low registry priority keeps ordinary Fast chat local. A
-real-config invariant enforces the ordering. All 3,109 backend tests pass.
-Current-mode dispatch evidence remains an operational unknown in item 10;
-inspect existing records before requesting a narrowly scoped missing proof.
+Every handoff names **Tower or laptop**, the directory, rebuild/restart action,
+the exact command or browser steps, and what a pass looks like. Mention whether
+a file upload is needed and whether the test generates model calls.
 
-Campaign 3 first strengthens Audrey's platform boundaries and operational
-contracts, then makes Audrey itself the application behind a native web client,
-and finally adds the first general skills layer on that owned surface.
-
-
-## Sequence
-
-| Phase | Plan | Outcome | Entry gate | Status |
-|---|---|---|---|---|
-| 01 | [Platform hardening](phase-01-platform-hardening-plan.md) | Strengthen data boundaries, request ownership, storage lifecycle, readiness, and runtime reproducibility | Campaign start | Complete |
-| 02 | [Audrey application and web UI](phase-02-audrey-ui-plan.md) | Provider-neutral identity, Audrey-owned conversations and runs, a structured agent protocol, and a native browser client | Phase 01 completion gate | Complete (all native cutover, parity, administration, recovery, and DNS gates live-passed) |
-| 03 | [Reusable skills](phase-03-skills-capability-plan.md) | Local versioned instruction/resource bundles, native explicit selection, enforced tool narrowing, and an evidence-gated automatic selector | Phase 02 completion gate | Complete (3A–3C live-settled; explicit grounded-document pilot ships; automatic selection deferred) |
-| 04 | [File and artifact downloads](phase-04-file-downloads.md) | Owner-scoped recovery of stored originals and useful derived artifacts from the native Files surface | Phase 03 explicit-skill ship decision | Complete |
-| 05 | [Responses API compatibility](phase-05-responses-api.md) | OpenAI Responses clients use Audrey's existing authenticated generation and policy boundaries | Phase 04 completion | Complete (5A and 5B live-settled) |
-| 06 | [System One decision routing](phase-06-system-one-routing.md) | Measure purpose-built local decision models against Audrey's incumbent router and retain a one-setting rollback | Phase 05 Slice 5B gate | Complete (all candidates measured; incumbent retained) |
-| 07 | [Scanned PDF OCR](phase-07-scanned-pdf-ocr.md) | Queue image-only PDFs for bounded owner-scoped OCR, indexing, and native reading | Phase 06 decision | Complete (OCR and PDF presentation live-settled) |
-| 08 | [Audio ingestion](phase-08-audio-ingestion.md) | Transcribe, summarize, search, inspect, and attach spoken audio as a first-class file kind | Phase 07 completion | Complete (8A and 8B live-passed) |
-| 09 | [Broader spoken audio](phase-09-broader-audio.md) | Admit measured OGG, Opus, and raw AAC containers before separately scoped speaker or media analysis | Phase 08 and Phase 2D.5 completion | Complete (9A live-passed) |
-| 10 | [Ordinary-answer provenance](phase-10-ordinary-answer-provenance.md) | Persist deterministic public URL and private file evidence on ordinary tool-backed answers | Phase 09 completion | Complete (10A live-passed) |
-| 11 | [Native file explorer](phase-11-native-file-explorer.md) | Browse, attach, and manage private files through compact folder-style native views | Phase 10 completion | Complete (11A user-closed) |
-| 12 | [Sidebar navigation](phase-12-sidebar-navigation.md) | Simplify primary conversation creation and move My Files into a distinct top-bar action | Phase 11 completion | Complete; native browser checks accepted 2026-10-07 |
-| 13 | [Responses input, structured output, and client tools](phase-13-responses-multimodal-input.md) | Add bounded inputs, JSON Schema output, and caller-executed functions | Phase 12 implementation | 13B–13F live-settled; Hermes stays on Chat Completions after assessment; 13A live gate pending |
-| 14 | [Bot accounts and token lifetimes](phase-14-bot-accounts-and-token-lifetimes.md) | Add limited automation accounts, intentional permanent PATs, and fresh admin data on every open | Phase 13 implementation | Complete; native checks and token revocation accepted 2026-10-07 |
-| 15 | [Composer controls and Projects](phase-15-composer-and-projects.md) | Clarify and rebalance the composer, then group conversations with reusable instructions and selected-file context | Phase 14 implementation | Complete, including direct project upload |
-| 16 | [Retired Audrey document tools](phase-16-native-document-tools.md) | Record the boundary between Audrey file analysis and the existing Hermes workspace APIs | Architecture review | Retired; no Audrey document or spreadsheet authoring surface |
-
-Phase numbers repeat across campaigns. Refer to these as Campaign 3 Phase 1
-through Campaign 3 Phase 16, or use the topic filenames.
-
-## Campaign rules
-
-- One deployable slice at a time. Each slice gets a laptop verification gate
-  and a separate user-run Unraid smoke.
-- Correctness tests land before refactors that change task, stream, or storage
-  ownership.
-- Audrey's internal application protocol is not the OpenAI compatibility
-  protocol. Both adapt from the same typed run events.
-- Browser authentication, Audrey authorization, and user-data ownership remain
-  separate boundaries; no UI-supplied identity is trusted.
-- Existing collection names and deployed source records remain recoverable
-  through migrations and rollback windows.
-- Skills do not execute code or grant permissions. Tools act; skills instruct;
-  platform policy authorizes.
-- Hermes workspace capabilities stay in the separate Bot Tools MCP service and
-  do not create Audrey interface features.
-- A feature is not called verified on Unraid until the user confirms it.
-- Any source/config edit runs the full hermetic suite and changed-file ruff.
-  Lesson-link sweeps run only when the user explicitly requests one.
-
-## Remaining work
-
-Items 5–10, their execution order, and pass criteria are tracked in
-[remaining-work-todo.md](remaining-work-todo.md). Items 5–6, legacy Phase
-2D.5, and Phases 9–11 are closed. The user reprioritized Phase 12's sidebar
-navigation slice ahead of Item 7; it is now live-accepted. Item 7's first
-multimodal slice is ready for its targeted live gate. Phase 14's native
-account, Bot, permanent-token, and revocation checks are accepted. The next
-code slice is 11A.1 model telemetry. Phase 15 and its
-direct project-upload follow-up are accepted. Phase 16 is retired and has no
-remaining Audrey build or smoke gate.
+Hermetic tests/lint run on the laptop; Tower runs Docker, not a host `.venv`.
+Native Files/upload/chat acceptance uses the browser and real files. API-only
+checks normally run on the laptop over LAN/WARP. Short results return in the
+launching shell. Reports needed for evaluation stay accessible on the laptop.
+Use the [short runner/credential reference](../reference/live-smoke-testing.md)
+only when handing off a live command. Delete temporary instructions after a
+pass; phase status is enough. Keep regression code and model evaluation data.

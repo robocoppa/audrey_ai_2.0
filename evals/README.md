@@ -103,8 +103,7 @@ for analysis back to the laptop; a remote path alone is not a report handoff.
 Short direct Ollama experiments use `probe-onbox.sh` only when they need its
 Docker network or local-model controls. Their compact JSON can be the complete
 handoff for findings and aggregate costs. If per-sample JSON is also saved,
-include a laptop transfer step, as in the
-[prospective-study receipt](../docs/campaign-3/phase-03-skill-selection-protocol.md#optional-full-report-transfer--run-on-the-laptop).
+include an explicit laptop transfer step.
 No new test should be run merely to relocate an existing report.
 
 ## Running — the whole suite in one command
@@ -320,65 +319,20 @@ It proves the plumbing offline (no live model); this live suite judges the
 answers. Use both.
 
 
-## Automatic skill selection study
+## Automatic skill selection — parked
 
-`eval_skill_selection.py` is a separate metadata-only study, outside the answer
-quality suite. Its default `rules` backend is offline. Optional `router` and
-`hybrid` arms call the retained local router through Ollama; hybrid uses the
-model only for eligible undecided rule results. Firm abstentions end selection
-without a model call. No skill is activated, uploaded content fetched, or
-runtime setting changed. Gold labels and full skill instructions stay out of
-model requests.
+Production automatic selection remains disabled. Reopen only for a concrete
+English workflow and agreed criteria in [Phase 03](../docs/campaign-3/phase-03-skills.md).
+Do not rerun completed studies or non-English cases. Fixtures and saved reports
+remain historical/regression evidence; measurements are in the model ledger.
 
-The 42 development cases remain in `cases/skill_selection_cases.json`; the
-[revision-1 findings](../docs/campaign-3/phase-03-skill-selection-evaluation.md)
-are preserved. Slice 3D.2 adds request-scope guards, case-set fingerprints, and
-30 separately authored proposed controls in `cases/skill_selection_holdout.json`.
-Its first measurement completed with 27/30 hybrid labels correct, two misses,
-and one ordinary false activation. Slice 3D.3 repairs these exposed cases; the
-set now supplies regression evidence, not untouched validation. Its labels
-still need independent human review. See the [received result](../docs/campaign-3/phase-03-skill-selection-policy.md#received-result--october-6-2026)
-and [accepted three-case check](../docs/campaign-3/phase-03-skill-selection-terminal-results.md#received-tower-acceptance--october-6-2026).
-The direct model arms use `scripts/probes/probe-onbox.sh`, not this suite's
-PAT-backed `/v1` runner. Production auto selection remains disabled.
+The standalone `eval_skill_selection.py` uses metadata, not uploaded contents
+or runtime skill activation. Its rules backend is offline; router/hybrid use
+Ollama through the Tower probe runner rather than this PAT-backed API harness.
+Short runs, if explicitly needed, use `FOREGROUND=1` and `--summary` for shell
+results. Save necessary full reports on/copy them to the laptop.
 
-For short Tower studies, prefix the probe runner with `FOREGROUND=1`. Results
-return in the launching shell and a log is saved; Telegram is skipped unless
-`NOTIFY=1`. Add `--summary` to print a compact label check and its findings.
-An execution-only `status: completed` is not selection-quality acceptance.
-The CLI exits 1 for mismatched proposed labels or model errors, and 2 for setup
-errors. Compact `status: passed` means this requested study arm matched the
-selected synthetic labels; production activation remains a separate gate.
-`--save-json` retains the full private artifact with either output format.
-
-### Frozen prospective study — Slice 3D.4
-
-`--prepare-plan PATH` saves a private study plan without HTTP. It freezes source,
-canonical cases/catalog, retained local model tag and origin, generation settings,
-repeats, timeout, proposed criteria, and a maximum/predicted model-call count.
-`--plan PATH` rejects mismatches before constructing the model client. Frozen
-studies prohibit `--only` and nonretained-model bypasses; artifacts refuse overwrites.
-
-The new `cases/skill_selection_prospective.json` contains 24 separately authored
-proposed controls with independent agent review; human validation remains pending.
-Do not evaluate them while developing or tuning the selector. Follow the
-[preparation and first-measurement commands](../docs/campaign-3/phase-03-skill-selection-protocol.md#tower-check--prepare-then-measure)
-on Tower with `FOREGROUND=1` and `--summary`. That first study is now completed
-with findings: 69/72 labels, 36/39 precision, zero misses/errors, and one repeated
-ordinary false activation. Its terminal receipts and operator-copied full
-report are verified on the laptop; do not repeat it unchanged.
-[Slice 3D.5](../docs/campaign-3/phase-03-skill-selection-japanese.md) then
-failed 3/4 and is closed as out of scope under the hard English-only rule.
-Do not rerun or tune non-English cases. Automatic-selection studies are
-parked until an English workflow and agreed criteria justify them; the
-historical revision-3 plan remains invalid for the changed source.
-
-The compact label status stays distinct from nested `qualification`. Human
-attestations default false; a correct, adequate measurement may exit zero while
-qualification remains `pending_review`. Inadequate evidence cannot report
-`criteria_met` and exits 1. Proposed threshold failures and model/label errors
-also exit 1. Full reports retain every sample and the complete plan.
-`--labels-reviewed` and `--gates-agreed` are preparation-only operator claims,
-not automatic approval. A tag is not a verified weight digest; loading is
-uncontrolled. All outcomes keep production activation false and require
-final-answer/workflow proof.
+The CLI distinguishes execution findings from qualification. Proposed-label
+matches are not production acceptance. Frozen plans detect source/case/settings
+drift before HTTP; review/agreement flags are human attestations, not automatic
+approval. Inspect `--help` before preparing a new permitted study.
