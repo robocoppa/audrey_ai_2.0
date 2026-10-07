@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import {
   approveAdminUser,
@@ -16,7 +17,6 @@ import {
   listAdminUsers,
   resetAdminModelPolicy,
   setAdminModelOrder,
-  updateAdminModel,
   updateAdminUser,
   type AccessGroup,
   type AdminModel,
@@ -27,7 +27,6 @@ import {
 type AdminView = "accounts" | "models" | "roles";
 type AccountFilter = "all" | "pending" | "active" | "disabled";
 type ModelFilter = "all" | "workflow" | "direct";
-type ModelStatusFilter = "all" | "enabled" | "disabled";
 type AccessRole = string;
 
 export function AdminPanel({
@@ -51,7 +50,6 @@ export function AdminPanel({
   const [deleteRoleId, setDeleteRoleId] = useState("");
   const [editingModel, setEditingModel] = useState<AdminModel | null>(null);
   const [modelName, setModelName] = useState("");
-  const [modelRoles, setModelRoles] = useState<AccessGroup[]>([]);
   const [modelPortrait, setModelPortrait] = useState<File | null>(null);
   const [modelSource, setModelSource] = useState<"ollama" | "configuration">("ollama");
   const [modelWarning, setModelWarning] = useState("");
@@ -67,12 +65,21 @@ export function AdminPanel({
   const [newAccountName, setNewAccountName] = useState("");
   const [modelQuery, setModelQuery] = useState("");
   const [modelFilter, setModelFilter] = useState<ModelFilter>("all");
-  const [modelStatusFilter, setModelStatusFilter] = useState<ModelStatusFilter>("all");
+  const [rolePickerId, setRolePickerId] = useState("");
+  const [roleDraft, setRoleDraft] = useState<AccessGroup[]>([]);
+  const [rolePickerPosition, setRolePickerPosition] = useState<React.CSSProperties>({ top: 0, left: 0, maxHeight: 320 });
+  const roleMenuRef = useRef<HTMLDivElement>(null);
+  const roleTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const [dragModelId, setDragModelId] = useState("");
+  const [dropTarget, setDropTarget] = useState<{ id: string; after: boolean } | null>(null);
+  const dragRef = useRef<{ id: string; pointerId: number; x: number; y: number; active: boolean } | null>(null);
+  const dropRef = useRef<{ id: string; after: boolean } | null>(null);
+  const dragScrollRef = useRef<{ element: HTMLElement; velocity: number; x: number; y: number } | null>(null);
+  const dragFrameRef = useRef<number | null>(null);
+  const [orderAnnouncement, setOrderAnnouncement] = useState("");
   const busy = loading || Boolean(busyKey);
   const pendingCount = users.filter(({ status }) => status === "pending").length;
-  const enabledDirectCount = models.filter((model) =>
-    model.kind === "direct" && model.enabled
-  ).length;
+  const directCount = models.filter((model) => model.kind === "direct").length;
   const filteredUsers = users.filter((user) => {
     const query = accountQuery.trim().toLocaleLowerCase();
     const matchesQuery = !query
@@ -80,16 +87,14 @@ export function AdminPanel({
       || user.email.toLocaleLowerCase().includes(query);
     return matchesQuery && (accountFilter === "all" || user.status === accountFilter);
   });
-  const modelOrderLocked = Boolean(modelQuery.trim()) || modelStatusFilter !== "all";
+  const modelOrderLocked = Boolean(modelQuery.trim());
   const filteredModels = models.filter((model) => {
     const query = modelQuery.trim().toLocaleLowerCase();
     const matchesQuery = !query
       || model.label.toLocaleLowerCase().includes(query)
       || model.concrete_model.toLocaleLowerCase().includes(query);
     const matchesType = modelFilter === "all" || model.kind === modelFilter;
-    const matchesStatus = modelStatusFilter === "all"
-      || model.enabled === (modelStatusFilter === "enabled");
-    return matchesQuery && matchesType && matchesStatus;
+    return matchesQuery && matchesType;
   });
 
   useEffect(() => {
@@ -114,6 +119,10 @@ export function AdminPanel({
     };
   }, []);
 
+  useEffect(() => () => {
+    if (dragFrameRef.current !== null) cancelAnimationFrame(dragFrameRef.current);
+  }, []);
+
   useEffect(() => {
     if (!users.some((user) => user.deletion_pending)) return;
     const timer = window.setInterval(() => {
@@ -126,14 +135,51 @@ export function AdminPanel({
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape" && !busy) {
+      if (event.key !== "Escape") return;
+      if (dragRef.current) {
+        clearDrag();
+        event.preventDefault();
+      } else if (rolePickerId) {
+        setRolePickerId("");
+        roleTriggerRef.current?.focus();
+        event.preventDefault();
+      } else if (!busy) {
         if (editingModel) setEditingModel(null);
         else onClose();
       }
     }
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [busy, editingModel, onClose]);
+  }, [busy, editingModel, onClose, rolePickerId]);
+
+  useEffect(() => {
+    if (!rolePickerId) return;
+    function closeOutside(event: PointerEvent) {
+      const target = event.target as Node;
+      if (!roleMenuRef.current?.contains(target) && !roleTriggerRef.current?.contains(target)) {
+        setRolePickerId("");
+      }
+    }
+    function positionMenu() {
+      const trigger = roleTriggerRef.current;
+      if (!trigger) return;
+      const bounds = trigger.getBoundingClientRect();
+      if (bounds.bottom <= 0 || bounds.top >= window.innerHeight) setRolePickerId("");
+      else setRolePickerPosition(modelRolePickerPosition(trigger));
+    }
+    function positionOnScroll(event: Event) {
+      if (!roleMenuRef.current?.contains(event.target as Node)) positionMenu();
+    }
+    roleMenuRef.current?.querySelector<HTMLInputElement>("input:not(:disabled)")?.focus({ preventScroll: true });
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("scroll", positionOnScroll, true);
+    window.addEventListener("resize", positionMenu);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("scroll", positionOnScroll, true);
+      window.removeEventListener("resize", positionMenu);
+    };
+  }, [rolePickerId]);
 
   function replaceUser(updated: AdminUser) {
     setUsers((current) => current.map((user) =>
@@ -284,13 +330,7 @@ export function AdminPanel({
     }
   }
 
-  async function moveModel(model: AdminModel, direction: -1 | 1) {
-    const siblings = models.filter((item) => item.kind === model.kind);
-    const index = siblings.findIndex((item) => item.id === model.id);
-    const target = index + direction;
-    if (modelOrderLocked || busy || target < 0 || target >= siblings.length) return;
-    const reordered = [...siblings];
-    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+  async function saveModelOrder(model: AdminModel, reordered: AdminModel[]) {
     setBusyKey("model-order");
     setError("");
     try {
@@ -301,6 +341,7 @@ export function AdminPanel({
         let next = 0;
         return current.map((item) => item.kind === model.kind ? ordered[next++] : item);
       });
+      setOrderAnnouncement(`${model.label} moved to position ${reordered.findIndex((item) => item.id === model.id) + 1} of ${reordered.length}.`);
       onChanged();
     } catch (reason) {
       setError(messageOf(reason, "The model order could not be saved."));
@@ -309,21 +350,114 @@ export function AdminPanel({
     }
   }
 
-  async function changeModelVisibility(model: AdminModel, visibility: "public" | "private") {
+  function moveModel(model: AdminModel, direction: -1 | 1) {
+    const siblings = models.filter((item) => item.kind === model.kind);
+    const index = siblings.findIndex((item) => item.id === model.id);
+    const target = index + direction;
+    if (modelOrderLocked || busy || target < 0 || target >= siblings.length) return;
+    const reordered = [...siblings];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    void saveModelOrder(model, reordered);
+  }
+
+  function clearDrag() {
+    dragRef.current = null;
+    dropRef.current = null;
+    dragScrollRef.current = null;
+    if (dragFrameRef.current !== null) cancelAnimationFrame(dragFrameRef.current);
+    dragFrameRef.current = null;
+    setDragModelId("");
+    setDropTarget(null);
+  }
+
+  function beginDrag(event: React.PointerEvent<HTMLButtonElement>, model: AdminModel) {
+    if (busy || modelOrderLocked || event.button !== 0 || dragRef.current) return;
+    event.preventDefault();
+    event.currentTarget.focus();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = { id: model.id, pointerId: event.pointerId, x: event.clientX, y: event.clientY, active: false };
+    setRolePickerId("");
+  }
+
+  function trackDrag(event: React.PointerEvent<HTMLButtonElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || busy || modelOrderLocked) return;
+    if (!drag.active && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 5) return;
+    drag.active = true;
+    setDragModelId(drag.id);
+    updateDropTarget(event.clientX, event.clientY, drag.id);
+    const scroller = event.currentTarget.closest<HTMLElement>(".account-settings");
+    if (scroller) {
+      const bounds = scroller.getBoundingClientRect();
+      const velocity = event.clientY < bounds.top + 40 ? -10 : event.clientY > bounds.bottom - 40 ? 10 : 0;
+      dragScrollRef.current = { element: scroller, velocity, x: event.clientX, y: event.clientY };
+      if (velocity && dragFrameRef.current === null) dragFrameRef.current = requestAnimationFrame(scrollDrag);
+    }
+  }
+
+  function updateDropTarget(x: number, y: number, sourceId: string) {
+    const row = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-model-id]");
+    const sourceModel = models.find((item) => item.id === sourceId);
+    const targetModel = models.find((item) => item.id === row?.dataset.modelId);
+    const target = row && targetModel && targetModel.kind === sourceModel?.kind && targetModel.id !== sourceId
+      ? { id: targetModel.id, after: y > row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2 }
+      : null;
+    dropRef.current = target;
+    setDropTarget(target);
+  }
+
+  function scrollDrag() {
+    dragFrameRef.current = null;
+    const scroll = dragScrollRef.current;
+    const drag = dragRef.current;
+    if (!scroll?.velocity || !drag?.active) return;
+    const previous = scroll.element.scrollTop;
+    scroll.element.scrollTop += scroll.velocity;
+    updateDropTarget(scroll.x, scroll.y, drag.id);
+    if (scroll.element.scrollTop !== previous) dragFrameRef.current = requestAnimationFrame(scrollDrag);
+  }
+
+  function finishDrag(event: React.PointerEvent<HTMLButtonElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const target = dropRef.current;
+    clearDrag();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    const model = models.find((item) => item.id === drag.id);
+    if (!drag.active || !target || !model || busy || modelOrderLocked) return;
+    const siblings = models.filter((item) => item.kind === model.kind);
+    const reordered = siblings.filter((item) => item.id !== model.id);
+    const targetIndex = reordered.findIndex((item) => item.id === target.id);
+    if (targetIndex < 0) return;
+    reordered.splice(targetIndex + (target.after ? 1 : 0), 0, model);
+    if (reordered.every((item, index) => item.id === siblings[index].id)) return;
+    void saveModelOrder(model, reordered);
+  }
+
+  function openRolePicker(model: AdminModel, trigger: HTMLButtonElement) {
+    if (rolePickerId === model.id) { setRolePickerId(""); return; }
+    roleTriggerRef.current = trigger;
+    setRolePickerPosition(modelRolePickerPosition(trigger));
+    setRoleDraft(model.visibility === "public" ? model.roles.filter((role) => role !== "admins") : []);
+    setRolePickerId(model.id);
+  }
+
+  async function saveModelRoles(model: AdminModel) {
     setBusyKey(`model:${model.id}`);
     setError("");
     try {
       const updated = await updateAdminModelProfile(model.id, {
-        visibility,
-        roles: visibility === "public"
-          ? (model.roles.length ? model.roles : ["users"])
-          : model.roles,
+        visibility: roleDraft.length ? "public" : "private",
+        roles: roleDraft,
         display_name: model.label,
+        ...(!model.enabled ? { enabled: true } : {}),
       });
       setModels((current) => current.map((item) => item.id === model.id ? updated : item));
+      setRolePickerId("");
+      roleTriggerRef.current?.focus();
       onChanged();
     } catch (reason) {
-      setError(messageOf(reason, "The model visibility could not be changed."));
+      setError(messageOf(reason, "The model's role access could not be saved."));
     } finally {
       setBusyKey("");
     }
@@ -332,7 +466,6 @@ export function AdminPanel({
   function openModelEditor(model: AdminModel) {
     setEditingModel(model);
     setModelName(model.label);
-    setModelRoles(model.roles);
     setModelPortrait(null);
   }
 
@@ -344,7 +477,7 @@ export function AdminPanel({
     try {
       let updated = await updateAdminModelProfile(editingModel.id, {
         visibility: editingModel.visibility,
-        roles: modelRoles,
+        roles: editingModel.roles,
         display_name: modelName.trim(),
       });
       if (modelPortrait) {
@@ -372,28 +505,6 @@ export function AdminPanel({
       onChanged();
     } catch (reason) {
       setError(messageOf(reason, "The portrait could not be removed."));
-    } finally {
-      setBusyKey("");
-    }
-  }
-
-  async function setModel(
-    model: AdminModel,
-    patch: { enabled?: boolean; audience?: AccessGroup },
-  ) {
-    setBusyKey(`model:${model.id}`);
-    setError("");
-    try {
-      const updated = await updateAdminModel(model.id, {
-        enabled: patch.enabled ?? model.enabled,
-        audience: patch.audience ?? model.audience,
-      });
-      setModels((current) => current.map((item) =>
-        item.id === updated.id ? updated : item,
-      ));
-      onChanged();
-    } catch (reason) {
-      setError(messageOf(reason, "The model policy could not be changed."));
     } finally {
       setBusyKey("");
     }
@@ -461,7 +572,7 @@ export function AdminPanel({
                 onClick={() => setView("models")}
               >
                 Models <span>{models.length}</span>
-                <em>{enabledDirectCount} direct enabled</em>
+                <em>{directCount} direct models</em>
               </button>
               <button
                 type="button"
@@ -662,7 +773,7 @@ export function AdminPanel({
                             </svg>
                           )}
                         </button>
-                      ) : null}
+                      ) : <span className="admin-delete-slot" aria-hidden="true" />}
                     </article>
                   );
                 })}
@@ -682,7 +793,7 @@ export function AdminPanel({
             >
               <div className="settings-section-heading">
                 <h3>Roles</h3>
-                <p>Create roles for account assignments and Public model access. Built-in roles are protected.</p>
+                <p>Create roles for account assignments and model access. Built-in roles are protected.</p>
               </div>
               <form className="admin-role-form" onSubmit={(event) => void addRole(event)}>
                 <label>
@@ -797,7 +908,7 @@ export function AdminPanel({
             >
               <div className="settings-section-heading">
                 <h3 id="admin-models-title">Models</h3>
-                <p>Publish Audrey workflows and Ollama models to the appropriate role.</p>
+                <p>Choose which roles can use each model and arrange their order.</p>
               </div>
               <div className="admin-inventory-status">
                 <span className={`admin-source ${modelSource}`}>{modelSource === "ollama" ? "Live Ollama inventory" : "Configured fallback"}</span>
@@ -806,7 +917,8 @@ export function AdminPanel({
                   Audrey policy overrides and do not alter Ollama itself.
                 </p>
                 {modelWarning ? <p className="admin-inventory-warning" role="status">{modelWarning}</p> : null}
-                <p>Use the arrows to set the order within Audrey workflows or Other models. Clear search and state filters to reorder.</p>
+                <p id="model-order-help">Drag the handle on the left to reorder, or focus it and use the arrow keys. Workflows and direct models have separate orders. Clear search to reorder.</p>
+                <span className="admin-visually-hidden" role="status">{orderAnnouncement}</span>
               </div>
               <div className="admin-toolbar">
                 <label>
@@ -829,27 +941,40 @@ export function AdminPanel({
                     <option value="direct">Direct Ollama</option>
                   </select>
                 </label>
-                <label>
-                  <span>State</span>
-                  <select
-                    value={modelStatusFilter}
-                    onChange={(event) => setModelStatusFilter(
-                      event.target.value as ModelStatusFilter,
-                    )}
-                  >
-                    <option value="all">Any state</option>
-                    <option value="enabled">Enabled</option>
-                    <option value="disabled">Disabled</option>
-                  </select>
-                </label>
               </div>
               <div className="admin-record-list">
                 {filteredModels.map((model) => {
-                  const rowBusy = busyKey === `model:${model.id}`;
-                  const siblings = models.filter((item) => item.kind === model.kind);
-                  const orderIndex = siblings.findIndex((item) => item.id === model.id);
+
                   return (
-                    <article className="admin-record admin-model-record" key={model.id}>
+                    <article
+                      className={`admin-record admin-model-record${dragModelId === model.id ? " is-dragging" : ""}`}
+                      data-model-id={model.id}
+                      data-drop-position={dropTarget?.id === model.id ? (dropTarget.after ? "after" : "before") : undefined}
+                      key={model.id}
+                    >
+                      <button
+                        className="admin-model-drag-handle"
+                        type="button"
+                        aria-label={`Reorder ${model.label}`}
+                        aria-describedby="model-order-help"
+                        title="Drag to reorder, or use the arrow keys"
+                        onPointerDown={(event) => beginDrag(event, model)}
+                        onPointerMove={trackDrag}
+                        onPointerUp={finishDrag}
+                        onPointerCancel={clearDrag}
+                        onLostPointerCapture={clearDrag}
+                        onKeyDown={(event) => {
+                          if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+                            event.preventDefault();
+                            moveModel(model, event.key === "ArrowUp" ? -1 : 1);
+                          }
+                        }}
+                        disabled={busy || modelOrderLocked}
+                      >
+                        <svg width="16" height="20" viewBox="0 0 16 20" fill="currentColor" aria-hidden="true">
+                          {[4, 10, 16].map((y) => <g key={y}><circle cx="5" cy={y} r="1.5" /><circle cx="11" cy={y} r="1.5" /></g>)}
+                        </svg>
+                      </button>
                       <div className="admin-record-heading" title={model.description}>
                         <div>
                           <strong>{model.label}</strong>
@@ -862,51 +987,25 @@ export function AdminPanel({
                       </div>
                       <p className="admin-visually-hidden">{model.description}</p>
                       <div className="admin-model-controls">
-                        <div className="admin-model-order-controls" aria-label={`Order for ${model.label}`}>
-                          <button
-                            type="button"
-                            aria-label={`Move ${model.label} up`}
-                            title="Move up"
-                            onClick={() => void moveModel(model, -1)}
-                            disabled={busy || modelOrderLocked || orderIndex === 0}
-                          >↑</button>
-                          <button
-                            type="button"
-                            aria-label={`Move ${model.label} down`}
-                            title="Move down"
-                            onClick={() => void moveModel(model, 1)}
-                            disabled={busy || modelOrderLocked || orderIndex === siblings.length - 1}
-                          >↓</button>
-                        </div>
                         <button
+                          className="admin-model-role-trigger"
                           type="button"
-                          aria-pressed={model.enabled}
-                          onClick={() => void setModel(model, { enabled: !model.enabled })}
-                          disabled={rowBusy}
+                          aria-label={`Model access for ${model.label}`}
+                          aria-expanded={rolePickerId === model.id}
+                          aria-controls={rolePickerId === model.id ? "admin-model-role-picker" : undefined}
+                          onClick={(event) => openRolePicker(model, event.currentTarget)}
+                          disabled={busy}
+                          title={modelAccessLabel(model, roles)}
                         >
-                          {rowBusy ? "Saving…" : model.enabled ? "Enabled" : "Disabled"}
+                          <span>{modelAccessLabel(model, roles)}</span>
+                          <span aria-hidden="true">⌄</span>
                         </button>
-                        <label className="admin-model-audience">
-                          <span>Visibility</span>
-                          <select
-                            value={model.visibility}
-                            onChange={(event) => void changeModelVisibility(
-                              model, event.target.value as "public" | "private",
-                            )}
-                            disabled={rowBusy}
-                          >
-                            <option value="public">Public</option>
-                            <option value="private">Private</option>
-                          </select>
-                        </label>
-                        <button type="button" onClick={() => openModelEditor(model)} disabled={rowBusy}>
+                        <button type="button" onClick={() => openModelEditor(model)} disabled={busy}>
                           Edit…
                         </button>
-                        {model.policy_overridden ? (
-                          <button type="button" onClick={() => void resetModel(model)} disabled={rowBusy}>
-                            Reset default
-                          </button>
-                        ) : null}
+                        <button type="button" onClick={() => void resetModel(model)} disabled={busy || !model.policy_overridden}>
+                          Reset default
+                        </button>
                       </div>
                     </article>
                   );
@@ -917,6 +1016,43 @@ export function AdminPanel({
               </div>
             </section>
             ) : null}
+
+            {rolePickerId ? (() => {
+              const model = models.find((item) => item.id === rolePickerId);
+              if (!model) return null;
+              return createPortal(
+                <div
+                  id="admin-model-role-picker"
+                  className="admin-model-role-picker"
+                  role="group"
+                  aria-label={`Available roles for ${model.label}`}
+                  ref={roleMenuRef}
+                  style={rolePickerPosition}
+                >
+                  <strong>Available to</strong>
+                  <div className="admin-model-role-options">
+                    <label><input type="checkbox" checked disabled />Administrators <small>Always</small></label>
+                    {roles.filter((role) => role.id !== "admins").map((role) => (
+                      <label key={role.id}>
+                        <input
+                          type="checkbox"
+                          checked={roleDraft.includes(role.id)}
+                          disabled={busy}
+                          onChange={(event) => setRoleDraft((current) => event.target.checked
+                            ? [...current, role.id] : current.filter((id) => id !== role.id))}
+                        />
+                        {role.name}
+                      </label>
+                    ))}
+                  </div>
+                  <p>Select the roles that can use this model. With no selections, only administrators have access.</p>
+                  <div className="admin-model-role-actions">
+                    <button type="button" onClick={() => { setRolePickerId(""); roleTriggerRef.current?.focus(); }} disabled={busy}>Cancel</button>
+                    <button type="button" onClick={() => void saveModelRoles(model)} disabled={busy}>{busy ? "Saving…" : "Save access"}</button>
+                  </div>
+                </div>, document.body,
+              );
+            })() : null}
 
             {editingModel ? (
               <div className="admin-editor-backdrop" role="presentation" onMouseDown={(event) => {
@@ -953,28 +1089,8 @@ export function AdminPanel({
                         <button type="button" onClick={() => void removePortrait()} disabled={busy}>Remove portrait</button>
                       ) : null}
                     </div>
-                    <fieldset>
-                      <legend>Roles allowed when Public</legend>
-                      <p>Private models are always limited to administrators, regardless of these selections.</p>
-                      <div className="admin-role-checks">
-                        {roles.filter((role) => role.id !== "admins").map((role) => (
-                          <label key={role.id}>
-                            <input
-                              type="checkbox"
-                              checked={modelRoles.includes(role.id)}
-                              onChange={(event) => setModelRoles((current) =>
-                                event.target.checked
-                                  ? [...current, role.id]
-                                  : current.filter((id) => id !== role.id),
-                              )}
-                            />
-                            {role.name}
-                          </label>
-                        ))}
-                      </div>
-                    </fieldset>
                     <div className="admin-editor-actions">
-                      <button type="submit" disabled={busy || !modelName.trim() || (editingModel.visibility === "public" && modelRoles.length === 0)}>
+                      <button type="submit" disabled={busy || !modelName.trim()}>
                         {busy ? "Saving…" : "Save model"}
                       </button>
                       <button type="button" onClick={() => setEditingModel(null)} disabled={busy}>Cancel</button>
@@ -1024,4 +1140,25 @@ function formatTime(value: string): string {
 
 function messageOf(reason: unknown, fallback: string): string {
   return reason instanceof Error ? reason.message : fallback;
+}
+
+function modelAccessLabel(model: AdminModel, roles: AdminRole[]): string {
+  if (!model.enabled) return "Unavailable";
+  if (model.visibility === "private") return "Administrators only";
+  const selected = model.roles.filter((id) => id !== "admins");
+  if (!selected.length) return "Administrators only";
+  const first = roles.find((role) => role.id === selected[0])?.name ?? selected[0];
+  return selected.length === 1 ? first : `${first} +${selected.length - 1}`;
+}
+
+function modelRolePickerPosition(trigger: HTMLButtonElement): React.CSSProperties {
+  const bounds = trigger.getBoundingClientRect();
+  const below = window.innerHeight - bounds.bottom - 16;
+  const above = bounds.top - 16;
+  const placeBelow = below >= 270 || below >= above;
+  return {
+    ...(placeBelow ? { top: bounds.bottom + 6 } : { bottom: window.innerHeight - bounds.top + 6 }),
+    left: Math.max(8, Math.min(bounds.right - 320, window.innerWidth - 328)),
+    maxHeight: Math.min(360, Math.max(80, placeBelow ? below : above)),
+  };
 }

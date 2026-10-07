@@ -385,9 +385,14 @@ export function ProjectHome({
           {conversations.length ? (
             <ul className="project-home-conversations">
               {conversations.map((conversation) => (
-                <li key={conversation.id}>
-                  <button type="button" onClick={() => onConversationSelected(conversation)}>
-                    <strong>{conversation.title || "New conversation"}</strong>
+                <li className="conversation-row" key={conversation.id}>
+                  <button
+                    className="conversation project-home-conversation"
+                    type="button"
+                    onClick={() => onConversationSelected(conversation)}
+                    title={conversation.title || "New conversation"}
+                  >
+                    <span>{conversation.title || "New conversation"}</span>
                     <small>{conversation.archived_at ? "Archived" : formatActivity(conversation)}</small>
                   </button>
                 </li>
@@ -425,7 +430,7 @@ export function ProjectHome({
               disabled={uploadingFiles || files.length >= limits.max_files}
             >
               <span aria-hidden="true">＋</span>
-              {uploadingFiles ? `Uploading ${uploadingName} · ${Math.max(1, Math.round(uploadProgress * 100))}%` : "Upload to project"}
+              {uploadingFiles ? `Uploading ${uploadingName} · ${Math.max(1, Math.round(uploadProgress * 100))}%` : "Upload file to project"}
             </button>
             <button className="project-manage-files" type="button" onClick={() => setFilesOpen(true)} disabled={uploadingFiles}>
               Choose from My Files

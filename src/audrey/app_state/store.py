@@ -1568,6 +1568,8 @@ class ApplicationStore:
         visibility: str,
         roles: Iterable[str],
         display_name: str,
+        enabled: bool | None = None,
+        default_audience: str = "admins",
     ) -> ModelPublicationProfile:
         return await asyncio.to_thread(
             self._set_model_publication_profile_sync,
@@ -1576,6 +1578,8 @@ class ApplicationStore:
             visibility,
             roles,
             display_name,
+            enabled,
+            default_audience,
         )
 
     def _set_model_publication_profile_sync(
@@ -1585,6 +1589,8 @@ class ApplicationStore:
         visibility: str,
         roles: Iterable[str],
         display_name: str,
+        enabled: bool | None = None,
+        default_audience: str = "admins",
     ) -> ModelPublicationProfile:
         actor_user_id = _required(actor_user_id, "actor user id")
         model_id = _required(model_id, "model id")
@@ -1597,6 +1603,8 @@ class ApplicationStore:
             raise AccountAdministrationError("unsupported model visibility")
         if visibility == "public" and not role_ids:
             raise AccountAdministrationError("public models need at least one role")
+        if enabled is not None and default_audience not in {"users", "testers", "bots", "admins"}:
+            raise AccountAdministrationError("unsupported model audience")
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
@@ -1616,6 +1624,39 @@ class ApplicationStore:
                     (model_id,),
                 ).fetchone()
                 now = _utc_now()
+                if enabled is not None:
+                    # Apply role access and activation in the same transaction:
+                    # an invalid role must never reactivate an old policy.
+                    before_policy = self._conn.execute(
+                        "SELECT model_id, enabled, audience, updated_at "
+                        "FROM model_access_policies WHERE model_id = ?", (model_id,),
+                    ).fetchone()
+                    self._conn.execute(
+                        "INSERT INTO model_access_policies "
+                        "(model_id, enabled, audience, updated_by_user_id, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?) ON CONFLICT(model_id) DO UPDATE SET "
+                        "enabled = excluded.enabled, "
+                        "updated_by_user_id = excluded.updated_by_user_id, "
+                        "updated_at = excluded.updated_at",
+                        (model_id, int(enabled), default_audience, actor_user_id, now),
+                    )
+                    after_policy = self._conn.execute(
+                        "SELECT model_id, enabled, audience, updated_at "
+                        "FROM model_access_policies WHERE model_id = ?", (model_id,),
+                    ).fetchone()
+                    assert after_policy is not None
+                    self._insert_audit_locked(
+                        actor_user_id=actor_user_id,
+                        target_type="model",
+                        target_id=model_id,
+                        action="set_model_policy",
+                        before=(
+                            _model_policy_snapshot(_model_policy_from_row(before_policy))
+                            if before_policy is not None else {}
+                        ),
+                        after=_model_policy_snapshot(_model_policy_from_row(after_policy)),
+                        now=now,
+                    )
                 self._conn.execute(
                     "INSERT INTO model_publication_profiles "
                     "(model_id, visibility, roles_json, display_name, "

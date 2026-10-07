@@ -1,8 +1,9 @@
 # Campaign 3 Phase 3 — reusable skills
 
-**Status:** Complete for explicit `video-analysis` and `grounded-document-analysis`. Automatic selection remains deferred and
-`skills.auto_select: false`. No selector experiment is required for campaign
-completion. User input is English-only.
+**Status:** Explicit `video-analysis` and `grounded-document-analysis` are
+complete. The user queued automatic English skill selection (3D) after 18A on
+October 7. `skills.auto_select: false` remains until its activation decision.
+English input only.
 
 ## Goal and decisions
 
@@ -65,7 +66,7 @@ separates facts by source file, states partial-read and missing-evidence limits,
 and compares retrieved contents. Its ship decision is accepted; no unchanged
 answer-comparison or native-selection gate remains.
 
-## Automatic selection — parked
+## Automatic selection — next after 18A
 
 The standalone evaluator does not select runtime skills, execute tools, read
 real uploads, or change production routing. Its preserved fixtures and reports
@@ -75,7 +76,10 @@ The Japanese 3D.5 check failed and is closed as out of scope, not passed.
 Do not tune or rerun non-English cases. Preserve artifacts without adding
 runtime language rejection.
 
-Reopen only for a concrete English workflow and agreed benefit. Before activation:
+The next slice addresses English questions about uploaded or project-selected
+documents/videos, where choosing an existing skill can remove a manual step.
+Reuse the current rules/router foundation rather than opening a model search.
+Ordinary chat should abstain; explicit choices retain precedence. Before activation:
 
 1. Obtain human-reviewed fresh labels and agree precision, miss, ordinary false
    activation, error, latency, token/context, and call-budget limits.

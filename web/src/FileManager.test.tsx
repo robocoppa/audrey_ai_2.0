@@ -302,7 +302,8 @@ it("shows a PDF summary first and its extracted text under Transcript", async ()
 
   fireEvent.click(screen.getByRole("button", { name: "Transcript" }));
   expect(await screen.findByText("Full extracted inspection text.")).toBeVisible();
-  expect(fetchMock).toHaveBeenCalledWith("/api/files/pdf_ready/text?offset=0", {
-    credentials: "include",
-  });
+  expect(fetchMock).toHaveBeenCalledWith("/api/files/pdf_ready/text?offset=0", expect.objectContaining({
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
+  }));
 });

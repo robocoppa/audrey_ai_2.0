@@ -20,7 +20,8 @@ Tower has Docker, not a host Python/uv/repository `.venv`.
 The backend is published on port 8000. The UI origin is Tower-loopback
 `127.0.0.1:8090` or Docker DNS `http://audrey-ui:8080`; laptop access to that
 origin needs an explicit tunnel. Tailscale `100.113.157.98:8000` remains
-unreachable from the laptop; do not use it until diagnosed.
+unreachable from the laptop. Repair is deferred until the user asks; use the
+working LAN/WARP route for current checks.
 
 ## Credentials
 
@@ -60,25 +61,3 @@ it. See [evals](../../evals/README.md) only for an actual evaluation task.
 
 Delete temporary handoffs after acceptance. Keep a brief phase status and
 regression code; retain model evaluation artifacts needed for decisions.
-
-## Remaining 13A inline-image check
-
-Run **on the laptop**, once Audrey's already-built Phase 13 code is deployed.
-It creates an in-memory red PNG: no manual upload, stored response, or cleanup.
-It makes one vision generation and checks a `file://` rejection without generation.
-The private `.env.test.local` must contain the valid compatibility PAT.
-
-```bash
-cd /home/bart/Documents/github/audrey/audrey_ai_2.0
-(
-  set -a
-  source .env.test.local
-  set +a
-  AUDREY_SMOKE_BASE_URL=http://192.168.1.11:8000 .venv/bin/python tests/smoke/smoke_responses_multimodal.py
-)
-```
-
-Pass: exit zero and `status: passed`, HTTP 200/`sentinel: true` for the image,
-HTTP 422/`validation_error: true` for the blocked URL. This is independent of
-the accepted uploaded-file and remote-input checks. Remove this section when
-the user confirms it passed.

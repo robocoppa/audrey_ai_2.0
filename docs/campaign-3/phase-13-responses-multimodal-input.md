@@ -1,6 +1,6 @@
 # Campaign 3 Phase 13 — Responses inputs, output, tools, and storage
 
-**Status:** 13B–13F complete and accepted. 13A implementation is complete; its distinct inline-image live proof remains pending.
+**Status:** 13A–13F complete and accepted. Inline-image API proof passed October 7, 2026.
 
 This extends [the Responses foundation](phase-05-responses-api.md) through existing authenticated generation paths. Admission and owner/policy failures finish before provider dispatch or SSE. Claimed `user` values never select the file/storage owner.
 
@@ -8,7 +8,7 @@ This extends [the Responses foundation](phase-05-responses-api.md) through exist
 
 Easy-input messages accept nonblank `input_text` on system/developer/user/assistant roles. User messages also accept inline base64 JPEG/PNG/WEBP `input_image` data URLs with `detail: auto|low|high|original`. Malformed/empty data, GIF/unknown image types, wrong-role images, unsupported schemes, and unknown part types are rejected.
 
-Completed and streamed requests share the existing vision adapter. The remaining live proof is one inline-image answer plus the unsupported-`file://` admission guard; passed owned/remote image checks are not repeated.
+Completed and streamed requests share the existing vision adapter. The inline-image answer and unsupported-`file://` admission guard are accepted.
 
 ## Slice 13B - structured text output
 

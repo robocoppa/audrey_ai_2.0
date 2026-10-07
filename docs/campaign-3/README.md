@@ -9,14 +9,23 @@ they are not ongoing task lists.
 
 ## Current work
 
-- **Passed:** model outcome/usage telemetry (formerly slice 11A.1), confirmed
-  by the user October 7. Navigation, Bots, token revocation, Files, uploads,
-  Projects, and the native cutover remain accepted.
-- **Passed:** [17A.2 model monitoring dashboard](phase-17-operations-and-api.md),
-  confirmed by the user October 7. **Built:** 17B reasoning controls; targeted API acceptance pending.
-- **Independent followups:** 13A inline-image protocol proof, Tailscale
-  reachability, and decision-relevant observations from existing model traffic.
-  These do not reopen accepted features or require a broad test sweep.
+- **18A — admin controls and project presentation:** replace model visibility
+  and enable controls with direct role access, align rows, add left-side drag
+  ordering, and improve project file actions and conversation rows. Implementation
+  passed laptop verification; deployed browser acceptance remains open.
+- **Next: 3D — automatic English skill selection.** The user queued this after
+  18A. Reuse the existing selector foundation and retained router; keep runtime
+  automatic selection off until English selection and answer/workflow quality
+  justify activation. Explicit skills remain accepted.
+- **Closed by the user October 7:** old domain cleanup and the model/runtime
+  evidence and traffic-analysis followups. These require no further campaign
+  work or testing; do not manufacture new measurements for the model ledger.
+- Existing native features, 13A–13F, accounts/tokens, Projects, telemetry, and
+  the Grafana model dashboard remain accepted. 17B reasoning controls are built;
+  their live API acceptance and benefit to the existing Hermes adapter remain
+  unverified, with no further bot integration work queued.
+- **Deferred by the user:** Tailscale repair and 17D Responses tool contracts /
+  catalog expansion. Keep the working Hermes adapter and settings.
 
 ## Phases
 
@@ -24,7 +33,7 @@ they are not ongoing task lists.
 |---|---|---|
 | 01 | [Platform hardening](phase-01-platform-hardening.md) | Complete |
 | 02 | [Native application](phase-02-native-application.md) | Complete |
-| 03 | [Skills](phase-03-skills.md) | Explicit skills complete; automatic selection parked |
+| 03 | [Skills](phase-03-skills.md) | Explicit skills complete; English automatic selection next after 18A |
 | 04 | [File downloads](phase-04-file-downloads.md) | Complete |
 | 05 | [Responses foundation](phase-05-responses-api.md) | Complete |
 | 06 | [Router candidates](phase-06-system-one-routing.md) | Complete; retain qwen3.5:4b |
@@ -34,36 +43,37 @@ they are not ongoing task lists.
 | 10 | [Answer provenance](phase-10-ordinary-answer-provenance.md) | Complete |
 | 11 | [File explorer](phase-11-native-file-explorer.md) | Complete |
 | 12 | [Navigation](phase-12-sidebar-navigation.md) | Complete |
-| 13 | [Responses extensions](phase-13-responses-multimodal-input.md) | 13B–13F complete; 13A proof open |
+| 13 | [Responses extensions](phase-13-responses-multimodal-input.md) | Complete |
 | 14 | [Bots and tokens](phase-14-bot-accounts-and-token-lifetimes.md) | Complete |
 | 15 | [Composer and Projects](phase-15-composer-and-projects.md) | Complete |
 | 16 | [Document tooling boundary](phase-16-native-document-tools.md) | Retired; Hermes uses its existing stack |
-| 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning controls built |
+| 17 | [Operations and API improvements](phase-17-operations-and-api.md) | Monitoring complete; reasoning built; further bot work deferred |
+| 18 | [Admin controls and project presentation](phase-18-admin-and-project-presentation.md) | 18A built and verified locally; browser acceptance pending |
 
-## Remaining order
+## Remaining work
 
-1. Accept the built reasoning controls with the targeted API check, then
-   diagnose actual retry/quota failures only where evidence identifies a gap.
-2. Close the small 13A inline-image proof when the user runs its laptop check.
-3. Diagnose Tailscale from laptop route through Tower firewall/published port
-   before editing configuration. Use the working LAN/WARP address meanwhile.
-4. Read existing Kimi K3 panel and DeepSeek capability evidence. Request only
-   an observation needed for a model decision; keep Kimi first in cloud panels
-   and the current router. Update the model ledger when something is measured.
-5. Optional required tools/catalog expansion follows only for a caller with a
-   concrete Responses adoption benefit. Scope is in Phase 17.
+1. Deploy 18A and complete its visual acceptance.
+2. Build automatic skill selection for English file questions (3D), using the
+   accepted explicit skills and existing rules/router foundation. Preserve an
+   abstain default, tool policy, explicit selection precedence, and ordinary chat.
+
+Domain cleanup and operational evidence/traffic followups are closed by user
+confirmation. Tailscale, 17D, and further Hermes changes stay deferred. 17C is
+only a future diagnostic note for an actual reported failure.
 
 ## Standing decisions
 
 - Hermes keeps its working Chat Completions adapter: Kimi K3 primary, GLM 5.3
-  fallback. The GPT bot is outside this work. No forced protocol migration.
+  fallback. The GPT bot is outside this work. Bot API enhancements require
+  a concrete benefit and explicit user direction before resuming parked work.
 - Saved Responses/continuation already exist. They reduce client payload and
   history bookkeeping; Audrey still sends full retained context to the model.
   They do not establish input-token or billing savings.
 - Hermes executes and approves its tools. Audrey validates model requests;
   required tool selection would not authorize execution.
-- Further automatic-selection research and non-English input work are parked.
-  Historical eval artifacts remain evidence, not new acceptance requirements.
+- Automatic skill selection for English requests is queued after 18A.
+  Non-English input work is out of scope. Historical eval artifacts remain
+  evidence; they are not fresh acceptance data after tuning.
 - Background generation, webhooks, Conversations API, historical imports,
   broader media analysis, and model/config experiments require a real need.
 - Document/spreadsheet authoring belongs to the existing Hermes Bot Tools MCP,
@@ -93,7 +103,7 @@ the slice; its handoff must state which rows apply.
 
 Backend/API clients use `http://192.168.1.11:8000`. Browser testing uses
 `https://ai.builtryte.xyz`. Tower's browser origin `127.0.0.1:8090` is private
-loopback, not a laptop address. Tailscale `100.113.157.98:8000` remains unverified.
+loopback, not a laptop address. Tailscale repair is deferred; use the working LAN/WARP route until the user asks to revisit it.
 
 ## Testing handoffs
 

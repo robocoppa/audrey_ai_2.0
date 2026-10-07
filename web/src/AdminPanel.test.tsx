@@ -70,11 +70,8 @@ describe("AdminPanel", () => {
             groups: patch.groups,
           });
         }
-        if (path === "/api/admin/models/direct%2Fqwen3.8-27b") {
-          const patch = JSON.parse(String(request?.body)) as {
-            enabled: boolean;
-            audience: string;
-          };
+        if (path === "/api/admin/model-profiles/direct%2Fqwen3.8-27b") {
+          const patch = JSON.parse(String(request?.body));
           return jsonResponse({ ...DIRECT_MODEL, ...patch, policy_overridden: true });
         }
         if (path === "/api/admin/model-policies/direct%2Fqwen3.8-27b") {
@@ -129,13 +126,17 @@ describe("AdminPanel", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: /Models/u }));
     expect(screen.getByText("Live Ollama inventory")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Enabled" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Disabled" })).toBeVisible());
+    fireEvent.click(screen.getByRole("button", { name: "Model access for Qwen 3.8 27B" }));
+    expect(screen.getByRole("checkbox", { name: /Administrators/u })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /Administrators/u })).toBeDisabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Users" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save access" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Model access for Qwen 3.8 27B" })).toHaveTextContent("Users"));
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/admin/models/direct%2Fqwen3.8-27b",
+      "/api/admin/model-profiles/direct%2Fqwen3.8-27b",
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({ enabled: false, audience: "admins" }),
+        body: JSON.stringify({ visibility: "public", roles: ["users"], display_name: "Qwen 3.8 27B" }),
       }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Reset default" }));
@@ -211,15 +212,16 @@ describe("AdminPanel", () => {
     await waitFor(() => expect(screen.getByText("Researchers")).toBeVisible());
 
     fireEvent.click(screen.getByRole("tab", { name: /Models/u }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Visibility" }), {
-      target: { value: "public" },
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Model access for Qwen 3.8 27B" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Users" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Researchers" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save access" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/admin/model-profiles/direct%2Fqwen3.8-27b",
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({
-          visibility: "public", roles: ["users"], display_name: "Qwen 3.8 27B",
+          visibility: "public", roles: ["users", "researchers"], display_name: "Qwen 3.8 27B",
         }),
       }),
     ));
@@ -227,7 +229,6 @@ describe("AdminPanel", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Display name" }), {
       target: { value: "Research Qwen" },
     });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Researchers" }));
     fireEvent.click(screen.getByRole("button", { name: "Save model" }));
     await waitFor(() => expect(screen.getByText("Research Qwen")).toBeVisible());
     expect(fetchMock).toHaveBeenCalledWith(
@@ -264,8 +265,7 @@ describe("AdminPanel", () => {
     render(<AdminPanel currentUserId="usr_admin" onChanged={changed} onClose={vi.fn()} />);
     fireEvent.click(await screen.findByRole("tab", { name: /Models/u }));
 
-    expect(screen.getByRole("button", { name: "Move Qwen 3.8 27B up" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Move Qwen 3.8 27B down" }));
+    fireEvent.keyDown(screen.getByRole("button", { name: "Reorder Qwen 3.8 27B" }), { key: "ArrowDown" });
     await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
     expect(fetchMock).toHaveBeenCalledWith("/api/admin/model-order", expect.objectContaining({
       method: "PUT",
@@ -280,7 +280,56 @@ describe("AdminPanel", () => {
     fireEvent.change(screen.getByRole("searchbox", { name: "Find a model" }), {
       target: { value: "Other" },
     });
-    expect(screen.getByRole("button", { name: "Move Other down" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reorder Other" })).toBeDisabled();
+  });
+
+
+  it("saves a pointer drop once and cancels role drafts on outside click or Escape", async () => {
+    const second = { ...DIRECT_MODEL, id: "direct/second", label: "Second", concrete_model: "second" };
+    const changed = vi.fn();
+    const fetchMock = vi.fn().mockImplementation(async (path: string) => {
+      if (path === "/api/admin/users") return jsonResponse({ items: [] });
+      if (path === "/api/admin/roles") return jsonResponse({ items: [
+        { id: "users", name: "Users", description: "", system: true, user_count: 0 },
+      ] });
+      if (path === "/api/admin/models") return jsonResponse({ items: [DIRECT_MODEL, second], source: "ollama", warning: "" });
+      if (path === "/api/admin/model-order") return jsonResponse({ model_ids: [second.id, DIRECT_MODEL.id] });
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("PointerEvent", MouseEvent);
+    render(<AdminPanel currentUserId="usr_admin" onChanged={changed} onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Models/u }));
+    const handle = screen.getByRole("button", { name: "Reorder Second" });
+    Object.defineProperties(handle, {
+      setPointerCapture: { value: vi.fn() },
+      hasPointerCapture: { value: () => false },
+    });
+    const target = document.querySelector<HTMLElement>(".admin-model-record")!;
+    const oldElementFromPoint = document.elementFromPoint;
+    document.elementFromPoint = vi.fn().mockReturnValue(target);
+    try {
+      fireEvent.pointerDown(handle, { button: 0, clientX: 10, clientY: 100 });
+      fireEvent.pointerMove(handle, { clientX: 10, clientY: -10 });
+      fireEvent.pointerUp(handle, { clientX: 10, clientY: -10 });
+      await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+      expect(fetchMock).toHaveBeenCalledWith("/api/admin/model-order", expect.objectContaining({
+        method: "PUT", body: JSON.stringify({ kind: "direct", model_ids: [second.id, DIRECT_MODEL.id] }),
+      }));
+      const trigger = screen.getByRole("button", { name: "Model access for Second" });
+      fireEvent.click(trigger);
+      fireEvent.click(screen.getByRole("checkbox", { name: "Users" }));
+      fireEvent.pointerDown(screen.getByRole("heading", { name: "Models" }));
+      expect(screen.queryByRole("checkbox", { name: "Users" })).not.toBeInTheDocument();
+      fireEvent.click(trigger);
+      expect(screen.getByRole("checkbox", { name: "Users" })).not.toBeChecked();
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(trigger).toHaveFocus();
+      expect(screen.queryByRole("checkbox", { name: "Users" })).not.toBeInTheDocument();
+      expect(fetchMock.mock.calls.filter(([path]) => String(path).includes("model-profiles"))).toHaveLength(0);
+    } finally {
+      document.elementFromPoint = oldElementFromPoint;
+    }
   });
 
   it("confirms permanent account deletion and shows durable progress", async () => {

@@ -19,3 +19,10 @@ Every use rechecks the digest, current owner status, scope, and revocation state
 ## Administration freshness
 
 Each Admin Panel opening fetches users, models, and roles with `cache: no-store`, showing newly submitted pending accounts without a whole-page reload.
+
+
+## Model access presentation
+
+[18A](phase-18-admin-and-project-presentation.md) makes role availability directly
+editable on model rows and aligns the account controls. Existing access groups,
+administrator authority, and compatibility model policies retain their contracts.

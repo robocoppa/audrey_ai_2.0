@@ -1237,3 +1237,73 @@ async def test_require_admin_principal_rejects_non_admin():
     with pytest.raises(HTTPException) as exc:
         await require_admin_principal(principal=user)
     assert exc.value.status_code == 403
+
+
+def test_role_access_save_can_reactivate_without_broadening_existing_audience(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    admin = asyncio.run(_resolve(store, subject="role-admin", email="admin@example.com", role="admin"))
+    member = asyncio.run(_resolve(store, subject="role-member", email="member@example.com"))
+    model_id = f"direct/{_DIRECT_MODEL}"
+    asyncio.run(store.set_model_access_policy(
+        actor_user_id=admin.user_id, model_id=model_id, enabled=False, audience="bots",
+    ))
+    app = FastAPI()
+    app.state.application_store = store
+    app.state.cfg = _cfg()
+    app.state.ollama = _OllamaInventory(_DIRECT_MODEL)
+    app.include_router(router)
+    app.dependency_overrides[require_admin_principal] = lambda: admin
+    app.dependency_overrides[require_principal] = lambda: member
+    try:
+        with TestClient(app) as client:
+            base = {"visibility": "public", "roles": ["users"], "display_name": "Role Qwen"}
+            # Name/profile-only callers must retain the old disabled state.
+            profile = client.patch(f"/api/admin/model-profiles/{model_id}", json=base)
+            assert profile.status_code == 200
+            assert profile.json()["enabled"] is False
+            assert model_id not in {item["id"] for item in client.get("/api/models").json()["items"]}
+            denied = client.patch(f"/api/admin/model-profiles/{model_id}", json={
+                **base, "roles": ["missing-role"], "enabled": True,
+            })
+            assert denied.status_code == 409
+            assert asyncio.run(store.list_model_access_policies())[0].enabled is False
+            active = client.patch(f"/api/admin/model-profiles/{model_id}", json={**base, "enabled": True})
+            assert active.status_code == 200
+            assert active.json()["enabled"] is True
+            assert active.json()["audience"] == "bots"
+            assert model_id in {item["id"] for item in client.get("/api/models").json()["items"]}
+            restricted = client.patch(f"/api/admin/model-profiles/{model_id}", json={
+                "visibility": "private", "roles": [], "display_name": "Role Qwen",
+            })
+            assert restricted.status_code == 200
+            assert model_id not in {item["id"] for item in client.get("/api/models").json()["items"]}
+            app.dependency_overrides[require_principal] = lambda: admin
+            assert model_id in {item["id"] for item in client.get("/api/models").json()["items"]}
+    finally:
+        store.close()
+
+
+def test_role_access_activation_rolls_back_when_profile_storage_fails(tmp_path):
+    store = ApplicationStore(tmp_path / "app.sqlite")
+    admin = asyncio.run(_resolve(store, subject="atomic-admin", email="admin@example.com", role="admin"))
+    model_id = f"direct/{_DIRECT_MODEL}"
+    asyncio.run(store.set_model_access_policy(
+        actor_user_id=admin.user_id, model_id=model_id, enabled=False, audience="testers",
+    ))
+    # Simulate a failure after activation has been written but before commit.
+    store._conn.execute(
+        "CREATE TRIGGER reject_test_profile BEFORE INSERT ON model_publication_profiles "
+        "BEGIN SELECT RAISE(ABORT, 'test profile write failed'); END"
+    )
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match="test profile write failed"):
+            asyncio.run(store.set_model_publication_profile(
+                actor_user_id=admin.user_id, model_id=model_id,
+                visibility="public", roles=["users"], display_name="Qwen", enabled=True,
+            ))
+        policy = asyncio.run(store.list_model_access_policies())[0]
+        assert policy.enabled is False
+        assert policy.audience == "testers"
+        assert asyncio.run(store.list_model_publication_profiles()) == ()
+    finally:
+        store.close()

@@ -539,7 +539,7 @@ export function updateAdminModel(
 
 export function updateAdminModelProfile(
   modelId: string,
-  profile: { visibility: "public" | "private"; roles: AccessGroup[]; display_name: string },
+  profile: { visibility: "public" | "private"; roles: AccessGroup[]; display_name: string; enabled?: boolean },
 ): Promise<AdminModel> {
   return apiJson<AdminModel>(`/api/admin/model-profiles/${encodeURIComponent(modelId)}`, {
     method: "PATCH",

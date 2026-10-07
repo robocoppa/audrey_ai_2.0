@@ -101,7 +101,7 @@ describe("native file uploads", () => {
       }),
       withCredentials: false,
     };
-    const xhr = vi.fn(() => request);
+    const xhr = vi.fn(function () { return request; });
     vi.stubGlobal("XMLHttpRequest", xhr);
     const progress: number[] = [];
 

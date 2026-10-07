@@ -163,7 +163,7 @@ test("holds a valid new Access identity for Audrey approval", async ({ page }) =
   expect(requests).toEqual(["/api/me"]);
 });
 
-test("approves an account and changes a model policy in the admin panel", async ({ page }) => {
+test("aligns admin controls, saves role access, and drags models into order", async ({ page }) => {
   let pending = {
     ...browserUser(),
     id: "usr_pending",
@@ -199,6 +199,9 @@ test("approves an account and changes a model policy in the admin panel", async 
   let includeFreshSignup = false;
   let adminUserLoads = 0;
   const modelPatches: unknown[] = [];
+  const secondModel = { ...directModel, id: "direct/second:cloud", label: "Second", concrete_model: "second:cloud", policy_overridden: true };
+  let orderedModels = [directModel, secondModel];
+  const modelOrders: unknown[] = [];
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -210,6 +213,14 @@ test("approves an account and changes a model policy in the admin panel", async 
         role: "admin",
         groups: ["admins", "users"],
       });
+      return;
+    }
+    if (url.pathname === "/api/skills") {
+      await json(route, { enabled: true, status: "ready", items: browserSkills() });
+      return;
+    }
+    if (url.pathname === "/api/capabilities") {
+      await json(route, { status: "ready", generated_at: "2026-10-07T00:00:00Z", chat: { status: "available" }, tools: { status: "available" }, knowledge: { status: "available" }, skills: { status: "available" } });
       return;
     }
     if (url.pathname === "/api/me/preferences") {
@@ -227,7 +238,10 @@ test("approves an account and changes a model policy in the admin panel", async 
     if (url.pathname === "/api/admin/users") {
       adminUserLoads += 1;
       await json(route, {
-        items: includeFreshSignup ? [pending, freshSignup] : [pending],
+        items: [
+          { ...pending, id: "usr_admin", display_name: "Owner", email: "owner@example.com", role: "admin", status: "active", groups: ["admins", "users"] },
+          pending, ...(includeFreshSignup ? [freshSignup] : []),
+        ],
       });
       return;
     }
@@ -237,7 +251,7 @@ test("approves an account and changes a model policy in the admin panel", async 
       return;
     }
     if (url.pathname === "/api/admin/models") {
-      await json(route, { items: [directModel], source: "ollama", warning: "" });
+      await json(route, { items: orderedModels, source: "ollama", warning: "" });
       return;
     }
     if (url.pathname === "/api/admin/roles") {
@@ -249,14 +263,27 @@ test("approves an account and changes a model policy in the admin panel", async 
       ] });
       return;
     }
-    if (url.pathname === "/api/admin/models/direct%2Fqwen3.8%3Alatest") {
+    if (url.pathname === "/api/admin/model-profiles/direct%2Fqwen3.8%3Alatest") {
       const modelPatch = request.postDataJSON() as {
-        enabled: boolean;
-        audience: string;
+        visibility: string;
+        roles: string[];
+        display_name: string;
       };
       modelPatches.push(modelPatch);
-      directModel = { ...directModel, ...modelPatch };
+      directModel = { ...directModel, ...modelPatch, policy_overridden: true };
+      orderedModels = orderedModels.map((model) => model.id === directModel.id ? directModel : model);
       await json(route, directModel);
+      return;
+    }
+    if (url.pathname === "/api/admin/model-order") {
+      const order = request.postDataJSON() as { model_ids: string[] };
+      modelOrders.push(order);
+      orderedModels = order.model_ids.map((id) => orderedModels.find((model) => model.id === id)!);
+      await json(route, order);
+      return;
+    }
+    if (url.pathname === "/api/projects") {
+      await json(route, { items: [], next_cursor: null });
       return;
     }
     if (url.pathname === "/api/conversations" && request.method() === "GET") {
@@ -283,7 +310,7 @@ test("approves an account and changes a model policy in the admin panel", async 
   await expect(page.locator("#admin-accounts-panel .admin-record-list")).toHaveCSS("flex-direction", "column");
 
   const account = page.locator(".admin-record").filter({ hasText: "Pending Person" });
-  await expect.poll(() => account.evaluate((row) => row.getBoundingClientRect().height)).toBeLessThan(70);
+  await expect.poll(() => account.evaluate((row) => row.getBoundingClientRect().height)).toBeLessThan(110);
   await account.getByRole("button", { name: "Approve as user" }).click();
   await expect(account.getByText("active")).toBeVisible();
   await expect.poll(() => account.evaluate((row) => row.getBoundingClientRect().height)).toBeLessThan(70);
@@ -293,20 +320,51 @@ test("approves an account and changes a model policy in the admin panel", async 
   await expect(page.locator("#admin-models-panel .admin-record-list")).toHaveCSS("flex-direction", "column");
   const model = page.locator(".admin-model-record").filter({ hasText: "Qwen 3.8" });
   await expect.poll(() => model.evaluate((row) => row.getBoundingClientRect().height)).toBeLessThan(70);
-  await model.getByRole("button", { name: "Enabled" }).click();
-  await expect(model.getByRole("button", { name: "Disabled" })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Audrey model" })).toHaveValue("auto");
-  expect(modelPatches).toEqual([{ enabled: false, audience: "testers" }]);
+  const owner = page.locator(".admin-user-record").filter({ hasText: "Owner" });
+  // The owner has no delete action, but the role/status columns retain their position.
+  await page.getByRole("tab", { name: /Accounts/u }).click();
+  expect((await account.locator("select").boundingBox())!.x).toBe((await owner.locator("select").boundingBox())!.x);
+  await page.getByRole("tab", { name: /Models/u }).click();
+  const access = model.getByRole("button", { name: "Model access for Qwen 3.8" });
+  await access.click();
+  await page.getByRole("checkbox", { name: "Testers" }).uncheck();
+  await page.getByRole("checkbox", { name: "Bots" }).check();
+  await page.getByRole("button", { name: "Save access" }).click();
+  await expect(access).toHaveText(/Bots/u);
+  expect(modelPatches).toEqual([{ visibility: "public", roles: ["bots"], display_name: "Qwen 3.8" }]);
+  const second = page.locator(".admin-model-record").filter({ hasText: "Second" });
+  expect((await access.boundingBox())!.x).toBe((await second.getByRole("button", { name: "Model access for Second" }).boundingBox())!.x);
+  const grip = await second.getByRole("button", { name: "Reorder Second" }).boundingBox();
+  const target = await model.boundingBox();
+  await page.mouse.move(grip!.x + grip!.width / 2, grip!.y + grip!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(target!.x + 10, target!.y + 8, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.locator(".admin-model-record").first()).toContainText("Second");
+  expect(modelOrders).toEqual([{ kind: "direct", model_ids: [secondModel.id, directModel.id] }]);
+  await access.click();
+  await page.getByRole("heading", { name: "Models" }).click();
+  await expect(page.getByRole("group", { name: "Available roles for Qwen 3.8" })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Close administration" }).click();
   includeFreshSignup = true;
   await page.getByRole("button", { name: "Admin Panel" }).click();
   await expect(page.getByText("Fresh Signup")).toBeVisible();
   expect(adminUserLoads).toBe(2);
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.getByRole("tab", { name: /Models/u }).click();
+  await page.getByRole("button", { name: "Model access for Qwen 3.8" }).click();
+  const roleMenu = page.getByRole("group", { name: "Available roles for Qwen 3.8" });
+  await expect(roleMenu).toBeVisible();
+  const roleMenuBounds = await roleMenu.boundingBox();
+  expect(roleMenuBounds!.x).toBeGreaterThanOrEqual(0);
+  expect(roleMenuBounds!.x + roleMenuBounds!.width).toBeLessThanOrEqual(360);
+  expect(roleMenuBounds!.y).toBeGreaterThanOrEqual(0);
+  expect(roleMenuBounds!.y + roleMenuBounds!.height).toBeLessThanOrEqual(740);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
+  await page.keyboard.press("Escape");
+  await expect(roleMenu).toHaveCount(0);
   await page.getByRole("button", { name: "Close administration" }).click();
-  const modelPicker = page.getByRole("combobox", { name: "Audrey model" });
-  await expect(modelPicker.getByRole("option", { name: "Qwen 3.8" })).toHaveCount(0);
-  await expect(modelPicker.locator('optgroup[label="Other models — direct"]')).toHaveCount(0);
 });
 
 test("hides direct models from basic users even if the catalog contains one", async ({ page }) => {
@@ -3150,7 +3208,7 @@ test("creates and manages a personal project without losing conversations or fil
   await expect(page.getByRole("heading", { name: "Renamed launch" })).toBeVisible();
   await expect(page.getByText("Use selected project documents.")).toBeVisible();
 
-  await page.getByRole("button", { name: "Manage project files" }).click();
+  await page.getByRole("button", { name: "Choose from My Files" }).click();
   const picker = page.getByRole("dialog", { name: "Choose project files" });
   await picker.getByRole("button", { name: /operations\.md/u }).click();
   await picker.getByRole("button", { name: /support\.md/u }).click();

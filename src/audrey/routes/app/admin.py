@@ -100,6 +100,7 @@ class AdminModelProfileRequest(BaseModel):
     visibility: Literal["public", "private"]
     roles: list[str]
     display_name: str = ""
+    enabled: bool | None = None
 
 
 class AdminModelResponse(ModelResponse):
@@ -508,7 +509,8 @@ async def update_model_profile(
     inventory = await discover_models(
         request.app.state.cfg, getattr(request.app.state, "ollama", None)
     )
-    if model_id not in {model.id for model in inventory.models}:
+    model = next((item for item in inventory.models if item.id == model_id), None)
+    if model is None:
         raise HTTPException(status_code=404, detail="Model does not exist.")
     store = application_store(request)
     try:
@@ -518,6 +520,8 @@ async def update_model_profile(
             visibility=payload.visibility,
             roles=payload.roles,
             display_name=payload.display_name,
+            enabled=payload.enabled,
+            default_audience=model.audience,
         )
     except AccountAdministrationError as exc:
         raise _admin_error(exc) from exc

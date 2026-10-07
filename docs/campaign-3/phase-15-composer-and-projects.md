@@ -22,7 +22,13 @@ The sidebar has compact collapsible Projects. Project home provides instructions
 
 ## Upload and processing
 
-Project home offers **Upload to project** and **Choose from My Files**. New uploads join immediately; Pending/Processing membership survives refresh/restart. Only Ready files become grounding evidence. Visible active states refresh every five seconds; failed rows remain visible for explicit removal, while missing references are pruned.
+Project home offers **Upload file to project** and **Choose from My Files**
+with matching readable labels. Its conversations use the sidebar conversation
+row styling, including stacked title/activity and hover treatment. These 18A
+presentation changes await deployed browser acceptance; existing project behavior
+remains accepted.
+
+New uploads join immediately; Pending/Processing membership survives refresh/restart. Only Ready files become grounding evidence. Visible active states refresh every five seconds; failed rows remain visible for explicit removal, while missing references are pruned.
 
 My Files has a clearer **Add files** action and styled **Choose files** control.
 

@@ -179,9 +179,10 @@ describe("App", () => {
       "Audrey chooses the available tools when they are useful.",
     );
     const videoSkill = screen.getByRole("button", {
-      name: /Video analysis Analyze uploaded videos/u,
+      name: /Video analysis/u,
     });
     expect(videoSkill).toBeEnabled();
+    expect(videoSkill).toHaveTextContent(DEFAULT_SKILLS[0].description);
     fireEvent.click(videoSkill);
     expect(
       screen.getByRole("button", { name: "Tools and skills: Video analysis" }),
