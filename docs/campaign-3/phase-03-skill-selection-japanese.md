@@ -1,8 +1,12 @@
 # Campaign 3 Slice 3D.5 — scoped Japanese file exclusions
 
-**Status:** Laptop-complete. The full backend suite passed 4,031 tests, and the
-four-case targeted Tower check is pending. Automatic skill selection remains
-disabled. This changes the standalone evaluator's policy, not Audrey's runtime.
+**Status:** Closed as out of scope, not passed. The reported Tower check
+failed 3/4 with one ineligible model choice. The user reiterated the hard
+English-only input rule; no repair or rerun is queued. Preserve this record
+as historical evidence. The earlier laptop gate passed 4,031 tests;
+automatic runtime selection remains disabled.
+
+Current scope and execution order: [October 6 review](2026-10-06-remaining-work-review.md).
 
 ## Why this slice
 
@@ -59,7 +63,21 @@ abstention, zero model calls, errors, or false activations. This proves the
 changed guard, rather than claiming the rules' earlier undecided `none` was
 already a complete fix.
 
+## Received Tower result
+
+The [operator receipt](../../evals/results/2026-10-06-skill-selection-v4-japanese-smoke-summary.json)
+is dated `2026-10-07T03:09:11.145355+00:00`: hybrid revision 4, four
+cases, one repeat, 3/4 matches, two guarded abstentions, and two model
+calls. The mixed denied-PDF/video case returned document analysis;
+eligibility validation rejected it. One error/ineligible choice and one
+miss were reported; input/output usage was 583/22 tokens. Exit 1 and
+`status: failed` remain the correct recorded outcome. It is not a passed
+quality gate. Under the English-only rule, stop this branch.
+
 ## Targeted Tower check
+
+**Historical command — do not run again.** This non-English check is
+out of scope. The steps below describe the previous handoff only.
 
 After updating the Tower checkout, run this once **in Tower's shell**. Keep the
 shell open until its copyable JSON appears. No file upload, Audrey token, new

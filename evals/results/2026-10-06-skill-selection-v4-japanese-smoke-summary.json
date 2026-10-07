@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "status": "failed",
+  "measurement_status": "failed",
+  "created_at": "2026-10-07T03:09:11.145355+00:00",
+  "scope": "proposed synthetic labels; not production acceptance",
+  "provenance": {
+    "backend": "hybrid",
+    "model": "qwen3.5:4b",
+    "case_count": 4,
+    "repeats": 1,
+    "rules_revision": 4,
+    "case_set_sha256": "793b4b6b1152b7a6d56205e1cad375c341f5fa138d0281ae88e5294cb65496d0",
+    "automatic_selection_enabled_in_harness": false,
+    "evaluation_only": true,
+    "cold_load_controlled": false
+  },
+  "selection": {
+    "correct": 3,
+    "total": 4,
+    "correct_activations": 1,
+    "activations": 1,
+    "precision": 1.0,
+    "positives": 2,
+    "misses": 1,
+    "ordinary_false_activations": 0,
+    "ordinary_total": 2
+  },
+  "execution": {
+    "errors": 1,
+    "ineligible_choices": 1,
+    "model_called": 2,
+    "guarded": 2,
+    "model_latency_p50_seconds": 0.17034494085237384,
+    "model_latency_p95_seconds": 6.216807125136256,
+    "input_tokens": {
+      "total": 583,
+      "samples": 2,
+      "p50": 279,
+      "p95": 304
+    },
+    "output_tokens": {
+      "total": 22,
+      "samples": 2,
+      "p50": 11,
+      "p95": 11
+    }
+  },
+  "findings": [
+    {
+      "id": "japanese-denied-pdf-video-content",
+      "repeat": 1,
+      "expected": "video-analysis",
+      "selected": null,
+      "valid": false,
+      "source": "router",
+      "error": "model selected an ineligible skill",
+      "error_kind": "ineligible_choice",
+      "raw_selected": "grounded-document-analysis",
+      "terminal_abstention": false,
+      "policy_reason": null
+    }
+  ]
+}

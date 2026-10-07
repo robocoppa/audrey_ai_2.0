@@ -6,6 +6,13 @@ false activation and does not meet the proposed quality criteria. Automatic
 selection stays disabled. This slice changes only the standalone evaluation
 harness and its study documents.
 
+**Current scope update:** The user reiterated a hard English-only input
+rule. The later Japanese 3D.5 check failed and is closed as out of scope.
+Automatic-selection studies are parked until an English workflow justifies
+them. This page preserves the historical mixed-language study, not an
+instruction to repair or rerun language cases. See the
+[October 6 review](2026-10-06-remaining-work-review.md).
+
 ## Starting evidence
 
 The [3D.3 targeted Tower check](phase-03-skill-selection-terminal-results.md#received-tower-acceptance--october-6-2026)

@@ -1,7 +1,7 @@
 # Campaign 3 Phase 12 - sidebar navigation
 
-**Status:** Slice 12A is laptop-complete with the requested My Files
-correction and awaits native browser acceptance.
+**Status:** Slice 12A is complete and live-accepted. The user confirmed all
+navigation checks passed on October 7, 2026.
 
 ## User direction
 
@@ -88,26 +88,9 @@ following Responses slice passed the full 3,106-test hermetic suite with one
 existing FastAPI deprecation warning. The diff check and changed-file Ruff
 pass.
 
-## Native browser gate
+## Native browser result
 
-1. Confirm the sidebar starts with one full-width **New conversation** button.
-   Confirm Workspace and the username no longer appear in the sidebar.
-2. Click **New conversation**, then click it again without sending anything.
-   Confirm only the latest empty draft remains and no empty item is added to
-   history. Send a short message and confirm the conversation appears once.
-3. Search history and switch between Active and Archived. With enough history
-   to scroll, confirm the sidebar list scrolls normally.
-4. Confirm **My Files** appears in the top bar with a vertical separator and
-   clear space before the username, Admin Panel, and Log out. Open it and
-   confirm the existing compact Files dialog can be closed normally.
-5. Use keyboard Tab to reach New conversation and My Files; confirm both have a
-   visible focus state and activate with Enter.
-6. Narrow the browser to a phone-sized width. Confirm My Files remains visible
-   in the wrapped top bar and the sidebar search, views, and horizontal
-   conversation list remain reachable. Reopen a conversation and send a
-   message.
-
-## Completion gate
-
-Close Slice 12A after the native browser gate passes. Phase 13 Slice 13A can be
-deployed and tested in the same build.
+**Passed, 2026-10-07.** The user confirmed all navigation checks passed,
+including the sidebar/header placement, My Files launch, keyboard and
+narrow-screen behavior, empty drafts, and history. Slice 12A is closed;
+these checks must not be requested again for unchanged behavior.

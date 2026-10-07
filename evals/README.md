@@ -367,10 +367,11 @@ on Tower with `FOREGROUND=1` and `--summary`. That first study is now completed
 with findings: 69/72 labels, 36/39 precision, zero misses/errors, and one repeated
 ordinary false activation. Its terminal receipts and operator-copied full
 report are verified on the laptop; do not repeat it unchanged.
-[Slice 3D.5](../docs/campaign-3/phase-03-skill-selection-japanese.md) repairs
-the exposed Japanese exclusion. Use its four-case foreground check for
-revision 4; the historical revision-3 plan now rejects source drift.
-No PAT, upload, or rebuild is needed for these direct checks.
+[Slice 3D.5](../docs/campaign-3/phase-03-skill-selection-japanese.md) then
+failed 3/4 and is closed as out of scope under the hard English-only rule.
+Do not rerun or tune non-English cases. Automatic-selection studies are
+parked until an English workflow and agreed criteria justify them; the
+historical revision-3 plan remains invalid for the changed source.
 
 The compact label status stays distinct from nested `qualification`. Human
 attestations default false; a correct, adequate measurement may exit zero while

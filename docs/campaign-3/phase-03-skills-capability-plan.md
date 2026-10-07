@@ -523,8 +523,11 @@ remains disabled. The full report is now verified on the laptop.
 [Slice 3D.5](phase-03-skill-selection-japanese.md) repairs the exposed
 Japanese exclusion with bounded scoped guards; genuine file questions
 remain eligible for the retained router. Its laptop gate passed 4,031
-tests and its four-case Tower regression check is pending. The 3C answer
-comparison stays passed and does not measure selector precision or false activation.
+tests. Its Tower check failed 3/4 with an ineligible model choice; the
+Japanese branch is now closed as out of scope under the hard English-only
+rule. Do not rerun or tune it. Automatic selection is parked until a
+concrete English workflow justifies the study. The 3C answer comparison
+stays passed and does not measure selector precision or false activation.
 
 Campaign 3 Phase 6's System One task-router comparison is settled; no candidate
 cleared its gate, and the retained router is unchanged. A future candidate may

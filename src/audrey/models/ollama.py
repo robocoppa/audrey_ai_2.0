@@ -9,6 +9,7 @@ All public methods are async — do NOT call them from sync code.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -19,7 +20,7 @@ from typing import Any
 
 import httpx
 
-from audrey.metrics import model_seconds
+from audrey.metrics import model_seconds, model_tokens_total, model_usage_observations_total
 
 log = logging.getLogger(__name__)
 
@@ -223,6 +224,46 @@ def _to_ollama_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return _merge_leading_system(out)
 
 
+class _GenerationObservation:
+    """Record one provider terminal, independent of later consumer cleanup."""
+
+    def __init__(self, model: str) -> None:
+        self.model = model
+        self.started_at = time.perf_counter()
+        self.recorded = False
+
+    def finish(self, outcome: str, body: dict[str, Any] | None = None) -> None:
+        if self.recorded:
+            return
+        self.recorded = True
+        model_seconds.labels(model=self.model, outcome=outcome).observe(
+            time.perf_counter() - self.started_at,
+        )
+        if body is None:
+            return
+        fields = (
+            ("input", "prompt_eval_count"),
+            ("output", "eval_count"),
+            ("cached_input", "prompt_eval_cached_count"),
+        )
+        input_count = body.get("prompt_eval_count")
+        for kind, field in fields:
+            count = body.get(field)
+            # JSON integers only: booleans, coerced strings, and missing usage
+            # cannot become measured zeroes or overflow a Prometheus value.
+            if type(count) is not int or not 0 <= count <= 2**63 - 1:
+                continue
+            if (
+                kind == "cached_input"
+                and type(input_count) is int
+                and 0 <= input_count <= 2**63 - 1
+                and count > input_count
+            ):
+                continue
+            model_tokens_total.labels(model=self.model, kind=kind).inc(count)
+            model_usage_observations_total.labels(model=self.model, kind=kind).inc()
+
+
 class OllamaClient:
     """Thin async wrapper over the Ollama HTTP API.
 
@@ -389,27 +430,28 @@ class OllamaClient:
             payload["format"] = format
         if think is not None:
             payload["think"] = think
-        t0 = time.perf_counter()
+        observation = _GenerationObservation(model)
         try:
-            r = await self._client.post(
-                "/api/chat",
-                json=payload,
-                timeout=httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT,
-            )
-        except httpx.HTTPError as e:
-            model_seconds.labels(model=model, outcome="error").observe(time.perf_counter() - t0)
-            # Timeouts, connection errors, etc. Callers catch OllamaError —
-            # if we let httpx.* escape, failures bubble up as 500s instead
-            # of being retried/skipped by router fallbacks.
-            raise OllamaError(f"POST /api/chat transport error: {type(e).__name__}: {e}") from e
-        try:
+            try:
+                r = await self._client.post(
+                    "/api/chat",
+                    json=payload,
+                    timeout=httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT,
+                )
+            except httpx.HTTPError as e:
+                # Preserve the exception boundary used by router fallbacks.
+                raise OllamaError(f"POST /api/chat transport error: {type(e).__name__}: {e}") from e
             self._raise_for_status(r, "/api/chat")
             body = self._json_object(r, "/api/chat")
-        except OllamaError:
-            model_seconds.labels(model=model, outcome="error").observe(time.perf_counter() - t0)
+            confirmed = body.get("done") is True
+            outcome = "ok" if confirmed and not body.get("error") else "error"
+            observation.finish(outcome, body if confirmed else None)
+            return body
+        except asyncio.CancelledError:
+            observation.finish("cancelled")
             raise
-        model_seconds.labels(model=model, outcome="ok").observe(time.perf_counter() - t0)
-        return body
+        finally:
+            observation.finish("error")
 
     async def chat_stream(
         self,
@@ -459,26 +501,41 @@ class OllamaClient:
         if think is not None:
             payload["think"] = think
         timeout = httpx.Timeout(timeout_s) if timeout_s else httpx.USE_CLIENT_DEFAULT
-        t0 = time.perf_counter()
-        outcome = "ok"
+        observation = _GenerationObservation(model)
         try:
             async with self._client.stream("POST", "/api/chat", json=payload, timeout=timeout) as r:
                 if r.status_code >= 400:
+                    observation.finish("error")
                     body = await r.aread()
-                    outcome = "error"
                     raise OllamaError(f"POST /api/chat -> {r.status_code}: {body.decode('utf-8', 'replace')}")
                 async for line in r.aiter_lines():
                     if not line:
                         continue
                     try:
-                        yield json.loads(line)
+                        chunk = json.loads(line)
                     except json.JSONDecodeError:
                         log.warning("Ollama returned non-JSON line: %r", line[:120])
+                        continue
+                    if isinstance(chunk, dict):
+                        if chunk.get("error"):
+                            observation.finish("error", chunk if chunk.get("done") is True else None)
+                        elif chunk.get("done") is True:
+                            # A provider terminal is already complete when it
+                            # reaches the consumer, even if the consumer closes
+                            # this iterator immediately afterward. Length limits
+                            # are confirmed provider completions, not telemetry
+                            # errors; higher layers own answer truncation status.
+                            observation.finish("ok", chunk)
+                    yield chunk
+        except (asyncio.CancelledError, GeneratorExit):
+            observation.finish("cancelled")
+            raise
         except httpx.HTTPError as e:
-            outcome = "error"
             raise OllamaError(f"POST /api/chat (stream) transport error: {type(e).__name__}: {e}") from e
         finally:
-            model_seconds.labels(model=model, outcome=outcome).observe(time.perf_counter() - t0)
+            # EOF without a terminal, transport failure, or an unhandled
+            # exception cannot become a successful model call.
+            observation.finish("error")
 
     # ─── Embeddings ─────────────────────────────────────────────────────
 

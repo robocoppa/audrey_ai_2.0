@@ -95,6 +95,16 @@ cache benefit would need separate evidence. OpenAI also explains that chaining
 with `previous_response_id` still accounts for prior input tokens in its
 [conversation-state documentation](https://developers.openai.com/api/docs/guides/conversation-state).
 
+## October 6 roadmap assessment
+
+The bot requested conversation caching, model usage/latency visibility,
+reasoning effort, required tools, larger limits, webhooks, quota headers,
+and error correlation. The [review and appended API slices](../campaign-3/2026-10-06-remaining-work-review.md#assessment-of-the-hermes-requests)
+distinguish already implemented features from useful future work.
+13F already supplies storage/continuation without reducing model input
+tokens. Streamed failures already include `response.id`. Keep the current
+Chat connection; any optional adoption must fit the actual workload.
+
 ## Follow-up message to forward
 
 > Keep your current Chat Completions connection, with Kimi K3 primary and GLM

@@ -102,6 +102,38 @@ the next reload anyway (since `allowUiUpdates: false`). To capture
 a UI experiment, use the UI's **JSON Model** view, copy the JSON
 back into the file, and commit.
 
+## Model generation metrics
+
+The backend exports these through its existing `/metrics` route:
+
+| Metric | What it measures |
+|---|---|
+| `audrey_model_seconds` | One latency observation per provider call, with `model` and `outcome` labels |
+| `audrey_model_tokens_total` | Sum of provider-reported counts, with `model` and `kind` labels |
+| `audrey_model_usage_observations_total` | Number of calls reporting a valid count for each usage kind |
+
+Outcomes are `ok` (confirmed provider completion), `error` (failure or an
+unconfirmed end), and `cancelled` (interrupted before a terminal). A length-limit
+terminal is a completed provider call; the API separately reports answer
+truncation. Once a terminal is observed, delayed consumer cleanup changes
+neither its latency nor its outcome. Malformed stream lines retain their
+existing warning/skip behavior; a later valid terminal can still complete.
+The cloud error-rate alert excludes cancellations from its denominator.
+
+Usage kinds are `input`, `output`, and `cached_input`. Only valid native terminal
+fields populate them; missing usage does not become zero. A reported zero
+increments the observation count, so it is distinguishable from unknown data.
+Provider output counts can include reasoning. Cached input is a subset
+observation, not additional input or a measurement of billing savings. These
+counters do not estimate cost. Streaming records a terminal only once.
+
+Normal traffic populates the metrics after deploying the backend. For example,
+`sum by (model, outcome) (rate(audrey_model_seconds_count[5m]))` gives provider
+call rates, and `sum by (model, kind) (rate(audrey_model_tokens_total[5m]))` gives
+observed token rates. Use observation counts when deciding whether a model's
+usage data is available. Metric kind labels are fixed; prompts, account IDs,
+and emails are not labels.
+
 ## Adding or editing alert rules
 
 1. Edit `prometheus-rules/audrey.yml` in the repo.

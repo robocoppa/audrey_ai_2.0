@@ -1317,6 +1317,25 @@ or latency measurement and do not change the original study result.
 The measured fixture is now exposed regression data. Preserve the result;
 do not repeat it unchanged or tune labels to the outputs.
 
+### Revision-4 Japanese regression check — closed out of scope (October 6, 2026)
+
+The operator reported a four-case hybrid regression run, timestamp
+`2026-10-07T03:09:11.145355+00:00`: 3/4 matches, two guards, two model calls,
+and one rejected ineligible choice. For the separate video request with an
+excluded PDF, Qwen returned `grounded-document-analysis`; the evaluator rejected
+it. That is an error/miss, not an accepted activation or a successful gate.
+Input/output usage was 583/22 tokens; model latency was 0.170345/6.216807 seconds
+at median/nearest-rank p95 with only two samples and uncontrolled loading.
+The [private terminal receipt](results/2026-10-06-skill-selection-v4-japanese-smoke-summary.json)
+preserves the exact supplied result.
+
+The user reiterated a hard English-only input scope. This branch is closed
+as out of scope without relabeling, a rerun, or another language repair.
+Neither this check nor the earlier mixed-language aggregates establish English
+production acceptance. Automatic selection remains disabled and further studies
+are parked until a concrete English workflow warrants them. This adds no
+production model recommendation or runtime-selection change.
+
 ### Kimi K3 and GLM 5.3 client protocol assessment (received October 6, 2026)
 
 **Source and scope.** Claudette, a Hermes bot, supplied

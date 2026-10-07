@@ -1,6 +1,6 @@
 # Campaign 3 Phase 14 - bot accounts and token lifetimes
 
-**Status:** Slice 14A is laptop-complete and awaits native acceptance.
+**Status:** Slice 14A is complete and live-accepted on October 7, 2026.
 
 ## Goal
 
@@ -72,27 +72,13 @@ compilation and changed-file Ruff pass. The full hermetic backend suite passes
 clean. The laptop has no Node runtime, so TypeScript, Vitest, build, and
 Playwright remain part of the `audrey-ui` build and native browser gate.
 
-## Native acceptance gate
+## Native acceptance result
 
-1. Rebuild `audrey` and `audrey-ui`. Confirm startup migrates the application
-   database to schema 18 and both services become ready.
-2. Open **Admin Panel -> Accounts**, close it, and complete a sign-in with a new
-   email in another browser profile. Reopen the panel without reloading Audrey.
-   Confirm the new Pending account appears.
-3. Click **Approve as bot**. Confirm the account becomes Active and its Role
-   control says **Bot**. Change it to User and back to Bot once.
-4. In **Models**, choose one disposable direct model, set it Public, open
-   **Edit...**, grant only **Bots**, and save. Confirm an ordinary account cannot
-   see that direct model while the bot account can.
-5. Sign in as the bot, open account settings, create a personal token with a
-   lifetime of `0`, and confirm its Expires value is **Never**. Use that token
-   against `http://192.168.1.11:8000/v1/models`; confirm the bot-assigned model
-   is present.
-6. Revoke the token and confirm the same authenticated request returns HTTP 401.
-7. Restore the model's original visibility and roles. Delete the disposable bot
-   account or restore its original role.
+**Passed, 2026-10-07.** The user confirmed fresh applicant data when
+reopening Admin Panel, Bot approval/role changes, Bot-only model visibility,
+and zero-day tokens displaying Never. The final revocation check also
+passed: the same token received HTTP 200 from protected `/api/models`
+before revocation and HTTP 401 afterward. Slice 14A is closed.
 
-## Completion gate
-
-Close Slice 14A after the refreshed-account, Bot model access, permanent-token,
-and revocation checks pass in the deployed application.
+The temporary smoke instructions were deleted after this confirmation.
+Keep this result; do not request another check for unchanged behavior.

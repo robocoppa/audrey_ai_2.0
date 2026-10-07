@@ -3,6 +3,10 @@
 Read this before giving or running a live smoke command. Audrey development
 happens in the laptop checkout; Tower is the Docker-only deployment host.
 
+**Hard scope rule:** user input is English-only for now. Do not propose
+non-English cases, language repairs, or live model measurements. Current
+priorities: [October 6 roadmap review](../campaign-3/2026-10-06-remaining-work-review.md).
+
 ## Choose the runner first
 
 | Test | Runner | Target | Credentials |
@@ -91,13 +95,12 @@ is execution-complete: 69/72 proposed labels, 36/39 activation precision, zero
 misses/errors, 24 planned/actual model calls, and one ordinary false activation
 repeated three times. Keep that result; do not repeat the unchanged study.
 Its terminal receipts and operator-copied full report are now verified on
-the laptop. [Slice 3D.5](../campaign-3/phase-03-skill-selection-japanese.md#targeted-tower-check)
-repairs the exposed Japanese exclusion with scoped guards. Its four-case
-targeted check prints complete necessary findings in the launching shell:
-two guarded abstentions, two retained-router calls, no upload or PAT.
-Do not rerun the broad frozen study or try to reuse its revision-3 plan.
-Human review remains pending and proposed criteria have findings. Final-answer
-and workflow proof remain required; automatic activation stays off.
+the laptop. [Slice 3D.5](../campaign-3/phase-03-skill-selection-japanese.md#received-tower-result)
+failed 3/4 with one rejected ineligible choice. It is closed as out of
+scope under the English-only rule, not passed. Do not rerun that check,
+repair its language cases, rerun the broad frozen study, or reuse the
+old plan. Automatic selection stays off and further studies are parked
+until a concrete English workflow and agreed criteria justify them.
 
 ### Clef and Clef Flash measurement — settled 2026-10-03
 
@@ -1006,9 +1009,10 @@ also exposed the faster-whisper/PyAV mismatch that is now fixed by `av<19` and
 the worker image's real-WAV decoder gate. Do not rerun the MP3 script unless a
 later failure needs that protocol diagnostic.
 
-**Slice 8B result:** Pending after deploying the laptop-complete WAV, M4A, and
-FLAC allowlist. This slice changes only the Audrey backend; rebuild `audrey`.
-Use the native browser with short spoken recordings:
+**Slice 8B result:** Passed and settled on 2026-10-01: WAV, M4A, and
+FLAC native upload, Summary/Transcript, chat, and refresh acceptance. Do
+not rerun it unless a relevant change or regression reopens this boundary.
+The original steps below remain a diagnostic reference only:
 
 1. Upload one `.wav`, one `.m4a`, and one `.flac` in **Files**. Confirm all are
    accepted, labeled **Audio**, and move from **Transcribing** to **Ready**.

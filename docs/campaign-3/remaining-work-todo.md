@@ -1,29 +1,26 @@
-# Campaign 3 remaining work — items 5–10
+# Campaign 3 remaining work
 
-**Status:** Items 1–6 were closed on 2026-10-01. The user reprioritized
-[Phase 12](phase-12-sidebar-navigation.md) ahead of Items 7–10. Slice 12A is
-laptop-complete with its My Files correction and awaits browser acceptance.
-Item 7 has live-settled [Phase 13 Slice
-13B](phase-13-responses-multimodal-input.md); Slice 13A remains laptop-complete
-with its targeted live gate pending. Slice 13C adds owner-scoped image and
-document references and passed its targeted protocol smoke on 2026-10-05.
-Slice 13D's normal URL answer, private-URL guards, and corrected streamed retry
-passed on 2026-10-05; its remote-input protocol gate is live-settled.
-Slice 13E client-executed function tools passed its three-call protocol smoke
-on 2026-10-05. Slice 13F saved Responses and text/function continuation is
-live-settled after 3,665 laptop tests and the user's successful restart verify
-received 2026-10-06. Claudette's cloud assessment is reviewed: keep the current
-Kimi-primary/GLM-fallback Chat Completions connection; the 20-tool catalog exceeds
-Responses admission. Further compatibility expansion needs a caller use case.
-The user then
-prioritized [Phase 14 Slice 14A](phase-14-bot-accounts-and-token-lifetimes.md),
-which is laptop-complete and awaits native acceptance.
-[Phase 15](phase-15-composer-and-projects.md) is complete. Slice 15A's composer control
-rail passed user acceptance, Slice 15B's owner-scoped Projects storage and API
-passed its restart smoke, and the user accepted Slices 15C–15D plus the
-direct project-upload follow-up.
-[Phase 16](phase-16-native-document-tools.md) is retired because document and
-spreadsheet authoring already belongs to the separate Hermes bot workspace.
+**Current plan:** Follow the [October 6 scope and roadmap review](2026-10-06-remaining-work-review.md).
+English user input is the hard scope boundary. Items 1–6 and Phases 12, 14,
+and 15 are closed; Phase 16 is retired. 13B–13F are live-settled. The Japanese 3D.5
+check failed and its branch is closed as out of scope, not passed. Automatic
+selection remains disabled and further selector studies are parked.
+
+## Execution order
+
+| Order | Next work | Scope |
+|---|---|---|
+| 1 | Deploy 11A.1; then model monitoring view | Foundation built and verified: 60 focused / 4,091 full tests. Observe metrics from normal traffic; next code builds the operational view. |
+| 2 | 13A inline-image protocol proof | One targeted laptop case through `192.168.1.11:8000`; retain 13B–13F acceptance. |
+| 3 | Item 9 Tailscale diagnosis | Independent of product gates; locate the failing hop before edits. |
+| 4 | Item 10 operational evidence | Existing artifacts first; measure only missing decision-relevant model behavior. |
+| 5 | Item 11 useful Hermes API work | Telemetry, supported reasoning controls, retry diagnostics, then optional tool contracts/catalog admission. |
+
+Model/config A-B-A experiments and automatic selection do not block campaign
+completion; conditional Hermes extensions do not become product prerequisites.
+No repeated broad evals, non-English repairs, forced Hermes
+migration, or new document/spreadsheet authoring work are queued. Historical
+completion receipts below stay valid and do not request another run.
 
 ## Closed prerequisites
 
@@ -322,7 +319,7 @@ do not yet justify diarization or broader media analysis.
 
 ## Next user-prioritized slice — Phase 12 sidebar navigation
 
-**State:** Laptop-complete. Native browser acceptance is pending.
+**State:** Complete and live-accepted on 2026-10-07.
 
 - [x] Replace the top Files and `+ New` pair with one full-width **New
   conversation** button.
@@ -330,14 +327,14 @@ do not yet justify diarization or broader media analysis.
 - [x] Move My Files into a distinct top-bar group separated from account
   actions.
 - [x] Preserve the existing Files dialog and conversation history behavior.
-- [ ] Pass desktop, narrow-screen, keyboard, empty-draft, and Files-launch
-  browser checks.
+- [x] Pass desktop, narrow-screen, keyboard, empty-draft, and Files-launch
+  browser checks. User confirmed 2026-10-07; no repeat needed.
 
 Detailed scope: [phase-12-sidebar-navigation.md](phase-12-sidebar-navigation.md).
 
 ## Next user-prioritized slice - Phase 14 bot accounts and token lifetimes
 
-**State:** Laptop-complete. Native acceptance is pending.
+**State:** Complete and live-accepted on 2026-10-07, including token revocation.
 
 - [x] Add Bots as a protected schema-backed access group.
 - [x] Allow pending approval and active role assignment as Bot.
@@ -346,8 +343,11 @@ Detailed scope: [phase-12-sidebar-navigation.md](phase-12-sidebar-navigation.md)
   status enforcement.
 - [x] Reload users, models, and roles without browser cache on every Admin Panel
   opening.
-- [ ] Pass the refreshed applicant, Bot model visibility, permanent PAT, and
-  revocation checks on the deployed application.
+- [x] Pass refreshed applicant data, Bot model visibility, and permanent
+  tokens in the deployed application. User confirmed 2026-10-07.
+- [x] Verify the same token returns 200 before revocation and 401 afterward
+  on protected `/api/models`. User confirmed 2026-10-07.
+- [x] Delete the temporary smoke handoff and its active links after acceptance.
 
 Detailed scope:
 [phase-14-bot-accounts-and-token-lifetimes.md](phase-14-bot-accounts-and-token-lifetimes.md).
@@ -402,6 +402,7 @@ Detailed decision record:
 - [x] Start the expansion as separate per-capability protocol slices.
 - [x] Add typed `input_text` plus bounded inline `input_image` content parts
   for completed and streaming requests.
+- [ ] Pass the remaining 13A inline-image API boundary with a targeted laptop check.
 - [x] Build Slice 13C: add owner-scoped `file_id` image and document inputs
   through Audrey storage, with ready-state, type, count, and size limits.
 - [x] Pass the targeted Slice 13C file-reference protocol smoke (2026-10-05).
@@ -432,79 +433,29 @@ Detailed decision record:
   lifecycle contract; deferred after the Hermes assessment.
 - [ ] Add background execution, in-progress retrieval, and cancellation only
   for a demonstrated caller workflow; deferred after the Hermes assessment.
-- [ ] Preserve the current explicit HTTP 400 response for every unsupported
-  feature until its complete contract ships.
+- [x] Preserve explicit unsupported-feature rejections as a standing API contract.
 
-## 8. Evaluate automatic skill selection
+## 8. Automatic skill selection — deferred
 
-**State:** Slice 3D.1 evaluation foundation is laptop-complete: 3,725 backend
-tests passed. Rules baseline is measured (70% precision, three false activations,
-seven misses). The pilot passed; two repeated hybrid studies completed all
-calls on 2026-10-06 but measured 63.16% precision, 15/42 ordinary false
-activations, and three rejected choices each. Automatic selection stays off.
-Slice 3D.2 policy refinement is laptop-complete: 3,845 backend tests passed.
-Rules on the same development set: nine correct activations, zero false
-activations, five undecided positives; no model calls. First new-control result:
-27/30 hybrid labels, 12/13 precision, two misses, one ordinary false activation;
-zero model errors. Slice 3D.3 repairs those three exposed cases and adds compact
-foreground results. Its targeted Tower check passed 3/3 on October 6 with zero
-model calls. Slice 3D.4 is laptop-complete (3,973 backend tests): frozen
-prospective study plans and 24 separately authored, agent-reviewed controls.
-Tower preparation and first measurement completed: 69/72 matches, 36/39
-activation precision, zero misses/errors, one ordinary request falsely selected
-in all three repeats, and 24 planned/actual model calls. Proposed quality gates
-remain unmet and human review remains pending; automatic selection stays off.
-Terminal receipts and the operator-copied full report are verified on the
-laptop. Slice 3D.5 repairs the exposed Japanese file-exclusion case;
-4,031 backend tests passed. Its targeted four-case Tower check is pending.
-[Recorded study](phase-03-skill-selection-evaluation.md) / [new-control result](phase-03-skill-selection-policy.md) / [terminal results](phase-03-skill-selection-terminal-results.md).
+**State:** Explicit video/document skills are accepted. Automatic selection is
+disabled and not a campaign completion gate. The mixed-language measurements
+are preserved as historical evidence, not English acceptance scores.
 
-- [x] Keep `skills.auto_select: false` during the study.
-- [x] Build 42 labeled positive, ambiguous, and ordinary-chat control cases.
-- [x] Add an offline rules baseline and optional retained-router and hybrid
-  measurement arms, with explicit errors, abstention, latency, and usage.
-- [x] Pass the one-case direct-model pilot: rules abstained and one retained
-  router call correctly selected document analysis; zero errors, auto off.
-- [x] Collect the 42-case, three-repeat hybrid study (30 model calls per run);
-  both received reports have identical selection findings.
-- [x] Measure missed activation and false activation separately; current hybrid
-  improves recall but worsens activation precision and ordinary false activation.
-- [x] Compare deterministic rules with the retained-router hybrid on identical cases.
-- [x] Refine evaluation policy: terminal abstention, excluded-file targets,
-  scoped negation, and quoted content (Slice 3D.2).
-- [x] Reserve 30 separately authored proposed controls without selector tuning;
-  labels still require independent human review.
-- [x] Preserve probe launch logfile identity through detachment; behavior tested.
-- [x] Collect the first revision-2 measurement on those 30 controls once.
-- [x] Review its three mismatches independently; proposed labels remain defensible.
-- [x] Repair quotation, file-location comma scope, and bounded Spanish management
-  regressions, preserving the exposed baseline (Slice 3D.3).
-- [x] Restore foreground shell logs and compact selection results; mismatches
-  now exit 1 even when model execution completed.
-- [x] Pass the targeted three-case revision-3 Tower check in the launching shell
-  (3/3, zero errors or model calls, accepted 2026-10-06).
-- [x] Author 24 fresh proposed controls separately and obtain independent
-  agent label review without evaluating or tuning on them (Slice 3D.4).
-- [x] Add frozen study plans and drift/budget checks before model HTTP;
-  separate proposed criteria from human attestations and production approval.
-- [x] Prepare the Tower plan and collect its first prospective measurement;
-  preserve the pasted terminal report on the laptop, including its findings.
-- [x] Verify the operator-copied full revision-3 report on the laptop,
-  including all repeated samples and qualification findings.
-- [x] Repair the exposed supplied-text Japanese false activation with
-  scoped file-access exclusions and quoted-data handling (Slice 3D.5).
-- [ ] Pass the four-case revision-4 Tower regression check once; two guarded
-  abstentions and two retained-router calls. Keep production selection off.
-- [ ] Obtain independent human label review before broader selection-quality
-  conclusions; earlier measured fixtures are now regression data.
-- [ ] Consider a separate router/System One arm only if revised policy evidence
-  warrants that comparison; no new candidate probe is queued now.
-- [x] Propose separate precision, false-activation, and missed-activation
-  thresholds; retain `auto_select: false` throughout measurement.
-- [ ] Agree the final gates, validate a holdout set, and prove answer-quality
-  and cost benefit before enabling anything.
-- [ ] Ship only if the selector beats explicit selection without narrowing tools
-  or activating a skill on unrelated chat.
+- [x] Keep `skills.auto_select: false` and preserve the evaluator, original
+  studies, operator-copied report, and accepted earlier targeted checks.
+- [x] Record the revision-4 Tower result: 3/4 matches, one ineligible model
+  choice, two model calls, two guards. It failed; the Japanese branch is closed
+  as out of scope under the user's hard English-only rule. No rerun or repair.
+- [ ] Reopen only for a concrete English user workflow that benefits from
+  automatic selection; agree the quality/cost decision criteria first.
+- [ ] If reopened, use independently reviewed English controls and demonstrate
+  final-answer/workflow benefit over the already accepted explicit selection.
+
+Historical details: [study](phase-03-skill-selection-evaluation.md),
+[policy](phase-03-skill-selection-policy.md),
+[accepted targeted check](phase-03-skill-selection-terminal-results.md),
+[frozen report](phase-03-skill-selection-protocol.md), and
+[closed Japanese branch](phase-03-skill-selection-japanese.md).
 
 ## 9. Repair the Tailscale backend route
 
@@ -516,31 +467,91 @@ laptop. Slice 3D.5 repairs the exposed Japanese file-exclusion case;
 - [ ] Restore `/health`, `/api/ready`, and authenticated `/v1` reachability.
 - [ ] Update the live-smoke reference to prefer Tailscale only after it passes.
 
-## 10. Finish model and production measurements
+## 10. Operational evidence and conditional measurements
 
-- [x] Run Clef's broad System One decision probe and review its text, JSON,
-  image, accuracy, calibration, latency, token, and residency results.
-- [x] Compare Clef and Clef Flash with `qwen3.5:4b`; retain the incumbent after
-  full Clef failed cold/footprint gates and Flash failed cold-start reliability.
-- [ ] Verify the installed `deepseek-v4.1-flash:cloud` capabilities with
-  `ollama show` and one tool-call probe.
-- [ ] Run the real A-B-A for `factcheck_worker.compress_keep_last` with a fresh
-  config load between arms.
-- [ ] Run the answer-quality A-B-A for
-  `agentic.react.max_tool_result_chars: 6000`.
-- [ ] Complete a normal video/audio ingest proof for the summary no-thinking
-  policy.
-- [ ] Measure fact-check fallback and ledger drop/unlinked counts from
-  accumulated production traffic.
-- [ ] Measure escalation cost and synthesis draft sizes once enough traffic has
-  accumulated.
-- [ ] Convert any decision-worthy result into `evals/MODEL-FACTS.md` in the
-  same session.
+**State:** Evidence review is useful; speculative experiments do not block
+completion. Start with existing production artifacts and the model ledger.
+
+- [x] Review Clef/Clef Flash and retain `qwen3.5:4b`; the router comparison is
+  settled and no candidate swap is queued.
+- [ ] Check installed `deepseek-v4.1-flash:cloud` capability metadata. Use one
+  tool-call proof only if the intended current role needs it and evidence is absent.
+- [ ] Locate existing Kimi K3 panel dispatch evidence. The ordering is tested;
+  bot passthrough calls do not prove native panel execution. Request only a
+  missing current-mode observation, not three new protocol suites.
+- [ ] Review accumulated fact-check fallback/drop/unlinked counts, escalation
+  cost, and draft sizes when traffic is sufficient. Do not generate a workload
+  solely to satisfy this checklist.
+- [ ] Preserve unmeasured compression/result-size A-B-A claims. Reopen each
+  only with a named quality/cost decision, fixed cases, fresh config between
+  arms, and a single varied setting; do not combine them into a sweep.
+- [ ] Review existing summary-policy observations before requesting any
+  missing no-thinking/cost proof. PDF/audio/video ingest acceptance stays closed.
+- [ ] Record decision-relevant findings in `evals/MODEL-FACTS.md` in the same session.
+
+## 11. Appended Hermes API improvements
+
+Detailed scope, source evidence, and dependencies:
+[October 6 review](2026-10-06-remaining-work-review.md#appended-hermes-api-slices).
+
+### 11A — model telemetry
+
+**Slice 11A.1:** Built and laptop-verified on 2026-10-07. The 60 focused
+tests and full 4,091-test backend suite pass (79.48 seconds, one existing
+FastAPI deprecation warning). Changed-file Ruff and compilation pass.
+Deployment observation remains open; the operational view follows.
+
+- [x] Record exactly one provider outcome (`ok`, `error`, `cancelled`) and
+  latency sample per call; require strict terminal confirmation, stop timing
+  before yielding the terminal, and preserve it through consumer cleanup.
+- [x] Exclude cancellations from the cloud success/error alert population.
+- [ ] Reuse Prometheus/Grafana for bounded model generation rate, errors, and latency.
+- [x] Add per-model token totals and valid usage observation counts for
+  input, output, and provider-reported cached input. Observe terminal fields
+  once; distinguish valid zero from missing/invalid data and avoid cost claims.
+- [x] Verify 11A.1 outcomes and usage with 60 focused regressions plus the
+  full 4,091-test backend gate; changed-file Ruff and compilation pass.
+- [ ] Observe new metrics from normal post-deploy traffic. No new temporary
+  smoke document or repeated UI acceptance is needed.
+- [ ] Add protected bot-readable JSON only if needed; define its time window,
+  freshness, authorized scope, and model visibility before exposing aggregates.
+
+### 11B — validated reasoning controls
+
+- [ ] Review actual installed Kimi/GLM thinking metadata and Hermes wire settings.
+- [ ] Resolve only supported per-model controls consistently across current Chat
+  and optional Responses, completed and streamed; preserve omitted defaults.
+- [ ] Reject unsupported explicit effort meanings; do not map graded effort to
+  a boolean and claim an equivalent budget. Prove forwarding and behavior separately.
+
+### 11C — failure/retry diagnostics
+
+- [ ] Help Hermes use existing `response.failed.response.id`; request wire evidence
+  only for an actual missing correlation path.
+- [ ] Attribute the reported session-quota 429 before changing Audrey. Preserve
+  truthful upstream retry/reset information where available; invent no quotas.
+- [ ] Close this item without code if the existing contract already suffices.
+
+### 11D — optional tool contracts and catalog admission
+
+- [ ] Proceed only for a concrete optional Responses adopter. Add `required` as
+  a validated terminal contract; keep caller execution and approval authority.
+- [ ] Assess the actual 20-tool schemas and a minimal 16→24 definition increase.
+  Retain 64 KiB, 8-call groups, and 128 replay items unless measured requests need more.
+- [ ] Coordinate all prompt/storage/replay limits for any later expansion; a
+  larger tool count alone does not establish full Hermes compatibility.
+- [ ] Keep Claudette on its current Kimi-primary/GLM-fallback Chat connection
+  until an optional measured adoption has a concrete benefit.
+
+Already implemented, not new slices: `store: true` / `previous_response_id`
+continuation (13F) and response identity in streamed failures. Stored replay
+reduces client payload/bookkeeping, not model input tokens. Provider prompt
+caching or context compaction needs its own cost/quality evidence.
 
 ## Deliberately deferred
 
 - Historical chat import remains optional and requires a new explicit request.
-- Automatic skill selection remains disabled until item 8 passes.
+- Automatic skill selection is parked; item 8 has explicit English-only reopening criteria.
 - The shared evidence pool, specialist prototype, math-classifier audit, and
   KB corpus split stay parked until a real failure or priority change reopens
   them.

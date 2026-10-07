@@ -5,7 +5,9 @@ Each metric is tied to a specific operational question:
   audrey_pipeline_seconds          — fast-path vs deep latency by task type
   audrey_pipeline_total            — fast/deep ratio + outcome counts
   audrey_dispatch_total            — which model is actually being picked
-  audrey_model_seconds             — per-model latency (ollama call timing)
+  audrey_model_seconds             — per-model latency and terminal outcomes
+  audrey_model_tokens_total        — provider-reported input/output/cache tokens
+  audrey_model_usage_observations_total — calls reporting each usage field
   audrey_gpu_gate_wait_seconds     — local-model queue wait time
   audrey_kb_search_seconds         — KB query latency (text/image; merged or not)
   audrey_kb_search_hits            — hits returned per query (zero = retrieval miss)
@@ -100,9 +102,23 @@ _MODEL_BUCKETS = (0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 20.0, 45.0, 90.0, 18
 
 model_seconds = Histogram(
     "audrey_model_seconds",
-    "Wall-clock time for a single model generation call.",
-    labelnames=("model", "outcome"),
+    "Time until provider completion, failure, or cancellation for a model call.",
+    labelnames=("model", "outcome"),  # outcome ∈ {ok, error, cancelled}
     buckets=_MODEL_BUCKETS,
+)
+
+# Only provider-reported counts enter these counters. An observation of zero
+# is distinct from an absent field; neither counter estimates billed cost.
+model_tokens_total = Counter(
+    "audrey_model_tokens_total",
+    "Tokens reported by the provider at the end of a model call.",
+    labelnames=("model", "kind"),  # kind ∈ {input, output, cached_input}
+)
+
+model_usage_observations_total = Counter(
+    "audrey_model_usage_observations_total",
+    "Model calls reporting a valid count for each token usage field.",
+    labelnames=("model", "kind"),
 )
 
 # ─── GPU gate ─────────────────────────────────────────────────────────
@@ -475,6 +491,8 @@ __all__ = [
     "skill_selection_seconds",
     "dispatch_total",
     "model_seconds",
+    "model_tokens_total",
+    "model_usage_observations_total",
     "gpu_gate_wait_seconds",
     "kb_search_seconds",
     "kb_search_hits",

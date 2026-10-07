@@ -1,7 +1,19 @@
 # Campaign 3 — correctness foundations, Audrey UI, and reusable skills
 
-**Status:** Campaign 3 Phases 1–11 and Phase 15 are complete. Phases 12–14
-are laptop-complete and awaiting their targeted live gates. Phase 15's direct
+**Scope:** English user input only. Non-English prompt evaluation/tuning is
+out of scope until the user explicitly changes that rule.
+
+**Current code slice:** 11A.1 model telemetry: accurate provider outcomes and
+measured token usage using the existing Prometheus metrics. The user closed
+12A and 14A, including revocation, on October 7. The remaining 13A protocol
+proof and Tailscale diagnosis stay tracked separately in the
+[remaining-work checklist](remaining-work-todo.md#execution-order).
+Automatic-selection studies are parked; completed gates stay settled.
+11A.1 laptop gate: 60 focused and 4,091 full backend tests pass; normal
+post-deploy metrics observation remains open. The operational view follows.
+
+**Status:** Campaign 3 Phases 1–12, 14, and 15 are complete. Phase 13A inline
+images remain awaiting their distinct protocol proof; 13B–13F are live-settled. Phase 15's direct
 project-upload follow-up is accepted. Phase 16 document tooling was retired
 after confirming that Hermes already uses the separate Bot Tools MCP, Nextcloud,
 and Collabora stack at `cloud.builtryte.xyz`.
@@ -66,9 +78,11 @@ one ordinary false activation repeated three times. Pasted reports are now in
 the laptop checkout, including the verified full report.
 [Slice 3D.5](phase-03-skill-selection-japanese.md) repairs the exposed
 Japanese access-exclusion case with scoped guards and quoted-data handling.
-Laptop verification passed 4,031 backend tests; its four-case targeted
-Tower check remains pending. Quality, human-review, and workflow gates
-remain open; automatic selection stays off.
+Laptop verification passed 4,031 backend tests. Its Tower check then
+failed 3/4 with one ineligible model choice. This language branch is now
+closed as out of scope under the hard English-only rule, not passed.
+No further repair or rerun is queued; automatic selection remains off
+and its studies are parked until a concrete English workflow warrants them.
 
 Phase 4 completed on 2026-09-29. Slice 4A's owner-scoped, ranged
 original-file downloads are live-settled. Slice 4B's read-only backend smoke
@@ -106,7 +120,8 @@ Client tools execute in the caller.
 Phase 14 started on 2026-10-02. Slice 14A adds a protected Bots access group,
 Bot-targeted model policy, zero-day never-expiring personal tokens, and
 uncached administration lists so reopening the panel shows new applicants.
-The implementation and full backend gate pass; native acceptance is pending.
+The user accepted all native checks on 2026-10-07, including the same-token
+200 → 401 revocation proof. Slice 14A is closed.
 
 Phase 15 started on 2026-10-02. Slice 15A moves model, file, and tools/skills
 controls into a labeled, equal-width rail below a narrower 56 rem message
@@ -183,8 +198,9 @@ production panels. `kimi-k3:cloud` now leads all twelve cloud-bearing worker
 and researcher lists across mixed Deep, Cloud, and Research modes. It replaces
 the former Kimi 2.x draft slot, so panel sizes and cloud concurrency do not
 increase; its low registry priority keeps ordinary Fast chat local. A
-real-config invariant enforces the ordering. All 3,109 backend tests pass; live
-mode acceptance is pending.
+real-config invariant enforces the ordering. All 3,109 backend tests pass.
+Current-mode dispatch evidence remains an operational unknown in item 10;
+inspect existing records before requesting a narrowly scoped missing proof.
 
 Campaign 3 first strengthens Audrey's platform boundaries and operational
 contracts, then makes Audrey itself the application behind a native web client,
@@ -206,9 +222,9 @@ and finally adds the first general skills layer on that owned surface.
 | 09 | [Broader spoken audio](phase-09-broader-audio.md) | Admit measured OGG, Opus, and raw AAC containers before separately scoped speaker or media analysis | Phase 08 and Phase 2D.5 completion | Complete (9A live-passed) |
 | 10 | [Ordinary-answer provenance](phase-10-ordinary-answer-provenance.md) | Persist deterministic public URL and private file evidence on ordinary tool-backed answers | Phase 09 completion | Complete (10A live-passed) |
 | 11 | [Native file explorer](phase-11-native-file-explorer.md) | Browse, attach, and manage private files through compact folder-style native views | Phase 10 completion | Complete (11A user-closed) |
-| 12 | [Sidebar navigation](phase-12-sidebar-navigation.md) | Simplify primary conversation creation and move My Files into a distinct top-bar action | Phase 11 completion | Revised Slice 12A laptop-complete; native browser gate pending |
+| 12 | [Sidebar navigation](phase-12-sidebar-navigation.md) | Simplify primary conversation creation and move My Files into a distinct top-bar action | Phase 11 completion | Complete; native browser checks accepted 2026-10-07 |
 | 13 | [Responses input, structured output, and client tools](phase-13-responses-multimodal-input.md) | Add bounded inputs, JSON Schema output, and caller-executed functions | Phase 12 implementation | 13B–13F live-settled; Hermes stays on Chat Completions after assessment; 13A live gate pending |
-| 14 | [Bot accounts and token lifetimes](phase-14-bot-accounts-and-token-lifetimes.md) | Add limited automation accounts, intentional permanent PATs, and fresh admin data on every open | Phase 13 implementation | Slice 14A laptop-complete; native acceptance pending |
+| 14 | [Bot accounts and token lifetimes](phase-14-bot-accounts-and-token-lifetimes.md) | Add limited automation accounts, intentional permanent PATs, and fresh admin data on every open | Phase 13 implementation | Complete; native checks and token revocation accepted 2026-10-07 |
 | 15 | [Composer controls and Projects](phase-15-composer-and-projects.md) | Clarify and rebalance the composer, then group conversations with reusable instructions and selected-file context | Phase 14 implementation | Complete, including direct project upload |
 | 16 | [Retired Audrey document tools](phase-16-native-document-tools.md) | Record the boundary between Audrey file analysis and the existing Hermes workspace APIs | Architecture review | Retired; no Audrey document or spreadsheet authoring surface |
 
@@ -240,9 +256,9 @@ through Campaign 3 Phase 16, or use the topic filenames.
 Items 5–10, their execution order, and pass criteria are tracked in
 [remaining-work-todo.md](remaining-work-todo.md). Items 5–6, legacy Phase
 2D.5, and Phases 9–11 are closed. The user reprioritized Phase 12's sidebar
-navigation slice ahead of Item 7. Its requested top-bar correction is ready
-for browser acceptance, and Item 7's first multimodal slice is ready for its
-targeted live gate. Phase 14's account administration slice is also
-laptop-complete and awaits its native browser and PAT checks. Phase 15 and its
+navigation slice ahead of Item 7; it is now live-accepted. Item 7's first
+multimodal slice is ready for its targeted live gate. Phase 14's native
+account, Bot, permanent-token, and revocation checks are accepted. The next
+code slice is 11A.1 model telemetry. Phase 15 and its
 direct project-upload follow-up are accepted. Phase 16 is retired and has no
 remaining Audrey build or smoke gate.

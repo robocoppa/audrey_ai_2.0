@@ -89,12 +89,13 @@ groups:
       # benefits from automation. If error count > 30% over 30m, that's
       # the threshold the followup memory says should drop kimi from the
       # pool — alert lets you act on it without manually grepping metrics.
+      # Cancelled calls do not enter the success/error population.
       - alert: AudreyCloudModelErrorRate
         expr: |
           (
             sum by (model) (rate(audrey_model_seconds_count{outcome="error",model=~".*:cloud"}[30m]))
             /
-            clamp_min(sum by (model) (rate(audrey_model_seconds_count{model=~".*:cloud"}[30m])), 1e-9)
+            clamp_min(sum by (model) (rate(audrey_model_seconds_count{outcome!="cancelled",model=~".*:cloud"}[30m])), 1e-9)
           ) > 0.30
         for: 15m
         labels:
